@@ -13,7 +13,7 @@ class Settings(BaseSettings):
     # Set this to bypass the individual fields above (optional)
     database_url: str = ""
 
-    zefix_api_base_url: str = "https://www.zefix.admin.ch/ZefixREST/api/v1"
+    zefix_api_base_url: str = "https://www.zefix.admin.ch/ZefixPublicREST/api/v1"
     zefix_api_username: str = ""
     zefix_api_password: str = ""
 

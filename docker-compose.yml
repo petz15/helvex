@@ -11,7 +11,7 @@ services:
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB: ${POSTGRES_DB:-zefix_analyzer}
-      ZEFIX_API_BASE_URL: ${ZEFIX_API_BASE_URL:-https://www.zefix.admin.ch/ZefixREST/api/v1}
+      ZEFIX_API_BASE_URL: ${ZEFIX_API_BASE_URL:-https://www.zefix.admin.ch/ZefixPublicREST/api/v1}
       ZEFIX_API_USERNAME: ${ZEFIX_API_USERNAME:-}
       ZEFIX_API_PASSWORD: ${ZEFIX_API_PASSWORD:-}
       GOOGLE_API_KEY: ${GOOGLE_API_KEY:-}
@@ -32,7 +32,7 @@ services:
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB: ${POSTGRES_DB:-zefix_analyzer}
-      ZEFIX_API_BASE_URL: ${ZEFIX_API_BASE_URL:-https://www.zefix.admin.ch/ZefixREST/api/v1}
+      ZEFIX_API_BASE_URL: ${ZEFIX_API_BASE_URL:-https://www.zefix.admin.ch/ZefixPublicREST/api/v1}
       ZEFIX_API_USERNAME: ${ZEFIX_API_USERNAME:-}
       ZEFIX_API_PASSWORD: ${ZEFIX_API_PASSWORD:-}
       GOOGLE_API_KEY: ${GOOGLE_API_KEY:-}
