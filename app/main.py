@@ -1,24 +1,104 @@
+import asyncio
+import time
 from contextlib import asynccontextmanager
 
 from alembic import command as alembic_command
 from alembic.config import Config as AlembicConfig
-from fastapi import FastAPI
+from alembic.runtime.migration import MigrationContext
+from alembic.script import ScriptDirectory
+from fastapi import FastAPI, Request
+from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
+from sqlalchemy import inspect as sa_inspect
+
+from app.database import Base, engine
 from app.ui.routes import router as ui_router
 
 
-def _run_migrations() -> None:
-    """Apply any pending Alembic migrations (idempotent)."""
+# ── Startup helpers ───────────────────────────────────────────────────────────
+
+def _database_has_tables() -> bool:
+    """Return True if the database already has any tables."""
+    with engine.connect() as conn:
+        return bool(sa_inspect(conn).get_table_names())
+
+
+def _get_pending_revisions(cfg: AlembicConfig) -> list:
+    """Return revisions that still need to be applied, oldest first."""
+    script = ScriptDirectory.from_config(cfg)
+    with engine.connect() as conn:
+        ctx = MigrationContext.configure(conn)
+        current_rev = ctx.get_current_revision()
+
+    revisions = list(script.walk_revisions(base="base", head="heads"))
+    revisions.reverse()  # oldest → newest
+
+    if current_rev is None:
+        return revisions
+
+    for i, rev in enumerate(revisions):
+        if rev.revision == current_rev:
+            return revisions[i + 1:]
+
+    return []
+
+
+def _run_migrations(app_state) -> None:
     cfg = AlembicConfig("alembic.ini")
-    alembic_command.upgrade(cfg, "head")
+
+    app_state.startup_message = "Connecting to database…"
+    try:
+        has_tables = _database_has_tables()
+    except Exception as exc:
+        raise RuntimeError(f"Cannot connect to database: {exc}") from exc
+
+    # ── Fresh database: create all tables in one shot, then stamp Alembic ─────
+    if not has_tables:
+        app_state.startup_message = "Empty database — creating schema…"
+        try:
+            Base.metadata.create_all(engine)
+        except Exception as exc:
+            raise RuntimeError(f"Failed to create schema: {exc}") from exc
+
+        app_state.startup_message = "Schema created — stamping Alembic version…"
+        try:
+            alembic_command.stamp(cfg, "head")
+        except Exception as exc:
+            raise RuntimeError(f"Failed to stamp Alembic version: {exc}") from exc
+
+        app_state.startup_message = "Database initialised ✓"
+        return
+
+    # ── Existing database: apply any pending migrations ────────────────────────
+    try:
+        pending = _get_pending_revisions(cfg)
+    except Exception as exc:
+        raise RuntimeError(f"Cannot read migration state: {exc}") from exc
+
+    if not pending:
+        app_state.startup_message = "Database schema is up to date"
+        return
+
+    total = len(pending)
+    app_state.startup_message = f"Found {total} pending migration(s)"
+    time.sleep(0.3)  # brief pause so the message is visible
+
+    for i, rev in enumerate(pending, 1):
+        label = rev.doc or rev.revision
+        app_state.startup_message = f"Migration {i}/{total}: {label}"
+        try:
+            alembic_command.upgrade(cfg, rev.revision)
+        except Exception as exc:
+            raise RuntimeError(
+                f"Migration {i}/{total} failed ({rev.revision} — {label}): {exc}"
+            ) from exc
+
+    app_state.startup_message = f"Applied {total} migration(s) ✓"
 
 
-def _seed_settings() -> None:
-    """Seed default app settings from environment variables on first run.
-
-    Values already stored in the DB are never overwritten — the DB wins.
-    """
+def _seed_settings(app_state) -> None:
+    app_state.startup_message = "Seeding application settings…"
     from app.config import settings
     from app.crud import seed_defaults
     from app.database import SessionLocal
@@ -27,16 +107,37 @@ def _seed_settings() -> None:
         "google_search_enabled": "true" if settings.google_search_enabled else "false",
         "google_daily_quota": str(settings.google_daily_quota),
     }
-    with SessionLocal() as db:
-        seed_defaults(db, defaults)
+    try:
+        with SessionLocal() as db:
+            seed_defaults(db, defaults)
+    except Exception as exc:
+        raise RuntimeError(f"Failed to seed settings: {exc}") from exc
 
+
+# ── Lifespan ──────────────────────────────────────────────────────────────────
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    _run_migrations()
-    _seed_settings()
+    app.state.ready = False
+    app.state.startup_message = "Initialising…"
+    app.state.startup_error = None
+    app.state.startup_started_at = time.time()
+
+    async def _startup() -> None:
+        try:
+            loop = asyncio.get_running_loop()
+            await loop.run_in_executor(None, _run_migrations, app.state)
+            await loop.run_in_executor(None, _seed_settings, app.state)
+            app.state.ready = True
+            app.state.startup_message = "Ready"
+        except Exception as exc:  # noqa: BLE001
+            app.state.startup_error = str(exc)
+
+    asyncio.create_task(_startup())
     yield
 
+
+# ── Application ───────────────────────────────────────────────────────────────
 
 app = FastAPI(
     title="Zefix Analyzer",
@@ -52,6 +153,101 @@ app.mount("/static", StaticFiles(directory="app/static"), name="static")
 app.include_router(ui_router)
 
 
+# ── Startup gate middleware ───────────────────────────────────────────────────
+
+_LOADING_HTML = """\
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="refresh" content="2">
+  <title>Zefix Analyzer — Starting</title>
+  <link rel="stylesheet" href="/static/styles.css">
+  <style>
+    .startup-box {{ max-width: 520px; margin: 5rem auto; text-align: center; }}
+    .spinner {{
+      width: 48px; height: 48px;
+      border: 5px solid #d7dee7; border-top-color: #146c94;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+      margin: 0 auto 1.5rem;
+    }}
+    @keyframes spin {{ to {{ transform: rotate(360deg); }} }}
+    .step-msg {{ font-weight: 600; margin: 0.5rem 0 0.2rem; }}
+    .elapsed {{ color: #4d6274; font-size: 0.82rem; margin-top: 0.8rem; }}
+  </style>
+</head>
+<body>
+  <header class="site-header">
+    <div class="container"><a class="brand" href="/ui">Zefix Analyzer</a></div>
+  </header>
+  <main class="container">
+    <div class="startup-box card">
+      <div class="spinner"></div>
+      <h2 style="margin-bottom:0.3rem;">Starting up…</h2>
+      <p class="step-msg">{message}</p>
+      <p class="elapsed">Elapsed: {elapsed}s &nbsp;·&nbsp; page refreshes every 2 s</p>
+    </div>
+  </main>
+</body>
+</html>
+"""
+
+_ERROR_HTML = """\
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Zefix Analyzer — Startup failed</title>
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+  <header class="site-header">
+    <div class="container"><a class="brand" href="/ui">Zefix Analyzer</a></div>
+  </header>
+  <main class="container">
+    <div class="card" style="margin-top:2rem;border-color:#a43d3d;">
+      <h2 style="color:#a43d3d;margin-top:0;">Startup failed</h2>
+      <p>The application could not complete startup. Fix the issue below and restart the container.</p>
+      <pre style="background:#fdecec;border-color:#a43d3d;color:#7f1f1f;white-space:pre-wrap;word-break:break-word;">{error}</pre>
+      <p class="muted-hint">Elapsed before failure: {elapsed}s</p>
+    </div>
+  </main>
+</body>
+</html>
+"""
+
+
+@app.middleware("http")
+async def startup_gate(request: Request, call_next):
+    path = request.url.path
+    if path.startswith("/static") or path == "/health":
+        return await call_next(request)
+
+    elapsed = int(time.time() - getattr(app.state, "startup_started_at", time.time()))
+    error = getattr(app.state, "startup_error", None)
+
+    if error:
+        return HTMLResponse(
+            _ERROR_HTML.format(error=error, elapsed=elapsed), status_code=500
+        )
+
+    if not getattr(app.state, "ready", False):
+        message = getattr(app.state, "startup_message", "Initialising…")
+        return HTMLResponse(
+            _LOADING_HTML.format(message=message, elapsed=elapsed), status_code=503
+        )
+
+    return await call_next(request)
+
+
 @app.get("/health", tags=["health"])
 def health():
-    return {"status": "ok"}
+    ready = getattr(app.state, "ready", False)
+    error = getattr(app.state, "startup_error", None)
+    elapsed = int(time.time() - getattr(app.state, "startup_started_at", time.time()))
+    message = getattr(app.state, "startup_message", "")
+    if error:
+        return {"status": "error", "detail": error, "elapsed_s": elapsed}
+    return {"status": "ok" if ready else "starting", "step": message, "elapsed_s": elapsed}
