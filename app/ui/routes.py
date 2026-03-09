@@ -621,7 +621,6 @@ async def start_initial(
     request: Request,
     names: str = Form(""),           # newline-separated company name search terms
     uids: str = Form(""),            # newline-separated UIDs
-    search_max_results: int = Form(25),
     canton: str = Form(""),
     legal_form: str = Form(""),
     include_inactive: str = Form("false"),
@@ -662,7 +661,6 @@ async def start_initial(
                     db,
                     names=name_list,
                     uids=uid_list,
-                    search_max_results=search_max_results,
                     canton=canton.strip().upper() or None,
                     legal_form=legal_form.strip() or None,
                     active_only=include_inactive != "true",

@@ -131,7 +131,12 @@ def get_company(uid: str) -> dict[str, Any]:
         response = client.get(url, auth=_get_auth())
         response.raise_for_status()
 
-    return response.json()
+    data = response.json()
+    if isinstance(data, list):
+        if not data:
+            raise ValueError(f"No company found for UID {uid}")
+        data = data[0]
+    return data
 
 
 def _parse_company(data: dict[str, Any]) -> ZefixSearchResult:
