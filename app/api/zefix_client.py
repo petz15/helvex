@@ -173,6 +173,18 @@ def _parse_company(data: dict[str, Any]) -> ZefixSearchResult:
     municipality = data.get("municipality") or None
     canton = data.get("canton") or None
 
+    purpose_raw = data.get("purpose") or data.get("purposes") or None
+    if isinstance(purpose_raw, list):
+        purpose = " ".join(str(p) for p in purpose_raw if p) or None
+    elif isinstance(purpose_raw, dict):
+        purpose = (
+            purpose_raw.get("de") or purpose_raw.get("fr")
+            or purpose_raw.get("it") or purpose_raw.get("en")
+            or next(iter(purpose_raw.values()), None) or None
+        )
+    else:
+        purpose = str(purpose_raw) if purpose_raw else None
+
     return ZefixSearchResult(
         uid=uid,
         name=name,
@@ -180,6 +192,7 @@ def _parse_company(data: dict[str, Any]) -> ZefixSearchResult:
         status=status,
         municipality=municipality,
         canton=canton,
+        purpose=purpose,
     )
 
 

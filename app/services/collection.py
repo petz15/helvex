@@ -22,6 +22,32 @@ from app.models.company import Company
 from app.schemas.company import CompanyCreate, CompanyUpdate
 from app.services.scoring import score_result
 
+_INDUSTRY_KEYWORDS: list[tuple[str, list[str]]] = [
+    ("Technology", ["software", "informatik", "it-", " it ", "digital", "technologie", "saas", "cloud", "künstliche intelligenz", " ai ", " ki ", "automation", "programmier", "developer", "entwicklung von"]),
+    ("Construction & Real Estate", ["bau", "immobilien", "real estate", "architektur", "renovati", "gebäude", "liegenschaften", "construction", "haustechnik", "sanitär", "elektroinstallation"]),
+    ("Finance", ["finanz", "finance", "invest", "kapital", "versicherung", "insurance", "treuhand", "buchhaltung", "accounting", "steuer", "tax ", "bank", "kredit", "fond", "vermögensverwaltu", "wirtschaftsprüf"]),
+    ("Healthcare", ["gesundheit", "health", "medizin", "medical", "pharma", "dental", "therapie", "pflege", "klinik", "arzt", "spital", "praxis"]),
+    ("Consulting", ["beratung", "consulting", "management", "strategie", "advisory", "unternehmensberatung"]),
+    ("Trade & Retail", ["handel", " trade", "import", "export", "vertrieb", "retail", "grosshandel", "detailhandel", "e-commerce"]),
+    ("Hospitality & Food", ["restaurant", "hotel", "gastro", "gastronomie", "catering", "food", "getränke", "beverage", "café", "bäckerei"]),
+    ("Manufacturing", ["herstellung", "produktion", "manufacturing", "fertigung", "verarbeit"]),
+    ("Transport & Logistics", ["transport", "logistik", "logistics", "spedition", "lieferung", "delivery", "kurier"]),
+    ("Education", ["bildung", "education", "schule", "ausbildung", "training", "unterricht", "weiterbildung", "coaching"]),
+    ("Marketing & Media", ["marketing", "werbung", "media", "kommunikation", " pr ", "design", "grafik", "agentur", "fotografie", "video"]),
+    ("Legal", ["rechts", "legal", "anwalt", "notariat", "kanzlei"]),
+    ("Engineering", ["engineering", "ingenieur", "planung", "maschinenbau", "electrical", "civil"]),
+]
+
+
+def _derive_industry(purpose: str | None) -> str | None:
+    if not purpose:
+        return None
+    p = purpose.lower()
+    for industry, keywords in _INDUSTRY_KEYWORDS:
+        if any(k in p for k in keywords):
+            return industry
+    return None
+
 
 def _extract_company_fields(raw: dict[str, Any], fallback_uid: str) -> CompanyCreate:
     name_raw = raw.get("name", "")
@@ -54,6 +80,8 @@ def _extract_company_fields(raw: dict[str, Any], fallback_uid: str) -> CompanyCr
 
     uid_normalised = _normalise_uid(str(raw.get("uid", fallback_uid)))
 
+    purpose = raw.get("purpose") or None
+
     return CompanyCreate(
         uid=uid_normalised,
         name=name,
@@ -61,8 +89,9 @@ def _extract_company_fields(raw: dict[str, Any], fallback_uid: str) -> CompanyCr
         status=str(raw.get("status", "")) or None,
         municipality=raw.get("municipality") or None,
         canton=raw.get("canton") or None,
-        purpose=raw.get("purpose") or None,
+        purpose=purpose,
         address=address_str,
+        industry=_derive_industry(purpose),
         zefix_raw=json.dumps(raw),
     )
 
@@ -328,6 +357,8 @@ def bulk_import_zefix(
                             status=result.status,
                             municipality=result.municipality,
                             canton=result.canton,
+                            purpose=result.purpose,
+                            industry=_derive_industry(result.purpose),
                         ),
                     )
                     stats["created"] += 1

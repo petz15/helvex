@@ -25,6 +25,7 @@ class CompanyBase(BaseModel):
     purpose: str | None = None
     address: str | None = None
     website_url: str | None = None
+    industry: str | None = None
 
     @field_validator("legal_form", "status", "municipality", "canton", "purpose", mode="before")
     @classmethod
@@ -71,7 +72,6 @@ class CompanyRead(CompanyBase):
     contact_email: str | None = None
     contact_phone: str | None = None
     tags: str | None = None
-    industry: str | None = None
     created_at: datetime
     updated_at: datetime
     notes: list[NoteRead] = []
@@ -86,8 +86,9 @@ class ZefixSearchResult(BaseModel):
     status: str | None = None
     municipality: str | None = None
     canton: str | None = None
+    purpose: str | None = None
 
-    @field_validator("legal_form", "status", "municipality", "canton", mode="before")
+    @field_validator("legal_form", "status", "municipality", "canton", "purpose", mode="before")
     @classmethod
     def coerce_multilang_fields(cls, v: object) -> str | None:
         return _coerce_multilang(v)
