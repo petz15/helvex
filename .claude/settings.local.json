@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(\"c:/D/coding_projects/zefix_analyzer/app/models/__init__.py\":*)",
+      "Bash(\"c:/D/coding_projects/zefix_analyzer/app/templates/base.html\":*)"
+    ]
+  }
+}

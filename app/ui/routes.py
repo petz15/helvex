@@ -10,7 +10,6 @@ from sqlalchemy.orm import Session
 
 from app import crud
 from app.api.zefix_client import SWISS_CANTONS
-from app.config import settings
 from app.database import get_db
 from app.services.collection import enrich_company_website
 from app.schemas.company import CompanyUpdate
@@ -132,7 +131,8 @@ def ui_home(
             "f_min_score": min_score if min_score is not None else "",
             "f_industry": industry or "",
             "f_tags": tags or "",
-            "google_daily_quota": settings.google_daily_quota,
+            "google_search_enabled": crud.get_setting(db, "google_search_enabled", "true") == "true",
+            "google_daily_quota": int(crud.get_setting(db, "google_daily_quota", "100")),
             "message": message,
             "error": error,
         },
@@ -269,6 +269,7 @@ def ui_company_detail(
             "notes": notes,
             "zefix_pretty": zefix_pretty,
             "google_results": google_results,
+            "google_search_enabled": crud.get_setting(db, "google_search_enabled", "true") == "true",
             "message": message,
             "error": error,
         },
@@ -277,6 +278,12 @@ def ui_company_detail(
 
 @router.post("/ui/companies/{company_id}/google-search", include_in_schema=False)
 def google_search_for_company(company_id: int, db: Session = Depends(get_db)) -> RedirectResponse:
+    if crud.get_setting(db, "google_search_enabled", "true") != "true":
+        return RedirectResponse(
+            url=f"/ui/companies/{company_id}?error={quote_plus('Google Search is disabled (GOOGLE_SEARCH_ENABLED=false)')}",
+            status_code=status.HTTP_303_SEE_OTHER,
+        )
+
     company = crud.get_company(db, company_id)
     if not company:
         return RedirectResponse(url="/ui?error=Company+not+found", status_code=status.HTTP_303_SEE_OTHER)
@@ -419,5 +426,42 @@ def delete_note(company_id: int, note_id: int, db: Session = Depends(get_db)) ->
     crud.delete_note(db, note)
     return RedirectResponse(
         url=f"/ui/companies/{company_id}?message=Note+deleted",
+        status_code=status.HTTP_303_SEE_OTHER,
+    )
+
+
+# ── Settings ──────────────────────────────────────────────────────────────────
+
+@router.get("/ui/settings", response_class=HTMLResponse, include_in_schema=False)
+def ui_settings(
+    request: Request,
+    message: str | None = Query(None),
+    error: str | None = Query(None),
+    db: Session = Depends(get_db),
+):
+    current = crud.get_all_settings(db)
+    return templates.TemplateResponse(
+        "settings.html",
+        {
+            "request": request,
+            "google_search_enabled": current.get("google_search_enabled", "true") == "true",
+            "google_daily_quota": current.get("google_daily_quota", "100"),
+            "message": message,
+            "error": error,
+        },
+    )
+
+
+@router.post("/ui/settings", include_in_schema=False)
+def save_settings(
+    google_search_enabled: str = Form("false"),
+    google_daily_quota: str = Form("100"),
+    db: Session = Depends(get_db),
+) -> RedirectResponse:
+    crud.set_setting(db, "google_search_enabled", "true" if google_search_enabled == "true" else "false")
+    quota = max(1, int(google_daily_quota)) if google_daily_quota.isdigit() else 100
+    crud.set_setting(db, "google_daily_quota", str(quota))
+    return RedirectResponse(
+        url=f"/ui/settings?message={quote_plus('Settings saved')}",
         status_code=status.HTTP_303_SEE_OTHER,
     )

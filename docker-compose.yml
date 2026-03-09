@@ -1,20 +1,4 @@
 services:
-  db:
-    image: postgres:16-alpine
-    environment:
-      POSTGRES_USER: zefix
-      POSTGRES_PASSWORD: zefix
-      POSTGRES_DB: zefix_analyzer
-    ports:
-      - "5432:5432"
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U zefix -d zefix_analyzer"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-
   app:
     build: .
     ports:
@@ -22,18 +6,20 @@ services:
     env_file:
       - .env
     environment:
-      DATABASE_URL: ${DATABASE_URL:-postgresql://zefix:zefix@db:5432/zefix_analyzer}
+      POSTGRES_HOST: ${POSTGRES_HOST}
+      POSTGRES_PORT: ${POSTGRES_PORT:-5432}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:-zefix_analyzer}
       ZEFIX_API_BASE_URL: ${ZEFIX_API_BASE_URL:-https://www.zefix.admin.ch/ZefixREST/api/v1}
       ZEFIX_API_USERNAME: ${ZEFIX_API_USERNAME:-}
       ZEFIX_API_PASSWORD: ${ZEFIX_API_PASSWORD:-}
       GOOGLE_API_KEY: ${GOOGLE_API_KEY:-}
       GOOGLE_CSE_ID: ${GOOGLE_CSE_ID:-}
-    depends_on:
-      db:
-        condition: service_healthy
+      GOOGLE_DAILY_QUOTA: ${GOOGLE_DAILY_QUOTA:-100}
+      GOOGLE_SEARCH_ENABLED: ${GOOGLE_SEARCH_ENABLED:-true}
     restart: unless-stopped
-    command: >
-      sh -c "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000"
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000
 
   collector:
     build: .
@@ -41,18 +27,17 @@ services:
     env_file:
       - .env
     environment:
-      DATABASE_URL: ${DATABASE_URL:-postgresql://zefix:zefix@db:5432/zefix_analyzer}
+      POSTGRES_HOST: ${POSTGRES_HOST}
+      POSTGRES_PORT: ${POSTGRES_PORT:-5432}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:-zefix_analyzer}
       ZEFIX_API_BASE_URL: ${ZEFIX_API_BASE_URL:-https://www.zefix.admin.ch/ZefixREST/api/v1}
       ZEFIX_API_USERNAME: ${ZEFIX_API_USERNAME:-}
       ZEFIX_API_PASSWORD: ${ZEFIX_API_PASSWORD:-}
       GOOGLE_API_KEY: ${GOOGLE_API_KEY:-}
       GOOGLE_CSE_ID: ${GOOGLE_CSE_ID:-}
-    depends_on:
-      db:
-        condition: service_healthy
+      GOOGLE_DAILY_QUOTA: ${GOOGLE_DAILY_QUOTA:-100}
+      GOOGLE_SEARCH_ENABLED: ${GOOGLE_SEARCH_ENABLED:-true}
     # Override with: docker compose --profile collector run --rm collector python -m app.run_collector bulk
-    command: >
-      sh -c "alembic upgrade head && python -m app.run_collector batch --limit 100"
-
-volumes:
-  postgres_data:
+    command: python -m app.run_collector batch --limit 100

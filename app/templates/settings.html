@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+
+{% block content %}
+<section class="card" style="max-width: 540px;">
+  <h2>Settings</h2>
+
+  <form method="post" action="/ui/settings" class="edit-form">
+
+    <div class="form-grid" style="grid-template-columns: 1fr;">
+
+      <label class="form-label">
+        <span>Google Search</span>
+        <select name="google_search_enabled">
+          <option value="true"  {% if google_search_enabled %}selected{% endif %}>Enabled</option>
+          <option value="false" {% if not google_search_enabled %}selected{% endif %}>Disabled</option>
+        </select>
+        <small class="muted">When disabled, no Google Search API calls are made. Use Zefix data only.</small>
+      </label>
+
+      <label class="form-label">
+        <span>Daily Google quota</span>
+        <input type="number" name="google_daily_quota" value="{{ google_daily_quota }}" min="1" max="10000">
+        <small class="muted">Free tier = 100/day. Batch runs stop automatically when this limit is reached.</small>
+      </label>
+
+    </div>
+
+    <button type="submit">Save settings</button>
+    <a class="button-link secondary" href="/ui" style="margin-left: 0.5rem;">Cancel</a>
+  </form>
+</section>
+{% endblock %}

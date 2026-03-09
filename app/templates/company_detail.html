@@ -141,9 +141,13 @@
 <section class="card">
   <div class="stack-header">
     <h3>Google Search Results</h3>
+    {% if google_search_enabled %}
     <form method="post" action="/ui/companies/{{ company.id }}/google-search">
       <button type="submit">{% if company.website_checked_at %}Re-run search{% else %}Run Google Search{% endif %}</button>
     </form>
+    {% else %}
+    <span class="badge badge-gray">Google Search disabled</span>
+    {% endif %}
   </div>
 
   {% if google_results %}
@@ -173,8 +177,10 @@
     </form>
   {% elif company.website_checked_at %}
     <p class="muted-hint">No results were returned for this company.</p>
-  {% else %}
+  {% elif google_search_enabled %}
     <p class="muted-hint">No Google search run yet.</p>
+  {% else %}
+    <p class="muted-hint">Google Search is disabled. Enable it in <code>.env</code> to find company websites automatically.</p>
   {% endif %}
 </section>
 

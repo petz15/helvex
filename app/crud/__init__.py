@@ -1,3 +1,4 @@
+from app.crud.app_setting import get_all_settings, get_setting, seed_defaults, set_setting
 from app.crud.collection_run import (
     complete_run,
     create_run,
@@ -34,6 +35,11 @@ __all__ = [
     "create_note",
     "update_note",
     "delete_note",
+    # app settings
+    "get_setting",
+    "set_setting",
+    "get_all_settings",
+    "seed_defaults",
     # collection run
     "create_run",
     "update_checkpoint",

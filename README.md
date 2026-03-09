@@ -52,12 +52,19 @@ All settings are read from environment variables (or a `.env` file):
 
 | Variable | Description | Default |
 |---|---|---|
-| `DATABASE_URL` | PostgreSQL connection URL | `postgresql://user:password@localhost:5432/zefix_analyzer` |
+| `POSTGRES_HOST` | PostgreSQL server host or IP | `localhost` |
+| `POSTGRES_PORT` | PostgreSQL port | `5432` |
+| `POSTGRES_USER` | PostgreSQL username | `zefix` |
+| `POSTGRES_PASSWORD` | PostgreSQL password | *(required)* |
+| `POSTGRES_DB` | Database name | `zefix_analyzer` |
+| `DATABASE_URL` | Full connection URL — overrides the individual fields above if set | *(optional)* |
 | `ZEFIX_API_BASE_URL` | Zefix REST API base URL | `https://www.zefix.admin.ch/ZefixREST/api/v1` |
 | `ZEFIX_API_USERNAME` | HTTP Basic Auth username (optional) | *(empty)* |
 | `ZEFIX_API_PASSWORD` | HTTP Basic Auth password (optional) | *(empty)* |
+| `GOOGLE_SEARCH_ENABLED` | Enable/disable Google Search (also settable via the UI) | `true` |
 | `GOOGLE_API_KEY` | Google Cloud API key | *(required for Google Search)* |
 | `GOOGLE_CSE_ID` | Google Custom Search Engine ID | *(required for Google Search)* |
+| `GOOGLE_DAILY_QUOTA` | Daily search quota (also settable via the UI) | `100` |
 
 ---
 
