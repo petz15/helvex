@@ -122,6 +122,7 @@ async def lifespan(app: FastAPI):
     app.state.startup_message = "Initialising…"
     app.state.startup_error = None
     app.state.startup_started_at = time.time()
+    app.state.collection_task = None  # populated while a collection job runs
 
     async def _startup() -> None:
         try:

@@ -1,6 +1,8 @@
 import csv
 import io
 import json
+import threading
+import time
 from urllib.parse import quote_plus, urlencode
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Query, Request, status
@@ -10,13 +12,14 @@ from sqlalchemy.orm import Session
 
 from app import crud
 from app.api.zefix_client import SWISS_CANTONS
-from app.database import get_db
-from app.services.collection import enrich_company_website
+from app.database import SessionLocal, get_db
+from app.services.collection import bulk_import_zefix, enrich_company_website, run_batch_collect
 from app.schemas.company import CompanyUpdate
 from app.schemas.note import NoteCreate, NoteUpdate
 
 router = APIRouter(tags=["ui"])
 templates = Jinja2Templates(directory="app/templates")
+templates.env.filters["tojson_parse"] = lambda s: json.loads(s) if s else {}
 
 PAGE_SIZE = 50
 
@@ -465,3 +468,160 @@ def save_settings(
         url=f"/ui/settings?message={quote_plus('Settings saved')}",
         status_code=status.HTTP_303_SEE_OTHER,
     )
+
+
+# ── Collection ────────────────────────────────────────────────────────────────
+
+def _task_is_running(app_state) -> bool:
+    task = getattr(app_state, "collection_task", None)
+    return task is not None and not task.get("done", False)
+
+
+@router.get("/ui/collection", response_class=HTMLResponse, include_in_schema=False)
+def ui_collection(
+    request: Request,
+    message: str | None = Query(None),
+    error: str | None = Query(None),
+    db: Session = Depends(get_db),
+):
+    task = getattr(request.app.state, "collection_task", None)
+    incomplete_bulk = crud.get_last_incomplete_bulk(db)
+    runs = crud.list_runs(db, limit=20)
+    return templates.TemplateResponse(
+        "collection.html",
+        {
+            "request": request,
+            "task": task,
+            "cantons": SWISS_CANTONS,
+            "incomplete_bulk": incomplete_bulk,
+            "runs": runs,
+            "message": message,
+            "error": error,
+        },
+    )
+
+
+@router.post("/ui/collection/bulk", include_in_schema=False)
+async def start_bulk(
+    request: Request,
+    cantons: str = Form(""),          # comma-separated, blank = all
+    page_size: int = Form(200),
+    delay: float = Form(0.5),
+    include_inactive: str = Form("false"),
+    resume: str = Form("false"),
+) -> RedirectResponse:
+    if _task_is_running(request.app.state):
+        return RedirectResponse(
+            url=f"/ui/collection?error={quote_plus('A collection job is already running')}",
+            status_code=status.HTTP_303_SEE_OTHER,
+        )
+
+    canton_list = [c.strip().upper() for c in cantons.split(",") if c.strip()] or None
+
+    task: dict = {
+        "type": "bulk",
+        "label": f"Bulk import — cantons: {', '.join(canton_list) if canton_list else 'all 26'}",
+        "started_at": time.time(),
+        "message": "Starting…",
+        "stats": {},
+        "error": None,
+        "done": False,
+    }
+    request.app.state.collection_task = task
+
+    def _run() -> None:
+        def progress_cb(canton: str, offset: int, created: int, skipped: int) -> None:
+            task["message"] = f"Canton {canton} offset {offset} — {created} created, {skipped} skipped"
+            task["stats"] = {"created": created, "skipped": skipped}
+
+        try:
+            with SessionLocal() as db:
+                stats = bulk_import_zefix(
+                    db,
+                    cantons=canton_list,
+                    active_only=include_inactive != "true",
+                    page_size=page_size,
+                    request_delay=delay,
+                    resume=resume == "true",
+                    progress_cb=progress_cb,
+                )
+            task["stats"] = stats
+            task["message"] = (
+                f"Done — {stats['created']} created, {stats['skipped']} skipped, "
+                f"{len(stats['errors'])} errors"
+            )
+        except Exception as exc:  # noqa: BLE001
+            task["error"] = str(exc)
+            task["message"] = "Failed"
+        finally:
+            task["done"] = True
+
+    threading.Thread(target=_run, daemon=True).start()
+    return RedirectResponse(url="/ui/collection", status_code=status.HTTP_303_SEE_OTHER)
+
+
+@router.post("/ui/collection/batch", include_in_schema=False)
+async def start_batch(
+    request: Request,
+    limit: int = Form(100),
+    skip: int = Form(0),
+    all_companies: str = Form("false"),
+    refresh_zefix: str = Form("false"),
+    skip_google: str = Form("false"),
+) -> RedirectResponse:
+    if _task_is_running(request.app.state):
+        return RedirectResponse(
+            url=f"/ui/collection?error={quote_plus('A collection job is already running')}",
+            status_code=status.HTTP_303_SEE_OTHER,
+        )
+
+    task: dict = {
+        "type": "batch",
+        "label": f"Batch enrichment — up to {limit} companies",
+        "started_at": time.time(),
+        "message": "Starting…",
+        "stats": {},
+        "error": None,
+        "done": False,
+    }
+    request.app.state.collection_task = task
+
+    def _run() -> None:
+        def progress_cb(done: int, total: int, stats: dict) -> None:
+            task["message"] = f"Processing {done}/{total} companies"
+            task["stats"] = dict(stats)
+
+        try:
+            with SessionLocal() as db:
+                stats = run_batch_collect(
+                    db,
+                    limit=limit,
+                    skip=skip,
+                    only_missing_website=all_companies != "true",
+                    refresh_zefix=refresh_zefix == "true",
+                    run_google=skip_google != "true",
+                    progress_cb=progress_cb,
+                )
+            task["stats"] = stats
+            task["message"] = (
+                f"Done — {stats['google_enriched']} enriched, "
+                f"{stats['google_no_result']} no result, "
+                f"{len(stats['errors'])} errors"
+            )
+        except Exception as exc:  # noqa: BLE001
+            task["error"] = str(exc)
+            task["message"] = "Failed"
+        finally:
+            task["done"] = True
+
+    threading.Thread(target=_run, daemon=True).start()
+    return RedirectResponse(url="/ui/collection", status_code=status.HTTP_303_SEE_OTHER)
+
+
+@router.post("/ui/collection/dismiss", include_in_schema=False)
+def dismiss_task(request: Request) -> RedirectResponse:
+    """Clear a finished task so the next run can start."""
+    task = getattr(request.app.state, "collection_task", None)
+    if task and task.get("done"):
+        request.app.state.collection_task = None
+    return RedirectResponse(url="/ui/collection", status_code=status.HTTP_303_SEE_OTHER)

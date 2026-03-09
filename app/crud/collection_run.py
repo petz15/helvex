@@ -46,3 +46,13 @@ def get_last_incomplete_bulk(db: Session) -> CollectionRun | None:
         .order_by(CollectionRun.started_at.desc())
         .first()
     )
+
+
+def list_runs(db: Session, limit: int = 20) -> list[CollectionRun]:
+    """Return the most recent collection runs, newest first."""
+    return (
+        db.query(CollectionRun)
+        .order_by(CollectionRun.started_at.desc())
+        .limit(limit)
+        .all()
+    )

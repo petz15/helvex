@@ -313,6 +313,7 @@ def run_batch_collect(
     only_missing_website: bool = True,
     refresh_zefix: bool = False,
     run_google: bool = True,
+    progress_cb: Any = None,
 ) -> dict[str, Any]:
     """Run a recurring batch process over companies already in your DB."""
     stats: dict[str, Any] = {
@@ -342,7 +343,7 @@ def run_batch_collect(
     companies = query.offset(skip).limit(limit).all()
     stats["selected"] = len(companies)
 
-    for company in companies:
+    for i, company in enumerate(companies, 1):
         current = company
         if refresh_zefix:
             try:
@@ -361,5 +362,8 @@ def run_batch_collect(
                     stats["google_no_result"] += 1
             except Exception as exc:  # noqa: BLE001
                 stats["errors"].append(f"Google search {current.uid}: {exc}")
+
+        if progress_cb:
+            progress_cb(i, stats["selected"], stats)
 
     return stats

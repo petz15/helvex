@@ -3,6 +3,7 @@ from app.crud.collection_run import (
     complete_run,
     create_run,
     get_last_incomplete_bulk,
+    list_runs,
     update_checkpoint,
 )
 from app.crud.company import (
@@ -45,4 +46,5 @@ __all__ = [
     "update_checkpoint",
     "complete_run",
     "get_last_incomplete_bulk",
+    "list_runs",
 ]
