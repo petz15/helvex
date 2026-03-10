@@ -342,6 +342,59 @@ def recalculate_zefix_scores(
     return stats
 
 
+def re_geocode_all_companies(
+    db: Session,
+    *,
+    batch_size: int = 500,
+    resume_from: int = 0,
+    progress_cb: Any = None,
+) -> dict[str, Any]:
+    """Re-geocode every company that has an address, overwriting existing lat/lon.
+
+    Used for the one-time upgrade from PLZ-centroid to building-level coordinates
+    after the swisstopo dataset becomes available.  No network calls beyond the
+    initial geocoding DB download (already done at Docker build time).
+
+    Returns:
+        ``{"geocoded": int, "failed": int, "skipped": int, "errors": list[str]}``
+    """
+    stats: dict[str, Any] = {"geocoded": 0, "failed": 0, "skipped": 0, "errors": []}
+
+    total = db.query(Company).filter(Company.address.isnot(None)).count()
+    offset = max(0, min(resume_from, total))
+
+    while True:
+        batch = (
+            db.query(Company)
+            .filter(Company.address.isnot(None))
+            .order_by(Company.id.asc())
+            .offset(offset)
+            .limit(batch_size)
+            .all()
+        )
+        if not batch:
+            break
+
+        for company in batch:
+            try:
+                coords = geocode_address(company.address)
+                if coords:
+                    company.lat, company.lon = coords
+                    stats["geocoded"] += 1
+                else:
+                    stats["failed"] += 1
+            except Exception as exc:  # noqa: BLE001
+                stats["errors"].append(f"{company.uid}: {exc}")
+
+        db.commit()
+        offset += len(batch)
+
+        if progress_cb:
+            progress_cb(min(offset, total), total, stats)
+
+    return stats
+
+
 def _score_google_results_for_company(company: Company, raw_results: list[dict]) -> list[dict]:
     """Score and sort Google results for one company using current scoring rules."""
     if not raw_results:

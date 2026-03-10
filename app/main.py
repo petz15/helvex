@@ -77,6 +77,36 @@ def _seed_settings(app_state) -> None:
         raise RuntimeError(f"Failed to seed settings: {exc}") from exc
 
 
+def _maybe_enqueue_geocode_upgrade(app_state) -> None:
+    """If building-level geocoding DB is present and hasn't been applied, queue the job."""
+    from pathlib import Path
+    from app.crud import create_event, create_job, get_setting, list_jobs
+    from app.database import SessionLocal
+
+    if not (Path("data") / "geocoding.db").exists():
+        return  # DB not built yet (local dev without Docker build)
+
+    with SessionLocal() as db:
+        if get_setting(db, "geocoding_building_level_done", "false") == "true":
+            return  # already upgraded
+
+        already_queued = any(
+            j.job_type == "re_geocode" and j.status in ("queued", "running", "paused")
+            for j in list_jobs(db, limit=50)
+        )
+        if already_queued:
+            return
+
+        job = create_job(
+            db,
+            job_type="re_geocode",
+            label="One-time re-geocode — upgrade to building-level coordinates",
+            params={},
+        )
+        create_event(db, job_id=job.id, level="info", message="Auto-queued by startup")
+    app_state.startup_message = "Queued one-time geocoding upgrade"
+
+
 def _recover_jobs_and_start_worker(app, app_state) -> None:
     """Requeue interrupted jobs and ensure queued jobs resume on startup."""
     from app.crud import list_active_jobs, requeue_interrupted_jobs
@@ -112,6 +142,7 @@ async def lifespan(app: FastAPI):
             await loop.run_in_executor(None, _run_migrations, app.state)
             await loop.run_in_executor(None, _seed_settings, app.state)
             await loop.run_in_executor(None, _recover_jobs_and_start_worker, app, app.state)
+            await loop.run_in_executor(None, _maybe_enqueue_geocode_upgrade, app.state)
             app.state.ready = True
             app.state.startup_message = "Ready"
         except Exception as exc:  # noqa: BLE001

@@ -19,6 +19,7 @@ from app.services.collection import (
     geocode_and_update_company,
     import_company_from_zefix_uid,
     initial_collect,
+    re_geocode_all_companies,
     recalculate_google_scores,
     recalculate_zefix_scores,
     run_batch_collect,
@@ -783,7 +784,25 @@ def _run_job(app, job_id: int) -> None:
                 raise JobPausedError("Pause requested")
 
         try:
-            if job.job_type == "recalculate_scores":
+            if job.job_type == "re_geocode":
+                def _progress(done: int, total: int, stats: dict) -> None:
+                    _assert_not_cancelled()
+                    msg = f"Geocoded {done}/{total} — {stats['geocoded']} updated, {stats['failed']} no match"
+                    crud.update_progress(db, job, message=msg, done=done, total=total, stats=stats)
+                    crud.create_event(db, job_id=job.id, level="debug", message=msg)
+                    _sync_active_task(app.state, job_type=job.job_type, label=job.label, message=msg, stats=dict(stats), error=None, done=False)
+
+                stats = re_geocode_all_companies(db, resume_from=resume_from, progress_cb=_progress)
+                done_msg = (
+                    f"Done — {stats['geocoded']} geocoded, {stats['failed']} no match, "
+                    f"{len(stats['errors'])} errors"
+                )
+                if resume_from:
+                    done_msg += f" (resumed from {resume_from})"
+                # Mark upgrade complete so startup doesn't re-enqueue
+                crud.set_setting(db, "geocoding_building_level_done", "true")
+
+            elif job.job_type == "recalculate_scores":
                 def _progress(done: int, total: int, stats: dict) -> None:
                     _assert_not_cancelled()
                     msg = f"Recalculated {done}/{total} companies"
