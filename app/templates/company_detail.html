@@ -220,13 +220,26 @@
 </section>
 
 {# ── Raw Zefix payload ────────────────────────────────────────────────────── #}
-{% if zefix_pretty %}
 <section class="card">
   <details>
-    <summary class="section-toggle">Raw Zefix Payload</summary>
-    <pre>{{ zefix_pretty }}</pre>
+    <summary class="section-toggle">Raw Zefix Data</summary>
+    {% if zefix_pretty %}
+      <div style="display:flex; justify-content:flex-end; margin-bottom:0.4rem;">
+        <button type="button" onclick="copyZefixData()" class="button-link secondary" style="font-size:0.82rem;">Copy JSON</button>
+      </div>
+      <pre id="zefix-raw" style="max-height:28rem; overflow-y:auto; font-size:0.78rem;">{{ zefix_pretty }}</pre>
+      <script>
+        function copyZefixData() {
+          navigator.clipboard.writeText(document.getElementById('zefix-raw').textContent);
+        }
+      </script>
+    {% else %}
+      <p class="muted-hint" style="margin:0.8rem 0 0.2rem;">
+        No Zefix detail data fetched yet.
+        Run <a href="/ui/collection">Zefix detail fetch</a> to load the full record for this company.
+      </p>
+    {% endif %}
   </details>
 </section>
-{% endif %}
 
 {% endblock %}

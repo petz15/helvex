@@ -85,7 +85,7 @@ def ui_home(
     review_status: str | None = Query(None),
     proposal_status: str | None = Query(None),
     google_searched: str | None = Query(None),
-    min_score: int | None = Query(None),
+    min_score: str | None = Query(None),   # kept as str to tolerate empty-string submissions
     industry: str | None = Query(None),
     tags: str | None = Query(None),
     sort: str | None = Query(None),
@@ -94,6 +94,7 @@ def ui_home(
     error: str | None = Query(None),
     db: Session = Depends(get_db),
 ):
+    min_score_int: int | None = int(min_score) if min_score and min_score.strip().lstrip("-").isdigit() else None
     searched_filter = _searched_bool(google_searched)
     filter_kwargs = dict(
         name_filter=q or None,
@@ -101,7 +102,7 @@ def ui_home(
         review_status=review_status or None,
         proposal_status=proposal_status or None,
         google_searched=searched_filter,
-        min_score=min_score,
+        min_score=min_score_int,
         industry=industry or None,
         tags=tags or None,
     )
@@ -114,7 +115,7 @@ def ui_home(
 
     # Build base query string (without page) for pagination links
     fp = _filter_params(q, canton, review_status, proposal_status,
-                        google_searched, min_score, sort, industry, tags)
+                        google_searched, min_score_int, sort, industry, tags)
     filter_qs = ("&" + urlencode(fp)) if fp else ""
 
     return templates.TemplateResponse(
@@ -137,7 +138,7 @@ def ui_home(
             "f_review_status": review_status or "",
             "f_proposal_status": proposal_status or "",
             "f_google_searched": google_searched or "",
-            "f_min_score": min_score if min_score is not None else "",
+            "f_min_score": min_score_int if min_score_int is not None else "",
             "f_industry": industry or "",
             "f_tags": tags or "",
             "google_search_enabled": crud.get_setting(db, "google_search_enabled", "true") == "true",

@@ -179,6 +179,7 @@
               Canton
               <span class="sort-icon">{% if sort == 'canton' %}↑{% elif sort == '-canton' %}↓{% else %}↕{% endif %}</span>
             </th>
+            <th>Status</th>
             <th>Industry</th>
             <th>Website</th>
             <th class="th-sortable" onclick="toggleSort('score')" title="Sort by score">
@@ -201,6 +202,15 @@
               <small class="muted">{{ c.uid }}</small>
             </td>
             <td>{{ c.canton or "-" }}</td>
+            <td>
+              {% if c.status %}
+                <span class="badge-sm {% if 'aktiv' in c.status.lower() or 'active' in c.status.lower() or 'eingetragen' in c.status.lower() %}badge-green{% else %}badge-gray{% endif %}">
+                  {{ c.status }}
+                </span>
+              {% else %}
+                <span class="muted">—</span>
+              {% endif %}
+            </td>
             <td>{{ c.industry or "-" }}</td>
             <td class="url-cell">
               {% if c.website_url %}
@@ -246,7 +256,7 @@
           </tr>
           {% else %}
           <tr>
-            <td colspan="9" class="empty-row">No companies match the current filters.</td>
+            <td colspan="10" class="empty-row">No companies match the current filters.</td>
           </tr>
           {% endfor %}
         </tbody>
