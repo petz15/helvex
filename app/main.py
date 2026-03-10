@@ -78,13 +78,12 @@ def _seed_settings(app_state) -> None:
 
 
 def _maybe_enqueue_geocode_upgrade(app_state) -> None:
-    """If building-level geocoding DB is present and hasn't been applied, queue the job."""
-    from pathlib import Path
+    """Queue the one-time re-geocode job if it hasn't been completed yet.
+
+    The job itself will trigger the geocoding DB download if it doesn't exist yet.
+    """
     from app.crud import create_event, create_job, get_setting, list_jobs
     from app.database import SessionLocal
-
-    if not (Path("data") / "geocoding.db").exists():
-        return  # DB not built yet (local dev without Docker build)
 
     with SessionLocal() as db:
         if get_setting(db, "geocoding_building_level_done", "false") == "true":

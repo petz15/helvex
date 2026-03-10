@@ -39,11 +39,9 @@ _BUILDING_URL = (
 # ── Regex helpers ─────────────────────────────────────────────────────────────
 _PLZ_RE = re.compile(r"\b(\d{4})\b")
 
-# Matches Zefix address format: "Steinmattstrasse 16, 4566 Oekingen"
-# Groups: street, house, plz
-_ADDR_RE = re.compile(
-    r"^(?P<street>.+?)\s+(?P<house>[^\s,]+),?\s+(?P<plz>\d{4})\b"
-)
+# Matches a "street housenumber" segment: the part immediately before the PLZ city segment.
+# Groups: street, house
+_STREET_HOUSE_RE = re.compile(r"^(?P<street>.+?)\s+(?P<house>\S+)$")
 
 # ── Thread locks ──────────────────────────────────────────────────────────────
 _plz_lock = threading.Lock()
@@ -234,14 +232,37 @@ def _get_db() -> sqlite3.Connection | None:
         return _db_conn
 
 
+def _parse_address(address: str) -> tuple[str, str, str] | None:
+    """Extract (plz, street, house) from a Zefix address string.
+
+    Zefix builds addresses as comma-joined segments:
+        [org,] [c/o careOf,] street housenumber, plz city [, addon...]
+
+    We find the segment that starts with a 4-digit PLZ and take the segment
+    immediately before it as "street housenumber".
+    """
+    parts = [p.strip() for p in address.split(",")]
+    for i, part in enumerate(parts):
+        m_plz = re.match(r"^(\d{4})\b", part)
+        if m_plz and i > 0:
+            plz = m_plz.group(1)
+            street_house = parts[i - 1].strip()
+            m_sh = _STREET_HOUSE_RE.match(street_house)
+            if m_sh:
+                return plz, m_sh.group("street"), m_sh.group("house")
+            # No house number — street only (e.g. "Bahnhofstrasse, 8001 Zürich")
+            return plz, street_house, ""
+    return None
+
+
 def _lookup_building(address: str) -> tuple[float, float] | None:
-    m = _ADDR_RE.match(address.strip())
-    if not m:
+    parsed = _parse_address(address.strip())
+    if not parsed:
         return None
 
-    plz = m.group("plz")
-    street = _norm(m.group("street"))
-    house = _norm(m.group("house"))
+    plz, street, house = parsed
+    street = _norm(street)
+    house = _norm(house)
 
     db = _get_db()
     if db is None:

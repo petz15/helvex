@@ -153,5 +153,13 @@
     </p>
     <button type="submit">Recalculate Google scores</button>
   </form>
+
+  <form method="post" action="/ui/scoring/re-geocode" style="margin-top:0.6rem;">
+    <p class="muted" style="margin: 0 0 0.6rem;">
+      Re-geocode all company addresses using the swisstopo building register (street-level precision).
+      Run this after the building DB has been built or if map coordinates look inaccurate.
+    </p>
+    <button type="submit">Re-geocode all companies</button>
+  </form>
 </section>
 {% endblock %}

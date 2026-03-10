@@ -731,6 +731,27 @@ def start_recalculate_google_scores(request: Request) -> RedirectResponse:
     )
 
 
+@router.post("/ui/scoring/re-geocode", include_in_schema=False)
+def start_re_geocode(request: Request, db: Session = Depends(get_db)) -> RedirectResponse:
+    # Reset the done flag so the job runs even if it ran before
+    crud.set_setting(db, "geocoding_building_level_done", "false")
+    job, err = _enqueue_job_safe(
+        request,
+        job_type="re_geocode",
+        label="Re-geocode all companies (building-level)",
+        params={},
+    )
+    if err:
+        return RedirectResponse(
+            url=f"/ui/settings?error={quote_plus(err)}",
+            status_code=status.HTTP_303_SEE_OTHER,
+        )
+    return RedirectResponse(
+        url=f"/ui/settings?message={quote_plus(f'Re-geocode job queued (job #{job.id})')}",
+        status_code=status.HTTP_303_SEE_OTHER,
+    )
+
+
 # ── Collection ────────────────────────────────────────────────────────────────
 
 def _task_is_running(app_state) -> bool:
