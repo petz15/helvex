@@ -10,8 +10,6 @@ from app.schemas.company import CompanyCreate, CompanyUpdate
 _SORT_MAP = {
     "name":         (Company.name,               True),
     "-name":        (Company.name,               False),
-    "score":        (Company.website_match_score, True),
-    "-score":       (Company.website_match_score, False),
     "google_score":  (Company.website_match_score, True),
     "-google_score": (Company.website_match_score, False),
     "zefix_score":   (Company.zefix_score, True),
@@ -37,7 +35,7 @@ def get_company_by_uid(db: Session, uid: str) -> Company | None:
 
 
 def _apply_filters(query, *, name_filter, canton, review_status, proposal_status,
-                   google_searched, min_score, min_google_score, min_zefix_score, industry, tags):
+                   google_searched, min_google_score, min_zefix_score, industry, tags):
     if name_filter:
         query = query.filter(Company.name.ilike(f"%{name_filter}%"))
     if canton:
@@ -54,8 +52,6 @@ def _apply_filters(query, *, name_filter, canton, review_status, proposal_status
         query = query.filter(Company.website_checked_at.isnot(None))
     elif google_searched is False:
         query = query.filter(Company.website_checked_at.is_(None))
-    if min_score is not None:
-        query = query.filter(Company.website_match_score >= min_score)
     if min_google_score is not None:
         query = query.filter(Company.website_match_score >= min_google_score)
     if min_zefix_score is not None:
@@ -77,7 +73,6 @@ def list_companies(
     review_status: str | None = None,
     proposal_status: str | None = None,
     google_searched: bool | None = None,
-    min_score: int | None = None,
     min_google_score: int | None = None,
     min_zefix_score: int | None = None,
     industry: str | None = None,
@@ -94,7 +89,6 @@ def list_companies(
         review_status=review_status,
         proposal_status=proposal_status,
         google_searched=google_searched,
-        min_score=min_score,
         min_google_score=min_google_score,
         min_zefix_score=min_zefix_score,
         industry=industry,
@@ -119,7 +113,6 @@ def count_companies(
     review_status: str | None = None,
     proposal_status: str | None = None,
     google_searched: bool | None = None,
-    min_score: int | None = None,
     min_google_score: int | None = None,
     min_zefix_score: int | None = None,
     industry: str | None = None,
@@ -133,7 +126,6 @@ def count_companies(
         review_status=review_status,
         proposal_status=proposal_status,
         google_searched=google_searched,
-        min_score=min_score,
         min_google_score=min_google_score,
         min_zefix_score=min_zefix_score,
         industry=industry,

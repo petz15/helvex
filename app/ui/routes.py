@@ -49,7 +49,6 @@ def _filter_params(
     review_status: str | None,
     proposal_status: str | None,
     google_searched: str | None,
-    min_score: int | None,
     min_google_score: int | None,
     min_zefix_score: int | None,
     sort: str | None,
@@ -68,8 +67,6 @@ def _filter_params(
         p["proposal_status"] = proposal_status
     if google_searched:
         p["google_searched"] = google_searched
-    if min_score is not None:
-        p["min_score"] = min_score
     if min_google_score is not None:
         p["min_google_score"] = min_google_score
     if min_zefix_score is not None:
@@ -104,7 +101,6 @@ def ui_home(
     review_status: str | None = Query(None),
     proposal_status: str | None = Query(None),
     google_searched: str | None = Query(None),
-    min_score: str | None = Query(None),   # kept as str to tolerate empty-string submissions
     min_google_score: str | None = Query(None),
     min_zefix_score: str | None = Query(None),
     industry: str | None = Query(None),
@@ -116,7 +112,6 @@ def ui_home(
     db: Session = Depends(get_db),
 ):
     _ensure_job_worker(request.app)
-    min_score_int: int | None = int(min_score) if min_score and min_score.strip().lstrip("-").isdigit() else None
     min_google_score_int: int | None = int(min_google_score) if min_google_score and min_google_score.strip().lstrip("-").isdigit() else None
     min_zefix_score_int: int | None = int(min_zefix_score) if min_zefix_score and min_zefix_score.strip().lstrip("-").isdigit() else None
     searched_filter = _searched_bool(google_searched)
@@ -126,7 +121,6 @@ def ui_home(
         review_status=review_status or None,
         proposal_status=proposal_status or None,
         google_searched=searched_filter,
-        min_score=min_score_int,
         min_google_score=min_google_score_int,
         min_zefix_score=min_zefix_score_int,
         industry=industry or None,
@@ -141,7 +135,7 @@ def ui_home(
 
     # Build base query string (without page) for pagination links
     fp = _filter_params(q, canton, review_status, proposal_status,
-                        google_searched, min_score_int, min_google_score_int, min_zefix_score_int,
+                        google_searched, min_google_score_int, min_zefix_score_int,
                         sort, industry, tags)
     filter_qs = ("&" + urlencode(fp)) if fp else ""
 
@@ -165,7 +159,6 @@ def ui_home(
             "f_review_status": review_status or "",
             "f_proposal_status": proposal_status or "",
             "f_google_searched": google_searched or "",
-            "f_min_score": min_score_int if min_score_int is not None else "",
             "f_min_google_score": min_google_score_int if min_google_score_int is not None else "",
             "f_min_zefix_score": min_zefix_score_int if min_zefix_score_int is not None else "",
             "f_industry": industry or "",
@@ -187,7 +180,6 @@ def export_csv(
     review_status: str | None = Query(None),
     proposal_status: str | None = Query(None),
     google_searched: str | None = Query(None),
-    min_score: int | None = Query(None),
     min_google_score: int | None = Query(None),
     min_zefix_score: int | None = Query(None),
     industry: str | None = Query(None),
@@ -204,7 +196,6 @@ def export_csv(
         review_status=review_status or None,
         proposal_status=proposal_status or None,
         google_searched=_searched_bool(google_searched),
-        min_score=min_score,
         min_google_score=min_google_score,
         min_zefix_score=min_zefix_score,
         industry=industry or None,
@@ -544,7 +535,7 @@ def ui_settings(
             "message": j.message or "",
             "stats": stats,
             "error": j.error,
-            "done": j.status in ("completed", "failed", "cancelled"),
+            "done": j.status in ("completed", "failed", "cancelled", "paused"),
         }
 
     scoring_task = _job_to_task(latest_zefix_job)
@@ -765,7 +756,6 @@ def _run_job(app, job_id: int) -> None:
                 stats = run_batch_collect(
                     db,
                     limit=int(params.get("limit", 100)),
-                    skip=int(params.get("skip", 0)),
                     only_missing_website=bool(params.get("only_missing_website", True)),
                     refresh_zefix=bool(params.get("refresh_zefix", False)),
                     run_google=bool(params.get("run_google", True)),

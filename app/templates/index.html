@@ -132,10 +132,6 @@
         <input type="number" name="min_zefix_score" value="{{ f_min_zefix_score }}" min="0" max="100" placeholder="0-100">
       </label>
       <label class="form-label">
-        <span>Min score (legacy)</span>
-        <input type="number" name="min_score" value="{{ f_min_score }}" min="0" max="100" placeholder="0–100">
-      </label>
-      <label class="form-label">
         <span>Sort by</span>
         <select name="sort">
           <option value="-updated"  {% if sort == '-updated'  %}selected{% endif %}>Last updated ↓</option>
@@ -146,8 +142,6 @@
           <option value="google_score"  {% if sort == 'google_score'  %}selected{% endif %}>Google score ↑</option>
           <option value="-zefix_score"  {% if sort == '-zefix_score'  %}selected{% endif %}>Zefix score ↓</option>
           <option value="zefix_score"   {% if sort == 'zefix_score'   %}selected{% endif %}>Zefix score ↑</option>
-          <option value="-score"        {% if sort == '-score'        %}selected{% endif %}>Score ↓ (legacy)</option>
-          <option value="score"         {% if sort == 'score'         %}selected{% endif %}>Score ↑ (legacy)</option>
           <option value="name"      {% if sort == 'name'      %}selected{% endif %}>Name A→Z</option>
           <option value="-name"     {% if sort == '-name'     %}selected{% endif %}>Name Z→A</option>
           <option value="industry"  {% if sort == 'industry'  %}selected{% endif %}>Industry A→Z</option>

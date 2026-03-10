@@ -14,7 +14,7 @@
     <div>
       <p style="margin:0; font-weight:600;">{{ scoring_task.label }}</p>
       <p style="margin:0.2rem 0 0; color:var(--muted);">{{ scoring_task.message }}</p>
-      <p style="margin:0.2rem 0 0; font-size:0.8rem; color:var(--muted);">Page refreshes every 3 s</p>
+      <p style="margin:0.2rem 0 0; font-size:0.8rem; color:var(--muted);">Page refreshes automatically</p>
     </div>
   </div>
 </section>
@@ -27,7 +27,7 @@
     <div>
       <p style="margin:0; font-weight:600;">{{ google_scoring_task.label }}</p>
       <p style="margin:0.2rem 0 0; color:var(--muted);">{{ google_scoring_task.message }}</p>
-      <p style="margin:0.2rem 0 0; font-size:0.8rem; color:var(--muted);">Page refreshes every 3 s</p>
+      <p style="margin:0.2rem 0 0; font-size:0.8rem; color:var(--muted);">Page refreshes automatically</p>
     </div>
   </div>
 </section>
@@ -144,14 +144,14 @@
     <p class="muted" style="margin: 0 0 0.6rem;">
       Recompute all saved <code>zefix_score</code> values after you change the scoring algorithm.
     </p>
-    <button type="submit" {% if active_task %}disabled{% endif %}>Recalculate Zefix scores</button>
+    <button type="submit">Recalculate Zefix scores</button>
   </form>
 
   <form method="post" action="/ui/scoring/recalculate-google" style="margin-top:0.6rem;">
     <p class="muted" style="margin: 0 0 0.6rem;">
       Recompute all saved Google <code>website_match_score</code> values from stored search results.
     </p>
-    <button type="submit" {% if active_task %}disabled{% endif %}>Recalculate Google scores</button>
+    <button type="submit">Recalculate Google scores</button>
   </form>
 </section>
 {% endblock %}
