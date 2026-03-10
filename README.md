@@ -286,8 +286,8 @@ Recent additions include:
 | `0003` | Filter indexes |
 | `0004` | Contact fields, industry, tags, collection_runs table |
 | `0005` | App settings table (runtime-configurable Google quota) |
-| `0006` | `job_runs` queue table + `companies.zefix_score_breakdown` |
-| `0007` | Job cancellation support (`job_runs.cancel_requested`) + `job_run_events` log stream |
+| `0010` | `job_runs` queue table + `companies.zefix_score_breakdown` |
+| `0011` | Job cancellation support (`job_runs.cancel_requested`) + `job_run_events` log stream |
 
 For the complete lineage in your environment, use `alembic history`.
 
