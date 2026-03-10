@@ -395,6 +395,130 @@ def bulk_import_zefix(
     return stats
 
 
+def rescore_from_stored_results(db: Session, company: Company) -> bool:
+    """Re-score website_match_score from already-stored google_search_results_raw.
+
+    Called after a Zefix detail refresh so that freshly fetched purpose /
+    municipality / canton data is applied to the existing Google results without
+    spending a new API call.  Only updates score fields; never triggers a new
+    Google search.
+
+    Returns True if scoring was applied and saved, False otherwise.
+    """
+    if not company.google_search_results_raw:
+        return False
+    try:
+        stored: list[dict] = json.loads(company.google_search_results_raw)
+    except (json.JSONDecodeError, TypeError):
+        return False
+    if not stored:
+        return False
+
+    rescored = []
+    for r in stored:
+        s = score_result(
+            {"title": r.get("title", ""), "link": r.get("link", ""), "snippet": r.get("snippet", "")},
+            company_name=company.name,
+            municipality=company.municipality,
+            canton=company.canton,
+            purpose=company.purpose,
+            legal_form=company.legal_form,
+        )
+        rescored.append({**r, "score": s})
+
+    rescored.sort(key=lambda x: x["score"], reverse=True)
+    best = rescored[0]
+    crud.update_company(
+        db,
+        company,
+        CompanyUpdate(
+            website_url=best["link"],
+            website_match_score=best["score"],
+            google_search_results_raw=json.dumps(rescored),
+        ),
+    )
+    return True
+
+
+def run_zefix_detail_collect(
+    db: Session,
+    *,
+    cantons: list[str] | None = None,
+    uids: list[str] | None = None,
+    limit: int = 500,
+    skip: int = 0,
+    score_if_missing: bool = True,
+    request_delay: float = 0.3,
+    progress_cb: Any = None,
+) -> dict[str, Any]:
+    """Fetch full Zefix detail records for companies already in the database.
+
+    Calls the per-UID Zefix endpoint for each target company, updating address,
+    purpose, legal form, status, and zefix_raw JSON.  Optionally re-scores
+    existing Google results with the freshly fetched purpose / municipality data.
+
+    Targeting priority:
+        1. Explicit *uids* list.
+        2. *cantons* filter (all DB companies in those cantons).
+        3. All companies, paginated by *limit* / *skip*.
+
+    Scoring applies only when *score_if_missing* is True **and** the company has
+    stored Google results but no ``website_match_score`` yet.
+    """
+    stats: dict[str, Any] = {
+        "selected": 0,
+        "updated": 0,
+        "scored": 0,
+        "errors": [],
+    }
+
+    run = crud.create_run(db, "detail")
+
+    # ── Build target list ─────────────────────────────────────────────────────
+    if uids:
+        companies: list[Company] = [
+            c for uid in uids if (c := crud.get_company_by_uid(db, uid)) is not None
+        ]
+    elif cantons:
+        companies = (
+            db.query(Company)
+            .filter(Company.canton.in_(cantons))
+            .offset(skip)
+            .limit(limit)
+            .all()
+        )
+    else:
+        companies = db.query(Company).offset(skip).limit(limit).all()
+
+    stats["selected"] = len(companies)
+    total = len(companies)
+
+    for i, company in enumerate(companies, 1):
+        try:
+            updated, _ = import_company_from_zefix_uid(db, company.uid)
+            stats["updated"] += 1
+
+            # Re-score only when no score exists yet and stored results are available
+            if score_if_missing and updated.website_match_score is None:
+                if rescore_from_stored_results(db, updated):
+                    stats["scored"] += 1
+
+        except Exception as exc:  # noqa: BLE001
+            stats["errors"].append(f"{company.uid} ({company.name}): {exc}")
+
+        if progress_cb:
+            progress_cb(i, total, stats)
+
+        # Periodic checkpoint (every 50 companies)
+        if i % 50 == 0:
+            crud.update_checkpoint(db, run, company.canton or "—", i, stats)
+
+        time.sleep(request_delay)
+
+    crud.complete_run(db, run, stats)
+    return stats
+
+
 def run_batch_collect(
     db: Session,
     *,

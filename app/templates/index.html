@@ -4,20 +4,20 @@
 
 {# ── Stats bar ────────────────────────────────────────────────────────────── #}
 <section class="card stats-bar">
-  <div class="stat-item">
+  <a class="stat-item stat-item--link" href="/ui">
     <span class="stat-value">{{ stats.total }}</span>
     <span class="stat-label">Total companies</span>
-  </div>
+  </a>
   <div class="stat-divider"></div>
   {% if google_search_enabled %}
-  <div class="stat-item">
+  <a class="stat-item stat-item--link" href="/ui?google_searched=yes">
     <span class="stat-value">{{ stats.searched }}</span>
     <span class="stat-label">Google searched</span>
-  </div>
-  <div class="stat-item stat-item--muted">
+  </a>
+  <a class="stat-item stat-item--link stat-item--muted" href="/ui?google_searched=no">
     <span class="stat-value">{{ stats.total - stats.searched }}</span>
     <span class="stat-label">Not yet searched</span>
-  </div>
+  </a>
   <div class="stat-item {% if stats.searches_today >= (google_daily_quota * 0.9) | int %}stat-item--warn{% endif %}">
     <span class="stat-value {% if stats.searches_today >= (google_daily_quota * 0.9) | int %}text-red{% elif stats.searches_today >= (google_daily_quota * 0.7) | int %}text-yellow{% endif %}">
       {{ stats.searches_today }}/{{ google_daily_quota }}
@@ -26,31 +26,31 @@
   </div>
   {% endif %}
   <div class="stat-divider"></div>
-  <div class="stat-item">
+  <a class="stat-item stat-item--link" href="/ui?review_status=confirmed">
     <span class="stat-value text-green">{{ stats.review.confirmed }}</span>
     <span class="stat-label">Confirmed</span>
-  </div>
-  <div class="stat-item">
+  </a>
+  <a class="stat-item stat-item--link" href="/ui?review_status=interesting">
     <span class="stat-value text-blue">{{ stats.review.interesting }}</span>
     <span class="stat-label">Interesting</span>
-  </div>
-  <div class="stat-item">
+  </a>
+  <a class="stat-item stat-item--link" href="/ui?review_status=_none">
     <span class="stat-value text-muted">{{ stats.review.pending }}</span>
     <span class="stat-label">Pending review</span>
-  </div>
-  <div class="stat-item">
+  </a>
+  <a class="stat-item stat-item--link" href="/ui?review_status=rejected">
     <span class="stat-value text-red">{{ stats.review.rejected }}</span>
     <span class="stat-label">Rejected</span>
-  </div>
+  </a>
   <div class="stat-divider"></div>
-  <div class="stat-item">
+  <a class="stat-item stat-item--link" href="/ui?proposal_status=sent">
     <span class="stat-value text-yellow">{{ stats.proposal.sent }}</span>
     <span class="stat-label">Proposals sent</span>
-  </div>
-  <div class="stat-item">
+  </a>
+  <a class="stat-item stat-item--link" href="/ui?proposal_status=converted">
     <span class="stat-value text-green">{{ stats.proposal.converted }}</span>
     <span class="stat-label">Converted</span>
-  </div>
+  </a>
 </section>
 
 {# ── Filter panel ─────────────────────────────────────────────────────────── #}
@@ -116,11 +116,14 @@
         <select name="sort">
           <option value="-updated"  {% if sort == '-updated'  %}selected{% endif %}>Last updated ↓</option>
           <option value="updated"   {% if sort == 'updated'   %}selected{% endif %}>Last updated ↑</option>
+          <option value="-created"  {% if sort == '-created'  %}selected{% endif %}>Created ↓</option>
+          <option value="created"   {% if sort == 'created'   %}selected{% endif %}>Created ↑</option>
           <option value="-score"    {% if sort == '-score'    %}selected{% endif %}>Score ↓</option>
           <option value="score"     {% if sort == 'score'     %}selected{% endif %}>Score ↑</option>
           <option value="name"      {% if sort == 'name'      %}selected{% endif %}>Name A→Z</option>
           <option value="-name"     {% if sort == '-name'     %}selected{% endif %}>Name Z→A</option>
           <option value="canton"    {% if sort == 'canton'    %}selected{% endif %}>Canton A→Z</option>
+          <option value="-canton"   {% if sort == '-canton'   %}selected{% endif %}>Canton Z→A</option>
         </select>
       </label>
     </div>
@@ -168,11 +171,20 @@
         <thead>
           <tr>
             <th class="col-check"></th>
-            <th>Company</th>
-            <th>Canton</th>
+            <th class="th-sortable" onclick="toggleSort('name')" title="Sort by name">
+              Company
+              <span class="sort-icon">{% if sort == 'name' %}↑{% elif sort == '-name' %}↓{% else %}↕{% endif %}</span>
+            </th>
+            <th class="th-sortable" onclick="toggleSort('canton')" title="Sort by canton">
+              Canton
+              <span class="sort-icon">{% if sort == 'canton' %}↑{% elif sort == '-canton' %}↓{% else %}↕{% endif %}</span>
+            </th>
             <th>Industry</th>
             <th>Website</th>
-            <th>Score</th>
+            <th class="th-sortable" onclick="toggleSort('score')" title="Sort by score">
+              Score
+              <span class="sort-icon">{% if sort == 'score' %}↑{% elif sort == '-score' %}↓{% else %}↕{% endif %}</span>
+            </th>
             <th>Review</th>
             <th>Proposal</th>
             <th></th>
@@ -270,6 +282,35 @@
   checkAll.addEventListener('change', () => {
     document.querySelectorAll('.row-check').forEach(cb => cb.checked = checkAll.checked);
   });
+
+  function toggleSort(field) {
+    const form = document.getElementById('filter-form');
+    const sortSelect = form.querySelector('[name="sort"]');
+    const cur = sortSelect.value;
+    if (cur === field) {
+      sortSelect.value = '-' + field;
+    } else if (cur === '-' + field) {
+      sortSelect.value = field;
+    } else {
+      // Default: descending for score/updated, ascending for name/canton
+      sortSelect.value = (field === 'name' || field === 'canton') ? field : '-' + field;
+    }
+    form.submit();
+  }
 </script>
+
+<style>
+  .th-sortable { cursor: pointer; user-select: none; white-space: nowrap; }
+  .th-sortable:hover { background: var(--hover, rgba(0,0,0,0.04)); }
+  .sort-icon { font-size: 0.75rem; opacity: 0.6; margin-left: 0.2rem; }
+  .stat-item--link {
+    text-decoration: none;
+    color: inherit;
+    cursor: pointer;
+    border-radius: 6px;
+    transition: background 0.15s;
+  }
+  .stat-item--link:hover { background: var(--hover, rgba(0,0,0,0.05)); }
+</style>
 
 {% endblock %}

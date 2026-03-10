@@ -13,7 +13,13 @@ from sqlalchemy.orm import Session
 from app import crud
 from app.api.zefix_client import SWISS_CANTONS
 from app.database import SessionLocal, get_db
-from app.services.collection import bulk_import_zefix, enrich_company_website, initial_collect, run_batch_collect
+from app.services.collection import (
+    bulk_import_zefix,
+    enrich_company_website,
+    initial_collect,
+    run_batch_collect,
+    run_zefix_detail_collect,
+)
 from app.schemas.company import CompanyUpdate
 from app.schemas.note import NoteCreate, NoteUpdate
 
@@ -670,6 +676,75 @@ async def start_initial(
             task["message"] = (
                 f"Done — {stats['created']} created, {stats['updated']} updated, "
                 f"{stats['google_enriched']} enriched, {len(stats['errors'])} errors"
+            )
+        except Exception as exc:  # noqa: BLE001
+            task["error"] = str(exc)
+            task["message"] = "Failed"
+        finally:
+            task["done"] = True
+
+    threading.Thread(target=_run, daemon=True).start()
+    return RedirectResponse(url="/ui/collection", status_code=status.HTTP_303_SEE_OTHER)
+
+
+@router.post("/ui/collection/detail", include_in_schema=False)
+async def start_detail(
+    request: Request,
+    cantons: str = Form(""),        # comma-separated canton codes, blank = all in DB
+    uids: str = Form(""),           # newline-separated UIDs for specific companies
+    limit: int = Form(500),
+    skip: int = Form(0),
+    score_if_missing: str = Form("true"),
+    delay: float = Form(0.3),
+) -> RedirectResponse:
+    if _task_is_running(request.app.state):
+        return RedirectResponse(
+            url=f"/ui/collection?error={quote_plus('A collection job is already running')}",
+            status_code=status.HTTP_303_SEE_OTHER,
+        )
+
+    canton_list = [c.strip().upper() for c in cantons.split(",") if c.strip()] or None
+    uid_list = [u.strip() for u in uids.splitlines() if u.strip()] or None
+
+    if canton_list:
+        label = f"Zefix detail fetch — cantons: {', '.join(canton_list)}"
+    elif uid_list:
+        label = f"Zefix detail fetch — {len(uid_list)} UID(s)"
+    else:
+        label = f"Zefix detail fetch — up to {limit} companies"
+
+    task: dict = {
+        "type": "detail",
+        "label": label,
+        "started_at": time.time(),
+        "message": "Starting…",
+        "stats": {},
+        "error": None,
+        "done": False,
+    }
+    request.app.state.collection_task = task
+
+    def _run() -> None:
+        def progress_cb(done: int, total: int, stats: dict) -> None:
+            task["message"] = f"Processing {done}/{total}"
+            task["stats"] = dict(stats)
+
+        try:
+            with SessionLocal() as db:
+                stats = run_zefix_detail_collect(
+                    db,
+                    cantons=canton_list,
+                    uids=uid_list,
+                    limit=limit,
+                    skip=skip,
+                    score_if_missing=score_if_missing == "true",
+                    request_delay=delay,
+                    progress_cb=progress_cb,
+                )
+            task["stats"] = stats
+            task["message"] = (
+                f"Done — {stats['updated']} updated, {stats['scored']} scored, "
+                f"{len(stats['errors'])} errors"
             )
         except Exception as exc:  # noqa: BLE001
             task["error"] = str(exc)

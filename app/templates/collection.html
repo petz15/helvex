@@ -33,6 +33,8 @@
             <p style="margin:0.3rem 0 0; font-size:0.82rem; color:var(--muted);">
               {% if task.type == "bulk" %}
                 {{ task.stats.get("created", 0) }} created &nbsp;·&nbsp; {{ task.stats.get("skipped", 0) }} skipped
+              {% elif task.type == "detail" %}
+                {{ task.stats.get("updated", 0) }} updated &nbsp;·&nbsp; {{ task.stats.get("scored", 0) }} scored
               {% else %}
                 {{ task.stats.get("google_enriched", 0) }} enriched &nbsp;·&nbsp; {{ task.stats.get("google_no_result", 0) }} no result
               {% endif %}
@@ -160,6 +162,63 @@
 
 </div>
 
+{# ── Zefix detail fetch ────────────────────────────────────────────────────── #}
+<div class="card" style="margin-bottom: 2rem;">
+  <h3 style="margin-top:0;">Zefix detail fetch</h3>
+  <p style="color:var(--muted); font-size:0.88rem; margin-top:0;">
+    Fetches the full Zefix detail record for companies already in the database —
+    purpose, address, legal form, raw JSON — by calling the per-UID endpoint.
+    Useful after a bulk import, which only stores basic data.
+    Optionally re-scores existing Google results with the freshly fetched purpose
+    and location data (only if no score exists yet, so no API calls are spent).
+  </p>
+  <form method="post" action="/ui/collection/detail" {% if running %}style="opacity:.5;pointer-events:none;"{% endif %}>
+    <div style="display:grid; grid-template-columns:1fr 1fr; gap:1rem; margin-bottom:0.8rem;">
+      <div>
+        <label style="display:block;font-size:0.85rem;font-weight:600;margin-bottom:0.3rem;">
+          Cantons <span style="font-weight:400;color:var(--muted);">(comma-separated, blank = all in DB)</span>
+        </label>
+        <input type="text" name="cantons" placeholder="e.g. ZH, BE, GE"
+               style="width:100%; padding:0.45rem 0.6rem; border:1px solid var(--line); border-radius:4px;">
+        <p style="margin:0.25rem 0 0; font-size:0.78rem; color:var(--muted);">
+          All: {{ cantons | join(", ") }}
+        </p>
+      </div>
+      <div>
+        <label style="display:block;font-size:0.85rem;font-weight:600;margin-bottom:0.3rem;">
+          Specific UIDs <span style="font-weight:400;color:var(--muted);">(one per line, overrides cantons)</span>
+        </label>
+        <textarea name="uids" rows="3" placeholder="e.g.&#10;CHE-123.456.789&#10;CHE-987.654.321"
+                  style="width:100%; padding:0.45rem 0.6rem; border:1px solid var(--line); border-radius:4px; resize:vertical; font-family:inherit; font-size:0.88rem;"></textarea>
+      </div>
+    </div>
+    <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:0.8rem; margin-bottom:0.8rem;">
+      <div>
+        <label style="display:block;font-size:0.85rem;font-weight:600;margin-bottom:0.3rem;">Limit</label>
+        <input type="number" name="limit" value="500" min="1" max="100000"
+               style="width:100%; padding:0.45rem 0.6rem; border:1px solid var(--line); border-radius:4px;">
+      </div>
+      <div>
+        <label style="display:block;font-size:0.85rem;font-weight:600;margin-bottom:0.3rem;">Skip (offset)</label>
+        <input type="number" name="skip" value="0" min="0"
+               style="width:100%; padding:0.45rem 0.6rem; border:1px solid var(--line); border-radius:4px;">
+      </div>
+      <div>
+        <label style="display:block;font-size:0.85rem;font-weight:600;margin-bottom:0.3rem;">Delay (s)</label>
+        <input type="number" name="delay" value="0.3" min="0" max="10" step="0.1"
+               style="width:100%; padding:0.45rem 0.6rem; border:1px solid var(--line); border-radius:4px;">
+      </div>
+    </div>
+    <div style="margin-bottom:1rem;">
+      <label style="display:flex;align-items:center;gap:0.5rem;font-size:0.88rem;cursor:pointer;">
+        <input type="checkbox" name="score_if_missing" value="true" checked>
+        Auto-score from stored Google results (only if no score exists yet)
+      </label>
+    </div>
+    <button class="button-link" type="submit">Start detail fetch</button>
+  </form>
+</div>
+
 {# ── Specific search / initial import ─────────────────────────────────────── #}
 <div class="card" style="margin-bottom: 2rem;">
   <h3 style="margin-top:0;">Specific search</h3>
@@ -234,8 +293,8 @@
             <td style="padding:0.4rem 0.6rem; color:var(--muted);">{{ run.id }}</td>
             <td style="padding:0.4rem 0.6rem;">
               <span style="padding:0.15rem 0.5rem; border-radius:3px; font-size:0.8rem;
-                background:{% if run.run_type == 'bulk' %}#e8f4fd{% elif run.run_type == 'initial' %}#f3eeff{% else %}#e8fdf4{% endif %};
-                color:{% if run.run_type == 'bulk' %}var(--accent){% elif run.run_type == 'initial' %}#6b35c2{% else %}var(--accent-2){% endif %};">
+                background:{% if run.run_type == 'bulk' %}#e8f4fd{% elif run.run_type == 'initial' %}#f3eeff{% elif run.run_type == 'detail' %}#fff3e0{% else %}#e8fdf4{% endif %};
+                color:{% if run.run_type == 'bulk' %}var(--accent){% elif run.run_type == 'initial' %}#6b35c2{% elif run.run_type == 'detail' %}#b85c00{% else %}var(--accent-2){% endif %};">
                 {{ run.run_type }}
               </span>
             </td>
@@ -258,13 +317,23 @@
               {% if stats %}
                 {% if run.run_type == "bulk" %}
                   {{ stats.get("created", "—") }} created, {{ stats.get("skipped", "—") }} skipped
-                  {% if stats.get("errors") %}&nbsp;·&nbsp; <span style="color:var(--danger);">{{ stats.errors | length }} err</span>{% endif %}
                 {% elif run.run_type == "initial" %}
                   {{ stats.get("created", "—") }} created, {{ stats.get("updated", "—") }} updated
-                  {% if stats.get("errors") %}&nbsp;·&nbsp; <span style="color:var(--danger);">{{ stats.errors | length }} err</span>{% endif %}
+                {% elif run.run_type == "detail" %}
+                  {{ stats.get("updated", "—") }} updated{% if stats.get("scored") %}, {{ stats.scored }} scored{% endif %}
                 {% else %}
                   {{ stats.get("google_enriched", "—") }} enriched
-                  {% if stats.get("errors") %}&nbsp;·&nbsp; <span style="color:var(--danger);">{{ stats.errors | length }} err</span>{% endif %}
+                {% endif %}
+                {% if stats.get("errors") %}
+                  <details style="margin-top:0.3rem;">
+                    <summary style="cursor:pointer; color:var(--danger); list-style:none; display:inline-flex; align-items:center; gap:0.25rem;">
+                      <span style="font-size:0.75rem;">▶</span>
+                      {{ stats.errors | length }} error(s)
+                    </summary>
+                    <ul style="margin:0.4rem 0 0; padding-left:1.2rem; font-size:0.8rem; color:var(--muted); max-height:12rem; overflow-y:auto;">
+                      {% for e in stats.errors %}<li style="margin-bottom:0.2rem;">{{ e }}</li>{% endfor %}
+                    </ul>
+                  </details>
                 {% endif %}
               {% else %}—{% endif %}
             </td>
