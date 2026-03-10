@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 
-{% if active_task and scoring_task and not scoring_task.done %}
+{% if active_task and ((scoring_task and not scoring_task.done) or (google_scoring_task and not google_scoring_task.done)) %}
 {% block extra_head %}<meta http-equiv="refresh" content="3">{% endblock %}
 {% endif %}
 
@@ -16,6 +16,42 @@
     </div>
   </div>
 </section>
+{% endif %}
+
+{% if google_scoring_task and not google_scoring_task.done %}
+<section class="card" style="margin-bottom: 1rem;">
+  <div style="display:flex; align-items:center; gap:0.8rem;">
+    <span class="spinner"></span>
+    <div>
+      <p style="margin:0; font-weight:600;">{{ google_scoring_task.label }}</p>
+      <p style="margin:0.2rem 0 0; color:var(--muted);">{{ google_scoring_task.message }}</p>
+      <p style="margin:0.2rem 0 0; font-size:0.8rem; color:var(--muted);">Page refreshes every 3 s</p>
+    </div>
+  </div>
+</section>
+{% endif %}
+
+{% if google_scoring_task and google_scoring_task.done %}
+  {% if google_scoring_task.error %}
+  <section class="card" style="margin-bottom: 1rem; border-color: var(--danger);">
+    <p style="margin:0; font-weight:600; color:var(--danger);">{{ google_scoring_task.label }} failed</p>
+    <p style="margin:0.35rem 0 0; color:var(--error-ink);">{{ google_scoring_task.error }}</p>
+  </section>
+  {% else %}
+  <section class="card" style="margin-bottom: 1rem; border-color: var(--accent-2);">
+    <p style="margin:0; font-weight:600; color:var(--accent-2);">{{ google_scoring_task.label }} complete</p>
+    <p style="margin:0.35rem 0 0; color:var(--muted);">{{ google_scoring_task.message }}</p>
+    <p style="margin:0.35rem 0 0; font-size:0.88rem; color:var(--muted);">
+      Updated: {{ google_scoring_task.stats.get("updated", 0) }} companies
+      {% if google_scoring_task.stats.get("skipped") %}
+      &nbsp;·&nbsp; Skipped: {{ google_scoring_task.stats.get("skipped", 0) }}
+      {% endif %}
+      {% if google_scoring_task.stats.get("errors") %}
+      &nbsp;·&nbsp; Errors: {{ google_scoring_task.stats.errors | length }}
+      {% endif %}
+    </p>
+  </section>
+  {% endif %}
 {% endif %}
 
 {% if scoring_task and scoring_task.done %}
@@ -107,6 +143,13 @@
       Recompute all saved <code>zefix_score</code> values after you change the scoring algorithm.
     </p>
     <button type="submit" {% if active_task %}disabled{% endif %}>Recalculate Zefix scores</button>
+  </form>
+
+  <form method="post" action="/ui/scoring/recalculate-google" style="margin-top:0.6rem;">
+    <p class="muted" style="margin: 0 0 0.6rem;">
+      Recompute all saved Google <code>website_match_score</code> values from stored search results.
+    </p>
+    <button type="submit" {% if active_task %}disabled{% endif %}>Recalculate Google scores</button>
   </form>
 </section>
 {% endblock %}

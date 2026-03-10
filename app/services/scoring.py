@@ -6,19 +6,13 @@ from urllib.parse import urlparse
 
 # Domains that are business directories, social networks, or government registries.
 _DIRECTORY_DOMAINS = {
-    "linkedin.com",
-    "facebook.com",
-    "twitter.com",
-    "x.com",
-    "xing.com",
-    "instagram.com",
-    "youtube.com",
     "wikipedia.org",
     "zefix.admin.ch",
     "uid.admin.ch",
     "moneyhouse.ch",
     "shab.ch",
     "search.ch",
+    "yelp.com",
     "local.ch",
     "yellowpages.ch",
     "directories.ch",
@@ -27,6 +21,16 @@ _DIRECTORY_DOMAINS = {
     "companyhouse.ch",
     "handelsregister.ch",
     "hr-register.ch",
+}
+
+_SOCIAL_LEAD_DOMAINS = {
+    "linkedin.com",
+    "facebook.com",
+    "twitter.com",
+    "x.com",
+    "xing.com",
+    "instagram.com",
+    "youtube.com",
 }
 
 # Words to exclude when extracting keywords from the purpose field
@@ -128,6 +132,70 @@ def score_result(
         score -= 20
 
     return max(0, min(100, score))
+
+
+def is_irrelevant_result(
+    result: dict,
+    *,
+    company_name: str,
+) -> bool:
+    """Return True when a search result is likely not the company's own website.
+
+    Heuristics:
+      - Directory/social/government registry domain, or
+      - Very low company-name overlap in both title and snippet.
+    """
+    title = result.get("title", "") or ""
+    snippet = result.get("snippet", "") or ""
+    link = result.get("link", "") or ""
+
+    domain = _root_domain(link)
+    if any(domain == d or domain.endswith("." + d) for d in _DIRECTORY_DOMAINS):
+        return True
+
+    title_overlap = _word_overlap_ratio(company_name, title)
+    snippet_overlap = _word_overlap_ratio(company_name, snippet)
+    return title_overlap < 0.2 and snippet_overlap < 0.2
+
+
+def fallback_result_score(
+    result: dict,
+    *,
+    municipality: str | None,
+    canton: str | None,
+    legal_form: str | None = None,
+) -> int:
+    """Fallback website score used when top results are mostly irrelevant.
+
+    Formula: base 5 + location (municipality/canton text) + legal-form presence.
+    """
+    title = result.get("title", "") or ""
+    snippet = result.get("snippet", "") or ""
+    link = result.get("link", "") or ""
+    combined = f"{title} {snippet}"
+    combined_lower = combined.lower()
+
+    score = 5
+
+    if municipality and municipality.lower() in combined_lower:
+        score += 20
+    if canton and canton.upper() in combined.upper():
+        score += 10
+
+    if legal_form:
+        domain = _root_domain(link)
+        lf_lower = legal_form.lower()
+        abbrevs = re.findall(r"\b\w{2,6}\b", lf_lower)
+        if any(a in domain or a in title.lower() for a in abbrevs if len(a) >= 2):
+            score += 5
+
+    return max(0, min(100, score))
+
+
+def is_social_lead_domain(url: str) -> bool:
+    """Return True when URL belongs to a social domain treated as high lead value."""
+    domain = _root_domain(url)
+    return any(domain == d or domain.endswith("." + d) for d in _SOCIAL_LEAD_DOMAINS)
 
 
 # ── Location scoring ────────────────────────────────────────────────────────
@@ -248,6 +316,35 @@ def _location_score(
         distance_score = -5
 
     return canton_score + distance_score
+
+
+def distance_to_muri_km(
+    *,
+    canton: str | None,
+    municipality: str | None,
+    lat: float | None = None,
+    lon: float | None = None,
+) -> float | None:
+    """Return distance in km to Muri bei Bern using the best available location source.
+
+    Resolution order matches location scoring logic:
+      1. exact lat/lon,
+      2. municipality lookup,
+      3. canton centroid fallback.
+    """
+    if lat is not None and lon is not None:
+        company_coords: tuple[float, float] | None = (lat, lon)
+    else:
+        company_coords = None
+        if municipality:
+            company_coords = _MUNICIPALITY_COORDS.get(municipality.lower())
+        if company_coords is None and canton:
+            company_coords = _CANTON_COORDS.get(canton.upper())
+
+    if company_coords is None:
+        return None
+
+    return _haversine_km(_ORIGIN[0], _ORIGIN[1], company_coords[0], company_coords[1])
 
 
 # ── Legal form scoring ───────────────────────────────────────────────────────

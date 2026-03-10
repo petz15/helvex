@@ -19,6 +19,7 @@ from app.services.collection import (
     geocode_and_update_company,
     import_company_from_zefix_uid,
     initial_collect,
+    recalculate_google_scores,
     recalculate_zefix_scores,
     run_batch_collect,
     run_zefix_detail_collect,
@@ -506,19 +507,25 @@ def ui_settings(
 
     task = getattr(request.app.state, "collection_task", None)
     active_jobs = crud.list_active_jobs(db)
-    latest_scoring_job = next((j for j in crud.list_jobs(db, limit=50) if j.job_type == "recalculate_scores"), None)
+    recent_jobs = crud.list_jobs(db, limit=50)
+    latest_zefix_job = next((j for j in recent_jobs if j.job_type == "recalculate_scores"), None)
+    latest_google_job = next((j for j in recent_jobs if j.job_type == "recalculate_google_scores"), None)
 
-    scoring_task = None
-    if latest_scoring_job is not None:
-        scoring_stats = json.loads(latest_scoring_job.stats_json or "{}") if latest_scoring_job.stats_json else {}
-        scoring_task = {
-            "type": latest_scoring_job.job_type,
-            "label": latest_scoring_job.label,
-            "message": latest_scoring_job.message or "",
-            "stats": scoring_stats,
-            "error": latest_scoring_job.error,
-            "done": latest_scoring_job.status in ("completed", "failed", "cancelled"),
+    def _job_to_task(j):
+        if j is None:
+            return None
+        stats = json.loads(j.stats_json or "{}") if j.stats_json else {}
+        return {
+            "type": j.job_type,
+            "label": j.label,
+            "message": j.message or "",
+            "stats": stats,
+            "error": j.error,
+            "done": j.status in ("completed", "failed", "cancelled"),
         }
+
+    scoring_task = _job_to_task(latest_zefix_job)
+    google_scoring_task = _job_to_task(latest_google_job)
 
     active_task = task if _task_is_running(request.app.state) else None
     if active_task is None and active_jobs:
@@ -546,6 +553,7 @@ def ui_settings(
             "error": error,
             "active_task": active_task,
             "scoring_task": scoring_task,
+            "google_scoring_task": google_scoring_task,
         },
     )
 
@@ -586,14 +594,38 @@ def save_settings(
 
 @router.post("/ui/scoring/recalculate", include_in_schema=False)
 def start_recalculate_scores(request: Request) -> RedirectResponse:
-    job = _enqueue_job(
+    job, err = _enqueue_job_safe(
         request,
         job_type="recalculate_scores",
         label="Recalculate Zefix scoring",
         params={},
     )
+    if err:
+        return RedirectResponse(
+            url=f"/ui/settings?error={quote_plus(err)}",
+            status_code=status.HTTP_303_SEE_OTHER,
+        )
     return RedirectResponse(
         url=f"/ui/settings?message={quote_plus(f'Scoring recalculation queued (job #{job.id})')}",
+        status_code=status.HTTP_303_SEE_OTHER,
+    )
+
+
+@router.post("/ui/scoring/recalculate-google", include_in_schema=False)
+def start_recalculate_google_scores(request: Request) -> RedirectResponse:
+    job, err = _enqueue_job_safe(
+        request,
+        job_type="recalculate_google_scores",
+        label="Recalculate Google website scores",
+        params={},
+    )
+    if err:
+        return RedirectResponse(
+            url=f"/ui/settings?error={quote_plus(err)}",
+            status_code=status.HTTP_303_SEE_OTHER,
+        )
+    return RedirectResponse(
+        url=f"/ui/settings?message={quote_plus(f'Google score recalculation queued (job #{job.id})')}",
         status_code=status.HTTP_303_SEE_OTHER,
     )
 
@@ -658,6 +690,20 @@ def _run_job(app, job_id: int) -> None:
 
                 stats = recalculate_zefix_scores(db, progress_cb=_progress)
                 done_msg = f"Done — {stats['updated']} companies recalculated, {len(stats['errors'])} errors"
+
+            elif job.job_type == "recalculate_google_scores":
+                def _progress(done: int, total: int, stats: dict) -> None:
+                    _assert_not_cancelled()
+                    msg = f"Recalculated Google scores for {done}/{total} companies"
+                    crud.update_progress(db, job, message=msg, done=done, total=total, stats=stats)
+                    crud.create_event(db, job_id=job.id, level="debug", message=msg)
+                    _sync_active_task(app.state, job_type=job.job_type, label=job.label, message=msg, stats=dict(stats), error=None, done=False)
+
+                stats = recalculate_google_scores(db, progress_cb=_progress)
+                done_msg = (
+                    f"Done — {stats['updated']} updated, {stats['skipped']} skipped, "
+                    f"{len(stats['errors'])} errors"
+                )
 
             elif job.job_type == "bulk":
                 def _progress(canton: str, prefix: str, created: int, updated: int) -> None:
@@ -792,6 +838,15 @@ def _enqueue_job(request: Request, *, job_type: str, label: str, params: dict) -
     return job
 
 
+def _enqueue_job_safe(request: Request, *, job_type: str, label: str, params: dict) -> tuple[object | None, str | None]:
+    try:
+        job = _enqueue_job(request, job_type=job_type, label=label, params=params)
+        return job, None
+    except Exception as exc:  # noqa: BLE001
+        hint = " Ensure DB migrations are up to date (alembic upgrade head)."
+        return None, f"{exc}{hint}"
+
+
 @router.get("/ui/jobs", response_class=HTMLResponse, include_in_schema=False)
 def ui_jobs(
     request: Request,
@@ -881,7 +936,7 @@ async def start_bulk(
 ) -> RedirectResponse:
     canton_list = [c.strip().upper() for c in cantons.split(",") if c.strip()] or None
     label = f"Bulk import — cantons: {', '.join(canton_list) if canton_list else 'all 26'}"
-    job = _enqueue_job(
+    job, err = _enqueue_job_safe(
         request,
         job_type="bulk",
         label=label,
@@ -892,6 +947,11 @@ async def start_bulk(
             "resume": resume == "true",
         },
     )
+    if err:
+        return RedirectResponse(
+            url=f"/ui/collection?error={quote_plus(err)}",
+            status_code=status.HTTP_303_SEE_OTHER,
+        )
     return RedirectResponse(
         url=f"/ui/collection?message={quote_plus(f'Queued bulk job #{job.id}')}",
         status_code=status.HTTP_303_SEE_OTHER,
@@ -905,9 +965,8 @@ async def start_batch(
     skip: int = Form(0),
     all_companies: str = Form("false"),
     refresh_zefix: str = Form("false"),
-    skip_google: str = Form("false"),
 ) -> RedirectResponse:
-    job = _enqueue_job(
+    job, err = _enqueue_job_safe(
         request,
         job_type="batch",
         label=f"Batch enrichment — up to {limit} companies",
@@ -916,9 +975,14 @@ async def start_batch(
             "skip": skip,
             "only_missing_website": all_companies != "true",
             "refresh_zefix": refresh_zefix == "true",
-            "run_google": skip_google != "true",
+            "run_google": True,
         },
     )
+    if err:
+        return RedirectResponse(
+            url=f"/ui/collection?error={quote_plus(err)}",
+            status_code=status.HTTP_303_SEE_OTHER,
+        )
     return RedirectResponse(
         url=f"/ui/collection?message={quote_plus(f'Queued batch job #{job.id}')}",
         status_code=status.HTTP_303_SEE_OTHER,
@@ -944,7 +1008,7 @@ async def start_initial(
             status_code=status.HTTP_303_SEE_OTHER,
         )
 
-    job = _enqueue_job(
+    job, err = _enqueue_job_safe(
         request,
         job_type="initial",
         label=f"Specific search — {len(name_list)} name(s), {len(uid_list)} UID(s)",
@@ -957,6 +1021,11 @@ async def start_initial(
             "run_google": skip_google != "true",
         },
     )
+    if err:
+        return RedirectResponse(
+            url=f"/ui/collection?error={quote_plus(err)}",
+            status_code=status.HTTP_303_SEE_OTHER,
+        )
     return RedirectResponse(
         url=f"/ui/collection?message={quote_plus(f'Queued initial search job #{job.id}')}",
         status_code=status.HTTP_303_SEE_OTHER,
@@ -968,7 +1037,6 @@ async def start_detail(
     request: Request,
     cantons: str = Form(""),        # comma-separated canton codes, blank = all in DB
     uids: str = Form(""),           # newline-separated UIDs for specific companies
-    score_if_missing: str = Form("true"),
     delay: float = Form(0.3),
 ) -> RedirectResponse:
     canton_list = [c.strip().upper() for c in cantons.split(",") if c.strip()] or None
@@ -981,17 +1049,22 @@ async def start_detail(
     else:
         label = "Zefix detail fetch — all matching companies"
 
-    job = _enqueue_job(
+    job, err = _enqueue_job_safe(
         request,
         job_type="detail",
         label=label,
         params={
             "cantons": canton_list,
             "uids": uid_list,
-            "score_if_missing": score_if_missing == "true",
+            "score_if_missing": False,
             "delay": delay,
         },
     )
+    if err:
+        return RedirectResponse(
+            url=f"/ui/collection?error={quote_plus(err)}",
+            status_code=status.HTTP_303_SEE_OTHER,
+        )
     return RedirectResponse(
         url=f"/ui/collection?message={quote_plus(f'Queued detail job #{job.id}')}",
         status_code=status.HTTP_303_SEE_OTHER,

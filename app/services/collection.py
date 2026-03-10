@@ -28,7 +28,11 @@ from app.schemas.company import CompanyCreate, CompanyUpdate
 from app.services.scoring import (
     compute_zefix_score,
     compute_zefix_score_breakdown,
+    distance_to_muri_km,
+    fallback_result_score,
     get_default_scoring_config,
+    is_irrelevant_result,
+    is_social_lead_domain,
     score_result,
 )
 
@@ -330,6 +334,102 @@ def recalculate_zefix_scores(
     return stats
 
 
+def _score_google_results_for_company(company: Company, raw_results: list[dict]) -> list[dict]:
+    """Score and sort Google results for one company using current scoring rules."""
+    if not raw_results:
+        return []
+
+    top_window = raw_results[: min(3, len(raw_results))]
+    irrelevant_count = sum(
+        1 for rr in top_window
+        if is_irrelevant_result(rr, company_name=company.name)
+    )
+    use_fallback = bool(top_window) and irrelevant_count >= ((len(top_window) + 1) // 2)
+    social_in_top = any(is_social_lead_domain((rr.get("link") or "")) for rr in top_window)
+
+    scored: list[dict] = []
+    for rr in raw_results:
+        row = {
+            "title": rr.get("title", "") or "",
+            "link": rr.get("link", "") or "",
+            "snippet": rr.get("snippet", "") or "",
+        }
+        if use_fallback:
+            s = fallback_result_score(
+                row,
+                municipality=company.municipality,
+                canton=company.canton,
+                legal_form=company.legal_form,
+            )
+        else:
+            s = score_result(
+                row,
+                company_name=company.name,
+                municipality=company.municipality,
+                canton=company.canton,
+                purpose=company.purpose,
+                legal_form=company.legal_form,
+            )
+
+        if social_in_top and is_social_lead_domain(row["link"]):
+            s = min(100, s + 15)
+
+        scored.append({**row, "score": s})
+
+    scored.sort(key=lambda x: x["score"], reverse=True)
+    return scored
+
+
+def recalculate_google_scores(
+    db: Session,
+    *,
+    batch_size: int = 500,
+    progress_cb: Any = None,
+) -> dict[str, Any]:
+    """Recompute website_match_score from stored Google results for all companies."""
+    stats: dict[str, Any] = {"updated": 0, "skipped": 0, "errors": []}
+
+    total = db.query(Company).count()
+    offset = 0
+
+    while True:
+        batch = db.query(Company).order_by(Company.id.asc()).offset(offset).limit(batch_size).all()
+        if not batch:
+            break
+
+        for company in batch:
+            try:
+                if not company.google_search_results_raw:
+                    stats["skipped"] += 1
+                    continue
+
+                raw_results = json.loads(company.google_search_results_raw)
+                if not isinstance(raw_results, list) or not raw_results:
+                    stats["skipped"] += 1
+                    continue
+
+                rescored = _score_google_results_for_company(company, raw_results)
+                if not rescored:
+                    stats["skipped"] += 1
+                    continue
+
+                best = rescored[0]
+                company.website_url = best["link"]
+                company.website_match_score = best["score"]
+                company.google_search_results_raw = json.dumps(rescored)
+                stats["updated"] += 1
+            except Exception as exc:  # noqa: BLE001
+                stats["errors"].append(f"{company.uid}: {exc}")
+
+        db.commit()
+        offset += batch_size
+
+        if progress_cb:
+            progress_cb(min(offset, total), total, stats)
+
+    return stats
+
+
 def enrich_company_website(db: Session, company: Company, *, num: int = 5) -> tuple[bool, str | None]:
     """Fetch top-N Google results, score each against the company profile, and persist.
 
@@ -351,19 +451,8 @@ def enrich_company_website(db: Session, company: Company, *, num: int = 5) -> tu
         )
         return False, None
 
-    scored: list[dict] = []
-    for r in results:
-        s = score_result(
-            {"title": r.title, "link": r.link, "snippet": r.snippet or ""},
-            company_name=company.name,
-            municipality=company.municipality,
-            canton=company.canton,
-            purpose=company.purpose,
-            legal_form=company.legal_form,
-        )
-        scored.append({"title": r.title, "link": r.link, "snippet": r.snippet or "", "score": s})
-
-    scored.sort(key=lambda x: x["score"], reverse=True)
+    raw_results = [{"title": r.title, "link": r.link, "snippet": r.snippet or ""} for r in results]
+    scored = _score_google_results_for_company(company, raw_results)
     best = scored[0]
 
     crud.update_company(
@@ -685,19 +774,7 @@ def rescore_from_stored_results(db: Session, company: Company) -> bool:
     if not stored:
         return False
 
-    rescored = []
-    for r in stored:
-        s = score_result(
-            {"title": r.get("title", ""), "link": r.get("link", ""), "snippet": r.get("snippet", "")},
-            company_name=company.name,
-            municipality=company.municipality,
-            canton=company.canton,
-            purpose=company.purpose,
-            legal_form=company.legal_form,
-        )
-        rescored.append({**r, "score": s})
-
-    rescored.sort(key=lambda x: x["score"], reverse=True)
+    rescored = _score_google_results_for_company(company, stored)
     best = rescored[0]
     crud.update_company(
         db,
@@ -834,11 +911,24 @@ def run_batch_collect(
         elif limit > available:
             limit = available
 
-    query = db.query(Company).order_by(Company.zefix_score.desc().nullslast(), Company.id.asc())
+    query = db.query(Company)
     if only_missing_website:
         query = query.filter(or_(Company.website_url.is_(None), Company.website_url == ""))
 
-    companies = query.offset(skip).limit(limit).all()
+    candidates = query.all()
+
+    def _batch_order_key(company: Company) -> tuple[float, float, int]:
+        score = float(company.zefix_score) if company.zefix_score is not None else float("-inf")
+        distance = distance_to_muri_km(
+            canton=company.canton,
+            municipality=company.municipality,
+            lat=company.lat,
+            lon=company.lon,
+        )
+        return (-score, distance if distance is not None else float("inf"), company.id)
+
+    ordered = sorted(candidates, key=_batch_order_key)
+    companies = ordered[skip: skip + limit]
     stats["selected"] = len(companies)
 
     for i, company in enumerate(companies, 1):

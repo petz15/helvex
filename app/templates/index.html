@@ -152,39 +152,12 @@
 </section>
 
 {# ── Leads table ──────────────────────────────────────────────────────────── #}
-<form method="post" action="/ui/bulk-update" id="bulk-form">
-  <input type="hidden" name="back_url" value="/ui?page={{ page }}{{ filter_qs }}">
-
-  <section class="card">
-    {# Bulk action bar #}
-    <div class="bulk-bar">
-      <label class="bulk-check-all">
-        <input type="checkbox" id="check-all"> Select all
-      </label>
-      <select name="bulk_action" class="bulk-select">
-        <option value="">— Bulk action —</option>
-        <optgroup label="Set review status">
-          <option value="review_status:confirmed">Review → Confirmed</option>
-          <option value="review_status:interesting">Review → Interesting</option>
-          <option value="review_status:rejected">Review → Rejected</option>
-          <option value="review_status:_clear">Review → Clear</option>
-        </optgroup>
-        <optgroup label="Set proposal status">
-          <option value="proposal_status:sent">Proposal → Sent</option>
-          <option value="proposal_status:responded">Proposal → Responded</option>
-          <option value="proposal_status:converted">Proposal → Converted</option>
-          <option value="proposal_status:rejected">Proposal → Rejected</option>
-          <option value="proposal_status:_clear">Proposal → Clear</option>
-        </optgroup>
-      </select>
-      <button type="submit" class="secondary-btn">Apply to selected</button>
-    </div>
+<section class="card">
 
     <div class="table-wrap">
       <table>
         <thead>
           <tr>
-            <th class="col-check"></th>
             <th class="th-sortable" onclick="toggleSort('name')" title="Sort by name">
               Company
               <span class="sort-icon">{% if sort == 'name' %}↑{% elif sort == '-name' %}↓{% else %}↕{% endif %}</span>
@@ -197,9 +170,10 @@
             <th>Industry</th>
             <th>Website</th>
             <th class="th-sortable" onclick="toggleSort('score')" title="Sort by score">
-              Score
+              Google Score
               <span class="sort-icon">{% if sort == 'score' %}↑{% elif sort == '-score' %}↓{% else %}↕{% endif %}</span>
             </th>
+            <th>Zefix Score</th>
             <th>Review</th>
             <th>Proposal</th>
             <th></th>
@@ -208,9 +182,6 @@
         <tbody>
           {% for c in companies %}
           <tr>
-            <td class="col-check">
-              <input type="checkbox" name="company_ids" value="{{ c.id }}" class="row-check">
-            </td>
             <td>
               <div class="company-name">{{ c.name }}</div>
               <small class="muted">{{ c.uid }}</small>
@@ -240,7 +211,12 @@
                 <span class="score-pill-sm {% if c.website_match_score >= 70 %}score-high{% elif c.website_match_score >= 40 %}score-mid{% else %}score-low{% endif %}" title="Website match score">
                   {{ c.website_match_score }}
                 </span>
-              {% elif c.zefix_score is not none %}
+              {% else %}
+                <span class="muted">—</span>
+              {% endif %}
+            </td>
+            <td>
+              {% if c.zefix_score is not none %}
                 <span class="score-pill-sm score-zefix" title="Zefix priority score (not yet searched)">
                   {{ c.zefix_score }}
                 </span>
@@ -280,8 +256,7 @@
         </tbody>
       </table>
     </div>
-  </section>
-</form>
+</section>
 
 {# ── Pagination ───────────────────────────────────────────────────────────── #}
 {% if total_pages > 1 %}
@@ -306,11 +281,6 @@
 {% endif %}
 
 <script>
-  const checkAll = document.getElementById('check-all');
-  checkAll.addEventListener('change', () => {
-    document.querySelectorAll('.row-check').forEach(cb => cb.checked = checkAll.checked);
-  });
-
   function toggleSort(field) {
     const form = document.getElementById('filter-form');
     const sortSelect = form.querySelector('[name="sort"]');

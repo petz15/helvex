@@ -152,9 +152,6 @@
         <label style="display:flex;align-items:center;gap:0.5rem;font-size:0.88rem;cursor:pointer;">
           <input type="checkbox" name="refresh_zefix" value="true"> Re-fetch Zefix details first
         </label>
-        <label style="display:flex;align-items:center;gap:0.5rem;font-size:0.88rem;cursor:pointer;">
-          <input type="checkbox" name="skip_google" value="true"> Skip Google (Zefix refresh only)
-        </label>
       </div>
       <button class="button-link" type="submit">Start batch enrichment</button>
     </form>
@@ -169,8 +166,6 @@
     Fetches the full Zefix detail record for companies already in the database —
     purpose, address, legal form, raw JSON — by calling the per-UID endpoint.
     Useful after a bulk import, which only stores basic data.
-    Optionally re-scores existing Google results with the freshly fetched purpose
-    and location data (only if no score exists yet, so no API calls are spent).
   </p>
   <form method="post" action="/ui/collection/detail">
     <div style="display:grid; grid-template-columns:1fr 1fr; gap:1rem; margin-bottom:0.8rem;">
@@ -198,12 +193,6 @@
         <input type="number" name="delay" value="0.3" min="0" max="10" step="0.1"
                style="width:100%; padding:0.45rem 0.6rem; border:1px solid var(--line); border-radius:4px;">
       </div>
-    </div>
-    <div style="margin-bottom:1rem;">
-      <label style="display:flex;align-items:center;gap:0.5rem;font-size:0.88rem;cursor:pointer;">
-        <input type="checkbox" name="score_if_missing" value="true" checked>
-        Auto-score from stored Google results (only if no score exists yet)
-      </label>
     </div>
     <button class="button-link" type="submit">Start detail fetch</button>
   </form>
