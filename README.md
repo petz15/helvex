@@ -5,8 +5,13 @@ Internal leads dashboard for Swiss registered companies. Bulk-imports the entire
 * **Zefix API** – bulk-import all ~700k companies from the official Swiss commercial register ([zefix.admin.ch](https://www.zefix.admin.ch/ZefixREST/swagger-ui.html)), canton by canton with resume support
 * **Serper.dev** – automatically find and score each company's website (0–100 match score)
 * **Zefix priority score** – score every company from Zefix data alone (legal form, capital, purpose, industry, proximity) so high-value companies are Google-searched first
+* **Configurable scoring** – tune Zefix scoring weights/penalties in the Settings UI without code changes
+* **Score explainability** – per-company Zefix score breakdown (component contributions + forced-zero reason)
 * **Offline geocoding** – Swiss PLZ → lat/lon lookup via GeoNames dataset (downloaded once, no API key); proximity to Muri bei Bern factored into the score
-* **Leads dashboard** – filter/sort/paginate companies, bulk-update review and proposal status; shows a live banner when a collection job is running in the background
+* **Persistent background jobs** – DB-backed queue for bulk/batch/detail/initial/scoring jobs; survives closing/reopening the UI
+* **Jobs dashboard** – `/ui/jobs` shows queued/running/completed/failed/cancelled jobs with progress and timestamps
+* **Job cancellation + event stream** – cancel queued/running jobs and inspect per-job event logs
+* **Leads dashboard** – filter/sort/paginate companies, bulk-update review and proposal status; shows a live banner when jobs are running
 * **Company detail** – view enriched data, pick best website from search results, add contact info and notes; "Refresh from Zefix" button re-fetches and geocodes on demand
 * **CSV export** – export any filtered view to CSV
 * **HTTPS** – Nginx reverse proxy with self-signed certificate (or swap in a CA-signed cert); HTTP auto-redirects to HTTPS
@@ -81,7 +86,8 @@ All settings are read from environment variables (or a `.env` file):
 2. **Batch enrich** with Google Search to find websites — runs daily against free 100-query quota
 3. **Dashboard** at `/ui` — filter by canton, industry, tags, review/proposal status, score; sort; paginate; bulk-update
 4. **Company detail** — pick best website from Google results, set contact info, add research notes
-5. **Export CSV** — download any filtered view
+5. **Jobs** at `/ui/jobs` — monitor queue/runs, view event stream, cancel queued/running jobs
+6. **Export CSV** — download any filtered view
 
 ### Status fields
 
@@ -261,13 +267,17 @@ Tests use an in-memory SQLite database — no PostgreSQL required.
 
 ## Database migrations
 
+The app runs migrations automatically on startup/restart (via Alembic in `app.main`).
+If the DB is reachable and credentials/permissions are valid, pending revisions are applied before the app becomes ready.
+
 ```bash
 alembic upgrade head      # apply all migrations
 alembic current           # show current revision
 alembic history           # list all revisions
 ```
 
-Migrations live in `alembic/versions/`. Current chain:
+Migrations live in `alembic/versions/`.
+Recent additions include:
 
 | Revision | Description |
 |---|---|
@@ -276,10 +286,10 @@ Migrations live in `alembic/versions/`. Current chain:
 | `0003` | Filter indexes |
 | `0004` | Contact fields, industry, tags, collection_runs table |
 | `0005` | App settings table (runtime-configurable Google quota) |
-| `0006` | Zefix administrative fields (ehraid, chid, legalSeatId, legalFormId/uid/shortName, sogcDate, deletionDate) |
-| `0007` | Extended Zefix detail fields (sogcPub, capital, headOffices, branchOffices, hasTakenOver, oldNames, cantonalExcerptWeb) |
-| `0008` | Zefix priority score column (`zefix_score`) |
-| `0009` | Geocoded coordinates columns (`lat`, `lon`) |
+| `0006` | `job_runs` queue table + `companies.zefix_score_breakdown` |
+| `0007` | Job cancellation support (`job_runs.cancel_requested`) + `job_run_events` log stream |
+
+For the complete lineage in your environment, use `alembic history`.
 
 ---
 
@@ -290,19 +300,27 @@ Two independent scores drive the workflow:
 ### Zefix priority score (0–100, shown in blue)
 
 Computed from Zefix register data alone — no Google Search required. Used to order which companies get searched first during batch enrichment.
+Weights and penalties are configurable in **Settings** (`/ui/settings`).
 
 | Component | Points |
 |---|---|
 | Legal form — AG/SA | +10 · GmbH/Sàrl +25 · Genossenschaft +20 · KG +15 · OG +12 · Stiftung +8 · Verein +5 · unknown +5 |
 | Capital nominal > 100 k | +10 · > 0 +5 |
-| Purpose text richness (≥ 20 words) | +10 · ≥ 8 words +5 |
+| Purpose text richness (≥ 20 words) | +20 · ≥ 8 words +5 |
 | Branch offices present | +10 |
-| Industry detected | +15 |
+| Industry detected | +15 (configurable) |
+| Industry contains `treuhand` or `consulting` | −15 (configurable) |
 | Location — canton tier | BE/SO +10 · AG +8 · BL/BS +6 · LU +5 · ZH +4 · all others −8 |
 | Location — distance to Muri bei Bern | ≤ 15 km +15 · ≤ 40 km +10 · ≤ 80 km +5 · ≤ 130 km 0 · > 130 km −5 |
-| Status not clearly active | −40 |
+| Status not clearly active | −40 (configurable) |
+| Status contains force-zero term (default: `being_cancelled`) | score forced to 0 |
 
 Distance is computed with the Haversine formula. Coordinates come from the geocoded address when available, else municipality name lookup, else canton centroid.
+
+### Score explainability
+
+Each company stores a Zefix score breakdown JSON (`zefix_score_breakdown`) with component contributions and final score.
+In the company detail page (`/ui/companies/{id}`), open **Zefix Score Breakdown** to inspect how the score was derived.
 
 ### Website match score (0–100, shown in green/yellow/red)
 
@@ -343,13 +361,16 @@ docker compose restart nginx
 
 ---
 
-## Background collection
+## Background jobs
 
-All collection jobs (bulk import, batch enrichment, Zefix detail fetch, initial import) run in **background threads**. Navigating away from the Collection page does not stop or pause them.
+All long-running actions are executed through a **persistent DB-backed queue** (`job_runs`).
 
-- The Collection page polls for progress every 3 seconds via `<meta http-equiv="refresh">`
-- The Dashboard shows a live blue banner with the current job label and status message while any job is running, and refreshes every 5 seconds
-- Only one job can run at a time; starting a second job while one is active is rejected with an error
+- Jobs can be queued from the UI: bulk import, batch enrichment, detail fetch, initial import, and score recalculation
+- Closing the browser/UI window does not stop jobs
+- Reopening `/ui/jobs` shows queued/running/completed/failed/cancelled runs
+- Running jobs support cooperative cancellation (stop at next checkpoint)
+- Per-job event stream is persisted in `job_run_events`
+- Collection and Jobs pages auto-refresh while active jobs exist
 
 ---
 
@@ -363,8 +384,7 @@ All collection jobs (bulk import, batch enrichment, Zefix detail fetch, initial 
 
 ### Medium-term
 
-- [ ] **Background task queue** — move bulk import and batch enrichment to a task queue (Celery + Redis or FastAPI `BackgroundTasks`) so runs can be triggered and monitored from the UI rather than via CLI/SSH
-- [ ] **Scheduler UI** — configure and trigger batch runs from the dashboard; view run history and stats
+- [ ] **Scheduler UI** — configure recurring runs directly from the dashboard; view calendar/history
 - [ ] **AI-assisted scoring** — use an LLM to read the company purpose and website snippet to produce a richer match score and auto-suggest industry classification
 - [ ] **Duplicate detection** — flag companies that appear to share a website, suggesting they are related entities
 
