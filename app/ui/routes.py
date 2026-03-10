@@ -39,6 +39,10 @@ class JobCancelledError(Exception):
     """Raised when a running job receives a cancellation request."""
 
 
+class JobPausedError(Exception):
+    """Raised when a running job receives a pause request."""
+
+
 def _filter_params(
     q: str | None,
     canton: str | None,
@@ -698,6 +702,8 @@ def _run_job(app, job_id: int) -> None:
             db.refresh(job)
             if job.cancel_requested:
                 raise JobCancelledError("Cancellation requested")
+            if job.pause_requested:
+                raise JobPausedError("Pause requested")
 
         try:
             if job.job_type == "recalculate_scores":
@@ -709,7 +715,7 @@ def _run_job(app, job_id: int) -> None:
                     _sync_active_task(app.state, job_type=job.job_type, label=job.label, message=msg, stats=dict(stats), error=None, done=False)
 
                 stats = recalculate_zefix_scores(db, resume_from=resume_from, progress_cb=_progress)
-                done_msg = f"Done — {stats['updated']} companies recalculated, {len(stats['errors'])} errors"
+                done_msg = f"Done — {stats['updated']} recalculated, {stats.get('geocoded', 0)} geocoded, {len(stats['errors'])} errors"
                 if resume_from:
                     done_msg += f" (resumed from {resume_from})"
 
@@ -815,11 +821,12 @@ def _run_job(app, job_id: int) -> None:
                     cantons=params.get("cantons"),
                     uids=params.get("uids"),
                     score_if_missing=bool(params.get("score_if_missing", True)),
+                    only_missing_details=bool(params.get("only_missing_details", False)),
                     resume_from=resume_from,
                     request_delay=float(params.get("delay", 0.3)),
                     progress_cb=_progress,
                 )
-                done_msg = f"Done — {stats['updated']} updated, {stats['scored']} scored, {len(stats['errors'])} errors"
+                done_msg = f"Done — {stats['updated']} updated, {stats['scored']} scored, {stats.get('geocoded', 0)} geocoded, {len(stats['errors'])} errors"
                 if resume_from:
                     done_msg += f" (resumed from {resume_from})"
             else:
@@ -828,6 +835,14 @@ def _run_job(app, job_id: int) -> None:
             crud.mark_completed(db, job, message=done_msg, stats=stats)
             crud.create_event(db, job_id=job.id, level="info", message=done_msg)
             _sync_active_task(app.state, job_type=job.job_type, label=job.label, message=done_msg, stats=dict(stats), error=None, done=True)
+        except JobPausedError:
+            current_stats = json.loads(job.stats_json) if job.stats_json else {}
+            done_n = job.progress_done or 0
+            total_n = job.progress_total
+            pause_msg = f"Paused at {done_n}" + (f"/{total_n}" if total_n else "")
+            crud.mark_paused(db, job, message=pause_msg, stats=current_stats)
+            crud.create_event(db, job_id=job.id, level="info", message=pause_msg)
+            _sync_active_task(app.state, job_type=job.job_type, label=job.label, message=pause_msg, stats=current_stats, error=None, done=True)
         except JobCancelledError:
             msg = "Cancelled by user"
             crud.mark_cancelled(db, job, message=msg)
@@ -895,7 +910,7 @@ def ui_jobs(
     _ensure_job_worker(request.app)
     jobs = crud.list_jobs(db, limit=100)
     events_by_job = {j.id: crud.list_events(db, job_id=j.id, limit=20) for j in jobs}
-    has_active = any(j.status in ("queued", "running") for j in jobs)
+    has_active = any(j.status in ("queued", "running", "paused") for j in jobs)
     return templates.TemplateResponse(
         "jobs.html",
         {
@@ -918,21 +933,64 @@ def cancel_job(job_id: int, request: Request, db: Session = Depends(get_db)) -> 
             status_code=status.HTTP_303_SEE_OTHER,
         )
 
-    if job.status == "queued":
+    if job.status in ("queued", "paused"):
         crud.mark_cancelled(db, job, message="Cancelled before execution")
-        crud.create_event(db, job_id=job.id, level="warn", message="Job cancelled before execution")
+        crud.create_event(db, job_id=job.id, level="warn", message="Job cancelled")
     elif job.status == "running":
         crud.mark_cancel_requested(db, job)
         crud.create_event(db, job_id=job.id, level="warn", message="Cancellation requested")
     else:
         return RedirectResponse(
-            url=f"/ui/jobs?error={quote_plus('Only queued or running jobs can be cancelled')}",
+            url=f"/ui/jobs?error={quote_plus('Only queued, running, or paused jobs can be cancelled')}",
             status_code=status.HTTP_303_SEE_OTHER,
         )
 
     _ensure_job_worker(request.app)
     return RedirectResponse(
         url=f"/ui/jobs?message={quote_plus(f'Cancellation requested for job #{job_id}')}",
+        status_code=status.HTTP_303_SEE_OTHER,
+    )
+
+
+@router.post("/ui/jobs/{job_id}/pause", include_in_schema=False)
+def pause_job(job_id: int, request: Request, db: Session = Depends(get_db)) -> RedirectResponse:
+    job = crud.get_job(db, job_id)
+    if not job:
+        return RedirectResponse(
+            url=f"/ui/jobs?error={quote_plus('Job not found')}",
+            status_code=status.HTTP_303_SEE_OTHER,
+        )
+    if job.status != "running":
+        return RedirectResponse(
+            url=f"/ui/jobs?error={quote_plus('Only running jobs can be paused')}",
+            status_code=status.HTTP_303_SEE_OTHER,
+        )
+    crud.mark_pause_requested(db, job)
+    crud.create_event(db, job_id=job.id, level="info", message="Pause requested")
+    return RedirectResponse(
+        url=f"/ui/jobs?message={quote_plus(f'Pause requested for job #{job_id}')}",
+        status_code=status.HTTP_303_SEE_OTHER,
+    )
+
+
+@router.post("/ui/jobs/{job_id}/resume", include_in_schema=False)
+def resume_job(job_id: int, request: Request, db: Session = Depends(get_db)) -> RedirectResponse:
+    job = crud.get_job(db, job_id)
+    if not job:
+        return RedirectResponse(
+            url=f"/ui/jobs?error={quote_plus('Job not found')}",
+            status_code=status.HTTP_303_SEE_OTHER,
+        )
+    if job.status != "paused":
+        return RedirectResponse(
+            url=f"/ui/jobs?error={quote_plus('Only paused jobs can be resumed')}",
+            status_code=status.HTTP_303_SEE_OTHER,
+        )
+    crud.resume_paused_job(db, job)
+    crud.create_event(db, job_id=job.id, level="info", message=f"Resumed from {job.progress_done or 0}")
+    _ensure_job_worker(request.app)
+    return RedirectResponse(
+        url=f"/ui/jobs?message={quote_plus(f'Job #{job_id} resumed')}",
         status_code=status.HTTP_303_SEE_OTHER,
     )
 
@@ -1000,7 +1058,6 @@ async def start_bulk(
 async def start_batch(
     request: Request,
     limit: int = Form(100),
-    skip: int = Form(0),
     all_companies: str = Form("false"),
     refresh_zefix: str = Form("false"),
 ) -> RedirectResponse:
@@ -1010,7 +1067,6 @@ async def start_batch(
         label=f"Batch enrichment — up to {limit} companies",
         params={
             "limit": limit,
-            "skip": skip,
             "only_missing_website": all_companies != "true",
             "refresh_zefix": refresh_zefix == "true",
             "run_google": True,
@@ -1076,9 +1132,11 @@ async def start_detail(
     cantons: str = Form(""),        # comma-separated canton codes, blank = all in DB
     uids: str = Form(""),           # newline-separated UIDs for specific companies
     delay: float = Form(0.3),
+    only_missing_details: str = Form("false"),
 ) -> RedirectResponse:
     canton_list = [c.strip().upper() for c in cantons.split(",") if c.strip()] or None
     uid_list = [u.strip() for u in uids.splitlines() if u.strip()] or None
+    missing_only = only_missing_details == "true"
 
     if canton_list:
         label = f"Zefix detail fetch — cantons: {', '.join(canton_list)}"
@@ -1086,6 +1144,9 @@ async def start_detail(
         label = f"Zefix detail fetch — {len(uid_list)} UID(s)"
     else:
         label = "Zefix detail fetch — all matching companies"
+
+    if missing_only:
+        label += " (missing details only)"
 
     job, err = _enqueue_job_safe(
         request,
@@ -1095,6 +1156,7 @@ async def start_detail(
             "cantons": canton_list,
             "uids": uid_list,
             "score_if_missing": False,
+            "only_missing_details": missing_only,
             "delay": delay,
         },
     )

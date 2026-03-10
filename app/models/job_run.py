@@ -16,6 +16,7 @@ class JobRun(Base):
     label: Mapped[str] = mapped_column(String(256), nullable=False)
     status: Mapped[str] = mapped_column(String(16), nullable=False, default="queued", index=True)
     cancel_requested: Mapped[bool] = mapped_column(default=False, nullable=False)
+    pause_requested: Mapped[bool] = mapped_column(default=False, nullable=False)
     message: Mapped[str | None] = mapped_column(String(512), nullable=True)
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
     params_json: Mapped[str | None] = mapped_column(Text, nullable=True)

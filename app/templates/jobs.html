@@ -34,7 +34,7 @@
           <td>{{ j.id }}</td>
           <td>{{ j.job_type }}</td>
           <td>
-            <span class="badge-sm {% if j.status == 'completed' %}badge-green{% elif j.status == 'failed' %}badge-red{% elif j.status == 'running' %}badge-blue{% else %}badge-gray{% endif %}">
+            <span class="badge-sm {% if j.status == 'completed' %}badge-green{% elif j.status == 'failed' %}badge-red{% elif j.status == 'running' %}badge-blue{% elif j.status == 'paused' %}badge-yellow{% else %}badge-gray{% endif %}">
               {{ j.status }}
             </span>
           </td>
@@ -61,9 +61,23 @@
             </details>
             {% endif %}
           </td>
-          <td>
-            {% if j.status in ['queued', 'running'] %}
+          <td style="white-space:nowrap;">
+            {% if j.status == 'running' %}
+            <form method="post" action="/ui/jobs/{{ j.id }}/pause" style="display:inline;">
+              <button type="submit" class="secondary small">Pause</button>
+            </form>
+            <form method="post" action="/ui/jobs/{{ j.id }}/cancel" style="display:inline;" onsubmit="return confirm('Cancel job #{{ j.id }}?');">
+              <button type="submit" class="danger small">Cancel</button>
+            </form>
+            {% elif j.status == 'queued' %}
             <form method="post" action="/ui/jobs/{{ j.id }}/cancel" onsubmit="return confirm('Cancel job #{{ j.id }}?');">
+              <button type="submit" class="danger small">Cancel</button>
+            </form>
+            {% elif j.status == 'paused' %}
+            <form method="post" action="/ui/jobs/{{ j.id }}/resume" style="display:inline;">
+              <button type="submit" class="secondary small">Resume</button>
+            </form>
+            <form method="post" action="/ui/jobs/{{ j.id }}/cancel" style="display:inline;" onsubmit="return confirm('Cancel job #{{ j.id }}?');">
               <button type="submit" class="danger small">Cancel</button>
             </form>
             {% else %}

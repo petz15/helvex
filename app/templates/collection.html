@@ -133,17 +133,10 @@
       Respects the daily Google quota set in Settings.
     </p>
     <form method="post" action="/ui/collection/batch">
-      <div style="display:grid; grid-template-columns:1fr 1fr; gap:0.8rem; margin-bottom:0.8rem;">
-        <div>
-          <label style="display:block;font-size:0.85rem;font-weight:600;margin-bottom:0.3rem;">Limit</label>
-          <input type="number" name="limit" value="100" min="1" max="10000"
-                 style="width:100%; padding:0.45rem 0.6rem; border:1px solid var(--line); border-radius:4px;">
-        </div>
-        <div>
-          <label style="display:block;font-size:0.85rem;font-weight:600;margin-bottom:0.3rem;">Skip (offset)</label>
-          <input type="number" name="skip" value="0" min="0"
-                 style="width:100%; padding:0.45rem 0.6rem; border:1px solid var(--line); border-radius:4px;">
-        </div>
+      <div style="max-width:200px; margin-bottom:0.8rem;">
+        <label style="display:block;font-size:0.85rem;font-weight:600;margin-bottom:0.3rem;">Limit</label>
+        <input type="number" name="limit" value="100" min="1" max="10000"
+               style="width:100%; padding:0.45rem 0.6rem; border:1px solid var(--line); border-radius:4px;">
       </div>
       <div style="margin-bottom:0.8rem; display:flex; flex-direction:column; gap:0.4rem;">
         <label style="display:flex;align-items:center;gap:0.5rem;font-size:0.88rem;cursor:pointer;">
@@ -187,11 +180,17 @@
                   style="width:100%; padding:0.45rem 0.6rem; border:1px solid var(--line); border-radius:4px; resize:vertical; font-family:inherit; font-size:0.88rem;"></textarea>
       </div>
     </div>
-    <div style="display:grid; grid-template-columns:1fr; gap:0.8rem; margin-bottom:0.8rem; max-width:200px;">
+    <div style="display:grid; grid-template-columns:1fr 1fr; gap:0.8rem; margin-bottom:0.8rem; max-width:420px;">
       <div>
         <label style="display:block;font-size:0.85rem;font-weight:600;margin-bottom:0.3rem;">Delay (s)</label>
         <input type="number" name="delay" value="0.3" min="0" max="10" step="0.1"
                style="width:100%; padding:0.45rem 0.6rem; border:1px solid var(--line); border-radius:4px;">
+      </div>
+      <div style="display:flex; align-items:flex-end; padding-bottom:0.1rem;">
+        <label style="display:flex; align-items:center; gap:0.45rem; font-size:0.88rem; cursor:pointer;">
+          <input type="checkbox" name="only_missing_details" value="true">
+          Only companies missing details
+        </label>
       </div>
     </div>
     <button class="button-link" type="submit">Start detail fetch</button>

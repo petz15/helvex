@@ -68,7 +68,6 @@ def _build_parser() -> argparse.ArgumentParser:
         default=100,
         help="Maximum companies to process (default: 100, matches free Google quota).",
     )
-    batch.add_argument("--skip", type=int, default=0, help="Record offset before selecting companies.")
     batch.add_argument(
         "--all-companies",
         action="store_true",
@@ -128,11 +127,10 @@ def main() -> int:
 
         # ── batch ─────────────────────────────────────────────────────────────
         if args.mode == "batch":
-            print(f"Starting Google batch — limit: {args.limit}, skip: {args.skip}")
+            print(f"Starting Google batch — limit: {args.limit}")
             stats = run_batch_collect(
                 db,
                 limit=args.limit,
-                skip=args.skip,
                 only_missing_website=not args.all_companies,
                 refresh_zefix=args.refresh_zefix,
                 run_google=not args.skip_google,

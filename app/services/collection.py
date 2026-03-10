@@ -293,7 +293,7 @@ def recalculate_zefix_scores(
     Returns:
         ``{"updated": int, "errors": list[str]}``
     """
-    stats: dict[str, Any] = {"updated": 0, "errors": []}
+    stats: dict[str, Any] = {"updated": 0, "geocoded": 0, "errors": []}
     scoring_config = _load_scoring_config(db)
 
     total = db.query(Company).count()
@@ -306,6 +306,13 @@ def recalculate_zefix_scores(
 
         for company in batch:
             try:
+                # Geocode if lat/lon not yet set
+                if company.lat is None and company.lon is None and company.address:
+                    coords = geocode_address(company.address)
+                    if coords:
+                        company.lat, company.lon = coords
+                        stats["geocoded"] += 1
+
                 score_breakdown = compute_zefix_score_breakdown(
                     legal_form=company.legal_form,
                     legal_form_short_name=company.legal_form_short_name,
@@ -799,6 +806,7 @@ def run_zefix_detail_collect(
     cantons: list[str] | None = None,
     uids: list[str] | None = None,
     score_if_missing: bool = True,
+    only_missing_details: bool = False,
     resume_from: int = 0,
     request_delay: float = 0.3,
     progress_cb: Any = None,
@@ -813,6 +821,9 @@ def run_zefix_detail_collect(
         1. Explicit *uids* list — processes exactly those companies.
         2. *cantons* filter — all DB companies in those cantons.
         3. No filter — all companies in the database.
+
+    When *only_missing_details* is True, limits to companies that are missing
+    at least one of: address, purpose, or cantonal_excerpt_web.
 
     Scoring applies only when *score_if_missing* is True **and** the company has
     stored Google results but no ``website_match_score`` yet.
@@ -840,18 +851,31 @@ def run_zefix_detail_collect(
         )
         return q.order_by(has_detail.asc(), Company.zefix_score.desc().nullslast(), Company.id.asc())
 
+    _missing_details_filter = or_(
+        Company.address.is_(None),
+        Company.purpose.is_(None),
+        Company.cantonal_excerpt_web.is_(None),
+    )
+
     if uids:
         companies: list[Company] = [
             c for uid in uids if (c := crud.get_company_by_uid(db, uid)) is not None
         ]
+        if only_missing_details:
+            companies = [
+                c for c in companies
+                if c.address is None or c.purpose is None or c.cantonal_excerpt_web is None
+            ]
     elif cantons:
-        companies = (
-            _detail_priority_order(
-                db.query(Company).filter(Company.canton.in_(cantons))
-            ).all()
-        )
+        q = db.query(Company).filter(Company.canton.in_(cantons))
+        if only_missing_details:
+            q = q.filter(_missing_details_filter)
+        companies = _detail_priority_order(q).all()
     else:
-        companies = _detail_priority_order(db.query(Company)).all()
+        q = db.query(Company)
+        if only_missing_details:
+            q = q.filter(_missing_details_filter)
+        companies = _detail_priority_order(q).all()
 
     stats["selected"] = len(companies)
     total = len(companies)
@@ -891,7 +915,6 @@ def run_batch_collect(
     db: Session,
     *,
     limit: int = 200,
-    skip: int = 0,
     only_missing_website: bool = True,
     refresh_zefix: bool = False,
     run_google: bool = True,
@@ -936,7 +959,7 @@ def run_batch_collect(
         return (-score, distance if distance is not None else float("inf"), company.id)
 
     ordered = sorted(candidates, key=_batch_order_key)
-    planned = ordered[skip: skip + limit]
+    planned = ordered[:limit]
     start_idx = max(0, min(resume_from, len(planned)))
     companies = planned[start_idx:]
     stats["selected"] = len(planned)

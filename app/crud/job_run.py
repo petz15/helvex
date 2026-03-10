@@ -162,3 +162,34 @@ def mark_failed(db: Session, job: JobRun, *, error: str, stats: dict[str, Any] |
     db.commit()
     db.refresh(job)
     return job
+
+
+def mark_pause_requested(db: Session, job: JobRun) -> JobRun:
+    job.pause_requested = True
+    db.commit()
+    db.refresh(job)
+    return job
+
+
+def mark_paused(db: Session, job: JobRun, *, message: str, stats: dict[str, Any] | None = None) -> JobRun:
+    """Set job status to 'paused', preserving progress_done as the resume point."""
+    job.status = "paused"
+    job.pause_requested = False
+    job.message = message
+    if stats is not None:
+        job.stats_json = json.dumps(stats)
+    db.commit()
+    db.refresh(job)
+    return job
+
+
+def resume_paused_job(db: Session, job: JobRun) -> JobRun:
+    """Re-queue a paused job so the worker picks it up from progress_done."""
+    job.status = "queued"
+    job.pause_requested = False
+    job.started_at = None
+    job.completed_at = None
+    job.message = f"Resuming from {job.progress_done or 0}…"
+    db.commit()
+    db.refresh(job)
+    return job
