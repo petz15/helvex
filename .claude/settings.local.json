@@ -32,7 +32,16 @@
       "Bash(curl -sL \"https://unpkg.com/leaflet@1.9.4/dist/leaflet.js\" -o app/static/vendor/leaflet.js)",
       "Bash(curl -sL \"https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css\" -o app/static/vendor/MarkerCluster.css)",
       "Bash(curl -sL \"https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css\" -o app/static/vendor/MarkerCluster.Default.css)",
-      "Bash(curl -sL \"https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js\" -o app/static/vendor/leaflet.markercluster.js)"
+      "Bash(curl -sL \"https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js\" -o app/static/vendor/leaflet.markercluster.js)",
+      "Bash(curl -s https://data.geo.admin.ch/api/stac/v0.9/collections/ch.swisstopo-vd.amtliche-gebaeudeadressen/items)",
+      "Bash(curl -s https://data.geo.admin.ch/api/stac/v0.9/collections)",
+      "Bash(curl -s https://data.geo.admin.ch/api/stac/v0.9/collections/ch.swisstopo.amtliche-gebaeudeadressen/items)",
+      "Bash(python -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\(json.dumps\\(d, indent=2\\)\\)\")",
+      "Bash(curl -s \"https://data.geo.admin.ch/api/stac/v0.9/search?q=gebaeudeadressen&limit=5\")",
+      "Bash(curl -s \"https://data.geo.admin.ch/api/stac/v0.9/search?q=amtliche+gebaude&limit=10\")",
+      "Bash(python -c \"import sys,json; d=json.load\\(sys.stdin\\); [print\\(f[''''collection''''], f[''''id'''']\\) for f in d.get\\(''''features'''',[]\\)]\")",
+      "Bash(curl -s --range 0-65536 https://data.geo.admin.ch/ch.swisstopo.amtliches-gebaeudeadressverzeichnis/amtliches-gebaeudeadressverzeichnis_ch/amtliches-gebaeudeadressverzeichnis_ch_2056.csv.zip)",
+      "Bash(curl -s --range 0-1048576 https://data.geo.admin.ch/ch.swisstopo.amtliches-gebaeudeadressverzeichnis/amtliches-gebaeudeadressverzeichnis_ch/amtliches-gebaeudeadressverzeichnis_ch_2056.csv.zip)"
     ]
   }
 }

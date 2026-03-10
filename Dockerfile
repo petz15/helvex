@@ -13,10 +13,13 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
-# Pre-download GeoNames CH postal code dataset so geocoding works offline
-# (file is git-ignored; baking it into the image avoids runtime download failures)
+# Build geocoding datasets (both git-ignored, downloaded during image build):
+# 1. GeoNames PLZ centroid table (~800 KB) — PLZ-level fallback
+# 2. swisstopo Amtliches Gebäudeadressverzeichnis (~143 MB zip) — building-level primary
 RUN python -c "from app.api.geocoding_client import _load_plz_table; _load_plz_table()" \
-    && echo "PLZ geocoding data ready: $(wc -l < data/plz_ch.tsv) entries"
+    && echo "PLZ table ready: $(wc -l < data/plz_ch.tsv) entries"
+RUN python -c "from app.api.geocoding_client import build_geocoding_db; build_geocoding_db()" \
+    && echo "Building DB ready: $(du -sh data/geocoding.db)"
 
 
 EXPOSE 8000

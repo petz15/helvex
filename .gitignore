@@ -16,4 +16,6 @@ build/
 *.sqlite
 *.db
 data/plz_ch.tsv
+data/geocoding.db
+data/geocoding.tmp.db
 certs/*.pem

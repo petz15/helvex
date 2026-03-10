@@ -7,7 +7,7 @@ Internal leads dashboard for Swiss registered companies. Bulk-imports the entire
 * **Zefix priority score** – score every company from Zefix data alone (legal form, capital, purpose, industry, proximity) so high-value companies are Google-searched first
 * **Configurable scoring** – tune Zefix scoring weights/penalties in the Settings UI without code changes
 * **Score explainability** – per-company Zefix score breakdown (component contributions + forced-zero reason)
-* **Offline geocoding** – Swiss PLZ → lat/lon lookup via GeoNames dataset (downloaded once, no API key); proximity to Muri bei Bern factored into the score
+* **Offline geocoding** – building-level precision (<10 m) via the swisstopo Amtliches Gebäudeadressverzeichnis (~4 M addresses, downloaded once, no API key); falls back to GeoNames PLZ centroid (~2 km) if no match; proximity to Muri bei Bern factored into the score
 * **Interactive map** – `/ui/map` plots all geocoded companies on a Leaflet.js map, coloured by Google score (green/yellow/red/grey); filterable by canton, review status, score thresholds
 * **Persistent background jobs** – DB-backed queue for bulk/batch/detail/initial/scoring jobs; survives closing/reopening the UI
 * **Jobs dashboard** – `/ui/jobs` shows queued/running/paused/completed/failed/cancelled jobs with progress and timestamps
@@ -334,12 +334,22 @@ Computed after Google Search against the best matching result. Factors: company 
 
 ## Geocoding
 
-Company addresses are geocoded offline using the [GeoNames Switzerland postal code dataset](https://download.geonames.org/export/zip/CH.zip) (CC BY 4.0, ~200 KB).
+Addresses are geocoded offline in two layers — no API key required:
 
-- Downloaded automatically on first use and cached to `data/plz_ch.tsv` — no API key required
-- Geocoding extracts the 4-digit Swiss PLZ from the Zefix address string and maps it to the postal code centroid (~village-level accuracy, typically < 2 km)
-- Triggered during Zefix detail fetch runs and via the "↻ Refresh from Zefix" button on company detail pages
-- Once `lat`/`lon` are set, they are reused on subsequent imports without re-geocoding
+### Primary: swisstopo Amtliches Gebäudeadressverzeichnis
+- Source: [data.geo.admin.ch](https://data.geo.admin.ch/ch.swisstopo.amtliches-gebaeudeadressverzeichnis/) — Open Government Data, free for any use
+- ~4 million Swiss building addresses with LV95 coordinates, converted to WGS84 at build time
+- Indexed into `data/geocoding.db` (SQLite, ~300–400 MB on disk, git-ignored)
+- Accuracy: building entrance level, typically **< 10 m**
+- Lookup: parses the Zefix address into street + house number + PLZ, queries the SQLite index
+
+### Fallback: GeoNames PLZ centroid
+- Source: [GeoNames Switzerland](https://download.geonames.org/export/zip/CH.zip) (CC BY 4.0)
+- Used when no building match is found (e.g. unknown street name or PO box address)
+- Accuracy: postal code centroid, typically **< 2 km**
+- Cached to `data/plz_ch.tsv` (git-ignored)
+
+Both datasets are downloaded automatically during `docker compose build`. Triggered during Zefix detail fetch runs and via the "↻ Refresh from Zefix" button on the company detail page. Once `lat`/`lon` are set, they are reused without re-geocoding.
 
 ---
 
