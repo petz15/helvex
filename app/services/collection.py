@@ -96,6 +96,7 @@ _TFIDF_STOPWORDS: set[str] = {
      die direkt oder indirekt mit ihrem Zweck in Zusammenhang stehen, im In-
       und Ausland Grundeigentum erwerben, belasten, veräussern und verwalten,
       Finanzierungen vornehmen sowie Garantien und Bürgschaften eingehen.''',
+      "schweiz",
     "kann", "errichten", "anderen", "geschäfte", "geschäftstätigkeit", "geschäftstätigkeiten",
     "tätigen", "direkt", "indirekt", "ihrem", "zusammenhang", "stehen",
     "grundeigentum", "belasten", "finanzierungen", "eigene", "fremde", "rechnung",
