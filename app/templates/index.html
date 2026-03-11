@@ -119,8 +119,9 @@
         <span>Google searched</span>
         <select name="google_searched">
           <option value="">All</option>
-          <option value="yes" {% if f_google_searched == 'yes' %}selected{% endif %}>Searched</option>
-          <option value="no"  {% if f_google_searched == 'no'  %}selected{% endif %}>Not searched</option>
+          <option value="yes"       {% if f_google_searched == 'yes'       %}selected{% endif %}>Searched</option>
+          <option value="no_result" {% if f_google_searched == 'no_result' %}selected{% endif %}>No result</option>
+          <option value="no"        {% if f_google_searched == 'no'        %}selected{% endif %}>Not searched</option>
         </select>
       </label>
       <label class="form-label">
@@ -217,7 +218,7 @@
               {% if c.website_url %}
                 <a href="{{ c.website_url }}" target="_blank" rel="noopener noreferrer">{{ c.website_url }}</a>
               {% elif c.website_checked_at %}
-                <span class="muted">no result</span>
+                <span class="badge-sm badge-yellow">no result</span>
               {% else %}
                 <span class="muted">—</span>
               {% endif %}
@@ -241,28 +242,25 @@
               {% endif %}
             </td>
             <td>
-              <span class="badge-sm
-                {% if c.review_status == 'confirmed'   %}badge-green
-                {% elif c.review_status == 'interesting' %}badge-blue
-                {% elif c.review_status == 'rejected'    %}badge-red
-                {% else %}badge-gray{% endif %}">
-                {{ c.review_status or "pending" }}
-              </span>
+              <select class="status-select" data-company-id="{{ c.id }}" data-field="review_status"
+                      data-original="{{ c.review_status or '' }}">
+                <option value=""            {% if not c.review_status                     %}selected{% endif %}>pending</option>
+                <option value="confirmed"   {% if c.review_status == 'confirmed'           %}selected{% endif %}>confirmed</option>
+                <option value="interesting" {% if c.review_status == 'interesting'         %}selected{% endif %}>interesting</option>
+                <option value="rejected"    {% if c.review_status == 'rejected'            %}selected{% endif %}>rejected</option>
+              </select>
             </td>
             <td>
-              {% if c.proposal_status and c.proposal_status != 'not_sent' %}
-                <span class="badge-sm
-                  {% if c.proposal_status == 'converted' %}badge-green
-                  {% elif c.proposal_status == 'responded' %}badge-blue
-                  {% elif c.proposal_status == 'rejected'  %}badge-red
-                  {% else %}badge-yellow{% endif %}">
-                  {{ c.proposal_status }}
-                </span>
-              {% else %}
-                <span class="muted">—</span>
-              {% endif %}
+              <select class="status-select" data-company-id="{{ c.id }}" data-field="proposal_status"
+                      data-original="{{ c.proposal_status or '' }}">
+                <option value=""          {% if not c.proposal_status or c.proposal_status == 'not_sent' %}selected{% endif %}>—</option>
+                <option value="sent"      {% if c.proposal_status == 'sent'      %}selected{% endif %}>sent</option>
+                <option value="responded" {% if c.proposal_status == 'responded' %}selected{% endif %}>responded</option>
+                <option value="converted" {% if c.proposal_status == 'converted' %}selected{% endif %}>converted</option>
+                <option value="rejected"  {% if c.proposal_status == 'rejected'  %}selected{% endif %}>rejected</option>
+              </select>
             </td>
-            <td><a class="button-link" href="/ui/companies/{{ c.id }}">Open</a></td>
+            <td><a class="button-link" href="/ui/companies/{{ c.id }}?back={{ request.url | urlencode }}">Open</a></td>
           </tr>
           {% else %}
           <tr>
@@ -306,11 +304,34 @@
     } else if (cur === '-' + field) {
       sortSelect.value = field;
     } else {
-      // Default: descending for score fields/updated, ascending for text fields.
       sortSelect.value = (field === 'name' || field === 'canton' || field === 'industry') ? field : '-' + field;
     }
     form.submit();
   }
+
+  // Inline status dropdowns — POST without page reload
+  document.querySelectorAll('.status-select').forEach(function(sel) {
+    sel.addEventListener('change', function() {
+      var id = this.dataset.companyId;
+      var field = this.dataset.field;
+      var val = this.value;
+      var self = this;
+      var body = new FormData();
+      body.append(field, val);
+      fetch('/ui/companies/' + id + '/quick-status', {method: 'POST', body: body})
+        .then(function(r) {
+          if (!r.ok) {
+            self.value = self.dataset.original;
+            alert('Failed to update status. Please try again.');
+          } else {
+            self.dataset.original = val;
+          }
+        })
+        .catch(function() {
+          self.value = self.dataset.original;
+        });
+    });
+  });
 </script>
 
 <style>

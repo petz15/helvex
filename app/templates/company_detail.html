@@ -10,7 +10,7 @@
       <form method="post" action="/ui/companies/{{ company.id }}/zefix-refresh">
         <button type="submit" class="button-link secondary" style="font-size:0.85rem;">↻ Refresh from Zefix</button>
       </form>
-      <a class="button-link secondary" href="/ui">Back to list</a>
+      <a class="button-link secondary" href="{{ back_url }}">Back to list</a>
     </div>
   </div>
 
@@ -256,6 +256,35 @@
       <li class="note-empty">No notes yet.</li>
     {% endfor %}
   </ul>
+</section>
+
+{# ── Change history ───────────────────────────────────────────────────────── #}
+<section class="card">
+  <details>
+    <summary class="section-toggle">Change history</summary>
+    {% if audit_log %}
+    <div class="table-wrap" style="margin-top:0.6rem;">
+      <table>
+        <thead>
+          <tr><th>When</th><th>User</th><th>Field</th><th>From</th><th>To</th></tr>
+        </thead>
+        <tbody>
+          {% for entry in audit_log %}
+          <tr>
+            <td style="white-space:nowrap; font-size:0.82rem;">{{ entry.changed_at.strftime('%Y-%m-%d %H:%M') if entry.changed_at else '—' }}</td>
+            <td>{{ entry.user.username if entry.user else '—' }}</td>
+            <td><code>{{ entry.field }}</code></td>
+            <td class="muted" style="max-width:12rem; overflow:hidden; text-overflow:ellipsis;">{{ entry.old_value or '—' }}</td>
+            <td style="max-width:12rem; overflow:hidden; text-overflow:ellipsis;">{{ entry.new_value or '—' }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <p class="muted-hint" style="margin-top:0.5rem;">No changes recorded yet.</p>
+    {% endif %}
+  </details>
 </section>
 
 {# ── Raw Zefix payload ────────────────────────────────────────────────────── #}

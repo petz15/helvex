@@ -41,7 +41,9 @@
       "Bash(curl -s \"https://data.geo.admin.ch/api/stac/v0.9/search?q=amtliche+gebaude&limit=10\")",
       "Bash(python -c \"import sys,json; d=json.load\\(sys.stdin\\); [print\\(f[''''collection''''], f[''''id'''']\\) for f in d.get\\(''''features'''',[]\\)]\")",
       "Bash(curl -s --range 0-65536 https://data.geo.admin.ch/ch.swisstopo.amtliches-gebaeudeadressverzeichnis/amtliches-gebaeudeadressverzeichnis_ch/amtliches-gebaeudeadressverzeichnis_ch_2056.csv.zip)",
-      "Bash(curl -s --range 0-1048576 https://data.geo.admin.ch/ch.swisstopo.amtliches-gebaeudeadressverzeichnis/amtliches-gebaeudeadressverzeichnis_ch/amtliches-gebaeudeadressverzeichnis_ch_2056.csv.zip)"
+      "Bash(curl -s --range 0-1048576 https://data.geo.admin.ch/ch.swisstopo.amtliches-gebaeudeadressverzeichnis/amtliches-gebaeudeadressverzeichnis_ch/amtliches-gebaeudeadressverzeichnis_ch_2056.csv.zip)",
+      "Bash(find /c/D/coding_projects/zefix_analyzer -type f -not -path */.git/* -not -path */.venv/* -not -path */__pycache__/*)",
+      "Bash(grep -E \"^/c/D/coding_projects/zefix_analyzer/[^/]+$|\\\\.py$|\\\\.html$|\\\\.yml$|\\\\.md$\")"
     ]
   }
 }

@@ -25,6 +25,7 @@ from app.services.collection import (
     run_batch_collect,
     run_zefix_detail_collect,
 )
+from app.models.user import User
 from app.services.scoring import get_default_scoring_config
 from app.schemas.company import CompanyUpdate
 from app.schemas.note import NoteCreate, NoteUpdate
@@ -35,6 +36,56 @@ templates.env.filters["tojson_parse"] = lambda s: json.loads(s) if s else {}
 
 PAGE_SIZE = 50
 MAP_DATA_MAX_POINTS = 20000
+
+
+# ── Auth ──────────────────────────────────────────────────────────────────────
+
+def require_user(request: Request, db: Session = Depends(get_db)) -> User:
+    """Dependency that enforces authentication. Redirects to /login if not logged in."""
+    user_id = request.session.get("user_id")
+    if not user_id:
+        raise HTTPException(
+            status_code=status.HTTP_302_FOUND,
+            headers={"Location": "/login"},
+        )
+    user = crud.get_user(db, user_id)
+    if not user or not user.is_active:
+        request.session.clear()
+        raise HTTPException(
+            status_code=status.HTTP_302_FOUND,
+            headers={"Location": "/login"},
+        )
+    return user
+
+
+@router.get("/login", response_class=HTMLResponse, include_in_schema=False)
+def login_page(request: Request, error: str | None = Query(None)):
+    if request.session.get("user_id"):
+        return RedirectResponse(url="/ui", status_code=status.HTTP_302_FOUND)
+    return templates.TemplateResponse("login.html", {"request": request, "error": error})
+
+
+@router.post("/login", include_in_schema=False)
+def login_submit(
+    request: Request,
+    username: str = Form(...),
+    password: str = Form(...),
+    db: Session = Depends(get_db),
+) -> RedirectResponse:
+    user = crud.authenticate(db, username=username, password=password)
+    if not user:
+        return RedirectResponse(
+            url=f"/login?error={quote_plus('Invalid username or password')}",
+            status_code=status.HTTP_303_SEE_OTHER,
+        )
+    request.session["user_id"] = user.id
+    return RedirectResponse(url="/ui", status_code=status.HTTP_303_SEE_OTHER)
+
+
+@router.post("/logout", include_in_schema=False)
+def logout(request: Request) -> RedirectResponse:
+    request.session.clear()
+    return RedirectResponse(url="/login", status_code=status.HTTP_303_SEE_OTHER)
 
 
 class JobCancelledError(Exception):
@@ -82,12 +133,9 @@ def _filter_params(
     return p
 
 
-def _searched_bool(google_searched: str | None) -> bool | None:
-    if google_searched == "yes":
-        return True
-    if google_searched == "no":
-        return False
-    return None
+def _searched_bool(google_searched: str | None) -> str | None:
+    """Pass google_searched string through; supports 'yes', 'no', 'no_result'."""
+    return google_searched or None
 
 
 @router.get("/", include_in_schema=False)
@@ -112,6 +160,7 @@ def ui_home(
     message: str | None = Query(None),
     error: str | None = Query(None),
     db: Session = Depends(get_db),
+    current_user: User = Depends(require_user),
 ):
     _ensure_job_worker(request.app)
     min_google_score_int: int | None = int(min_google_score) if min_google_score and min_google_score.strip().lstrip("-").isdigit() else None
@@ -171,6 +220,7 @@ def ui_home(
             "error": error,
             "active_task": getattr(request.app.state, "collection_task", None)
                 if _task_is_running(request.app.state) else None,
+            "current_user": current_user,
         },
     )
 
@@ -184,6 +234,7 @@ def ui_map(
     min_google_score: str | None = Query(None),
     min_zefix_score: str | None = Query(None),
     db: Session = Depends(get_db),
+    current_user: User = Depends(require_user),
 ):
     return templates.TemplateResponse(
         "map.html",
@@ -195,6 +246,7 @@ def ui_map(
             "f_google_searched": google_searched or "",
             "f_min_google_score": min_google_score or "",
             "f_min_zefix_score": min_zefix_score or "",
+            "current_user": current_user,
         },
     )
 
@@ -345,6 +397,7 @@ def export_csv(
 async def bulk_update(
     request: Request,
     db: Session = Depends(get_db),
+    current_user: User = Depends(require_user),
 ) -> RedirectResponse:
     form = await request.form()
     company_ids_raw = form.getlist("company_ids")
@@ -371,6 +424,16 @@ async def bulk_update(
         value = None
 
     crud.bulk_update_status(db, company_ids, field, value)
+    # Record one audit entry per company
+    for cid in company_ids:
+        crud.create_audit_entry(
+            db,
+            company_id=cid,
+            user_id=current_user.id,
+            field=field,
+            old_value=None,  # old value not captured in bulk for perf
+            new_value=str(value) if value else None,
+        )
     label = value or "cleared"
     return RedirectResponse(
         url=f"{back}&message={quote_plus(f'{len(company_ids)} companies set to {label}')}",
@@ -382,9 +445,11 @@ async def bulk_update(
 def ui_company_detail(
     company_id: int,
     request: Request,
+    back: str | None = Query(None),
     message: str | None = Query(None),
     error: str | None = Query(None),
     db: Session = Depends(get_db),
+    current_user: User = Depends(require_user),
 ):
     company = crud.get_company(db, company_id)
     if not company:
@@ -423,6 +488,8 @@ def ui_company_detail(
         except Exception:  # noqa: BLE001
             pass
 
+    audit_log = crud.list_audit_for_company(db, company_id, limit=30)
+
     return templates.TemplateResponse(
         "company_detail.html",
         {
@@ -434,8 +501,11 @@ def ui_company_detail(
             "old_names": old_names,
             "google_search_enabled": crud.get_setting(db, "google_search_enabled", "true") == "true",
             "zefix_score_breakdown": zefix_score_breakdown,
+            "audit_log": audit_log,
+            "back_url": back or "/ui",
             "message": message,
             "error": error,
+            "current_user": current_user,
         },
     )
 
@@ -500,29 +570,68 @@ def edit_company(
     industry: str = Form(""),
     tags: str = Form(""),
     db: Session = Depends(get_db),
+    current_user: User = Depends(require_user),
 ) -> RedirectResponse:
     company = crud.get_company(db, company_id)
     if not company:
         return RedirectResponse(url="/ui?error=Company+not+found", status_code=status.HTTP_303_SEE_OTHER)
 
-    crud.update_company(
+    new_values = dict(
+        website_url=website_url.strip() or None,
+        review_status=review_status or None,
+        proposal_status=proposal_status or None,
+        contact_name=contact_name.strip() or None,
+        contact_email=contact_email.strip() or None,
+        contact_phone=contact_phone.strip() or None,
+        industry=industry.strip() or None,
+        tags=tags.strip() or None,
+    )
+    old_values = {f: getattr(company, f) for f in new_values}
+
+    crud.update_company(db, company, CompanyUpdate(**new_values))
+    crud.record_company_changes(
         db,
-        company,
-        CompanyUpdate(
-            website_url=website_url.strip() or None,
-            review_status=review_status or None,
-            proposal_status=proposal_status or None,
-            contact_name=contact_name.strip() or None,
-            contact_email=contact_email.strip() or None,
-            contact_phone=contact_phone.strip() or None,
-            industry=industry.strip() or None,
-            tags=tags.strip() or None,
-        ),
+        company_id=company_id,
+        user_id=current_user.id,
+        old_values=old_values,
+        new_values=new_values,
     )
     return RedirectResponse(
         url=f"/ui/companies/{company_id}?message=Company+updated",
         status_code=status.HTTP_303_SEE_OTHER,
     )
+
+
+@router.post("/ui/companies/{company_id}/quick-status", include_in_schema=False)
+def quick_status(
+    company_id: int,
+    review_status: str | None = Form(None),
+    proposal_status: str | None = Form(None),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_user),
+):
+    company = crud.get_company(db, company_id)
+    if not company:
+        raise HTTPException(status_code=404, detail="Company not found")
+
+    new_values: dict = {}
+    if review_status is not None:
+        new_values["review_status"] = review_status or None
+    if proposal_status is not None:
+        new_values["proposal_status"] = proposal_status or None
+
+    if new_values:
+        old_values = {f: getattr(company, f) for f in new_values}
+        crud.update_company(db, company, CompanyUpdate(**new_values))
+        crud.record_company_changes(
+            db,
+            company_id=company_id,
+            user_id=current_user.id,
+            old_values=old_values,
+            new_values=new_values,
+        )
+    from fastapi.responses import Response
+    return Response(status_code=204)
 
 
 @router.post("/ui/companies/{company_id}/set-website", include_in_schema=False)
@@ -623,6 +732,7 @@ def ui_settings(
     message: str | None = Query(None),
     error: str | None = Query(None),
     db: Session = Depends(get_db),
+    current_user: User = Depends(require_user),
 ):
     _ensure_job_worker(request.app)
     current = crud.get_all_settings(db)
@@ -676,6 +786,7 @@ def ui_settings(
             "active_task": active_task,
             "scoring_task": scoring_task,
             "google_scoring_task": google_scoring_task,
+            "current_user": current_user,
         },
     )
 
@@ -1043,6 +1154,7 @@ def ui_jobs(
     message: str | None = Query(None),
     error: str | None = Query(None),
     db: Session = Depends(get_db),
+    current_user: User = Depends(require_user),
 ):
     _ensure_job_worker(request.app)
     jobs = crud.list_jobs(db, limit=100)
@@ -1057,7 +1169,35 @@ def ui_jobs(
             "has_active": has_active,
             "message": message,
             "error": error,
+            "current_user": current_user,
         },
+    )
+
+
+@router.get("/ui/jobs/stream", include_in_schema=False)
+def ui_jobs_stream(db: Session = Depends(get_db)):
+    def event_generator():
+        while True:
+            active = crud.list_active_jobs(db)
+            if not active:
+                yield "data: done\n\n"
+                return
+            yield "data: update\n\n"
+            time.sleep(2)
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+@router.get("/ui/jobs/partial", response_class=HTMLResponse, include_in_schema=False)
+def ui_jobs_partial(request: Request, db: Session = Depends(get_db)):
+    jobs = crud.list_jobs(db, limit=100)
+    events_by_job = {j.id: crud.list_events(db, job_id=j.id, limit=20) for j in jobs}
+    return templates.TemplateResponse(
+        "jobs_table.html",
+        {"request": request, "jobs": jobs, "events_by_job": events_by_job},
     )
 
 
@@ -1138,6 +1278,7 @@ def ui_collection(
     message: str | None = Query(None),
     error: str | None = Query(None),
     db: Session = Depends(get_db),
+    current_user: User = Depends(require_user),
 ):
     _ensure_job_worker(request.app)
     task = getattr(request.app.state, "collection_task", None)
@@ -1153,6 +1294,7 @@ def ui_collection(
             "runs": runs,
             "message": message,
             "error": error,
+            "current_user": current_user,
         },
     )
 

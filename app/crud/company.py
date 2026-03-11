@@ -48,10 +48,15 @@ def _apply_filters(query, *, name_filter, canton, review_status, proposal_status
         query = query.filter(Company.proposal_status.is_(None))
     elif proposal_status:
         query = query.filter(Company.proposal_status == proposal_status)
-    if google_searched is True:
+    if google_searched == "yes":
         query = query.filter(Company.website_checked_at.isnot(None))
-    elif google_searched is False:
+    elif google_searched == "no":
         query = query.filter(Company.website_checked_at.is_(None))
+    elif google_searched == "no_result":
+        query = query.filter(
+            Company.website_checked_at.isnot(None),
+            Company.website_url.is_(None),
+        )
     if min_google_score is not None:
         query = query.filter(Company.website_match_score >= min_google_score)
     if min_zefix_score is not None:
@@ -72,7 +77,7 @@ def list_companies(
     canton: str | None = None,
     review_status: str | None = None,
     proposal_status: str | None = None,
-    google_searched: bool | None = None,
+    google_searched: str | None = None,
     min_google_score: int | None = None,
     min_zefix_score: int | None = None,
     industry: str | None = None,
@@ -112,7 +117,7 @@ def count_companies(
     canton: str | None = None,
     review_status: str | None = None,
     proposal_status: str | None = None,
-    google_searched: bool | None = None,
+    google_searched: str | None = None,
     min_google_score: int | None = None,
     min_zefix_score: int | None = None,
     industry: str | None = None,

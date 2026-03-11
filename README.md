@@ -393,23 +393,27 @@ All long-running actions are executed through a **persistent DB-backed queue** (
 
 ### Near-term
 
-- [ ] **Preserve filters on "Back to list"** — pass referrer or session state so filters survive opening a company detail
-- [ ] **Inline status dropdowns in table** — change review/proposal status without opening the company page or using bulk actions
-- [ ] **"Not searched vs no result" distinction** — show a visual indicator in the table for companies that were searched but returned no Google results, vs never searched
+- [x] **Preserve filters on "Back to list"** — pass current URL as `?back=` param so filters survive opening a company detail
+- [x] **Inline status dropdowns in table** — change review/proposal status without opening the company page or using bulk actions; updates via `fetch` with no page reload
+- [x] **"Not searched vs no result" distinction** — yellow badge for companies that were searched but returned no Google results, dash for never searched; filter dropdown has a dedicated "No result" option
 
 ### Medium-term
 
 - [ ] **Scheduler UI** — configure recurring runs directly from the dashboard; view calendar/history
-- [ ] **AI-assisted scoring** — use an LLM to read the company purpose and website snippet to produce a richer match score and auto-suggest industry classification
+- [ ] **AI-assisted scoring** — use an LLM to read the company purpose and website snippet to produce a richer match score and auto-suggest industry classification; can run locally via Ollama (no API key) or with sentence-transformers for lightweight semantic similarity
 - [ ] **Duplicate detection** — flag companies that appear to share a website, suggesting they are related entities
+- [ ] **Website crawler** — fetch and parse homepage (and 1–2 internal pages: About, Contact, Services) using `httpx` + `beautifulsoup4`; extract visible text, emails, phone numbers, and social links; store in new DB columns and feed into a richer match score; JS-rendered sites require Playwright (heavier, separate Docker service)
+- [ ] **Concurrent job workers** — replace the single-threaded job worker with a `ThreadPoolExecutor`; use PostgreSQL `SELECT ... FOR UPDATE SKIP LOCKED` for race-condition-free job pickup; configurable `JOB_WORKER_CONCURRENCY` env var; enables crawler + import + scoring jobs to run in parallel
 
 ### Multi-user / public hosting
 
-- [ ] **Authentication** — login system (session-based or OAuth) before any public exposure; per-user data isolation
+- [x] **Authentication** — session-based login with bcrypt-hashed passwords; admin user auto-created from `ADMIN_USERNAME` + `ADMIN_PASSWORD` env vars on first startup
+- [x] **Audit log** — records who changed which field (website URL, review/proposal status, contact info, industry, tags) and when; visible on each company detail page under "Change history"
+- [ ] **User management UI** — add/deactivate users from the dashboard; currently requires direct DB access or re-setting env vars
+- [ ] **Password reset** — self-service reset flow or admin-triggered reset link
 - [ ] **Role-based access** — read-only viewer role vs full editor role
 - [ ] **Per-user quota tracking** — replace the global Google quota counter with per-user accounting
 - [ ] **Rate limiting** — throttle Google Search triggers per user to prevent quota exhaustion from concurrent users
-- [ ] **Audit log** — record who changed review/proposal status and when
 
 ---
 

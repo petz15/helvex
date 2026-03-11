@@ -1,4 +1,10 @@
 from app.crud.app_setting import get_all_settings, get_setting, seed_defaults, set_setting
+from app.crud.audit_log import (
+    create_audit_entry,
+    list_audit_for_company,
+    list_recent_audit,
+    record_company_changes,
+)
 from app.crud.collection_run import (
     complete_run,
     create_run,
@@ -36,6 +42,14 @@ from app.crud.job_run import (
     requeue_interrupted_jobs,
     resume_paused_job,
     update_progress,
+)
+from app.crud.user import (
+    authenticate,
+    count_users,
+    create_user,
+    get_user,
+    get_user_by_username,
+    list_users,
 )
 
 __all__ = [
@@ -84,4 +98,16 @@ __all__ = [
     "mark_completed",
     "mark_failed",
     "create_event",
+    # user
+    "get_user",
+    "get_user_by_username",
+    "list_users",
+    "count_users",
+    "create_user",
+    "authenticate",
+    # audit log
+    "create_audit_entry",
+    "record_company_changes",
+    "list_audit_for_company",
+    "list_recent_audit",
 ]

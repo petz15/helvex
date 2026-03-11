@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Zefix Analyzer — Login</title>
+  <link rel="stylesheet" href="/static/styles.css">
+  <style>
+    .login-box { max-width: 380px; margin: 6rem auto; }
+    .login-box h2 { margin-top: 0; }
+    .login-box .form-label { display: flex; flex-direction: column; gap: 0.3rem; margin-bottom: 1rem; }
+    .login-box input { width: 100%; box-sizing: border-box; }
+    .login-box button { width: 100%; }
+  </style>
+</head>
+<body>
+  <header class="site-header">
+    <div class="container">
+      <a class="brand" href="/login">Zefix Analyzer</a>
+      <p class="subtitle">Swiss company leads dashboard</p>
+    </div>
+  </header>
+  <main class="container">
+    {% if error %}
+    <div class="alert error">{{ error }}</div>
+    {% endif %}
+    <section class="card login-box">
+      <h2>Sign in</h2>
+      <form method="post" action="/login">
+        <label class="form-label">
+          <span>Username</span>
+          <input type="text" name="username" autocomplete="username" autofocus required>
+        </label>
+        <label class="form-label">
+          <span>Password</span>
+          <input type="password" name="password" autocomplete="current-password" required>
+        </label>
+        <button type="submit">Sign in</button>
+      </form>
+    </section>
+  </main>
+</body>
+</html>
