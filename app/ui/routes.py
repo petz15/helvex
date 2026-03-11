@@ -60,6 +60,7 @@ def _filter_params(
     industry: str | None,
     tags: str | None,
     min_claude_score: int | None = None,
+    tfidf_cluster: str | None = None,
 ) -> dict:
     """Build a dict of non-empty filter params for URL construction."""
     p: dict = {}
@@ -85,6 +86,8 @@ def _filter_params(
         p["industry"] = industry
     if tags:
         p["tags"] = tags
+    if tfidf_cluster:
+        p["tfidf_cluster"] = tfidf_cluster
     return p
 
 
@@ -118,6 +121,7 @@ def ui_home(
     min_claude_score: str | None = Query(None),
     industry: str | None = Query(None),
     tags: str | None = Query(None),
+    tfidf_cluster: str | None = Query(None),
     sort: str | None = Query(None),
     page: int = Query(1, ge=1),
     message: str | None = Query(None),
@@ -140,6 +144,7 @@ def ui_home(
         min_claude_score=min_claude_score_int,
         industry=industry or None,
         tags=tags or None,
+        tfidf_cluster=tfidf_cluster or None,
     )
 
     companies = crud.list_companies(db, page=page, page_size=PAGE_SIZE,
@@ -151,7 +156,7 @@ def ui_home(
     # Build base query string (without page) for pagination links
     fp = _filter_params(q, canton, review_status, proposal_status,
                         google_searched, min_google_score_int, min_zefix_score_int,
-                        sort, industry, tags, min_claude_score_int)
+                        sort, industry, tags, min_claude_score_int, tfidf_cluster or None)
     filter_qs = ("&" + urlencode(fp)) if fp else ""
 
     return templates.TemplateResponse(
@@ -179,6 +184,7 @@ def ui_home(
             "f_min_claude_score": min_claude_score_int if min_claude_score_int is not None else "",
             "f_industry": industry or "",
             "f_tags": tags or "",
+            "f_tfidf_cluster": tfidf_cluster or "",
             "google_search_enabled": crud.get_setting(db, "google_search_enabled", "true") == "true",
             "google_daily_quota": int(crud.get_setting(db, "google_daily_quota", "100")),
             "message": message,

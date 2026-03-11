@@ -5,16 +5,20 @@ Internal leads dashboard for Swiss registered companies. Bulk-imports the entire
 * **Zefix API** – bulk-import all ~700k companies from the official Swiss commercial register ([zefix.admin.ch](https://www.zefix.admin.ch/ZefixREST/swagger-ui.html)), canton by canton with resume support
 * **Serper.dev** – automatically find and score each company's website (0–100 match score)
 * **Zefix priority score** – score every company from Zefix data alone (legal form, capital, purpose, industry, proximity) so high-value companies are Google-searched first
+* **Keyword scoring** – configurable target and excluded keywords matched against `purpose` + `industry` text; boosts or penalises the Zefix score; fully tunable from Settings
 * **Configurable scoring** – tune Zefix scoring weights/penalties in the Settings UI without code changes
 * **Score explainability** – per-company Zefix score breakdown (component contributions + forced-zero reason)
+* **Industry taxonomy** – configurable category→keyword mapping stored in Settings; best-match derivation (highest keyword hit count wins) replaces first-match; re-derivable in bulk via Settings
+* **TF-IDF clustering** – unsupervised topic clustering of `purpose` text (K-Means + scikit-learn, no API); groups companies into N thematic clusters; stores a `tfidf_cluster` label (top-3 terms, e.g. `software · entwicklung · digital`) per company; run periodically from Settings
+* **Claude classification** – sends each company's purpose text to Claude Haiku; returns a `claude_score` (0–100) and `claude_category` label; separate from Zefix/Google scores; configurable system prompt; ~$0.25/1 000 companies; run in bulk from Settings
 * **Offline geocoding** – building-level precision (<10 m) via the swisstopo Amtliches Gebäudeadressverzeichnis (~4 M addresses, downloaded once, no API key); falls back to GeoNames PLZ centroid (~2 km) if no match; proximity to Muri bei Bern factored into the score
 * **Interactive map** – `/ui/map` plots all geocoded companies on a Leaflet.js map, coloured by Google score (green/yellow/red/grey); filterable by canton, review status, score thresholds
-* **Persistent background jobs** – DB-backed queue for bulk/batch/detail/initial/scoring jobs; survives closing/reopening the UI
+* **Persistent background jobs** – DB-backed queue for bulk/batch/detail/initial/scoring/classification jobs; survives closing/reopening the UI
 * **Jobs dashboard** – `/ui/jobs` shows queued/running/paused/completed/failed/cancelled jobs with progress and timestamps
 * **Job pause + resume** – pause a running job at the next checkpoint, start another, then resume from where it left off
 * **Job cancellation + event stream** – cancel queued/running/paused jobs and inspect per-job event logs
-* **Leads dashboard** – filter/sort/paginate companies, bulk-update review and proposal status; shows a live banner when jobs are running
-* **Company detail** – view enriched data, pick best website from search results, add contact info and notes; "Refresh from Zefix" button re-fetches and geocodes on demand
+* **Leads dashboard** – filter/sort/paginate companies by Zefix, Google, or Claude score; toggle column visibility; bulk-update review and proposal status; shows a live banner when jobs are running
+* **Company detail** – view enriched data including TF-IDF cluster and Claude score/category; pick best website from search results, add contact info and notes; "Refresh from Zefix" button re-fetches and geocodes on demand
 * **CSV export** – export any filtered view to CSV
 * **HTTPS** – Nginx reverse proxy with self-signed certificate (or swap in a CA-signed cert); HTTP auto-redirects to HTTPS
 * **PostgreSQL** – all data persisted in Postgres; DB indexes on all filter columns
@@ -79,6 +83,7 @@ All settings are read from environment variables (or a `.env` file):
 | `GOOGLE_SEARCH_ENABLED` | Enable/disable website search (also settable via the UI) | `true` |
 | `SERPER_API_KEY` | Serper.dev API key | *(required for website search)* |
 | `GOOGLE_DAILY_QUOTA` | Daily search quota (also settable via the UI) | `83` |
+| `ANTHROPIC_API_KEY` | Anthropic API key for Claude classification jobs (also settable via Settings UI) | *(empty)* |
 
 ---
 
@@ -87,11 +92,12 @@ All settings are read from environment variables (or a `.env` file):
 1. **Bulk import** all companies from Zefix (see below) — one-time, ~hours
 2. **Detail fetch** from Collection — populates address, purpose, and geocodes lat/lon
 3. **Batch enrich** with Google Search to find websites — runs daily against free 100-query quota
-4. **Dashboard** at `/ui` — filter by canton, industry, tags, review/proposal status, score; sort; paginate; bulk-update
+4. **Dashboard** at `/ui` — filter by canton, industry, tags, review/proposal status, Zefix/Google/Claude score; toggle column visibility; sort; paginate; bulk-update
 5. **Map** at `/ui/map` — geographic overview of geocoded companies, coloured by Google score
-6. **Company detail** — pick best website from Google results, set contact info, add research notes
+6. **Company detail** — pick best website from Google results, set contact info, add research notes; shows TF-IDF cluster and Claude score/category if populated
 7. **Jobs** at `/ui/jobs` — monitor queue/runs, pause/resume, view event stream, cancel jobs
 8. **Export CSV** — download any filtered view
+9. **Settings** at `/ui/settings` — configure scoring, industry taxonomy, API keys; run classification batch jobs (re-derive industry, TF-IDF clustering, Claude classification)
 
 ### Status fields
 
@@ -292,16 +298,76 @@ Recent additions include:
 | `0010` | `job_runs` queue table + `companies.zefix_score_breakdown` |
 | `0011` | Job cancellation support (`job_runs.cancel_requested`) + `job_run_events` log stream |
 | `0012` | Job pause support (`job_runs.pause_requested`) |
+| `0013` | `users` and `audit_log` tables |
+| `0014` | `companies.tfidf_cluster`, `claude_score`, `claude_category`, `claude_scored_at` |
 
 For the complete lineage in your environment, use `alembic history`.
 
 ---
 
+## Company Classification
+
+Three optional enrichment passes add deeper categorisation signals. All run as background jobs from **Settings → Industry classification**.
+
+### Re-derive industry labels
+
+Re-runs the keyword-based industry derivation on existing companies using the current taxonomy from Settings. Uses best-match scoring (highest keyword hit count wins) rather than first-match. Re-computes `zefix_score` for any company whose industry label changes.
+
+Useful after editing the industry taxonomy or adding new categories.
+
+### TF-IDF clustering (local, no API)
+
+Groups companies by the semantic content of their `purpose` text using unsupervised machine learning. Requires `scikit-learn` (included in `requirements.txt`).
+
+**How it works:**
+
+1. Each company's `purpose` field is converted to a TF-IDF vector — words that are distinctive to that company's text get high weight; common filler words get near-zero weight
+2. K-Means groups the vectors into N clusters of similar companies
+3. Each cluster is labelled with its 3 highest-weight terms (e.g. `software · entwicklung · digital`, `bau · immobilien · verwaltung`)
+4. The label is stored in `tfidf_cluster` on each matched company
+
+**Checking results:**
+
+- Open any company detail page — `tfidf_cluster` is shown in the info grid if populated
+- SQL query to see cluster distribution:
+  ```sql
+  SELECT tfidf_cluster, count(*) AS n
+  FROM companies
+  WHERE tfidf_cluster IS NOT NULL
+  GROUP BY tfidf_cluster
+  ORDER BY n DESC;
+  ```
+- The job log at `/ui/jobs` shows how many companies were classified
+
+**Tips:**
+- Start with `n_clusters=10–15` and a broad filter (or no filter) so K-Means has enough data
+- `min_df=2` means a term must appear in at least 2 purpose texts — very small subsets (< ~20 companies) may fail or produce poor clusters
+- Re-run whenever you add large batches of new companies; old labels remain valid until overwritten
+- The clusters are exploratory, not prescriptive — use them to spot themes, not as ground truth
+
+### Claude classification (Anthropic API)
+
+Sends each company's `purpose` text to Claude Haiku with a configurable system prompt. The model returns a JSON object `{"score": 0–100, "category": "..."}` which is stored as `claude_score` and `claude_category`.
+
+**Setup:** set your Anthropic API key in Settings or via `ANTHROPIC_API_KEY` env var.
+
+**Cost:** ~$0.25 per 1 000 companies at Haiku pricing (~150 input tokens + ~20 output tokens per company).
+
+**Checking results:**
+
+- `claude_score` and `claude_category` are shown on each company detail page
+- The dashboard allows filtering by minimum `claude_score` and sorting by `claude_score`
+- The job log at `/ui/jobs` shows tokens consumed
+
+**Custom prompt:** override the default evaluation prompt from **Settings → Claude classification prompt**. The model must always output only `{"score": N, "category": "..."}` — keep that constraint in any custom prompt.
+
+---
+
 ## Scoring
 
-Two independent scores drive the workflow:
+Three independent scores are computed and stored per company:
 
-### Zefix priority score (0–100, shown in blue)
+### Zefix priority score (0–100)
 
 Computed from Zefix register data alone — no Google Search required. Used to order which companies get searched first during batch enrichment.
 Weights and penalties are configurable in **Settings** (`/ui/settings`).
@@ -313,7 +379,8 @@ Weights and penalties are configurable in **Settings** (`/ui/settings`).
 | Purpose text richness (≥ 20 words) | +20 · ≥ 8 words +5 |
 | Branch offices present | +10 |
 | Industry detected | +15 (configurable) |
-| Industry contains `treuhand` or `consulting` | −15 (configurable) |
+| Target keywords matched in purpose/industry (1 hit = +½ bonus, 2+ hits = +full bonus) | configurable keyword list |
+| Excluded keywords matched in purpose/industry | −penalty (configurable) |
 | Location — canton tier | BE/SO +10 · AG +8 · BL/BS +6 · LU +5 · ZH +4 · all others −8 |
 | Location — distance to Muri bei Bern | ≤ 15 km +15 · ≤ 40 km +10 · ≤ 80 km +5 · ≤ 130 km 0 · > 130 km −5 |
 | Status not clearly active | −40 (configurable) |
@@ -325,6 +392,14 @@ Distance is computed with the Haversine formula. Coordinates come from the geoco
 
 Each company stores a Zefix score breakdown JSON (`zefix_score_breakdown`) with component contributions and final score.
 In the company detail page (`/ui/companies/{id}`), open **Zefix Score Breakdown** to inspect how the score was derived.
+
+### Website match score (0–100)
+
+Google Search score — computed after finding the best-matching website result.
+
+### Claude score (0–100)
+
+Returned by Claude Haiku when you run the Claude classification batch job. Stored alongside `claude_category` (a short label). Independent of Zefix and Google scores — use it to rank companies by AI-assessed lead quality or fit.
 
 ### Website match score (0–100, shown in green/yellow/red)
 
@@ -400,7 +475,7 @@ All long-running actions are executed through a **persistent DB-backed queue** (
 ### Medium-term
 
 - [ ] **Scheduler UI** — configure recurring runs directly from the dashboard; view calendar/history
-- [ ] **AI-assisted scoring** — use an LLM to read the company purpose and website snippet to produce a richer match score and auto-suggest industry classification; can run locally via Ollama (no API key) or with sentence-transformers for lightweight semantic similarity
+- [x] **AI-assisted scoring** — Claude Haiku batch classification (`claude_score` + `claude_category`); TF-IDF unsupervised clustering (`tfidf_cluster`); configurable industry taxonomy with best-match derivation
 - [ ] **Duplicate detection** — flag companies that appear to share a website, suggesting they are related entities
 - [ ] **Website crawler** — fetch and parse homepage (and 1–2 internal pages: About, Contact, Services) using `httpx` + `beautifulsoup4`; extract visible text, emails, phone numbers, and social links; store in new DB columns and feed into a richer match score; JS-rendered sites require Playwright (heavier, separate Docker service)
 - [ ] **Concurrent job workers** — replace the single-threaded job worker with a `ThreadPoolExecutor`; use PostgreSQL `SELECT ... FOR UPDATE SKIP LOCKED` for race-condition-free job pickup; configurable `JOB_WORKER_CONCURRENCY` env var; enables crawler + import + scoring jobs to run in parallel

@@ -37,7 +37,8 @@ def get_company_by_uid(db: Session, uid: str) -> Company | None:
 
 
 def _apply_filters(query, *, name_filter, canton, review_status, proposal_status,
-                   google_searched, min_google_score, min_zefix_score, min_claude_score=None, industry, tags):
+                   google_searched, min_google_score, min_zefix_score, min_claude_score=None,
+                   industry, tags, tfidf_cluster=None):
     if name_filter:
         query = query.filter(Company.name.ilike(f"%{name_filter}%"))
     if canton:
@@ -69,6 +70,12 @@ def _apply_filters(query, *, name_filter, canton, review_status, proposal_status
         query = query.filter(Company.industry.ilike(f"%{industry}%"))
     if tags:
         query = query.filter(Company.tags.ilike(f"%{tags}%"))
+    if tfidf_cluster == "_none":
+        query = query.filter(Company.tfidf_cluster.is_(None))
+    elif tfidf_cluster == "_any":
+        query = query.filter(Company.tfidf_cluster.isnot(None))
+    elif tfidf_cluster:
+        query = query.filter(Company.tfidf_cluster.ilike(f"%{tfidf_cluster}%"))
     return query
 
 
@@ -87,6 +94,7 @@ def list_companies(
     min_claude_score: int | None = None,
     industry: str | None = None,
     tags: str | None = None,
+    tfidf_cluster: str | None = None,
     # kept for backward-compat with collection.py batch query
     limit: int | None = None,
     skip: int = 0,
@@ -104,6 +112,7 @@ def list_companies(
         min_claude_score=min_claude_score,
         industry=industry,
         tags=tags,
+        tfidf_cluster=tfidf_cluster,
     )
 
     col, ascending = _SORT_MAP.get(sort, _SORT_MAP[_DEFAULT_SORT])
@@ -129,6 +138,7 @@ def count_companies(
     min_claude_score: int | None = None,
     industry: str | None = None,
     tags: str | None = None,
+    tfidf_cluster: str | None = None,
 ) -> int:
     query = db.query(Company)
     query = _apply_filters(
@@ -143,6 +153,7 @@ def count_companies(
         min_claude_score=min_claude_score,
         industry=industry,
         tags=tags,
+        tfidf_cluster=tfidf_cluster,
     )
     return query.count()
 

@@ -53,17 +53,58 @@ _INDUSTRY_KEYWORDS: list[tuple[str, list[str]]] = [
 ]
 
 
-# Stopwords for TF-IDF vectorization (German + French + common business terms)
+# Stopwords for TF-IDF vectorization (German + French + Italian + English + Swiss registry boilerplate)
+# Goal: remove words that appear in almost every company purpose and don't help distinguish clusters.
+# Do NOT add words that mark meaningful categories (e.g. "handel", "entwicklung", "bau", "immobilien").
 _TFIDF_STOPWORDS: set[str] = {
+    # ── German: articles, pronouns, conjunctions, prepositions ───────────────
     "die", "der", "das", "und", "oder", "mit", "von", "für", "des", "dem",
     "den", "ein", "eine", "einer", "eines", "sich", "auf", "zu", "ist",
     "sowie", "als", "auch", "nicht", "nach", "bei", "alle", "durch", "wird",
     "deren", "diese", "dieser", "dieses", "sie", "ihr", "ihren", "ihres",
     "haben", "hat", "hatte", "werden", "war", "sind", "sein",
-    "les", "des", "une", "est", "dans", "par", "sur", "aux",
+    "im", "an", "am", "ab", "um", "bis", "vor", "aus", "über", "unter",
+    "zum", "zur", "beim", "vom", "ans", "ins", "er", "es", "wir",
+    "ihm", "ihn", "ihnen", "uns", "man", "kein", "keine",
+    "diesem", "diesen", "solche", "solcher", "welche", "welcher",
+    "jede", "jeder", "jedes", "aller", "allem", "allen",
+    "jedoch", "daher", "dabei", "dazu", "davon", "darüber", "dafür",
+    "soweit", "sowohl", "darunter", "hierzu", "hierbei", "hierfür", "bzgl", "bzw",
+    # ── Swiss registry boilerplate (appear in nearly every purpose text) ──────
+    "gesellschaft", "unternehmen", "betrieb", "zweck", "zwecks",
+    "aktien", "gmbh", "ag", "sarl", "sàrl", "cie", "co", "inc",
+    "insbesondere", "namentlich", "hauptsächlich", "vorzugsweise",
+    "allgemein", "allgemeine", "allgemeinen", "sonstige", "sonstigen",
+    "ähnliche", "ähnlichen", "weitere", "weiteren", "entsprechende",
+    # Generic activity words — too broad to form meaningful clusters
+    "erbringung", "dienstleistungen", "dienstleistung", "leistungen", "leistung",
+    "tätigkeiten", "tätigkeit", "aktivitäten", "aktivität",
+    "verwaltung", "führung", "betreuung",
+    "bereich", "bereiche", "bereichen", "gebiet", "gebiete", "gebieten",
+    "erwerb", "erwerben", "veräusserung", "veräussern",
+    "beteiligung", "beteiligungen", "halten", "verwalten", "betreiben",
+    "erbringen", "anbieten", "durchführen", "ausführen",
+    # ── French: articles, prepositions, pronouns ─────────────────────────────
+    "les", "une", "est", "dans", "par", "sur", "aux",
+    "de", "la", "le", "et", "en", "du", "au", "avec", "qui", "que",
+    "se", "son", "sa", "ses", "toute", "tous", "toutes",
+    "il", "ils", "elle", "elles", "nous", "vous", "leur", "leurs",
+    "ce", "cet", "cette", "ces", "ou", "mais", "donc",
+    "pour", "pas", "plus", "comme", "aussi",
+    "notamment", "ainsi", "dont", "afin", "selon",
+    # ── Italian: articles, prepositions, pronouns ────────────────────────────
+    "di", "il", "e", "del", "della", "dello", "dei", "delle",
+    "un", "una", "su", "con", "per", "al", "alla", "alle", "ai",
+    "che", "sono", "ed", "ha", "hanno", "si", "da", "dal",
+    "dalla", "dai", "dagli", "tra", "fra", "lo", "gli",
+    "ne", "ci", "non", "anche", "come", "tutti", "ogni",
+    # ── English ───────────────────────────────────────────────────────────────
     "the", "and", "of", "in", "for", "to", "a", "an", "with", "its",
-    "gesellschaft", "unternehmen", "betrieb", "zweck", "aktien", "gmbh",
-    "ag", "sarl", "sàrl", "cie", "co", "inc", "insbesondere",
+    "as", "by", "at", "from", "or", "be", "is", "are", "was", "were",
+    "have", "has", "had", "will", "can", "all", "any",
+    "other", "such", "their", "this", "that", "these", "those",
+    "including", "related", "services", "company", "activities",
+    "general", "various", "especially", "particular",
 }
 
 # Default system prompt for Claude classification
