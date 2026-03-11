@@ -13,7 +13,7 @@ from sqlalchemy import inspect as sa_inspect
 from app.config import settings
 from app.database import Base, engine
 from app.services.scoring import get_default_scoring_config
-from app.ui.routes import kick_job_worker, router as ui_router
+from app.ui.routes import kick_job_worker, router as ui_router, templates as ui_templates
 
 _REPO_ROOT = pathlib.Path(__file__).parent.parent
 
@@ -189,6 +189,10 @@ app = FastAPI(
 
 app.mount("/static", StaticFiles(directory="app/static"), name="static")
 app.include_router(ui_router)
+
+# Expose version info to all Jinja2 templates as globals
+ui_templates.env.globals["APP_VERSION"] = APP_VERSION
+ui_templates.env.globals["BUILD_DATE"] = BUILD_DATE
 
 
 # ── Startup gate middleware ───────────────────────────────────────────────────

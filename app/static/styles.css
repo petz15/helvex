@@ -667,6 +667,42 @@ pre {
   cursor: pointer;
 }
 
+/* ── Site footer ──────────────────────────────────────────────────────────── */
+.site-footer {
+  border-top: 1px solid var(--line);
+  background: #ffffffcc;
+  backdrop-filter: blur(4px);
+  margin-top: 2rem;
+  padding: 0.75rem 0;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+.footer-inner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.footer-brand {
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.footer-sep {
+  opacity: 0.4;
+}
+
+.site-footer a {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+.site-footer a:hover {
+  text-decoration: underline;
+}
+
 @media (max-width: 720px) {
   .meta-grid {
     grid-template-columns: 1fr;
