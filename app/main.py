@@ -7,8 +7,6 @@ from alembic.config import Config as AlembicConfig
 from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
-from starlette.middleware.sessions import SessionMiddleware
-
 from sqlalchemy import inspect as sa_inspect
 
 from app.config import settings
@@ -60,22 +58,6 @@ def _run_migrations(app_state) -> None:
 
     app_state.startup_message = "Database schema is up to date ✓"
 
-
-def _bootstrap_admin(app_state) -> None:
-    """Create the admin user from env vars if no users exist yet."""
-    from app.crud import count_users, create_user
-    from app.database import SessionLocal
-
-    if not settings.admin_password:
-        return
-    app_state.startup_message = "Checking admin user…"
-    try:
-        with SessionLocal() as db:
-            if count_users(db) == 0:
-                create_user(db, username=settings.admin_username, password=settings.admin_password)
-                app_state.startup_message = f"Admin user '{settings.admin_username}' created"
-    except Exception as exc:
-        raise RuntimeError(f"Failed to bootstrap admin user: {exc}") from exc
 
 
 def _seed_settings(app_state) -> None:
@@ -163,7 +145,6 @@ async def lifespan(app: FastAPI):
         try:
             loop = asyncio.get_running_loop()
             await loop.run_in_executor(None, _run_migrations, app.state)
-            await loop.run_in_executor(None, _bootstrap_admin, app.state)
             await loop.run_in_executor(None, _seed_settings, app.state)
             await loop.run_in_executor(None, _recover_jobs_and_start_worker, app, app.state)
             await loop.run_in_executor(None, _maybe_enqueue_geocode_upgrade, app, app.state)
@@ -188,7 +169,6 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-app.add_middleware(SessionMiddleware, secret_key=settings.secret_key)
 app.mount("/static", StaticFiles(directory="app/static"), name="static")
 app.include_router(ui_router)
 
@@ -278,13 +258,6 @@ async def startup_gate(request: Request, call_next):
         return HTMLResponse(
             _LOADING_HTML.format(message=message, elapsed=elapsed), status_code=503
         )
-
-    # Auth gate — protect all /ui and /api routes
-    _PUBLIC_PATHS = {"/login", "/logout"}
-    if path not in _PUBLIC_PATHS and (path.startswith("/ui") or path.startswith("/api/")):
-        from fastapi.responses import RedirectResponse as _Redirect
-        if not request.session.get("user_id"):
-            return _Redirect(url="/login", status_code=302)
 
     return await call_next(request)
 

@@ -21,10 +21,6 @@ class Settings(BaseSettings):
     serper_api_key: str = ""
     google_daily_quota: int = 100
 
-    # Auth
-    secret_key: str = "change-me-in-production-use-a-long-random-string"
-    admin_username: str = "admin"
-    admin_password: str = ""  # Set in .env to auto-create admin user on first startup
 
 
 settings = Settings()

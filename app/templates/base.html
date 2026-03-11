@@ -20,12 +20,6 @@
         <a class="button-link secondary" href="/ui/collection">Collection</a>
         <a class="button-link secondary" href="/ui/jobs">Jobs</a>
         <a class="button-link secondary" href="/ui/settings">Settings</a>
-        {% if current_user %}
-        <span style="font-size:0.82rem; color:var(--muted, #5a7080); padding: 0 0.25rem;">{{ current_user.username }}</span>
-        <form method="post" action="/logout" style="margin:0;">
-          <button type="submit" class="secondary small">Sign out</button>
-        </form>
-        {% endif %}
       </nav>
     </div>
   </header>
