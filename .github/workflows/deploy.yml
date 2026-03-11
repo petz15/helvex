@@ -1,0 +1,20 @@
+name: Deploy To Local Server
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    # Run if manually triggered OR commit message contains [deploy]
+    if: github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[deploy]')
+    runs-on: [self-hosted, linux, zefix]
+
+    steps:
+      - name: Deploy
+        run: /deploy.sh

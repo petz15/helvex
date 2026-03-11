@@ -46,7 +46,16 @@
       "Bash(grep -E \"^/c/D/coding_projects/zefix_analyzer/[^/]+$|\\\\.py$|\\\\.html$|\\\\.yml$|\\\\.md$\")",
       "Bash(python -:*)",
       "Bash(echo \"anthropic_api_key: str = \"\"\"\"\")",
-      "Bash(printf \"scikit-learn>=1.4.0\\\\nanthropic>=0.30.0\\\\n\")"
+      "Bash(printf \"scikit-learn>=1.4.0\\\\nanthropic>=0.30.0\\\\n\")",
+      "Bash(python -m py_compile app/ui/routes.py app/services/collection.py app/config.py app/crud/company.py app/models/company.py app/schemas/company.py)",
+      "Bash(python -c \"from app.ui.routes import router\")",
+      "Bash(grep -h \"^revision\\\\|^down_revision\" /c/D/coding_projects/zefix_analyzer/alembic/versions/*.py)",
+      "Bash(git -C /c/D/coding_projects/zefix_analyzer log --oneline -5)",
+      "Bash(git -C /c/D/coding_projects/zefix_analyzer diff HEAD -- app/templates/ app/ui/routes.py app/services/collection.py)",
+      "Bash(git -C /c/D/coding_projects/zefix_analyzer show --stat 41e8b56)",
+      "Bash(git -C /c/D/coding_projects/zefix_analyzer show --stat 733f5d0)",
+      "Bash(git -C /c/D/coding_projects/zefix_analyzer show 41e8b56 -- app/ui/routes.py)",
+      "Bash(git -C /c/D/coding_projects/zefix_analyzer show 41e8b56 -- app/templates/base.html)"
     ]
   }
 }
