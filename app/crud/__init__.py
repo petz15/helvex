@@ -20,6 +20,7 @@ from app.crud.company import (
     get_company,
     get_company_by_uid,
     get_company_stats,
+    get_taxonomy_stats,
     list_companies,
     update_company,
 )
@@ -59,6 +60,7 @@ __all__ = [
     "list_companies",
     "count_companies",
     "get_company_stats",
+    "get_taxonomy_stats",
     "bulk_update_status",
     "create_company",
     "update_company",
