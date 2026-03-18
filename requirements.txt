@@ -17,5 +17,5 @@ itsdangerous==2.1.2
 scikit-learn>=1.4.0
 anthropic>=0.30.0
 pandas>=2.2.0
-spacy>=3.7.0
+spacy>=3.8.0
 tqdm>=4.66.0
