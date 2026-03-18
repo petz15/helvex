@@ -47,8 +47,8 @@ class PipelineConfig:
     min_cluster_size: int = 75
     min_samples: int = 10
     hdbscan_metric: str = "euclidean"
-    hdbscan_algorithm: str = "boruvka_kdtree"
-    core_dist_n_jobs: int = -1
+    hdbscan_algorithm: str = "auto"
+    n_jobs: int = -1
 
     # ── Labeling ──
     top_terms_per_cluster: int = 7
@@ -162,17 +162,14 @@ def reduce_dimensions(X, cfg: PipelineConfig):
 
 def cluster_hdbscan(X_reduced, cfg: PipelineConfig):
     """Return integer cluster labels; -1 = noise/outlier."""
-    try:
-        import hdbscan
-    except ImportError as exc:
-        raise ImportError("hdbscan is required. Run: pip install hdbscan") from exc
+    from sklearn.cluster import HDBSCAN
 
-    clusterer = hdbscan.HDBSCAN(
+    clusterer = HDBSCAN(
         min_cluster_size=cfg.min_cluster_size,
         min_samples=cfg.min_samples,
         metric=cfg.hdbscan_metric,
         algorithm=cfg.hdbscan_algorithm,
-        core_dist_n_jobs=cfg.core_dist_n_jobs,
+        n_jobs=cfg.n_jobs,
     )
     return clusterer.fit_predict(X_reduced)
 
