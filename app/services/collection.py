@@ -173,12 +173,16 @@ def _derive_industry(
     purpose: str | None,
     taxonomy: list[tuple[str, list[str]]] | None = None,
 ) -> str | None:
-    """Return the best-matching industry category using keyword hit count (best-match, not first-match)."""
+    """Return the best-matching industry category using keyword hit count (best-match, not first-match).
+    Returns "Undefined" when purpose has no keyword matches, None when purpose is empty."""
     if not purpose:
         return None
-    p = purpose.lower()
+    # Strip stopword tokens so boilerplate doesn't dilute keyword matching.
+    # Pad with spaces so space-bounded keywords like " it " still match.
+    words = purpose.lower().split()
+    p = " " + " ".join(w for w in words if w not in _TFIDF_STOPWORDS) + " "
     entries = taxonomy if taxonomy is not None else _INDUSTRY_KEYWORDS
-    best_cat: str | None = None
+    best_cat: str = "Undefined"
     best_hits = 0
     for industry, keywords in entries:
         hits = sum(1 for k in keywords if k in p)
