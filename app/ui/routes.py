@@ -1293,8 +1293,8 @@ def _run_job(app, job_id: int) -> None:
             crud.create_event(db, job_id=job.id, level="warn", message=msg)
             _sync_active_task(app.state, job_type=job.job_type, label=job.label, message=msg, stats={}, error=None, done=True)
         except Exception as exc:  # noqa: BLE001
-            err = str(exc)
-            logger.error("Job %s (%s) failed:\n%s", job.id, job.job_type, traceback.format_exc())
+            err = traceback.format_exc()
+            logger.error("Job %s (%s) failed:\n%s", job.id, job.job_type, err)
             crud.mark_failed(db, job, error=err)
             crud.create_event(db, job_id=job.id, level="error", message=err)
             _sync_active_task(app.state, job_type=job.job_type, label=job.label, message="Failed", stats={}, error=err, done=True)
