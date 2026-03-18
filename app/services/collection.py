@@ -153,8 +153,40 @@ _TFIDF_STOPWORDS: set[str] = {
 
     # Custom sentences/words that appear in almost every purpose and don't help clustering
     "handel mit waren", "mit waren aller art", "erbringung von dienstleistungen", "dienstleistungen aller art", "handel mit waren aller art", 
-    
-
+    "fremd garantie", 
+    "garantie bürgschaft","bürgschaft dritter"
+"bürgschaft",
+"garantie",
+"können",
+"anderer geschäft",
+"verbunden abgeben",
+"fremd sicherheit",
+"sicherheit verbindlichkeit",
+"verbindlichkeit verbunden",
+"abgeben",
+"verbindlichkeit",
+"verbunden",
+"übrig vgl",
+"übrig können",
+"übrig kommerziell",
+"übrig immaterialgüterrecht",
+"übrig geschäft",
+"übrig finanzierung",
+"übrig",
+"handel",
+"handel wein",
+"wein",
+"geschenkartikel",
+"handel geschenkartikel",
+"onlineshops",
+"buch",
+"vornahme finanzierung",
+"eingehung bürgschaft",
+"finanzierung eingehung",
+"vornahme",
+"eingehung",
+"belastung vornahme",
+"belastung",
 }
 
 # Default system prompt for Claude classification

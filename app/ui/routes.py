@@ -1229,8 +1229,18 @@ def _run_job(app, job_id: int) -> None:
                     min_cluster_size=int(params.get("min_cluster_size", 75)),
                     min_samples=int(params.get("min_samples", 10)),
                     top_terms_per_cluster=int(params.get("top_terms", 7)),
+                    n_components=int(params.get("n_components", 50)),
+                    top_keywords_per_company=int(params.get("top_keywords_per_company", 10)),
                 )
-                stats = run_pipeline(db, cfg, progress_cb=_progress)
+                stats = run_pipeline(
+                    db, cfg,
+                    canton=params.get("canton") or None,
+                    industry=params.get("industry") or None,
+                    min_zefix_score=int(params["min_zefix_score"]) if params.get("min_zefix_score") else None,
+                    max_zefix_score=int(params["max_zefix_score"]) if params.get("max_zefix_score") else None,
+                    limit=int(params["limit"]) if params.get("limit") else None,
+                    progress_cb=_progress,
+                )
                 n_c = stats.get("n_clusters", 0)
                 classified = stats.get("classified", 0)
                 noise = stats.get("noise", 0)

@@ -228,24 +228,52 @@
 
   <form method="post" action="/ui/classify/hdbscan" style="margin-top:1rem;">
     <p class="muted" style="margin: 0 0 0.6rem;">
-      Cluster all companies by purpose text using spaCy lemmatization + TF-IDF + TruncatedSVD + HDBSCAN.
-      Stores a comma-separated label (top-7 terms) in <code>tfidf_cluster</code>.
-      Noise/outliers (no clear cluster) are set to <code>null</code>.
-      Requires <code>spacy</code>, <code>scikit-learn</code>, <code>tqdm</code>.
-      First run: <code>python -m spacy download de_core_news_md</code>.
-      Processes all companies with a purpose — no company limit.
+      Cluster companies by purpose text using spaCy lemmatization + TF-IDF + TruncatedSVD + HDBSCAN.
+      Stores a comma-separated label (top-N terms) in <code>tfidf_cluster</code>.
+      Noise/outliers are set to <code>null</code>. Leave filters empty to process all companies.
     </p>
     <div class="filter-grid" style="margin-bottom:0.6rem;">
-      <label class="form-label"><span>Min cluster size</span>
-        <input type="number" name="min_cluster_size" value="75" min="5">
+      <label class="form-label"><span>Canton</span>
+        <input type="text" name="canton" placeholder="e.g. BE (leave empty = all)">
       </label>
-      <label class="form-label"><span>Min samples</span>
-        <input type="number" name="min_samples" value="10" min="1">
+      <label class="form-label"><span>Industry filter</span>
+        <input type="text" name="industry" placeholder="e.g. Technology">
       </label>
-      <label class="form-label"><span>Top terms per label</span>
-        <input type="number" name="top_terms" value="7" min="1" max="20">
+      <label class="form-label"><span>Min Zefix score</span>
+        <input type="number" name="min_zefix_score" placeholder="0–100">
+      </label>
+      <label class="form-label"><span>Max Zefix score</span>
+        <input type="number" name="max_zefix_score" placeholder="0–100">
+      </label>
+      <label class="form-label"><span>Limit (companies)</span>
+        <input type="number" name="limit" placeholder="leave empty = all">
       </label>
     </div>
+    <details style="margin-bottom:0.6rem;">
+      <summary class="section-toggle">Advanced clustering parameters</summary>
+      <div class="filter-grid" style="margin-top:0.5rem;">
+        <label class="form-label"><span>Min cluster size</span>
+          <input type="number" name="min_cluster_size" value="75" min="5">
+          <small class="muted">Smallest grouping HDBSCAN will form.</small>
+        </label>
+        <label class="form-label"><span>Min samples</span>
+          <input type="number" name="min_samples" value="10" min="1">
+          <small class="muted">Higher = more noise points, tighter clusters.</small>
+        </label>
+        <label class="form-label"><span>SVD components</span>
+          <input type="number" name="n_components" value="50" min="10" max="300">
+          <small class="muted">Dimensions after reduction. Lower = faster HDBSCAN.</small>
+        </label>
+        <label class="form-label"><span>Top terms per label</span>
+          <input type="number" name="top_terms" value="7" min="1" max="20">
+          <small class="muted">Keywords stored per cluster label.</small>
+        </label>
+        <label class="form-label"><span>Keywords per company</span>
+          <input type="number" name="top_keywords_per_company" value="10" min="1" max="30">
+          <small class="muted">Top TF-IDF keywords extracted from each company's own purpose text, stored in <code>purpose_keywords</code>.</small>
+        </label>
+      </div>
+    </details>
     <button type="submit">Run HDBSCAN clustering</button>
   </form>
 

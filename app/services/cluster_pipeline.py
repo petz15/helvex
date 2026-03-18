@@ -40,7 +40,7 @@ class PipelineConfig:
     max_features: int = 15000
 
     # ── Dimensionality reduction ──
-    n_components: int = 150
+    n_components: int = 50
     svd_random_state: int = 42
 
     # ── HDBSCAN ──
@@ -52,6 +52,7 @@ class PipelineConfig:
 
     # ── Labeling ──
     top_terms_per_cluster: int = 7
+    top_keywords_per_company: int = 10   # stored in purpose_keywords
 
     # ── Cross-cluster analysis ──
     analysis_top_clusters: int = 20
@@ -182,23 +183,108 @@ def label_clusters(
     feature_names,
     cfg: PipelineConfig,
 ) -> dict[int, str]:
-    """For each cluster compute mean TF-IDF vector and extract top-N terms.
+    """Label each cluster using c-TF-IDF with bigram deduplication.
+
+    c-TF-IDF scores terms by how frequent they are *within* a cluster relative
+    to how many other clusters also contain them — so cluster-specific terms
+    rank above generic cross-cluster terms like "handel" or "dienstleistung".
+
+    Bigram deduplication: skip a candidate term if every word it contains is
+    already represented by a previously selected term (prevents "handel",
+    "handel wein", "wein" all appearing in the same label).
 
     Returns {cluster_id: "term1,term2,...,termN"}.
     """
     import numpy as np
 
-    labels_map: dict[int, str] = {}
     unique_ids = sorted(set(cluster_labels) - {-1})
+    n_clusters = len(unique_ids)
+    n_features = X_tfidf.shape[1]
 
-    for cid in unique_ids:
+    # ── Build per-cluster term-sum matrix ──
+    cluster_term_sum = np.zeros((n_clusters, n_features))
+    for i, cid in enumerate(unique_ids):
         mask = cluster_labels == cid
-        mean_vec = np.asarray(X_tfidf[mask].mean(axis=0)).flatten()
-        top_idx = mean_vec.argsort()[-cfg.top_terms_per_cluster:][::-1]
-        terms = [feature_names[i] for i in top_idx]
-        labels_map[cid] = ",".join(terms)
+        cluster_term_sum[i] = np.asarray(X_tfidf[mask].sum(axis=0)).flatten()
+
+    # ── c-IDF: penalise terms present in many clusters ──
+    term_presence = (cluster_term_sum > 0).sum(axis=0)          # how many clusters contain each term
+    c_idf = np.log(n_clusters / (term_presence + 1) + 1)
+
+    # ── c-TF: normalise each cluster's total weight to 1 ──
+    totals = cluster_term_sum.sum(axis=1, keepdims=True)
+    totals = np.where(totals == 0, 1, totals)
+    c_tf = cluster_term_sum / totals
+
+    c_tfidf = c_tf * c_idf  # shape: (n_clusters, n_features)
+
+    # ── Select top terms with bigram deduplication ──
+    labels_map: dict[int, str] = {}
+    candidates = cfg.top_terms_per_cluster * 4          # scan wider to find enough unique terms
+
+    for i, cid in enumerate(unique_ids):
+        ranked_idx = c_tfidf[i].argsort()[::-1][:candidates]
+        selected: list[str] = []
+        covered: set[str] = set()
+
+        for j in ranked_idx:
+            if len(selected) == cfg.top_terms_per_cluster:
+                break
+            term = feature_names[j]
+            words = set(term.split())
+            # Skip if every word in this term is already covered by a selected term
+            if words.issubset(covered):
+                continue
+            selected.append(term)
+            covered.update(words)
+
+        labels_map[cid] = ",".join(selected)
 
     return labels_map
+
+
+# ── Step 5b: Per-document keyword extraction ──────────────────────────────────
+
+def extract_company_keywords(
+    X_tfidf,
+    feature_names,
+    cfg: PipelineConfig,
+) -> list[str | None]:
+    """Extract top-N TF-IDF keywords from each company's own purpose text.
+
+    Uses the same bigram deduplication as label_clusters so results are clean.
+    Returns one string (or None) per row in X_tfidf.
+    """
+    import numpy as np
+
+    results: list[str | None] = []
+    candidates = cfg.top_keywords_per_company * 4
+
+    for i in range(X_tfidf.shape[0]):
+        row = np.asarray(X_tfidf[i].todense()).flatten()
+        if row.max() == 0:
+            results.append(None)
+            continue
+
+        ranked_idx = row.argsort()[::-1][:candidates]
+        selected: list[str] = []
+        covered: set[str] = set()
+
+        for j in ranked_idx:
+            if row[j] == 0:
+                break
+            if len(selected) == cfg.top_keywords_per_company:
+                break
+            term = feature_names[j]
+            words = set(term.split())
+            if words.issubset(covered):
+                continue
+            selected.append(term)
+            covered.update(words)
+
+        results.append(",".join(selected) if selected else None)
+
+    return results
 
 
 # ── Step 6: Save Results to DB ────────────────────────────────────────────────
@@ -208,10 +294,11 @@ def save_results(
     companies: list,
     cluster_labels,
     labels_map: dict[int, str],
+    company_keywords: list[str | None],
     cfg: PipelineConfig,
     progress_cb: Callable[[int, int, dict], None] | None = None,
 ) -> dict[str, Any]:
-    """Write tfidf_cluster labels to DB in batches.
+    """Write tfidf_cluster and purpose_keywords to DB in batches.
 
     Noise companies (cluster == -1) get tfidf_cluster = None.
     """
@@ -221,10 +308,12 @@ def save_results(
     for idx in range(0, total, cfg.db_batch_size):
         batch = companies[idx: idx + cfg.db_batch_size]
         batch_cids = cluster_labels[idx: idx + cfg.db_batch_size]
+        batch_kws = company_keywords[idx: idx + cfg.db_batch_size]
 
-        for company, cid in zip(batch, batch_cids):
+        for company, cid, kw in zip(batch, batch_cids, batch_kws):
             try:
                 cid_int = int(cid)
+                company.purpose_keywords = kw
                 if cid_int == -1:
                     company.tfidf_cluster = None
                     stats["noise"] += 1
@@ -306,6 +395,11 @@ def run_pipeline(
     db,
     cfg: PipelineConfig | None = None,
     *,
+    canton: str | None = None,
+    industry: str | None = None,
+    min_zefix_score: int | None = None,
+    max_zefix_score: int | None = None,
+    limit: int | None = None,
     progress_cb: Callable[[int, int, dict], None] | None = None,
 ) -> dict[str, Any]:
     """Run the full HDBSCAN clustering pipeline end-to-end.
@@ -327,12 +421,19 @@ def run_pipeline(
 
     # ── Load companies ──
     t0 = time.time()
-    companies = (
-        db.query(Company)
-        .filter(Company.purpose.isnot(None))
-        .order_by(Company.id.asc())
-        .all()
-    )
+    q = db.query(Company).filter(Company.purpose.isnot(None))
+    if canton:
+        q = q.filter(Company.canton == canton.upper())
+    if industry:
+        q = q.filter(Company.industry.ilike(f"%{industry}%"))
+    if min_zefix_score is not None:
+        q = q.filter(Company.zefix_score >= min_zefix_score)
+    if max_zefix_score is not None:
+        q = q.filter(Company.zefix_score <= max_zefix_score)
+    q = q.order_by(Company.id.asc())
+    if limit:
+        q = q.limit(limit)
+    companies = q.all()
     logger.info(f"[1/6] Loaded {len(companies)} companies in {time.time()-t0:.1f}s")
     if not companies:
         return stats
@@ -377,14 +478,16 @@ def run_pipeline(
     # ── Step 5: Labeling ──
     t5 = time.time()
     labels_map = label_clusters(cluster_labels, X_tfidf, feature_names, cfg)
+    company_keywords = extract_company_keywords(X_tfidf, feature_names, cfg)
     cluster_counts = {
         cid: int((cluster_labels == cid).sum()) for cid in unique_ids
     }
     logger.info(f"[6/6] Labeling done in {time.time()-t5:.1f}s")
 
     # Build human-readable summary (largest clusters first)
+    # cast cluster_id to Python int — numpy.int64 is not JSON serializable
     stats["summary"] = [
-        {"cluster_id": cid, "label": labels_map[cid], "company_count": cluster_counts[cid]}
+        {"cluster_id": int(cid), "label": labels_map[cid], "company_count": cluster_counts[cid]}
         for cid in sorted(cluster_counts, key=lambda k: -cluster_counts[k])
     ]
 
@@ -395,7 +498,7 @@ def run_pipeline(
         if progress_cb:
             progress_cb(done, total, s)
 
-    save_stats = save_results(db, companies, cluster_labels, labels_map, cfg, _save_cb)
+    save_stats = save_results(db, companies, cluster_labels, labels_map, company_keywords, cfg, _save_cb)
     stats.update(save_stats)
     logger.info(f"DB save done in {time.time()-t6:.1f}s")
 
