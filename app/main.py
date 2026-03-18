@@ -1,8 +1,24 @@
 import asyncio
 import os
 import pathlib
+import sys
 import time
 from contextlib import asynccontextmanager
+
+# ── Python 3.12 compatibility patch ───────────────────────────────────────────
+# pydantic.v1 (bundled inside pydantic v2) calls ForwardRef._evaluate() without
+# the `recursive_guard` keyword argument required by Python 3.12.  Patch it once
+# at startup so any library that uses pydantic.v1 (e.g. spaCy) works correctly.
+if sys.version_info >= (3, 12):
+    from typing import ForwardRef
+    _orig_evaluate = ForwardRef._evaluate
+
+    def _patched_evaluate(self, globalns, localns, *args, **kwargs):
+        kwargs.setdefault("recursive_guard", frozenset())
+        return _orig_evaluate(self, globalns, localns, *args, **kwargs)
+
+    ForwardRef._evaluate = _patched_evaluate  # type: ignore[method-assign]
+# ──────────────────────────────────────────────────────────────────────────────
 
 from alembic import command as alembic_command
 from alembic.config import Config as AlembicConfig

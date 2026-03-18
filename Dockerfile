@@ -20,7 +20,18 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
-RUN python -m spacy download de_core_news_md
+RUN python - <<'EOF'
+import sys
+if sys.version_info >= (3, 12):
+    from typing import ForwardRef
+    _orig = ForwardRef._evaluate
+    def _p(self, g, l, *a, **kw):
+        kw.setdefault("recursive_guard", frozenset())
+        return _orig(self, g, l, *a, **kw)
+    ForwardRef._evaluate = _p
+import spacy.cli
+spacy.cli.download("de_core_news_md")
+EOF
 
 COPY . .
 
