@@ -1,8 +1,12 @@
 import csv
 import io
 import json
+import logging
 import threading
 import time
+import traceback
+
+logger = logging.getLogger(__name__)
 from urllib.parse import quote_plus, urlencode
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Query, Request, status
@@ -1290,6 +1294,7 @@ def _run_job(app, job_id: int) -> None:
             _sync_active_task(app.state, job_type=job.job_type, label=job.label, message=msg, stats={}, error=None, done=True)
         except Exception as exc:  # noqa: BLE001
             err = str(exc)
+            logger.error("Job %s (%s) failed:\n%s", job.id, job.job_type, traceback.format_exc())
             crud.mark_failed(db, job, error=err)
             crud.create_event(db, job_id=job.id, level="error", message=err)
             _sync_active_task(app.state, job_type=job.job_type, label=job.label, message="Failed", stats={}, error=err, done=True)

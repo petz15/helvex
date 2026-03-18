@@ -38,7 +38,7 @@ from app.services.scoring import (
 
 _INDUSTRY_KEYWORDS: list[tuple[str, list[str]]] = [
     ("Technology", ["software", "informatik", "it-", " it ", "digital", "technologie", "saas", "cloud", "künstliche intelligenz", " ai ", " ki ", "automation", "programmier", "developer", "entwicklung von"]),
-    ("Construction & Real Estate", ["bau", "immobilien", "real estate", "architektur", "renovati", "gebäude", "liegenschaften", "construction", "haustechnik", "sanitär", "elektroinstallation"]),
+    ("Construction & Real Estate", ["bau", "real estate", "architektur", "renovati", "gebäude", "liegenschaften", "construction", "haustechnik", "sanitär", "elektroinstallation"]),
     ("Finance", ["finanz", "finance", "invest", "kapital", "versicherung", "insurance", "treuhand", "buchhaltung", "accounting", "steuer", "tax ", "bank", "kredit", "fond", "vermögensverwaltu", "wirtschaftsprüf"]),
     ("Healthcare", ["gesundheit", "health", "medizin", "medical", "pharma", "dental", "therapie", "pflege", "klinik", "arzt", "spital", "praxis"]),
     ("Consulting", ["beratung", "consulting", "management", "strategie", "advisory", "unternehmensberatung"]),
