@@ -226,33 +226,44 @@
     <button type="submit">Re-derive industry labels</button>
   </form>
 
-  <form method="post" action="/ui/classify/tfidf" style="margin-top:1rem;">
+  <form method="post" action="/ui/classify/hdbscan" style="margin-top:1rem;">
     <p class="muted" style="margin: 0 0 0.6rem;">
-      Cluster companies by TF-IDF similarity of their purpose text. Stores a human-readable
-      <code>tfidf_cluster</code> label (top-3 terms) on each matched company. No API calls — runs locally.
-      Requires <code>scikit-learn</code>.
+      Cluster all companies by purpose text using spaCy lemmatization + TF-IDF + TruncatedSVD + HDBSCAN.
+      Stores a comma-separated label (top-7 terms) in <code>tfidf_cluster</code>.
+      Noise/outliers (no clear cluster) are set to <code>null</code>.
+      Requires <code>spacy</code>, <code>hdbscan</code>, <code>scikit-learn</code>, <code>tqdm</code>.
+      First run: <code>python -m spacy download de_core_news_md</code>.
+      Processes all companies with a purpose — no company limit.
     </p>
     <div class="filter-grid" style="margin-bottom:0.6rem;">
-      <label class="form-label"><span>Canton</span>
-        <input type="text" name="canton" placeholder="e.g. ZH (leave empty = all)">
+      <label class="form-label"><span>Min cluster size</span>
+        <input type="number" name="min_cluster_size" value="75" min="5">
       </label>
-      <label class="form-label"><span>Industry filter</span>
-        <input type="text" name="industry_filter" placeholder="e.g. Technology">
+      <label class="form-label"><span>Min samples</span>
+        <input type="number" name="min_samples" value="10" min="1">
       </label>
-      <label class="form-label"><span>Min Zefix score</span>
-        <input type="number" name="min_zefix_score" placeholder="0-100">
-      </label>
-      <label class="form-label"><span>Max Zefix score</span>
-        <input type="number" name="max_zefix_score" placeholder="0-100">
-      </label>
-      <label class="form-label"><span>Max companies</span>
-        <input type="number" name="limit" value="1000">
-      </label>
-      <label class="form-label"><span>Number of clusters</span>
-        <input type="number" name="n_clusters" value="10" min="2" max="50">
+      <label class="form-label"><span>Top terms per label</span>
+        <input type="number" name="top_terms" value="7" min="1" max="20">
       </label>
     </div>
-    <button type="submit">Run TF-IDF clustering</button>
+    <button type="submit">Run HDBSCAN clustering</button>
+  </form>
+
+  <form method="post" action="/ui/classify/cluster-analysis" style="margin-top:0.75rem;">
+    <p class="muted" style="margin: 0 0 0.6rem;">
+      Analyze which terms appear across many cluster labels — use this after clustering to find
+      new stopword candidates. Output saved to
+      <a href="/static/cluster_analysis.txt" target="_blank"><code>cluster_analysis.txt</code></a>.
+    </p>
+    <div class="filter-grid" style="margin-bottom:0.6rem;">
+      <label class="form-label"><span>Top N clusters to analyze</span>
+        <input type="number" name="top_n_clusters" value="20" min="5">
+      </label>
+      <label class="form-label"><span>Top N terms per cluster</span>
+        <input type="number" name="top_n_terms" value="10" min="3">
+      </label>
+    </div>
+    <button type="submit" class="secondary">Analyze cross-cluster terms</button>
   </form>
 
   <form method="post" action="/ui/classify/claude" style="margin-top:1rem;">

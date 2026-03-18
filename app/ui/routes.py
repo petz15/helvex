@@ -26,7 +26,6 @@ from app.services.collection import (
     rederive_industry_batch,
     run_batch_collect,
     run_zefix_detail_collect,
-    tfidf_classify_batch,
 )
 from app.services.scoring import get_default_scoring_config
 from app.schemas.company import CompanyUpdate
@@ -932,36 +931,40 @@ def start_rederive_industry(
     return RedirectResponse(url=_url_for(request, "ui_settings", message=f"Industry re-derivation queued (job #{job.id})"), status_code=status.HTTP_303_SEE_OTHER)
 
 
-@router.post("/ui/classify/tfidf", include_in_schema=False)
-def start_tfidf_classify(
+@router.post("/ui/classify/hdbscan", include_in_schema=False)
+def start_hdbscan_cluster(
     request: Request,
-    canton: str = Form(""),
-    industry_filter: str = Form(""),
-    min_zefix_score: str = Form(""),
-    max_zefix_score: str = Form(""),
-    limit: str = Form("1000"),
-    n_clusters: str = Form("10"),
+    min_cluster_size: str = Form("75"),
+    min_samples: str = Form("10"),
+    top_terms: str = Form("7"),
 ) -> RedirectResponse:
     params: dict = {
-        "limit": _parse_optional_int(limit) or 1000,
-        "n_clusters": _parse_optional_int(n_clusters) or 10,
+        "min_cluster_size": _parse_optional_int(min_cluster_size) or 75,
+        "min_samples": _parse_optional_int(min_samples) or 10,
+        "top_terms": _parse_optional_int(top_terms) or 7,
     }
-    if canton.strip():
-        params["canton"] = canton.strip()
-    if industry_filter.strip():
-        params["industry_filter"] = industry_filter.strip()
-    v = _parse_optional_int(min_zefix_score)
-    if v is not None:
-        params["min_zefix_score"] = v
-    v2 = _parse_optional_int(max_zefix_score)
-    if v2 is not None:
-        params["max_zefix_score"] = v2
-
-    label = f"TF-IDF cluster ({params['limit']} companies, {params['n_clusters']} clusters)"
-    job, err = _enqueue_job_safe(request, job_type="tfidf_classify", label=label, params=params)
+    label = f"HDBSCAN clustering (min_cluster={params['min_cluster_size']})"
+    job, err = _enqueue_job_safe(request, job_type="hdbscan_cluster", label=label, params=params)
     if err:
         return RedirectResponse(url=_url_for(request, "ui_settings", error=err), status_code=status.HTTP_303_SEE_OTHER)
-    return RedirectResponse(url=_url_for(request, "ui_settings", message=f"TF-IDF clustering queued (job #{job.id})"), status_code=status.HTTP_303_SEE_OTHER)
+    return RedirectResponse(url=_url_for(request, "ui_settings", message=f"HDBSCAN clustering queued (job #{job.id})"), status_code=status.HTTP_303_SEE_OTHER)
+
+
+@router.post("/ui/classify/cluster-analysis", include_in_schema=False)
+def start_cluster_analysis(
+    request: Request,
+    top_n_clusters: str = Form("20"),
+    top_n_terms: str = Form("10"),
+) -> RedirectResponse:
+    params: dict = {
+        "top_n_clusters": _parse_optional_int(top_n_clusters) or 20,
+        "top_n_terms": _parse_optional_int(top_n_terms) or 10,
+    }
+    label = f"Cross-cluster analysis (top {params['top_n_clusters']} clusters)"
+    job, err = _enqueue_job_safe(request, job_type="cluster_analysis", label=label, params=params)
+    if err:
+        return RedirectResponse(url=_url_for(request, "ui_settings", error=err), status_code=status.HTTP_303_SEE_OTHER)
+    return RedirectResponse(url=_url_for(request, "ui_settings", message=f"Analysis queued (job #{job.id})"), status_code=status.HTTP_303_SEE_OTHER)
 
 
 @router.post("/ui/classify/claude", include_in_schema=False)
@@ -1207,26 +1210,38 @@ def _run_job(app, job_id: int) -> None:
                 )
                 done_msg = f"Done — {stats['updated']} updated, {stats['unchanged']} unchanged, {len(stats['errors'])} errors"
 
-            elif job.job_type == "tfidf_classify":
+            elif job.job_type == "hdbscan_cluster":
+                from app.services.cluster_pipeline import PipelineConfig, run_pipeline
+
                 def _progress(done: int, total: int, stats: dict) -> None:
                     _assert_not_cancelled()
-                    msg = f"Clustered {done}/{total} — {stats['classified']} labelled"
+                    step = stats.get("step", "clustering")
+                    msg = f"[{step}] {done}/{total} — {stats.get('classified', 0)} clustered, {stats.get('noise', 0)} noise"
                     crud.update_progress(db, job, message=msg, done=done, total=total, stats=stats)
                     crud.create_event(db, job_id=job.id, level="debug", message=msg)
                     _sync_active_task(app.state, job_type=job.job_type, label=job.label, message=msg, stats=dict(stats), error=None, done=False)
 
-                stats = tfidf_classify_batch(
-                    db,
-                    canton=params.get("canton") or None,
-                    industry_filter=params.get("industry_filter") or None,
-                    min_zefix_score=params.get("min_zefix_score"),
-                    max_zefix_score=params.get("max_zefix_score"),
-                    limit=int(params.get("limit", 1000)),
-                    n_clusters=int(params.get("n_clusters", 10)),
-                    resume_from=resume_from,
-                    progress_cb=_progress,
+                cfg = PipelineConfig(
+                    min_cluster_size=int(params.get("min_cluster_size", 75)),
+                    min_samples=int(params.get("min_samples", 10)),
+                    top_terms_per_cluster=int(params.get("top_terms", 7)),
                 )
-                done_msg = f"Done — {stats['classified']} clustered, {stats['skipped']} skipped, {len(stats['errors'])} errors"
+                stats = run_pipeline(db, cfg, progress_cb=_progress)
+                n_c = stats.get("n_clusters", 0)
+                classified = stats.get("classified", 0)
+                noise = stats.get("noise", 0)
+                done_msg = f"Done — {n_c} clusters, {classified} companies labelled, {noise} noise"
+
+            elif job.job_type == "cluster_analysis":
+                from app.services.cluster_pipeline import PipelineConfig, analyze_cross_cluster_terms
+
+                cfg = PipelineConfig(
+                    analysis_top_clusters=int(params.get("top_n_clusters", 20)),
+                    analysis_top_terms=int(params.get("top_n_terms", 10)),
+                )
+                analyze_cross_cluster_terms(db, cfg)
+                stats = {"errors": []}
+                done_msg = "Cross-cluster analysis written — download at /static/cluster_analysis.txt"
 
             elif job.job_type == "claude_classify":
                 from app.config import settings as app_settings

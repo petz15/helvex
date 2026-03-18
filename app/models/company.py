@@ -65,8 +65,8 @@ class Company(Base):
     # Geocoded coordinates (from Nominatim, based on the Zefix address)
     lat: Mapped[float | None] = mapped_column(Float, nullable=True)
     lon: Mapped[float | None] = mapped_column(Float, nullable=True)
-    # TF-IDF clustering label (e.g. "software · entwicklung · digital")
-    tfidf_cluster: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    # TF-IDF keyword tags (comma-separated, e.g. "werkzeugmaschinen,robotics,handlinggeräte")
+    tfidf_cluster: Mapped[str | None] = mapped_column(String(512), nullable=True)
     # Claude Haiku classification score and category
     claude_score: Mapped[int | None] = mapped_column(Integer, nullable=True)
     claude_category: Mapped[str | None] = mapped_column(String(128), nullable=True)

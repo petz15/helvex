@@ -3,7 +3,6 @@
 {% if active_task %}
 {% block extra_head %}<script>
 (function(){
-  var prevRunning = true;
   function poll(){
     fetch('/api/task-status')
       .then(function(r){ return r.json(); })
@@ -13,10 +12,10 @@
           var msg = document.getElementById('task-msg');
           if(lbl) lbl.textContent = d.label;
           if(msg) msg.textContent = d.message;
-          prevRunning = true;
           setTimeout(poll, 5000);
         } else {
-          if(prevRunning){ location.reload(); }
+          var banner = document.querySelector('.collection-running-banner');
+          if(banner) banner.remove();
         }
       })
       .catch(function(){ setTimeout(poll, 10000); });

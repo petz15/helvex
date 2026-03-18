@@ -1,3 +1,4 @@
+from collections import Counter
 from datetime import date
 
 from sqlalchemy import func
@@ -201,13 +202,19 @@ def get_company_stats(db: Session) -> dict:
 
 def get_taxonomy_stats(db: Session) -> dict:
     """Return distinct values + counts for tfidf_cluster, industry, and tags (sorted by count desc)."""
-    clusters = (
-        db.query(Company.tfidf_cluster, func.count(Company.id).label("cnt"))
+    # tfidf_cluster is comma-separated keywords — count per individual keyword
+    raw_clusters = (
+        db.query(Company.tfidf_cluster)
         .filter(Company.tfidf_cluster.isnot(None))
-        .group_by(Company.tfidf_cluster)
-        .order_by(func.count(Company.id).desc())
         .all()
     )
+    kw_counter: Counter = Counter()
+    for (val,) in raw_clusters:
+        for kw in val.split(","):
+            kw = kw.strip()
+            if kw:
+                kw_counter[kw] += 1
+    clusters_list = kw_counter.most_common()
     industries = (
         db.query(Company.industry, func.count(Company.id).label("cnt"))
         .filter(Company.industry.isnot(None))
@@ -223,7 +230,7 @@ def get_taxonomy_stats(db: Session) -> dict:
         .all()
     )
     return {
-        "clusters": [(r.tfidf_cluster, r.cnt) for r in clusters],
+        "clusters": clusters_list,
         "industries": [(r.industry, r.cnt) for r in industries],
         "tags": [(r.tags, r.cnt) for r in tags],
     }
