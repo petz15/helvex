@@ -25,6 +25,10 @@ _DIRECTORY_DOMAINS = {
     "kununu.com",
     "crunchbase.com",
     "rocketreach.com",
+    "tiger.ch",
+    "help.ch",
+    "kompass.ch",
+    
 }
 
 _SOCIAL_LEAD_DOMAINS = {
