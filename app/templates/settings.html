@@ -264,6 +264,13 @@
           <input type="number" name="n_components" value="50" min="10" max="300">
           <small class="muted">Dimensions after reduction. Lower = faster HDBSCAN.</small>
         </label>
+        <label class="form-label"><span>Assign noise to nearest cluster</span>
+          <select name="assign_noise">
+            <option value="true" selected>Yes — every company gets a label</option>
+            <option value="false">No — keep noise as null</option>
+          </select>
+          <small class="muted">After HDBSCAN, noise points are assigned to the nearest cluster centroid so no company is left unlabelled.</small>
+        </label>
         <label class="form-label"><span>Top terms per label</span>
           <input type="number" name="top_terms" value="7" min="1" max="20">
           <small class="muted">Keywords stored per cluster label.</small>

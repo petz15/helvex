@@ -1231,6 +1231,7 @@ def _run_job(app, job_id: int) -> None:
                     top_terms_per_cluster=int(params.get("top_terms", 7)),
                     n_components=int(params.get("n_components", 50)),
                     top_keywords_per_company=int(params.get("top_keywords_per_company", 10)),
+                    assign_noise=params.get("assign_noise", "true") == "true",
                 )
                 stats = run_pipeline(
                     db, cfg,

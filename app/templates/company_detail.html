@@ -89,6 +89,9 @@
     {% if company.claude_score is not none %}
     <dt>Claude score</dt><dd>{{ company.claude_score }}{% if company.claude_category %} — <em>{{ company.claude_category }}</em>{% endif %}</dd>
     {% endif %}
+    {% if company.purpose_keywords %}
+    <dt>Purpose keywords</dt><dd>{{ company.purpose_keywords }}</dd>
+    {% endif %}
     {% if company.tfidf_cluster %}
     <dt>TF-IDF cluster</dt><dd>{{ company.tfidf_cluster }}</dd>
     {% endif %}

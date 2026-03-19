@@ -49,6 +49,7 @@ class PipelineConfig:
     hdbscan_metric: str = "euclidean"
     hdbscan_algorithm: str = "auto"
     n_jobs: int = -1
+    assign_noise: bool = True   # assign noise points to nearest cluster centroid
 
     # ── Labeling ──
     top_terms_per_cluster: int = 7
@@ -173,6 +174,37 @@ def cluster_hdbscan(X_reduced, cfg: PipelineConfig):
         n_jobs=cfg.n_jobs,
     )
     return clusterer.fit_predict(X_reduced)
+
+
+def assign_noise_to_nearest_cluster(X_reduced, cluster_labels, cfg: PipelineConfig):
+    """Assign noise points (-1) to the nearest cluster centroid.
+
+    Computes the mean position of each cluster in the reduced space, then for
+    each noise point finds the closest centroid (euclidean distance) and assigns
+    that cluster id.  Non-noise labels are unchanged.
+    """
+    import numpy as np
+
+    unique_ids = sorted(set(cluster_labels) - {-1})
+    if not unique_ids:
+        return cluster_labels  # no clusters at all — nothing to assign to
+
+    centroids = np.array([
+        X_reduced[cluster_labels == cid].mean(axis=0) for cid in unique_ids
+    ])
+
+    labels = cluster_labels.copy()
+    noise_mask = labels == -1
+    if not noise_mask.any():
+        return labels
+
+    noise_points = X_reduced[noise_mask]
+    # Euclidean distance from each noise point to each centroid
+    diffs = noise_points[:, np.newaxis, :] - centroids[np.newaxis, :, :]  # (n_noise, n_clusters, dims)
+    distances = np.linalg.norm(diffs, axis=2)                             # (n_noise, n_clusters)
+    nearest = distances.argmin(axis=1)
+    labels[noise_mask] = np.array(unique_ids)[nearest]
+    return labels
 
 
 # ── Step 5: Cluster Labeling ──────────────────────────────────────────────────
@@ -468,12 +500,16 @@ def run_pipeline(
         progress_cb(0, len(companies), {**stats, "step": "clustering"})
     cluster_labels = cluster_hdbscan(X_reduced, cfg)
     unique_ids = sorted(set(cluster_labels) - {-1})
-    stats["n_clusters"] = len(unique_ids)
-    stats["noise"] = int((cluster_labels == -1).sum())
+    raw_noise = int((cluster_labels == -1).sum())
     logger.info(
         f"[5/6] HDBSCAN done in {time.time()-t4:.1f}s — "
-        f"{len(unique_ids)} clusters, {stats['noise']} noise"
+        f"{len(unique_ids)} clusters, {raw_noise} noise"
     )
+    if cfg.assign_noise and unique_ids:
+        cluster_labels = assign_noise_to_nearest_cluster(X_reduced, cluster_labels, cfg)
+        logger.info(f"      Noise assigned to nearest cluster ({raw_noise} points reassigned)")
+    stats["n_clusters"] = len(unique_ids)
+    stats["noise"] = int((cluster_labels == -1).sum())  # 0 when assign_noise=True
 
     # ── Step 5: Labeling ──
     t5 = time.time()
