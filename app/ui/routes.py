@@ -64,6 +64,7 @@ def _filter_params(
     tags: str | None,
     min_claude_score: int | None = None,
     tfidf_cluster: str | None = None,
+    purpose_keywords: str | None = None,
 ) -> dict:
     """Build a dict of non-empty filter params for URL construction."""
     p: dict = {}
@@ -91,6 +92,8 @@ def _filter_params(
         p["tags"] = tags
     if tfidf_cluster:
         p["tfidf_cluster"] = tfidf_cluster
+    if purpose_keywords:
+        p["purpose_keywords"] = purpose_keywords
     return p
 
 
@@ -143,6 +146,7 @@ def ui_home(
     industry: str | None = Query(None),
     tags: str | None = Query(None),
     tfidf_cluster: str | None = Query(None),
+    purpose_keywords: str | None = Query(None),
     sort: str | None = Query(None),
     page: int = Query(1, ge=1),
     message: str | None = Query(None),
@@ -166,6 +170,7 @@ def ui_home(
         industry=industry or None,
         tags=tags or None,
         tfidf_cluster=tfidf_cluster or None,
+        purpose_keywords=purpose_keywords or None,
     )
 
     companies = crud.list_companies(db, page=page, page_size=PAGE_SIZE,
@@ -177,7 +182,8 @@ def ui_home(
     # Build base query string (without page) for pagination links
     fp = _filter_params(q, canton, review_status, proposal_status,
                         google_searched, min_google_score_int, min_zefix_score_int,
-                        sort, industry, tags, min_claude_score_int, tfidf_cluster or None)
+                        sort, industry, tags, min_claude_score_int, tfidf_cluster or None,
+                        purpose_keywords or None)
     filter_qs = ("&" + urlencode(fp)) if fp else ""
 
     return templates.TemplateResponse(
@@ -206,6 +212,7 @@ def ui_home(
             "f_industry": industry or "",
             "f_tags": tags or "",
             "f_tfidf_cluster": tfidf_cluster or "",
+            "f_purpose_keywords": purpose_keywords or "",
             "taxonomy_stats": crud.get_taxonomy_stats(db),
             "google_search_enabled": crud.get_setting(db, "google_search_enabled", "true") == "true",
             "google_daily_quota": int(crud.get_setting(db, "google_daily_quota", "100")),
@@ -779,8 +786,11 @@ def ui_settings(
             "zefix_force_zero_status_terms": current.get("zefix_force_zero_status_terms", "being_cancelled"),
             "zefix_target_keywords": current.get("zefix_target_keywords", ""),
             "zefix_excluded_keywords": current.get("zefix_excluded_keywords", "treuhand,consulting"),
+            "zefix_target_clusters": current.get("zefix_target_clusters", ""),
+            "zefix_cluster_bonus": current.get("zefix_cluster_bonus", "10"),
             "industry_taxonomy": current.get("industry_taxonomy", ""),
             "anthropic_api_key": current.get("anthropic_api_key", ""),
+            "claude_target_description": current.get("claude_target_description", ""),
             "claude_classify_prompt": current.get("claude_classify_prompt", ""),
             "message": message,
             "error": error,
@@ -802,8 +812,11 @@ def save_settings(
     zefix_force_zero_status_terms: str = Form("being_cancelled"),
     zefix_target_keywords: str = Form(""),
     zefix_excluded_keywords: str = Form("treuhand,consulting"),
+    zefix_target_clusters: str = Form(""),
+    zefix_cluster_bonus: str = Form("10"),
     industry_taxonomy: str = Form(""),
     anthropic_api_key: str = Form(""),
+    claude_target_description: str = Form(""),
     claude_classify_prompt: str = Form(""),
     db: Session = Depends(get_db),
 ) -> RedirectResponse:
@@ -819,9 +832,12 @@ def save_settings(
         "zefix_force_zero_status_terms": zefix_force_zero_status_terms,
         "zefix_target_keywords": zefix_target_keywords,
         "zefix_excluded_keywords": zefix_excluded_keywords,
+        "zefix_target_clusters": zefix_target_clusters,
+        "zefix_cluster_bonus": zefix_cluster_bonus,
     }
+    _text_fields = {"zefix_force_zero_status_terms", "zefix_target_keywords", "zefix_excluded_keywords", "zefix_target_clusters"}
     for key, value in score_fields.items():
-        if key in ("zefix_force_zero_status_terms", "zefix_target_keywords", "zefix_excluded_keywords"):
+        if key in _text_fields:
             cleaned = value.strip()
         else:
             cleaned = str(int(value)) if value.strip().lstrip("-").isdigit() else defaults[key]
@@ -830,6 +846,7 @@ def save_settings(
     # Free-text / API settings
     crud.set_setting(db, "industry_taxonomy", industry_taxonomy.strip())
     crud.set_setting(db, "anthropic_api_key", anthropic_api_key.strip())
+    crud.set_setting(db, "claude_target_description", claude_target_description.strip())
     crud.set_setting(db, "claude_classify_prompt", claude_classify_prompt.strip())
 
     return RedirectResponse(
@@ -1226,12 +1243,12 @@ def _run_job(app, job_id: int) -> None:
                     _sync_active_task(app.state, job_type=job.job_type, label=job.label, message=msg, stats=dict(stats), error=None, done=False)
 
                 cfg = PipelineConfig(
-                    min_cluster_size=int(params.get("min_cluster_size", 75)),
-                    min_samples=int(params.get("min_samples", 10)),
-                    top_terms_per_cluster=int(params.get("top_terms", 7)),
+                    n_clusters=int(params.get("n_clusters", 150)),
+                    max_clusters_per_company=int(params.get("max_clusters_per_company", 7)),
+                    min_similarity=float(params.get("min_similarity", 0.10)),
                     n_components=int(params.get("n_components", 50)),
+                    top_terms_per_cluster=int(params.get("top_terms", 5)),
                     top_keywords_per_company=int(params.get("top_keywords_per_company", 10)),
-                    assign_noise=params.get("assign_noise", "true") == "true",
                 )
                 stats = run_pipeline(
                     db, cfg,
@@ -1277,6 +1294,7 @@ def _run_job(app, job_id: int) -> None:
                     max_zefix_score=params.get("max_zefix_score"),
                     limit=int(params.get("limit", 500)),
                     system_prompt=params.get("system_prompt") or None,
+                    target_description=crud.get_setting(db, "claude_target_description", "") or None,
                     api_key=crud.get_setting(db, "anthropic_api_key", "") or app_settings.anthropic_api_key,
                     resume_from=resume_from,
                     progress_cb=_progress,

@@ -41,10 +41,10 @@ _INDUSTRY_KEYWORDS: list[tuple[str, list[str]]] = [
     ("Construction & Real Estate", ["bau", "real estate", "architektur", "renovati", "gebäude", "liegenschaften", "construction", "haustechnik", "sanitär", "elektroinstallation"]),
     ("Finance", ["finanz", "finance", "invest", "kapital", "versicherung", "insurance", "treuhand", "buchhaltung", "accounting", "steuer", "tax ", "bank", "kredit", "fond", "vermögensverwaltu", "wirtschaftsprüf"]),
     ("Healthcare", ["gesundheit", "health", "medizin", "medical", "pharma", "dental", "therapie", "pflege", "klinik", "arzt", "spital", "praxis"]),
-    ("Consulting", ["beratung", "consulting", "management", "strategie", "advisory", "unternehmensberatung"]),
+    ("Consulting", ["consulting", "management", "strategie", "advisory", "unternehmensberatung"]),
     ("Trade & Retail", ["handel", " trade", "import", "export", "vertrieb", "retail", "grosshandel", "detailhandel", "e-commerce"]),
     ("Hospitality & Food", ["restaurant", "hotel", "gastro", "gastronomie", "catering", "food", "getränke", "beverage", "café", "bäckerei"]),
-    ("Manufacturing", ["herstellung", "produktion", "manufacturing", "fertigung", "verarbeit"]),
+    ("Manufacturing", ["manufacturing", "fertigung", "verarbeit"]),
     ("Transport & Logistics", ["transport", "logistik", "logistics", "spedition", "lieferung", "delivery", "kurier"]),
     ("Education", ["bildung", "education", "schule", "ausbildung", "training", "unterricht", "weiterbildung", "coaching"]),
     ("Marketing & Media", ["marketing", "werbung", "media", "kommunikation", " pr ", "design", "grafik", "agentur", "fotografie", "video"]),
@@ -70,6 +70,9 @@ _TFIDF_STOPWORDS: set[str] = {
     "jede", "jeder", "jedes", "aller", "allem", "allen",
     "jedoch", "daher", "dabei", "dazu", "davon", "darüber", "dafür",
     "soweit", "sowohl", "darunter", "hierzu", "hierbei", "hierfür", "bzgl", "bzw",
+    "etc", "usw", "inklusive", "inkl", "exklusive", "exkl", "anderen", "anderer", "anderes", 
+    "beispielsweise", "z.B", "zB", "u.a", "ua", "namentlich", "hauptsächlich", "vorzugsweise",
+    "allgemein", "allgemeine", "allgemeinen", "sonstige", "sonstigen",
     # ── Swiss registry boilerplate (appear in nearly every purpose text) ──────
     "gesellschaft", "gesellschaften", "gesellschafts", "unternehmen", "betrieb", "zweck", "zwecks",
     "aktien", "gmbh", "ag", "sarl", "sàrl", "cie", "co", "inc",
@@ -97,6 +100,7 @@ _TFIDF_STOPWORDS: set[str] = {
     "vertretungen", "vertretung",
     "zubehör",
     "dazugehörig", "dazugehörigen", "dazugehörigem",
+    "darlehen", "immaterialgüter", "immaterialgüt", "anderer", "zusammenhängen", "bezwecken", 
     # ── Swiss registry standard boilerplate sentence (verbatim filler) ────────
     "kann", "errichten", "anderen", "andern", "geschäfte", "geschäftstätigkeit", "geschäftstätigkeiten",
     "tätigen", "direkt", "indirekt", "ihrem", "zusammenhang", "stehen",
@@ -228,18 +232,33 @@ _TFIDF_STOPWORDS: set[str] = {
     "verpflichtung sicherheit",
     "darlehen verpflichtung",
     "gunst",
+    "anderer geschäft"
 }
 
 # Default system prompt for Claude classification
-_DEFAULT_CLAUDE_PROMPT = (
-    "You are evaluating Swiss company register (Zefix) entries as potential B2B leads. "
-    "Given the company name, purpose statement, and optionally an industry label, output ONLY a JSON object "
-    "(no markdown, no explanation) with exactly two fields:\n"
-    '- "score": integer 0-100 (100 = perfect lead, 0 = completely irrelevant)\n'
-    '- "category": short English category label (e.g. "Technology", "Manufacturing", "Consulting", "Retail")\n\n'
-    "Consider: Is the company an active SME likely to need services or products? "
-    "Holding companies, pure financial entities, and non-commercial associations score lower."
-)
+_DEFAULT_CLAUDE_PROMPT = """\
+You are evaluating Swiss company register (Zefix) entries as B2B sales leads.
+
+Each entry includes the company name, purpose text, pre-classified industry, \
+purpose keywords (TF-IDF terms from the company's own text), and cluster labels \
+(segment groups derived from similar companies).
+
+Use ALL provided fields together. The keywords and cluster labels are pre-computed \
+hints — let the purpose text be the primary signal when they conflict.
+
+Output ONLY a JSON object (no markdown, no explanation) with exactly two fields:
+- "score": integer 0–100
+- "category": short English label (e.g. "SaaS", "Industrial Machinery", "Accounting", "E-Commerce")
+
+Scoring guidance — spread scores across the full range:
+- 85–100: Strong lead. Active SME clearly operating in the target space.
+- 60–84:  Relevant but not ideal. Adjacent industry or mixed activities.
+- 35–59:  Marginal. Some overlap but mostly outside the target.
+- 10–34:  Weak. Different industry, very generic, or unclear purpose.
+- 0–9:    Irrelevant. Holding company, dormant entity, non-commercial association.
+
+Do NOT cluster scores in the 40–70 band. Use the full range so leads can be ranked meaningfully.\
+"""
 
 
 def _derive_industry(
@@ -503,6 +522,8 @@ def geocode_and_update_company(db: Session, company: Company) -> bool:
         municipality=company.municipality,
         lat=lat,
         lon=lon,
+        purpose_keywords=company.purpose_keywords,
+        tfidf_cluster=company.tfidf_cluster,
         config=scoring_config,
     )
     crud.update_company(
@@ -565,6 +586,8 @@ def recalculate_zefix_scores(
                     municipality=company.municipality,
                     lat=company.lat,
                     lon=company.lon,
+                    purpose_keywords=company.purpose_keywords,
+                    tfidf_cluster=company.tfidf_cluster,
                     config=scoring_config,
                 )
                 company.zefix_score = int(score_breakdown["final_score"])
@@ -1345,6 +1368,8 @@ def rederive_industry_batch(
                         municipality=company.municipality,
                         lat=company.lat,
                         lon=company.lon,
+                        purpose_keywords=company.purpose_keywords,
+                        tfidf_cluster=company.tfidf_cluster,
                         config=scoring_config,
                     )
                     company.zefix_score = int(score_breakdown["final_score"])
@@ -1375,6 +1400,7 @@ def claude_classify_batch(
     max_zefix_score: int | None = None,
     limit: int = 500,
     system_prompt: str | None = None,
+    target_description: str | None = None,
     api_key: str | None = None,
     resume_from: int = 0,
     progress_cb: Any = None,
@@ -1399,7 +1425,11 @@ def claude_classify_batch(
 
     stats: dict[str, Any] = {"classified": 0, "skipped": 0, "errors": [], "input_tokens": 0, "output_tokens": 0}
     client = _anthropic.Anthropic(api_key=api_key)
-    prompt = (system_prompt or "").strip() or _DEFAULT_CLAUDE_PROMPT
+    base_prompt = (system_prompt or "").strip() or _DEFAULT_CLAUDE_PROMPT
+    if target_description and target_description.strip():
+        prompt = base_prompt + f"\n\nWhat we are looking for: {target_description.strip()}"
+    else:
+        prompt = base_prompt
 
     query = db.query(Company).filter(Company.purpose.isnot(None))
     if canton:
@@ -1417,9 +1447,14 @@ def claude_classify_batch(
 
     for i, company in enumerate(companies[offset:], start=offset + 1):
         try:
-            user_text = f"Company: {company.name}\nPurpose: {company.purpose}"
+            parts = [f"Company: {company.name}", f"Purpose: {company.purpose}"]
             if company.industry:
-                user_text += f"\nIndustry: {company.industry}"
+                parts.append(f"Industry: {company.industry}")
+            if company.purpose_keywords:
+                parts.append(f"Keywords: {company.purpose_keywords}")
+            if company.tfidf_cluster and company.tfidf_cluster != "Undefined":
+                parts.append(f"Clusters: {company.tfidf_cluster}")
+            user_text = "\n".join(parts)
 
             msg = client.messages.create(
                 model="claude-haiku-4-5-20251001",

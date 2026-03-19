@@ -1,17 +1,21 @@
-"""HDBSCAN-based company clustering pipeline for zefix_analyzer.
+"""K-Means multi-label clustering pipeline for zefix_analyzer.
 
 Pipeline steps:
-  1. Load companies from DB
+  1. Load companies from DB (with optional filters)
   2. Lemmatize purpose text with spaCy de_core_news_md
   3. TF-IDF vectorization
   4. Dimensionality reduction (TruncatedSVD + L2 normalize)
-  5. HDBSCAN clustering
-  6. Cluster labeling (top-7 TF-IDF terms per cluster)
-  7. Write labels back to Company.tfidf_cluster
+  5. K-Means clustering (MiniBatchKMeans for speed)
+  6. Cluster labeling via c-TF-IDF with bigram deduplication
+  7. Multi-label soft assignment: each company gets up to N clusters
+     by cosine similarity to centroids; below threshold → "Undefined"
+  8. Per-company keyword extraction from each document's own TF-IDF row
+  9. Write tfidf_cluster (pipe-separated cluster labels) and
+     purpose_keywords (comma-separated per-doc keywords) to DB
 
 Standalone helper:
-  analyze_cross_cluster_terms() — finds terms that appear across many
-  cluster labels (candidates for the stopword list) and writes a .txt file.
+  analyze_cross_cluster_terms() — finds terms appearing across many
+  cluster labels (stopword candidates), writes a .txt file.
 
 All tunable parameters live in PipelineConfig at the top of this file.
 """
@@ -43,17 +47,19 @@ class PipelineConfig:
     n_components: int = 50
     svd_random_state: int = 42
 
-    # ── HDBSCAN ──
-    min_cluster_size: int = 75
-    min_samples: int = 10
-    hdbscan_metric: str = "euclidean"
-    hdbscan_algorithm: str = "auto"
-    n_jobs: int = -1
-    assign_noise: bool = True   # assign noise points to nearest cluster centroid
+    # ── K-Means ──
+    n_clusters: int = 150
+    kmeans_random_state: int = 42
+    kmeans_max_iter: int = 300
+    kmeans_n_init: int = 3
+
+    # ── Multi-label assignment ──
+    max_clusters_per_company: int = 7   # assign up to this many clusters per company
+    min_similarity: float = 0.10        # cosine similarity threshold; below → Undefined
 
     # ── Labeling ──
-    top_terms_per_cluster: int = 7
-    top_keywords_per_company: int = 10   # stored in purpose_keywords
+    top_terms_per_cluster: int = 5      # terms in each cluster label
+    top_keywords_per_company: int = 10  # stored in purpose_keywords
 
     # ── Cross-cluster analysis ──
     analysis_top_clusters: int = 20
@@ -63,7 +69,6 @@ class PipelineConfig:
     db_batch_size: int = 200
 
     # ── Extra domain stopwords merged with _TFIDF_STOPWORDS ──
-    # These are loaded at runtime so the set is always current.
     extra_stopwords: list[str] = field(default_factory=lambda: [
         "gesellschaft", "zweck", "unternehmen", "dienstleistungen", "kunden",
         "erbringt", "betreibt", "sowie", "alle", "art", "insbesondere",
@@ -150,7 +155,6 @@ def vectorize(texts: list[str], cfg: PipelineConfig):
 
 def reduce_dimensions(X, cfg: PipelineConfig):
     """TruncatedSVD + L2 normalisation (euclidean distance ≈ cosine similarity)."""
-    import numpy as np
     from sklearn.decomposition import TruncatedSVD
     from sklearn.preprocessing import normalize
 
@@ -160,102 +164,94 @@ def reduce_dimensions(X, cfg: PipelineConfig):
     return normalize(X_svd)
 
 
-# ── Step 4: HDBSCAN Clustering ────────────────────────────────────────────────
+# ── Step 4: K-Means Clustering ────────────────────────────────────────────────
 
-def cluster_hdbscan(X_reduced, cfg: PipelineConfig):
-    """Return integer cluster labels; -1 = noise/outlier."""
-    from sklearn.cluster import HDBSCAN
+def cluster_kmeans(X_reduced, cfg: PipelineConfig):
+    """Fit MiniBatchKMeans and return the fitted model."""
+    from sklearn.cluster import MiniBatchKMeans
 
-    clusterer = HDBSCAN(
-        min_cluster_size=cfg.min_cluster_size,
-        min_samples=cfg.min_samples,
-        metric=cfg.hdbscan_metric,
-        algorithm=cfg.hdbscan_algorithm,
-        n_jobs=cfg.n_jobs,
+    km = MiniBatchKMeans(
+        n_clusters=min(cfg.n_clusters, X_reduced.shape[0]),
+        random_state=cfg.kmeans_random_state,
+        max_iter=cfg.kmeans_max_iter,
+        n_init=cfg.kmeans_n_init,
     )
-    return clusterer.fit_predict(X_reduced)
+    km.fit(X_reduced)
+    return km
 
 
-def assign_noise_to_nearest_cluster(X_reduced, cluster_labels, cfg: PipelineConfig):
-    """Assign noise points (-1) to the nearest cluster centroid.
+# ── Step 5: Multi-label soft assignment ───────────────────────────────────────
 
-    Computes the mean position of each cluster in the reduced space, then for
-    each noise point finds the closest centroid (euclidean distance) and assigns
-    that cluster id.  Non-noise labels are unchanged.
+def assign_multi_label(X_reduced, km, cfg: PipelineConfig) -> list[list[int]]:
+    """Assign each company up to max_clusters_per_company clusters.
+
+    Computes cosine similarity between each company vector and all cluster
+    centroids (both are already L2-normalised so dot product = cosine sim).
+    Assigns the top-N clusters whose similarity >= min_similarity.
+    Returns an empty list for companies that don't meet the threshold on any
+    cluster (they will be labelled "Undefined").
     """
     import numpy as np
+    from sklearn.preprocessing import normalize
 
-    unique_ids = sorted(set(cluster_labels) - {-1})
-    if not unique_ids:
-        return cluster_labels  # no clusters at all — nothing to assign to
+    centers_norm = normalize(km.cluster_centers_)
+    sim_matrix = X_reduced @ centers_norm.T          # (n_companies, n_clusters)
 
-    centroids = np.array([
-        X_reduced[cluster_labels == cid].mean(axis=0) for cid in unique_ids
-    ])
+    assignments: list[list[int]] = []
+    for i in range(sim_matrix.shape[0]):
+        sims = sim_matrix[i]
+        ranked = sims.argsort()[::-1][: cfg.max_clusters_per_company]
+        assigned = [int(idx) for idx in ranked if sims[idx] >= cfg.min_similarity]
+        assignments.append(assigned)
 
-    labels = cluster_labels.copy()
-    noise_mask = labels == -1
-    if not noise_mask.any():
-        return labels
-
-    noise_points = X_reduced[noise_mask]
-    # Euclidean distance from each noise point to each centroid
-    diffs = noise_points[:, np.newaxis, :] - centroids[np.newaxis, :, :]  # (n_noise, n_clusters, dims)
-    distances = np.linalg.norm(diffs, axis=2)                             # (n_noise, n_clusters)
-    nearest = distances.argmin(axis=1)
-    labels[noise_mask] = np.array(unique_ids)[nearest]
-    return labels
+    return assignments
 
 
-# ── Step 5: Cluster Labeling ──────────────────────────────────────────────────
+# ── Step 6: Cluster Labeling ──────────────────────────────────────────────────
 
 def label_clusters(
-    cluster_labels,
+    hard_labels,        # km.labels_ — hard assignment used only for c-TF-IDF
     X_tfidf,
     feature_names,
+    n_clusters: int,
     cfg: PipelineConfig,
 ) -> dict[int, str]:
     """Label each cluster using c-TF-IDF with bigram deduplication.
 
     c-TF-IDF scores terms by how frequent they are *within* a cluster relative
-    to how many other clusters also contain them — so cluster-specific terms
-    rank above generic cross-cluster terms like "handel" or "dienstleistung".
-
-    Bigram deduplication: skip a candidate term if every word it contains is
-    already represented by a previously selected term (prevents "handel",
-    "handel wein", "wein" all appearing in the same label).
+    to how many other clusters also contain them — cluster-specific terms rank
+    above generic ones like "handel" or "dienstleistung".
 
     Returns {cluster_id: "term1,term2,...,termN"}.
     """
     import numpy as np
 
-    unique_ids = sorted(set(cluster_labels) - {-1})
-    n_clusters = len(unique_ids)
     n_features = X_tfidf.shape[1]
 
-    # ── Build per-cluster term-sum matrix ──
+    # Build per-cluster term-sum matrix using hard K-Means assignments
     cluster_term_sum = np.zeros((n_clusters, n_features))
-    for i, cid in enumerate(unique_ids):
-        mask = cluster_labels == cid
-        cluster_term_sum[i] = np.asarray(X_tfidf[mask].sum(axis=0)).flatten()
+    for cid in range(n_clusters):
+        mask = hard_labels == cid
+        if mask.sum() > 0:
+            cluster_term_sum[cid] = np.asarray(X_tfidf[mask].sum(axis=0)).flatten()
 
-    # ── c-IDF: penalise terms present in many clusters ──
-    term_presence = (cluster_term_sum > 0).sum(axis=0)          # how many clusters contain each term
+    # c-IDF: penalise terms present in many clusters
+    term_presence = (cluster_term_sum > 0).sum(axis=0)
     c_idf = np.log(n_clusters / (term_presence + 1) + 1)
 
-    # ── c-TF: normalise each cluster's total weight to 1 ──
+    # c-TF: normalise each cluster's total weight to 1
     totals = cluster_term_sum.sum(axis=1, keepdims=True)
     totals = np.where(totals == 0, 1, totals)
     c_tf = cluster_term_sum / totals
 
-    c_tfidf = c_tf * c_idf  # shape: (n_clusters, n_features)
+    c_tfidf = c_tf * c_idf  # (n_clusters, n_features)
 
-    # ── Select top terms with bigram deduplication ──
+    # Select top terms with bigram deduplication
     labels_map: dict[int, str] = {}
-    candidates = cfg.top_terms_per_cluster * 4          # scan wider to find enough unique terms
+    candidates = cfg.top_terms_per_cluster * 4
 
-    for i, cid in enumerate(unique_ids):
-        ranked_idx = c_tfidf[i].argsort()[::-1][:candidates]
+    for cid in range(n_clusters):
+        ranked_idx = c_tfidf[cid].argsort()[::-1][:candidates]
         selected: list[str] = []
         covered: set[str] = set()
 
@@ -264,18 +260,17 @@ def label_clusters(
                 break
             term = feature_names[j]
             words = set(term.split())
-            # Skip if every word in this term is already covered by a selected term
             if words.issubset(covered):
                 continue
             selected.append(term)
             covered.update(words)
 
-        labels_map[cid] = ",".join(selected)
+        labels_map[cid] = ",".join(selected) if selected else f"cluster_{cid}"
 
     return labels_map
 
 
-# ── Step 5b: Per-document keyword extraction ──────────────────────────────────
+# ── Step 6b: Per-document keyword extraction ──────────────────────────────────
 
 def extract_company_keywords(
     X_tfidf,
@@ -319,38 +314,40 @@ def extract_company_keywords(
     return results
 
 
-# ── Step 6: Save Results to DB ────────────────────────────────────────────────
+# ── Step 7: Save Results to DB ────────────────────────────────────────────────
 
 def save_results(
     db,
     companies: list,
-    cluster_labels,
+    assignments: list[list[int]],
     labels_map: dict[int, str],
     company_keywords: list[str | None],
     cfg: PipelineConfig,
     progress_cb: Callable[[int, int, dict], None] | None = None,
 ) -> dict[str, Any]:
-    """Write tfidf_cluster and purpose_keywords to DB in batches.
+    """Write tfidf_cluster (pipe-separated cluster labels) and purpose_keywords to DB.
 
-    Noise companies (cluster == -1) get tfidf_cluster = None.
+    tfidf_cluster format: "label_a|label_b|label_c" where each label is the
+    comma-separated c-TF-IDF terms for that cluster.
+    Companies with no cluster above the similarity threshold get "Undefined".
     """
-    stats: dict[str, Any] = {"classified": 0, "noise": 0, "skipped": 0, "errors": []}
+    stats: dict[str, Any] = {"classified": 0, "undefined": 0, "skipped": 0, "errors": []}
     total = len(companies)
 
     for idx in range(0, total, cfg.db_batch_size):
         batch = companies[idx: idx + cfg.db_batch_size]
-        batch_cids = cluster_labels[idx: idx + cfg.db_batch_size]
+        batch_assignments = assignments[idx: idx + cfg.db_batch_size]
         batch_kws = company_keywords[idx: idx + cfg.db_batch_size]
 
-        for company, cid, kw in zip(batch, batch_cids, batch_kws):
+        for company, cluster_ids, kw in zip(batch, batch_assignments, batch_kws):
             try:
-                cid_int = int(cid)
                 company.purpose_keywords = kw
-                if cid_int == -1:
-                    company.tfidf_cluster = None
-                    stats["noise"] += 1
+                if not cluster_ids:
+                    company.tfidf_cluster = "Undefined"
+                    stats["undefined"] += 1
                 else:
-                    company.tfidf_cluster = labels_map.get(cid_int)
+                    parts = [labels_map[cid] for cid in cluster_ids if cid in labels_map]
+                    company.tfidf_cluster = "|".join(parts) if parts else "Undefined"
                     stats["classified"] += 1
             except Exception as exc:  # noqa: BLE001
                 stats["errors"].append(f"{company.uid}: {exc}")
@@ -363,21 +360,18 @@ def save_results(
     return stats
 
 
-# ── Step 7: Cross-Cluster Term Analysis ───────────────────────────────────────
+# ── Cross-Cluster Term Analysis ───────────────────────────────────────────────
 
 def analyze_cross_cluster_terms(
     db,
     cfg: PipelineConfig | None = None,
     output_path: Path | None = None,
 ) -> Path:
-    """Find terms that appear across many cluster labels (stopword candidates).
+    """Find terms appearing across many cluster labels (stopword candidates).
 
-    Reads cluster labels already stored in Company.tfidf_cluster, groups by
-    label, takes the top-N largest clusters, splits each label into its
-    component terms, and counts how many clusters each term appears in.
-
-    Writes a tab-separated .txt file sorted by appearance frequency.
-    Returns the output path.
+    Reads tfidf_cluster from DB, splits on '|' to get individual cluster labels,
+    then on ',' for terms, and counts cross-cluster term frequency.
+    Writes a tab-separated .txt file. Returns the output path.
     """
     from collections import Counter
     from sqlalchemy import func
@@ -388,16 +382,26 @@ def analyze_cross_cluster_terms(
     if output_path is None:
         output_path = Path(__file__).parent.parent / "static" / "cluster_analysis.txt"
 
-    # cluster label → member count
     rows = (
         db.query(Company.tfidf_cluster, func.count(Company.id).label("cnt"))
         .filter(Company.tfidf_cluster.isnot(None))
+        .filter(Company.tfidf_cluster != "Undefined")
         .group_by(Company.tfidf_cluster)
         .order_by(func.count(Company.id).desc())
         .all()
     )
 
-    top_labels = [label for label, _ in rows[: cfg.analysis_top_clusters]]
+    # Each row's tfidf_cluster is "label_a|label_b|..." — collect unique cluster labels
+    all_labels: list[str] = []
+    seen: set[str] = set()
+    for full_value, _ in rows:
+        for label in full_value.split("|"):
+            label = label.strip()
+            if label and label not in seen:
+                seen.add(label)
+                all_labels.append(label)
+
+    top_labels = all_labels[: cfg.analysis_top_clusters]
     term_counter: Counter = Counter()
     for label in top_labels:
         for term in label.split(",")[: cfg.analysis_top_terms]:
@@ -407,7 +411,7 @@ def analyze_cross_cluster_terms(
 
     lines = [
         "# Cross-cluster term frequency analysis",
-        f"# Top {cfg.analysis_top_clusters} clusters by size, top {cfg.analysis_top_terms} terms each",
+        f"# Top {cfg.analysis_top_clusters} unique cluster labels, top {cfg.analysis_top_terms} terms each",
         "# Terms appearing in many clusters are candidates to add to the stopword list",
         "# ---------------------------------------------------------------",
         "# term\tclusters_containing_term",
@@ -434,19 +438,18 @@ def run_pipeline(
     limit: int | None = None,
     progress_cb: Callable[[int, int, dict], None] | None = None,
 ) -> dict[str, Any]:
-    """Run the full HDBSCAN clustering pipeline end-to-end.
+    """Run the full K-Means multi-label clustering pipeline end-to-end.
 
     Returns a stats dict with keys:
-      classified, noise, skipped, n_clusters, errors, summary, analysis_file
+      classified, undefined, skipped, n_clusters, errors, summary, analysis_file
     """
-    import numpy as np
     from app.models.company import Company
 
     if cfg is None:
         cfg = PipelineConfig()
 
     stats: dict[str, Any] = {
-        "classified": 0, "noise": 0, "skipped": 0,
+        "classified": 0, "undefined": 0, "skipped": 0,
         "n_clusters": 0, "errors": [], "summary": [],
     }
     t_total = time.time()
@@ -466,7 +469,7 @@ def run_pipeline(
     if limit:
         q = q.limit(limit)
     companies = q.all()
-    logger.info(f"[1/6] Loaded {len(companies)} companies in {time.time()-t0:.1f}s")
+    logger.info(f"[1/7] Loaded {len(companies)} companies in {time.time()-t0:.1f}s")
     if not companies:
         return stats
 
@@ -477,55 +480,55 @@ def run_pipeline(
 
     def _prep_cb(done: int, total: int) -> None:
         if progress_cb:
-            msg_stats = {**stats, "step": "lemmatizing"}
-            progress_cb(done, total, msg_stats)
+            progress_cb(done, total, {**stats, "step": "lemmatizing"})
 
     cleaned = preprocess_texts(purposes, cfg, progress_cb=_prep_cb)
-    logger.info(f"[2/6] Lemmatization done in {time.time()-t1:.1f}s")
+    logger.info(f"[2/7] Lemmatization done in {time.time()-t1:.1f}s")
 
     # ── Step 2: TF-IDF ──
     t2 = time.time()
     vectorizer, X_tfidf = vectorize(cleaned, cfg)
     feature_names = vectorizer.get_feature_names_out()
-    logger.info(f"[3/6] TF-IDF done in {time.time()-t2:.1f}s — shape: {X_tfidf.shape}")
+    logger.info(f"[3/7] TF-IDF done in {time.time()-t2:.1f}s — shape: {X_tfidf.shape}")
 
     # ── Step 3: Dimensionality reduction ──
     t3 = time.time()
     X_reduced = reduce_dimensions(X_tfidf, cfg)
-    logger.info(f"[4/6] SVD done in {time.time()-t3:.1f}s — shape: {X_reduced.shape}")
+    logger.info(f"[4/7] SVD done in {time.time()-t3:.1f}s — shape: {X_reduced.shape}")
 
-    # ── Step 4: Clustering ──
+    # ── Step 4: K-Means ──
     t4 = time.time()
     if progress_cb:
         progress_cb(0, len(companies), {**stats, "step": "clustering"})
-    cluster_labels = cluster_hdbscan(X_reduced, cfg)
-    unique_ids = sorted(set(cluster_labels) - {-1})
-    raw_noise = int((cluster_labels == -1).sum())
-    logger.info(
-        f"[5/6] HDBSCAN done in {time.time()-t4:.1f}s — "
-        f"{len(unique_ids)} clusters, {raw_noise} noise"
-    )
-    if cfg.assign_noise and unique_ids:
-        cluster_labels = assign_noise_to_nearest_cluster(X_reduced, cluster_labels, cfg)
-        logger.info(f"      Noise assigned to nearest cluster ({raw_noise} points reassigned)")
-    stats["n_clusters"] = len(unique_ids)
-    stats["noise"] = int((cluster_labels == -1).sum())  # 0 when assign_noise=True
+    km = cluster_kmeans(X_reduced, cfg)
+    actual_k = km.n_clusters
+    stats["n_clusters"] = actual_k
+    logger.info(f"[5/7] K-Means done in {time.time()-t4:.1f}s — {actual_k} clusters")
 
-    # ── Step 5: Labeling ──
+    # ── Step 5: Label clusters ──
     t5 = time.time()
-    labels_map = label_clusters(cluster_labels, X_tfidf, feature_names, cfg)
-    company_keywords = extract_company_keywords(X_tfidf, feature_names, cfg)
-    cluster_counts = {
-        cid: int((cluster_labels == cid).sum()) for cid in unique_ids
-    }
-    logger.info(f"[6/6] Labeling done in {time.time()-t5:.1f}s")
+    labels_map = label_clusters(km.labels_, X_tfidf, feature_names, actual_k, cfg)
+    logger.info(f"[6/7] Labeling done in {time.time()-t5:.1f}s")
 
-    # Build human-readable summary (largest clusters first)
-    # cast cluster_id to Python int — numpy.int64 is not JSON serializable
+    # ── Step 5b: Multi-label assignment + per-doc keywords ──
+    t5b = time.time()
+    if progress_cb:
+        progress_cb(0, len(companies), {**stats, "step": "assigning"})
+    assignments = assign_multi_label(X_reduced, km, cfg)
+    company_keywords = extract_company_keywords(X_tfidf, feature_names, cfg)
+    logger.info(f"[6b/7] Assignment + keywords done in {time.time()-t5b:.1f}s")
+
+    # Summary: count how many companies reference each cluster label
+    from collections import Counter
+    label_counter: Counter = Counter()
+    for cluster_ids in assignments:
+        for cid in cluster_ids:
+            label_counter[labels_map[cid]] += 1
     stats["summary"] = [
-        {"cluster_id": int(cid), "label": labels_map[cid], "company_count": cluster_counts[cid]}
-        for cid in sorted(cluster_counts, key=lambda k: -cluster_counts[k])
+        {"label": label, "company_count": count}
+        for label, count in label_counter.most_common(50)
     ]
+    stats["undefined"] = sum(1 for a in assignments if not a)
 
     # ── Step 6: Save to DB ──
     t6 = time.time()
@@ -534,11 +537,11 @@ def run_pipeline(
         if progress_cb:
             progress_cb(done, total, s)
 
-    save_stats = save_results(db, companies, cluster_labels, labels_map, company_keywords, cfg, _save_cb)
+    save_stats = save_results(db, companies, assignments, labels_map, company_keywords, cfg, _save_cb)
     stats.update(save_stats)
-    logger.info(f"DB save done in {time.time()-t6:.1f}s")
+    logger.info(f"[7/7] DB save done in {time.time()-t6:.1f}s")
 
-    # ── Cross-cluster analysis (auto-run, output to static/) ──
+    # ── Cross-cluster analysis ──
     try:
         analysis_path = analyze_cross_cluster_terms(db, cfg)
         stats["analysis_file"] = str(analysis_path)

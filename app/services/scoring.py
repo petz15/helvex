@@ -21,6 +21,10 @@ _DIRECTORY_DOMAINS = {
     "companyhouse.ch",
     "handelsregister.ch",
     "hr-register.ch",
+    "rocketreach.co",
+    "kununu.com",
+    "crunchbase.com",
+    "rocketreach.com",
 }
 
 _SOCIAL_LEAD_DOMAINS = {
@@ -366,11 +370,14 @@ _DEFAULT_SCORING_CONFIG: dict[str, str] = {
     "zefix_treuhand_consulting_penalty": "15",
     "zefix_inactive_status_penalty": "40",
     "zefix_force_zero_status_terms": "being_cancelled",
-    # Comma-separated words. Any hit in purpose OR industry → +industry_bonus pts.
+    # Comma-separated words. Any hit in purpose OR industry OR purpose_keywords OR tfidf_cluster → +industry_bonus pts.
     "zefix_target_keywords": "",
-    # Comma-separated words. Any hit in purpose OR industry → -consulting_penalty pts.
-    # Replaces the hardcoded "treuhand/consulting" check and also covers purpose text.
+    # Comma-separated words. Any hit in purpose OR industry OR purpose_keywords OR tfidf_cluster → -consulting_penalty pts.
     "zefix_excluded_keywords": "treuhand,consulting",
+    # Comma-separated cluster label substrings. Hit in tfidf_cluster → +cluster_bonus pts.
+    "zefix_target_clusters": "",
+    # Points awarded per matching cluster label (when zefix_target_clusters has entries).
+    "zefix_cluster_bonus": "10",
 }
 
 
@@ -412,6 +419,8 @@ def compute_zefix_score_breakdown(
     municipality: str | None = None,
     lat: float | None = None,
     lon: float | None = None,
+    purpose_keywords: str | None = None,
+    tfidf_cluster: str | None = None,
     config: dict[str, str] | None = None,
 ) -> dict:
     industry_bonus = _cfg_int(config, "zefix_industry_bonus", 15)
@@ -421,6 +430,8 @@ def compute_zefix_score_breakdown(
 
     target_keywords = _cfg_terms(config, "zefix_target_keywords", [])
     excluded_keywords = _cfg_terms(config, "zefix_excluded_keywords", ["treuhand", "consulting"])
+    target_clusters = _cfg_terms(config, "zefix_target_clusters", [])
+    cluster_bonus = _cfg_int(config, "zefix_cluster_bonus", 10)
 
     breakdown: dict[str, int | str | list[str] | bool] = {
         "legal_form": 0,
@@ -429,6 +440,7 @@ def compute_zefix_score_breakdown(
         "branch_offices": 0,
         "industry_bonus": 0,
         "keyword_match": 0,
+        "cluster_match": 0,
         "industry_penalty": 0,
         "location": 0,
         "status_penalty": 0,
@@ -467,13 +479,13 @@ def compute_zefix_score_breakdown(
     if branch_offices and branch_offices not in ("null", "[]", ""):
         breakdown["branch_offices"] = 10
 
-    # Combined text for keyword matching (purpose + industry)
-    combined_kw = " ".join(filter(None, [purpose, industry])).lower()
+    # Combined text for keyword matching (purpose + industry + per-company keywords + cluster labels)
+    combined_kw = " ".join(filter(None, [purpose, industry, purpose_keywords, tfidf_cluster])).lower()
 
     if industry:
         breakdown["industry_bonus"] = industry_bonus
 
-    # Target keyword match: purpose or industry contains a configured target word
+    # Target keyword match: any hit in purpose/industry/purpose_keywords/tfidf_cluster
     if target_keywords:
         hits = sum(1 for kw in target_keywords if kw in combined_kw)
         if hits >= 2:
@@ -481,7 +493,14 @@ def compute_zefix_score_breakdown(
         elif hits == 1:
             breakdown["keyword_match"] = industry_bonus // 2
 
-    # Excluded keyword penalty: configurable list (replaces hardcoded treuhand/consulting)
+    # Cluster match: dedicated bonus when tfidf_cluster contains a target cluster term
+    if target_clusters and tfidf_cluster:
+        cluster_lower = tfidf_cluster.lower()
+        cluster_hits = sum(1 for tc in target_clusters if tc in cluster_lower)
+        if cluster_hits > 0:
+            breakdown["cluster_match"] = min(cluster_hits * cluster_bonus, cluster_bonus * 3)
+
+    # Excluded keyword penalty: matches against full combined text incl. keywords/clusters
     if excluded_keywords and any(kw in combined_kw for kw in excluded_keywords):
         breakdown["industry_penalty"] = -consulting_penalty
 
@@ -499,6 +518,7 @@ def compute_zefix_score_breakdown(
         + int(breakdown["branch_offices"])
         + int(breakdown["industry_bonus"])
         + int(breakdown["keyword_match"])
+        + int(breakdown["cluster_match"])
         + int(breakdown["industry_penalty"])
         + int(breakdown["location"])
         + int(breakdown["status_penalty"])
@@ -520,6 +540,8 @@ def compute_zefix_score(
     municipality: str | None = None,
     lat: float | None = None,
     lon: float | None = None,
+    purpose_keywords: str | None = None,
+    tfidf_cluster: str | None = None,
     config: dict[str, str] | None = None,
 ) -> int:
     breakdown = compute_zefix_score_breakdown(
@@ -534,6 +556,8 @@ def compute_zefix_score(
         municipality=municipality,
         lat=lat,
         lon=lon,
+        purpose_keywords=purpose_keywords,
+        tfidf_cluster=tfidf_cluster,
         config=config,
     )
     return int(breakdown["final_score"])

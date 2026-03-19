@@ -135,19 +135,38 @@
       <label class="form-label">
         <span>Zefix score: Target keywords</span>
         <input type="text" name="zefix_target_keywords" value="{{ zefix_target_keywords }}" placeholder="e.g. software, IT, digital, saas">
-        <small class="muted">Comma-separated words. 1 hit in purpose or industry → +½ industry bonus. 2+ hits → +full industry bonus.</small>
+        <small class="muted">Comma-separated words. Matched against purpose, industry, purpose keywords, and cluster labels. 1 hit → +½ industry bonus; 2+ hits → +full industry bonus.</small>
       </label>
 
       <label class="form-label">
         <span>Zefix score: Excluded keywords</span>
         <input type="text" name="zefix_excluded_keywords" value="{{ zefix_excluded_keywords }}" placeholder="e.g. treuhand, consulting, holding">
-        <small class="muted">Comma-separated words. Any hit in purpose or industry → −consulting penalty. Replaces the hardcoded treuhand/consulting check.</small>
+        <small class="muted">Comma-separated words. Any hit in purpose, industry, purpose keywords, or cluster labels → −consulting penalty.</small>
+      </label>
+
+      <label class="form-label">
+        <span>Zefix score: Target cluster labels</span>
+        <input type="text" name="zefix_target_clusters" value="{{ zefix_target_clusters }}" placeholder="e.g. maschinenbau, software, holz">
+        <small class="muted">Comma-separated substrings matched against TF-IDF cluster labels. Each matching label adds the cluster bonus (capped at 3× bonus). Browse cluster names in the Taxonomy panel.</small>
+      </label>
+
+      <label class="form-label">
+        <span>Zefix score: Cluster bonus (pts)</span>
+        <input type="number" name="zefix_cluster_bonus" value="{{ zefix_cluster_bonus }}" min="0" max="50" step="1">
+        <small class="muted">Points awarded per matching cluster label when target cluster labels are configured. Default: 10.</small>
       </label>
 
       <label class="form-label">
         <span>Anthropic API key</span>
         <input type="password" name="anthropic_api_key" value="{{ anthropic_api_key }}" placeholder="sk-ant-…" autocomplete="off">
         <small class="muted">Required for Claude classification jobs. Also readable from the <code>ANTHROPIC_API_KEY</code> environment variable.</small>
+      </label>
+
+      <label class="form-label">
+        <span>Claude scoring target</span>
+        <textarea name="claude_target_description" rows="3" style="width:100%;"
+                  placeholder="e.g. We sell ERP software to Swiss manufacturing SMEs with 10–200 employees. Ideal leads are companies producing physical goods and likely to need production planning or inventory software.">{{ claude_target_description }}</textarea>
+        <small class="muted">Describe what you are looking for. Claude appends this to the scoring prompt so it calibrates scores toward your specific target.</small>
       </label>
 
     </div>
@@ -167,7 +186,8 @@
       <summary class="section-toggle">Claude classification prompt (optional)</summary>
       <div style="margin-top: 0.7rem;">
         <p class="muted-hint">System prompt sent to Claude Haiku for each company. Leave empty to use the built-in default.
-          The model must output <strong>only</strong> a JSON object with <code>"score"</code> (0-100) and <code>"category"</code>.</p>
+          The model must output <strong>only</strong> a JSON object with <code>"score"</code> (0-100) and <code>"category"</code>.
+          Each company is sent as: <code>Company / Purpose / Industry / Keywords / Clusters</code>.</p>
         <textarea name="claude_classify_prompt" rows="7" style="width:100%; font-family: monospace; font-size: 0.85rem;"
                   placeholder="You are evaluating Swiss company entries as B2B leads…">{{ claude_classify_prompt }}</textarea>
       </div>
@@ -252,32 +272,29 @@
     <details style="margin-bottom:0.6rem;">
       <summary class="section-toggle">Advanced clustering parameters</summary>
       <div class="filter-grid" style="margin-top:0.5rem;">
-        <label class="form-label"><span>Min cluster size</span>
-          <input type="number" name="min_cluster_size" value="75" min="5">
-          <small class="muted">Smallest grouping HDBSCAN will form.</small>
+        <label class="form-label"><span>Number of clusters (K)</span>
+          <input type="number" name="n_clusters" value="150" min="10" max="500">
+          <small class="muted">How many distinct segments K-Means will form. More = finer-grained clusters.</small>
         </label>
-        <label class="form-label"><span>Min samples</span>
-          <input type="number" name="min_samples" value="10" min="1">
-          <small class="muted">Higher = more noise points, tighter clusters.</small>
+        <label class="form-label"><span>Max clusters per company</span>
+          <input type="number" name="max_clusters_per_company" value="7" min="1" max="15">
+          <small class="muted">A company is assigned to its top-N most similar clusters.</small>
+        </label>
+        <label class="form-label"><span>Min similarity threshold</span>
+          <input type="number" name="min_similarity" value="0.10" min="0.01" max="0.99" step="0.01">
+          <small class="muted">Cosine similarity cutoff. Clusters below this are skipped; if none qualify → "Undefined".</small>
         </label>
         <label class="form-label"><span>SVD components</span>
           <input type="number" name="n_components" value="50" min="10" max="300">
-          <small class="muted">Dimensions after reduction. Lower = faster HDBSCAN.</small>
+          <small class="muted">Dimensions after reduction. Lower = faster; higher = more detail.</small>
         </label>
-        <label class="form-label"><span>Assign noise to nearest cluster</span>
-          <select name="assign_noise">
-            <option value="true" selected>Yes — every company gets a label</option>
-            <option value="false">No — keep noise as null</option>
-          </select>
-          <small class="muted">After HDBSCAN, noise points are assigned to the nearest cluster centroid so no company is left unlabelled.</small>
-        </label>
-        <label class="form-label"><span>Top terms per label</span>
-          <input type="number" name="top_terms" value="7" min="1" max="20">
-          <small class="muted">Keywords stored per cluster label.</small>
+        <label class="form-label"><span>Top terms per cluster label</span>
+          <input type="number" name="top_terms" value="5" min="1" max="20">
+          <small class="muted">Keywords in each cluster label.</small>
         </label>
         <label class="form-label"><span>Keywords per company</span>
           <input type="number" name="top_keywords_per_company" value="10" min="1" max="30">
-          <small class="muted">Top TF-IDF keywords extracted from each company's own purpose text, stored in <code>purpose_keywords</code>.</small>
+          <small class="muted">Top TF-IDF keywords from each company's own purpose text, stored in <code>purpose_keywords</code>.</small>
         </label>
       </div>
     </details>

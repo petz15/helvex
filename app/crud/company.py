@@ -49,7 +49,7 @@ def get_company_by_uid(db: Session, uid: str) -> Company | None:
 
 def _apply_filters(query, *, name_filter, canton, review_status, proposal_status,
                    google_searched, min_google_score, min_zefix_score, min_claude_score=None,
-                   industry, tags, tfidf_cluster=None):
+                   industry, tags, tfidf_cluster=None, purpose_keywords=None):
     if name_filter:
         query = query.filter(Company.name.ilike(f"%{name_filter}%"))
     if canton:
@@ -87,6 +87,8 @@ def _apply_filters(query, *, name_filter, canton, review_status, proposal_status
         query = query.filter(Company.tfidf_cluster.isnot(None))
     elif tfidf_cluster:
         query = query.filter(Company.tfidf_cluster.ilike(f"%{tfidf_cluster}%"))
+    if purpose_keywords:
+        query = query.filter(Company.purpose_keywords.ilike(f"%{purpose_keywords}%"))
     return query
 
 
@@ -106,6 +108,7 @@ def list_companies(
     industry: str | None = None,
     tags: str | None = None,
     tfidf_cluster: str | None = None,
+    purpose_keywords: str | None = None,
     # kept for backward-compat with collection.py batch query
     limit: int | None = None,
     skip: int = 0,
@@ -124,6 +127,7 @@ def list_companies(
         industry=industry,
         tags=tags,
         tfidf_cluster=tfidf_cluster,
+        purpose_keywords=purpose_keywords,
     )
 
     col, ascending = _SORT_MAP.get(sort, _SORT_MAP[_DEFAULT_SORT])
@@ -150,6 +154,7 @@ def count_companies(
     industry: str | None = None,
     tags: str | None = None,
     tfidf_cluster: str | None = None,
+    purpose_keywords: str | None = None,
 ) -> int:
     query = db.query(Company)
     query = _apply_filters(
@@ -165,6 +170,7 @@ def count_companies(
         industry=industry,
         tags=tags,
         tfidf_cluster=tfidf_cluster,
+        purpose_keywords=purpose_keywords,
     )
     return query.count()
 
@@ -202,19 +208,36 @@ def get_company_stats(db: Session) -> dict:
 
 def get_taxonomy_stats(db: Session) -> dict:
     """Return distinct values + counts for tfidf_cluster, industry, and tags (sorted by count desc)."""
-    # tfidf_cluster is comma-separated keywords — count per individual keyword
+    # tfidf_cluster format: "label_a|label_b|label_c" where each label is "term1,term2,..."
+    # Count how many companies belong to each cluster label (pipe-separated chunk)
     raw_clusters = (
         db.query(Company.tfidf_cluster)
         .filter(Company.tfidf_cluster.isnot(None))
+        .filter(Company.tfidf_cluster != "Undefined")
+        .all()
+    )
+    label_counter: Counter = Counter()
+    for (val,) in raw_clusters:
+        for label in val.split("|"):
+            label = label.strip()
+            if label:
+                label_counter[label] += 1
+    clusters_list = label_counter.most_common()
+
+    # purpose_keywords is comma-separated per-company terms — count per individual keyword
+    raw_keywords = (
+        db.query(Company.purpose_keywords)
+        .filter(Company.purpose_keywords.isnot(None))
         .all()
     )
     kw_counter: Counter = Counter()
-    for (val,) in raw_clusters:
+    for (val,) in raw_keywords:
         for kw in val.split(","):
             kw = kw.strip()
             if kw:
                 kw_counter[kw] += 1
-    clusters_list = kw_counter.most_common()
+    keywords_list = kw_counter.most_common()
+
     industries = (
         db.query(Company.industry, func.count(Company.id).label("cnt"))
         .filter(Company.industry.isnot(None))
@@ -231,6 +254,7 @@ def get_taxonomy_stats(db: Session) -> dict:
     )
     return {
         "clusters": clusters_list,
+        "keywords": keywords_list,
         "industries": [(r.industry, r.cnt) for r in industries],
         "tags": [(r.tags, r.cnt) for r in tags],
     }
