@@ -58,6 +58,7 @@ _TFIDF_STOPWORDS: set[str] = {
     "etc", "usw", "inklusive", "inkl", "exklusive", "exkl", "anderen", "anderer", "anderes", 
     "beispielsweise", "z.B", "zB", "u.a", "ua", "namentlich", "hauptsächlich", "vorzugsweise",
     "allgemein", "allgemeine", "allgemeinen", "sonstige", "sonstigen",
+    
     # ── Swiss registry boilerplate (appear in nearly every purpose text) ──────
     "gesellschaft", "gesellschaften", "gesellschafts", "unternehmen", "betrieb", "zweck", "zwecks",
     "aktien", "gmbh", "ag", "sarl", "sàrl", "cie", "co", "inc",
@@ -86,6 +87,8 @@ _TFIDF_STOPWORDS: set[str] = {
     "zubehör",
     "dazugehörig", "dazugehörigen", "dazugehörigem",
     "darlehen", "immaterialgüter", "immaterialgüt", "anderer", "zusammenhängen", "bezwecken", 
+    "einschliesslich", "einschließlich", "einschl", "ähnliche", "ähnlichen", "weitere", "weiteren", "entsprechende",
+
     # ── Swiss registry standard boilerplate sentence (verbatim filler) ────────
     "kann", "errichten", "anderen", "andern", "geschäfte", "geschäftstätigkeit", "geschäftstätigkeiten",
     "tätigen", "direkt", "indirekt", "ihrem", "zusammenhang", "stehen",
@@ -118,6 +121,12 @@ _TFIDF_STOPWORDS: set[str] = {
     "sämtliche", "sämtlichen",                              # synonym for "alle"
     "innmaterialgüterrechte",                               # IP rights boilerplate
     "unternehmens",                                          # genitive: "Zweck des Unternehmens"
+    "fiduziare", "fiduziar", "fiduziaren",                        # "fiduziare Verwaltung von Vermögen Dritter"
+    "übereignung", "übereignung", "übertragung", "übertragen",           # "Übertragung von Vermögen"
+    "pfandrecht", "pfandrechte", "verpfändung", "verpfänden",                 # "Verpfändung von Vermögen"
+    "mittels",
+    "aktiven", "aktiven", "passiven", "passiven", "beteiligungen", "beteiligen",
+    "aktionär", "aktionäre", ""
     # ── French: articles, prepositions, pronouns ─────────────────────────────
     "les", "une", "est", "dans", "par", "sur", "aux",
     "de", "la", "le", "et", "en", "du", "au", "avec", "qui", "que",
@@ -217,7 +226,32 @@ _TFIDF_STOPWORDS: set[str] = {
     "verpflichtung sicherheit",
     "darlehen verpflichtung",
     "gunst",
-    "anderer geschäft"
+    "anderer geschäft",
+
+    # ── Holding/intercompany boilerplate (Cash-Pooling, interco financing) ────
+    "überdies",                                          # "Die Gesellschaft kann überdies..."
+    "entgeltlich", "unentgeltlich",                      # "entgeltlich oder unentgeltlich"
+    "personen", "person",                                # "Verbindlichkeiten solcher Personen"
+    "zudem",                                             # "Zudem kann sie..."
+    "daran",                                             # "sich daran beteiligen"
+    "zwar",                                              # "und zwar auch ohne Gegenleistung"
+    "ohne",                                              # "ohne Gegenleistung"
+    "gegenleistung",                                     # "ohne Gegenleistung"
+    "zinslos",                                           # "zinslos" financing
+    "ausschluss",                                        # "unter Ausschluss der Gewinnerzielungsabsicht"
+    "gewinnerzielungsabsicht",                           # ibid
+    "klumpenrisiko", "klumpenrisiken",                   # "unter Übernahme von Klumpenrisiken"
+    "gruppengesellschaft", "gruppengesellschaften",      # "mit Gruppengesellschaften"
+    "liquiditätsausgleich", "liquiditätsausgleiche",     # Cash-pooling synonym
+    "nettoliquiditätszentralisierung", "nettoliquiditätszentralisierungen",  # ibid
+    "cashpooling", "cash-pooling",                       # "(Cash-Pooling)"
+    "periodisch", "periodische", "periodischer", "periodischen",  # "periodischer Saldoanpassungen"
+    "saldoanpassung", "saldoanpassungen",                # "(Balancing)"
+    "balancing",                                         # English term in German text
+    "vorzugskondition", "vorzugskonditionen",            # "zu Vorzugskonditionen"
+    "kommerziell", "kommerzielle", "kommerziellen",      # "kommerziellen Geschäfte"
+    "finanziell", "finanzielle", "finanziellen",         # "finanziellen Geschäfte"
+    "tätigen",                                           # "Geschäfte tätigen" — too generic
 }
 
 # Default system prompt for Claude classification
