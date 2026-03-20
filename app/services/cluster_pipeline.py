@@ -492,7 +492,6 @@ def recompute_keywords(
     cfg: PipelineConfig | None = None,
     *,
     canton: str | None = None,
-    industry: str | None = None,
     limit: int | None = None,
     progress_cb: Callable[[int, int, dict], None] | None = None,
 ) -> dict[str, Any]:
@@ -519,8 +518,7 @@ def recompute_keywords(
     )
     if canton:
         q = q.filter(Company.canton == canton.upper())
-    if industry:
-        q = q.filter(Company.industry.ilike(f"%{industry}%"))
+
     q = q.order_by(Company.id.asc())
     if limit:
         q = q.limit(limit)
@@ -587,7 +585,6 @@ def run_pipeline(
     cfg: PipelineConfig | None = None,
     *,
     canton: str | None = None,
-    industry: str | None = None,
     min_zefix_score: int | None = None,
     max_zefix_score: int | None = None,
     limit: int | None = None,
@@ -624,8 +621,7 @@ def run_pipeline(
     )
     if canton:
         q = q.filter(Company.canton == canton.upper())
-    if industry:
-        q = q.filter(Company.industry.ilike(f"%{industry}%"))
+
     if min_zefix_score is not None:
         q = q.filter(Company.zefix_score >= min_zefix_score)
     if max_zefix_score is not None:

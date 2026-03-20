@@ -70,7 +70,6 @@
         -
       {% endif %}
     </dd>
-    <dt>Industry</dt><dd>{{ company.industry or "-" }}</dd>
     <dt>Tags</dt><dd>{{ company.tags or "-" }}</dd>
     <dt>Contact</dt>
     <dd>
@@ -158,10 +157,6 @@
               <option value="{{ val }}" {% if company.proposal_status == val %}selected{% endif %}>{{ val }}</option>
             {% endfor %}
           </select>
-        </label>
-        <label class="form-label">
-          <span>Industry</span>
-          <input type="text" name="industry" value="{{ company.industry or '' }}" placeholder="e.g. IT, Bau, Handel…">
         </label>
         <label class="form-label">
           <span>Tags</span>

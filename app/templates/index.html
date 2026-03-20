@@ -106,10 +106,6 @@
         </select>
       </label>
       <label class="form-label">
-        <span>Industry</span>
-        <input type="text" name="industry" value="{{ f_industry }}" placeholder="e.g. IT, Bau, Handel…">
-      </label>
-      <label class="form-label">
         <span>Tags</span>
         <input type="text" name="tags" value="{{ f_tags }}" placeholder="e.g. saas, warm-lead…">
       </label>
@@ -180,8 +176,6 @@
           <option value="claude_score"   {% if sort == 'claude_score'   %}selected{% endif %}>Claude score ↑</option>
           <option value="name"           {% if sort == 'name'           %}selected{% endif %}>Name A→Z</option>
           <option value="-name"          {% if sort == '-name'          %}selected{% endif %}>Name Z→A</option>
-          <option value="industry"       {% if sort == 'industry'       %}selected{% endif %}>Industry A→Z</option>
-          <option value="-industry"      {% if sort == '-industry'      %}selected{% endif %}>Industry Z→A</option>
           <option value="tfidf_cluster"  {% if sort == 'tfidf_cluster'  %}selected{% endif %}>Cluster A→Z</option>
           <option value="-tfidf_cluster" {% if sort == '-tfidf_cluster' %}selected{% endif %}>Cluster Z→A</option>
           <option value="canton"         {% if sort == 'canton'         %}selected{% endif %}>Canton A→Z</option>
@@ -230,20 +224,6 @@
           {% for label, cnt in taxonomy_stats.clusters %}
           <li>
             <a class="cluster-tag" href="/ui?tfidf_cluster={{ label | urlencode }}">{{ label }}</a>
-            <span class="taxonomy-count">{{ cnt }}</span>
-          </li>
-          {% endfor %}
-        </ul>
-      </div>
-      {% endif %}
-
-      {% if taxonomy_stats.industries %}
-      <div class="taxonomy-col">
-        <div class="taxonomy-col-title">Industries ({{ taxonomy_stats.industries | length }})</div>
-        <ul class="taxonomy-list">
-          {% for label, cnt in taxonomy_stats.industries %}
-          <li>
-            <a class="taxonomy-link" href="/ui?industry={{ label | urlencode }}">{{ label }}</a>
             <span class="taxonomy-count">{{ cnt }}</span>
           </li>
           {% endfor %}
@@ -309,10 +289,6 @@
               Status
               <span class="sort-icon">{% if sort == 'status' %}↑{% elif sort == '-status' %}↓{% else %}↕{% endif %}</span>
             </th>
-            <th class="th-sortable" onclick="toggleSort('industry')" title="Sort by industry">
-              Industry
-              <span class="sort-icon">{% if sort == 'industry' %}↑{% elif sort == '-industry' %}↓{% else %}↕{% endif %}</span>
-            </th>
             <th class="th-sortable" onclick="toggleSort('tfidf_cluster')" title="Sort by cluster">
               Cluster
               <span class="sort-icon">{% if sort == 'tfidf_cluster' %}↑{% elif sort == '-tfidf_cluster' %}↓{% else %}↕{% endif %}</span>
@@ -361,7 +337,6 @@
                 <span class="muted">—</span>
               {% endif %}
             </td>
-            <td>{{ c.industry or "-" }}</td>
             <td>
               {% if c.tfidf_cluster %}
                 <a class="cluster-tag" href="/ui?tfidf_cluster={{ c.tfidf_cluster | urlencode }}" title="Filter by this cluster">{{ c.tfidf_cluster }}</a>
@@ -461,7 +436,7 @@
 {% endif %}
 
 <script>
-  var _TEXT_SORT_FIELDS = {'name':1,'canton':1,'industry':1,'tfidf_cluster':1,'status':1,'review_status':1,'proposal_status':1,'website':1};
+  var _TEXT_SORT_FIELDS = {'name':1,'canton':1,'tfidf_cluster':1,'status':1,'review_status':1,'proposal_status':1,'website':1};
   function toggleSort(field) {
     var form = document.getElementById('filter-form');
     var sortSelect = form.querySelector('[name="sort"]');

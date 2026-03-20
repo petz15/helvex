@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import DateTime, Float, Integer, String, Text, func
+from sqlalchemy import Boolean, DateTime, Float, Integer, String, Text, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
@@ -25,6 +25,8 @@ class Company(Base):
     google_search_results_raw: Mapped[str | None] = mapped_column(Text, nullable=True)
     # 0-100 auto match score for the current website_url; None = not yet scored
     website_match_score: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # True if Google only returned social media results (no real website found)
+    social_media_only: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     # Manual workflow statuses
     # 'pending' | 'confirmed' | 'interesting' | 'rejected'
     review_status: Mapped[str | None] = mapped_column(String(32), nullable=True)
@@ -36,7 +38,6 @@ class Company(Base):
     contact_phone: Mapped[str | None] = mapped_column(String(64), nullable=True)
     # Comma-separated free-form labels, e.g. "saas,b2b,warm-lead"
     tags: Mapped[str | None] = mapped_column(Text, nullable=True)
-    industry: Mapped[str | None] = mapped_column(String(128), nullable=True)
     # Zefix administrative identifiers
     ehraid: Mapped[str | None] = mapped_column(String(64), nullable=True)
     chid: Mapped[str | None] = mapped_column(String(32), nullable=True)

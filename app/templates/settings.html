@@ -117,7 +117,19 @@
       <label class="form-label">
         <span>Score: Cluster hit points</span>
         <input type="number" name="scoring_cluster_hit_points" value="{{ scoring_cluster_hit_points }}" min="0" max="100" step="1">
-        <small class="muted">Points per matching cluster label. Default: 10.</small>
+        <small class="muted">Points added per matching cluster. Default: 10.</small>
+      </label>
+
+      <label class="form-label">
+        <span>Score: Exclude clusters</span>
+        <input type="text" name="scoring_exclude_clusters" value="{{ scoring_exclude_clusters }}" placeholder="e.g. treuhand, holding, beratung">
+        <small class="muted">Comma-separated substrings matched against TF-IDF cluster labels. Each match <strong>subtracts</strong> the cluster exclude points.</small>
+      </label>
+
+      <label class="form-label">
+        <span>Score: Cluster exclude points</span>
+        <input type="number" name="scoring_cluster_exclude_points" value="{{ scoring_cluster_exclude_points }}" min="0" max="100" step="1">
+        <small class="muted">Points subtracted per matching exclusion cluster. Default: 10.</small>
       </label>
 
       <label class="form-label">
@@ -129,7 +141,19 @@
       <label class="form-label">
         <span>Score: Keyword hit points</span>
         <input type="number" name="scoring_keyword_hit_points" value="{{ scoring_keyword_hit_points }}" min="0" max="100" step="1">
-        <small class="muted">Points per matching purpose keyword. Default: 10.</small>
+        <small class="muted">Points added per matching keyword. Default: 10.</small>
+      </label>
+
+      <label class="form-label">
+        <span>Score: Exclude keywords</span>
+        <input type="text" name="scoring_exclude_keywords" value="{{ scoring_exclude_keywords }}" placeholder="e.g. treuhand, verwaltung, holding">
+        <small class="muted">Comma-separated substrings matched against purpose keywords. Each match <strong>subtracts</strong> the keyword exclude points.</small>
+      </label>
+
+      <label class="form-label">
+        <span>Score: Keyword exclude points</span>
+        <input type="number" name="scoring_keyword_exclude_points" value="{{ scoring_keyword_exclude_points }}" min="0" max="100" step="1">
+        <small class="muted">Points subtracted per matching exclusion keyword. Default: 10.</small>
       </label>
 
       <label class="form-label">
@@ -240,9 +264,6 @@
       <label class="form-label"><span>Canton</span>
         <input type="text" name="canton" placeholder="e.g. BE (leave empty = all)">
       </label>
-      <label class="form-label"><span>Industry filter</span>
-        <input type="text" name="industry" placeholder="e.g. Technology">
-      </label>
       <label class="form-label"><span>Min Zefix score</span>
         <input type="number" name="min_zefix_score" placeholder="0–100">
       </label>
@@ -319,9 +340,6 @@
       <label class="form-label"><span>Canton</span>
         <input type="text" name="canton" placeholder="e.g. BE (leave empty = all)">
       </label>
-      <label class="form-label"><span>Industry filter</span>
-        <input type="text" name="industry" placeholder="leave empty = all">
-      </label>
       <label class="form-label"><span>Limit (companies)</span>
         <input type="number" name="limit" placeholder="leave empty = all">
       </label>
@@ -333,14 +351,11 @@
     <p class="muted" style="margin: 0 0 0.6rem;">
       Classify companies using Claude Haiku. Stores a <code>claude_score</code> (0-100) and
       <code>claude_category</code> per company. Requires an Anthropic API key (set above).
-      Approximate cost: ~$0.25 per 1 000 companies.
+      Per-request cost: ~$0.25 / 1 000 companies. Batch API cost: ~$0.12 / 1 000 companies.
     </p>
     <div class="filter-grid" style="margin-bottom:0.6rem;">
       <label class="form-label"><span>Canton</span>
         <input type="text" name="canton" placeholder="e.g. BE (leave empty = all)">
-      </label>
-      <label class="form-label"><span>Industry filter</span>
-        <input type="text" name="industry_filter" placeholder="e.g. Technology">
       </label>
       <label class="form-label"><span>Min Zefix score</span>
         <input type="number" name="min_zefix_score" placeholder="0-100">
@@ -352,6 +367,10 @@
         <input type="number" name="limit" value="500">
       </label>
     </div>
+    <label style="display:flex; align-items:center; gap:0.5rem; margin-bottom:0.75rem;">
+      <input type="checkbox" name="use_batch_api" value="true">
+      <span>Use Batch API <small class="muted">(~50% cheaper — submits all at once, polls until done)</small></span>
+    </label>
     <button type="submit">Run Claude classification</button>
   </form>
 </section>

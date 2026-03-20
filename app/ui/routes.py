@@ -59,7 +59,6 @@ def _filter_params(
     min_google_score: int | None,
     min_zefix_score: int | None,
     sort: str | None,
-    industry: str | None,
     tags: str | None,
     min_claude_score: int | None = None,
     tfidf_cluster: str | None = None,
@@ -85,8 +84,6 @@ def _filter_params(
         p["min_claude_score"] = min_claude_score
     if sort:
         p["sort"] = sort
-    if industry:
-        p["industry"] = industry
     if tags:
         p["tags"] = tags
     if tfidf_cluster:
@@ -142,7 +139,6 @@ def ui_home(
     min_google_score: str | None = Query(None),
     min_zefix_score: str | None = Query(None),
     min_claude_score: str | None = Query(None),
-    industry: str | None = Query(None),
     tags: str | None = Query(None),
     tfidf_cluster: str | None = Query(None),
     purpose_keywords: str | None = Query(None),
@@ -166,7 +162,6 @@ def ui_home(
         min_google_score=min_google_score_int,
         min_zefix_score=min_zefix_score_int,
         min_claude_score=min_claude_score_int,
-        industry=industry or None,
         tags=tags or None,
         tfidf_cluster=tfidf_cluster or None,
         purpose_keywords=purpose_keywords or None,
@@ -181,7 +176,7 @@ def ui_home(
     # Build base query string (without page) for pagination links
     fp = _filter_params(q, canton, review_status, proposal_status,
                         google_searched, min_google_score_int, min_zefix_score_int,
-                        sort, industry, tags, min_claude_score_int, tfidf_cluster or None,
+                        sort, tags, min_claude_score_int, tfidf_cluster or None,
                         purpose_keywords or None)
     filter_qs = ("&" + urlencode(fp)) if fp else ""
 
@@ -208,7 +203,6 @@ def ui_home(
             "f_min_google_score": min_google_score_int if min_google_score_int is not None else "",
             "f_min_zefix_score": min_zefix_score_int if min_zefix_score_int is not None else "",
             "f_min_claude_score": min_claude_score_int if min_claude_score_int is not None else "",
-            "f_industry": industry or "",
             "f_tags": tags or "",
             "f_tfidf_cluster": tfidf_cluster or "",
             "f_purpose_keywords": purpose_keywords or "",
@@ -346,7 +340,6 @@ def export_csv(
     google_searched: str | None = Query(None),
     min_google_score: int | None = Query(None),
     min_zefix_score: int | None = Query(None),
-    industry: str | None = Query(None),
     tags: str | None = Query(None),
     sort: str | None = Query(None),
     db: Session = Depends(get_db),
@@ -362,7 +355,6 @@ def export_csv(
         google_searched=_searched_bool(google_searched),
         min_google_score=min_google_score,
         min_zefix_score=min_zefix_score,
-        industry=industry or None,
         tags=tags or None,
     )
 
@@ -372,7 +364,7 @@ def export_csv(
         writer.writerow([
             "uid", "name", "legal_form", "status", "municipality", "canton",
             "website_url", "website_match_score", "review_status", "proposal_status",
-            "contact_name", "contact_email", "contact_phone", "industry", "tags",
+            "contact_name", "contact_email", "contact_phone", "tags",
             "created_at", "updated_at",
         ])
         yield buf.getvalue()
@@ -385,7 +377,7 @@ def export_csv(
                 c.website_url or "", c.website_match_score if c.website_match_score is not None else "",
                 c.review_status or "", c.proposal_status or "",
                 c.contact_name or "", c.contact_email or "", c.contact_phone or "",
-                c.industry or "", c.tags or "",
+                c.tags or "",
                 c.created_at.isoformat(), c.updated_at.isoformat(),
             ])
             yield buf.getvalue()
@@ -569,7 +561,6 @@ def edit_company(
     contact_name: str = Form(""),
     contact_email: str = Form(""),
     contact_phone: str = Form(""),
-    industry: str = Form(""),
     tags: str = Form(""),
     db: Session = Depends(get_db),
 ) -> RedirectResponse:
@@ -584,7 +575,6 @@ def edit_company(
         contact_name=contact_name.strip() or None,
         contact_email=contact_email.strip() or None,
         contact_phone=contact_phone.strip() or None,
-        industry=industry.strip() or None,
         tags=tags.strip() or None,
     )
     old_values = {f: getattr(company, f) for f in new_values}
@@ -781,8 +771,12 @@ def ui_settings(
             "google_daily_quota": current.get("google_daily_quota", "100"),
             "scoring_target_clusters": current.get("scoring_target_clusters", ""),
             "scoring_cluster_hit_points": current.get("scoring_cluster_hit_points", "10"),
+            "scoring_exclude_clusters": current.get("scoring_exclude_clusters", ""),
+            "scoring_cluster_exclude_points": current.get("scoring_cluster_exclude_points", "10"),
             "scoring_target_keywords": current.get("scoring_target_keywords", ""),
             "scoring_keyword_hit_points": current.get("scoring_keyword_hit_points", "10"),
+            "scoring_exclude_keywords": current.get("scoring_exclude_keywords", ""),
+            "scoring_keyword_exclude_points": current.get("scoring_keyword_exclude_points", "10"),
             "scoring_origin_lat": current.get("scoring_origin_lat", "46.9266"),
             "scoring_origin_lon": current.get("scoring_origin_lon", "7.4817"),
             "scoring_dist_15km": current.get("scoring_dist_15km", "20"),
@@ -812,8 +806,12 @@ def save_settings(
     google_daily_quota: str = Form("100"),
     scoring_target_clusters: str = Form(""),
     scoring_cluster_hit_points: str = Form("10"),
+    scoring_exclude_clusters: str = Form(""),
+    scoring_cluster_exclude_points: str = Form("10"),
     scoring_target_keywords: str = Form(""),
     scoring_keyword_hit_points: str = Form("10"),
+    scoring_exclude_keywords: str = Form(""),
+    scoring_keyword_exclude_points: str = Form("10"),
     scoring_origin_lat: str = Form("46.9266"),
     scoring_origin_lon: str = Form("7.4817"),
     scoring_dist_15km: str = Form("20"),
@@ -837,7 +835,9 @@ def save_settings(
     # Text fields saved as-is; numeric fields validated (fall back to default on bad input)
     _text_fields = {
         "scoring_target_clusters": scoring_target_clusters,
+        "scoring_exclude_clusters": scoring_exclude_clusters,
         "scoring_target_keywords": scoring_target_keywords,
+        "scoring_exclude_keywords": scoring_exclude_keywords,
         "scoring_legal_form_scores": scoring_legal_form_scores,
     }
     for key, value in _text_fields.items():
@@ -845,7 +845,9 @@ def save_settings(
 
     _numeric_fields = {
         "scoring_cluster_hit_points": scoring_cluster_hit_points,
+        "scoring_cluster_exclude_points": scoring_cluster_exclude_points,
         "scoring_keyword_hit_points": scoring_keyword_hit_points,
+        "scoring_keyword_exclude_points": scoring_keyword_exclude_points,
         "scoring_origin_lat": scoring_origin_lat,
         "scoring_origin_lon": scoring_origin_lon,
         "scoring_dist_15km": scoring_dist_15km,
@@ -983,13 +985,11 @@ def start_recompute_keywords(
     request: Request,
     top_keywords_per_company: str = Form("10"),
     canton: str = Form(""),
-    industry: str = Form(""),
     limit: str = Form(""),
 ) -> RedirectResponse:
     params: dict = {
         "top_keywords_per_company": _parse_optional_int(top_keywords_per_company) or 10,
         "canton": canton.strip() or None,
-        "industry": industry.strip() or None,
         "limit": _parse_optional_int(limit),
     }
     job, err = _enqueue_job_safe(request, job_type="recompute_keywords", label="Recompute purpose_keywords", params=params)
@@ -1002,17 +1002,15 @@ def start_recompute_keywords(
 def start_claude_classify(
     request: Request,
     canton: str = Form(""),
-    industry_filter: str = Form(""),
     min_zefix_score: str = Form(""),
     max_zefix_score: str = Form(""),
     limit: str = Form("500"),
     system_prompt: str = Form(""),
+    use_batch_api: str = Form("false"),
 ) -> RedirectResponse:
     params: dict = {"limit": _parse_optional_int(limit) or 500}
     if canton.strip():
         params["canton"] = canton.strip()
-    if industry_filter.strip():
-        params["industry_filter"] = industry_filter.strip()
     v = _parse_optional_int(min_zefix_score)
     if v is not None:
         params["min_zefix_score"] = v
@@ -1021,8 +1019,10 @@ def start_claude_classify(
         params["max_zefix_score"] = v2
     if system_prompt.strip():
         params["system_prompt"] = system_prompt.strip()
+    if use_batch_api == "true":
+        params["use_batch_api"] = True
 
-    label = f"Claude classify ({params['limit']} companies)"
+    label = f"Claude classify ({params['limit']} companies)" + (" [batch]" if params.get("use_batch_api") else "")
     job, err = _enqueue_job_safe(request, job_type="claude_classify", label=label, params=params)
     if err:
         return RedirectResponse(url=_url_for(request, "ui_settings", error=err), status_code=status.HTTP_303_SEE_OTHER)
@@ -1244,7 +1244,6 @@ def _run_job(app, job_id: int) -> None:
                 stats = run_pipeline(
                     db, cfg,
                     canton=params.get("canton") or None,
-                    industry=params.get("industry") or None,
                     min_zefix_score=int(params["min_zefix_score"]) if params.get("min_zefix_score") else None,
                     max_zefix_score=int(params["max_zefix_score"]) if params.get("max_zefix_score") else None,
                     limit=int(params["limit"]) if params.get("limit") else None,
@@ -1271,7 +1270,6 @@ def _run_job(app, job_id: int) -> None:
                 stats = recompute_keywords(
                     db, cfg,
                     canton=params.get("canton") or None,
-                    industry=params.get("industry") or None,
                     limit=int(params["limit"]) if params.get("limit") else None,
                     progress_cb=_progress,
                 )
@@ -1294,7 +1292,9 @@ def _run_job(app, job_id: int) -> None:
                 def _progress(done: int, total: int, stats: dict) -> None:
                     _assert_not_cancelled()
                     tokens = stats.get("input_tokens", 0) + stats.get("output_tokens", 0)
-                    msg = f"Classified {done}/{total} — {stats['classified']} scored, ~{tokens} tokens used"
+                    batch_id = stats.get("batch_id", "")
+                    batch_hint = f" · batch {batch_id}" if batch_id and done == 0 else ""
+                    msg = f"Classified {done}/{total} — {stats['classified']} scored, ~{tokens} tokens used{batch_hint}"
                     crud.update_progress(db, job, message=msg, done=done, total=total, stats=stats)
                     crud.create_event(db, job_id=job.id, level="debug", message=msg)
                     _sync_active_task(app.state, job_type=job.job_type, label=job.label, message=msg, stats=dict(stats), error=None, done=False)
@@ -1302,7 +1302,6 @@ def _run_job(app, job_id: int) -> None:
                 stats = claude_classify_batch(
                     db,
                     canton=params.get("canton") or None,
-                    industry_filter=params.get("industry_filter") or None,
                     min_zefix_score=params.get("min_zefix_score"),
                     max_zefix_score=params.get("max_zefix_score"),
                     limit=int(params.get("limit", 500)),
@@ -1310,6 +1309,7 @@ def _run_job(app, job_id: int) -> None:
                     target_description=crud.get_setting(db, "claude_target_description", "") or None,
                     api_key=crud.get_setting(db, "anthropic_api_key", "") or app_settings.anthropic_api_key,
                     resume_from=resume_from,
+                    use_batch_api=bool(params.get("use_batch_api", False)),
                     progress_cb=_progress,
                 )
                 tokens = stats.get("input_tokens", 0) + stats.get("output_tokens", 0)

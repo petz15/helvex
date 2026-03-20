@@ -4,8 +4,7 @@ from app.models.audit_log import AuditLog
 
 _TRACKED_FIELDS = {
     "website_url", "review_status", "proposal_status",
-    "contact_name", "contact_email", "contact_phone",
-    "industry", "tags",
+    "contact_name", "contact_email", "contact_phone", "tags",
 }
 
 

@@ -29,6 +29,8 @@ _DIRECTORY_DOMAINS = {
     "help.ch",
     "kompass.ch",
     "spheriq.ch",
+    "treuhandsuisse.ch",
+    "fiduciairesuisse-vd.ch",
     
 }
 
@@ -77,6 +79,32 @@ def _purpose_keywords(purpose: str | None, max_keywords: int = 8) -> list[str]:
     return [w for w in words if w not in _STOPWORDS][:max_keywords]
 
 
+def _extract_address_parts(address: str) -> tuple[str | None, str | None]:
+    """Return (zip_code, street_name) extracted from a Swiss address string.
+
+    zip_code  — first 4-digit sequence found (e.g. "3001")
+    street_name — leading alphabetic word(s) before the first street number,
+                  lowercased (e.g. "musterstrasse", "rue du moulin").
+    Returns None for each part that cannot be extracted.
+    """
+    zip_code = None
+    street_name = None
+
+    zip_match = re.search(r"\b(\d{4})\b", address)
+    if zip_match:
+        zip_code = zip_match.group(1)
+
+    # Street name: take the run of non-digit words at the start of the address
+    # (stops at the first digit, e.g. house number)
+    street_match = re.match(r"^([^\d,]+?)(?:\s+\d|\s*,|$)", address.strip())
+    if street_match:
+        candidate = street_match.group(1).strip().lower()
+        if len(candidate) >= 5:  # ignore very short tokens (noise)
+            street_name = candidate
+
+    return zip_code, street_name
+
+
 def score_result(
     result: dict,
     *,
@@ -85,6 +113,7 @@ def score_result(
     canton: str | None,
     purpose: str | None = None,
     legal_form: str | None = None,
+    address: str | None = None,
 ) -> int:
     """Score a single Google search result against a company profile.
 
@@ -93,7 +122,8 @@ def score_result(
     Breakdown:
       - Name match in title:        0-40 pts  (word overlap × 40)
       - Name match in snippet:      0-10 pts  (bonus if overlap > 0.5)
-      - Location in combined text:  0-30 pts  (municipality 20 + canton 10)
+      - Location in combined text:  0-45 pts  (municipality 20 + canton 10
+                                               + zip 10 + street 5)
       - Purpose keyword match:      0-10 pts  (1+ hit = 5, 3+ hits = 10)
       - Legal form in domain/title:   +5 pts  bonus
       - Directory domain:            -20 pts  penalty
@@ -101,6 +131,12 @@ def score_result(
     title = result.get("title", "") or ""
     snippet = result.get("snippet", "") or ""
     link = result.get("link", "") or ""
+
+    # --- Directory domain → always 0, no further scoring ---
+    domain = _root_domain(link)
+    if any(domain == d or domain.endswith("." + d) for d in _DIRECTORY_DOMAINS):
+        return 0
+
     combined = f"{title} {snippet}"
     combined_lower = combined.lower()
 
@@ -111,11 +147,17 @@ def score_result(
     if _word_overlap_ratio(company_name, snippet) > 0.5:
         score += 10
 
-    # --- Location match (0-30) ---
+    # --- Location match (0-45) ---
     if municipality and municipality.lower() in combined_lower:
         score += 20
     if canton and canton.upper() in combined.upper():
         score += 10
+    if address:
+        zip_code, street_name = _extract_address_parts(address)
+        if zip_code and zip_code in combined:
+            score += 10
+        if street_name and street_name in combined_lower:
+            score += 5
 
     # --- Purpose keyword match (0-10) ---
     keywords = _purpose_keywords(purpose)
@@ -173,10 +215,11 @@ def fallback_result_score(
     municipality: str | None,
     canton: str | None,
     legal_form: str | None = None,
+    address: str | None = None,
 ) -> int:
     """Fallback website score used when top results are mostly irrelevant.
 
-    Formula: base 5 + location (municipality/canton text) + legal-form presence.
+    Formula: base 5 + location (municipality/canton/zip/street) + legal-form presence.
     """
     title = result.get("title", "") or ""
     snippet = result.get("snippet", "") or ""
@@ -190,6 +233,12 @@ def fallback_result_score(
         score += 20
     if canton and canton.upper() in combined.upper():
         score += 10
+    if address:
+        zip_code, street_name = _extract_address_parts(address)
+        if zip_code and zip_code in combined:
+            score += 10
+        if street_name and street_name in combined_lower:
+            score += 5
 
     if legal_form:
         domain = _root_domain(link)
@@ -331,9 +380,15 @@ _DEFAULT_SCORING_CONFIG: dict[str, str] = {
     # Comma-separated cluster label substrings — each match adds cluster_hit_points
     "scoring_target_clusters": "",
     "scoring_cluster_hit_points": "10",
+    # Comma-separated cluster label substrings — each match subtracts cluster_exclude_points
+    "scoring_exclude_clusters": "",
+    "scoring_cluster_exclude_points": "10",
     # Comma-separated purpose keyword substrings — each match adds keyword_hit_points
     "scoring_target_keywords": "",
     "scoring_keyword_hit_points": "10",
+    # Comma-separated purpose keyword substrings — each match subtracts keyword_exclude_points
+    "scoring_exclude_keywords": "",
+    "scoring_keyword_exclude_points": "10",
     # Distance tiers (haversine from configurable origin)
     "scoring_origin_lat": "46.9266",   # default: Muri bei Bern
     "scoring_origin_lon": "7.4817",
@@ -424,7 +479,6 @@ def compute_zefix_score_breakdown(
     capital_nominal: str | None = None,
     purpose: str | None = None,
     branch_offices: str | None = None,
-    industry: str | None = None,
 ) -> dict:
     cancelled_score = _cfg_int(config, "scoring_cancelled_score", 5)
 
@@ -446,18 +500,30 @@ def compute_zefix_score_breakdown(
     # ── Cluster hits ──────────────────────────────────────────────────────────
     target_clusters = _cfg_terms(config, "scoring_target_clusters", [])
     cluster_pts = _cfg_int(config, "scoring_cluster_hit_points", 10)
-    if target_clusters and tfidf_cluster:
+    exclude_clusters = _cfg_terms(config, "scoring_exclude_clusters", [])
+    cluster_excl_pts = _cfg_int(config, "scoring_cluster_exclude_points", 10)
+    if tfidf_cluster:
         cluster_lower = tfidf_cluster.lower()
-        hits = sum(1 for tc in target_clusters if tc in cluster_lower)
-        breakdown["clusters"] = hits * cluster_pts
+        if target_clusters:
+            hits = sum(1 for tc in target_clusters if tc in cluster_lower)
+            breakdown["clusters"] += hits * cluster_pts
+        if exclude_clusters:
+            excl_hits = sum(1 for ec in exclude_clusters if ec in cluster_lower)
+            breakdown["clusters"] -= excl_hits * cluster_excl_pts
 
-    # ── Keyword hits ──────────────────────────────────────────────────────────
+    # ── Keyword hits / penalties ───────────────────────────────────────────────
     target_keywords = _cfg_terms(config, "scoring_target_keywords", [])
     kw_pts = _cfg_int(config, "scoring_keyword_hit_points", 10)
-    if target_keywords and purpose_keywords:
+    exclude_keywords = _cfg_terms(config, "scoring_exclude_keywords", [])
+    kw_excl_pts = _cfg_int(config, "scoring_keyword_exclude_points", 10)
+    if purpose_keywords:
         kw_lower = purpose_keywords.lower()
-        hits = sum(1 for kw in target_keywords if kw in kw_lower)
-        breakdown["keywords"] = hits * kw_pts
+        if target_keywords:
+            hits = sum(1 for kw in target_keywords if kw in kw_lower)
+            breakdown["keywords"] += hits * kw_pts
+        if exclude_keywords:
+            excl_hits = sum(1 for ek in exclude_keywords if ek in kw_lower)
+            breakdown["keywords"] -= excl_hits * kw_excl_pts
 
     # ── Distance ──────────────────────────────────────────────────────────────
     origin_lat = _cfg_float(config, "scoring_origin_lat", _ORIGIN[0])
@@ -498,7 +564,6 @@ def compute_zefix_score(
     capital_nominal: str | None = None,
     purpose: str | None = None,
     branch_offices: str | None = None,
-    industry: str | None = None,
 ) -> int:
     return int(compute_zefix_score_breakdown(
         legal_form=legal_form,

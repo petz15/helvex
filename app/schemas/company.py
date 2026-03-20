@@ -25,7 +25,6 @@ class CompanyBase(BaseModel):
     purpose: str | None = None
     address: str | None = None
     website_url: str | None = None
-    industry: str | None = None
     # Zefix administrative identifiers
     ehraid: str | None = None
     chid: str | None = None
@@ -78,13 +77,13 @@ class CompanyUpdate(BaseModel):
     zefix_raw: str | None = None
     google_search_results_raw: str | None = None
     website_match_score: int | None = None
+    social_media_only: bool | None = None
     review_status: str | None = None
     proposal_status: str | None = None
     contact_name: str | None = None
     contact_email: str | None = None
     contact_phone: str | None = None
     tags: str | None = None
-    industry: str | None = None
     # Zefix administrative identifiers
     ehraid: str | None = None
     chid: str | None = None

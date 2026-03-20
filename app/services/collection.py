@@ -42,35 +42,7 @@ from app.services.scoring import (
 # Goal: remove words that appear in almost every company purpose and don't help distinguish clusters.
 # Do NOT add words that mark meaningful categories (e.g. "handel", "entwicklung", "bau", "immobilien").
 _TFIDF_STOPWORDS: set[str] = {
-    # ── German: articles, pronouns, conjunctions, prepositions ───────────────
-    "die", "der", "das", "und", "oder", "mit", "von", "für", "des", "dem",
-    "den", "ein", "eine", "einer", "eines", "sich", "auf", "zu", "ist",
-    "sowie", "als", "auch", "nicht", "nach", "bei", "alle", "durch", "wird",
-    "deren", "diese", "dieser", "dieses", "sie", "ihr", "ihren", "ihres",
-    "haben", "hat", "hatte", "werden", "war", "sind", "sein",
-    "im", "an", "am", "ab", "um", "bis", "vor", "aus", "über", "unter",
-    "zum", "zur", "beim", "vom", "ans", "ins", "er", "es", "wir",
-    "ihm", "ihn", "ihnen", "uns", "man", "kein", "keine",
-    "diesem", "diesen", "solche", "solcher", "welche", "welcher",
-    "jede", "jeder", "jedes", "aller", "allem", "allen",
-    "jedoch", "daher", "dabei", "dazu", "davon", "darüber", "dafür",
-    "soweit", "sowohl", "darunter", "hierzu", "hierbei", "hierfür", "bzgl", "bzw",
-    "etc", "usw", "inklusive", "inkl", "exklusive", "exkl", "anderen", "anderer", "anderes", 
-    "beispielsweise", "z.B", "zB", "u.a", "ua", "namentlich", "hauptsächlich", "vorzugsweise",
-    "allgemein", "allgemeine", "allgemeinen", "sonstige", "sonstigen",
-    
-    # ── Swiss registry boilerplate (appear in nearly every purpose text) ──────
-    "gesellschaft", "gesellschaften", "gesellschafts", "unternehmen", "betrieb", "zweck", "zwecks",
-    "aktien", "gmbh", "ag", "sarl", "sàrl", "cie", "co", "inc",
-    "insbesondere", "namentlich", "hauptsächlich", "vorzugsweise",
-    "allgemein", "allgemeine", "allgemeinen", "sonstige", "sonstigen",
-    "ähnliche", "ähnlichen", "weitere", "weiteren", "entsprechende",
-    "verschiedene", "verschiedenen", "verschiedenste",
-    "konzern", "konzerne", "gruppe", "gruppen",
-    "hauptsitz", "sitz", "domizil", "domizile",
-    "schweiz", "schweizer", "schweizerische", "schweizerischen",
-    "europa", "europäische", "europäischen",
-    "weltweit", "international", "global", "national",
+
     # Generic activity words — too broad to form meaningful clusters
     "erbringung", "dienstleistungen", "dienstleistung", "leistungen", "leistung",
     "waren", "ware",
@@ -89,7 +61,23 @@ _TFIDF_STOPWORDS: set[str] = {
     "darlehen", "immaterialgüter", "immaterialgüt", "anderer", "zusammenhängen", "bezwecken", 
     "einschliesslich", "einschließlich", "einschl", "ähnliche", "ähnlichen", "weitere", "weiteren", "entsprechende",
     "jeglicher", "zusammenhängende", "zusammenhängenden", "zusammenhängendem", "weiterveräussern", 
-    "dritter", "dritten", "dritter", "dritten", "dritter", "dritten", "weit"
+    "dritter", "dritten", "dritter", "dritten", "dritter", "dritten", "weit",
+    "die", "der", "das", "und", "oder", "mit", "von", "für", "des", "dem",
+    "den", "ein", "eine", "einer", "eines", "sich", "auf", "zu", "ist",
+    "sowie", "als", "auch", "nicht", "nach", "bei", "alle", "durch", "wird",
+    "deren", "diese", "dieser", "dieses", "sie", "ihr", "ihren", "ihres",
+    "haben", "hat", "hatte", "werden", "war", "sind", "sein",
+    "im", "an", "am", "ab", "um", "bis", "vor", "aus", "über", "unter",
+    "zum", "zur", "beim", "vom", "ans", "ins", "er", "es", "wir",
+    "ihm", "ihn", "ihnen", "uns", "man", "kein", "keine",
+    "diesem", "diesen", "solche", "solcher", "welche", "welcher",
+    "jede", "jeder", "jedes", "aller", "allem", "allen",
+    "jedoch", "daher", "dabei", "dazu", "davon", "darüber", "dafür",
+    "soweit", "sowohl", "darunter", "hierzu", "hierbei", "hierfür", "bzgl", "bzw",
+    "etc", "usw", "inklusive", "inkl", "exklusive", "exkl", "anderen", "anderer", "anderes", 
+    "beispielsweise", "z.B", "zB", "u.a", "ua", "namentlich", "hauptsächlich", "vorzugsweise",
+    "allgemein", "allgemeine", "allgemeinen", "sonstige", "sonstigen",
+    "eigen", "eigene", "eigenen", "ähnliche", "ähnlichen", "weitere", "weiteren", "entsprechende",
 
     # ── Swiss registry standard boilerplate sentence (verbatim filler) ────────
     "kann", "errichten", "anderen", "andern", "geschäfte", "geschäftstätigkeit", "geschäftstätigkeiten",
@@ -130,6 +118,17 @@ _TFIDF_STOPWORDS: set[str] = {
     "aktiven", "aktiven", "passiven", "passiven", "beteiligungen", "beteiligen",
     "aktionär", "aktionäre", "dritter", "dritten",
     "fremd", "finanzierung", "geschäft",
+    "gesellschaft", "gesellschaften", "gesellschafts", "unternehmen", "betrieb", "zweck", "zwecks",
+    "aktien", "gmbh", "ag", "sarl", "sàrl", "cie", "co", "inc",
+    "insbesondere", "namentlich", "hauptsächlich", "vorzugsweise",
+    "allgemein", "allgemeine", "allgemeinen", "sonstige", "sonstigen",
+    "ähnliche", "ähnlichen", "weitere", "weiteren", "entsprechende",
+    "verschiedene", "verschiedenen", "verschiedenste",
+    "konzern", "konzerne", "gruppe", "gruppen",
+    "hauptsitz", "sitz", "domizil", "domizile",
+    "schweiz", "schweizer", "schweizerische", "schweizerischen",
+    "europa", "europäische", "europäischen",
+    "weltweit", "international", "global", "national",
     # ── French: articles, prepositions, pronouns ─────────────────────────────
     "les", "une", "est", "dans", "par", "sur", "aux",
     "de", "la", "le", "et", "en", "du", "au", "avec", "qui", "que",
@@ -265,12 +264,16 @@ _TFIDF_STOPWORDS: set[str] = {
 _DEFAULT_CLAUDE_PROMPT = """\
 You are evaluating Swiss company register (Zefix) entries as B2B sales leads.
 
-Each entry includes the company name, purpose text, pre-classified industry, \
-purpose keywords (TF-IDF terms from the company's own text), and cluster labels \
-(segment groups derived from similar companies).
+Each entry includes the company name, purpose text, \
+purpose keywords (TF-IDF terms from the company's own text), cluster labels \
+(segment groups derived from similar companies), and optionally a website URL \
+and Google score (0–100 confidence that the found website belongs to this company).
 
 Use ALL provided fields together. The keywords and cluster labels are pre-computed \
-hints — let the purpose text be the primary signal when they conflict.
+hints — let the purpose text be the primary signal when they conflict. \
+A high Google score (≥60) suggests the company has an active, findable web presence \
+which is a mild positive signal. A missing website or low Google score is neutral — \
+many legitimate SMEs are not indexed.
 
 Output ONLY a JSON object (no markdown, no explanation) with exactly two fields:
 - "score": integer 0–100
@@ -665,6 +668,7 @@ def _score_google_results_for_company(company: Company, raw_results: list[dict])
                 municipality=company.municipality,
                 canton=company.canton,
                 legal_form=company.legal_form,
+                address=company.address,
             )
         else:
             s = score_result(
@@ -674,6 +678,7 @@ def _score_google_results_for_company(company: Company, raw_results: list[dict])
                 canton=company.canton,
                 purpose=company.purpose,
                 legal_form=company.legal_form,
+                address=company.address,
             )
 
         if social_in_top and is_social_lead_domain(row["link"]):
@@ -722,6 +727,7 @@ def recalculate_google_scores(
                 best = rescored[0]
                 company.website_url = best["link"]
                 company.website_match_score = best["score"]
+                company.social_media_only = is_social_lead_domain(best["link"])
                 company.google_search_results_raw = json.dumps(rescored)
                 stats["updated"] += 1
             except Exception as exc:  # noqa: BLE001
@@ -760,6 +766,7 @@ def enrich_company_website(db: Session, company: Company, *, num: int = 5) -> tu
     raw_results = [{"title": r.title, "link": r.link, "snippet": r.snippet or ""} for r in results]
     scored = _score_google_results_for_company(company, raw_results)
     best = scored[0]
+    social_media_only = is_social_lead_domain(best["link"])
 
     crud.update_company(
         db,
@@ -767,6 +774,7 @@ def enrich_company_website(db: Session, company: Company, *, num: int = 5) -> tu
         CompanyUpdate(
             website_url=best["link"],
             website_match_score=best["score"],
+            social_media_only=social_media_only,
             website_checked_at=now,
             google_search_results_raw=json.dumps(scored),
         ),
@@ -966,7 +974,7 @@ def bulk_import_zefix(
     # Fields that come exclusively from Zefix — safe to overwrite on every run
     _ZEFIX_UPDATE_FIELDS = {
         "name", "legal_form", "legal_form_id", "legal_form_uid", "legal_form_short_name",
-        "status", "municipality", "canton", "purpose", "industry", "zefix_score", "zefix_score_breakdown",
+        "status", "municipality", "canton", "purpose", "zefix_score", "zefix_score_breakdown",
         "ehraid", "chid", "legal_seat_id", "sogc_date", "deletion_date",
     }
 
@@ -1073,6 +1081,7 @@ def rescore_from_stored_results(db: Session, company: Company) -> bool:
         CompanyUpdate(
             website_url=best["link"],
             website_match_score=best["score"],
+            social_media_only=is_social_lead_domain(best["link"]),
             google_search_results_raw=json.dumps(rescored),
         ),
     )
@@ -1277,7 +1286,6 @@ def claude_classify_batch(
     db: Session,
     *,
     canton: str | None = None,
-    industry_filter: str | None = None,
     min_zefix_score: int | None = None,
     max_zefix_score: int | None = None,
     limit: int = 500,
@@ -1285,17 +1293,22 @@ def claude_classify_batch(
     target_description: str | None = None,
     api_key: str | None = None,
     resume_from: int = 0,
+    use_batch_api: bool = False,
     progress_cb: Any = None,
 ) -> dict[str, Any]:
     """Classify companies using Claude Haiku and store a lead-quality score + category.
 
-    Each company's ``purpose`` (and optionally ``industry``) is sent to
-    claude-haiku-4-5 with a classification prompt.  The response JSON is parsed
-    to extract ``score`` (0-100) and ``category`` (short label), which are stored
-    in ``claude_score`` and ``claude_category``.
+    When ``use_batch_api=True`` all requests are submitted as a single Anthropic
+    Message Batch (50 % cheaper).  The call blocks while polling for completion
+    and processes results once the batch ends.
+
+    When ``use_batch_api=False`` (default) each company is sent individually in
+    a tight loop (~6 req/s).
 
     Returns:
-        ``{"classified": int, "skipped": int, "errors": list[str], "input_tokens": int, "output_tokens": int}``
+        ``{"classified": int, "skipped": int, "errors": list[str],
+           "input_tokens": int, "output_tokens": int}``
+        Batch mode also includes ``"batch_id": str``.
     """
     try:
         import anthropic as _anthropic
@@ -1316,8 +1329,6 @@ def claude_classify_batch(
     query = db.query(Company).filter(Company.purpose.isnot(None))
     if canton:
         query = query.filter(Company.canton == canton)
-    if industry_filter:
-        query = query.filter(Company.industry.ilike(f"%{industry_filter}%"))
     if min_zefix_score is not None:
         query = query.filter(Company.zefix_score >= min_zefix_score)
     if max_zefix_score is not None:
@@ -1326,42 +1337,120 @@ def claude_classify_batch(
     companies = query.order_by(Company.id.asc()).limit(limit).all()
     total = len(companies)
     offset = max(0, min(resume_from, total))
+    selected = companies[offset:]
 
-    for i, company in enumerate(companies[offset:], start=offset + 1):
+    # ── helpers ──────────────────────────────────────────────────────────────
+
+    def _build_user_text(company: Company) -> str:
+        parts = [f"Company: {company.name}", f"Purpose: {company.purpose}"]
+        if company.purpose_keywords:
+            parts.append(f"Keywords: {company.purpose_keywords}")
+        if company.tfidf_cluster and company.tfidf_cluster != "Undefined":
+            parts.append(f"Clusters: {company.tfidf_cluster}")
+        if company.website_url:
+            parts.append(f"Website: {company.website_url}")
+        if company.website_match_score is not None:
+            parts.append(f"Google score: {company.website_match_score} (0–100 confidence that the website belongs to this company)")
+        if company.social_media_only:
+            parts.append("Note: only social media presence found — no company website")
+        return "\n".join(parts)
+
+    def _apply_response(company: Company, response_text: str) -> None:
+        """Parse JSON response and write score/category back to the company ORM object."""
+        if response_text.startswith("```"):
+            response_text = response_text.split("```")[1]
+            if response_text.startswith("json"):
+                response_text = response_text[4:]
+        data = json.loads(response_text)
+        company.claude_score = max(0, min(100, int(data.get("score", 0))))
+        company.claude_category = str(data.get("category", ""))[:128]
+        company.claude_scored_at = datetime.now(tz=timezone.utc)
+
+    # ── Batch API path ────────────────────────────────────────────────────────
+
+    if use_batch_api:
+        uid_map: dict[str, Company] = {c.uid: c for c in selected}
+
+        requests_list = [
+            {
+                "custom_id": company.uid,
+                "params": {
+                    "model": "claude-haiku-4-5-20251001",
+                    "max_tokens": 128,
+                    "system": prompt,
+                    "messages": [{"role": "user", "content": _build_user_text(company)}],
+                },
+            }
+            for company in selected
+        ]
+
+        if not requests_list:
+            return stats
+
+        batch = client.beta.messages.batches.create(requests=requests_list)
+        stats["batch_id"] = batch.id
+
+        if progress_cb:
+            progress_cb(0, total, stats)
+
+        # Poll until the batch ends
+        while batch.processing_status != "ended":
+            time.sleep(15)
+            batch = client.beta.messages.batches.retrieve(batch.id)
+            counts = batch.request_counts
+            done_so_far = (counts.succeeded or 0) + (counts.errored or 0)
+            if progress_cb:
+                progress_cb(done_so_far, total, stats)
+
+        # Process results
+        for result in client.beta.messages.batches.results(batch.id):
+            company = uid_map.get(result.custom_id)
+            if company is None:
+                continue
+            if result.result.type == "succeeded":
+                response_text = result.result.message.content[0].text.strip()
+                stats["input_tokens"] += result.result.message.usage.input_tokens
+                stats["output_tokens"] += result.result.message.usage.output_tokens
+                try:
+                    _apply_response(company, response_text)
+                    stats["classified"] += 1
+                except json.JSONDecodeError as exc:
+                    stats["errors"].append(f"{result.custom_id}: JSON parse error — raw: {response_text!r} — {exc}")
+                    stats["skipped"] += 1
+                except Exception as exc:  # noqa: BLE001
+                    stats["errors"].append(f"{result.custom_id}: {type(exc).__name__}: {exc}")
+                    stats["skipped"] += 1
+            else:
+                err_info = getattr(result.result, "error", result.result.type)
+                stats["errors"].append(f"{result.custom_id}: batch error — {err_info}")
+                stats["skipped"] += 1
+
+        db.commit()
+        if progress_cb:
+            progress_cb(total, total, stats)
+        return stats
+
+    # ── Per-request path (default) ────────────────────────────────────────────
+
+    for i, company in enumerate(selected, start=offset + 1):
         try:
-            parts = [f"Company: {company.name}", f"Purpose: {company.purpose}"]
-            if company.industry:
-                parts.append(f"Industry: {company.industry}")
-            if company.purpose_keywords:
-                parts.append(f"Keywords: {company.purpose_keywords}")
-            if company.tfidf_cluster and company.tfidf_cluster != "Undefined":
-                parts.append(f"Clusters: {company.tfidf_cluster}")
-            user_text = "\n".join(parts)
-
             msg = client.messages.create(
                 model="claude-haiku-4-5-20251001",
                 max_tokens=128,
                 system=prompt,
-                messages=[{"role": "user", "content": user_text}],
+                messages=[{"role": "user", "content": _build_user_text(company)}],
             )
             response_text = msg.content[0].text.strip()
             stats["input_tokens"] += msg.usage.input_tokens
             stats["output_tokens"] += msg.usage.output_tokens
-
-            # Strip optional markdown code fences
-            if response_text.startswith("```"):
-                response_text = response_text.split("```")[1]
-                if response_text.startswith("json"):
-                    response_text = response_text[4:]
-
-            data = json.loads(response_text)
-            company.claude_score = max(0, min(100, int(data.get("score", 0))))
-            company.claude_category = str(data.get("category", ""))[:128]
-            company.claude_scored_at = datetime.now(tz=timezone.utc)
+            _apply_response(company, response_text)
             stats["classified"] += 1
 
+        except json.JSONDecodeError as exc:
+            stats["errors"].append(f"{company.uid}: JSON parse error — raw: {response_text!r} — {exc}")
+            stats["skipped"] += 1
         except Exception as exc:  # noqa: BLE001
-            stats["errors"].append(f"{company.uid}: {exc}")
+            stats["errors"].append(f"{company.uid}: {type(exc).__name__}: {exc}")
             stats["skipped"] += 1
 
         if i % 50 == 0:

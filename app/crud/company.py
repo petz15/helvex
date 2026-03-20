@@ -17,8 +17,6 @@ _SORT_MAP = {
     "-zefix_score":     (Company.zefix_score,        False),
     "claude_score":     (Company.claude_score,       True),
     "-claude_score":    (Company.claude_score,       False),
-    "industry":         (Company.industry,           True),
-    "-industry":        (Company.industry,           False),
     "tfidf_cluster":    (Company.tfidf_cluster,      True),
     "-tfidf_cluster":   (Company.tfidf_cluster,      False),
     "canton":           (Company.canton,             True),
@@ -49,7 +47,7 @@ def get_company_by_uid(db: Session, uid: str) -> Company | None:
 
 def _apply_filters(query, *, name_filter, canton, review_status, proposal_status,
                    google_searched, min_google_score, min_zefix_score, min_claude_score=None,
-                   industry, tags, tfidf_cluster=None, purpose_keywords=None):
+                   tags, tfidf_cluster=None, purpose_keywords=None):
     if name_filter:
         query = query.filter(Company.name.ilike(f"%{name_filter}%"))
     if canton:
@@ -77,8 +75,6 @@ def _apply_filters(query, *, name_filter, canton, review_status, proposal_status
         query = query.filter(Company.zefix_score >= min_zefix_score)
     if min_claude_score is not None:
         query = query.filter(Company.claude_score >= min_claude_score)
-    if industry:
-        query = query.filter(Company.industry.ilike(f"%{industry}%"))
     if tags:
         query = query.filter(Company.tags.ilike(f"%{tags}%"))
     if tfidf_cluster == "_none":
@@ -105,7 +101,6 @@ def list_companies(
     min_google_score: int | None = None,
     min_zefix_score: int | None = None,
     min_claude_score: int | None = None,
-    industry: str | None = None,
     tags: str | None = None,
     tfidf_cluster: str | None = None,
     purpose_keywords: str | None = None,
@@ -124,7 +119,6 @@ def list_companies(
         min_google_score=min_google_score,
         min_zefix_score=min_zefix_score,
         min_claude_score=min_claude_score,
-        industry=industry,
         tags=tags,
         tfidf_cluster=tfidf_cluster,
         purpose_keywords=purpose_keywords,
@@ -151,7 +145,6 @@ def count_companies(
     min_google_score: int | None = None,
     min_zefix_score: int | None = None,
     min_claude_score: int | None = None,
-    industry: str | None = None,
     tags: str | None = None,
     tfidf_cluster: str | None = None,
     purpose_keywords: str | None = None,
@@ -167,7 +160,6 @@ def count_companies(
         min_google_score=min_google_score,
         min_zefix_score=min_zefix_score,
         min_claude_score=min_claude_score,
-        industry=industry,
         tags=tags,
         tfidf_cluster=tfidf_cluster,
         purpose_keywords=purpose_keywords,
@@ -207,7 +199,7 @@ def get_company_stats(db: Session) -> dict:
 
 
 def get_taxonomy_stats(db: Session) -> dict:
-    """Return distinct values + counts for tfidf_cluster, industry, and tags (sorted by count desc)."""
+    """Return distinct values + counts for tfidf_cluster and tags (sorted by count desc)."""
     # tfidf_cluster format: "label_a|label_b|label_c" where each label is "term1,term2,..."
     # Count how many companies belong to each cluster label (pipe-separated chunk)
     raw_clusters = (
@@ -238,13 +230,6 @@ def get_taxonomy_stats(db: Session) -> dict:
                 kw_counter[kw] += 1
     keywords_list = kw_counter.most_common()
 
-    industries = (
-        db.query(Company.industry, func.count(Company.id).label("cnt"))
-        .filter(Company.industry.isnot(None))
-        .group_by(Company.industry)
-        .order_by(func.count(Company.id).desc())
-        .all()
-    )
     tags = (
         db.query(Company.tags, func.count(Company.id).label("cnt"))
         .filter(Company.tags.isnot(None))
@@ -255,7 +240,6 @@ def get_taxonomy_stats(db: Session) -> dict:
     return {
         "clusters": clusters_list,
         "keywords": keywords_list,
-        "industries": [(r.industry, r.cnt) for r in industries],
         "tags": [(r.tags, r.cnt) for r in tags],
     }
 
