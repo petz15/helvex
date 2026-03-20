@@ -17,8 +17,8 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
+    op.execute("DROP INDEX IF EXISTS ix_companies_industry")
     with op.batch_alter_table("companies") as batch_op:
-        batch_op.drop_index("ix_companies_industry")
         batch_op.drop_column("industry")
 
 
