@@ -42,6 +42,7 @@ _SOCIAL_LEAD_DOMAINS = {
     "xing.com",
     "instagram.com",
     "youtube.com",
+    "tiktok.com",
 }
 
 # Words to exclude when extracting keywords from the purpose field
