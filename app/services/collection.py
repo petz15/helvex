@@ -1369,11 +1369,15 @@ def claude_classify_batch(
     # ── Batch API path ────────────────────────────────────────────────────────
 
     if use_batch_api:
-        uid_map: dict[str, Company] = {c.uid: c for c in selected}
+        def _batch_id(uid: str) -> str:
+            """Sanitize a Zefix UID for use as a batch custom_id (dots not allowed)."""
+            return uid.replace(".", "_")[:64]
+
+        uid_map: dict[str, Company] = {_batch_id(c.uid): c for c in selected}
 
         requests_list = [
             {
-                "custom_id": company.uid,
+                "custom_id": _batch_id(company.uid),
                 "params": {
                     "model": "claude-haiku-4-5-20251001",
                     "max_tokens": 128,
