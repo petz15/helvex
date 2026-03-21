@@ -71,19 +71,26 @@
                  min="0" max="100" placeholder="0–100" style="padding:0.3rem 0.5rem;">
         </label>
 
+        <label class="form-label" style="font-size:0.83rem;">
+          <span>Min Claude score</span>
+          <input type="number" name="min_claude_score" value="{{ f_min_claude_score }}"
+                 min="0" max="100" placeholder="0–100" style="padding:0.3rem 0.5rem;">
+        </label>
+
         <button type="submit" style="margin-top:0.2rem;">Apply</button>
         <button type="button" id="btn-clear" class="secondary">Clear</button>
       </form>
     </div>
 
     <div class="card" style="padding:0.8rem; flex-shrink:0;">
-      <p style="margin:0 0 0.5rem; font-size:0.83rem; font-weight:600;">Score color</p>
+      <p style="margin:0 0 0.5rem; font-size:0.83rem; font-weight:600;">Combined score color</p>
       <div class="legend">
-        <div class="legend-row"><div class="legend-dot" style="background:#16a34a;"></div> Google ≥ 70</div>
-        <div class="legend-row"><div class="legend-dot" style="background:#ca8a04;"></div> Google 40–69</div>
-        <div class="legend-row"><div class="legend-dot" style="background:#dc2626;"></div> Google &lt; 40</div>
+        <div class="legend-row"><div class="legend-dot" style="background:#16a34a;"></div> ≥ 70</div>
+        <div class="legend-row"><div class="legend-dot" style="background:#ca8a04;"></div> 40–69</div>
+        <div class="legend-row"><div class="legend-dot" style="background:#dc2626;"></div> &lt; 40</div>
         <div class="legend-row"><div class="legend-dot" style="background:#6b7280;"></div> Not scored</div>
       </div>
+      <p style="margin:0.5rem 0 0; font-size:0.78rem; color:var(--muted);">Claude 70% · Google 20% · Zefix 10%</p>
     </div>
 
     <div class="card" style="padding:0.8rem;">
@@ -111,6 +118,15 @@ var clusters = null;
 var loadSeq = 0;
 var loadTimer = null;
 
+function combinedScore(f) {
+  // Same weights as Company.combined_score property: claude 70%, google 20%, zefix 10%
+  var weights = [[f.claude_score, 0.70], [f.google_score, 0.20], [f.zefix_score, 0.10]];
+  var present = weights.filter(function(p) { return p[0] !== null && p[0] !== undefined; });
+  if (!present.length) return null;
+  var totalW = present.reduce(function(s, p) { return s + p[1]; }, 0);
+  return Math.round(present.reduce(function(s, p) { return s + p[0] * p[1]; }, 0) / totalW);
+}
+
 function scoreColor(s) {
   if (s === null || s === undefined) return '#6b7280';
   if (s >= 70) return '#16a34a';
@@ -119,7 +135,8 @@ function scoreColor(s) {
 }
 
 function makeMarker(f) {
-  var color = scoreColor(f.google_score);
+  var combined = combinedScore(f);
+  var color = scoreColor(combined);
   var m = L.circleMarker([f.lat, f.lon], {
     radius: 7,
     fillColor: color,
@@ -129,8 +146,14 @@ function makeMarker(f) {
   });
   var popup = '<b><a href="' + companyBaseUrl + f.id + '" target="_blank">' + f.name + '</a></b>';
   popup += '<br><span style="color:#6b7280;font-size:0.82em;">' + (f.municipality || '') + (f.canton ? ', ' + f.canton : '') + '</span>';
+  if (combined !== null) {
+    popup += '<br>Combined: <b>' + combined + '</b>';
+  }
+  if (f.claude_score !== null && f.claude_score !== undefined) {
+    popup += '&nbsp;·&nbsp;Claude: <b>' + f.claude_score + '</b>';
+  }
   if (f.google_score !== null && f.google_score !== undefined) {
-    popup += '<br>Google score: <b>' + f.google_score + '</b>';
+    popup += '&nbsp;·&nbsp;Google: <b>' + f.google_score + '</b>';
   }
   if (f.zefix_score !== null && f.zefix_score !== undefined) {
     popup += '&nbsp;·&nbsp;Zefix: <b>' + f.zefix_score + '</b>';

@@ -54,6 +54,8 @@ _DIRECTORY_DOMAINS = {
     "ofri.ch",
     "region-emmental.ch",
     "bloomberg.com",
+    "yandex.ru",
+    
 }
 
 _NEWS_DOMAINS = {

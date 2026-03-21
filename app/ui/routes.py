@@ -361,6 +361,7 @@ def ui_map(
     google_searched: str | None = Query(None),
     min_google_score: str | None = Query(None),
     min_zefix_score: str | None = Query(None),
+    min_claude_score: str | None = Query(None),
     db: Session = Depends(get_db),
 ):
     return templates.TemplateResponse(
@@ -373,6 +374,7 @@ def ui_map(
             "f_google_searched": google_searched or "",
             "f_min_google_score": min_google_score or "",
             "f_min_zefix_score": min_zefix_score or "",
+            "f_min_claude_score": min_claude_score or "",
         },
     )
 
@@ -395,6 +397,7 @@ def api_map_data(
     google_searched: str | None = Query(None),
     min_google_score: int | None = Query(None),
     min_zefix_score: int | None = Query(None),
+    min_claude_score: int | None = Query(None),
     min_lat: float | None = Query(None),
     max_lat: float | None = Query(None),
     min_lon: float | None = Query(None),
@@ -410,6 +413,7 @@ def api_map_data(
         CompanyModel.lon,
         CompanyModel.website_match_score,
         CompanyModel.zefix_score,
+        CompanyModel.claude_score,
         CompanyModel.canton,
         CompanyModel.municipality,
         CompanyModel.website_url,
@@ -431,6 +435,8 @@ def api_map_data(
         query = query.filter(CompanyModel.website_match_score >= min_google_score)
     if min_zefix_score is not None:
         query = query.filter(CompanyModel.zefix_score >= min_zefix_score)
+    if min_claude_score is not None:
+        query = query.filter(CompanyModel.claude_score >= min_claude_score)
     if None not in (min_lat, max_lat):
         query = query.filter(CompanyModel.lat >= min_lat, CompanyModel.lat <= max_lat)
     if None not in (min_lon, max_lon):
@@ -450,6 +456,7 @@ def api_map_data(
             "lon": r.lon,
             "google_score": r.website_match_score,
             "zefix_score": r.zefix_score,
+            "claude_score": r.claude_score,
             "canton": r.canton,
             "municipality": r.municipality,
             "website": r.website_url,
