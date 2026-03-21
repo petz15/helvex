@@ -36,6 +36,14 @@ _DIRECTORY_DOMAINS = {
     "swiss-arc.ch",
     "kompass.com",
     "northdata.com",
+    "provenexpert.com",
+    "bestatter1.ch",
+    "auditorstats.ch",
+    "maptons.com",
+    "pappers.ch",
+    "kanzleiwelten.com",
+    
+
 }
 
 _NEWS_DOMAINS = {
@@ -178,6 +186,7 @@ def score_result(
                                                + zip 15 + street 15)
       - Purpose keywords in snippet: 0-15 pts  (1-2 hits = 8, 3+ hits = 15)
       - Legal form in domain/title:   +5 pts  bonus
+      - Swiss TLD (.ch / .swiss):    +10 pts  bonus
       - Social media domain:         -30 pts  penalty
       - Local directory URL path:   -25 pts  penalty (verzeichnis in URL)
       - Directory domain:           hard  0  (returned immediately)
@@ -231,6 +240,10 @@ def score_result(
         if any(a in domain or a in title.lower() for a in abbrevs if len(a) >= 2):
             score += 5
 
+    # --- Swiss TLD bonus (+10) ---
+    if domain.endswith(".ch") or domain.endswith(".swiss"):
+        score += 10
+
     # --- Social media penalty (-30) ---
     if any(domain == d or domain.endswith("." + d) for d in _SOCIAL_LEAD_DOMAINS):
         score -= 30
@@ -281,6 +294,12 @@ def fallback_result_score(
     title = result.get("title", "") or ""
     snippet = result.get("snippet", "") or ""
     link = result.get("link", "") or ""
+
+    # Directory / news domains must never be selected as the company website
+    domain = _root_domain(link)
+    if any(domain == d or domain.endswith("." + d) for d in _DIRECTORY_DOMAINS | _NEWS_DOMAINS):
+        return 0
+
     combined = f"{title} {snippet}"
     combined_lower = combined.lower()
 
@@ -298,7 +317,6 @@ def fallback_result_score(
             score += 15
 
     if legal_form:
-        domain = _root_domain(link)
         lf_lower = legal_form.lower()
         abbrevs = re.findall(r"\b\w{2,6}\b", lf_lower)
         if any(a in domain or a in title.lower() for a in abbrevs if len(a) >= 2):
