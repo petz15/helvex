@@ -6,7 +6,7 @@ from typing import Any
 
 import httpx
 
-from sqlalchemy import or_
+from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
 from app import crud
@@ -527,6 +527,7 @@ def geocode_and_update_company(db: Session, company: Company) -> bool:
             lon=lon,
             zefix_score=int(score_breakdown["final_score"]),
             zefix_score_breakdown=json.dumps(score_breakdown),
+            zefix_scored_at=datetime.now(tz=timezone.utc),
         ),
     )
     return True
@@ -606,6 +607,7 @@ def recalculate_zefix_scores(
             bd["final_score"] = normalised[company.id]
             company.zefix_score = normalised[company.id]
             company.zefix_score_breakdown = json.dumps(bd)
+            company.zefix_scored_at = datetime.now(tz=timezone.utc)
             stats["updated"] += 1
         db.commit()
         offset += len(batch)
@@ -726,7 +728,14 @@ def recalculate_google_scores(
     while True:
         batch = (
             db.query(Company)
-            .order_by(Company.zefix_score.desc().nullslast(), Company.id.asc())
+            .order_by(
+                (
+                    func.coalesce(Company.claude_score * 0.70, 0)
+                    + func.coalesce(Company.website_match_score * 0.20, 0)
+                    + func.coalesce(Company.zefix_score * 0.10, 0)
+                ).desc(),
+                Company.id.asc(),
+            )
             .offset(offset)
             .limit(batch_size)
             .all()
@@ -1262,8 +1271,17 @@ def run_batch_collect(
 
     candidates = query.all()
 
+    def _combined_score_py(company: Company) -> float:
+        """Combined score for Python-side ordering (same weights as Company.combined_score property)."""
+        _w = [(company.claude_score, 0.70), (company.website_match_score, 0.20), (company.zefix_score, 0.10)]
+        present = [(s, w) for s, w in _w if s is not None]
+        if not present:
+            return 0.0
+        total_w = sum(w for _, w in present)
+        return sum(s * w for s, w in present) / total_w
+
     def _batch_order_key(company: Company) -> tuple[float, float, int]:
-        score = float(company.zefix_score) if company.zefix_score is not None else float("-inf")
+        score = _combined_score_py(company)
         distance = distance_to_muri_km(
             canton=company.canton,
             municipality=company.municipality,

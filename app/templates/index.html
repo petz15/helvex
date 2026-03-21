@@ -285,7 +285,11 @@
           <label><input type="checkbox" data-col="8" checked> Combined Score</label>
           <label><input type="checkbox" data-col="9" checked> Review</label>
           <label><input type="checkbox" data-col="10" checked> Proposal</label>
-          <label><input type="checkbox" data-col="11" checked> Open</label>
+          <label><input type="checkbox" data-col="11"> Last Google</label>
+          <label><input type="checkbox" data-col="12"> Last Zefix</label>
+          <label><input type="checkbox" data-col="13"> Last Claude</label>
+          <label><input type="checkbox" data-col="14"> Updated</label>
+          <label><input type="checkbox" data-col="15" checked> Open</label>
         </div>
       </div>
     </div>
@@ -337,6 +341,22 @@
             <th class="th-sortable" onclick="toggleSort('proposal_status')" title="Sort by proposal">
               Proposal
               <span class="sort-icon">{% if sort == 'proposal_status' %}↑{% elif sort == '-proposal_status' %}↓{% else %}↕{% endif %}</span>
+            </th>
+            <th class="th-sortable" onclick="toggleSort('website_checked_at')" title="Last Google search">
+              Last Google
+              <span class="sort-icon">{% if sort == 'website_checked_at' %}↑{% elif sort == '-website_checked_at' %}↓{% else %}↕{% endif %}</span>
+            </th>
+            <th class="th-sortable" onclick="toggleSort('zefix_scored_at')" title="Last Zefix score calculation">
+              Last Zefix
+              <span class="sort-icon">{% if sort == 'zefix_scored_at' %}↑{% elif sort == '-zefix_scored_at' %}↓{% else %}↕{% endif %}</span>
+            </th>
+            <th class="th-sortable" onclick="toggleSort('claude_scored_at')" title="Last Claude classification">
+              Last Claude
+              <span class="sort-icon">{% if sort == 'claude_scored_at' %}↑{% elif sort == '-claude_scored_at' %}↓{% else %}↕{% endif %}</span>
+            </th>
+            <th class="th-sortable" onclick="toggleSort('updated_at')" title="Last record update">
+              Updated
+              <span class="sort-icon">{% if sort == 'updated_at' %}↑{% elif sort == '-updated_at' %}↓{% else %}↕{% endif %}</span>
             </th>
             <th></th>
           </tr>
@@ -435,11 +455,23 @@
                 <option value="rejected"  {% if c.proposal_status == 'rejected'  %}selected{% endif %}>rejected</option>
               </select>
             </td>
+            <td class="ts-cell" data-ts="{{ c.website_checked_at.isoformat() if c.website_checked_at else '' }}">
+              <span class="muted ts-rel">{{ c.website_checked_at.strftime('%d.%m.%y') if c.website_checked_at else '—' }}</span>
+            </td>
+            <td class="ts-cell" data-ts="{{ c.zefix_scored_at.isoformat() if c.zefix_scored_at else '' }}">
+              <span class="muted ts-rel">{{ c.zefix_scored_at.strftime('%d.%m.%y') if c.zefix_scored_at else '—' }}</span>
+            </td>
+            <td class="ts-cell" data-ts="{{ c.claude_scored_at.isoformat() if c.claude_scored_at else '' }}">
+              <span class="muted ts-rel">{{ c.claude_scored_at.strftime('%d.%m.%y') if c.claude_scored_at else '—' }}</span>
+            </td>
+            <td class="ts-cell" data-ts="{{ c.updated_at.isoformat() if c.updated_at else '' }}">
+              <span class="muted ts-rel">{{ c.updated_at.strftime('%d.%m.%y') if c.updated_at else '—' }}</span>
+            </td>
             <td><a class="button-link" href="/ui/companies/{{ c.id }}?back={{ request.url | urlencode }}">Open</a></td>
           </tr>
           {% else %}
           <tr>
-            <td colspan="12" class="empty-row">No companies match the current filters.</td>
+            <td colspan="16" class="empty-row">No companies match the current filters.</td>
           </tr>
           {% endfor %}
         </tbody>
@@ -470,7 +502,35 @@
 {% endif %}
 
 <script>
-  var _TEXT_SORT_FIELDS = {'name':1,'canton':1,'tfidf_cluster':1,'status':1,'review_status':1,'proposal_status':1,'website':1};
+  // Relative time for timestamp cells
+  (function() {
+    function timeAgo(iso) {
+      if (!iso) return null;
+      var d = new Date(iso);
+      if (isNaN(d)) return null;
+      var sec = Math.floor((Date.now() - d) / 1000);
+      if (sec < 60) return sec + 's ago';
+      if (sec < 3600) return Math.floor(sec/60) + 'm ago';
+      if (sec < 86400) return Math.floor(sec/3600) + 'h ago';
+      if (sec < 86400*30) return Math.floor(sec/86400) + 'd ago';
+      if (sec < 86400*365) return Math.floor(sec/86400/30) + 'mo ago';
+      return Math.floor(sec/86400/365) + 'y ago';
+    }
+    document.querySelectorAll('.ts-cell').forEach(function(td) {
+      var iso = td.dataset.ts;
+      var rel = timeAgo(iso);
+      if (rel) {
+        var span = td.querySelector('.ts-rel');
+        if (span) {
+          var abs = span.textContent;
+          span.textContent = rel;
+          span.title = abs;
+        }
+      }
+    });
+  })();
+
+  var _TEXT_SORT_FIELDS = {'name':1,'canton':1,'tfidf_cluster':1,'status':1,'review_status':1,'proposal_status':1,'website':1,'website_checked_at':1,'zefix_scored_at':1,'claude_scored_at':1,'updated_at':1};
   function toggleSort(field) {
     var form = document.getElementById('filter-form');
     var sortSelect = form.querySelector('[name="sort"]');

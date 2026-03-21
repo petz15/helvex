@@ -113,6 +113,7 @@ class CompanyUpdate(BaseModel):
     claude_score: int | None = None
     claude_category: str | None = None
     claude_scored_at: datetime | None = None
+    zefix_scored_at: datetime | None = None
 
 
 class CompanyRead(CompanyBase):

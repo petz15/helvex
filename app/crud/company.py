@@ -29,10 +29,18 @@ _SORT_MAP = {
     "-proposal_status": (Company.proposal_status,    False),
     "website":          (Company.website_url,        True),
     "-website":         (Company.website_url,        False),
-    "updated":          (Company.updated_at,         True),
-    "-updated":         (Company.updated_at,         False),
-    "created":          (Company.created_at,         True),
-    "-created":         (Company.created_at,         False),
+    "updated":              (Company.updated_at,          True),
+    "-updated":             (Company.updated_at,          False),
+    "updated_at":           (Company.updated_at,          True),
+    "-updated_at":          (Company.updated_at,          False),
+    "created":              (Company.created_at,          True),
+    "-created":             (Company.created_at,          False),
+    "website_checked_at":   (Company.website_checked_at,  True),
+    "-website_checked_at":  (Company.website_checked_at,  False),
+    "zefix_scored_at":      (Company.zefix_scored_at,     True),
+    "-zefix_scored_at":     (Company.zefix_scored_at,     False),
+    "claude_scored_at":     (Company.claude_scored_at,    True),
+    "-claude_scored_at":    (Company.claude_scored_at,    False),
 }
 _DEFAULT_SORT = "-updated"
 

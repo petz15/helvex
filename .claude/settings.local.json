@@ -70,7 +70,17 @@
       "Bash(.venv/Scripts/python -c \"from sklearn.cluster import HDBSCAN; print\\(''sklearn HDBSCAN ok''\\)\")",
       "Bash(ls .venv/Scripts/python*)",
       "Bash(ls .venv/bin/python*)",
-      "Bash(.venv/Scripts/python.exe -c \"from sklearn.cluster import HDBSCAN; print\\(''sklearn HDBSCAN ok''\\); import sklearn; print\\(''sklearn version:'', sklearn.__version__\\)\")"
+      "Bash(.venv/Scripts/python.exe -c \"from sklearn.cluster import HDBSCAN; print\\(''sklearn HDBSCAN ok''\\); import sklearn; print\\(''sklearn version:'', sklearn.__version__\\)\")",
+      "Bash(.venv/Scripts/alembic upgrade:*)",
+      "Bash(.venv/Scripts/python.exe -c \"import alembic; import subprocess; subprocess.run\\([''.venv/Scripts/python.exe'', ''-c'', ''from alembic.config import main; main\\(argv=[\"\"upgrade\"\", \"\"head\"\"]\\)''], cwd=''.''\\)\")",
+      "Bash(.venv/Scripts/python.exe -m alembic.config upgrade head)",
+      "Bash(.venv/Scripts/python.exe -c \"import sys; print\\(sys.path\\)\")",
+      "Bash(pip show:*)",
+      "Bash(ls *.sh *.bat *.ps1)",
+      "Bash(python -c \"from alembic.config import Config; from alembic import command; cfg = Config\\(''alembic.ini''\\); command.upgrade\\(cfg, ''head''\\)\")",
+      "Bash(where alembic:*)",
+      "Bash(find c:/D/coding_projects/zefix_analyzer -name alembic* -not -path */__pycache__/*)",
+      "Bash(C:/Users/peter/anaconda3/Scripts/alembic.exe upgrade:*)"
     ]
   }
 }

@@ -53,6 +53,7 @@ _DIRECTORY_DOMAINS = {
     "swissbiotech.org",
     "ofri.ch",
     "region-emmental.ch",
+    "bloomberg.com",
 }
 
 _NEWS_DOMAINS = {

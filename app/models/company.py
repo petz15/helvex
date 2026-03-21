@@ -76,6 +76,7 @@ class Company(Base):
     claude_score: Mapped[int | None] = mapped_column(Integer, nullable=True)
     claude_category: Mapped[str | None] = mapped_column(String(128), nullable=True)
     claude_scored_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    zefix_scored_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     # Raw JSON from Zefix API stored for reference
     zefix_raw: Mapped[str | None] = mapped_column(Text, nullable=True)
 
