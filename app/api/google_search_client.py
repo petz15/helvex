@@ -39,7 +39,13 @@ def search_website(company_name: str, *, num: int = 5) -> list[GoogleSearchResul
 
     with httpx.Client(timeout=30.0) as client:
         response = client.post(_SERPER_URL, json=payload, headers=headers)
-        response.raise_for_status()
+        if not response.is_success:
+            body = response.text[:500]
+            raise httpx.HTTPStatusError(
+                f"Serper API HTTP {response.status_code}: {body}",
+                request=response.request,
+                response=response,
+            )
 
     data = response.json()
     items = data.get("organic", [])

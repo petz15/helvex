@@ -586,7 +586,7 @@ def recalculate_zefix_scores(
                 breakdowns[company.id] = bd
                 raw_scores[company.id] = None if bd.get("cancelled") else int(bd["raw_total"])
             except Exception as exc:  # noqa: BLE001
-                stats["errors"].append(f"{company.uid}: {exc}")
+                stats["errors"].append(f"{company.uid} [{type(exc).__name__}]: {exc}")
         db.commit()
         offset += len(batch)
         if progress_cb:
@@ -657,7 +657,7 @@ def re_geocode_all_companies(
                 else:
                     stats["failed"] += 1
             except Exception as exc:  # noqa: BLE001
-                stats["errors"].append(f"{company.uid}: {exc}")
+                stats["errors"].append(f"{company.uid} [{type(exc).__name__}]: {exc}")
 
         db.commit()
         offset += len(batch)
@@ -766,7 +766,7 @@ def recalculate_google_scores(
                 company.google_search_results_raw = json.dumps(rescored)
                 stats["updated"] += 1
             except Exception as exc:  # noqa: BLE001
-                stats["errors"].append(f"{company.uid}: {exc}")
+                stats["errors"].append(f"{company.uid} [{type(exc).__name__}]: {exc}")
 
         db.commit()
         offset += len(batch)
@@ -862,7 +862,7 @@ def initial_collect(
                 legal_form=legal_form,
             )
         except Exception as exc:  # noqa: BLE001
-            stats["errors"].append(f"Search '{name_clean}': {exc}")
+            stats["errors"].append(f"Search '{name_clean}' [{type(exc).__name__}]: {exc}")
             continue
 
         for result in results:
@@ -886,7 +886,7 @@ def initial_collect(
                 else:
                     stats["google_no_result"] += 1
         except Exception as exc:  # noqa: BLE001
-            stats["errors"].append(f"UID {uid_clean}: {exc}")
+            stats["errors"].append(f"UID {uid_clean} [{type(exc).__name__}]: {exc}")
         if progress_cb:
             progress_cb(idx, total, stats)
 
@@ -1026,7 +1026,7 @@ def bulk_import_zefix(
                     canton, char, active_only=active_only, request_delay=request_delay
                 )
             except Exception as exc:  # noqa: BLE001
-                stats["errors"].append(f"Canton {canton} prefix {char}: {exc}")
+                stats["errors"].append(f"Canton {canton} prefix {char} [{type(exc).__name__}]: {exc}")
                 crud.update_checkpoint(db, run, canton, prefix_idx, stats)
                 time.sleep(request_delay)
                 continue
@@ -1219,7 +1219,7 @@ def run_zefix_detail_collect(
                     stats["scored"] += 1
 
         except Exception as exc:  # noqa: BLE001
-            stats["errors"].append(f"{company.uid} ({company.name}): {exc}")
+            stats["errors"].append(f"{company.uid} ({company.name}) [{type(exc).__name__}]: {exc}")
 
         if progress_cb:
             progress_cb(i, total, stats)
@@ -1304,7 +1304,7 @@ def run_batch_collect(
                 current = refreshed
                 stats["zefix_refreshed"] += 1
             except Exception as exc:  # noqa: BLE001
-                stats["errors"].append(f"Zefix refresh {company.uid}: {exc}")
+                stats["errors"].append(f"Zefix refresh {company.uid} [{type(exc).__name__}]: {exc}")
 
         if run_google:
             try:
@@ -1314,7 +1314,7 @@ def run_batch_collect(
                 else:
                     stats["google_no_result"] += 1
             except Exception as exc:  # noqa: BLE001
-                stats["errors"].append(f"Google search {current.uid}: {exc}")
+                stats["errors"].append(f"Google search {current.uid} [{type(exc).__name__}]: {exc}")
 
         if progress_cb:
             progress_cb(i, stats["selected"], stats)
