@@ -1243,6 +1243,12 @@ def run_batch_collect(
     run_google: bool = True,
     resume_from: int = 0,
     progress_cb: Any = None,
+    canton: str | None = None,
+    min_zefix_score: int | None = None,
+    min_claude_score: int | None = None,
+    purpose_keywords: str | None = None,
+    tfidf_cluster: str | None = None,
+    review_status: str | None = None,
 ) -> dict[str, Any]:
     """Run a recurring batch process over companies already in your DB."""
     stats: dict[str, Any] = {
@@ -1273,6 +1279,25 @@ def run_batch_collect(
     query = db.query(Company)
     if only_missing_website:
         query = query.filter(or_(Company.website_url.is_(None), Company.website_url == ""))
+    if canton:
+        query = query.filter(Company.canton == canton.strip().upper())
+    if min_zefix_score is not None:
+        query = query.filter(Company.zefix_score >= min_zefix_score)
+    if min_claude_score is not None:
+        query = query.filter(Company.claude_score >= min_claude_score)
+    if purpose_keywords:
+        kw_terms = [t.strip() for t in purpose_keywords.split(",") if t.strip()]
+        if kw_terms:
+            query = query.filter(or_(
+                Company.purpose_keywords.ilike(f"%{kw}%") for kw in kw_terms
+            ))
+    if tfidf_cluster:
+        query = query.filter(Company.tfidf_cluster.ilike(f"%{tfidf_cluster}%"))
+    if review_status:
+        if review_status == "pending":
+            query = query.filter(Company.review_status.is_(None))
+        else:
+            query = query.filter(Company.review_status == review_status)
 
     candidates = query.all()
 

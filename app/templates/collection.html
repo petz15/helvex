@@ -135,10 +135,38 @@
       Respects the daily Google quota set in Settings.
     </p>
     <form method="post" action="/ui/collection/batch">
-      <div style="max-width:200px; margin-bottom:0.8rem;">
-        <label style="display:block;font-size:0.85rem;font-weight:600;margin-bottom:0.3rem;">Limit</label>
-        <input type="number" name="limit" value="100" min="1" max="10000"
-               style="width:100%; padding:0.45rem 0.6rem; border:1px solid var(--line); border-radius:4px;">
+      <div class="filter-grid" style="margin-bottom:0.8rem;">
+        <label class="form-label"><span>Max companies</span>
+          <input type="number" name="limit" value="100" min="1" max="10000">
+        </label>
+        <label class="form-label"><span>Canton</span>
+          <input type="text" name="canton" placeholder="e.g. BE (blank = all)">
+        </label>
+        <label class="form-label"><span>Min Zefix score</span>
+          <input type="number" name="min_zefix_score" placeholder="0–100" min="0" max="100">
+        </label>
+        <label class="form-label"><span>Min Claude score</span>
+          <input type="number" name="min_claude_score" placeholder="0–100" min="0" max="100">
+        </label>
+        <label class="form-label"><span>Purpose keywords</span>
+          <input type="text" name="purpose_keywords" placeholder="e.g. gastro, software">
+          <small class="muted">Comma-separated — any match included.</small>
+        </label>
+        <label class="form-label"><span>TF-IDF cluster</span>
+          <input type="text" name="tfidf_cluster" placeholder="e.g. küche">
+        </label>
+        <label class="form-label"><span>Review status</span>
+          <select name="review_status">
+            <option value="">All</option>
+            <option value="pending">Pending</option>
+            <option value="potential_proposal">Potential proposal</option>
+            <option value="confirmed_proposal">Confirmed proposal</option>
+            <option value="potential_generic">Potential generic</option>
+            <option value="confirmed_generic">Confirmed generic</option>
+            <option value="interesting">Interesting</option>
+            <option value="rejected">Rejected</option>
+          </select>
+        </label>
       </div>
       <div style="margin-bottom:0.8rem; display:flex; flex-direction:column; gap:0.4rem;">
         <label style="display:flex;align-items:center;gap:0.5rem;font-size:0.88rem;cursor:pointer;">

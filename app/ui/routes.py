@@ -1367,6 +1367,12 @@ def _run_job(app, job_id: int) -> None:
                     run_google=bool(params.get("run_google", True)),
                     resume_from=resume_from,
                     progress_cb=_progress,
+                    canton=params.get("canton"),
+                    min_zefix_score=params.get("min_zefix_score"),
+                    min_claude_score=params.get("min_claude_score"),
+                    purpose_keywords=params.get("purpose_keywords"),
+                    tfidf_cluster=params.get("tfidf_cluster"),
+                    review_status=params.get("review_status"),
                 )
                 done_msg = (
                     f"Done — {stats['google_enriched']} enriched, "
@@ -1795,7 +1801,19 @@ async def start_batch(
     limit: int = Form(100),
     all_companies: str = Form("false"),
     refresh_zefix: str = Form("false"),
+    canton: str = Form(""),
+    min_zefix_score: str = Form(""),
+    min_claude_score: str = Form(""),
+    purpose_keywords: str = Form(""),
+    tfidf_cluster: str = Form(""),
+    review_status: str = Form(""),
 ) -> RedirectResponse:
+    def _int_or_none(v: str) -> int | None:
+        try:
+            return int(v.strip()) if v.strip() else None
+        except ValueError:
+            return None
+
     job, err = _enqueue_job_safe(
         request,
         job_type="batch",
@@ -1805,6 +1823,12 @@ async def start_batch(
             "only_missing_website": all_companies != "true",
             "refresh_zefix": refresh_zefix == "true",
             "run_google": True,
+            "canton": canton.strip().upper() or None,
+            "min_zefix_score": _int_or_none(min_zefix_score),
+            "min_claude_score": _int_or_none(min_claude_score),
+            "purpose_keywords": purpose_keywords.strip() or None,
+            "tfidf_cluster": tfidf_cluster.strip() or None,
+            "review_status": review_status.strip() or None,
         },
     )
     if err:
