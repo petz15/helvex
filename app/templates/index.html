@@ -187,8 +187,10 @@
           <option value="google_score"   {% if sort == 'google_score'   %}selected{% endif %}>Google score ↑</option>
           <option value="-zefix_score"   {% if sort == '-zefix_score'   %}selected{% endif %}>Score ↓</option>
           <option value="zefix_score"    {% if sort == 'zefix_score'    %}selected{% endif %}>Score ↑</option>
-          <option value="-claude_score"  {% if sort == '-claude_score'  %}selected{% endif %}>Claude score ↓</option>
-          <option value="claude_score"   {% if sort == 'claude_score'   %}selected{% endif %}>Claude score ↑</option>
+          <option value="-claude_score"    {% if sort == '-claude_score'    %}selected{% endif %}>Claude score ↓</option>
+          <option value="claude_score"     {% if sort == 'claude_score'     %}selected{% endif %}>Claude score ↑</option>
+          <option value="-combined_score"  {% if sort == '-combined_score'  %}selected{% endif %}>Combined score ↓</option>
+          <option value="combined_score"   {% if sort == 'combined_score'   %}selected{% endif %}>Combined score ↑</option>
           <option value="name"           {% if sort == 'name'           %}selected{% endif %}>Name A→Z</option>
           <option value="-name"          {% if sort == '-name'          %}selected{% endif %}>Name Z→A</option>
           <option value="tfidf_cluster"  {% if sort == 'tfidf_cluster'  %}selected{% endif %}>Cluster A→Z</option>
@@ -280,9 +282,10 @@
           <label><input type="checkbox" data-col="5" checked> Google Score</label>
           <label><input type="checkbox" data-col="6" checked> Zefix Score</label>
           <label><input type="checkbox" data-col="7" checked> Claude Score</label>
-          <label><input type="checkbox" data-col="8" checked> Review</label>
-          <label><input type="checkbox" data-col="9" checked> Proposal</label>
-          <label><input type="checkbox" data-col="10" checked> Open</label>
+          <label><input type="checkbox" data-col="8" checked> Combined Score</label>
+          <label><input type="checkbox" data-col="9" checked> Review</label>
+          <label><input type="checkbox" data-col="10" checked> Proposal</label>
+          <label><input type="checkbox" data-col="11" checked> Open</label>
         </div>
       </div>
     </div>
@@ -322,6 +325,10 @@
             <th class="th-sortable" onclick="toggleSort('claude_score')" title="Sort by Claude score">
               Claude Score
               <span class="sort-icon">{% if sort == 'claude_score' %}↑{% elif sort == '-claude_score' %}↓{% else %}↕{% endif %}</span>
+            </th>
+            <th class="th-sortable" onclick="toggleSort('combined_score')" title="Average of available scores (zefix + claude + google)">
+              Combined
+              <span class="sort-icon">{% if sort == 'combined_score' %}↑{% elif sort == '-combined_score' %}↓{% else %}↕{% endif %}</span>
             </th>
             <th class="th-sortable" onclick="toggleSort('review_status')" title="Sort by review">
               Review
@@ -389,6 +396,16 @@
               {% if c.claude_score is not none %}
                 <span class="score-pill-sm {% if c.claude_score >= 70 %}score-high{% elif c.claude_score >= 40 %}score-mid{% else %}score-low{% endif %}" title="Claude classification score{% if c.claude_category %}: {{ c.claude_category }}{% endif %}">
                   {{ c.claude_score }}
+                </span>
+              {% else %}
+                <span class="muted">—</span>
+              {% endif %}
+            </td>
+            <td>
+              {% if c.combined_score is not none %}
+                <span class="score-pill-sm {% if c.combined_score >= 70 %}score-high{% elif c.combined_score >= 40 %}score-mid{% else %}score-low{% endif %}"
+                  title="Combined score: avg of {% if c.zefix_score is not none %}zefix={{ c.zefix_score }} {% endif %}{% if c.claude_score is not none %}claude={{ c.claude_score }} {% endif %}{% if c.website_match_score is not none %}google={{ c.website_match_score }}{% endif %}">
+                  {{ c.combined_score }}
                 </span>
               {% else %}
                 <span class="muted">—</span>

@@ -31,7 +31,30 @@ _DIRECTORY_DOMAINS = {
     "spheriq.ch",
     "treuhandsuisse.ch",
     "fiduciairesuisse-vd.ch",
-    
+    "business-monitor.ch",
+    "graph.swiss",
+    "swiss-arc.ch",
+    "kompass.com",
+    "northdata.com",
+}
+
+_NEWS_DOMAINS = {
+    "news.google.com",
+    "20min.ch",
+    "gastrojournal.ch",
+    "nzz.ch",
+    "srf.ch",
+    "swissinfo.ch",
+    "blick.ch",
+    "aargauerzeitung.ch",
+    "bernerzeitung.ch",
+    "derbund.ch",
+    "tagesanzeiger.ch",
+    "luzernerzeitung.ch",
+    "stgallerzeitung.ch",
+    "suedostschweiz.ch",
+    "nau.ch",
+    "watson.ch",
 }
 
 _SOCIAL_LEAD_DOMAINS = {
@@ -47,6 +70,12 @@ _SOCIAL_LEAD_DOMAINS = {
 
 # Legal form words excluded when matching company name against domain
 _LEGAL_FORM_WORDS = {"ag", "gmbh", "sa", "sarl", "sàrl", "kg", "og", "llc", "ltd", "inc", "co", "spa"}
+
+# URL path pattern for municipal/local company directories (not in _DIRECTORY_DOMAINS).
+# Matches pages like /unternehmensverzeichnis/, /firmenverzeichnis/, /verzeichnis/, etc.
+_LOCAL_DIRECTORY_PATH_RE = re.compile(
+    r"(?:unternehmens|firmen|branchen|betriebs)?verzeichnis", re.IGNORECASE
+)
 
 # Words to exclude when extracting keywords from the purpose field
 _STOPWORDS = {
@@ -70,17 +99,19 @@ def _word_overlap_ratio(a: str, b: str) -> float:
 def _domain_name_overlap(domain: str, company_name: str) -> float:
     """Fraction of meaningful company name words found in the domain string.
 
-    Strips legal form suffixes (AG, GmbH, …) and short tokens before comparing,
-    so "Muster AG" vs "muster-ag.ch" → 1.0.
+    Uses substring containment so concatenated domains match correctly:
+    "aarestadt" and "gastro" are both substrings of "aarestadtgastro.ch" → 1.0.
+    Strips legal form suffixes (AG, GmbH, …) and short tokens before comparing.
     """
-    domain_tokens = set(re.findall(r"[a-zA-Z]{3,}", domain.lower()))
-    name_words = {
+    domain_lower = domain.lower()
+    name_words = [
         w for w in re.findall(r"\w+", company_name.lower())
         if len(w) >= 3 and w not in _LEGAL_FORM_WORDS
-    }
+    ]
     if not name_words:
         return 0.0
-    return len(name_words & domain_tokens) / len(name_words)
+    hits = sum(1 for w in name_words if w in domain_lower)
+    return hits / len(name_words)
 
 
 def _root_domain(url: str) -> str:
@@ -148,15 +179,16 @@ def score_result(
       - Purpose keywords in snippet: 0-15 pts  (1-2 hits = 8, 3+ hits = 15)
       - Legal form in domain/title:   +5 pts  bonus
       - Social media domain:         -30 pts  penalty
+      - Local directory URL path:   -25 pts  penalty (verzeichnis in URL)
       - Directory domain:           hard  0  (returned immediately)
     """
     title = result.get("title", "") or ""
     snippet = result.get("snippet", "") or ""
     link = result.get("link", "") or ""
 
-    # --- Directory domain → always 0, no further scoring ---
+    # --- Directory / news domain → always 0, no further scoring ---
     domain = _root_domain(link)
-    if any(domain == d or domain.endswith("." + d) for d in _DIRECTORY_DOMAINS):
+    if any(domain == d or domain.endswith("." + d) for d in _DIRECTORY_DOMAINS | _NEWS_DOMAINS):
         return 0
 
     combined_lower = f"{title} {snippet}".lower()
@@ -203,6 +235,10 @@ def score_result(
     if any(domain == d or domain.endswith("." + d) for d in _SOCIAL_LEAD_DOMAINS):
         score -= 30
 
+    # --- Local directory path penalty (-25) ---
+    if _LOCAL_DIRECTORY_PATH_RE.search(link):
+        score -= 25
+
     return max(0, min(100, score))
 
 
@@ -222,7 +258,7 @@ def is_irrelevant_result(
     link = result.get("link", "") or ""
 
     domain = _root_domain(link)
-    if any(domain == d or domain.endswith("." + d) for d in _DIRECTORY_DOMAINS):
+    if any(domain == d or domain.endswith("." + d) for d in _DIRECTORY_DOMAINS | _NEWS_DOMAINS):
         return True
 
     title_overlap = _word_overlap_ratio(company_name, title)

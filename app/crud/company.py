@@ -1,7 +1,7 @@
 from collections import Counter
 from datetime import date
 
-from sqlalchemy import func
+from sqlalchemy import case, func, nullslast
 from sqlalchemy.orm import Session
 
 from app.models.company import Company
@@ -124,8 +124,24 @@ def list_companies(
         purpose_keywords=purpose_keywords,
     )
 
-    col, ascending = _SORT_MAP.get(sort, _SORT_MAP[_DEFAULT_SORT])
-    query = query.order_by(col.asc() if ascending else col.desc())
+    if sort in ("combined_score", "-combined_score"):
+        # SQL expression: avg of non-null scores (zefix, claude, google)
+        _sum = (
+            func.coalesce(Company.zefix_score, 0)
+            + func.coalesce(Company.claude_score, 0)
+            + func.coalesce(Company.website_match_score, 0)
+        )
+        _count = (
+            case((Company.zefix_score.isnot(None), 1), else_=0)
+            + case((Company.claude_score.isnot(None), 1), else_=0)
+            + case((Company.website_match_score.isnot(None), 1), else_=0)
+        )
+        _expr = _sum / func.nullif(_count, 0)
+        asc = sort == "combined_score"
+        query = query.order_by(nullslast(_expr.asc() if asc else _expr.desc()))
+    else:
+        col, ascending = _SORT_MAP.get(sort, _SORT_MAP[_DEFAULT_SORT])
+        query = query.order_by(col.asc() if ascending else col.desc())
 
     if limit is not None:
         # Legacy path used by batch collection

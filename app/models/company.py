@@ -86,4 +86,15 @@ class Company(Base):
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
     )
 
+    @property
+    def combined_score(self) -> int | None:
+        """Average of available scores: zefix_score, claude_score, website_match_score.
+
+        Only available scores contribute to the average; returns None if all are absent.
+        """
+        scores = [s for s in (self.zefix_score, self.claude_score, self.website_match_score) if s is not None]
+        if not scores:
+            return None
+        return round(sum(scores) / len(scores))
+
     notes: Mapped[list["Note"]] = relationship("Note", back_populates="company", cascade="all, delete-orphan")
