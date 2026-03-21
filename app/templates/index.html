@@ -185,8 +185,8 @@
           <option value="created"        {% if sort == 'created'        %}selected{% endif %}>Created ↑</option>
           <option value="-google_score"  {% if sort == '-google_score'  %}selected{% endif %}>Google score ↓</option>
           <option value="google_score"   {% if sort == 'google_score'   %}selected{% endif %}>Google score ↑</option>
-          <option value="-zefix_score"   {% if sort == '-zefix_score'   %}selected{% endif %}>Score ↓</option>
-          <option value="zefix_score"    {% if sort == 'zefix_score'    %}selected{% endif %}>Score ↑</option>
+          <option value="-zefix_score"   {% if sort == '-zefix_score'   %}selected{% endif %}>Zefix score ↓</option>
+          <option value="zefix_score"    {% if sort == 'zefix_score'    %}selected{% endif %}>Zefix score ↑</option>
           <option value="-claude_score"    {% if sort == '-claude_score'    %}selected{% endif %}>Claude score ↓</option>
           <option value="claude_score"     {% if sort == 'claude_score'     %}selected{% endif %}>Claude score ↑</option>
           <option value="-combined_score"  {% if sort == '-combined_score'  %}selected{% endif %}>Combined score ↓</option>
@@ -318,8 +318,8 @@
               Google Score
               <span class="sort-icon">{% if sort == 'google_score' or sort == 'score' %}↑{% elif sort == '-google_score' or sort == '-score' %}↓{% else %}↕{% endif %}</span>
             </th>
-            <th class="th-sortable" onclick="toggleSort('zefix_score')" title="Sort by score">
-              Score
+            <th class="th-sortable" onclick="toggleSort('zefix_score')" title="Sort by Zefix score">
+              Zefix Score
               <span class="sort-icon">{% if sort == 'zefix_score' %}↑{% elif sort == '-zefix_score' %}↓{% else %}↕{% endif %}</span>
             </th>
             <th class="th-sortable" onclick="toggleSort('claude_score')" title="Sort by Claude score">

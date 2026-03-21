@@ -491,6 +491,9 @@ _DEFAULT_SCORING_CONFIG: dict[str, str] = {
     "scoring_legal_form_default": "5",
     # Fixed score for cancelled/dissolved companies (bypasses normalization)
     "scoring_cancelled_score": "5",
+    # Data quality penalties
+    "scoring_no_keywords_penalty": "10",       # deducted when purpose_keywords is empty
+    "scoring_undefined_cluster_penalty": "10", # deducted when tfidf_cluster is undefined/missing
 }
 
 _CANCELLED_STATUS_TERMS = frozenset({"being_cancelled", "dissolved", "gelöscht", "radiation", "liquidation"})
@@ -576,6 +579,7 @@ def compute_zefix_score_breakdown(
         "keywords": 0,
         "distance": 0,
         "legal_form": 0,
+        "data_quality": 0,
         "raw_total": 0,
         "final_score": 0,
         "cancelled": False,
@@ -614,6 +618,15 @@ def compute_zefix_score_breakdown(
             excl_hits = sum(1 for ek in exclude_keywords if ek in kw_lower)
             breakdown["keywords"] -= excl_hits * kw_excl_pts
 
+    # ── Data quality penalties ────────────────────────────────────────────────
+    no_kw_penalty = _cfg_int(config, "scoring_no_keywords_penalty", 10)
+    undef_cluster_penalty = _cfg_int(config, "scoring_undefined_cluster_penalty", 10)
+    if not purpose_keywords or not purpose_keywords.strip():
+        breakdown["data_quality"] -= no_kw_penalty
+    _undef_cluster_terms = {"undefined", "unbekannt", "unknown", "none", "other", "sonstige"}
+    if not tfidf_cluster or tfidf_cluster.lower().strip() in _undef_cluster_terms:
+        breakdown["data_quality"] -= undef_cluster_penalty
+
     # ── Distance ──────────────────────────────────────────────────────────────
     origin_lat = _cfg_float(config, "scoring_origin_lat", _ORIGIN[0])
     origin_lon = _cfg_float(config, "scoring_origin_lon", _ORIGIN[1])
@@ -630,6 +643,7 @@ def compute_zefix_score_breakdown(
         + int(breakdown["keywords"])
         + int(breakdown["distance"])
         + int(breakdown["legal_form"])
+        + int(breakdown["data_quality"])
     )
     breakdown["raw_total"] = raw
     # Clamped to 0-100 for real-time use; recalculate job normalises properly

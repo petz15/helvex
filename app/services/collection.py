@@ -1314,6 +1314,9 @@ def claude_classify_batch(
     canton: str | None = None,
     min_zefix_score: int | None = None,
     max_zefix_score: int | None = None,
+    min_google_score: int | None = None,
+    purpose_keywords: str | None = None,
+    rerun_classified: bool = False,
     limit: int = 500,
     system_prompt: str | None = None,
     target_description: str | None = None,
@@ -1375,12 +1378,18 @@ def claude_classify_batch(
     origin_lon = float(scoring_config.get("scoring_origin_lon", 7.4817))
 
     query = db.query(Company).filter(Company.purpose.isnot(None))
+    if not rerun_classified:
+        query = query.filter(Company.claude_score.is_(None))
     if canton:
         query = query.filter(Company.canton == canton)
     if min_zefix_score is not None:
         query = query.filter(Company.zefix_score >= min_zefix_score)
     if max_zefix_score is not None:
         query = query.filter(Company.zefix_score <= max_zefix_score)
+    if min_google_score is not None:
+        query = query.filter(Company.website_match_score >= min_google_score)
+    if purpose_keywords:
+        query = query.filter(Company.purpose_keywords.ilike(f"%{purpose_keywords}%"))
 
     all_candidates = query.all()
     all_candidates.sort(key=lambda c: (

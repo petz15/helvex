@@ -88,13 +88,17 @@ class Company(Base):
 
     @property
     def combined_score(self) -> int | None:
-        """Average of available scores: zefix_score, claude_score, website_match_score.
+        """Weighted average of available scores.
 
-        Only available scores contribute to the average; returns None if all are absent.
+        Weights: claude 70 %, google 20 %, zefix 10 %.
+        Only present scores contribute; weights are renormalised accordingly.
+        Returns None if all three are absent.
         """
-        scores = [s for s in (self.zefix_score, self.claude_score, self.website_match_score) if s is not None]
-        if not scores:
+        _WEIGHTS = ((self.claude_score, 0.70), (self.website_match_score, 0.20), (self.zefix_score, 0.10))
+        present = [(s, w) for s, w in _WEIGHTS if s is not None]
+        if not present:
             return None
-        return round(sum(scores) / len(scores))
+        total_w = sum(w for _, w in present)
+        return round(sum(s * w for s, w in present) / total_w)
 
     notes: Mapped[list["Note"]] = relationship("Note", back_populates="company", cascade="all, delete-orphan")

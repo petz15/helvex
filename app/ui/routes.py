@@ -995,6 +995,9 @@ def start_claude_classify(
     canton: str = Form(""),
     min_zefix_score: str = Form(""),
     max_zefix_score: str = Form(""),
+    min_google_score: str = Form(""),
+    purpose_keywords: str = Form(""),
+    rerun_classified: str = Form("false"),
     limit: str = Form("500"),
     system_prompt: str = Form(""),
     use_batch_api: str = Form("false"),
@@ -1009,6 +1012,13 @@ def start_claude_classify(
     v2 = _parse_optional_int(max_zefix_score)
     if v2 is not None:
         params["max_zefix_score"] = v2
+    v3 = _parse_optional_int(min_google_score)
+    if v3 is not None:
+        params["min_google_score"] = v3
+    if purpose_keywords.strip():
+        params["purpose_keywords"] = purpose_keywords.strip()
+    if rerun_classified == "true":
+        params["rerun_classified"] = True
     if system_prompt.strip():
         params["system_prompt"] = system_prompt.strip()
     if use_batch_api == "true":
@@ -1346,6 +1356,9 @@ def _run_job(app, job_id: int) -> None:
                     canton=params.get("canton") or None,
                     min_zefix_score=params.get("min_zefix_score"),
                     max_zefix_score=params.get("max_zefix_score"),
+                    min_google_score=params.get("min_google_score"),
+                    purpose_keywords=params.get("purpose_keywords") or None,
+                    rerun_classified=bool(params.get("rerun_classified", False)),
                     limit=int(params.get("limit", 500)),
                     system_prompt=params.get("system_prompt") or None,
                     target_description=crud.get_setting(db, "claude_target_description", "") or None,
