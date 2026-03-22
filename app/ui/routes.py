@@ -21,6 +21,7 @@ from app.auth import (
     COOKIE_NAME,
     check_login_rate_limit,
     create_session_cookie,
+    require_login,
 )
 from app.database import SessionLocal, get_db
 from app.services.collection import (
@@ -37,6 +38,7 @@ from app.services.collection import (
     run_zefix_detail_collect,
 )
 from app.services.scoring import get_default_scoring_config
+from app.models.user import User
 from app.schemas.company import CompanyUpdate
 from app.schemas.note import NoteCreate, NoteUpdate
 
@@ -660,6 +662,7 @@ def export_csv(
 async def bulk_update(
     request: Request,
     db: Session = Depends(get_db),
+    current_user: User = Depends(require_login),
 ) -> RedirectResponse:
     form = await request.form()
     company_ids_raw = form.getlist("company_ids")
@@ -691,7 +694,7 @@ async def bulk_update(
         crud.create_audit_entry(
             db,
             company_id=cid,
-            user_id=None,
+            user_id=current_user.id,
             field=field,
             old_value=None,  # old value not captured in bulk for perf
             new_value=str(value) if value else None,
@@ -820,6 +823,7 @@ def edit_company(
     contact_phone: str = Form(""),
     tags: str = Form(""),
     db: Session = Depends(get_db),
+    current_user: User = Depends(require_login),
 ) -> RedirectResponse:
     company = crud.get_company(db, company_id)
     if not company:
@@ -840,7 +844,7 @@ def edit_company(
     crud.record_company_changes(
         db,
         company_id=company_id,
-        user_id=None,
+        user_id=current_user.id,
         old_values=old_values,
         new_values=new_values,
     )
@@ -856,6 +860,7 @@ def quick_status(
     review_status: str | None = Form(None),
     proposal_status: str | None = Form(None),
     db: Session = Depends(get_db),
+    current_user: User = Depends(require_login),
 ):
     company = crud.get_company(db, company_id)
     if not company:
@@ -873,7 +878,7 @@ def quick_status(
         crud.record_company_changes(
             db,
             company_id=company_id,
-            user_id=None,
+            user_id=current_user.id,
             old_values=old_values,
             new_values=new_values,
         )

@@ -92,7 +92,8 @@
       "Bash(xargs grep:*)",
       "Bash(ls -1 /c/D/coding_projects/zefix_analyzer/app/models/*.py)",
       "Bash(xargs -I {} basename {})",
-      "Bash(ls -1 /c/D/coding_projects/zefix_analyzer/app/schemas/*.py)"
+      "Bash(ls -1 /c/D/coding_projects/zefix_analyzer/app/schemas/*.py)",
+      "Bash(python -c \"import secrets; print\\(secrets.token_hex\\(32\\)\\)\")"
     ]
   }
 }

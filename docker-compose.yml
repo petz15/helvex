@@ -76,13 +76,15 @@ services:
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB: ${POSTGRES_DB:-zefix_analyzer}
-    # Usage:
-    #   docker compose --profile create-admin run --rm create-admin \
-    #     python -m app.create_admin create --username admin --password <password> --email admin@example.com
+    # The entrypoint runs migrations then delegates to app.create_admin.
+    # Pass the subcommand directly — no need to repeat "python -m app.create_admin":
     #
     #   docker compose --profile create-admin run --rm create-admin \
-    #     python -m app.create_admin list
+    #     create --username admin --password <password> --email admin@example.com
+    #
+    #   docker compose --profile create-admin run --rm create-admin list
     #
     #   docker compose --profile create-admin run --rm create-admin \
-    #     python -m app.create_admin set-password --username admin --password <newpassword>
-    command: python -m app.create_admin list
+    #     set-password --username admin --password <newpassword>
+    entrypoint: ["/app/entrypoint.sh", "python", "-m", "app.create_admin"]
+    command: list
