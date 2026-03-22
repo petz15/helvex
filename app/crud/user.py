@@ -38,11 +38,23 @@ def count_users(db: Session) -> int:
     return db.query(User).count()
 
 
-def create_user(db: Session, *, username: str, password: str, is_active: bool = True) -> User:
+def create_user(
+    db: Session,
+    *,
+    username: str,
+    password: str,
+    is_active: bool = True,
+    email: str | None = None,
+    tier: str = "free",
+    is_superadmin: bool = False,
+) -> User:
     user = User(
         username=username,
         hashed_password=hash_password(password),
         is_active=is_active,
+        email=email,
+        tier=tier,
+        is_superadmin=is_superadmin,
     )
     db.add(user)
     db.commit()

@@ -23,5 +23,9 @@ class Settings(BaseSettings):
 
     anthropic_api_key: str = ""
 
+    # Security — MUST be set to a long random string in production
+    # Generate with: python -c "import secrets; print(secrets.token_hex(32))"
+    secret_key: str = "dev-secret-change-in-production"
+
 
 settings = Settings()

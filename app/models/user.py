@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 
-from sqlalchemy import Boolean, DateTime, String
+from sqlalchemy import Boolean, DateTime, ForeignKey, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database import Base
@@ -18,3 +18,17 @@ class User(Base):
         nullable=False,
         default=lambda: datetime.now(tz=timezone.utc),
     )
+
+    # SaaS fields
+    email: Mapped[str | None] = mapped_column(String(256), unique=True, nullable=True)
+    tier: Mapped[str] = mapped_column(String(32), nullable=False, default="free")
+    email_verified: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    is_superadmin: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+
+    # Payment (vendor-neutral — currently Worldline)
+    payment_customer_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    payment_subscription_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    subscription_status: Mapped[str | None] = mapped_column(String(32), nullable=True)
+
+    # Organisation (for team-seat tiers)
+    org_id: Mapped[int | None] = mapped_column(ForeignKey("organizations.id", ondelete="SET NULL"), nullable=True)

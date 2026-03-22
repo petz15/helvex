@@ -27,10 +27,15 @@ from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import inspect as sa_inspect
 
+from app.auth import COOKIE_NAME, decode_session_cookie
 from app.config import settings
 from app.database import Base, engine
 from app.services.scoring import get_default_scoring_config
 from app.ui.routes import kick_job_worker, router as ui_router, templates as ui_templates
+
+# Paths that do NOT require authentication
+_PUBLIC_PREFIXES = ("/static", "/login", "/health", "/metadata")
+_PUBLIC_EXACT = {"/login", "/logout", "/health", "/metadata", "/"}
 
 _REPO_ROOT = pathlib.Path(__file__).parent.parent
 
@@ -305,6 +310,37 @@ async def startup_gate(request: Request, call_next):
         )
 
     return await call_next(request)
+
+
+@app.middleware("http")
+async def auth_gate(request: Request, call_next):
+    """Redirect unauthenticated requests to /login for all protected paths."""
+    path = request.url.path
+
+    # Always allow public paths through
+    if path in _PUBLIC_EXACT or any(path.startswith(p) for p in _PUBLIC_PREFIXES):
+        return await call_next(request)
+
+    # Validate session cookie
+    token = request.cookies.get(COOKIE_NAME)
+    if token and decode_session_cookie(token) is not None:
+        return await call_next(request)
+
+    from urllib.parse import quote
+    from fastapi.responses import RedirectResponse as _Redirect
+    next_url = quote(path, safe="")
+    return _Redirect(url=f"/login?next={next_url}", status_code=302)
+
+
+@app.middleware("http")
+async def security_headers(request: Request, call_next):
+    """Add security headers to every response."""
+    response = await call_next(request)
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    response.headers["X-XSS-Protection"] = "1; mode=block"
+    return response
 
 
 @app.get("/health", tags=["health"])

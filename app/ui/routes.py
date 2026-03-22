@@ -17,6 +17,11 @@ from sqlalchemy.orm import Session
 
 from app import crud
 from app.api.zefix_client import SWISS_CANTONS
+from app.auth import (
+    COOKIE_NAME,
+    check_login_rate_limit,
+    create_session_cookie,
+)
 from app.database import SessionLocal, get_db
 from app.services.collection import (
     bulk_import_zefix,
@@ -275,6 +280,60 @@ def _url_for(request: Request, endpoint: str, **kwargs) -> str:
 @router.get("/", include_in_schema=False)
 def root_redirect(request: Request) -> RedirectResponse:
     return RedirectResponse(url="/ui", status_code=status.HTTP_302_FOUND)
+
+
+# ── Authentication ─────────────────────────────────────────────────────────────
+
+@router.get("/login", response_class=HTMLResponse, include_in_schema=False)
+def login_page(request: Request, next: str = "/ui", error: str | None = None):
+    return templates.TemplateResponse(
+        "login.html", {"request": request, "next": next, "error": error}
+    )
+
+
+@router.post("/login", include_in_schema=False)
+def login_submit(
+    request: Request,
+    username: str = Form(...),
+    password: str = Form(...),
+    next: str = Form("/ui"),
+    db: Session = Depends(get_db),
+):
+    ip = request.client.host if request.client else "unknown"
+    if not check_login_rate_limit(ip):
+        return templates.TemplateResponse(
+            "login.html",
+            {"request": request, "next": next, "error": "Too many login attempts. Try again in 15 minutes."},
+            status_code=429,
+        )
+
+    user = crud.authenticate(db, username=username, password=password)
+    if not user:
+        return templates.TemplateResponse(
+            "login.html",
+            {"request": request, "next": next, "error": "Invalid username or password."},
+            status_code=401,
+        )
+
+    # Ensure next is a safe relative path
+    safe_next = next if next.startswith("/") and not next.startswith("//") else "/ui"
+    response = RedirectResponse(url=safe_next, status_code=status.HTTP_302_FOUND)
+    response.set_cookie(
+        key=COOKIE_NAME,
+        value=create_session_cookie(user.id),
+        httponly=True,
+        samesite="lax",
+        secure=False,  # set to True behind HTTPS in prod (Cloudflare/Traefik handle TLS)
+        max_age=8 * 3600,
+    )
+    return response
+
+
+@router.get("/logout", include_in_schema=False)
+def logout():
+    response = RedirectResponse(url="/login", status_code=status.HTTP_302_FOUND)
+    response.delete_cookie(key=COOKIE_NAME)
+    return response
 
 
 @router.get("/ui", response_class=HTMLResponse, include_in_schema=False)

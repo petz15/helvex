@@ -19,3 +19,17 @@ docker compose up -d --build --remove-orphans
 
 echo "==> Current status"
 docker compose ps
+
+# ── First-time setup: create the initial admin user ───────────────────────────
+# Run this once after the first deployment (or whenever you need to add/reset an admin):
+#
+#   docker compose --profile create-admin run --rm create-admin \
+#     create --username admin --password <password> --email admin@example.com
+#
+# To list existing users:
+#   docker compose --profile create-admin run --rm create-admin list
+#
+# To reset a password:
+#   docker compose --profile create-admin run --rm create-admin \
+#     set-password --username admin --password <newpassword>
+# ─────────────────────────────────────────────────────────────────────────────

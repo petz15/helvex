@@ -27,6 +27,7 @@
     <section class="card login-box">
       <h2>Sign in</h2>
       <form method="post" action="/login">
+        <input type="hidden" name="next" value="{{ next }}">
         <label class="form-label">
           <span>Username</span>
           <input type="text" name="username" autocomplete="username" autofocus required>

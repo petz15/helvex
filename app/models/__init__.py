@@ -6,6 +6,7 @@ from app.models.company import Company
 from app.models.job_run import JobRun
 from app.models.job_run_event import JobRunEvent
 from app.models.note import Note
+from app.models.organization import Organization
 from app.models.user import User
 
-__all__ = ["AppSetting", "AuditLog", "BoilerplatePattern", "Company", "Note", "CollectionRun", "JobRun", "JobRunEvent", "User"]
+__all__ = ["AppSetting", "AuditLog", "BoilerplatePattern", "Company", "Note", "CollectionRun", "JobRun", "JobRunEvent", "Organization", "User"]
