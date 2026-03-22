@@ -78,10 +78,11 @@ services:
       POSTGRES_DB: ${POSTGRES_DB:-zefix_analyzer}
     # Usage:
     #   docker compose --profile create-admin run --rm create-admin \
-    #     create --username admin --password <password> --email admin@example.com
-    #
-    #   docker compose --profile create-admin run --rm create-admin list
+    #     python -m app.create_admin create --username admin --password <password> --email admin@example.com
     #
     #   docker compose --profile create-admin run --rm create-admin \
-    #     set-password --username admin --password <newpassword>
+    #     python -m app.create_admin list
+    #
+    #   docker compose --profile create-admin run --rm create-admin \
+    #     python -m app.create_admin set-password --username admin --password <newpassword>
     command: python -m app.create_admin list

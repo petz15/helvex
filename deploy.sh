@@ -24,12 +24,13 @@ docker compose ps
 # Run this once after the first deployment (or whenever you need to add/reset an admin):
 #
 #   docker compose --profile create-admin run --rm create-admin \
-#     create --username admin --password <password> --email admin@example.com
+#     python -m app.create_admin create --username admin --password <password> --email admin@example.com
 #
 # To list existing users:
-#   docker compose --profile create-admin run --rm create-admin list
+#   docker compose --profile create-admin run --rm create-admin \
+#     python -m app.create_admin list
 #
 # To reset a password:
 #   docker compose --profile create-admin run --rm create-admin \
-#     set-password --username admin --password <newpassword>
+#     python -m app.create_admin set-password --username admin --password <newpassword>
 # ─────────────────────────────────────────────────────────────────────────────
