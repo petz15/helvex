@@ -194,6 +194,8 @@
           <option value="zefix_score"    {% if sort == 'zefix_score'    %}selected{% endif %}>Zefix score ↑</option>
           <option value="-claude_score"    {% if sort == '-claude_score'    %}selected{% endif %}>Claude score ↓</option>
           <option value="claude_score"     {% if sort == 'claude_score'     %}selected{% endif %}>Claude score ↑</option>
+          <option value="claude_category"  {% if sort == 'claude_category'  %}selected{% endif %}>Claude category A→Z</option>
+          <option value="-claude_category" {% if sort == '-claude_category' %}selected{% endif %}>Claude category Z→A</option>
           <option value="-combined_score"  {% if sort == '-combined_score'  %}selected{% endif %}>Combined score ↓</option>
           <option value="combined_score"   {% if sort == 'combined_score'   %}selected{% endif %}>Combined score ↑</option>
           <option value="name"           {% if sort == 'name'           %}selected{% endif %}>Name A→Z</option>
@@ -301,14 +303,15 @@
           <label><input type="checkbox" data-col="5" checked> Google Score</label>
           <label><input type="checkbox" data-col="6" checked> Zefix Score</label>
           <label><input type="checkbox" data-col="7" checked> Claude Score</label>
-          <label><input type="checkbox" data-col="8" checked> Combined Score</label>
-          <label><input type="checkbox" data-col="9" checked> Review</label>
-          <label><input type="checkbox" data-col="10" checked> Proposal</label>
-          <label><input type="checkbox" data-col="11"> Last Google</label>
-          <label><input type="checkbox" data-col="12"> Last Zefix</label>
-          <label><input type="checkbox" data-col="13"> Last Claude</label>
-          <label><input type="checkbox" data-col="14"> Updated</label>
-          <label><input type="checkbox" data-col="15" checked> Open</label>
+          <label><input type="checkbox" data-col="8"> Claude Category</label>
+          <label><input type="checkbox" data-col="9" checked> Combined Score</label>
+          <label><input type="checkbox" data-col="10" checked> Review</label>
+          <label><input type="checkbox" data-col="11" checked> Proposal</label>
+          <label><input type="checkbox" data-col="12"> Last Google</label>
+          <label><input type="checkbox" data-col="13"> Last Zefix</label>
+          <label><input type="checkbox" data-col="14"> Last Claude</label>
+          <label><input type="checkbox" data-col="15"> Updated</label>
+          <label><input type="checkbox" data-col="16" checked> Open</label>
         </div>
       </div>
     </div>
@@ -348,6 +351,10 @@
             <th class="th-sortable" onclick="toggleSort('claude_score')" title="Sort by Claude score">
               Claude Score
               <span class="sort-icon">{% if sort == 'claude_score' %}↑{% elif sort == '-claude_score' %}↓{% else %}↕{% endif %}</span>
+            </th>
+            <th class="th-sortable" onclick="toggleSort('claude_category')" title="Sort by Claude category">
+              Claude Category
+              <span class="sort-icon">{% if sort == 'claude_category' %}↑{% elif sort == '-claude_category' %}↓{% else %}↕{% endif %}</span>
             </th>
             <th class="th-sortable" onclick="toggleSort('combined_score')" title="Average of available scores (zefix + claude + google)">
               Combined
@@ -397,9 +404,14 @@
                 <span class="muted">—</span>
               {% endif %}
             </td>
-            <td>
+            <td style="white-space:normal;">
               {% if c.tfidf_cluster %}
-                <a class="cluster-tag" href="/ui?tfidf_cluster={{ c.tfidf_cluster | urlencode }}" title="Filter by this cluster">{{ c.tfidf_cluster }}</a>
+                {% for label in c.tfidf_cluster.split("|") %}
+                  {% set label = label.strip() %}
+                  {% if label and label != "Undefined" %}
+                    <a class="cluster-tag" href="/ui?tfidf_cluster={{ label | urlencode }}" title="Filter by this cluster">{{ label }}</a>
+                  {% endif %}
+                {% endfor %}
               {% else %}
                 <span class="muted">—</span>
               {% endif %}
@@ -433,9 +445,16 @@
             </td>
             <td>
               {% if c.claude_score is not none %}
-                <span class="score-pill-sm {% if c.claude_score >= 70 %}score-high{% elif c.claude_score >= 40 %}score-mid{% else %}score-low{% endif %}" title="Claude classification score{% if c.claude_category %}: {{ c.claude_category }}{% endif %}">
+                <span class="score-pill-sm {% if c.claude_score >= 70 %}score-high{% elif c.claude_score >= 40 %}score-mid{% else %}score-low{% endif %}" title="Claude classification score">
                   {{ c.claude_score }}
                 </span>
+              {% else %}
+                <span class="muted">—</span>
+              {% endif %}
+            </td>
+            <td>
+              {% if c.claude_category %}
+                <a class="taxonomy-link" href="/ui?claude_category={{ c.claude_category | urlencode }}" title="Filter by this category">{{ c.claude_category }}</a>
               {% else %}
                 <span class="muted">—</span>
               {% endif %}
@@ -490,7 +509,7 @@
           </tr>
           {% else %}
           <tr>
-            <td colspan="16" class="empty-row">No companies match the current filters.</td>
+            <td colspan="17" class="empty-row">No companies match the current filters.</td>
           </tr>
           {% endfor %}
         </tbody>

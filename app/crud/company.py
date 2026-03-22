@@ -41,6 +41,8 @@ _SORT_MAP = {
     "-zefix_scored_at":     (Company.zefix_scored_at,     False),
     "claude_scored_at":     (Company.claude_scored_at,    True),
     "-claude_scored_at":    (Company.claude_scored_at,    False),
+    "claude_category":      (Company.claude_category,     True),
+    "-claude_category":     (Company.claude_category,     False),
 }
 _DEFAULT_SORT = "-updated"
 

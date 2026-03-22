@@ -80,6 +80,8 @@ _TFIDF_STOPWORDS: set[str] = {
     "beispielsweise", "z.B", "zB", "u.a", "ua", "namentlich", "hauptsächlich", "vorzugsweise",
     "allgemein", "allgemeine", "allgemeinen", "sonstige", "sonstigen",
     "eigen", "eigene", "eigenen", "ähnliche", "ähnlichen", "weitere", "weiteren", "entsprechende",
+    "zusammenhängend", "zusammenhängendem", "zusammenhängende", "zusammenhängenden", 
+    "raiffeisen", "raiffeisenbank", "raiffeisenbanken",
 
     # ── Swiss registry standard boilerplate sentence (verbatim filler) ────────
     "kann", "errichten", "anderen", "andern", "geschäfte", "geschäftstätigkeit", "geschäftstätigkeiten",

@@ -54,8 +54,8 @@ class PipelineConfig:
     kmeans_n_init: int = 3
 
     # ── Multi-label assignment ──
-    max_clusters_per_company: int = 7   # assign up to this many clusters per company
-    min_similarity: float = 0.15        # cosine similarity threshold; below → Undefined
+    max_clusters_per_company: int = 3   # assign up to this many clusters per company
+    min_similarity: float = 0.20        # cosine similarity threshold; below → Undefined
     label_dedup_threshold: float = 0.6  # Jaccard overlap above this → skip duplicate label
 
     # ── Labeling ──

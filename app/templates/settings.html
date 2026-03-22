@@ -452,11 +452,11 @@
               <small class="muted">How many distinct segments K-Means will form. More = finer-grained clusters.</small>
             </label>
             <label class="form-label"><span>Max clusters per company</span>
-              <input type="number" name="max_clusters_per_company" value="7" min="1" max="15">
+              <input type="number" name="max_clusters_per_company" value="3" min="1" max="15">
               <small class="muted">A company is assigned to its top-N most similar clusters.</small>
             </label>
             <label class="form-label"><span>Min similarity threshold</span>
-              <input type="number" name="min_similarity" value="0.10" min="0.01" max="0.99" step="0.01">
+              <input type="number" name="min_similarity" value="0.20" min="0.01" max="0.99" step="0.01">
               <small class="muted">Cosine similarity cutoff. Clusters below this are skipped; if none qualify → "Undefined".</small>
             </label>
             <label class="form-label"><span>SVD components</span>

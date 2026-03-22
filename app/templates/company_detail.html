@@ -94,7 +94,10 @@
     {% endif %}
     <dt>Zefix score</dt><dd>{{ company.zefix_score if company.zefix_score is not none else "-" }}</dd>
     {% if company.claude_score is not none %}
-    <dt>Claude score</dt><dd>{{ company.claude_score }}{% if company.claude_category %} — <em>{{ company.claude_category }}</em>{% endif %}</dd>
+    <dt>Claude score</dt><dd>{{ company.claude_score }}</dd>
+    {% endif %}
+    {% if company.claude_category %}
+    <dt>Claude category</dt><dd><a class="taxonomy-link" href="/ui?claude_category={{ company.claude_category | urlencode }}">{{ company.claude_category }}</a></dd>
     {% endif %}
     {% if company.claude_freeform %}
     <dt>Claude notes</dt><dd style="white-space:pre-wrap;">{{ company.claude_freeform }}</dd>
@@ -103,10 +106,26 @@
     <dt>Combined score</dt><dd>{{ company.combined_score }}/100 <small class="muted">(avg of {% if company.zefix_score is not none %}zefix={{ company.zefix_score }}{% endif %}{% if company.claude_score is not none %} claude={{ company.claude_score }}{% endif %}{% if company.website_match_score is not none %} google={{ company.website_match_score }}{% endif %})</small></dd>
     {% endif %}
     {% if company.purpose_keywords %}
-    <dt>Purpose keywords</dt><dd>{{ company.purpose_keywords }}</dd>
+    <dt>Purpose keywords</dt>
+    <dd style="display:flex; flex-wrap:wrap; gap:0.3rem;">
+      {% for kw in company.purpose_keywords.split(",") %}
+        {% set kw = kw.strip() %}
+        {% if kw %}
+          <a class="cluster-tag" href="/ui?purpose_keywords={{ kw | urlencode }}">{{ kw }}</a>
+        {% endif %}
+      {% endfor %}
+    </dd>
     {% endif %}
     {% if company.tfidf_cluster %}
-    <dt>TF-IDF cluster</dt><dd>{{ company.tfidf_cluster }}</dd>
+    <dt>TF-IDF clusters</dt>
+    <dd style="display:flex; flex-wrap:wrap; gap:0.3rem;">
+      {% for label in company.tfidf_cluster.split("|") %}
+        {% set label = label.strip() %}
+        {% if label and label != "Undefined" %}
+          <a class="cluster-tag" href="/ui?tfidf_cluster={{ label | urlencode }}">{{ label }}</a>
+        {% endif %}
+      {% endfor %}
+    </dd>
     {% endif %}
     {% if company.cantonal_excerpt_web %}
     <dt>Registry</dt><dd><a href="{{ company.cantonal_excerpt_web }}" target="_blank" rel="noopener noreferrer">Cantonal excerpt ↗</a></dd>
