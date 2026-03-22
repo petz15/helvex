@@ -182,6 +182,67 @@
 
 </div>
 
+{# ── Claude classification ─────────────────────────────────────────────────── #}
+<div class="card" style="margin-bottom: 2rem;">
+  <h3 style="margin-top:0;">Claude classification</h3>
+  <p style="color:var(--muted); font-size:0.88rem; margin-top:0;">
+    Classify companies using Claude Haiku. Stores a <code>claude_score</code> (0–100),
+    <code>claude_category</code>, and optional free-form notes per company.
+    Requires an Anthropic API key (set in Settings → Claude API Options).
+    Cost: ~$0.03–0.05 / 1k companies at 10/msg with prompt caching; Batch API adds ~50% discount.
+  </p>
+  <form method="post" action="/ui/classify/claude">
+    <div class="filter-grid" style="margin-bottom:0.8rem;">
+      <label class="form-label"><span>Max companies</span>
+        <input type="number" name="limit" value="500">
+      </label>
+      <label class="form-label"><span>Canton</span>
+        <input type="text" name="canton" placeholder="e.g. BE (blank = all)">
+      </label>
+      <label class="form-label"><span>Min Zefix score</span>
+        <input type="number" name="min_zefix_score" placeholder="0–100">
+      </label>
+      <label class="form-label"><span>Max Zefix score</span>
+        <input type="number" name="max_zefix_score" placeholder="0–100">
+      </label>
+      <label class="form-label"><span>Min Google score</span>
+        <input type="number" name="min_google_score" placeholder="0–100" min="0" max="100">
+      </label>
+      <label class="form-label"><span>Purpose keywords</span>
+        <input type="text" name="purpose_keywords" placeholder="e.g. gastro, software">
+        <small class="muted">Only classify companies whose purpose keywords contain this text.</small>
+      </label>
+      <label class="form-label"><span>TF-IDF cluster</span>
+        <input type="text" name="tfidf_cluster" placeholder="e.g. küche, maschinenbau">
+        <small class="muted">Filter by cluster label substring.</small>
+      </label>
+      <label class="form-label"><span>Companies per message</span>
+        <input type="number" name="companies_per_message" value="10" min="1" max="50">
+        <small class="muted">Pack N companies per API call. 10–20 recommended.</small>
+      </label>
+    </div>
+    <div style="display:flex; flex-direction:column; gap:0.4rem; margin-bottom:0.9rem;">
+      <label style="display:flex;align-items:center;gap:0.5rem;font-size:0.88rem;cursor:pointer;">
+        <input type="checkbox" name="rerun_classified" value="true">
+        Rerun already classified <small class="muted">(include companies that already have a Claude score)</small>
+      </label>
+      <label style="display:flex;align-items:center;gap:0.5rem;font-size:0.88rem;cursor:pointer;">
+        <input type="checkbox" name="use_batch_api" value="true">
+        Use Batch API <small class="muted">(~50% cheaper — submits all at once, polls until done)</small>
+      </label>
+      <label style="display:flex;align-items:center;gap:0.5rem;font-size:0.88rem;cursor:pointer;">
+        <input type="checkbox" name="auto_filter_keywords" value="true">
+        Auto-filter by target keywords <small class="muted">(only classify companies matching scoring target keywords)</small>
+      </label>
+      <label style="display:flex;align-items:center;gap:0.5rem;font-size:0.88rem;cursor:pointer;">
+        <input type="checkbox" name="use_fixed_categories" value="true">
+        Use fixed category list <small class="muted">(inject category taxonomy from Settings into the prompt)</small>
+      </label>
+    </div>
+    <button class="button-link" type="submit">Run Claude classification</button>
+  </form>
+</div>
+
 {# ── Zefix detail fetch ────────────────────────────────────────────────────── #}
 <div class="card" style="margin-bottom: 2rem;">
   <h3 style="margin-top:0;">Zefix detail fetch</h3>

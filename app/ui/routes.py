@@ -1188,6 +1188,7 @@ def start_claude_classify(
     max_zefix_score: str = Form(""),
     min_google_score: str = Form(""),
     purpose_keywords: str = Form(""),
+    tfidf_cluster: str = Form(""),
     rerun_classified: str = Form("false"),
     auto_filter_keywords: str = Form("false"),
     use_fixed_categories: str = Form("false"),
@@ -1210,6 +1211,8 @@ def start_claude_classify(
         params["min_google_score"] = v3
     if purpose_keywords.strip():
         params["purpose_keywords"] = purpose_keywords.strip()
+    if tfidf_cluster.strip():
+        params["tfidf_cluster"] = tfidf_cluster.strip()
     if rerun_classified == "true":
         params["rerun_classified"] = True
     if auto_filter_keywords == "true":
@@ -1227,8 +1230,8 @@ def start_claude_classify(
     label = f"Claude classify ({params['limit']} companies)" + (" [batch]" if params.get("use_batch_api") else "")
     job, err = _enqueue_job_safe(request, job_type="claude_classify", label=label, params=params)
     if err:
-        return RedirectResponse(url=_url_for(request, "ui_settings", error=err), status_code=status.HTTP_303_SEE_OTHER)
-    return RedirectResponse(url=_url_for(request, "ui_settings", message=f"Claude classification queued (job #{job.id})"), status_code=status.HTTP_303_SEE_OTHER)
+        return RedirectResponse(url=_url_for(request, "ui_collection", error=err), status_code=status.HTTP_303_SEE_OTHER)
+    return RedirectResponse(url=_url_for(request, "ui_collection", message=f"Claude classification queued (job #{job.id})"), status_code=status.HTTP_303_SEE_OTHER)
 
 
 # ── Boilerplate pattern management ────────────────────────────────────────────

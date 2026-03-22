@@ -81,7 +81,8 @@ _TFIDF_STOPWORDS: set[str] = {
     "allgemein", "allgemeine", "allgemeinen", "sonstige", "sonstigen",
     "eigen", "eigene", "eigenen", "ähnliche", "ähnlichen", "weitere", "weiteren", "entsprechende",
     "zusammenhängend", "zusammenhängendem", "zusammenhängende", "zusammenhängenden", 
-    "raiffeisen", "raiffeisenbank", "raiffeisenbanken",
+    "raiffeisen", "raiffeisenbank", "raiffeisenbanken", "sämtlicher", "sämtlichen", "sämtliche",
+    "zusammen", "zusammenschliessen", "zusammenschluss", "zusammenschlüssen", "schliessen"
 
     # ── Swiss registry standard boilerplate sentence (verbatim filler) ────────
     "kann", "errichten", "anderen", "andern", "geschäfte", "geschäftstätigkeit", "geschäftstätigkeiten",
@@ -133,6 +134,8 @@ _TFIDF_STOPWORDS: set[str] = {
     "schweiz", "schweizer", "schweizerische", "schweizerischen",
     "europa", "europäische", "europäischen",
     "weltweit", "international", "global", "national",
+    "urheberrecht", "markenrecht", "patentrecht", "designrecht", "immaterialgüterrecht",
+    "patent", "zweigniederlassunge", "tochtergesellschafte", "beteiligunge", 
     # ── French: articles, prepositions, pronouns ─────────────────────────────
     "les", "une", "est", "dans", "par", "sur", "aux",
     "de", "la", "le", "et", "en", "du", "au", "avec", "qui", "que",
@@ -1366,6 +1369,7 @@ def claude_classify_batch(
     max_zefix_score: int | None = None,
     min_google_score: int | None = None,
     purpose_keywords: str | None = None,
+    tfidf_cluster: str | None = None,
     rerun_classified: bool = False,
     auto_filter_keywords: bool = False,
     use_fixed_categories: bool = False,
@@ -1454,6 +1458,8 @@ def claude_classify_batch(
         query = query.filter(Company.website_match_score >= min_google_score)
     if purpose_keywords:
         query = query.filter(Company.purpose_keywords.ilike(f"%{purpose_keywords}%"))
+    if tfidf_cluster:
+        query = query.filter(Company.tfidf_cluster.ilike(f"%{tfidf_cluster}%"))
     # Auto-filter: only classify companies matching the configured scoring target keywords
     if auto_filter_keywords:
         raw_target = (scoring_config.get("scoring_target_keywords") or "").strip()

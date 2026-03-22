@@ -58,6 +58,7 @@ _DIRECTORY_DOMAINS = {
     "autolina.ch",
     "autoscout24.ch",
     "comparis.ch",
+    "admin.ch",
 }
 
 _NEWS_DOMAINS = {
