@@ -182,6 +182,45 @@
         <input type="number" name="min_claude_score" value="{{ f_min_claude_score }}" min="0" max="100" placeholder="0-100">
       </label>
       <label class="form-label">
+        <span>Exclude tags</span>
+        <input type="text" name="exclude_tags" value="{{ f_exclude_tags }}"
+               placeholder="e.g. rejected, cold-lead…"
+               title="Exclude companies that have any of these tags (comma-separated).">
+      </label>
+      <label class="form-label">
+        <span>Exclude review status</span>
+        <select name="exclude_review_status">
+          <option value="">— none —</option>
+          <option value="_none"                {% if f_exclude_review_status == '_none'                %}selected{% endif %}>Pending (none set)</option>
+          <option value="potential_proposal"  {% if f_exclude_review_status == 'potential_proposal'  %}selected{% endif %}>Potential proposal</option>
+          <option value="confirmed_proposal"  {% if f_exclude_review_status == 'confirmed_proposal'  %}selected{% endif %}>Confirmed proposal</option>
+          <option value="potential_generic"   {% if f_exclude_review_status == 'potential_generic'   %}selected{% endif %}>Potential generic</option>
+          <option value="confirmed_generic"   {% if f_exclude_review_status == 'confirmed_generic'   %}selected{% endif %}>Confirmed generic</option>
+          <option value="interesting"         {% if f_exclude_review_status == 'interesting'         %}selected{% endif %}>Interesting</option>
+          <option value="rejected"            {% if f_exclude_review_status == 'rejected'            %}selected{% endif %}>Rejected</option>
+        </select>
+      </label>
+      <label class="form-label">
+        <span>Exclude proposal status</span>
+        <select name="exclude_proposal_status">
+          <option value="">— none —</option>
+          <option value="_none"     {% if f_exclude_proposal_status == '_none'     %}selected{% endif %}>Not sent (none set)</option>
+          <option value="sent"      {% if f_exclude_proposal_status == 'sent'      %}selected{% endif %}>Sent</option>
+          <option value="responded" {% if f_exclude_proposal_status == 'responded' %}selected{% endif %}>Responded</option>
+          <option value="converted" {% if f_exclude_proposal_status == 'converted' %}selected{% endif %}>Converted</option>
+          <option value="rejected"  {% if f_exclude_proposal_status == 'rejected'  %}selected{% endif %}>Rejected</option>
+        </select>
+      </label>
+      <label class="form-label">
+        <span>Exclude canton</span>
+        <select name="exclude_canton">
+          <option value="">— none —</option>
+          {% for c in cantons %}
+            <option value="{{ c }}" {% if f_exclude_canton == c %}selected{% endif %}>{{ c }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label class="form-label">
         <span>Sort by</span>
         <select name="sort">
           <option value="-updated"       {% if sort == '-updated'       %}selected{% endif %}>Last updated ↓</option>

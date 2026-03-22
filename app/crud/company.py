@@ -57,7 +57,9 @@ def get_company_by_uid(db: Session, uid: str) -> Company | None:
 
 def _apply_filters(query, *, name_filter, canton, review_status, proposal_status,
                    google_searched, min_google_score, min_zefix_score, min_claude_score=None,
-                   claude_category=None, tags, tfidf_cluster=None, purpose_keywords=None):
+                   claude_category=None, tags, tfidf_cluster=None, purpose_keywords=None,
+                   exclude_tags=None, exclude_review_status=None, exclude_canton=None,
+                   exclude_proposal_status=None):
     if name_filter:
         query = query.filter(Company.name.ilike(f"%{name_filter}%"))
     if canton:
@@ -99,6 +101,27 @@ def _apply_filters(query, *, name_filter, canton, review_status, proposal_status
         query = query.filter(Company.tfidf_cluster.ilike(f"%{tfidf_cluster}%"))
     if purpose_keywords:
         query = query.filter(Company.purpose_keywords.ilike(f"%{purpose_keywords}%"))
+    if exclude_tags:
+        for term in [t.strip() for t in exclude_tags.split(",") if t.strip()]:
+            query = query.filter(
+                (Company.tags.is_(None)) | (Company.tags.notilike(f"%{term}%"))
+            )
+    if exclude_review_status == "_none":
+        query = query.filter(Company.review_status.isnot(None))
+    elif exclude_review_status:
+        query = query.filter(
+            (Company.review_status.is_(None)) | (Company.review_status != exclude_review_status)
+        )
+    if exclude_canton:
+        query = query.filter(
+            (Company.canton.is_(None)) | (Company.canton != exclude_canton)
+        )
+    if exclude_proposal_status == "_none":
+        query = query.filter(Company.proposal_status.isnot(None))
+    elif exclude_proposal_status:
+        query = query.filter(
+            (Company.proposal_status.is_(None)) | (Company.proposal_status != exclude_proposal_status)
+        )
     return query
 
 
@@ -119,6 +142,10 @@ def list_companies(
     tags: str | None = None,
     tfidf_cluster: str | None = None,
     purpose_keywords: str | None = None,
+    exclude_tags: str | None = None,
+    exclude_review_status: str | None = None,
+    exclude_canton: str | None = None,
+    exclude_proposal_status: str | None = None,
     # kept for backward-compat with collection.py batch query
     limit: int | None = None,
     skip: int = 0,
@@ -138,6 +165,10 @@ def list_companies(
         tags=tags,
         tfidf_cluster=tfidf_cluster,
         purpose_keywords=purpose_keywords,
+        exclude_tags=exclude_tags,
+        exclude_review_status=exclude_review_status,
+        exclude_canton=exclude_canton,
+        exclude_proposal_status=exclude_proposal_status,
     )
 
     if sort in ("combined_score", "-combined_score"):
@@ -181,6 +212,10 @@ def count_companies(
     tags: str | None = None,
     tfidf_cluster: str | None = None,
     purpose_keywords: str | None = None,
+    exclude_tags: str | None = None,
+    exclude_review_status: str | None = None,
+    exclude_canton: str | None = None,
+    exclude_proposal_status: str | None = None,
 ) -> int:
     query = db.query(Company)
     query = _apply_filters(
@@ -197,6 +232,10 @@ def count_companies(
         tags=tags,
         tfidf_cluster=tfidf_cluster,
         purpose_keywords=purpose_keywords,
+        exclude_tags=exclude_tags,
+        exclude_review_status=exclude_review_status,
+        exclude_canton=exclude_canton,
+        exclude_proposal_status=exclude_proposal_status,
     )
     return query.count()
 

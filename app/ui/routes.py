@@ -200,6 +200,10 @@ def _filter_params(
     min_claude_score: int | None = None,
     tfidf_cluster: str | None = None,
     purpose_keywords: str | None = None,
+    exclude_tags: str | None = None,
+    exclude_review_status: str | None = None,
+    exclude_canton: str | None = None,
+    exclude_proposal_status: str | None = None,
 ) -> dict:
     """Build a dict of non-empty filter params for URL construction."""
     p: dict = {}
@@ -227,6 +231,14 @@ def _filter_params(
         p["tfidf_cluster"] = tfidf_cluster
     if purpose_keywords:
         p["purpose_keywords"] = purpose_keywords
+    if exclude_tags:
+        p["exclude_tags"] = exclude_tags
+    if exclude_review_status:
+        p["exclude_review_status"] = exclude_review_status
+    if exclude_canton:
+        p["exclude_canton"] = exclude_canton
+    if exclude_proposal_status:
+        p["exclude_proposal_status"] = exclude_proposal_status
     return p
 
 
@@ -280,6 +292,10 @@ def ui_home(
     tags: str | None = Query(None),
     tfidf_cluster: str | None = Query(None),
     purpose_keywords: str | None = Query(None),
+    exclude_tags: str | None = Query(None),
+    exclude_review_status: str | None = Query(None),
+    exclude_canton: str | None = Query(None),
+    exclude_proposal_status: str | None = Query(None),
     sort: str | None = Query(None),
     page: int = Query(1, ge=1),
     message: str | None = Query(None),
@@ -304,6 +320,10 @@ def ui_home(
         tags=tags or None,
         tfidf_cluster=tfidf_cluster or None,
         purpose_keywords=purpose_keywords or None,
+        exclude_tags=exclude_tags or None,
+        exclude_review_status=exclude_review_status or None,
+        exclude_canton=exclude_canton or None,
+        exclude_proposal_status=exclude_proposal_status or None,
     )
 
     companies = crud.list_companies(db, page=page, page_size=PAGE_SIZE,
@@ -316,7 +336,9 @@ def ui_home(
     fp = _filter_params(q, canton, review_status, proposal_status,
                         google_searched, min_google_score_int, min_zefix_score_int,
                         sort, tags, min_claude_score_int, tfidf_cluster or None,
-                        purpose_keywords or None)
+                        purpose_keywords or None, exclude_tags or None,
+                        exclude_review_status or None, exclude_canton or None,
+                        exclude_proposal_status or None)
     filter_qs = ("&" + urlencode(fp)) if fp else ""
 
     return templates.TemplateResponse(
@@ -346,6 +368,10 @@ def ui_home(
             "f_tags": tags or "",
             "f_tfidf_cluster": tfidf_cluster or "",
             "f_purpose_keywords": purpose_keywords or "",
+            "f_exclude_tags": exclude_tags or "",
+            "f_exclude_review_status": exclude_review_status or "",
+            "f_exclude_canton": exclude_canton or "",
+            "f_exclude_proposal_status": exclude_proposal_status or "",
             "taxonomy_stats": crud.get_taxonomy_stats(db),
             "google_search_enabled": crud.get_setting(db, "google_search_enabled", "true") == "true",
             "google_daily_quota": int(crud.get_setting(db, "google_daily_quota", "100")),

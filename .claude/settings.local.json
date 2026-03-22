@@ -86,7 +86,13 @@
       "Bash(cmd /c \"cd /d c:\\\\D\\\\coding_projects\\\\zefix_analyzer && .venv\\\\Scripts\\\\alembic.exe upgrade head\")",
       "Bash(cmd /c \"cd /d c:\\\\D\\\\coding_projects\\\\zefix_analyzer && .venv\\\\Scripts\\\\alembic.exe upgrade head 2>&1\")",
       "Bash(cmd /c \"cd /d c:\\\\D\\\\coding_projects\\\\zefix_analyzer && .venv\\\\Scripts\\\\alembic.exe current\")",
-      "Bash(powershell -Command \"cd ''c:\\\\D\\\\coding_projects\\\\zefix_analyzer''; .\\\\.venv\\\\Scripts\\\\alembic.exe upgrade head\")"
+      "Bash(powershell -Command \"cd ''c:\\\\D\\\\coding_projects\\\\zefix_analyzer''; .\\\\.venv\\\\Scripts\\\\alembic.exe upgrade head\")",
+      "Bash(find /c/D/coding_projects/zefix_analyzer/app -type f \\\\\\(-name *.py -o -name *.html -o -name *.jinja2 \\\\\\))",
+      "Bash(grep -l \"class\\\\|def \" /c/D/coding_projects/zefix_analyzer/app/services/*.py)",
+      "Bash(xargs grep:*)",
+      "Bash(ls -1 /c/D/coding_projects/zefix_analyzer/app/models/*.py)",
+      "Bash(xargs -I {} basename {})",
+      "Bash(ls -1 /c/D/coding_projects/zefix_analyzer/app/schemas/*.py)"
     ]
   }
 }
