@@ -1,25 +1,23 @@
 import base64
 import hashlib
 
-from passlib.context import CryptContext
+import bcrypt
 from sqlalchemy.orm import Session
 
 from app.models.user import User
 
-_pwd_ctx = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
-
-def _prehash(plain: str) -> str:
+def _prehash(plain: str) -> bytes:
     """SHA-256 pre-hash before bcrypt to support passwords longer than 72 bytes."""
-    return base64.b64encode(hashlib.sha256(plain.encode()).digest()).decode()
+    return base64.b64encode(hashlib.sha256(plain.encode()).digest())
 
 
 def hash_password(plain: str) -> str:
-    return _pwd_ctx.hash(_prehash(plain))
+    return bcrypt.hashpw(_prehash(plain), bcrypt.gensalt()).decode()
 
 
 def verify_password(plain: str, hashed: str) -> bool:
-    return _pwd_ctx.verify(_prehash(plain), hashed)
+    return bcrypt.checkpw(_prehash(plain), hashed.encode())
 
 
 def get_user(db: Session, user_id: int) -> User | None:
