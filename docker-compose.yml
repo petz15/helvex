@@ -86,5 +86,5 @@ services:
     #
     #   docker compose --profile create-admin run --rm create-admin \
     #     set-password --username admin --password <newpassword>
-    entrypoint: ["/app/entrypoint.sh", "python", "-m", "app.create_admin"]
+    entrypoint: ["sh", "entrypoint.sh", "python", "-m", "app.create_admin"]
     command: list
