@@ -57,7 +57,7 @@ def test_list_companies(client):
 def test_list_companies_name_filter(client):
     client.post("/api/v1/companies", json={"uid": "CHE-001.001.001", "name": "Alpha AG"})
     client.post("/api/v1/companies", json={"uid": "CHE-002.002.002", "name": "Beta GmbH"})
-    resp = client.get("/api/v1/companies?name=alpha")
+    resp = client.get("/api/v1/companies?q=alpha")
     assert resp.status_code == 200
     data = resp.json()["items"]
     assert len(data) == 1

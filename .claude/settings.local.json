@@ -110,7 +110,9 @@
       "Bash(sed -i 's|actions/setup-python@v5|actions/setup-python@v6|g' \"$f\")",
       "Bash(done)",
       "Bash(curl -s http://helvex.dicy.ch/health)",
-      "Bash(python -c \"from app.main import app\")"
+      "Bash(python -c \"from app.main import app\")",
+      "Bash(python -m pytest tests/ -v --tb=short)",
+      "Bash(pip install:*)"
     ]
   }
 }
