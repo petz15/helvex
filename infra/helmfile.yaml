@@ -6,6 +6,8 @@ environments:
     values:
       - environments/prod.yaml
 
+---
+
 releases:
   - name: helvex
     namespace: helvex-{{ .Environment.Name }}
