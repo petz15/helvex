@@ -28,12 +28,13 @@ from fastapi.staticfiles import StaticFiles
 from sqlalchemy import inspect as sa_inspect
 from sqlalchemy.orm import Session
 
+from app import crud
 from app.auth import COOKIE_NAME, check_login_rate_limit, create_session_cookie, decode_session_cookie
 from app.config import settings
 from app.database import Base, engine, get_db
 from app.services.job_worker import kick_job_worker
 from app.services.scoring import get_default_scoring_config
-from app import crud
+from app.api.routes import companies_router, notes_router, jobs_router, map_router, settings_router
 
 # Paths that do NOT require authentication
 _PUBLIC_PREFIXES = ("/static", "/login", "/health", "/metadata")
@@ -206,8 +207,6 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-from app.api.routes import companies_router, notes_router, jobs_router, map_router, settings_router
-
 app.mount("/static", StaticFiles(directory="app/static"), name="static")
 app.include_router(companies_router, prefix="/api/v1")
 app.include_router(notes_router, prefix="/api/v1")
@@ -292,7 +291,6 @@ def login_submit(
     next: str = Form("/app/dashboard"),
     db: Session = Depends(get_db),
 ):
-    from urllib.parse import quote
     ip = request.client.host if request.client else "unknown"
     if not check_login_rate_limit(ip):
         error_html = '<div class="error">Too many login attempts. Try again in 15 minutes.</div>'

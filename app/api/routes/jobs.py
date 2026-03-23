@@ -1,7 +1,6 @@
 """REST API for job management and collection/scoring triggers."""
 from __future__ import annotations
 
-import json
 import time
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status

@@ -1,10 +1,9 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
+import type { Map, LayerGroup } from "leaflet";
 import { fetchMapData } from "@/lib/api";
 import type { MapFeature } from "@/lib/types";
-
-// Leaflet is loaded dynamically to avoid SSR issues
-let L: typeof import("leaflet") | null = null;
+import "leaflet/dist/leaflet.css";
 
 function scoreColor(score: number | null): string {
   if (score == null) return "#94a3b8";
@@ -22,16 +21,17 @@ interface Filters {
 
 export function MapClient() {
   const mapRef = useRef<HTMLDivElement>(null);
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const mapInstanceRef = useRef<any>(null);
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const layerRef = useRef<any>(null);
+  const mapInstanceRef = useRef<Map | null>(null);
+  const layerRef = useRef<LayerGroup | null>(null);
   const [loading, setLoading] = useState(false);
   const [count, setCount] = useState(0);
   const [truncated, setTruncated] = useState(false);
-  const [filters, setFilters] = useState<Filters>({ canton: "", review_status: "", min_combined_score: "", hide_cancelled: false });
+  const [filters, setFilters] = useState<Filters>({
+    canton: "", review_status: "", min_combined_score: "", hide_cancelled: false,
+  });
 
   async function loadData(f: Filters) {
+    if (!mapInstanceRef.current) return;
     setLoading(true);
     try {
       const params: Record<string, string> = {};
@@ -49,17 +49,14 @@ export function MapClient() {
   }
 
   function renderMarkers(features: MapFeature[]) {
+    const L = (window as typeof window & { _L?: typeof import("leaflet") })._L;
     if (!L || !mapInstanceRef.current) return;
-    if (layerRef.current) layerRef.current.clearLayers();
+    layerRef.current?.clearLayers();
     const layer = L.layerGroup();
     for (const f of features) {
       const color = scoreColor(f.claude_score ?? f.google_score ?? f.zefix_score ?? null);
       const marker = L.circleMarker([f.lat, f.lon], {
-        radius: 6,
-        fillColor: color,
-        color: "#fff",
-        weight: 1.5,
-        fillOpacity: 0.85,
+        radius: 6, fillColor: color, color: "#fff", weight: 1.5, fillOpacity: 0.85,
       });
       const parts = [
         `<strong>${f.name}</strong>`,
@@ -71,38 +68,23 @@ export function MapClient() {
       marker.bindPopup(parts.join("<br>"), { maxWidth: 300 });
       layer.addLayer(marker);
     }
-    layer.addTo(mapInstanceRef.current);
+    layer.addTo(mapInstanceRef.current!);
     layerRef.current = layer;
   }
 
   useEffect(() => {
-    if (!mapRef.current) return;
+    if (!mapRef.current || mapInstanceRef.current) return;
     let mounted = true;
     (async () => {
-      // Dynamically load Leaflet CSS and JS
-      if (!document.getElementById("leaflet-css")) {
-        const link = document.createElement("link");
-        link.id = "leaflet-css";
-        link.rel = "stylesheet";
-        link.href = "https://unpkg.com/leaflet@1.9.4/dist/leaflet.css";
-        document.head.appendChild(link);
-      }
-      const leaflet = await import("leaflet");
+      const L = await import("leaflet");
       if (!mounted) return;
-      L = leaflet.default ?? leaflet;
 
-      // Fix default marker icons broken by webpack
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      delete (L.Icon.Default.prototype as any)._getIconUrl;
-      L.Icon.Default.mergeOptions({
-        iconRetinaUrl: "https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png",
-        iconUrl: "https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png",
-        shadowUrl: "https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png",
-      });
+      // Store on window so renderMarkers can access it synchronously
+      (window as typeof window & { _L?: typeof L })._L = L;
 
       const map = L.map(mapRef.current!).setView([46.8, 8.2], 8);
       L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-        attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+        attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
         maxZoom: 19,
       }).addTo(map);
       mapInstanceRef.current = map;
@@ -120,7 +102,6 @@ export function MapClient() {
 
   return (
     <div className="flex flex-col h-[calc(100vh-3rem)]">
-      {/* Toolbar */}
       <form onSubmit={handleFilter} className="flex items-center gap-3 px-4 py-2.5 border-b border-slate-200 bg-white flex-wrap">
         <input
           placeholder="Canton (e.g. BE)"
@@ -164,8 +145,6 @@ export function MapClient() {
           {count.toLocaleString()} companies{truncated ? " (truncated to 20k)" : ""}
         </span>
       </form>
-
-      {/* Map */}
       <div ref={mapRef} className="flex-1" />
     </div>
   );

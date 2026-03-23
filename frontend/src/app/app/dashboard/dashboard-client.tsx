@@ -1,6 +1,7 @@
 "use client";
 import { useState, useCallback, useTransition } from "react";
 import useSWR from "swr";
+import { Download } from "lucide-react";
 import { FilterSidebar } from "@/components/dashboard/filter-sidebar";
 import { StatsBar } from "@/components/dashboard/stats-bar";
 import { CompanyTable } from "@/components/dashboard/company-table";
@@ -8,6 +9,15 @@ import { CompanyPreview } from "@/components/dashboard/company-preview";
 import { Pagination } from "@/components/dashboard/pagination";
 import { fetchCompanies, fetchStats } from "@/lib/api";
 import type { Company, CompanyFilters, CompanyStats } from "@/lib/types";
+
+function buildExportUrl(filters: CompanyFilters): string {
+  const params = new URLSearchParams();
+  const { page: _p, page_size: _ps, ...rest } = filters;
+  for (const [k, v] of Object.entries(rest)) {
+    if (v !== undefined && v !== null && v !== "") params.set(k, String(v));
+  }
+  return `/api/v1/companies/export.csv?${params.toString()}`;
+}
 
 interface DashboardClientProps {
   cantons: string[];
@@ -64,6 +74,15 @@ export function DashboardClient({ cantons, initialStats }: DashboardClientProps)
 
         {/* Table + pagination */}
         <div className="flex-1 flex flex-col overflow-hidden bg-white">
+          <div className="flex items-center justify-end px-3 py-1 border-b border-slate-100 bg-slate-50">
+            <a
+              href={buildExportUrl(filters)}
+              download
+              className="flex items-center gap-1.5 text-xs text-slate-500 hover:text-slate-700 px-2.5 py-1 rounded border border-slate-200 hover:bg-white transition-colors"
+            >
+              <Download size={12} /> Export CSV ({page?.total ?? 0})
+            </a>
+          </div>
           <CompanyTable
             companies={page?.items ?? []}
             selectedId={selectedCompany?.id ?? null}

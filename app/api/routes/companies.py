@@ -1,10 +1,13 @@
 """Routes for company management and Zefix / Google Search integration."""
 
+import csv
+import io
 import json
 import math
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
 from app import crud
@@ -239,6 +242,87 @@ def list_companies(
         page=page,
         page_size=page_size,
         pages=math.ceil(total / page_size) if total else 1,
+    )
+
+
+@router.get("/export.csv", summary="Export companies as CSV")
+def export_companies_csv(
+    sort: str = Query("-updated"),
+    q: str | None = Query(None),
+    canton: str | None = Query(None),
+    review_status: str | None = Query(None),
+    proposal_status: str | None = Query(None),
+    google_searched: str | None = Query(None),
+    min_google_score: int | None = Query(None),
+    min_zefix_score: int | None = Query(None),
+    min_claude_score: int | None = Query(None),
+    tags: str | None = Query(None),
+    tfidf_cluster: str | None = Query(None),
+    purpose_keywords: str | None = Query(None),
+    exclude_tags: str | None = Query(None),
+    exclude_review_status: str | None = Query(None),
+    exclude_canton: str | None = Query(None),
+    exclude_proposal_status: str | None = Query(None),
+    db: Session = Depends(get_db),
+):
+    companies = crud.list_companies(
+        db,
+        page=1,
+        page_size=10000,
+        sort=sort,
+        name_filter=q,
+        canton=canton,
+        review_status=review_status,
+        proposal_status=proposal_status,
+        google_searched=google_searched,
+        min_google_score=min_google_score,
+        min_zefix_score=min_zefix_score,
+        min_claude_score=min_claude_score,
+        tags=tags,
+        tfidf_cluster=tfidf_cluster,
+        purpose_keywords=purpose_keywords,
+        exclude_tags=exclude_tags,
+        exclude_review_status=exclude_review_status,
+        exclude_canton=exclude_canton,
+        exclude_proposal_status=exclude_proposal_status,
+    )
+
+    _HEADERS = [
+        "uid", "name", "legal_form", "status", "municipality", "canton",
+        "website_url", "website_match_score", "zefix_score", "claude_score", "combined_score",
+        "review_status", "proposal_status", "contact_name", "contact_email", "contact_phone",
+        "tags", "claude_category", "tfidf_cluster", "purpose_keywords",
+        "created_at", "updated_at",
+    ]
+
+    def _generate():
+        buf = io.StringIO()
+        writer = csv.writer(buf)
+        writer.writerow(_HEADERS)
+        yield buf.getvalue()
+        for c in companies:
+            buf = io.StringIO()
+            writer = csv.writer(buf)
+            writer.writerow([
+                c.uid, c.name, c.legal_form or "", c.status or "",
+                c.municipality or "", c.canton or "",
+                c.website_url or "",
+                c.website_match_score if c.website_match_score is not None else "",
+                c.zefix_score if c.zefix_score is not None else "",
+                c.claude_score if c.claude_score is not None else "",
+                c.combined_score if c.combined_score is not None else "",
+                c.review_status or "", c.proposal_status or "",
+                c.contact_name or "", c.contact_email or "", c.contact_phone or "",
+                c.tags or "", c.claude_category or "", c.tfidf_cluster or "",
+                c.purpose_keywords or "",
+                c.created_at.isoformat(), c.updated_at.isoformat(),
+            ])
+            yield buf.getvalue()
+
+    return StreamingResponse(
+        _generate(),
+        media_type="text/csv",
+        headers={"Content-Disposition": "attachment; filename=helvex_export.csv"},
     )
 
 
