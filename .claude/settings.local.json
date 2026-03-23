@@ -112,7 +112,9 @@
       "Bash(curl -s http://helvex.dicy.ch/health)",
       "Bash(python -c \"from app.main import app\")",
       "Bash(python -m pytest tests/ -v --tb=short)",
-      "Bash(pip install:*)"
+      "Bash(pip install:*)",
+      "Bash(find c:/D/coding_projects/zefix_analyzer -name docker-compose* -o -name compose*.yml -o -name compose*.yaml)",
+      "Bash(grep -r \"docker.compose\\\\|docker-compose\\\\|deploy\\\\.sh\\\\|nginx\\\\.conf\" c:/D/coding_projects/zefix_analyzer --include=*.yml --include=*.yaml --include=*.md --include=*.sh -l)"
     ]
   }
 }

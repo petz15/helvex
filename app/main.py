@@ -293,13 +293,15 @@ def login_submit(
     next: str = Form("/app/dashboard"),
     db: Session = Depends(get_db),
 ):
-    ip = request.client.host if request.client else "unknown"
-    if not check_login_rate_limit(ip):
-        error_html = '<div class="error">Too many login attempts. Try again in 15 minutes.</div>'
-        return HTMLResponse(_LOGIN_HTML.format(next=next, error_html=error_html), status_code=429)
+    # Traefik sets X-Real-IP to the actual client IP; fall back to direct connection host
+    ip = request.headers.get("x-real-ip") or (request.client.host if request.client else "unknown")
 
     user = crud.authenticate(db, username=username, password=password)
     if not user:
+        # Only count failures toward the rate limit, not successful logins
+        if not check_login_rate_limit(ip):
+            error_html = '<div class="error">Too many login attempts. Try again in 15 minutes.</div>'
+            return HTMLResponse(_LOGIN_HTML.format(next=next, error_html=error_html), status_code=429)
         error_html = '<div class="error">Invalid username or password.</div>'
         return HTMLResponse(_LOGIN_HTML.format(next=next, error_html=error_html), status_code=401)
 
