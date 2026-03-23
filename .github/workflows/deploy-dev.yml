@@ -15,6 +15,24 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
+      - name: Prepare kubeconfig for runner user
+        run: |
+          set -euo pipefail
+          mkdir -p "$HOME/.kube"
+
+          if [ -r /etc/rancher/k3s/k3s.yaml ]; then
+            cp /etc/rancher/k3s/k3s.yaml "$HOME/.kube/config"
+          else
+            sudo install -m 600 /etc/rancher/k3s/k3s.yaml "$HOME/.kube/config"
+            sudo chown "$(id -u):$(id -g)" "$HOME/.kube/config"
+          fi
+
+          chmod 600 "$HOME/.kube/config"
+          echo "KUBECONFIG=$HOME/.kube/config" >> "$GITHUB_ENV"
+
+      - name: Verify cluster access
+        run: kubectl get nodes -o wide
+
       - name: Log in to GHCR
         uses: docker/login-action@v3
         with:

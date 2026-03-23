@@ -330,65 +330,61 @@ Tier matrix (see User Tiers section below).
 
 These are concrete security gaps spotted in the current webapp implementation/config (in addition to the target-state checklist above). They should be tracked as actionable issues with an owner + due date, and tied to Phase 0 / Phase 1 gates.
 
-### 1) Insecure fallback `secret_key` in runtime config
-- **Issue:** `app/config.py` defines a default/fallback secret key value.
-- **Why it matters:** If an environment variable is missing in production, the app can run with a predictable key, enabling token/session forgery.
-- **Recommended fix:** Fail fast on startup in non-dev environments when `SECRET_KEY` is unset or matches a known default; require a strong random value from a secret manager.
-- **Priority:** **Critical**
+### 1) CSP still allows inline styles
+- **Issue:** CSP still includes `style-src 'unsafe-inline'` because login/loading/error pages are rendered with inline CSS.
+- **Why it matters:** Inline allowances keep the XSS defense model weaker than a strict nonce/hash policy.
+- **Recommended fix:** Move inline CSS into static assets and migrate to nonce/hash-based CSP without `'unsafe-inline'`.
+- **Priority:** **Medium**
 
-### 2) Risky default credentials/config values
-- **Issue:** Runtime config contains permissive defaults (including DB connection defaults) and `.env` fallback behavior.
-- **Why it matters:** Misconfigured prod deployments may silently run with unsafe settings.
-- **Recommended fix:** Remove insecure defaults for production-critical settings; enforce explicit env vars in prod and validate at startup.
-- **Priority:** **High**
-
-### 3) CSP currently allows `'unsafe-inline'`
-- **Issue:** Security headers in `app/main.py` include CSP directives with `script-src 'unsafe-inline'` and `style-src 'unsafe-inline'`.
-- **Why it matters:** Inline allowances materially increase XSS exploitability.
-- **Recommended fix:** Move to nonce/hash-based CSP and remove `'unsafe-inline'` wherever possible.
-- **Priority:** **High**
-
-### 4) Deprecated `X-XSS-Protection` header in use
-- **Issue:** `app/main.py` sets `X-XSS-Protection`.
-- **Why it matters:** Modern browsers ignore/deprecate it; it can create false confidence.
-- **Recommended fix:** Remove this header; rely on robust CSP, output encoding, and framework defaults.
-- **Priority:** **Low**
-
-### 5) Public-route allowlisting too broad
-- **Issue:** Auth bypass uses prefix/exact allowlists; broad prefixes can accidentally expose future endpoints.
-- **Why it matters:** New routes added under a public prefix may become unintentionally unauthenticated.
-- **Recommended fix:** Keep public allowlist minimal and explicit; add tests asserting auth requirements per route.
-- **Priority:** **High**
-
-### 6) Startup/background initialization race window
+### 2) Startup/background initialization race window
 - **Issue:** Background startup task scheduling can allow serving requests before all initialization has completed.
 - **Why it matters:** Sensitive routes may be reachable in a partially initialized state.
 - **Recommended fix:** Gate sensitive endpoints on readiness and ensure startup readiness is enforced cluster-side (`readinessProbe`/app readiness gate).
 - **Priority:** **Medium**
 
-### 7) Container hardening gap: non-root not enforced everywhere
-- **Issue:** Deployment templates indicate workloads may still run as root (`runAsNonRoot` not consistently true).
-- **Why it matters:** Running as root increases blast radius for RCE/container breakout scenarios.
-- **Recommended fix:** Enforce `runAsNonRoot: true`, drop Linux capabilities, set `allowPrivilegeEscalation: false`, and prefer read-only root filesystem where feasible.
-- **Priority:** **High**
-
-### 8) Dev registry/network exposure risk
+### 3) Dev registry/network exposure risk
 - **Issue:** Registry/deployment config patterns (e.g., host networking / hostPath in dev) broaden host attack surface.
 - **Why it matters:** Lateral movement and host compromise risk increases if reused beyond isolated local environments.
 - **Recommended fix:** Limit to isolated dev only, add auth/TLS when applicable, and prefer cluster-internal networking patterns.
 - **Priority:** **Medium**
 
-### 9) Excessive operational metadata in health responses
-- **Issue:** Health endpoint may return build/version/git SHA and startup error details.
-- **Why it matters:** Information disclosure aids reconnaissance.
-- **Recommended fix:** Return minimal health payload publicly; expose diagnostic details only to authenticated admin paths or internal endpoints.
-- **Priority:** **Medium**
-
-### 10) Planned controls not fully enforced yet
+### 4) Planned controls not fully enforced yet
 - **Issue:** Some security checklist items in this document are currently aspirational (e.g., non-root everywhere, Doppler operator, strict service-account token policy).
 - **Why it matters:** Security posture can be overestimated during rollout.
 - **Recommended fix:** Convert checklist items into enforceable CI/cluster policy checks (lint + admission/policy tests) with explicit pass/fail gates.
 - **Priority:** **High**
+
+### Resolved Security Items
+
+These items were addressed in code/config and are now considered closed for the current phase.
+
+1. **Insecure fallback `secret_key` in runtime config**
+- **Resolution:** Removed predictable fallback behavior and added production-like startup validation for strong secret configuration.
+- **Implemented in:** `app/config.py`, `.env.example`
+
+2. **Risky default credentials/config values**
+- **Resolution:** Added production-like environment validation to fail fast on unsafe secret/password settings.
+- **Implemented in:** `app/config.py`
+
+3. **Deprecated `X-XSS-Protection` header in use**
+- **Resolution:** Removed deprecated header and kept modern header strategy centered on CSP and other standard protections.
+- **Implemented in:** `app/main.py`
+
+4. **Public-route allowlisting too broad**
+- **Resolution:** Reduced public allowlist surface and protected metadata from unauthenticated access.
+- **Implemented in:** `app/main.py`
+
+5. **Container hardening gap: non-root not enforced everywhere**
+- **Resolution:** Enforced non-root execution and stricter container security context controls (drop capabilities, no privilege escalation).
+- **Implemented in:** `infra/charts/helvex/templates/deployment.yaml`, `infra/charts/helvex/templates/frontend-deployment.yaml`
+
+6. **Excessive operational metadata in health responses**
+- **Resolution:** Reduced health response to minimal status output and removed detailed startup error disclosure from public health checks.
+- **Implemented in:** `app/main.py`
+
+7. **Missing dependency vulnerability gate in CI**
+- **Resolution:** Added dependency audit step to CI.
+- **Implemented in:** `.github/workflows/ci.yml`
 
 ---
 

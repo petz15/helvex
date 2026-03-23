@@ -1,7 +1,7 @@
 """Authentication: signed cookies (browser UI) + JWT Bearer tokens (API clients).
 
 Cookie sessions use itsdangerous (unchanged from before).
-JWT Bearer tokens use python-jose with HS256, same SECRET_KEY.
+JWT Bearer tokens use PyJWT with HS256, same SECRET_KEY.
 
 Routes that need the current user should depend on `get_current_user`.
 The auth_gate middleware enforces authentication globally; the dependency
@@ -16,7 +16,7 @@ from urllib.parse import quote
 
 from fastapi import Cookie, Depends, HTTPException, Request, status
 from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
-from jose import JWTError, jwt as jose_jwt
+import jwt
 from sqlalchemy.orm import Session
 
 from app import crud
@@ -61,15 +61,15 @@ def create_access_token(user_id: int, expires_delta: timedelta | None = None) ->
         expires_delta or timedelta(seconds=_JWT_EXPIRE_SECONDS)
     )
     payload = {"sub": str(user_id), "exp": expire}
-    return jose_jwt.encode(payload, settings.secret_key, algorithm=_JWT_ALGORITHM)
+    return jwt.encode(payload, settings.secret_key, algorithm=_JWT_ALGORITHM)
 
 
 def decode_access_token(token: str) -> int | None:
     try:
-        payload = jose_jwt.decode(token, settings.secret_key, algorithms=[_JWT_ALGORITHM])
+        payload = jwt.decode(token, settings.secret_key, algorithms=[_JWT_ALGORITHM])
         sub = payload.get("sub")
         return int(sub) if sub is not None else None
-    except (JWTError, ValueError, TypeError):
+    except (jwt.InvalidTokenError, ValueError, TypeError):
         return None
 
 
