@@ -15,7 +15,7 @@ from app.schemas.company import GoogleSearchResult, ZefixSearchResult
 def test_health(client):
     response = client.get("/health")
     assert response.status_code == 200
-    assert response.json() == {"status": "ok"}
+    assert response.json()["status"] == "ok"
 
 
 # ---------------------------------------------------------------------------
@@ -49,7 +49,7 @@ def test_list_companies(client):
     client.post("/api/v1/companies", json={"uid": "CHE-002.002.002", "name": "Beta GmbH"})
     resp = client.get("/api/v1/companies")
     assert resp.status_code == 200
-    names = [c["name"] for c in resp.json()]
+    names = [c["name"] for c in resp.json()["items"]]
     assert "Alpha AG" in names
     assert "Beta GmbH" in names
 
@@ -59,7 +59,7 @@ def test_list_companies_name_filter(client):
     client.post("/api/v1/companies", json={"uid": "CHE-002.002.002", "name": "Beta GmbH"})
     resp = client.get("/api/v1/companies?name=alpha")
     assert resp.status_code == 200
-    data = resp.json()
+    data = resp.json()["items"]
     assert len(data) == 1
     assert data[0]["name"] == "Alpha AG"
 

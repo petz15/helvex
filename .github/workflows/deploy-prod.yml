@@ -17,7 +17,7 @@ jobs:
     runs-on: self-hosted-prod   # runner on the Hetzner prod server (not yet provisioned)
     environment: production     # requires manual approval in GitHub
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Determine tag
         id: tag

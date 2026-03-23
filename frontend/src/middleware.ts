@@ -1,17 +1,15 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 
-const PUBLIC_PATHS = ["/login", "/logout", "/api", "/health", "/_next", "/favicon.ico", "/api/ping"];
+const PUBLIC_PATHS = ["/login", "/logout", "/api", "/health", "/_next", "/favicon.ico"];
 
-export function proxy(request: NextRequest) {
+export function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
-  // Allow public paths through
   if (PUBLIC_PATHS.some((p) => pathname.startsWith(p))) {
     return NextResponse.next();
   }
 
-  // Check for session cookie set by FastAPI
   const session = request.cookies.get("zefix_session");
   if (!session) {
     const loginUrl = new URL("/login", request.url);

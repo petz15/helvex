@@ -1,4 +1,5 @@
 import asyncio
+import html as _html
 import os
 import pathlib
 import sys
@@ -279,8 +280,9 @@ _LOGIN_HTML = """\
 
 @app.get("/login", response_class=HTMLResponse, include_in_schema=False)
 def login_page(next: str = Query("/app/dashboard"), error: str | None = Query(None)):
-    error_html = f'<div class="error">{error}</div>' if error else ""
-    return HTMLResponse(_LOGIN_HTML.format(next=next, error_html=error_html))
+    error_html = f'<div class="error">{_html.escape(error)}</div>' if error else ""
+    safe_next = _html.escape(next)
+    return HTMLResponse(_LOGIN_HTML.format(next=safe_next, error_html=error_html))
 
 
 @app.post("/login", include_in_schema=False)
@@ -388,7 +390,8 @@ async def startup_gate(request: Request, call_next):
     error = getattr(app.state, "startup_error", None)
 
     if error:
-        return HTMLResponse(_ERROR_HTML.format(error=error, elapsed=elapsed), status_code=500)
+        safe_error = _html.escape(error).replace("{", "&#123;").replace("}", "&#125;")
+        return HTMLResponse(_ERROR_HTML.format(error=safe_error, elapsed=elapsed), status_code=500)
 
     if not getattr(app.state, "ready", False):
         message = getattr(app.state, "startup_message", "Initialising…")

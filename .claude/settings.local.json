@@ -103,7 +103,14 @@
       "Bash(npm run:*)",
       "Bash(find c:/D/coding_projects/zefix_analyzer/frontend/node_modules/next/dist/docs -name *.md)",
       "Bash(find c:/D/coding_projects/zefix_analyzer/frontend/node_modules/next/dist/docs -name *proxy* -o -name *middleware*)",
-      "Bash(ls \"c:\\\\D\\\\coding_projects\\\\zefix_analyzer\\\\app\\\\ui\"\" && ls \"c:Dcoding_projectszefix_analyzerapptemplates\"\")"
+      "Bash(ls \"c:\\\\D\\\\coding_projects\\\\zefix_analyzer\\\\app\\\\ui\"\" && ls \"c:Dcoding_projectszefix_analyzerapptemplates\"\")",
+      "Bash(for f:*)",
+      "Bash(do)",
+      "Bash(sed -i 's|actions/checkout@v4|actions/checkout@v5|g' \"$f\")",
+      "Bash(sed -i 's|actions/setup-python@v5|actions/setup-python@v6|g' \"$f\")",
+      "Bash(done)",
+      "Bash(curl -s http://helvex.dicy.ch/health)",
+      "Bash(python -c \"from app.main import app\")"
     ]
   }
 }
