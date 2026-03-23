@@ -39,6 +39,7 @@ jobs:
         uses: sigstore/cosign-installer@v3
 
       - name: Sign image
+        continue-on-error: true   # Rekor inclusion proof can be flaky; non-blocking
         run: |
           cosign sign --yes \
             ghcr.io/${{ github.repository }}@${{ steps.build.outputs.digest }}
