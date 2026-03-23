@@ -14,7 +14,7 @@ def test_being_cancelled_forces_zero_score():
         canton="BE",
         municipality="Bern",
     )
-    assert score == 0
+    assert score == 5  # cancelled_score default; not zero so cancelled companies stay findable
 
 
 def test_score_breakdown_contains_final_score():
@@ -50,4 +50,4 @@ def test_fallback_result_score_base_plus_location_plus_legal():
         canton="BE",
         legal_form="AG",
     )
-    assert score == 40  # 5 base + 20 municipality + 10 canton + 5 legal
+    assert score == 45  # 5 base + 25 municipality + 10 canton + 5 legal

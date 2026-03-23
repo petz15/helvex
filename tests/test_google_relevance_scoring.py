@@ -11,6 +11,7 @@ def _company_stub() -> SimpleNamespace:
         canton="BE",
         purpose="Beratung und Softwareentwicklung",
         legal_form="AG",
+        address=None,
     )
 
 
