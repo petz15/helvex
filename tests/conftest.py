@@ -84,6 +84,10 @@ def client(db):
         for p in _STARTUP_PATCHES:
             stack.enter_context(p)
         with TestClient(app) as c:
+            # Avoid race with async startup gate during tests.
+            app.state.ready = True
+            app.state.startup_error = None
+            app.state.startup_message = "Ready"
             # Provide a signed session cookie so the auth gate lets requests through.
             c.cookies.set(COOKIE_NAME, create_session_cookie(1))
             yield c

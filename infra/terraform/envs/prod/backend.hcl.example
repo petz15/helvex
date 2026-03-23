@@ -1,0 +1,10 @@
+bucket                      = "helvex-tfstate"
+key                         = "prod/terraform.tfstate"
+region                      = "eu-central"
+endpoint                    = "https://<your-hetzner-s3-endpoint>"
+access_key                  = "<s3-access-key>"
+secret_key                  = "<s3-secret-key>"
+skip_credentials_validation = true
+skip_region_validation      = true
+skip_metadata_api_check     = true
+force_path_style            = true

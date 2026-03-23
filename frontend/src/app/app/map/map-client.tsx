@@ -14,7 +14,28 @@ function scoreColor(score: number | null): string {
   if (score == null) return "#94a3b8";
   if (score >= 70) return "#22c55e";
   if (score >= 40) return "#f59e0b";
-  return "#ef4444";
+  if (score >= 10) return "#f97316";
+  return "#94a3b8"; // unscored → neutral grey instead of alarming red
+}
+
+/** Cluster bubble color — count-based blue scale for a natural, non-alarming look. */
+function clusterColor(count: number): string {
+  if (count >= 500) return "#1e40af";
+  if (count >= 100) return "#1d4ed8";
+  if (count >= 20)  return "#3b82f6";
+  return "#60a5fa";
+}
+
+function buildPopup(f: MapFeature): string {
+  const parts = [
+    `<strong><a href="/app/companies/${f.id}" style="color:#3b82f6;text-decoration:none">${f.name}</a></strong>`,
+    f.canton ? `<span style="color:#64748b">${f.municipality ?? ""}, ${f.canton}</span>` : "",
+    f.website ? `<a href="${f.website}" target="_blank" rel="noopener" style="color:#3b82f6">${f.website.replace(/^https?:\/\//, "")}</a>` : "",
+    `Google: ${f.google_score ?? "—"} · Zefix: ${f.zefix_score ?? "—"} · Claude: ${f.claude_score ?? "—"}`,
+    f.review ? `<em>${f.review.replace(/_/g, " ")}</em>` : "",
+    `<a href="/app/companies/${f.id}" style="color:#3b82f6;font-size:11px">View profile →</a>`,
+  ].filter(Boolean);
+  return parts.join("<br>");
 }
 
 interface Filters {
@@ -51,12 +72,12 @@ export function MapClient() {
     const layer = L.layerGroup();
     for (const cell of cells) {
       if (cell.count === 0) continue;
-      const color = scoreColor(cell.avg_score);
-      const size = Math.max(30, Math.min(70, 20 + Math.sqrt(cell.count) * 1.8));
+      const color = clusterColor(cell.count);
+      const size = Math.max(32, Math.min(72, 22 + Math.sqrt(cell.count) * 1.8));
       const label = cell.count >= 1000 ? `${Math.round(cell.count / 1000)}k` : String(cell.count);
-      const fs = size > 44 ? 12 : 10;
+      const fs = size > 46 ? 12 : 10;
       const icon = L.divIcon({
-        html: `<div style="width:${size}px;height:${size}px;border-radius:50%;background:${color};border:2.5px solid rgba(255,255,255,0.9);display:flex;align-items:center;justify-content:center;font-size:${fs}px;font-weight:700;color:#fff;box-shadow:0 2px 6px rgba(0,0,0,0.3);cursor:pointer">${label}</div>`,
+        html: `<div style="width:${size}px;height:${size}px;border-radius:50%;background:${color};border:2.5px solid rgba(255,255,255,0.85);display:flex;align-items:center;justify-content:center;font-size:${fs}px;font-weight:700;color:#fff;box-shadow:0 2px 8px rgba(0,0,0,0.25);cursor:pointer;opacity:0.92">${label}</div>`,
         className: "",
         iconSize: [size, size] as [number, number],
         iconAnchor: [size / 2, size / 2] as [number, number],
@@ -72,21 +93,40 @@ export function MapClient() {
     if (!L || !mapInstanceRef.current) return;
     layerRef.current?.clearLayers();
     const layer = L.layerGroup();
+
+    // Group co-located companies (same lat/lon to 5 decimal places ≈ 1m precision)
+    const byLocation = new Map<string, MapFeature[]>();
     for (const f of features) {
-      const color = scoreColor(f.claude_score ?? f.google_score ?? f.zefix_score ?? null);
-      const marker = L.circleMarker([f.lat, f.lon], {
-        radius: 6, fillColor: color, color: "#fff", weight: 1.5, fillOpacity: 0.85,
-      });
-      const parts = [
-        `<strong>${f.name}</strong>`,
-        f.canton ? `<span style="color:#64748b">${f.municipality ?? ""}, ${f.canton}</span>` : "",
-        f.website ? `<a href="${f.website}" target="_blank" rel="noopener" style="color:#3b82f6">${f.website.replace(/^https?:\/\//, "")}</a>` : "",
-        `Google: ${f.google_score ?? "—"} · Zefix: ${f.zefix_score ?? "—"} · Claude: ${f.claude_score ?? "—"}`,
-        f.review ? `<em>${f.review.replace(/_/g, " ")}</em>` : "",
-      ].filter(Boolean);
-      marker.bindPopup(parts.join("<br>"), { maxWidth: 300 });
-      layer.addLayer(marker);
+      const key = `${f.lat.toFixed(5)},${f.lon.toFixed(5)}`;
+      const arr = byLocation.get(key);
+      if (arr) arr.push(f); else byLocation.set(key, [f]);
     }
+
+    for (const group of byLocation.values()) {
+      const f = group[0];
+      if (group.length === 1) {
+        const color = scoreColor(f.claude_score ?? f.google_score ?? f.zefix_score ?? null);
+        const marker = L.circleMarker([f.lat, f.lon], {
+          radius: 6, fillColor: color, color: "#fff", weight: 1.5, fillOpacity: 0.85,
+        });
+        marker.bindPopup(buildPopup(f), { maxWidth: 300 });
+        layer.addLayer(marker);
+      } else {
+        // Diamond icon with count for co-located companies
+        const s = 28;
+        const icon = L.divIcon({
+          html: `<div style="width:${s}px;height:${s}px;background:#3b82f6;border:2px solid #fff;transform:rotate(45deg);display:flex;align-items:center;justify-content:center;box-shadow:0 2px 6px rgba(0,0,0,0.3)"><span style="transform:rotate(-45deg);font-size:10px;font-weight:700;color:#fff;line-height:1">${group.length}</span></div>`,
+          className: "",
+          iconSize: [s, s] as [number, number],
+          iconAnchor: [s / 2, s / 2] as [number, number],
+        });
+        const marker = L.marker([f.lat, f.lon], { icon });
+        const popupHtml = group.map(buildPopup).join('<hr style="margin:5px 0;border-color:#e2e8f0">');
+        marker.bindPopup(popupHtml, { maxWidth: 320 });
+        layer.addLayer(marker);
+      }
+    }
+
     layer.addTo(mapInstanceRef.current);
     layerRef.current = layer;
   }

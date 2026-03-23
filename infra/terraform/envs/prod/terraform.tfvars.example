@@ -1,0 +1,12 @@
+hcloud_token = "replace-me"
+project_name = "helvex"
+location     = "fsn1"
+
+admin_cidrs = [
+  "203.0.113.10/32"
+]
+
+# These must match names of keys already uploaded in Hetzner Cloud.
+ssh_keys = [
+  "my-main-key"
+]

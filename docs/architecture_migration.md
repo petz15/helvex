@@ -390,6 +390,9 @@ These items were addressed in code/config and are now considered closed for the 
 
 ## Cost Estimate (Hetzner, Production)
 
+Todo: reduce resources! ML only on demand. Start small, scale only when needed.
+S3 Bucket as little as possible, use hetzner box for long term backups, due to it being already covered. 
+
 | Resource | Specification | Monthly Cost |
 |---|---|---|
 | K3s node × 2 (api + workers) | CX32 — 4 vCPU, 8 GB RAM | ~€30 |
@@ -398,7 +401,6 @@ These items were addressed in code/config and are now considered closed for the 
 | Object Storage | ~300 GB (geocoding + exports + backups) | ~€1 |
 | **Total** | | **~€44/month** |
 
-AWS equivalent: ~€150–200/month.
 
 ---
 
