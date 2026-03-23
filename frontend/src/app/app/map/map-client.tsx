@@ -1,9 +1,14 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
 import type { Map, LayerGroup } from "leaflet";
-import { fetchMapData } from "@/lib/api";
-import type { MapFeature } from "@/lib/types";
+import { fetchMapData, fetchMapClusters } from "@/lib/api";
+import type { MapFeature, MapCluster } from "@/lib/types";
 import "leaflet/dist/leaflet.css";
+
+// Below this zoom level show grid-aggregated cluster circles; at/above show individual points.
+const DETAIL_ZOOM = 12;
+
+type WindowWithLeaflet = typeof window & { _L?: typeof import("leaflet") };
 
 function scoreColor(score: number | null): string {
   if (score == null) return "#94a3b8";
@@ -19,37 +24,51 @@ interface Filters {
   hide_cancelled: boolean;
 }
 
+const DEFAULT_FILTERS: Filters = { canton: "", review_status: "", min_combined_score: "", hide_cancelled: false };
+
 export function MapClient() {
   const mapRef = useRef<HTMLDivElement>(null);
   const mapInstanceRef = useRef<Map | null>(null);
   const layerRef = useRef<LayerGroup | null>(null);
+  // Ref mirrors state so Leaflet event handlers always read the latest filters
+  const filtersRef = useRef<Filters>(DEFAULT_FILTERS);
+  // Ref to the latest loadViewport so Leaflet event handlers call the current closure
+  const loadViewportRef = useRef<((f: Filters) => Promise<void>) | null>(null);
+
   const [loading, setLoading] = useState(false);
   const [count, setCount] = useState(0);
   const [truncated, setTruncated] = useState(false);
-  const [filters, setFilters] = useState<Filters>({
-    canton: "", review_status: "", min_combined_score: "", hide_cancelled: false,
-  });
+  const [clustered, setClustered] = useState(true);
+  const [filters, setFilters] = useState<Filters>(DEFAULT_FILTERS);
 
-  async function loadData(f: Filters) {
-    if (!mapInstanceRef.current) return;
-    setLoading(true);
-    try {
-      const params: Record<string, string> = {};
-      if (f.canton) params.canton = f.canton;
-      if (f.review_status) params.review_status = f.review_status;
-      if (f.min_combined_score) params.min_combined_score = f.min_combined_score;
-      if (f.hide_cancelled) params.hide_cancelled = "true";
-      const data = await fetchMapData(params);
-      setCount(data.count);
-      setTruncated(data.truncated);
-      renderMarkers(data.features);
-    } finally {
-      setLoading(false);
+  // Keep filtersRef in sync
+  useEffect(() => { filtersRef.current = filters; }, [filters]);
+
+  function renderClusters(cells: MapCluster[]) {
+    const L = (window as WindowWithLeaflet)._L;
+    if (!L || !mapInstanceRef.current) return;
+    layerRef.current?.clearLayers();
+    const layer = L.layerGroup();
+    for (const cell of cells) {
+      if (cell.count === 0) continue;
+      const color = scoreColor(cell.avg_score);
+      const size = Math.max(30, Math.min(70, 20 + Math.sqrt(cell.count) * 1.8));
+      const label = cell.count >= 1000 ? `${Math.round(cell.count / 1000)}k` : String(cell.count);
+      const fs = size > 44 ? 12 : 10;
+      const icon = L.divIcon({
+        html: `<div style="width:${size}px;height:${size}px;border-radius:50%;background:${color};border:2.5px solid rgba(255,255,255,0.9);display:flex;align-items:center;justify-content:center;font-size:${fs}px;font-weight:700;color:#fff;box-shadow:0 2px 6px rgba(0,0,0,0.3);cursor:pointer">${label}</div>`,
+        className: "",
+        iconSize: [size, size] as [number, number],
+        iconAnchor: [size / 2, size / 2] as [number, number],
+      });
+      layer.addLayer(L.marker([cell.lat, cell.lon], { icon }));
     }
+    layer.addTo(mapInstanceRef.current);
+    layerRef.current = layer;
   }
 
   function renderMarkers(features: MapFeature[]) {
-    const L = (window as typeof window & { _L?: typeof import("leaflet") })._L;
+    const L = (window as WindowWithLeaflet)._L;
     if (!L || !mapInstanceRef.current) return;
     layerRef.current?.clearLayers();
     const layer = L.layerGroup();
@@ -68,9 +87,49 @@ export function MapClient() {
       marker.bindPopup(parts.join("<br>"), { maxWidth: 300 });
       layer.addLayer(marker);
     }
-    layer.addTo(mapInstanceRef.current!);
+    layer.addTo(mapInstanceRef.current);
     layerRef.current = layer;
   }
+
+  async function loadViewport(f: Filters) {
+    const map = mapInstanceRef.current;
+    if (!map) return;
+    const zoom = Math.round(map.getZoom());
+    const bounds = map.getBounds();
+
+    const params: Record<string, string> = {};
+    if (f.canton) params.canton = f.canton;
+    if (f.review_status) params.review_status = f.review_status;
+    if (f.min_combined_score) params.min_combined_score = f.min_combined_score;
+    if (f.hide_cancelled) params.hide_cancelled = "true";
+    params.min_lat = String(bounds.getSouth());
+    params.max_lat = String(bounds.getNorth());
+    params.min_lon = String(bounds.getWest());
+    params.max_lon = String(bounds.getEast());
+
+    setLoading(true);
+    try {
+      if (zoom < DETAIL_ZOOM) {
+        params.zoom = String(zoom);
+        const data = await fetchMapClusters(params);
+        setCount(data.total);
+        setTruncated(false);
+        setClustered(true);
+        renderClusters(data.cells);
+      } else {
+        const data = await fetchMapData(params);
+        setCount(data.count);
+        setTruncated(data.truncated);
+        setClustered(false);
+        renderMarkers(data.features);
+      }
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  // Always keep the ref pointing at the latest closure
+  loadViewportRef.current = loadViewport;
 
   useEffect(() => {
     if (!mapRef.current || mapInstanceRef.current) return;
@@ -79,8 +138,7 @@ export function MapClient() {
       const L = await import("leaflet");
       if (!mounted) return;
 
-      // Store on window so renderMarkers can access it synchronously
-      (window as typeof window & { _L?: typeof L })._L = L;
+      (window as WindowWithLeaflet)._L = L;
 
       const map = L.map(mapRef.current!).setView([46.8, 8.2], 8);
       L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
@@ -89,15 +147,20 @@ export function MapClient() {
       }).addTo(map);
       mapInstanceRef.current = map;
 
-      await loadData(filters);
+      // Reload whenever the viewport changes
+      map.on("moveend zoomend", () => {
+        loadViewportRef.current?.(filtersRef.current);
+      });
+
+      await loadViewportRef.current?.(filtersRef.current);
     })();
     return () => { mounted = false; };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   function handleFilter(e: React.FormEvent) {
     e.preventDefault();
-    loadData(filters);
+    loadViewport(filters);
   }
 
   return (
@@ -142,7 +205,12 @@ export function MapClient() {
           {loading ? "Loading…" : "Apply"}
         </button>
         <span className="text-xs text-slate-400 ml-auto">
-          {count.toLocaleString()} companies{truncated ? " (truncated to 20k)" : ""}
+          {count.toLocaleString()} companies
+          {clustered
+            ? " — zoom in for individual points"
+            : truncated
+            ? ` (capped at 5 000 — zoom in further)`
+            : " in view"}
         </span>
       </form>
       <div ref={mapRef} className="flex-1" />

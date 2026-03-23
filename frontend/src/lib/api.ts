@@ -1,4 +1,4 @@
-import type { AppSettings, BoilerplatePattern, Company, CompanyFilters, CompanyPage, CompanyStats, Job, JobEvent } from "./types";
+import type { AppSettings, BoilerplatePattern, Company, CompanyFilters, CompanyPage, CompanyStats, Job, JobEvent, MapCluster } from "./types";
 
 const BASE = process.env.NEXT_PUBLIC_API_BASE ?? "";
 
@@ -161,5 +161,12 @@ export async function fetchMapData(params?: Record<string, string>): Promise<{ f
   const url = buildUrl("/api/v1/map", params as Record<string, string | number | undefined | null>);
   const res = await fetch(url, { credentials: "include" });
   if (!res.ok) throw new Error("Failed to fetch map data");
+  return res.json();
+}
+
+export async function fetchMapClusters(params?: Record<string, string>): Promise<{ cells: MapCluster[]; total: number }> {
+  const url = buildUrl("/api/v1/map/clusters", params as Record<string, string | number | undefined | null>);
+  const res = await fetch(url, { credentials: "include" });
+  if (!res.ok) throw new Error("Failed to fetch map clusters");
   return res.json();
 }

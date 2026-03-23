@@ -157,6 +157,13 @@ export interface BoilerplatePattern {
   active: boolean;
 }
 
+export interface MapCluster {
+  lat: number;
+  lon: number;
+  count: number;
+  avg_score: number | null;
+}
+
 export interface MapFeature {
   id: number;
   name: string;
