@@ -35,7 +35,7 @@ spec:
             {{- toYaml .Values.frontend.resources | nindent 12 }}
           readinessProbe:
             httpGet:
-              path: /
+              path: /api/ping
               port: 3000
             initialDelaySeconds: 10
             periodSeconds: 10

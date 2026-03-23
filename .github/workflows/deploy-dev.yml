@@ -15,19 +15,23 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Build and push backend image
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Retag and push backend
         run: |
-          docker build \
-            --build-arg BUILD_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-            --build-arg BUILD_GIT_SHA="$(git rev-parse --short=12 HEAD)" \
-            -t 192.168.1.100:5000/helvex-app:latest .
+          docker pull ghcr.io/${{ github.repository }}:${{ github.event.workflow_run.head_sha }}
+          docker tag  ghcr.io/${{ github.repository }}:${{ github.event.workflow_run.head_sha }} 192.168.1.100:5000/helvex-app:latest
           docker push 192.168.1.100:5000/helvex-app:latest
 
-      - name: Build and push frontend image
+      - name: Retag and push frontend
         run: |
-          docker build \
-            --build-arg FASTAPI_URL=http://helvex:8000 \
-            -t 192.168.1.100:5000/helvex-frontend:latest ./frontend
+          docker pull ghcr.io/${{ github.repository }}-frontend:${{ github.event.workflow_run.head_sha }}
+          docker tag  ghcr.io/${{ github.repository }}-frontend:${{ github.event.workflow_run.head_sha }} 192.168.1.100:5000/helvex-frontend:latest
           docker push 192.168.1.100:5000/helvex-frontend:latest
 
       - name: Apply Helmfile (dev)
