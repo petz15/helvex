@@ -12,5 +12,5 @@ export default async function DashboardPage() {
     })),
   ]);
 
-  return <DashboardClient cantons={cantons} initialStats={stats} />;
+  return <DashboardClient initialCantons={cantons} initialStats={stats} />;
 }

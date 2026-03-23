@@ -7,7 +7,7 @@ import { StatsBar } from "@/components/dashboard/stats-bar";
 import { CompanyTable } from "@/components/dashboard/company-table";
 import { CompanyPreview } from "@/components/dashboard/company-preview";
 import { Pagination } from "@/components/dashboard/pagination";
-import { fetchCompanies, fetchStats } from "@/lib/api";
+import { fetchCompanies, fetchStats, fetchCantons, fetchTaxonomy } from "@/lib/api";
 import type { Company, CompanyFilters, CompanyStats } from "@/lib/types";
 
 function buildExportUrl(filters: CompanyFilters): string {
@@ -20,13 +20,13 @@ function buildExportUrl(filters: CompanyFilters): string {
 }
 
 interface DashboardClientProps {
-  cantons: string[];
+  initialCantons: string[];
   initialStats: CompanyStats;
 }
 
 const DEFAULT_FILTERS: CompanyFilters = { sort: "-updated", page: 1, page_size: 50 };
 
-export function DashboardClient({ cantons, initialStats }: DashboardClientProps) {
+export function DashboardClient({ initialCantons, initialStats }: DashboardClientProps) {
   const [filters, setFilters] = useState<CompanyFilters>(DEFAULT_FILTERS);
   const [selectedCompany, setSelectedCompany] = useState<Company | null>(null);
   const [, startTransition] = useTransition();
@@ -38,6 +38,8 @@ export function DashboardClient({ cantons, initialStats }: DashboardClientProps)
   );
 
   const { data: stats } = useSWR("stats", fetchStats, { fallbackData: initialStats });
+  const { data: cantons = initialCantons } = useSWR("cantons", fetchCantons, { fallbackData: initialCantons });
+  const { data: taxonomy = {} } = useSWR("taxonomy", fetchTaxonomy);
 
   const handleFilterChange = useCallback((newFilters: CompanyFilters) => {
     startTransition(() => setFilters(newFilters));
@@ -67,6 +69,7 @@ export function DashboardClient({ cantons, initialStats }: DashboardClientProps)
         <FilterSidebar
           filters={filters}
           cantons={cantons}
+          taxonomy={taxonomy}
           onChange={handleFilterChange}
           onClear={handleClear}
           resultCount={page?.total ?? 0}

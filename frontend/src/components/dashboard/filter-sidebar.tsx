@@ -8,6 +8,7 @@ import { REVIEW_STATUSES, PROPOSAL_STATUSES } from "@/lib/types";
 interface FilterSidebarProps {
   filters: CompanyFilters;
   cantons: string[];
+  taxonomy?: Record<string, [string, number][]>;
   onChange: (filters: CompanyFilters) => void;
   onClear: () => void;
   resultCount: number;
@@ -27,7 +28,9 @@ const inputCls =
 
 const selectCls = cn(inputCls, "appearance-none pr-6 bg-[right_0.4rem_center] bg-no-repeat");
 
-export function FilterSidebar({ filters, cantons, onChange, onClear, resultCount }: FilterSidebarProps) {
+export function FilterSidebar({ filters, cantons, taxonomy, onChange, onClear, resultCount }: FilterSidebarProps) {
+  const clusters = taxonomy?.clusters ?? [];
+  const keywords = taxonomy?.keywords ?? [];
   const set = useCallback(
     (key: keyof CompanyFilters, value: string | number | undefined) =>
       onChange({ ...filters, [key]: value || undefined, page: 1 }),
@@ -116,6 +119,29 @@ export function FilterSidebar({ filters, cantons, onChange, onClear, resultCount
             onChange={(e) => set("claude_category", e.target.value)} />
         </Field>
 
+        <Field label="TF-IDF cluster">
+          <div className="relative">
+            <select className={selectCls} value={filters.tfidf_cluster ?? ""} onChange={(e) => set("tfidf_cluster", e.target.value)}>
+              <option value="">All</option>
+              <option value="_none">None (unset)</option>
+              <option value="_any">Any (set)</option>
+              {clusters.map(([label]) => <option key={label} value={label}>{label}</option>)}
+            </select>
+            <ChevronDown size={13} className="pointer-events-none absolute right-2 top-2 text-slate-400" />
+          </div>
+        </Field>
+
+        <Field label="Purpose keyword">
+          <div className="relative">
+            <select className={selectCls} value={filters.purpose_keywords ?? ""} onChange={(e) => set("purpose_keywords", e.target.value)}>
+              <option value="">All</option>
+              <option value="_none">None (unset)</option>
+              {keywords.map(([kw]) => <option key={kw} value={kw}>{kw}</option>)}
+            </select>
+            <ChevronDown size={13} className="pointer-events-none absolute right-2 top-2 text-slate-400" />
+          </div>
+        </Field>
+
         <Field label="Min Google score">
           <input type="number" className={inputCls} min={0} max={100} placeholder="0–100" value={filters.min_google_score ?? ""}
             onChange={(e) => set("min_google_score", e.target.value ? Number(e.target.value) : undefined)} />
@@ -136,6 +162,16 @@ export function FilterSidebar({ filters, cantons, onChange, onClear, resultCount
             <select className={selectCls} value={filters.exclude_review_status ?? ""} onChange={(e) => set("exclude_review_status", e.target.value)}>
               <option value="">— none —</option>
               {REVIEW_STATUSES.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
+            </select>
+            <ChevronDown size={13} className="pointer-events-none absolute right-2 top-2 text-slate-400" />
+          </div>
+        </Field>
+
+        <Field label="Exclude proposal">
+          <div className="relative">
+            <select className={selectCls} value={filters.exclude_proposal_status ?? ""} onChange={(e) => set("exclude_proposal_status", e.target.value)}>
+              <option value="">— none —</option>
+              {PROPOSAL_STATUSES.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
             </select>
             <ChevronDown size={13} className="pointer-events-none absolute right-2 top-2 text-slate-400" />
           </div>
