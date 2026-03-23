@@ -15,6 +15,21 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Build and push backend image
+        run: |
+          docker build \
+            --build-arg BUILD_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            --build-arg BUILD_GIT_SHA="$(git rev-parse --short=12 HEAD)" \
+            -t 192.168.1.100:5000/helvex-app:latest .
+          docker push 192.168.1.100:5000/helvex-app:latest
+
+      - name: Build and push frontend image
+        run: |
+          docker build \
+            --build-arg FASTAPI_URL=http://helvex:8000 \
+            -t 192.168.1.100:5000/helvex-frontend:latest ./frontend
+          docker push 192.168.1.100:5000/helvex-frontend:latest
+
       - name: Apply Helmfile (dev)
         working-directory: infra
         run: helmfile -e dev apply --suppress-diff

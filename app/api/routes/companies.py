@@ -1,6 +1,7 @@
 """Routes for company management and Zefix / Google Search integration."""
 
 import json
+import math
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -9,8 +10,10 @@ from sqlalchemy.orm import Session
 from app import crud
 from app.api import google_search_client, zefix_client
 from app.database import get_db
+from app.models.company import Company
 from app.schemas.company import (
     CompanyCreate,
+    CompanyPage,
     CompanyRead,
     CompanyUpdate,
     GoogleSearchResult,
@@ -171,14 +174,72 @@ def google_search_for_company(
 # ---------------------------------------------------------------------------
 
 
-@router.get("", response_model=list[CompanyRead], summary="List companies")
+@router.get("/stats", response_model=dict, summary="Company stats (totals, review/proposal counts)")
+def get_stats(db: Session = Depends(get_db)):
+    return crud.get_company_stats(db)
+
+
+@router.get("/cantons", response_model=list[str], summary="List distinct cantons")
+def list_cantons(db: Session = Depends(get_db)):
+    rows = db.query(Company.canton).filter(Company.canton.isnot(None)).distinct().order_by(Company.canton).all()
+    return [r.canton for r in rows]
+
+
+@router.get("/taxonomy", response_model=dict, summary="Taxonomy stats (clusters, keywords, tags, categories)")
+def get_taxonomy(db: Session = Depends(get_db)):
+    return crud.get_taxonomy_stats(db)
+
+
+@router.get("", response_model=CompanyPage, summary="List companies (paginated, filterable)")
 def list_companies(
-    skip: int = Query(0, ge=0),
-    limit: int = Query(100, ge=1, le=1000),
-    name: str | None = Query(None, description="Filter by company name (case-insensitive)"),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(50, ge=1, le=500),
+    sort: str = Query("-updated", description="Sort key, e.g. -combined_score, name, -updated"),
+    q: str | None = Query(None, description="Filter by name (case-insensitive)"),
+    canton: str | None = Query(None),
+    review_status: str | None = Query(None, description="Use _none for unset"),
+    proposal_status: str | None = Query(None, description="Use _none for unset"),
+    google_searched: str | None = Query(None, description="yes | no | no_result"),
+    min_google_score: int | None = Query(None, ge=0, le=100),
+    min_zefix_score: int | None = Query(None, ge=0, le=100),
+    min_claude_score: int | None = Query(None, ge=0, le=100),
+    claude_category: str | None = Query(None, description="Use _none for unset"),
+    tags: str | None = Query(None),
+    tfidf_cluster: str | None = Query(None, description="_none | _any | keyword"),
+    purpose_keywords: str | None = Query(None),
+    exclude_tags: str | None = Query(None, description="Comma-separated tags to exclude"),
+    exclude_review_status: str | None = Query(None),
+    exclude_canton: str | None = Query(None),
+    exclude_proposal_status: str | None = Query(None),
     db: Session = Depends(get_db),
-):
-    return crud.list_companies(db, skip=skip, limit=limit, name_filter=name)
+) -> CompanyPage:
+    filter_kwargs = dict(
+        name_filter=q,
+        canton=canton,
+        review_status=review_status,
+        proposal_status=proposal_status,
+        google_searched=google_searched,
+        min_google_score=min_google_score,
+        min_zefix_score=min_zefix_score,
+        min_claude_score=min_claude_score,
+        claude_category=claude_category,
+        tags=tags,
+        tfidf_cluster=tfidf_cluster,
+        purpose_keywords=purpose_keywords,
+        exclude_tags=exclude_tags,
+        exclude_review_status=exclude_review_status,
+        exclude_canton=exclude_canton,
+        exclude_proposal_status=exclude_proposal_status,
+    )
+    total = crud.count_companies(db, **filter_kwargs)
+    items = crud.list_companies(db, page=page, page_size=page_size, sort=sort, **filter_kwargs)
+    return CompanyPage(
+        items=items,
+        total=total,
+        page=page,
+        page_size=page_size,
+        pages=math.ceil(total / page_size) if total else 1,
+    )
 
 
 @router.post("", response_model=CompanyRead, status_code=status.HTTP_201_CREATED, summary="Create company")

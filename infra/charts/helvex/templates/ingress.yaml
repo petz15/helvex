@@ -21,11 +21,61 @@ spec:
     - host: {{ .Values.ingress.host }}
       http:
         paths:
-          - path: /
+          # FastAPI: API, auth, docs, static assets, health
+          - path: /api
             pathType: Prefix
             backend:
               service:
                 name: {{ include "helvex.fullname" . }}
                 port:
-                  number: 80
+                  number: {{ .Values.service.port }}
+          - path: /login
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "helvex.fullname" . }}
+                port:
+                  number: {{ .Values.service.port }}
+          - path: /logout
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "helvex.fullname" . }}
+                port:
+                  number: {{ .Values.service.port }}
+          - path: /health
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "helvex.fullname" . }}
+                port:
+                  number: {{ .Values.service.port }}
+          - path: /docs
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "helvex.fullname" . }}
+                port:
+                  number: {{ .Values.service.port }}
+          - path: /static
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "helvex.fullname" . }}
+                port:
+                  number: {{ .Values.service.port }}
+          # Next.js frontend (everything else)
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                {{- if .Values.frontend.enabled }}
+                name: {{ include "helvex.fullname" . }}-frontend
+                port:
+                  number: 3000
+                {{- else }}
+                name: {{ include "helvex.fullname" . }}
+                port:
+                  number: {{ .Values.service.port }}
+                {{- end }}
 {{- end }}

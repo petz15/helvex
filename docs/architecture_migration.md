@@ -366,6 +366,7 @@ AWS equivalent: ~€150–200/month.
 - Per-service separate databases
 - OpenTelemetry distributed tracing
 - Multi-region Hetzner deployment
+- **Audit log retention policy**: batch jobs generate high write volume (e.g. ~500k rows for a 50k-company import run). Add a scheduled DELETE for automated entries (`user_id IS NULL AND changed_at < NOW() - INTERVAL '90 days'`) via K8s CronJob or `pg_cron` once batch job frequency increases. Manual edits (`user_id IS NOT NULL`) should be kept indefinitely.
 
 ---
 

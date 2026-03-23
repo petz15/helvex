@@ -131,9 +131,21 @@ class CompanyRead(CompanyBase):
     contact_email: str | None = None
     contact_phone: str | None = None
     tags: str | None = None
+    purpose_keywords: str | None = None
+    combined_score: int | None = None
+    zefix_scored_at: datetime | None = None
+    claude_scored_at: datetime | None = None
     created_at: datetime
     updated_at: datetime
     notes: list[NoteRead] = []
+
+
+class CompanyPage(BaseModel):
+    items: list[CompanyRead]
+    total: int
+    page: int
+    page_size: int
+    pages: int
 
 
 class ZefixSearchResult(BaseModel):

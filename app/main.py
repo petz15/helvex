@@ -22,16 +22,18 @@ if sys.version_info >= (3, 12):
 
 from alembic import command as alembic_command
 from alembic.config import Config as AlembicConfig
-from fastapi import FastAPI, Request
-from fastapi.responses import HTMLResponse
+from fastapi import Depends, FastAPI, Form, Query, Request, status
+from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import inspect as sa_inspect
+from sqlalchemy.orm import Session
 
-from app.auth import COOKIE_NAME, decode_session_cookie
+from app.auth import COOKIE_NAME, check_login_rate_limit, create_session_cookie, decode_session_cookie
 from app.config import settings
-from app.database import Base, engine
+from app.database import Base, engine, get_db
+from app.services.job_worker import kick_job_worker
 from app.services.scoring import get_default_scoring_config
-from app.ui.routes import kick_job_worker, router as ui_router, templates as ui_templates
+from app import crud
 
 # Paths that do NOT require authentication
 _PUBLIC_PREFIXES = ("/static", "/login", "/health", "/metadata")
@@ -63,7 +65,6 @@ APP_VERSION, BUILD_DATE, BUILD_GIT_SHA = _read_version_info()
 # ── Startup helpers ───────────────────────────────────────────────────────────
 
 def _database_has_tables() -> bool:
-    """Return True if the database already has any tables."""
     with engine.connect() as conn:
         return bool(sa_inspect(conn).get_table_names())
 
@@ -77,7 +78,6 @@ def _run_migrations(app_state) -> None:
     except Exception as exc:
         raise RuntimeError(f"Cannot connect to database: {exc}") from exc
 
-    # ── Fresh database: create all tables in one shot, then stamp Alembic ─────
     if not has_tables:
         app_state.startup_message = "Empty database — creating schema…"
         try:
@@ -94,7 +94,6 @@ def _run_migrations(app_state) -> None:
         app_state.startup_message = "Database initialised ✓"
         return
 
-    # ── Existing database: apply all pending migrations in one call ────────────
     app_state.startup_message = "Applying pending migrations…"
     try:
         alembic_command.upgrade(cfg, "head")
@@ -102,7 +101,6 @@ def _run_migrations(app_state) -> None:
         raise RuntimeError(f"Database migration failed: {exc}") from exc
 
     app_state.startup_message = "Database schema is up to date ✓"
-
 
 
 def _seed_settings(app_state) -> None:
@@ -123,17 +121,13 @@ def _seed_settings(app_state) -> None:
 
 
 def _maybe_enqueue_geocode_upgrade(app, app_state) -> None:
-    """Queue the one-time re-geocode job if it hasn't been completed yet.
-
-    The job itself will trigger the geocoding DB download if it doesn't exist yet.
-    """
     from app.crud import create_event, create_job, get_setting, list_jobs
     from app.database import SessionLocal
 
     queued_job = False
     with SessionLocal() as db:
         if get_setting(db, "geocoding_building_level_done", "false") == "true":
-            return  # already upgraded
+            return
 
         already_queued = any(
             j.job_type == "re_geocode" and j.status in ("queued", "running", "paused")
@@ -152,13 +146,11 @@ def _maybe_enqueue_geocode_upgrade(app, app_state) -> None:
         queued_job = True
 
     if queued_job:
-        # Ensure the auto-queued upgrade job does not wait for a UI request.
         kick_job_worker(app)
     app_state.startup_message = "Queued one-time geocoding upgrade"
 
 
 def _recover_jobs_and_start_worker(app, app_state) -> None:
-    """Requeue interrupted jobs and ensure queued jobs resume on startup."""
     from app.crud import list_active_jobs, requeue_interrupted_jobs
     from app.database import SessionLocal
 
@@ -183,7 +175,7 @@ async def lifespan(app: FastAPI):
     app.state.startup_message = "Initialising…"
     app.state.startup_error = None
     app.state.startup_started_at = time.time()
-    app.state.collection_task = None  # populated while a collection job runs
+    app.state.collection_task = None
     app.state.job_worker_running = False
 
     async def _startup() -> None:
@@ -205,26 +197,130 @@ async def lifespan(app: FastAPI):
 # ── Application ───────────────────────────────────────────────────────────────
 
 app = FastAPI(
-    title="Zefix Analyzer",
+    title="Helvex",
     description=(
-        "Internal GUI tool for analysing Swiss registered companies via the Zefix API, "
-        "Google Search enrichment, and manual notes stored in PostgreSQL."
+        "B2B company intelligence platform for Swiss registered companies via the Zefix API, "
+        "Google Search enrichment, and AI scoring."
     ),
     version=APP_VERSION,
     lifespan=lifespan,
 )
 
-from app.api.routes import companies_router, notes_router
+from app.api.routes import companies_router, notes_router, jobs_router, map_router, settings_router
 
 app.mount("/static", StaticFiles(directory="app/static"), name="static")
 app.include_router(companies_router, prefix="/api/v1")
 app.include_router(notes_router, prefix="/api/v1")
-app.include_router(ui_router)
+app.include_router(jobs_router, prefix="/api/v1")
+app.include_router(map_router, prefix="/api/v1")
+app.include_router(settings_router, prefix="/api/v1")
 
-# Expose version info to all Jinja2 templates as globals
-ui_templates.env.globals["APP_VERSION"] = APP_VERSION
-ui_templates.env.globals["BUILD_DATE"] = BUILD_DATE
-ui_templates.env.globals["BUILD_GIT_SHA"] = BUILD_GIT_SHA
+
+# ── Auth routes (raw HTML — no Jinja2) ───────────────────────────────────────
+
+_LOGIN_HTML = """\
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Helvex — Sign in</title>
+  <style>
+    *, *::before, *::after {{ box-sizing: border-box; }}
+    body {{
+      margin: 0; min-height: 100vh; display: flex; align-items: center; justify-content: center;
+      font-family: ui-sans-serif, system-ui, sans-serif;
+      background: #f1f5f9; color: #1e293b;
+    }}
+    .card {{
+      background: #fff; border-radius: 12px; box-shadow: 0 4px 24px rgba(0,0,0,.10);
+      padding: 2.5rem 2rem; width: 100%; max-width: 380px;
+    }}
+    .brand {{ font-size: 1.5rem; font-weight: 700; color: #1d4ed8; margin: 0 0 1.5rem; text-align: center; }}
+    label {{ display: block; font-size: .875rem; font-weight: 500; margin-bottom: .25rem; color: #374151; }}
+    input {{
+      width: 100%; padding: .625rem .75rem; border: 1px solid #d1d5db; border-radius: 8px;
+      font-size: .95rem; outline: none; transition: border-color .15s;
+    }}
+    input:focus {{ border-color: #3b82f6; box-shadow: 0 0 0 3px rgba(59,130,246,.15); }}
+    .field {{ margin-bottom: 1rem; }}
+    .btn {{
+      width: 100%; padding: .7rem; border: none; border-radius: 8px;
+      background: #1d4ed8; color: #fff; font-size: 1rem; font-weight: 600;
+      cursor: pointer; margin-top: .5rem; transition: background .15s;
+    }}
+    .btn:hover {{ background: #1e40af; }}
+    .error {{
+      background: #fef2f2; border: 1px solid #fca5a5; color: #b91c1c;
+      border-radius: 8px; padding: .625rem .875rem; font-size: .875rem; margin-bottom: 1rem;
+    }}
+  </style>
+</head>
+<body>
+  <div class="card">
+    <p class="brand">Helvex</p>
+    {error_html}
+    <form method="post" action="/login">
+      <input type="hidden" name="next" value="{next}">
+      <div class="field">
+        <label for="username">Username</label>
+        <input id="username" name="username" type="text" autocomplete="username" autofocus required>
+      </div>
+      <div class="field">
+        <label for="password">Password</label>
+        <input id="password" name="password" type="password" autocomplete="current-password" required>
+      </div>
+      <button class="btn" type="submit">Sign in</button>
+    </form>
+  </div>
+</body>
+</html>
+"""
+
+
+@app.get("/login", response_class=HTMLResponse, include_in_schema=False)
+def login_page(next: str = Query("/app/dashboard"), error: str | None = Query(None)):
+    error_html = f'<div class="error">{error}</div>' if error else ""
+    return HTMLResponse(_LOGIN_HTML.format(next=next, error_html=error_html))
+
+
+@app.post("/login", include_in_schema=False)
+def login_submit(
+    request: Request,
+    username: str = Form(...),
+    password: str = Form(...),
+    next: str = Form("/app/dashboard"),
+    db: Session = Depends(get_db),
+):
+    from urllib.parse import quote
+    ip = request.client.host if request.client else "unknown"
+    if not check_login_rate_limit(ip):
+        error_html = '<div class="error">Too many login attempts. Try again in 15 minutes.</div>'
+        return HTMLResponse(_LOGIN_HTML.format(next=next, error_html=error_html), status_code=429)
+
+    user = crud.authenticate(db, username=username, password=password)
+    if not user:
+        error_html = '<div class="error">Invalid username or password.</div>'
+        return HTMLResponse(_LOGIN_HTML.format(next=next, error_html=error_html), status_code=401)
+
+    safe_next = next if next.startswith("/") and not next.startswith("//") else "/app/dashboard"
+    response = RedirectResponse(url=safe_next, status_code=status.HTTP_302_FOUND)
+    response.set_cookie(
+        key=COOKIE_NAME,
+        value=create_session_cookie(user.id),
+        httponly=True,
+        samesite="lax",
+        secure=False,
+        max_age=8 * 3600,
+    )
+    return response
+
+
+@app.get("/logout", include_in_schema=False)
+def logout():
+    response = RedirectResponse(url="/login", status_code=status.HTTP_302_FOUND)
+    response.delete_cookie(key=COOKIE_NAME)
+    return response
 
 
 # ── Startup gate middleware ───────────────────────────────────────────────────
@@ -236,34 +332,24 @@ _LOADING_HTML = """\
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta http-equiv="refresh" content="2">
-  <title>Zefix Analyzer — Starting</title>
-  <link rel="stylesheet" href="/static/styles.css">
+  <title>Helvex — Starting</title>
   <style>
-    .startup-box {{ max-width: 520px; margin: 5rem auto; text-align: center; }}
-    .spinner {{
-      width: 48px; height: 48px;
-      border: 5px solid #d7dee7; border-top-color: #146c94;
-      border-radius: 50%;
-      animation: spin 0.8s linear infinite;
-      margin: 0 auto 1.5rem;
-    }}
+    body {{ font-family: ui-sans-serif, system-ui, sans-serif; margin: 0; background: #f1f5f9; color: #1e293b; }}
+    .box {{ max-width: 520px; margin: 6rem auto; text-align: center; background: #fff; border-radius: 12px; padding: 2.5rem; box-shadow: 0 4px 24px rgba(0,0,0,.08); }}
+    .spinner {{ width: 48px; height: 48px; border: 5px solid #dbeafe; border-top-color: #1d4ed8; border-radius: 50%; animation: spin 0.8s linear infinite; margin: 0 auto 1.5rem; }}
     @keyframes spin {{ to {{ transform: rotate(360deg); }} }}
-    .step-msg {{ font-weight: 600; margin: 0.5rem 0 0.2rem; }}
-    .elapsed {{ color: #4d6274; font-size: 0.82rem; margin-top: 0.8rem; }}
+    h2 {{ margin: 0 0 .5rem; font-size: 1.25rem; }}
+    .msg {{ color: #475569; font-weight: 500; }}
+    .elapsed {{ color: #94a3b8; font-size: .8rem; margin-top: 1rem; }}
   </style>
 </head>
 <body>
-  <header class="site-header">
-    <div class="container"><a class="brand" href="/ui">Zefix Analyzer</a></div>
-  </header>
-  <main class="container">
-    <div class="startup-box card">
-      <div class="spinner"></div>
-      <h2 style="margin-bottom:0.3rem;">Starting up…</h2>
-      <p class="step-msg">{message}</p>
-      <p class="elapsed">Elapsed: {elapsed}s &nbsp;·&nbsp; page refreshes every 2 s</p>
-    </div>
-  </main>
+  <div class="box">
+    <div class="spinner"></div>
+    <h2>Starting up…</h2>
+    <p class="msg">{message}</p>
+    <p class="elapsed">Elapsed: {elapsed}s · refreshes every 2s</p>
+  </div>
 </body>
 </html>
 """
@@ -273,21 +359,22 @@ _ERROR_HTML = """\
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <title>Zefix Analyzer — Startup failed</title>
-  <link rel="stylesheet" href="/static/styles.css">
+  <title>Helvex — Startup failed</title>
+  <style>
+    body {{ font-family: ui-sans-serif, system-ui, sans-serif; margin: 0; background: #f1f5f9; color: #1e293b; }}
+    .box {{ max-width: 600px; margin: 4rem auto; background: #fff; border-radius: 12px; padding: 2rem; box-shadow: 0 4px 24px rgba(0,0,0,.08); border: 2px solid #fca5a5; }}
+    h2 {{ color: #b91c1c; margin-top: 0; }}
+    pre {{ background: #fef2f2; border: 1px solid #fca5a5; color: #7f1d1d; padding: 1rem; border-radius: 8px; white-space: pre-wrap; word-break: break-word; font-size: .85rem; }}
+    .elapsed {{ color: #94a3b8; font-size: .8rem; }}
+  </style>
 </head>
 <body>
-  <header class="site-header">
-    <div class="container"><a class="brand" href="/ui">Zefix Analyzer</a></div>
-  </header>
-  <main class="container">
-    <div class="card" style="margin-top:2rem;border-color:#a43d3d;">
-      <h2 style="color:#a43d3d;margin-top:0;">Startup failed</h2>
-      <p>The application could not complete startup. Fix the issue below and restart the container.</p>
-      <pre style="background:#fdecec;border-color:#a43d3d;color:#7f1f1f;white-space:pre-wrap;word-break:break-word;">{error}</pre>
-      <p class="muted-hint">Elapsed before failure: {elapsed}s</p>
-    </div>
-  </main>
+  <div class="box">
+    <h2>Startup failed</h2>
+    <p>Fix the error below and restart the container.</p>
+    <pre>{error}</pre>
+    <p class="elapsed">Elapsed before failure: {elapsed}s</p>
+  </div>
 </body>
 </html>
 """
@@ -303,15 +390,11 @@ async def startup_gate(request: Request, call_next):
     error = getattr(app.state, "startup_error", None)
 
     if error:
-        return HTMLResponse(
-            _ERROR_HTML.format(error=error, elapsed=elapsed), status_code=500
-        )
+        return HTMLResponse(_ERROR_HTML.format(error=error, elapsed=elapsed), status_code=500)
 
     if not getattr(app.state, "ready", False):
         message = getattr(app.state, "startup_message", "Initialising…")
-        return HTMLResponse(
-            _LOADING_HTML.format(message=message, elapsed=elapsed), status_code=503
-        )
+        return HTMLResponse(_LOADING_HTML.format(message=message, elapsed=elapsed), status_code=503)
 
     return await call_next(request)
 
@@ -321,24 +404,20 @@ async def auth_gate(request: Request, call_next):
     """Redirect unauthenticated requests to /login for all protected paths."""
     path = request.url.path
 
-    # Always allow public paths through
     if path in _PUBLIC_EXACT or any(path.startswith(p) for p in _PUBLIC_PREFIXES):
         return await call_next(request)
 
-    # Validate session cookie
     token = request.cookies.get(COOKIE_NAME)
     if token and decode_session_cookie(token) is not None:
         return await call_next(request)
 
     from urllib.parse import quote
-    from fastapi.responses import RedirectResponse as _Redirect
     next_url = quote(path, safe="")
-    return _Redirect(url=f"/login?next={next_url}", status_code=302)
+    return RedirectResponse(url=f"/login?next={next_url}", status_code=302)
 
 
 @app.middleware("http")
 async def security_headers(request: Request, call_next):
-    """Add security headers to every response."""
     response = await call_next(request)
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["X-Frame-Options"] = "DENY"

@@ -44,3 +44,15 @@ jobs:
         run: |
           cosign sign --yes \
             ghcr.io/${{ github.repository }}@${{ steps.build.outputs.digest }}
+
+      - name: Build and push frontend
+        uses: docker/build-push-action@v6
+        with:
+          context: ./frontend
+          push: true
+          provenance: false
+          tags: |
+            ghcr.io/${{ github.repository }}-frontend:latest
+            ghcr.io/${{ github.repository }}-frontend:${{ github.sha }}
+          build-args: |
+            FASTAPI_URL=http://helvex:8000

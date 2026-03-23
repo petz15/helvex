@@ -93,7 +93,17 @@
       "Bash(ls -1 /c/D/coding_projects/zefix_analyzer/app/models/*.py)",
       "Bash(xargs -I {} basename {})",
       "Bash(ls -1 /c/D/coding_projects/zefix_analyzer/app/schemas/*.py)",
-      "Bash(python -c \"import secrets; print\\(secrets.token_hex\\(32\\)\\)\")"
+      "Bash(python -c \"import secrets; print\\(secrets.token_hex\\(32\\)\\)\")",
+      "Bash(npm --version)",
+      "Bash(npx create-next-app@latest frontend --typescript --tailwind --eslint --app --src-dir --import-alias \"@/*\" --no-turbopack)",
+      "Bash(npx create-next-app@16.2.1 frontend --typescript --tailwind --eslint --app --src-dir --import-alias \"@/*\" --no-turbopack --no-react-compiler)",
+      "Bash(npm install:*)",
+      "Bash(npx shadcn@latest init --yes --base-color neutral --css-variables)",
+      "Bash(npx shadcn@latest init --yes)",
+      "Bash(npm run:*)",
+      "Bash(find c:/D/coding_projects/zefix_analyzer/frontend/node_modules/next/dist/docs -name *.md)",
+      "Bash(find c:/D/coding_projects/zefix_analyzer/frontend/node_modules/next/dist/docs -name *proxy* -o -name *middleware*)",
+      "Bash(ls \"c:\\\\D\\\\coding_projects\\\\zefix_analyzer\\\\app\\\\ui\"\" && ls \"c:Dcoding_projectszefix_analyzerapptemplates\"\")"
     ]
   }
 }
