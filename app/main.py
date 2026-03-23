@@ -30,7 +30,7 @@ from sqlalchemy import inspect as sa_inspect
 from sqlalchemy.orm import Session
 
 from app import crud
-from app.auth import COOKIE_NAME, _user_id_from_request, check_login_rate_limit, create_session_cookie, decode_session_cookie
+from app.auth import COOKIE_NAME, _user_id_from_request, check_login_rate_limit, create_session_cookie
 from app.config import settings
 from app.database import Base, engine, get_db
 from app.services.job_worker import kick_job_worker
