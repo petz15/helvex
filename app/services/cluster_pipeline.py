@@ -237,7 +237,7 @@ def label_clusters(
     import numpy as np
     import scipy.sparse as sp
 
-    n_features = X_tfidf.shape[1]
+    _n_features = X_tfidf.shape[1]
     n_docs = len(hard_labels)
 
     # Build per-cluster term-sum matrix via sparse one-hot multiply —

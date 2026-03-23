@@ -5,8 +5,6 @@ import logging
 import threading
 import time
 import traceback
-
-logger = logging.getLogger(__name__)
 from urllib.parse import quote_plus, urlencode
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Query, Request, status
@@ -41,6 +39,8 @@ from app.services.scoring import get_default_scoring_config
 from app.models.user import User
 from app.schemas.company import CompanyUpdate
 from app.schemas.note import NoteCreate, NoteUpdate
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["ui"])
 templates = Jinja2Templates(directory="app/templates")
@@ -1694,7 +1694,7 @@ def _run_job(app, job_id: int) -> None:
             crud.mark_cancelled(db, job, message=msg)
             crud.create_event(db, job_id=job.id, level="warn", message=msg)
             _sync_active_task(app.state, job_type=job.job_type, label=job.label, message=msg, stats={}, error=None, done=True)
-        except Exception as exc:  # noqa: BLE001
+        except Exception:  # noqa: BLE001
             err = traceback.format_exc()
             # Roll back any failed transaction so the session is usable again.
             # Without this, accessing job.id triggers a lazy load on a session

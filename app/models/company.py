@@ -103,4 +103,4 @@ class Company(Base):
         total_w = sum(w for _, w in present)
         return round(sum(s * w for s, w in present) / total_w)
 
-    notes: Mapped[list["Note"]] = relationship("Note", back_populates="company", cascade="all, delete-orphan")
+    notes: Mapped[list["Note"]] = relationship("Note", back_populates="company", cascade="all, delete-orphan")  # noqa: F821

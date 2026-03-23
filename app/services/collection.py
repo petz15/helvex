@@ -14,7 +14,6 @@ from app.api.geocoding_client import geocode_address
 from app.api.google_search_client import search_website
 from app.config import settings
 from app.api.zefix_client import (
-    ALPHABET,
     ALPHANUMERIC,
     SWISS_CANTONS,
     ZEFIX_MAX_ENTRIES,

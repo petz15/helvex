@@ -19,4 +19,4 @@ class Note(Base):
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
     )
 
-    company: Mapped["Company"] = relationship("Company", back_populates="notes")
+    company: Mapped["Company"] = relationship("Company", back_populates="notes")  # noqa: F821

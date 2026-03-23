@@ -21,4 +21,4 @@ class AuditLog(Base):
         default=lambda: datetime.now(tz=timezone.utc),
     )
 
-    user: Mapped["User | None"] = relationship("User", lazy="joined")  # type: ignore[name-defined]
+    user: Mapped["User | None"] = relationship("User", lazy="joined")  # type: ignore[name-defined]  # noqa: F821

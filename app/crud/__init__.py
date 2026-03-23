@@ -115,6 +115,7 @@ __all__ = [
     "list_users",
     "count_users",
     "create_user",
+    "hash_password",
     "authenticate",
     # boilerplate
     "list_boilerplate_patterns",
