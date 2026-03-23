@@ -30,15 +30,15 @@ from sqlalchemy import inspect as sa_inspect
 from sqlalchemy.orm import Session
 
 from app import crud
-from app.auth import COOKIE_NAME, check_login_rate_limit, create_session_cookie, decode_session_cookie
+from app.auth import COOKIE_NAME, _user_id_from_request, check_login_rate_limit, create_session_cookie, decode_session_cookie
 from app.config import settings
 from app.database import Base, engine, get_db
 from app.services.job_worker import kick_job_worker
 from app.services.scoring import get_default_scoring_config
-from app.api.routes import companies_router, notes_router, jobs_router, map_router, settings_router
+from app.api.routes import auth_router, companies_router, jobs_router, map_router, notes_router, settings_router
 
 # Paths that do NOT require authentication
-_PUBLIC_PREFIXES = ("/static", "/login", "/health", "/metadata")
+_PUBLIC_PREFIXES = ("/static", "/login", "/health", "/metadata", "/api/v1/auth")
 _PUBLIC_EXACT = {"/login", "/logout", "/health", "/metadata", "/"}
 
 _REPO_ROOT = pathlib.Path(__file__).parent.parent
@@ -209,6 +209,7 @@ app = FastAPI(
 )
 
 app.mount("/static", StaticFiles(directory="app/static"), name="static")
+app.include_router(auth_router, prefix="/api/v1")
 app.include_router(companies_router, prefix="/api/v1")
 app.include_router(notes_router, prefix="/api/v1")
 app.include_router(jobs_router, prefix="/api/v1")
@@ -404,15 +405,24 @@ async def startup_gate(request: Request, call_next):
 
 @app.middleware("http")
 async def auth_gate(request: Request, call_next):
-    """Redirect unauthenticated requests to /login for all protected paths."""
+    """Enforce authentication on all protected paths.
+
+    - Public paths pass through unconditionally.
+    - Authenticated requests (cookie session OR Bearer JWT) pass through.
+    - Unauthenticated API requests → 401 JSON.
+    - Unauthenticated browser requests → redirect to /login.
+    """
     path = request.url.path
 
     if path in _PUBLIC_EXACT or any(path.startswith(p) for p in _PUBLIC_PREFIXES):
         return await call_next(request)
 
-    token = request.cookies.get(COOKIE_NAME)
-    if token and decode_session_cookie(token) is not None:
+    if _user_id_from_request(request) is not None:
         return await call_next(request)
+
+    if path.startswith("/api/"):
+        from fastapi.responses import JSONResponse
+        return JSONResponse({"detail": "Not authenticated"}, status_code=401)
 
     from urllib.parse import quote
     next_url = quote(path, safe="")
@@ -426,6 +436,18 @@ async def security_headers(request: Request, call_next):
     response.headers["X-Frame-Options"] = "DENY"
     response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
     response.headers["X-XSS-Protection"] = "1; mode=block"
+    response.headers["Content-Security-Policy"] = (
+        "default-src 'self'; "
+        "script-src 'self' 'unsafe-inline'; "
+        "style-src 'self' 'unsafe-inline'; "
+        "img-src 'self' data:; "
+        "font-src 'self'; "
+        "connect-src 'self'; "
+        "frame-ancestors 'none';"
+    )
+    # HSTS — only meaningful over HTTPS; omit on plain HTTP dev
+    if request.url.scheme == "https":
+        response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
     return response
 
 

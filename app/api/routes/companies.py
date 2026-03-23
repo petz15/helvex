@@ -12,8 +12,10 @@ from sqlalchemy.orm import Session
 
 from app import crud
 from app.api import google_search_client, zefix_client
+from app.auth import get_current_user
 from app.database import get_db
 from app.models.company import Company
+from app.models.user import User
 from app.schemas.company import (
     CompanyCreate,
     CompanyPage,
@@ -343,15 +345,34 @@ def get_company(company_id: int, db: Session = Depends(get_db)):
 
 
 @router.patch("/{company_id}", response_model=CompanyRead, summary="Update company")
-def update_company(company_id: int, company_in: CompanyUpdate, db: Session = Depends(get_db)):
+def update_company(
+    company_id: int,
+    company_in: CompanyUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     db_company = crud.get_company(db, company_id)
     if not db_company:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Company not found")
-    return crud.update_company(db, db_company, company_in)
+    old_values = {f: getattr(db_company, f) for f in (
+        "website_url", "review_status", "proposal_status",
+        "contact_name", "contact_email", "contact_phone", "tags",
+    )}
+    updated = crud.update_company(db, db_company, company_in)
+    new_values = company_in.model_dump(exclude_unset=True)
+    crud.record_company_changes(
+        db, company_id=company_id, user_id=current_user.id,
+        old_values=old_values, new_values=new_values,
+    )
+    return updated
 
 
 @router.delete("/{company_id}", status_code=status.HTTP_204_NO_CONTENT, summary="Delete company")
-def delete_company(company_id: int, db: Session = Depends(get_db)):
+def delete_company(
+    company_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     db_company = crud.get_company(db, company_id)
     if not db_company:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Company not found")

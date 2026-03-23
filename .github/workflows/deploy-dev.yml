@@ -37,3 +37,10 @@ jobs:
       - name: Apply Helmfile (dev)
         working-directory: infra
         run: helmfile -e dev apply --suppress-diff
+
+      - name: Restart pods to pick up new images
+        run: |
+          kubectl rollout restart deployment/helvex -n helvex-dev
+          kubectl rollout restart deployment/helvex-frontend -n helvex-dev
+          kubectl rollout status deployment/helvex -n helvex-dev --timeout=120s
+          kubectl rollout status deployment/helvex-frontend -n helvex-dev --timeout=120s

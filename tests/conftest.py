@@ -1,6 +1,7 @@
 """Shared pytest fixtures for the test suite."""
 
 import contextlib
+from datetime import datetime, timezone
 from unittest.mock import patch
 
 import pytest
@@ -9,9 +10,21 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from app.auth import COOKIE_NAME, create_session_cookie
+from app.auth import COOKIE_NAME, create_session_cookie, get_current_user
 from app.database import Base, get_db
 from app.main import app
+from app.models.user import User as UserModel
+
+_TEST_USER = UserModel(
+    id=1,
+    username="testuser",
+    hashed_password="x",
+    is_active=True,
+    tier="free",
+    email_verified=False,
+    is_superadmin=False,
+    created_at=datetime.now(timezone.utc),
+)
 
 # ---------------------------------------------------------------------------
 # In-memory SQLite engine for tests (no real PostgreSQL needed)
@@ -65,6 +78,7 @@ def client(db):
             pass
 
     app.dependency_overrides[get_db] = override_get_db
+    app.dependency_overrides[get_current_user] = lambda: _TEST_USER
 
     with contextlib.ExitStack() as stack:
         for p in _STARTUP_PATCHES:
