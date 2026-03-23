@@ -214,7 +214,11 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+from app.api.routes import companies_router, notes_router
+
 app.mount("/static", StaticFiles(directory="app/static"), name="static")
+app.include_router(companies_router, prefix="/api/v1")
+app.include_router(notes_router, prefix="/api/v1")
 app.include_router(ui_router)
 
 # Expose version info to all Jinja2 templates as globals
