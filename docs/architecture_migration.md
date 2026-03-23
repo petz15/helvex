@@ -17,7 +17,7 @@ FastAPI monolith + Jinja2 server-rendered UI + PostgreSQL + in-process backgroun
 - `docker-compose.yml` stays working throughout the entire migration for local dev
 
 ### Brand
-**Firmiq** — "Firm" (company) + "iq" (intelligence). Enterprise B2B company intelligence for the Swiss market.
+**Helvex** — "Helvetic" and techy
 
 ---
 

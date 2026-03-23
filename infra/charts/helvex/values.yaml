@@ -1,0 +1,29 @@
+# Default values — overridden by infra/environments/{dev,prod}.yaml
+
+image:
+  repository: localhost:5000/helvex-app
+  tag: latest
+  pullPolicy: Always
+
+replicaCount: 1
+
+service:
+  port: 8000
+
+ingress:
+  enabled: true
+  host: helvex.dicy.ch
+  tls: false
+  tlsSecret: ""
+  annotations: {}
+
+# Name of the K8s Secret that holds all env vars (created via scripts/k8s-create-secret.sh)
+envSecretName: helvex-env
+
+resources:
+  requests:
+    cpu: 500m
+    memory: 512Mi
+  limits:
+    cpu: "1"
+    memory: 1Gi

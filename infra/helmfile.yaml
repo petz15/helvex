@@ -1,0 +1,16 @@
+environments:
+  dev:
+    values:
+      - environments/dev.yaml
+  prod:
+    values:
+      - environments/prod.yaml
+
+releases:
+  - name: helvex
+    namespace: helvex-{{ .Environment.Name }}
+    chart: ./charts/helvex
+    createNamespace: true
+    values:
+      - ./charts/helvex/values.yaml
+      - environments/{{ .Environment.Name }}.yaml

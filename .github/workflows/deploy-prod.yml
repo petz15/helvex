@@ -1,0 +1,38 @@
+name: Deploy Prod
+
+# Manual trigger only — or triggered by a git tag (v*)
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Image tag to deploy (git SHA or 'latest')"
+        required: true
+        default: latest
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  deploy:
+    runs-on: self-hosted-prod   # runner on the Hetzner prod server (not yet provisioned)
+    environment: production     # requires manual approval in GitHub
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Determine tag
+        id: tag
+        run: |
+          if [[ "${{ github.event_name }}" == "push" ]]; then
+            echo "tag=${{ github.sha }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=${{ inputs.tag }}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Update image tag in prod values
+        run: |
+          sed -i "s|tag: .*|tag: ${{ steps.tag.outputs.tag }}|" \
+            infra/environments/prod.yaml
+
+      - name: Apply Helmfile (prod)
+        working-directory: infra
+        run: helmfile -e prod apply --suppress-diff

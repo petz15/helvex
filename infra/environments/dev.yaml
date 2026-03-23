@@ -1,0 +1,20 @@
+# Dev environment — LAN K3s server
+# Image built locally and pushed to the on-node registry (see infra/registry/)
+image:
+  repository: 192.168.1.100:5000/helvex-app
+  tag: latest
+  pullPolicy: Always
+
+ingress:
+  host: helvex.dicy.ch
+  tls: false   # add cert-manager later; dev uses plain HTTP via Traefik
+  annotations:
+    traefik.ingress.kubernetes.io/router.entrypoints: web
+
+resources:
+  requests:
+    cpu: 500m
+    memory: 512Mi
+  limits:
+    cpu: "1"
+    memory: 1Gi

@@ -1,0 +1,44 @@
+# Local container registry for the dev K3s node.
+# Uses hostNetwork so it binds directly to the node's port 5000.
+#
+# Deploy:   kubectl apply -f infra/registry/registry.yaml
+# Push to:  docker push 192.168.1.100:5000/helvex-app:latest
+# Pull ref: 192.168.1.100:5000/helvex-app:latest  (use in dev.yaml)
+#
+# After deploying, place infra/registry/registries.yaml at
+# /etc/rancher/k3s/registries.yaml on the dev server and restart k3s:
+#   sudo systemctl restart k3s
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: local-registry
+  namespace: kube-system
+  labels:
+    app: local-registry
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: local-registry
+  template:
+    metadata:
+      labels:
+        app: local-registry
+    spec:
+      hostNetwork: true          # binds registry directly to host port 5000
+      tolerations:
+        - key: node-role.kubernetes.io/master
+          effect: NoSchedule
+      containers:
+        - name: registry
+          image: registry:2
+          ports:
+            - containerPort: 5000
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/registry
+      volumes:
+        - name: data
+          hostPath:
+            path: /var/lib/local-registry
+            type: DirectoryOrCreate

@@ -1,0 +1,9 @@
+# K3s registry mirror config.
+# Place this file at /etc/rancher/k3s/registries.yaml on the dev server,
+# then restart k3s: sudo systemctl restart k3s
+#
+# Replace 192.168.1.100 with the actual LAN IP of your dev server.
+mirrors:
+  "192.168.1.100:5000":
+    endpoint:
+      - "http://192.168.1.100:5000"

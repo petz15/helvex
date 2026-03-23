@@ -1,0 +1,23 @@
+# Prod environment — Hetzner K3s (not yet provisioned)
+# Replace OWNER with your GitHub username/org once the repo is created.
+image:
+  repository: ghcr.io/OWNER/helvex-app
+  tag: latest
+  pullPolicy: Always
+
+ingress:
+  host: helvex.dicy.ch
+  tls: true
+  tlsSecret: helvex-tls   # provisioned by cert-manager (Let's Encrypt)
+  annotations:
+    traefik.ingress.kubernetes.io/router.entrypoints: websecure
+    traefik.ingress.kubernetes.io/router.tls: "true"
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+
+resources:
+  requests:
+    cpu: 500m
+    memory: 512Mi
+  limits:
+    cpu: "1"
+    memory: 1Gi
