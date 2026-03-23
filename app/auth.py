@@ -124,18 +124,29 @@ _RATE_WINDOW = 900   # 15 minutes
 _RATE_MAX = 10       # failed attempts per window per IP
 
 
-def check_login_rate_limit(ip: str) -> bool:
-    """Return True if the request is allowed, False if rate-limited.
-
-    Only call this on *failed* login attempts — successful logins do not
-    consume rate-limit budget.
-    """
+def _trim_attempts(ip: str) -> list[float]:
     now = time.monotonic()
     attempts = [t for t in _login_attempts[ip] if now - t < _RATE_WINDOW]
     _login_attempts[ip] = attempts
-    if len(attempts) >= _RATE_MAX:
+    return attempts
+
+
+def is_login_allowed(ip: str) -> bool:
+    """Return True if this IP can attempt another login."""
+    return len(_trim_attempts(ip)) < _RATE_MAX
+
+
+def record_login_failure(ip: str) -> None:
+    """Record one failed login attempt for this IP."""
+    _trim_attempts(ip)
+    _login_attempts[ip].append(time.monotonic())
+
+
+def check_login_rate_limit(ip: str) -> bool:
+    """Backward-compatible helper used by older code paths."""
+    if not is_login_allowed(ip):
         return False
-    _login_attempts[ip].append(now)
+    record_login_failure(ip)
     return True
 
 

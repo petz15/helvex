@@ -1,8 +1,13 @@
+import secrets
+
+from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
+
+    app_env: str = "dev"
 
     # PostgreSQL — set individual fields OR override with a full DATABASE_URL
     postgres_host: str = "localhost"
@@ -23,9 +28,24 @@ class Settings(BaseSettings):
 
     anthropic_api_key: str = ""
 
-    # Security — MUST be set to a long random string in production
-    # Generate with: python -c "import secrets; print(secrets.token_hex(32))"
-    secret_key: str = "dev-secret-change-in-production"
+    # Security — dev gets an ephemeral random key if unset; production must set a strong key.
+    secret_key: str = Field(default_factory=lambda: secrets.token_hex(32))
+
+    @model_validator(mode="after")
+    def _validate_prod_security(self) -> "Settings":
+        env = self.app_env.lower().strip()
+        is_prod_like = env in {"prod", "production", "staging"}
+        if not is_prod_like:
+            return self
+
+        weak_db_passwords = {"", "password", "changeme", "your_password_here"}
+        if self.postgres_password.strip().lower() in weak_db_passwords:
+            raise ValueError("Unsafe POSTGRES_PASSWORD for production-like environment")
+
+        if len(self.secret_key.strip()) < 32:
+            raise ValueError("SECRET_KEY must be set and at least 32 characters in production-like environment")
+
+        return self
 
 
 settings = Settings()

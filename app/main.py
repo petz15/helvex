@@ -30,7 +30,13 @@ from sqlalchemy import inspect as sa_inspect
 from sqlalchemy.orm import Session
 
 from app import crud
-from app.auth import COOKIE_NAME, _user_id_from_request, check_login_rate_limit, create_session_cookie
+from app.auth import (
+    COOKIE_NAME,
+    _user_id_from_request,
+    create_session_cookie,
+    is_login_allowed,
+    record_login_failure,
+)
 from app.config import settings
 from app.database import Base, engine, get_db
 from app.services.job_worker import kick_job_worker
@@ -38,8 +44,8 @@ from app.services.scoring import get_default_scoring_config
 from app.api.routes import auth_router, companies_router, jobs_router, map_router, notes_router, settings_router
 
 # Paths that do NOT require authentication
-_PUBLIC_PREFIXES = ("/static", "/login", "/health", "/metadata", "/api/v1/auth")
-_PUBLIC_EXACT = {"/login", "/logout", "/health", "/metadata", "/"}
+_PUBLIC_PREFIXES = ("/static", "/login", "/health", "/api/v1/auth")
+_PUBLIC_EXACT = {"/login", "/logout", "/health"}
 
 _REPO_ROOT = pathlib.Path(__file__).parent.parent
 
@@ -294,26 +300,28 @@ def login_submit(
     next: str = Form("/app/dashboard"),
     db: Session = Depends(get_db),
 ):
-    # Traefik sets X-Real-IP to the actual client IP; fall back to direct connection host
-    ip = request.headers.get("x-real-ip") or (request.client.host if request.client else "unknown")
+    ip = request.client.host if request.client else "unknown"
+
+    if not is_login_allowed(ip):
+        error_html = '<div class="error">Too many login attempts. Try again in 15 minutes.</div>'
+        return HTMLResponse(_LOGIN_HTML.format(next=next, error_html=error_html), status_code=429)
 
     user = crud.authenticate(db, username=username, password=password)
     if not user:
-        # Only count failures toward the rate limit, not successful logins
-        if not check_login_rate_limit(ip):
-            error_html = '<div class="error">Too many login attempts. Try again in 15 minutes.</div>'
-            return HTMLResponse(_LOGIN_HTML.format(next=next, error_html=error_html), status_code=429)
+        record_login_failure(ip)
         error_html = '<div class="error">Invalid username or password.</div>'
         return HTMLResponse(_LOGIN_HTML.format(next=next, error_html=error_html), status_code=401)
 
     safe_next = next if next.startswith("/") and not next.startswith("//") else "/app/dashboard"
+    forwarded_proto = request.headers.get("x-forwarded-proto", "")
+    is_https = request.url.scheme == "https" or forwarded_proto.split(",")[0].strip().lower() == "https"
     response = RedirectResponse(url=safe_next, status_code=status.HTTP_302_FOUND)
     response.set_cookie(
         key=COOKIE_NAME,
         value=create_session_cookie(user.id),
         httponly=True,
         samesite="lax",
-        secure=False,
+        secure=is_https,
         max_age=8 * 3600,
     )
     return response
@@ -393,8 +401,8 @@ async def startup_gate(request: Request, call_next):
     error = getattr(app.state, "startup_error", None)
 
     if error:
-        safe_error = _html.escape(error).replace("{", "&#123;").replace("}", "&#125;")
-        return HTMLResponse(_ERROR_HTML.format(error=safe_error, elapsed=elapsed), status_code=500)
+        generic_error = "Service failed to start. Check server logs for details."
+        return HTMLResponse(_ERROR_HTML.format(error=generic_error, elapsed=elapsed), status_code=500)
 
     if not getattr(app.state, "ready", False):
         message = getattr(app.state, "startup_message", "Initialising…")
@@ -435,10 +443,12 @@ async def security_headers(request: Request, call_next):
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["X-Frame-Options"] = "DENY"
     response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
-    response.headers["X-XSS-Protection"] = "1; mode=block"
     response.headers["Content-Security-Policy"] = (
         "default-src 'self'; "
-        "script-src 'self' 'unsafe-inline'; "
+        "base-uri 'self'; "
+        "object-src 'none'; "
+        "form-action 'self'; "
+        "script-src 'self'; "
         "style-src 'self' 'unsafe-inline'; "
         "img-src 'self' data:; "
         "font-src 'self'; "
@@ -446,7 +456,9 @@ async def security_headers(request: Request, call_next):
         "frame-ancestors 'none';"
     )
     # HSTS — only meaningful over HTTPS; omit on plain HTTP dev
-    if request.url.scheme == "https":
+    forwarded_proto = request.headers.get("x-forwarded-proto", "")
+    is_https = request.url.scheme == "https" or forwarded_proto.split(",")[0].strip().lower() == "https"
+    if is_https:
         response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
     return response
 
@@ -455,12 +467,9 @@ async def security_headers(request: Request, call_next):
 def health():
     ready = getattr(app.state, "ready", False)
     error = getattr(app.state, "startup_error", None)
-    elapsed = int(time.time() - getattr(app.state, "startup_started_at", time.time()))
-    message = getattr(app.state, "startup_message", "")
-    base = {"version": APP_VERSION, "build_date": BUILD_DATE, "git_sha": BUILD_GIT_SHA}
     if error:
-        return {**base, "status": "error", "detail": error, "elapsed_s": elapsed}
-    return {**base, "status": "ok" if ready else "starting", "step": message, "elapsed_s": elapsed}
+        return {"status": "error"}
+    return {"status": "ok" if ready else "starting"}
 
 
 @app.get("/metadata", tags=["metadata"])
