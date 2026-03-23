@@ -15,11 +15,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Update image tag in dev values
-        run: |
-          sed -i "s|tag: .*|tag: ${{ github.event.workflow_run.head_sha }}|" \
-            infra/environments/dev.yaml
-
       - name: Apply Helmfile (dev)
         working-directory: infra
         run: helmfile -e dev apply --suppress-diff

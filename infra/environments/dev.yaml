@@ -2,7 +2,7 @@
 # Image built locally and pushed to the on-node registry (see infra/registry/)
 image:
   repository: 192.168.1.100:5000/helvex-app
-  tag: latest
+  tag: latest   # dev always tracks latest; SHA pinning is for prod only
   pullPolicy: Always
 
 ingress:
