@@ -28,6 +28,7 @@ jobs:
         with:
           context: .
           push: true
+          provenance: false   # avoids "unknown blob" on GHCR with buildx attestations
           tags: |
             ghcr.io/${{ github.repository }}:latest
             ghcr.io/${{ github.repository }}:${{ github.sha }}
