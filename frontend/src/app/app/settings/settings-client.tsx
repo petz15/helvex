@@ -223,6 +223,9 @@ export function SettingsClient() {
         <button type="button" onClick={() => handleTrigger("scoring/google")} className="flex items-center gap-2 bg-slate-100 hover:bg-slate-200 text-slate-700 px-4 py-2 rounded-lg text-sm font-medium transition-colors">
           <Play size={14} /> Recalculate Google scores
         </button>
+        <button type="button" onClick={() => handleTrigger("scoring/re-geocode")} className="flex items-center gap-2 bg-amber-50 hover:bg-amber-100 text-amber-700 px-4 py-2 rounded-lg text-sm font-medium transition-colors">
+          <Play size={14} /> Re-geocode all companies
+        </button>
       </div>
 
       {/* Boilerplate */}

@@ -14,6 +14,7 @@ to the ``data/`` directory.  No API key is required.
 
 import csv
 import io
+import math
 import re
 import sqlite3
 import threading
@@ -311,6 +312,21 @@ def _lookup_building(address: str) -> tuple[float, float] | None:
 
 # ── Public API ────────────────────────────────────────────────────────────────
 
+# Building results more than this far from the PLZ centroid are likely wrong
+# (e.g. street name matched in a different city). Swiss PLZ areas are typically
+# 1–10 km across; 15 km gives enough room for large rural PLZs.
+_MAX_PLZ_DEVIATION_KM = 15.0
+
+
+def _haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    """Great-circle distance in km between two WGS84 points."""
+    r = 6_371.0
+    dlat = math.radians(lat2 - lat1)
+    dlon = math.radians(lon2 - lon1)
+    a = math.sin(dlat / 2) ** 2 + math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) * math.sin(dlon / 2) ** 2
+    return 2.0 * r * math.asin(math.sqrt(a))
+
+
 def geocode_address(address: str) -> tuple[float, float] | None:
     """Return (lat, lon) for a Swiss address string.
 
@@ -318,12 +334,26 @@ def geocode_address(address: str) -> tuple[float, float] | None:
     1. swisstopo building register — exact street + house match (<10 m accuracy)
     2. swisstopo building register — street-level match (same PLZ + street name)
     3. GeoNames PLZ centroid (~2 km accuracy)
+
+    The building result is validated against the PLZ centroid: if it lies more
+    than _MAX_PLZ_DEVIATION_KM away the result is likely a false street match
+    in a different municipality, so the PLZ centroid is used instead.
     """
     if not address:
         return None
 
-    result = _lookup_building(address)
-    if result is not None:
-        return result
+    plz_coords = _plz_fallback(address)
+    building_result = _lookup_building(address)
 
-    return _plz_fallback(address)
+    if building_result is None:
+        return plz_coords
+
+    if plz_coords is None:
+        return building_result
+
+    # Sanity-check: building result must be within _MAX_PLZ_DEVIATION_KM of the PLZ centroid
+    dist_km = _haversine_km(building_result[0], building_result[1], plz_coords[0], plz_coords[1])
+    if dist_km > _MAX_PLZ_DEVIATION_KM:
+        return plz_coords
+
+    return building_result

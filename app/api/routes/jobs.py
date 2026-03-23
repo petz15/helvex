@@ -292,6 +292,17 @@ def trigger_recalc_google(request: Request):
     return JobOut.from_orm_obj(job)
 
 
+@router.post("/scoring/re-geocode", response_model=JobOut, status_code=status.HTTP_202_ACCEPTED)
+def trigger_re_geocode(request: Request):
+    job = enqueue_job(
+        request.app,
+        job_type="re_geocode",
+        label="Re-geocode all companies",
+        params={},
+    )
+    return JobOut.from_orm_obj(job)
+
+
 @router.post("/scoring/claude", response_model=JobOut, status_code=status.HTTP_202_ACCEPTED)
 def trigger_claude_classify(body: ClaudeClassifyBody, request: Request):
     job = enqueue_job(
