@@ -24,9 +24,10 @@ while IFS= read -r line || [[ -n "$line" ]]; do
   # Split on first =
   key="${line%%=*}"
   value="${line#*=}"
-  # Strip surrounding single or double quotes
+  # Strip surrounding single or double quotes and Windows \r
   value="${value#\'}" ; value="${value%\'}"
   value="${value#\"}" ; value="${value%\"}"
+  value="${value%$'\r'}"
   ARGS+=("--from-literal=${key}=${value}")
 done < "$ENV_FILE"
 
