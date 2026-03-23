@@ -96,16 +96,22 @@ def map_clusters(
     """Return grid-aggregated cluster counts for low-zoom map views.
 
     Grid cell size (degrees) by zoom:
-      zoom ≤ 7  → 1.0°  (~111 km)
-      zoom 8–9  → 0.5°  (~55 km)
-      zoom 10–11 → 0.25° (~28 km)
+      zoom ≤ 6  → 1.0°  (~111 km)
+      zoom 7–8  → 0.5°  (~55 km)
+      zoom 9    → 0.25° (~28 km)
+      zoom 10   → 0.1°  (~11 km, roughly town level)
+      zoom 11   → 0.05° (~5 km,  city-district level)
     """
-    if zoom <= 7:
+    if zoom <= 6:
         precision = 1.0
-    elif zoom <= 9:
+    elif zoom <= 8:
         precision = 0.5
-    else:
+    elif zoom <= 9:
         precision = 0.25
+    elif zoom <= 10:
+        precision = 0.1
+    else:
+        precision = 0.05   # ~5 km — city-district level at zoom 11
 
     # Cell centre = floor(coord / precision) * precision + precision / 2
     lat_cell = func.floor(CompanyModel.lat / precision) * precision + precision / 2.0

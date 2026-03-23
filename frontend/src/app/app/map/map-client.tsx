@@ -95,7 +95,7 @@ export function MapClient() {
     const layer = L.layerGroup();
 
     // Group co-located companies (same lat/lon to 5 decimal places ≈ 1m precision)
-    const byLocation = new Map<string, MapFeature[]>();
+    const byLocation = new globalThis.Map<string, MapFeature[]>();
     for (const f of features) {
       const key = `${f.lat.toFixed(5)},${f.lon.toFixed(5)}`;
       const arr = byLocation.get(key);
