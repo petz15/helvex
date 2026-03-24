@@ -64,9 +64,6 @@ resource "hcloud_volume" "db" {
     role = "database-data"
   }
 
-  lifecycle {
-    prevent_destroy = true
-  }
 }
 
 resource "hcloud_volume_attachment" "db" {

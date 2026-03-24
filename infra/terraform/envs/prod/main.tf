@@ -25,7 +25,7 @@ module "servers" {
   subnet_id          = module.network.subnet_id
   firewall_id        = module.firewall.firewall_id
   servers            = var.servers
-  db_volume_size_gb  = 80
+  db_volume_size_gb  = 0
   k3s_token          = var.k3s_token
 }
 
