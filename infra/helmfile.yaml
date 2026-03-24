@@ -46,6 +46,8 @@ releases:
     createNamespace: true
     values:
       - architecture: standalone
+        image:
+          registry: ghcr.io
         auth:
           enabled: true
           existingSecret: helvex-env

@@ -42,3 +42,20 @@ runcmd:
     chmod 600 /home/ubuntu/.kube/config
     echo 'export KUBECONFIG=$HOME/.kube/config' >> /home/ubuntu/.bashrc
   - su -s /bin/bash ubuntu -c "helm plugin install https://github.com/databus23/helm-diff"
+  - |
+    # Configure Traefik to bind hostPort 80/443 (required since servicelb is disabled)
+    until kubectl get deploy traefik -n kube-system &>/dev/null; do sleep 5; done
+    kubectl apply -f - <<MANIFEST
+    apiVersion: helm.cattle.io/v1
+    kind: HelmChartConfig
+    metadata:
+      name: traefik
+      namespace: kube-system
+    spec:
+      valuesContent: |-
+        ports:
+          web:
+            hostPort: 80
+          websecure:
+            hostPort: 443
+    MANIFEST
