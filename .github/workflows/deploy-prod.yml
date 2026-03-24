@@ -96,7 +96,7 @@ jobs:
       - name: Ensure K8s secrets exist
         env:
           GHCR_PAT: ${{ secrets.GHCR_PAT }}
-          GITHUB_ACTOR: ${{ github.actor }}
+          REGISTRY_USER: ${{ github.actor }}
         run: |
           if ! kubectl get secret helvex-env -n helvex-prod &>/dev/null; then
             kubectl create secret generic helvex-env \
@@ -111,10 +111,14 @@ jobs:
               -n helvex-prod
           fi
           if ! kubectl get secret ghcr-pull-secret -n helvex-prod &>/dev/null; then
+            if [ -z "$GHCR_PAT" ]; then
+              echo "ERROR: GHCR_PAT secret is not set in GitHub repo settings" >&2
+              exit 1
+            fi
             kubectl create secret docker-registry ghcr-pull-secret \
               --docker-server=ghcr.io \
-              --docker-username="${GITHUB_ACTOR}" \
-              --docker-password="${GHCR_PAT}" \
+              --docker-username="$REGISTRY_USER" \
+              --docker-password="$GHCR_PAT" \
               -n helvex-prod
           fi
           if ! kubectl get secret arc-github-app -n arc-systems &>/dev/null; then
