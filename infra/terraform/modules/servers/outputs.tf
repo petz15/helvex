@@ -8,7 +8,7 @@ output "public_ipv4" {
 output "private_ipv4" {
   value = {
     for k, s in hcloud_server.this :
-    k => s.network[0].ip
+    k => one(s.network).ip
   }
 }
 

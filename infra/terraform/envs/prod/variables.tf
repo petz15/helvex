@@ -52,15 +52,22 @@ variable "servers" {
   type = map(object({
     server_type = string
     role        = string
+    private_ip  = string
+    node_labels = optional(list(string), [])
+    node_taints = optional(list(string), [])
   }))
   default = {
     app1 = {
       server_type = "cx23"
       role        = "k3s-control-plane"
+      private_ip  = "10.0.1.10"
     }
     db1 = {
       server_type = "cx33"
-      role        = "database"
+      role        = "k3s-worker"
+      private_ip  = "10.0.1.11"
+      node_labels = ["helvex.io/role=database"]
+      node_taints = ["helvex.io/role=database:NoSchedule"]
     }
   }
 }

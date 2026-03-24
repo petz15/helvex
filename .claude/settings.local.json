@@ -122,7 +122,21 @@
       "Bash(wc -l /c/D/coding_projects/zefix_analyzer/app/models/*.py)",
       "Bash(wc -l /c/D/coding_projects/zefix_analyzer/app/schemas/*.py)",
       "Bash(grep -r \"list comprehension\\\\|for.*in\\\\|lambda\\\\|\\\\[.*for\" /c/D/coding_projects/zefix_analyzer/app --include=*.py)",
-      "Bash(wc -l /c/D/coding_projects/zefix_analyzer/alembic/versions/*.py)"
+      "Bash(wc -l /c/D/coding_projects/zefix_analyzer/alembic/versions/*.py)",
+      "Bash(terraform version:*)",
+      "Read(//c//**)",
+      "Read(//c/Windows/System32/**)",
+      "Bash(/c/Windows/System32/terraform.exe version:*)",
+      "Bash(ls /c/Windows/system32/terraform*)",
+      "Bash(/c/Windows/system32/terraform.exe version:*)",
+      "Bash(cmd.exe /c \"terraform version\")",
+      "Bash(/c/Users/peter/bin/terraform version:*)",
+      "Bash(cmd.exe /c \"where terraform\")",
+      "Bash(cmd.exe /c \"dir /s /b C:\\\\Users\\\\peter\\\\terraform.exe 2>nul\")",
+      "Bash(cmd.exe /c \"dir /s /b C:\\\\Users\\\\peter\\\\bin\\\\terraform\\\\*.exe 2>nul\")",
+      "Bash(cmd.exe /c \"dir /s /b C:\\\\Users\\\\peter\\\\Downloads\\\\terraform*.exe 2>nul && dir /s /b C:\\\\tools\\\\terraform*.exe 2>nul && dir /s /b C:\\\\Users\\\\peter\\\\bin\\\\terraform\\\\*.exe 2>nul\")",
+      "Bash(cmd.exe /c \"dir /s /b C:\\\\Users\\\\peter\\\\terraform.exe C:\\\\Windows\\\\System32\\\\terraform.exe C:\\\\Windows\\\\SysWOW64\\\\terraform.exe 2>nul\")",
+      "Bash(curl -s https://api.github.com/repos/actions/runner/releases/latest)"
     ]
   }
 }
