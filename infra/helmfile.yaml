@@ -45,7 +45,10 @@ releases:
     version: "20.6.2"
     createNamespace: true
     values:
-      - architecture: standalone
+      - global:
+          security:
+            allowInsecureImages: true
+        architecture: standalone
         image:
           registry: ghcr.io
         auth:
