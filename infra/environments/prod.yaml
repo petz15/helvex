@@ -1,0 +1,42 @@
+# Prod environment — Hetzner K3s
+image:
+  repository: ghcr.io/petz15/helvex
+  tag: latest
+  pullPolicy: Always
+
+replicaCount: 1
+
+frontend:
+  image:
+    repository: ghcr.io/petz15/helvex-frontend
+    tag: latest
+    pullPolicy: Always
+
+ingress:
+  host: helvex.dicy.ch
+  tls: true
+  tlsSecret: helvex-tls
+  annotations:
+    traefik.ingress.kubernetes.io/router.entrypoints: websecure
+    traefik.ingress.kubernetes.io/router.tls: "true"
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+
+resources:
+  requests:
+    cpu: 500m
+    memory: 512Mi
+  limits:
+    cpu: "1"
+    memory: 1Gi
+
+imagePullSecrets:
+  - name: ghcr-pull-secret
+
+postgres:
+  enabled: true
+  instances: 1
+  storageSize: 20Gi
+  backupEnabled: true
+  s3EndpointUrl: "https://nbg1.your-objectstorage.com"
+  s3BucketPath: "s3://helvex-backups/pg/"
+  backupRetention: "7d"

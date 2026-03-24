@@ -33,6 +33,7 @@ runcmd:
     mv /tmp/helmfile /usr/local/bin/helmfile
     chmod +x /usr/local/bin/helmfile
   - git clone https://github.com/petz15/helvex.git /opt/helvex
+  - chown -R ubuntu:ubuntu /opt/helvex
   - |
     # Set up kubeconfig for ubuntu user
     mkdir -p /home/ubuntu/.kube
@@ -40,7 +41,4 @@ runcmd:
     chown ubuntu:ubuntu /home/ubuntu/.kube/config
     chmod 600 /home/ubuntu/.kube/config
     echo 'export KUBECONFIG=$HOME/.kube/config' >> /home/ubuntu/.bashrc
-  - |
-    # Install helm-diff plugin
-    export HOME=/root
-    helm plugin install https://github.com/databus23/helm-diff
+  - su -s /bin/bash ubuntu -c "helm plugin install https://github.com/databus23/helm-diff"

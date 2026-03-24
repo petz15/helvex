@@ -24,5 +24,4 @@ certs/*.pem
 *.hcl
 terraform.tfvars
 
-/infra/environments/prod.yaml
 /infra/environments/dev.yaml

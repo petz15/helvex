@@ -128,8 +128,10 @@ kubectl get secret arc-github-app -n arc-systems
 ### Step 5 — Run helmfile to deploy the full stack
 
 ```bash
-cd /opt/helvex/infra
+cd /opt/helvex
+git checkout prod_init
 git pull
+cd infra
 
 helmfile -e prod apply --selector name=cert-manager --suppress-diff
 helmfile -e prod apply --selector name=cloudnative-pg --suppress-diff
