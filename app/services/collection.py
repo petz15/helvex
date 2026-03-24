@@ -1275,6 +1275,8 @@ def run_batch_collect(
     review_status: str | None = None,
 ) -> dict[str, Any]:
     """Run a recurring batch process over companies already in your DB."""
+    import heapq
+
     stats: dict[str, Any] = {
         "selected": 0,
         "zefix_refreshed": 0,
@@ -1329,32 +1331,65 @@ def run_batch_collect(
         else:
             query = query.filter(Company.review_status == review_status)
 
-    candidates = query.all()
+    # NOTE: Do not `query.all()` here.
+    # In real datasets, this can be tens/hundreds of thousands of rows, and sorting
+    # them in Python will exceed the pod memory limit (OOMKilled).
+    # Instead, stream minimal columns and keep only the best K candidates.
+    keep_n = max(0, int(limit)) + max(0, int(resume_from))
+    if keep_n <= 0:
+        return stats
 
-    def _combined_score_py(company: Company) -> float:
+    def _combined_score_values(claude_score: float | None, website_match_score: float | None, zefix_score: float | None) -> float:
         """Combined score for Python-side ordering (same weights as Company.combined_score property)."""
-        _w = [(company.claude_score, 0.70), (company.website_match_score, 0.20), (company.zefix_score, 0.10)]
+        _w = [(claude_score, 0.70), (website_match_score, 0.20), (zefix_score, 0.10)]
         present = [(s, w) for s, w in _w if s is not None]
         if not present:
             return 0.0
         total_w = sum(w for _, w in present)
-        return sum(s * w for s, w in present) / total_w
+        return float(sum(float(s) * w for s, w in present) / total_w)
 
-    def _batch_order_key(company: Company) -> tuple[float, float, int]:
-        score = _combined_score_py(company)
+    # Keep a min-heap of the best candidates, ordered by a "better-is-larger" key.
+    # nkey = (score DESC, distance ASC, id ASC) expressed as (score, -distance, -id)
+    heap: list[tuple[tuple[float, float, int], int]] = []
+
+    row_query = query.with_entities(
+        Company.id,
+        Company.claude_score,
+        Company.website_match_score,
+        Company.zefix_score,
+        Company.canton,
+        Company.municipality,
+        Company.lat,
+        Company.lon,
+    )
+
+    for row in row_query.yield_per(1000):
+        company_id = int(row.id)
+        score = _combined_score_values(row.claude_score, row.website_match_score, row.zefix_score)
         distance = distance_to_muri_km(
-            canton=company.canton,
-            municipality=company.municipality,
-            lat=company.lat,
-            lon=company.lon,
+            canton=row.canton,
+            municipality=row.municipality,
+            lat=row.lat,
+            lon=row.lon,
         )
-        return (-score, distance if distance is not None else float("inf"), company.id)
+        dist_val = float(distance) if distance is not None else float("inf")
+        nkey = (score, -dist_val, -company_id)
 
-    ordered = sorted(candidates, key=_batch_order_key)
-    planned = ordered[:limit]
-    start_idx = max(0, min(resume_from, len(planned)))
-    companies = planned[start_idx:]
-    stats["selected"] = len(planned)
+        if len(heap) < keep_n:
+            heapq.heappush(heap, (nkey, company_id))
+        else:
+            # Replace worst (smallest nkey) if this candidate is better.
+            if nkey > heap[0][0]:
+                heapq.heapreplace(heap, (nkey, company_id))
+
+    # Best-first ordering: score high → distance low → id low
+    planned_ids = [cid for _, cid in sorted(heap, key=lambda x: x[0], reverse=True)]
+    stats["selected"] = min(len(planned_ids), max(0, int(limit)) + max(0, int(resume_from)))
+
+    start_idx = max(0, min(resume_from, len(planned_ids)))
+    company_ids = planned_ids[start_idx: start_idx + max(0, int(limit))]
+    companies = [db.get(Company, cid) for cid in company_ids]
+    companies = [c for c in companies if c is not None]
 
     for i, company in enumerate(companies, start=start_idx + 1):
         current = company
