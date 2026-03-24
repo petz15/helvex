@@ -41,15 +41,10 @@ variable "servers" {
       role        = "k3s-control-plane"
       private_ip  = "10.0.1.10"
     }
-    app2 = {
-      server_type = "cx32"
-      role        = "k3s-worker"
-      private_ip  = "10.0.1.11"
-    }
     db1 = {
       server_type = "cx22"
       role        = "k3s-worker"
-      private_ip  = "10.0.1.12"
+      private_ip  = "10.0.1.11"
       node_labels = ["helvex.io/role=database"]
       node_taints = ["helvex.io/role=database:NoSchedule"]
     }

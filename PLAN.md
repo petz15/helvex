@@ -16,10 +16,19 @@ Work through these in order — each step unblocks the next.
 - [ ] Copy `infra/terraform/envs/prod/terraform.tfvars.example` → `terraform.tfvars`
 - [ ] Fill in:
   - `hcloud_token` — from Hetzner Console → API tokens
-  - `admin_cidrs` — your current public IP + `/32` (run `curl ifconfig.me`)
+  - `admin_cidrs` — your current public IP + `/32` (run `curl ifconfig.me` on your dev machine)
   - `ssh_keys` — names of SSH keys already uploaded in Hetzner Console
   - `k3s_token` — generate with `openssl rand -hex 32`
-- [ ] Replace all `OWNER` placeholders in `infra/environments/prod.yaml` and `.github/workflows/build.yml` with actual GitHub username/org
+- [ ] Replace all `OWNER` placeholders in `infra/environments/prod.yaml` with actual GitHub username/org
+
+> **Dynamic IP warning:** You are on a home network. If your IP changes you will be locked out of SSH and kubectl.
+>
+> **If locked out — regain access via Hetzner Console:**
+> 1. Go to [console.hetzner.com](https://console.hetzner.com) → **Firewalls** → select `helvex-firewall`
+> 2. Edit the inbound rule for port 22 (SSH) and 6443 (K3s API) — change the source IP to your new IP + `/32`
+> 3. Click **Apply Changes** — takes effect in seconds, no reboot needed
+> 4. Alternatively: open **Server → Console** (VNC in-browser) — gives root shell without SSH entirely, no firewall rules needed
+> 5. After regaining access, run `terraform apply` with the updated `admin_cidrs` to keep state in sync
 
 ### 4.3 Provision infrastructure
 - [ ] `cd infra/terraform/envs/prod && terraform init -backend-config=backend.hcl`

@@ -58,10 +58,6 @@ variable "servers" {
       server_type = "cx23"
       role        = "k3s-control-plane"
     }
-    app2 = {
-      server_type = "cx23"
-      role        = "k3s-worker"
-    }
     db1 = {
       server_type = "cx33"
       role        = "database"
