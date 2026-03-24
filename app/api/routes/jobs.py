@@ -224,7 +224,7 @@ class ClusterPipelineBody(BaseModel):
 
 
 @router.post("/collection/bulk", response_model=JobOut, status_code=status.HTTP_202_ACCEPTED)
-def trigger_bulk(body: BulkImportBody, request: Request):
+def trigger_bulk(body: BulkImportBody, request: Request, db: Session = Depends(get_db)):
     canton_list = [c.upper() for c in body.cantons] if body.cantons else None
     label = f"Bulk import — cantons: {', '.join(canton_list) if canton_list else 'all 26'}"
     job = enqueue_job(
@@ -232,32 +232,34 @@ def trigger_bulk(body: BulkImportBody, request: Request):
         job_type="bulk",
         label=label,
         params={"cantons": canton_list, "active_only": body.active_only, "delay": body.delay},
+        db=db,
     )
     return JobOut.from_orm_obj(job)
 
 
 @router.post("/collection/batch", response_model=JobOut, status_code=status.HTTP_202_ACCEPTED)
-def trigger_batch(body: BatchCollectBody, request: Request):
+def trigger_batch(body: BatchCollectBody, request: Request, db: Session = Depends(get_db)):
     job = enqueue_job(
         request.app,
         job_type="batch",
         label=f"Batch enrichment — up to {body.limit} companies",
         params=body.model_dump(),
+        db=db,
     )
     return JobOut.from_orm_obj(job)
 
 
 @router.post("/collection/initial", response_model=JobOut, status_code=status.HTTP_202_ACCEPTED)
-def trigger_initial(body: InitialCollectBody, request: Request):
+def trigger_initial(body: InitialCollectBody, request: Request, db: Session = Depends(get_db)):
     if not body.names and not body.uids:
         raise HTTPException(status_code=400, detail="Provide at least one name or UID")
     label = f"Specific search — {len(body.names)} name(s), {len(body.uids)} UID(s)"
-    job = enqueue_job(request.app, job_type="initial", label=label, params=body.model_dump())
+    job = enqueue_job(request.app, job_type="initial", label=label, params=body.model_dump(), db=db)
     return JobOut.from_orm_obj(job)
 
 
 @router.post("/collection/detail", response_model=JobOut, status_code=status.HTTP_202_ACCEPTED)
-def trigger_detail(body: DetailCollectBody, request: Request):
+def trigger_detail(body: DetailCollectBody, request: Request, db: Session = Depends(get_db)):
     if body.cantons:
         label = f"Zefix detail fetch — cantons: {', '.join(body.cantons)}"
     elif body.uids:
@@ -266,61 +268,66 @@ def trigger_detail(body: DetailCollectBody, request: Request):
         label = "Zefix detail fetch — all matching companies"
     if body.only_missing_details:
         label += " (missing details only)"
-    job = enqueue_job(request.app, job_type="detail", label=label, params=body.model_dump())
+    job = enqueue_job(request.app, job_type="detail", label=label, params=body.model_dump(), db=db)
     return JobOut.from_orm_obj(job)
 
 
 @router.post("/scoring/zefix", response_model=JobOut, status_code=status.HTTP_202_ACCEPTED)
-def trigger_recalc_zefix(request: Request):
+def trigger_recalc_zefix(request: Request, db: Session = Depends(get_db)):
     job = enqueue_job(
         request.app,
         job_type="recalculate_scores",
         label="Recalculate Zefix scores",
         params={},
+        db=db,
     )
     return JobOut.from_orm_obj(job)
 
 
 @router.post("/scoring/google", response_model=JobOut, status_code=status.HTTP_202_ACCEPTED)
-def trigger_recalc_google(request: Request):
+def trigger_recalc_google(request: Request, db: Session = Depends(get_db)):
     job = enqueue_job(
         request.app,
         job_type="recalculate_google_scores",
         label="Recalculate Google scores",
         params={},
+        db=db,
     )
     return JobOut.from_orm_obj(job)
 
 
 @router.post("/scoring/re-geocode", response_model=JobOut, status_code=status.HTTP_202_ACCEPTED)
-def trigger_re_geocode(request: Request):
+def trigger_re_geocode(request: Request, db: Session = Depends(get_db)):
     job = enqueue_job(
         request.app,
         job_type="re_geocode",
         label="Re-geocode all companies",
         params={},
+        db=db,
     )
     return JobOut.from_orm_obj(job)
 
 
 @router.post("/scoring/claude", response_model=JobOut, status_code=status.HTTP_202_ACCEPTED)
-def trigger_claude_classify(body: ClaudeClassifyBody, request: Request):
+def trigger_claude_classify(body: ClaudeClassifyBody, request: Request, db: Session = Depends(get_db)):
     job = enqueue_job(
         request.app,
         job_type="claude_classify",
         label=f"Claude classify — up to {body.limit} companies",
         params=body.model_dump(),
+        db=db,
     )
     return JobOut.from_orm_obj(job)
 
 
 @router.post("/scoring/cluster", response_model=JobOut, status_code=status.HTTP_202_ACCEPTED)
-def trigger_cluster_pipeline(body: ClusterPipelineBody, request: Request):
+def trigger_cluster_pipeline(body: ClusterPipelineBody, request: Request, db: Session = Depends(get_db)):
     job = enqueue_job(
         request.app,
         job_type="hdbscan_cluster",
         label="Cluster pipeline",
         params=body.model_dump(),
+        db=db,
     )
     return JobOut.from_orm_obj(job)
 

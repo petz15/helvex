@@ -28,6 +28,11 @@ class Settings(BaseSettings):
 
     anthropic_api_key: str = ""
 
+    # Background worker
+    # Set DISABLE_JOB_WORKER=true to prevent starting the in-process job worker thread.
+    # Useful when running the web API in a memory-limited pod and processing jobs elsewhere.
+    disable_job_worker: bool = False
+
     # Security — dev gets an ephemeral random key if unset; production must set a strong key.
     secret_key: str = Field(default_factory=lambda: secrets.token_hex(32))
 

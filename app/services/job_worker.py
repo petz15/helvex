@@ -13,16 +13,7 @@ import traceback
 
 from app import crud
 from app.database import SessionLocal
-from app.services.collection import (
-    bulk_import_zefix,
-    claude_classify_batch,
-    re_geocode_all_companies,
-    recalculate_google_scores,
-    recalculate_zefix_scores,
-    run_batch_collect,
-    run_zefix_detail_collect,
-    initial_collect,
-)
+from sqlalchemy.orm import Session
 
 logger = logging.getLogger(__name__)
 
@@ -95,6 +86,8 @@ def _run_job(app, job_id: int) -> None:
 
         try:
             if job.job_type == "re_geocode":
+                from app.services.collection import re_geocode_all_companies
+
                 def _progress(done: int, total: int, stats: dict) -> None:
                     _assert_not_cancelled()
                     msg = f"Geocoded {done}/{total} — {stats['geocoded']} updated, {stats['failed']} no match"
@@ -112,6 +105,8 @@ def _run_job(app, job_id: int) -> None:
                 crud.set_setting(db, "geocoding_building_level_done", "true")
 
             elif job.job_type == "recalculate_scores":
+                from app.services.collection import recalculate_zefix_scores
+
                 def _progress(done: int, total: int, stats: dict) -> None:
                     _assert_not_cancelled()
                     phase = stats.get("_phase", "scoring")
@@ -129,6 +124,8 @@ def _run_job(app, job_id: int) -> None:
                     done_msg += f" (resumed from {resume_from})"
 
             elif job.job_type == "recalculate_google_scores":
+                from app.services.collection import recalculate_google_scores
+
                 def _progress(done: int, total: int, stats: dict) -> None:
                     _assert_not_cancelled()
                     msg = f"Recalculated Google scores for {done}/{total} companies"
@@ -145,6 +142,8 @@ def _run_job(app, job_id: int) -> None:
                     done_msg += f" (resumed from {resume_from})"
 
             elif job.job_type == "bulk":
+                from app.services.collection import bulk_import_zefix
+
                 def _progress(canton: str, prefix: str, created: int, updated: int) -> None:
                     _assert_not_cancelled()
                     msg = f"Canton {canton} prefix {prefix} — {created} created, {updated} updated"
@@ -164,6 +163,8 @@ def _run_job(app, job_id: int) -> None:
                 done_msg = f"Done — {stats['created']} created, {stats['updated']} updated, {len(stats['errors'])} errors"
 
             elif job.job_type == "batch":
+                from app.services.collection import run_batch_collect
+
                 def _progress(done: int, total: int, stats: dict) -> None:
                     _assert_not_cancelled()
                     msg = f"Processing {done}/{total} companies"
@@ -196,6 +197,8 @@ def _run_job(app, job_id: int) -> None:
                     done_msg += f" (resumed from {resume_from})"
 
             elif job.job_type == "initial":
+                from app.services.collection import initial_collect
+
                 def _progress(done: int, total: int, stats: dict) -> None:
                     _assert_not_cancelled()
                     msg = (
@@ -225,6 +228,8 @@ def _run_job(app, job_id: int) -> None:
                     done_msg += f" (resumed from {resume_from})"
 
             elif job.job_type == "detail":
+                from app.services.collection import run_zefix_detail_collect
+
                 def _progress(done: int, total: int, stats: dict) -> None:
                     _assert_not_cancelled()
                     msg = f"Processing {done}/{total}"
@@ -312,6 +317,7 @@ def _run_job(app, job_id: int) -> None:
 
             elif job.job_type == "claude_classify":
                 from app.config import settings as app_settings
+                from app.services.collection import claude_classify_batch
 
                 def _progress(done: int, total: int, stats: dict) -> None:
                     _assert_not_cancelled()
@@ -403,6 +409,8 @@ def _job_worker_loop(app) -> None:
 
 
 def _ensure_job_worker(app) -> None:
+    if getattr(app.state, "disable_job_worker", False):
+        return
     if getattr(app.state, "job_worker_running", False):
         return
     threading.Thread(target=_job_worker_loop, args=(app,), daemon=True).start()
@@ -415,14 +423,29 @@ def kick_job_worker(app) -> None:
 
 # ── Enqueue helpers (used by REST routes) ─────────────────────────────────────
 
-def enqueue_job(app, *, job_type: str, label: str, params: dict) -> object:
-    with SessionLocal() as db:
-        job = crud.create_job(db, job_type=job_type, label=label, params=params)
-        crud.create_event(db, job_id=job.id, level="info", message="Job queued")
-        # `create_event()` commits, which expires ORM attributes by default.
-        # Refresh + expunge so the returned `job` can be serialized safely
-        # after the session context closes (avoids DetachedInstanceError).
-        db.refresh(job)
-        db.expunge(job)
+def _enqueue_job_in_session(db: Session, *, job_type: str, label: str, params: dict) -> object:
+    job = crud.create_job(db, job_type=job_type, label=label, params=params)
+    crud.create_event(db, job_id=job.id, level="info", message="Job queued")
+    # `create_event()` commits, which expires ORM attributes by default.
+    # Refresh + expunge so the returned `job` can be serialized safely
+    # after the session context closes (avoids DetachedInstanceError).
+    db.refresh(job)
+    db.expunge(job)
+    return job
+
+def enqueue_job(
+    app,
+    *,
+    job_type: str,
+    label: str,
+    params: dict,
+    db: Session | None = None,
+) -> object:
+    if db is None:
+        with SessionLocal() as session:
+            job = _enqueue_job_in_session(session, job_type=job_type, label=label, params=params)
+    else:
+        job = _enqueue_job_in_session(db, job_type=job_type, label=label, params=params)
+
     _ensure_job_worker(app)
     return job

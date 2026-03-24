@@ -185,6 +185,7 @@ async def lifespan(app: FastAPI):
     app.state.startup_started_at = time.time()
     app.state.collection_task = None
     app.state.job_worker_running = False
+    app.state.disable_job_worker = bool(getattr(settings, "disable_job_worker", False))
 
     async def _startup() -> None:
         try:

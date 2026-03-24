@@ -38,6 +38,15 @@ from app.services.scoring import (
 )
 
 
+def _google_search_ready(db: Session) -> tuple[bool, str | None]:
+    enabled = (crud.get_setting(db, "google_search_enabled", "true") or "").strip().lower() == "true"
+    if not enabled:
+        return False, "Google search is disabled in Settings"
+    if not settings.serper_api_key:
+        return False, "SERPER_API_KEY is not configured (website search cannot run)"
+    return True, None
+
+
 
 # Stopwords for TF-IDF vectorization (German + French + Italian + English + Swiss registry boilerplate)
 # Goal: remove words that appear in almost every company purpose and don't help distinguish clusters.
@@ -884,6 +893,12 @@ def initial_collect(
     total = len(target_uids)
     start_idx = max(0, min(resume_from, total))
 
+    if run_google:
+        ok, reason = _google_search_ready(db)
+        if not ok:
+            stats["errors"].append(f"Google enrichment skipped: {reason}.")
+            run_google = False
+
     for idx, uid_clean in enumerate(target_uids[start_idx:], start=start_idx + 1):
         try:
             company, created = import_company_from_zefix_uid(db, uid_clean)
@@ -1270,6 +1285,12 @@ def run_batch_collect(
     }
 
     if run_google:
+        ok, reason = _google_search_ready(db)
+        if not ok:
+            stats["warnings"].append(f"Google enrichment skipped: {reason}.")
+            run_google = False
+
+    if run_google:
         quota = int(crud.get_setting(db, "google_daily_quota", str(settings.google_daily_quota)))
         searches_today = crud.get_company_stats(db)["searches_today"]
         available = max(0, quota - searches_today)
@@ -1297,9 +1318,9 @@ def run_batch_collect(
     if purpose_keywords:
         kw_terms = [t.strip() for t in purpose_keywords.split(",") if t.strip()]
         if kw_terms:
-            query = query.filter(or_(
-                Company.purpose_keywords.ilike(f"%{kw}%") for kw in kw_terms
-            ))
+            query = query.filter(
+                or_(*[Company.purpose_keywords.ilike(f"%{kw}%") for kw in kw_terms])
+            )
     if tfidf_cluster:
         query = query.filter(Company.tfidf_cluster.ilike(f"%{tfidf_cluster}%"))
     if review_status:

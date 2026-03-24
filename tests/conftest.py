@@ -88,6 +88,9 @@ def client(db):
             app.state.ready = True
             app.state.startup_error = None
             app.state.startup_message = "Ready"
+            # Tests use an in-memory DB; prevent the background worker thread
+            # from starting and trying to use the real SessionLocal (Postgres).
+            app.state.disable_job_worker = True
             # Provide a signed session cookie so the auth gate lets requests through.
             c.cookies.set(COOKIE_NAME, create_session_cookie(1))
             yield c
