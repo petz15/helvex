@@ -73,6 +73,14 @@ jobs:
       - name: Verify cluster access
         run: kubectl get nodes -o wide
 
+      - name: Bootstrap CRDs (cert-manager + CloudNativePG)
+        working-directory: infra
+        run: |
+          helmfile -e dev apply --selector name=cert-manager --suppress-diff
+          helmfile -e dev apply --selector name=cloudnative-pg --suppress-diff
+          kubectl wait --for condition=established --timeout=60s crd/clusters.postgresql.cnpg.io
+          kubectl wait --for condition=established --timeout=60s crd/clusterissuers.cert-manager.io
+
       - name: Apply Helmfile (dev)
         working-directory: infra
         run: |

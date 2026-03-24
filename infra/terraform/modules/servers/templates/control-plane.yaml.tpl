@@ -10,9 +10,24 @@ runcmd:
       --node-ip=${private_ip} \
       --advertise-address=${private_ip} \
       --flannel-iface=enp7s0 \
+      --tls-san=${public_ip} \
       --cluster-cidr=10.244.0.0/16 \
       --service-cidr=10.96.0.0/12 \
       --write-kubeconfig-mode=640 \
       --write-kubeconfig-group=k3s
   - groupadd -f k3s
+  - useradd -m -s /bin/bash ubuntu || true
   - usermod -aG k3s ubuntu
+  - usermod -aG sudo ubuntu
+  - echo "ubuntu ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/ubuntu
+  - mkdir -p /home/ubuntu/.ssh
+  - cp /root/.ssh/authorized_keys /home/ubuntu/.ssh/authorized_keys
+  - chown -R ubuntu:ubuntu /home/ubuntu/.ssh
+  - chmod 700 /home/ubuntu/.ssh && chmod 600 /home/ubuntu/.ssh/authorized_keys
+  - curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+  - |
+    HELMFILE_VERSION=0.171.0
+    curl -Lo /tmp/helmfile.tar.gz https://github.com/helmfile/helmfile/releases/download/v$${HELMFILE_VERSION}/helmfile_$${HELMFILE_VERSION}_linux_amd64.tar.gz
+    tar -xzf /tmp/helmfile.tar.gz -C /tmp
+    mv /tmp/helmfile /usr/local/bin/helmfile
+    chmod +x /usr/local/bin/helmfile

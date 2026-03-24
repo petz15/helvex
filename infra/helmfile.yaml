@@ -5,6 +5,10 @@ repositories:
     url: https://cloudnative-pg.github.io/charts
   - name: bitnami
     url: https://charts.bitnami.com/bitnami
+  - name: arc
+    url: https://actions-runner-controller.github.io/actions-runner-controller
+  - name: arc-runners
+    url: https://actions-runner-controller.github.io/actions-runner-controller
 
 environments:
   dev:
@@ -38,7 +42,7 @@ releases:
   - name: redis
     namespace: helvex-{{ .Environment.Name }}
     chart: bitnami/redis
-    version: "19.6.4"
+    version: "20.6.2"
     createNamespace: true
     values:
       - architecture: standalone
@@ -56,6 +60,34 @@ releases:
             limits:
               cpu: 500m
               memory: 256Mi
+
+  # ARC — Actions Runner Controller (ephemeral self-hosted runners as K8s pods)
+  - name: arc-controller
+    namespace: arc-systems
+    chart: oci://ghcr.io/actions/actions-runner-controller-charts/gha-runner-scale-set-controller
+    version: "0.9.3"
+    createNamespace: true
+
+  - name: arc-runner-set
+    namespace: arc-systems
+    chart: oci://ghcr.io/actions/actions-runner-controller-charts/gha-runner-scale-set
+    version: "0.9.3"
+    needs:
+      - arc-systems/arc-controller
+    values:
+      - githubConfigUrl: "https://github.com/petz15/helvex"
+        githubConfigSecret: arc-github-app
+        runnerScaleSetName: helvex-prod
+        minRunners: 0
+        maxRunners: 3
+        containerMode:
+          type: kubernetes
+          kubernetesModeWorkVolumeClaim:
+            accessModes: ["ReadWriteOnce"]
+            storageClassName: local-path
+            resources:
+              requests:
+                storage: 1Gi
 
   # Main application
   - name: helvex

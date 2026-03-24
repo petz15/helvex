@@ -8,6 +8,26 @@ locals {
     if contains(v.node_labels, "helvex.io/role=database")
   }
 
+  # Control-plane nodes get a pre-allocated primary IP for stable TLS SAN
+  cp_servers = {
+    for k, v in var.servers : k => v
+    if v.role == "k3s-control-plane"
+  }
+}
+
+# Pre-allocate a static public IP for each control-plane node.
+# Known before server creation — used in cloud-init for --tls-san.
+resource "hcloud_primary_ip" "cp" {
+  for_each = local.cp_servers
+
+  name          = "${var.name_prefix}-${each.key}-ip"
+  type          = "ipv4"
+  location      = var.location
+  assignee_type = "server"
+  auto_delete   = false
+}
+
+locals {
   # Per-server cloud-init user_data
   user_data = {
     for k, v in var.servers : k => (
@@ -15,6 +35,7 @@ locals {
       ? templatefile("${path.module}/templates/control-plane.yaml.tpl", {
           token      = var.k3s_token
           private_ip = v.private_ip
+          public_ip  = hcloud_primary_ip.cp[k].ip_address
         })
       : templatefile("${path.module}/templates/worker.yaml.tpl", {
           token       = var.k3s_token
@@ -39,6 +60,15 @@ resource "hcloud_server" "this" {
 
   labels = {
     role = each.value.role
+  }
+
+  # Assign pre-allocated primary IP to control-plane nodes
+  dynamic "public_net" {
+    for_each = each.value.role == "k3s-control-plane" ? [1] : []
+    content {
+      ipv4_enabled = true
+      ipv4         = hcloud_primary_ip.cp[each.key].id
+    }
   }
 
   network {

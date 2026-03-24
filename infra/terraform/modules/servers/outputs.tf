@@ -5,6 +5,14 @@ output "public_ipv4" {
   }
 }
 
+output "cp_primary_ipv4" {
+  description = "Pre-allocated static public IPs for control-plane nodes"
+  value = {
+    for k, ip in hcloud_primary_ip.cp :
+    k => ip.ip_address
+  }
+}
+
 output "private_ipv4" {
   value = {
     for k, s in hcloud_server.this :

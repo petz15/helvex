@@ -194,15 +194,56 @@ Cloudflare (TLS, CDN, DDoS)
 
 Deploy the existing monolith to K3s — no microservices split yet.
 
-1. Provision 3 Hetzner nodes, install K3s
-2. Deploy CloudNativePG, configure WAL backup to Hetzner Object Storage
-3. Configure Doppler K8s operator
-4. Deploy existing `app` as single K8s Deployment (2 replicas)
-5. Deploy Redis StatefulSet
-6. Configure Traefik IngressRoute + TLS
-7. Set up `zefix-dev` and `zefix-prod` namespaces
-8. GitHub Actions CI/CD pipeline
-9. Data migration: `pg_dump` from Docker Compose → `pg_restore` into CloudNativePG
+#### Status (as of 2026-03-24)
+
+**Done:**
+- ✅ Hetzner Object Storage bucket `helvex-backups` created (nbg1), Terraform S3 backend configured
+- ✅ Terraform provisioned: `app1` (cx23, control-plane) + `db1` (cx23, worker), LB `162.55.153.183`, private network, firewall
+- ✅ K3s installed on both nodes; flannel interface fixed (`eth1` → `enp7s0`)
+- ✅ Both nodes `Ready` (`kubectl get nodes` confirmed)
+- ✅ DNS: `helvex.dicy.ch` A → `162.55.153.183`
+- ✅ kubeconfig saved locally (`~/.kube/helvex-prod.yaml`)
+- ✅ Namespace `helvex-prod` created
+- ✅ K8s secrets created: `helvex-env`, `ghcr-pull-secret`, `arc-github-app`
+- ✅ ARC (Actions Runner Controller) added to helmfile — replaces self-hosted runner
+- ✅ Deploy workflows updated: tag `deploy-dev` → dev, `deploy-prod` → prod + minor version bump
+- ✅ Terraform updated: pre-allocates static primary IP for control-plane (fixes TLS SAN on rebuild)
+
+**Outstanding (blockers):**
+- ❌ `helm` + `helmfile` not yet installed on `app1` (cloud-init template updated; manual install needed for current server)
+- ❌ `helmfile -e prod apply` not yet run — nothing deployed to cluster yet (no app, no CloudNativePG, no Redis, no ARC, no cert-manager)
+- ❌ TLS SAN fix currently manual — will be automatic after next `terraform apply` (primary IP pre-allocation)
+- ❌ `ubuntu` user + k3s group setup not in cloud-init (still manual)
+- ❌ Data migration not done (`pg_dump` → CloudNativePG)
+- ❌ Post-deploy smoke test not done
+
+**Deviations from original plan:**
+- Dropped `app2` worker node (cost saving — add back when load requires it)
+- Dropped Doppler K8s operator — using native K8s secrets directly for now
+- Replaced self-hosted GitHub Actions runner with ARC (ephemeral pods, survives rebuilds)
+- `replicaCount: 1` instead of 2 (matches single node)
+
+#### Next Steps
+
+1. **Install helm + helmfile on app1** (manual, one-time):
+   ```bash
+   ssh root@91.98.21.142
+   curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+   HELMFILE_VERSION=0.171.0
+   curl -Lo /tmp/helmfile.tar.gz https://github.com/helmfile/helmfile/releases/download/v${HELMFILE_VERSION}/helmfile_${HELMFILE_VERSION}_linux_amd64.tar.gz
+   tar -xzf /tmp/helmfile.tar.gz -C /tmp && mv /tmp/helmfile /usr/local/bin/helmfile
+   ```
+
+2. **Run `terraform apply`** — provisions static primary IP for app1, updates server
+
+3. **Run helmfile** (deploys cert-manager, CloudNativePG, Redis, ARC, app):
+   ```bash
+   helmfile -e prod apply
+   ```
+
+4. **Data migration** — `pg_dump` local → `pg_restore` into CloudNativePG
+
+5. **Smoke test** — login, dashboard, run one job
 
 **Dev→prod promotion gate:**
 - `/health` returns ok for 1 hour in dev
