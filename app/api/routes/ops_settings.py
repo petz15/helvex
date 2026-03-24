@@ -16,7 +16,7 @@ router = APIRouter(tags=["settings"])
 
 class SettingsBody(BaseModel):
     google_search_enabled: bool = True
-    google_daily_quota: int = 100
+    google_daily_quota: str = "100"
     # Scoring
     scoring_target_clusters: str = ""
     scoring_cluster_hit_points: str = "10"
@@ -73,7 +73,10 @@ def get_settings(db: Session = Depends(get_db)):
 @router.put("/settings")
 def save_settings(body: SettingsBody, db: Session = Depends(get_db)):
     crud.set_setting(db, "google_search_enabled", "true" if body.google_search_enabled else "false")
-    crud.set_setting(db, "google_daily_quota", str(max(1, body.google_daily_quota)))
+    try:
+        crud.set_setting(db, "google_daily_quota", str(max(1, int(body.google_daily_quota))))
+    except (ValueError, TypeError):
+        crud.set_setting(db, "google_daily_quota", "100")
 
     defaults = get_default_scoring_config()
     text_fields = {

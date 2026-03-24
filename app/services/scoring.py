@@ -59,6 +59,7 @@ _DIRECTORY_DOMAINS = {
     "autoscout24.ch",
     "comparis.ch",
     "admin.ch",
+    "sogenda.ch",
 }
 
 _NEWS_DOMAINS = {

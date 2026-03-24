@@ -49,7 +49,7 @@ jobs:
 
       - name: Lint
         working-directory: frontend
-        run: npx next lint
+        run: npm run lint
 
       - name: Build
         working-directory: frontend

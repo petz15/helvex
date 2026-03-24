@@ -116,7 +116,8 @@
       "Bash(find c:/D/coding_projects/zefix_analyzer -name docker-compose* -o -name compose*.yml -o -name compose*.yaml)",
       "Bash(grep -r \"docker.compose\\\\|docker-compose\\\\|deploy\\\\.sh\\\\|nginx\\\\.conf\" c:/D/coding_projects/zefix_analyzer --include=*.yml --include=*.yaml --include=*.md --include=*.sh -l)",
       "Bash(python -m pytest tests/ -x -q)",
-      "Bash(.venv/Scripts/python -m pytest tests/ -x -q)"
+      "Bash(.venv/Scripts/python -m pytest tests/ -x -q)",
+      "Bash(find c:/D/coding_projects/zefix_analyzer -maxdepth 2 -name docker-compose* -o -name compose*)"
     ]
   }
 }

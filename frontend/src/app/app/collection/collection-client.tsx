@@ -72,7 +72,11 @@ export function CollectionClient() {
       </div>
 
       {error && (
-        <div className="bg-red-50 border border-red-200 text-red-700 rounded-lg px-4 py-3 text-sm">{error}</div>
+        <div className="sticky top-2 z-20 bg-red-50 border border-red-300 text-red-800 rounded-lg px-4 py-3 text-sm flex items-start gap-2 shadow-sm">
+          <span className="font-semibold shrink-0">Error:</span>
+          <span>{error}</span>
+          <button onClick={() => setError(null)} className="ml-auto shrink-0 text-red-400 hover:text-red-600">✕</button>
+        </div>
       )}
 
       <Section title="Bulk import from Zefix" defaultOpen>

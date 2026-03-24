@@ -155,3 +155,12 @@ Work through these in order — each step unblocks the next.
 - [ ] Settings → Re-geocode all companies (validate the fix from Phase 1)
 - [ ] Map → zoom in → confirm clusters and popups work
 - [ ] Check Jobs page shows re-geocode job running
+
+
+## Phase 5 - Extensions
+
+### 5.1 Change Dashboard filtering
+Move the filtering to the top of the page and make collapseable. Filters such as TF-IDF, Purpose and Claude (AI) can be freeform with autocomplete features as well as list the top 20 then show more. Also showing the number of companies with those keywords. Add an exclude feature (potentially press twice on a keyword). Add save view (potentially make the view a json format or similar so it can be saved per user and quickly ingested)
+
+### 5.2 Extend LLM Search/AI Classification
+Add ChatGPT integration for the search next to Claude. Allow the users to make more adjustments. 
