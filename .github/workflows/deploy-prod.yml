@@ -94,6 +94,9 @@ jobs:
         run: kubectl get nodes -o wide
 
       - name: Ensure K8s secrets exist
+        env:
+          GHCR_PAT: ${{ secrets.GHCR_PAT }}
+          GITHUB_ACTOR: ${{ github.actor }}
         run: |
           if ! kubectl get secret helvex-env -n helvex-prod &>/dev/null; then
             kubectl create secret generic helvex-env \
@@ -110,8 +113,8 @@ jobs:
           if ! kubectl get secret ghcr-pull-secret -n helvex-prod &>/dev/null; then
             kubectl create secret docker-registry ghcr-pull-secret \
               --docker-server=ghcr.io \
-              --docker-username=${{ github.actor }} \
-              --docker-password=${{ secrets.GHCR_PAT }} \
+              --docker-username="${GITHUB_ACTOR}" \
+              --docker-password="${GHCR_PAT}" \
               -n helvex-prod
           fi
           if ! kubectl get secret arc-github-app -n arc-systems &>/dev/null; then
