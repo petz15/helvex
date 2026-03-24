@@ -645,6 +645,32 @@ Other options if you want to swap out Serper.dev — all return `title`/`link`/`
 
 | Tool | Purpose |
 |---|---|
-| **GitHub Actions + SSH** | Deploy on push to `main` — `git pull` → `docker compose build` → `alembic upgrade head` → `docker compose up -d` |
-| **Tailscale** | Secure access to the server without opening ports, enables GitHub Actions deployment to a NAT-ed home server |
-| **Watchtower** | Auto-pull updated Docker images (alternative to SSH deploy for simple setups) |
+| **GitHub Actions + ARC** | CI/CD via ephemeral self-hosted runners (Actions Runner Controller) on K3s — triggered by commit message tags |
+| **Hetzner K3s** | Lightweight Kubernetes on two Hetzner CX servers (app1 control-plane, db1 worker) |
+| **Helmfile** | Declarative multi-release Helm deployments (cert-manager, CloudNativePG, Redis, ARC, app) |
+| **CloudNativePG** | Kubernetes-native PostgreSQL with WAL backup to Hetzner Object Storage |
+| **cert-manager** | Automatic TLS via Let's Encrypt |
+
+#### Deploy triggers (commit message)
+
+| Tag | What runs |
+|---|---|
+| `[deploy-prod]` | Build images → full `helmfile apply` (cert-manager, CloudNativePG, Redis, ARC, app + frontend) |
+| `[deploy-app]` | Build images → apply only the `helvex` Helm release (app + frontend) — faster, leaves infra untouched |
+
+Use `[deploy-app]` for all normal code changes. Use `[deploy-prod]` only when infra config (Helm values, chart changes, new releases) has changed.
+
+#### Partial deploys (manual, from app1)
+
+```bash
+# Restart a deployment without rebuilding (picks up same image)
+kubectl rollout restart deployment/helvex -n helvex-prod
+kubectl rollout restart deployment/helvex-frontend -n helvex-prod
+
+# Apply only a specific Helm release
+cd /opt/helvex/infra
+helmfile -e prod apply --selector name=helvex --suppress-diff
+
+# Update a single container image directly
+kubectl set image deployment/helvex app=ghcr.io/petz15/helvex:<sha> -n helvex-prod
+```

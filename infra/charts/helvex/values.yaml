@@ -53,6 +53,7 @@ postgres:
   database: helvex
   owner: helvex
   backupEnabled: false
+  restoreFromBackup: false   # set to true on rebuild to restore from S3 instead of initdb
   s3EndpointUrl: ""    # e.g. https://fsn1.your-objectstorage.com
   s3BucketPath: ""     # e.g. s3://helvex-backups/pg/
   backupRetention: "7d"

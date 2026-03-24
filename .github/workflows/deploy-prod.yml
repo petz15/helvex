@@ -6,7 +6,9 @@ on:
 
 jobs:
   build:
-    if: contains(github.event.head_commit.message, '[deploy-prod]')
+    if: |
+      contains(github.event.head_commit.message, '[deploy-prod]') ||
+      contains(github.event.head_commit.message, '[deploy-app]')
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -66,7 +68,9 @@ jobs:
 
   deploy:
     needs: build
-    if: contains(github.event.head_commit.message, '[deploy-prod]')
+    if: |
+      contains(github.event.head_commit.message, '[deploy-prod]') ||
+      contains(github.event.head_commit.message, '[deploy-app]')
     runs-on: helvex-prod
     environment: production
     permissions:
@@ -131,6 +135,7 @@ jobs:
           fi
 
       - name: Bootstrap CRDs (cert-manager + CloudNativePG)
+        if: contains(github.event.head_commit.message, '[deploy-prod]')
         working-directory: infra
         run: |
           helmfile -e prod apply --selector name=cert-manager --suppress-diff
@@ -140,8 +145,14 @@ jobs:
 
       - name: Apply Helmfile (prod)
         working-directory: infra
+        env:
+          COMMIT_MSG: ${{ github.event.head_commit.message }}
         run: |
-          helmfile -e prod apply \
+          SELECTOR=""
+          if echo "$COMMIT_MSG" | grep -qF '[deploy-app]'; then
+            SELECTOR="--selector name=helvex"
+          fi
+          helmfile -e prod apply $SELECTOR \
             --set "image.tag=${{ github.sha }}" \
             --set "frontend.image.tag=${{ github.sha }}" \
             --suppress-diff

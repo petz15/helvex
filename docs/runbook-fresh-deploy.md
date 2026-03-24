@@ -148,7 +148,28 @@ kubectl get pods -n arc-systems -w
 
 You should see `arc-controller-*` and `arc-runner-set-*` pods reach `Running`.
 
-### Step 6 — Trigger the first deploy
+### Step 6 — Restore database (if rebuilding with existing data)
+
+Skip this step if the database is empty (first-time deploy).
+
+If you have existing data backed up in S3, restore it now while still SSH'd into `app1`. This uses `--set` to override the value at apply time — **no code change or commit needed**:
+
+```bash
+cd /opt/helvex/infra
+helmfile -e prod apply --selector name=helvex \
+  --set postgres.restoreFromBackup=true \
+  --suppress-diff
+```
+
+CloudNativePG will read the latest base backup + WAL from `s3://helvex-backups/pg/` and replay them. Wait until the cluster is healthy:
+
+```bash
+kubectl get cluster -n helvex-prod -w
+```
+
+Wait for `STATUS: Cluster in healthy state`.
+
+### Step 7 — Trigger the first deploy
 
 Exit the SSH session. On your local machine:
 
@@ -160,6 +181,8 @@ git push
 Watch the workflow run at **github.com/petz15/helvex → Actions**.
 
 The `deploy` job will run on the `helvex-prod` ARC runner (the pod you started in step 5).
+
+> The deploy workflow uses `restoreFromBackup: false` (the default). No toggle commit needed — the `--set` override from step 6 only applied to that one manual helmfile run.
 
 ### Step 7 — Verify
 
