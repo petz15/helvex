@@ -1,0 +1,4 @@
+apiVersion: v2
+name: arc-rbac
+description: ServiceAccount and ClusterRoleBinding for ARC runner pods
+version: 0.1.0

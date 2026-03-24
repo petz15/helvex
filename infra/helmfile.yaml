@@ -68,12 +68,19 @@ releases:
     version: "0.9.3"
     createNamespace: true
 
+  - name: arc-rbac
+    namespace: arc-systems
+    chart: ./charts/arc-rbac
+    needs:
+      - arc-systems/arc-controller
+
   - name: arc-runner-set
     namespace: arc-systems
     chart: oci://ghcr.io/actions/actions-runner-controller-charts/gha-runner-scale-set
     version: "0.9.3"
     needs:
       - arc-systems/arc-controller
+      - arc-systems/arc-rbac
     values:
       - githubConfigUrl: "https://github.com/petz15/helvex"
         githubConfigSecret: arc-github-app
@@ -83,14 +90,9 @@ releases:
         controllerServiceAccount:
           namespace: arc-systems
           name: arc-controller-gha-rs-controller
-        containerMode:
-          type: kubernetes
-          kubernetesModeWorkVolumeClaim:
-            accessModes: ["ReadWriteOnce"]
-            storageClassName: local-path
-            resources:
-              requests:
-                storage: 1Gi
+        template:
+          spec:
+            serviceAccountName: arc-runner
 
   # Main application
   - name: helvex

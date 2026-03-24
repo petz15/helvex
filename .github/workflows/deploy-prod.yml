@@ -76,20 +76,6 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Prepare kubeconfig
-        run: |
-          set -euo pipefail
-          mkdir -p "$HOME/.kube"
-          if [ -r /etc/rancher/k3s/k3s.yaml ]; then
-            cp /etc/rancher/k3s/k3s.yaml "$HOME/.kube/config"
-            chmod 600 "$HOME/.kube/config"
-          else
-            echo "ERROR: Cannot read /etc/rancher/k3s/k3s.yaml" >&2
-            echo "Run: sudo usermod -aG k3s <runner-user>" >&2
-            exit 1
-          fi
-          echo "KUBECONFIG=$HOME/.kube/config" >> "$GITHUB_ENV"
-
       - name: Verify cluster access
         run: kubectl get nodes -o wide
 
