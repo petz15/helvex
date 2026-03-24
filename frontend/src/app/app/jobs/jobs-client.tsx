@@ -41,22 +41,31 @@ function ProgressBar({ done, total }: { done: number | null; total: number | nul
 
 function JobEvents({ jobId }: { jobId: number }) {
   const { data: events = [] } = useSWR<JobEvent[]>(`events-${jobId}`, () => fetchJobEvents(jobId), { refreshInterval: 3000 });
+  const [verbose, setVerbose] = useState(false);
+  const visible = verbose ? events : events.filter(e => e.level !== "debug");
   return (
-    <div className="mt-3 max-h-48 overflow-y-auto bg-slate-950 rounded-lg p-3 font-mono text-xs space-y-0.5">
-      {events.length === 0 && <p className="text-slate-500">No events</p>}
-      {[...events].reverse().map(e => (
-        <div key={e.id} className={cn(
-          "leading-relaxed",
-          e.level === "error" ? "text-red-400" : e.level === "warn" ? "text-amber-400" : "text-slate-300"
-        )}>
-          <span className="text-slate-600 mr-2">{new Date(e.created_at).toLocaleTimeString("de-CH")}</span>
-          <span className={cn(
-            "mr-2 uppercase tracking-wider text-[10px]",
-            e.level === "error" ? "text-red-500" : e.level === "warn" ? "text-amber-500" : e.level === "debug" ? "text-slate-600" : "text-slate-400"
-          )}>[{e.level}]</span>
-          {e.message}
-        </div>
-      ))}
+    <div className="mt-3">
+      <label className="flex items-center gap-1.5 text-xs text-slate-400 mb-1 cursor-pointer select-none w-fit">
+        <input type="checkbox" checked={verbose} onChange={e => setVerbose(e.target.checked)}
+          className="rounded border-slate-300 text-blue-600 focus:ring-blue-300" />
+        Verbose
+      </label>
+      <div className="max-h-48 overflow-y-auto bg-slate-950 rounded-lg p-3 font-mono text-xs space-y-0.5">
+        {visible.length === 0 && <p className="text-slate-500">No events</p>}
+        {[...visible].reverse().map(e => (
+          <div key={e.id} className={cn(
+            "leading-relaxed",
+            e.level === "error" ? "text-red-400" : e.level === "warn" ? "text-amber-400" : "text-slate-300"
+          )}>
+            <span className="text-slate-600 mr-2">{new Date(e.created_at).toLocaleTimeString("de-CH")}</span>
+            <span className={cn(
+              "mr-2 uppercase tracking-wider text-[10px]",
+              e.level === "error" ? "text-red-500" : e.level === "warn" ? "text-amber-500" : e.level === "debug" ? "text-slate-600" : "text-slate-400"
+            )}>[{e.level}]</span>
+            {e.message}
+          </div>
+        ))}
+      </div>
     </div>
   );
 }

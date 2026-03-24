@@ -176,3 +176,7 @@ Have some generic defaults but allow users to create their own categories.
 
 # 6 Make App more user customizable/specific
 Such has having their own scoring logic, tags, custom categories, LLM scoring, running their own jobs. -> implement tiers, topups and ads. 
+
+# 7 add multi Lang support 
+Specifically DE/FR/IT
+

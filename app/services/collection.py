@@ -599,6 +599,8 @@ def recalculate_zefix_scores(
     # ── Pass 2: normalise and write final scores ───────────────────────────────
     normalised = normalize_raw_scores(raw_scores, cancelled_score=cancelled_score)
 
+    write_total = len(normalised)
+    write_done = 0
     offset = 0
     while True:
         batch = db.query(Company).order_by(Company.id.asc()).offset(offset).limit(batch_size).all()
@@ -613,8 +615,11 @@ def recalculate_zefix_scores(
             company.zefix_score_breakdown = json.dumps(bd)
             company.zefix_scored_at = datetime.now(tz=timezone.utc)
             stats["updated"] += 1
+            write_done += 1
         db.commit()
         offset += len(batch)
+        if progress_cb:
+            progress_cb(write_done, write_total, {**stats, "_phase": "writing"})
 
     return stats
 

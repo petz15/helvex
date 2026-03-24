@@ -117,7 +117,12 @@
       "Bash(grep -r \"docker.compose\\\\|docker-compose\\\\|deploy\\\\.sh\\\\|nginx\\\\.conf\" c:/D/coding_projects/zefix_analyzer --include=*.yml --include=*.yaml --include=*.md --include=*.sh -l)",
       "Bash(python -m pytest tests/ -x -q)",
       "Bash(.venv/Scripts/python -m pytest tests/ -x -q)",
-      "Bash(find c:/D/coding_projects/zefix_analyzer -maxdepth 2 -name docker-compose* -o -name compose*)"
+      "Bash(find c:/D/coding_projects/zefix_analyzer -maxdepth 2 -name docker-compose* -o -name compose*)",
+      "Bash(xargs wc:*)",
+      "Bash(wc -l /c/D/coding_projects/zefix_analyzer/app/models/*.py)",
+      "Bash(wc -l /c/D/coding_projects/zefix_analyzer/app/schemas/*.py)",
+      "Bash(grep -r \"list comprehension\\\\|for.*in\\\\|lambda\\\\|\\\\[.*for\" /c/D/coding_projects/zefix_analyzer/app --include=*.py)",
+      "Bash(wc -l /c/D/coding_projects/zefix_analyzer/alembic/versions/*.py)"
     ]
   }
 }

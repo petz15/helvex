@@ -114,7 +114,11 @@ def _run_job(app, job_id: int) -> None:
             elif job.job_type == "recalculate_scores":
                 def _progress(done: int, total: int, stats: dict) -> None:
                     _assert_not_cancelled()
-                    msg = f"Recalculated {done}/{total} companies"
+                    phase = stats.get("_phase", "scoring")
+                    if phase == "writing":
+                        msg = f"Writing normalised scores — {done}/{total}"
+                    else:
+                        msg = f"Computing raw scores — {done}/{total} ({stats.get('geocoded', 0)} geocoded)"
                     crud.update_progress(db, job, message=msg, done=done, total=total, stats=stats)
                     crud.create_event(db, job_id=job.id, level="debug", message=msg)
                     _sync_active_task(app.state, job_type=job.job_type, label=job.label, message=msg, stats=dict(stats), error=None, done=False)
@@ -415,5 +419,10 @@ def enqueue_job(app, *, job_type: str, label: str, params: dict) -> object:
     with SessionLocal() as db:
         job = crud.create_job(db, job_type=job_type, label=label, params=params)
         crud.create_event(db, job_id=job.id, level="info", message="Job queued")
+        # `create_event()` commits, which expires ORM attributes by default.
+        # Refresh + expunge so the returned `job` can be serialized safely
+        # after the session context closes (avoids DetachedInstanceError).
+        db.refresh(job)
+        db.expunge(job)
     _ensure_job_worker(app)
     return job

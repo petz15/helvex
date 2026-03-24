@@ -196,3 +196,26 @@ def test_google_search_not_configured(client):
     ):
         resp = client.get(f"/api/v1/companies/{company_id}/google-search")
     assert resp.status_code == 503
+
+
+# ---------------------------------------------------------------------------
+# Job triggers
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "path,expected_job_type",
+    [
+        ("/api/v1/scoring/zefix", "recalculate_scores"),
+        ("/api/v1/scoring/google", "recalculate_google_scores"),
+        ("/api/v1/scoring/re-geocode", "re_geocode"),
+    ],
+)
+def test_scoring_triggers_return_202_job(client, path, expected_job_type):
+    resp = client.post(path)
+    assert resp.status_code == 202
+    data = resp.json()
+    assert data["job_type"] == expected_job_type
+    assert data["status"] == "queued"
+    assert isinstance(data["id"], int)
+    assert data["created_at"]
