@@ -19,3 +19,10 @@ data/plz_ch.tsv
 data/geocoding.db
 data/geocoding.tmp.db
 certs/*.pem
+
+
+*.hcl
+terraform.tfvars
+
+/infra/environments/prod.yaml
+/infra/environments/dev.yaml
