@@ -1,0 +1,35 @@
+name: Cleanup old images
+
+on:
+  schedule:
+    - cron: '0 2 * * 0'  # every Sunday at 02:00 UTC
+  workflow_dispatch:
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    permissions:
+      packages: write
+
+    strategy:
+      matrix:
+        package:
+          - helvex
+          - helvex-frontend
+
+    steps:
+      - name: Delete untagged images
+        uses: actions/delete-package-versions@v5
+        with:
+          package-name: ${{ matrix.package }}
+          package-type: container
+          delete-untagged-versions: true
+          min-versions-to-keep: 0
+
+      - name: Keep only last 5 tagged versions
+        uses: actions/delete-package-versions@v5
+        with:
+          package-name: ${{ matrix.package }}
+          package-type: container
+          min-versions-to-keep: 5
+          ignore-versions: '^(latest|dev)$'

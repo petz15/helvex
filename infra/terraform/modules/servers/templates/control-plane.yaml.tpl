@@ -2,6 +2,7 @@
 packages:
   - curl
   - netcat-openbsd
+  - git
 
 runcmd:
   - |
@@ -31,3 +32,15 @@ runcmd:
     tar -xzf /tmp/helmfile.tar.gz -C /tmp
     mv /tmp/helmfile /usr/local/bin/helmfile
     chmod +x /usr/local/bin/helmfile
+  - git clone https://github.com/petz15/helvex.git /opt/helvex
+  - |
+    # Set up kubeconfig for ubuntu user
+    mkdir -p /home/ubuntu/.kube
+    cp /etc/rancher/k3s/k3s.yaml /home/ubuntu/.kube/config
+    chown ubuntu:ubuntu /home/ubuntu/.kube/config
+    chmod 600 /home/ubuntu/.kube/config
+    echo 'export KUBECONFIG=$HOME/.kube/config' >> /home/ubuntu/.bashrc
+  - |
+    # Install helm-diff plugin
+    export HOME=/root
+    helm plugin install https://github.com/databus23/helm-diff

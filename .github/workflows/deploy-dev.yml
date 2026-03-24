@@ -53,7 +53,7 @@ jobs:
   deploy:
     needs: build
     if: contains(github.event.head_commit.message, '[deploy-dev]')
-    runs-on: self-hosted
+    runs-on: helvex-dev
     steps:
       - uses: actions/checkout@v5
 
@@ -73,6 +73,29 @@ jobs:
 
       - name: Verify cluster access
         run: kubectl get nodes -o wide
+
+      - name: Ensure K8s secrets exist
+        run: |
+          if ! kubectl get secret helvex-env -n helvex-dev &>/dev/null; then
+            kubectl create namespace helvex-dev --dry-run=client -o yaml | kubectl apply -f -
+            kubectl create secret generic helvex-env \
+              --from-literal=DATABASE_URL="${{ secrets.DB_URL }}" \
+              --from-literal=REDIS_URL="${{ secrets.REDIS_URL }}" \
+              --from-literal=REDIS_PASSWORD="${{ secrets.REDIS_PASSWORD }}" \
+              --from-literal=SECRET_KEY="${{ secrets.SECRET_KEY }}" \
+              --from-literal=S3_ACCESS_KEY="${{ secrets.S3_ACCESS_KEY }}" \
+              --from-literal=S3_SECRET_KEY="${{ secrets.S3_SECRET_KEY }}" \
+              --from-literal=username="helvex" \
+              --from-literal=password="${{ secrets.DB_PASSWORD }}" \
+              -n helvex-dev
+          fi
+          if ! kubectl get secret ghcr-pull-secret -n helvex-dev &>/dev/null; then
+            kubectl create secret docker-registry ghcr-pull-secret \
+              --docker-server=ghcr.io \
+              --docker-username=${{ github.actor }} \
+              --docker-password=${{ secrets.GHCR_PAT }} \
+              -n helvex-dev
+          fi
 
       - name: Bootstrap CRDs (cert-manager + CloudNativePG)
         working-directory: infra

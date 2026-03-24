@@ -114,6 +114,14 @@ jobs:
               --docker-password=${{ secrets.GHCR_PAT }} \
               -n helvex-prod
           fi
+          if ! kubectl get secret arc-github-app -n arc-systems &>/dev/null; then
+            kubectl create namespace arc-systems --dry-run=client -o yaml | kubectl apply -f -
+            kubectl create secret generic arc-github-app \
+              --from-literal=github_app_id="${{ secrets.ARC_APP_ID }}" \
+              --from-literal=github_app_installation_id="${{ secrets.ARC_APP_INSTALLATION_ID }}" \
+              --from-literal=github_app_private_key="${{ secrets.ARC_APP_PRIVATE_KEY }}" \
+              -n arc-systems
+          fi
 
       - name: Bootstrap CRDs (cert-manager + CloudNativePG)
         working-directory: infra
