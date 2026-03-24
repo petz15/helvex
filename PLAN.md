@@ -163,4 +163,16 @@ Work through these in order — each step unblocks the next.
 Move the filtering to the top of the page and make collapseable. Filters such as TF-IDF, Purpose and Claude (AI) can be freeform with autocomplete features as well as list the top 20 then show more. Also showing the number of companies with those keywords. Add an exclude feature (potentially press twice on a keyword). Add save view (potentially make the view a json format or similar so it can be saved per user and quickly ingested)
 
 ### 5.2 Extend LLM Search/AI Classification
-Add ChatGPT integration for the search next to Claude. Allow the users to make more adjustments. 
+Add ChatGPT integration for the search next to Claude. Allow the users to make more adjustments on how LLM classify the companies. 
+
+### 5.3 Company Profile
+General overhaul, which allows user to change the website if they think its incorrect (add logic to backend where webiste is changed if too many users switch). Add classifications from tf-idf cluster, purpose keywords and claude classification. 
+
+### 5.4 Rename Zefix and Google Scoring
+Rename both scoring to reflect their true purpose. Zefix should be Individual based scoring or Company purpose scoring. Google should be Web scoring (as webcrawlers might be added later which would be included in that scoring). 
+
+### 5.5 Change review and Proposal categories
+Have some generic defaults but allow users to create their own categories.
+
+# 6 Make App more user customizable/specific
+Such has having their own scoring logic, tags, custom categories, LLM scoring, running their own jobs. -> implement tiers, topups and ads. 

@@ -44,9 +44,9 @@ class JobOut(BaseModel):
             progress_done=j.progress_done,
             progress_total=j.progress_total,
             error=j.error,
-            created_at=j.created_at.isoformat() if j.created_at else "",
+            created_at=j.queued_at.isoformat() if j.queued_at else "",
             started_at=j.started_at.isoformat() if j.started_at else None,
-            finished_at=j.finished_at.isoformat() if j.finished_at else None,
+            finished_at=j.completed_at.isoformat() if j.completed_at else None,
         )
 
 
