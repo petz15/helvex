@@ -1,0 +1,52 @@
+{{- if .Values.postgres.enabled }}
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: {{ include "helvex.fullname" . }}-pg
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "helvex.labels" . | nindent 4 }}
+spec:
+  instances: {{ .Values.postgres.instances }}
+
+  storage:
+    size: {{ .Values.postgres.storageSize }}
+
+  postgresql:
+    pg_hba:
+      - host all all 0.0.0.0/0 scram-sha-256
+
+  bootstrap:
+    initdb:
+      database: {{ .Values.postgres.database }}
+      owner: {{ .Values.postgres.owner }}
+      secret:
+        name: {{ .Values.envSecretName }}
+
+  superuserSecret:
+    name: {{ .Values.envSecretName }}
+
+  {{- if .Values.postgres.backupEnabled }}
+  backup:
+    retentionPolicy: {{ .Values.postgres.backupRetention }}
+    barmanObjectStore:
+      destinationPath: {{ .Values.postgres.s3BucketPath }}
+      endpointURL: {{ .Values.postgres.s3EndpointUrl }}
+      s3Credentials:
+        accessKeyId:
+          name: {{ .Values.envSecretName }}
+          key: S3_ACCESS_KEY
+        secretAccessKey:
+          name: {{ .Values.envSecretName }}
+          key: S3_SECRET_KEY
+  {{- end }}
+
+  affinity:
+    nodeSelector:
+      helvex.io/role: database
+    tolerations:
+      - key: helvex.io/role
+        operator: Equal
+        value: database
+        effect: NoSchedule
+{{- end }}

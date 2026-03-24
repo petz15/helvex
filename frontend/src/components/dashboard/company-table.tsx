@@ -5,7 +5,7 @@ import {
   createColumnHelper, type VisibilityState,
 } from "@tanstack/react-table";
 import { ChevronUp, ChevronDown, ChevronsUpDown, Settings2 } from "lucide-react";
-import { cn, reviewBadgeClass, proposalBadgeClass } from "@/lib/utils";
+import { cn, reviewBadgeClass, proposalBadgeClass, scoreColor } from "@/lib/utils";
 import { ScoreBar } from "@/components/ui/score-bar";
 import { Badge } from "@/components/ui/badge";
 import type { Company, CompanyFilters } from "@/lib/types";
@@ -36,6 +36,28 @@ function SortIcon({ col, sort }: { col: string; sort: string }) {
   return <ChevronsUpDown size={12} className="text-slate-300" />;
 }
 
+function reviewLeftBorderClass(status: string | null): string {
+  switch (status) {
+    case "confirmed_proposal":
+      return "border-l-green-500";
+    case "potential_proposal":
+      return "border-l-blue-500";
+    case "interesting":
+      return "border-l-yellow-400";
+    case "rejected":
+      return "border-l-red-400";
+    default:
+      return "border-l-transparent";
+  }
+}
+
+function scoreTextClass(score: number | null): string {
+  if (score == null) return "text-slate-500";
+  if (score >= 70) return "text-green-700";
+  if (score >= 40) return "text-yellow-700";
+  return "text-red-700";
+}
+
 export function CompanyTable({ companies, selectedId, onSelect, filters, onSort, isLoading }: CompanyTableProps) {
   const sort = filters.sort ?? "-updated";
 
@@ -54,8 +76,15 @@ export function CompanyTable({ companies, selectedId, onSelect, filters, onSort,
       ch.accessor("name", {
         header: "Company",
         cell: (info) => (
-          <div className="font-medium text-slate-800 max-w-[200px] truncate" title={info.getValue() as string}>
-            {info.getValue() as string}
+          <div
+            className={cn(
+              "border-l-[3px] pl-2 -ml-2",
+              reviewLeftBorderClass(info.row.original.review_status),
+            )}
+          >
+            <div className="font-medium text-slate-800 max-w-[200px] truncate" title={info.getValue() as string}>
+              {info.getValue() as string}
+            </div>
           </div>
         ),
       }),
@@ -100,7 +129,19 @@ export function CompanyTable({ companies, selectedId, onSelect, filters, onSort,
       }),
       ch.accessor("combined_score", {
         header: "Combined",
-        cell: (info) => <ScoreBar score={info.getValue() as number | null} />,
+        cell: (info) => {
+          const v = info.getValue() as number | null;
+          return (
+            <div className="min-w-[6rem]">
+              <div className={cn("text-xs font-bold tabular-nums", scoreTextClass(v))}>
+                {v == null ? "—" : Math.round(v)}
+              </div>
+              <div className="mt-1 h-1.5 bg-slate-200 rounded-full overflow-hidden">
+                <div className={cn("h-full rounded-full", scoreColor(v))} style={{ width: `${v ?? 0}%` }} />
+              </div>
+            </div>
+          );
+        },
       }),
       ch.accessor("review_status", {
         header: "Review",
@@ -237,6 +278,7 @@ export function CompanyTable({ companies, selectedId, onSelect, filters, onSort,
                   onClick={() => onSelect(row.original)}
                   className={cn(
                     "border-b border-slate-100 cursor-pointer transition-colors",
+                    String(row.original.status ?? "").toLowerCase() === "cancelled" && "opacity-60",
                     row.original.id === selectedId
                       ? "bg-blue-50"
                       : "hover:bg-slate-50"

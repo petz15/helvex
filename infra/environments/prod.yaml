@@ -1,14 +1,22 @@
-# Prod environment — Hetzner K3s (not yet provisioned)
-# Replace OWNER with your GitHub username/org once the repo is created.
+# Prod environment — Hetzner K3s
+# Replace OWNER with your GitHub username/org.
 image:
   repository: ghcr.io/OWNER/helvex-app
   tag: latest
   pullPolicy: Always
 
+replicaCount: 2
+
+frontend:
+  image:
+    repository: ghcr.io/OWNER/helvex-frontend
+    tag: latest
+    pullPolicy: Always
+
 ingress:
   host: helvex.dicy.ch
   tls: true
-  tlsSecret: helvex-tls   # provisioned by cert-manager (Let's Encrypt)
+  tlsSecret: helvex-tls
   annotations:
     traefik.ingress.kubernetes.io/router.entrypoints: websecure
     traefik.ingress.kubernetes.io/router.tls: "true"
@@ -21,3 +29,21 @@ resources:
   limits:
     cpu: "1"
     memory: 1Gi
+
+# GHCR pull secret — create with:
+#   kubectl create secret docker-registry ghcr-pull-secret \
+#     --docker-server=ghcr.io \
+#     --docker-username=OWNER \
+#     --docker-password=GHCR_PAT \
+#     -n helvex-prod
+imagePullSecrets:
+  - name: ghcr-pull-secret
+
+postgres:
+  enabled: true
+  instances: 2
+  storageSize: 20Gi
+  backupEnabled: true
+  s3EndpointUrl: "https://fsn1.your-objectstorage.com"  # update after bucket creation
+  s3BucketPath: "s3://helvex-backups/pg/"               # update after bucket creation
+  backupRetention: "7d"

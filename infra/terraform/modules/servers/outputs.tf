@@ -18,3 +18,11 @@ output "server_ids" {
     k => s.id
   }
 }
+
+output "volume_ids" {
+  description = "Persistent data volume IDs keyed by server name (database nodes only)"
+  value = {
+    for k, v in hcloud_volume.db :
+    k => v.id
+  }
+}

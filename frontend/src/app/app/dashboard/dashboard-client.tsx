@@ -12,7 +12,9 @@ import type { Company, CompanyFilters, CompanyStats } from "@/lib/types";
 
 function buildExportUrl(filters: CompanyFilters): string {
   const params = new URLSearchParams();
-  const { page: _p, page_size: _ps, ...rest } = filters;
+  const rest: Record<string, unknown> = { ...filters };
+  delete rest.page;
+  delete rest.page_size;
   for (const [k, v] of Object.entries(rest)) {
     if (v !== undefined && v !== null && v !== "") params.set(k, String(v));
   }
@@ -31,7 +33,7 @@ export function DashboardClient({ initialCantons, initialStats }: DashboardClien
   const [selectedCompany, setSelectedCompany] = useState<Company | null>(null);
   const [, startTransition] = useTransition();
 
-  const { data: page, isLoading } = useSWR(
+  const { data: page, isLoading, mutate: mutateCompanies } = useSWR(
     ["companies", filters],
     () => fetchCompanies(filters),
     { keepPreviousData: true }
@@ -58,10 +60,22 @@ export function DashboardClient({ initialCantons, initialStats }: DashboardClien
     setFilters({ ...DEFAULT_FILTERS, [key]: value });
   }, []);
 
+  const activeStat = (() => {
+    if (filters.review_status) return { key: "review_status", value: String(filters.review_status) };
+    if (filters.proposal_status) return { key: "proposal_status", value: String(filters.proposal_status) };
+    if (filters.google_searched) return { key: "google_searched", value: String(filters.google_searched) };
+    return { key: "", value: "" };
+  })();
+
   return (
     <div className="flex flex-col h-[calc(100vh-3rem)] overflow-hidden">
       {/* Stats bar */}
-      <StatsBar stats={stats ?? initialStats} onFilter={handleStatFilter} />
+      <StatsBar
+        stats={stats ?? initialStats}
+        onFilter={handleStatFilter}
+        activeKey={activeStat.key || undefined}
+        activeValue={activeStat.value || undefined}
+      />
 
       {/* Three-panel layout */}
       <div className="flex flex-1 overflow-hidden">
@@ -109,6 +123,10 @@ export function DashboardClient({ initialCantons, initialStats }: DashboardClien
           <CompanyPreview
             company={selectedCompany}
             onClose={() => setSelectedCompany(null)}
+            onUpdated={(updated) => {
+              setSelectedCompany(updated);
+              mutateCompanies();
+            }}
           />
         )}
       </div>

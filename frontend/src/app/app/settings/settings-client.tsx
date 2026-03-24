@@ -2,7 +2,7 @@
 import { useEffect, useState } from "react";
 import useSWR from "swr";
 import { useRouter } from "next/navigation";
-import { Save, Plus, Trash2, ToggleLeft, ToggleRight, Play } from "lucide-react";
+import { Save, Plus, Trash2, ToggleLeft, ToggleRight, Loader2, Landmark, Search, MapPin } from "lucide-react";
 import {
   createBoilerplate, deleteBoilerplate, fetchBoilerplate, fetchSettings,
   saveSettings, toggleBoilerplate, triggerJob,
@@ -35,6 +35,8 @@ export function SettingsClient() {
   const [saved, setSaved] = useState(false);
   const [newPattern, setNewPattern] = useState({ pattern: "", description: "", example: "" });
   const [addingPattern, setAddingPattern] = useState(false);
+  const [triggering, setTriggering] = useState<string | null>(null);
+  const [banner, setBanner] = useState<{ kind: "success" | "error"; message: string } | null>(null);
   const router = useRouter();
 
   useEffect(() => {
@@ -59,8 +61,19 @@ export function SettingsClient() {
   }
 
   async function handleTrigger(endpoint: string) {
-    await triggerJob(endpoint);
-    router.push("/app/jobs");
+    setTriggering(endpoint);
+    setBanner(null);
+    try {
+      await triggerJob(endpoint);
+      setBanner({ kind: "success", message: "Job queued → redirecting to Jobs…" });
+      setTimeout(() => router.push("/app/jobs"), 800);
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error);
+      setBanner({ kind: "error", message: `Failed to queue job: ${msg}` });
+    } finally {
+      setTriggering(null);
+      setTimeout(() => setBanner(null), 4000);
+    }
   }
 
   async function handleToggle(id: number) {
@@ -88,7 +101,22 @@ export function SettingsClient() {
   if (!initial) return <div className="p-6 text-slate-400 text-sm">Loading…</div>;
 
   return (
-    <form onSubmit={handleSave} className="p-6 max-w-3xl mx-auto space-y-5">
+    <div className="p-6 max-w-3xl mx-auto space-y-5">
+      {banner && (
+        <div
+          role="status"
+          className={cn(
+            "rounded-lg border px-4 py-3 text-sm",
+            banner.kind === "success"
+              ? "border-green-200 bg-green-50 text-green-800"
+              : "border-red-200 bg-red-50 text-red-800",
+          )}
+        >
+          {banner.message}
+        </div>
+      )}
+
+      <form onSubmit={handleSave} className="space-y-5">
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-xl font-semibold text-slate-900">Settings</h1>
@@ -217,14 +245,38 @@ export function SettingsClient() {
       {/* Recalculate actions */}
       <SectionTitle title="Recalculate scores" />
       <div className="flex gap-3 flex-wrap">
-        <button type="button" onClick={() => handleTrigger("scoring/zefix")} className="flex items-center gap-2 bg-slate-100 hover:bg-slate-200 text-slate-700 px-4 py-2 rounded-lg text-sm font-medium transition-colors">
-          <Play size={14} /> Recalculate Zefix scores
+        <button
+          type="button"
+          onClick={() => handleTrigger("scoring/zefix")}
+          disabled={!!triggering}
+          className={cn(
+            "flex items-center gap-2 bg-slate-100 hover:bg-slate-200 disabled:opacity-60 text-slate-700 px-4 py-2 rounded-lg text-sm font-medium transition-colors",
+          )}
+        >
+          {triggering === "scoring/zefix" ? <Loader2 size={16} className="animate-spin text-blue-600" /> : <Landmark size={16} className="text-blue-600" />}
+          Recalculate Zefix scores
         </button>
-        <button type="button" onClick={() => handleTrigger("scoring/google")} className="flex items-center gap-2 bg-slate-100 hover:bg-slate-200 text-slate-700 px-4 py-2 rounded-lg text-sm font-medium transition-colors">
-          <Play size={14} /> Recalculate Google scores
+        <button
+          type="button"
+          onClick={() => handleTrigger("scoring/google")}
+          disabled={!!triggering}
+          className={cn(
+            "flex items-center gap-2 bg-slate-100 hover:bg-slate-200 disabled:opacity-60 text-slate-700 px-4 py-2 rounded-lg text-sm font-medium transition-colors",
+          )}
+        >
+          {triggering === "scoring/google" ? <Loader2 size={16} className="animate-spin text-green-600" /> : <Search size={16} className="text-green-600" />}
+          Recalculate Google scores
         </button>
-        <button type="button" onClick={() => handleTrigger("scoring/re-geocode")} className="flex items-center gap-2 bg-amber-50 hover:bg-amber-100 text-amber-700 px-4 py-2 rounded-lg text-sm font-medium transition-colors">
-          <Play size={14} /> Re-geocode all companies
+        <button
+          type="button"
+          onClick={() => handleTrigger("scoring/re-geocode")}
+          disabled={!!triggering}
+          className={cn(
+            "flex items-center gap-2 bg-amber-50 hover:bg-amber-100 disabled:opacity-60 text-amber-700 px-4 py-2 rounded-lg text-sm font-medium transition-colors",
+          )}
+        >
+          {triggering === "scoring/re-geocode" ? <Loader2 size={16} className="animate-spin text-amber-700" /> : <MapPin size={16} className="text-amber-700" />}
+          Re-geocode all companies
         </button>
       </div>
 
@@ -245,30 +297,35 @@ export function SettingsClient() {
             </button>
           </div>
         ))}
-        <form onSubmit={handleAddPattern} className="flex gap-2 mt-2">
-          <input
-            value={newPattern.pattern}
-            onChange={e => setNewPattern(p => ({ ...p, pattern: e.target.value }))}
-            placeholder="Regex pattern"
-            className={cn(inputCls, "flex-1")}
-            required
-          />
-          <input
-            value={newPattern.description}
-            onChange={e => setNewPattern(p => ({ ...p, description: e.target.value }))}
-            placeholder="Description (optional)"
-            className={cn(inputCls, "w-48")}
-          />
-          <button
-            type="submit"
-            disabled={addingPattern}
-            className="flex items-center gap-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 px-3 py-2 rounded-lg text-sm font-medium transition-colors shrink-0"
-          >
-            <Plus size={14} /> Add
-          </button>
-        </form>
       </div>
-    </form>
+
+      </form>
+
+      {/* Boilerplate add form (separate form to avoid nested forms) */}
+      <form onSubmit={handleAddPattern} className="flex gap-2">
+        <input
+          value={newPattern.pattern}
+          onChange={e => setNewPattern(p => ({ ...p, pattern: e.target.value }))}
+          placeholder="Regex pattern"
+          className={cn(inputCls, "flex-1")}
+          required
+        />
+        <input
+          value={newPattern.description}
+          onChange={e => setNewPattern(p => ({ ...p, description: e.target.value }))}
+          placeholder="Description (optional)"
+          className={cn(inputCls, "w-48")}
+        />
+        <button
+          type="submit"
+          disabled={addingPattern}
+          className="flex items-center gap-1.5 bg-slate-100 hover:bg-slate-200 disabled:opacity-60 text-slate-700 px-3 py-2 rounded-lg text-sm font-medium transition-colors shrink-0"
+        >
+          {addingPattern ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} />}
+          Add
+        </button>
+      </form>
+    </div>
   );
 }
 

@@ -1,13 +1,13 @@
 "use client";
-import { useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { ExternalLink, ChevronLeft, Globe, MapPin, Building2, Phone, Mail, FileText, Plus, Trash2, Loader2 } from "lucide-react";
-import { ScoreBar } from "@/components/ui/score-bar";
 import { Badge } from "@/components/ui/badge";
-import { reviewBadgeClass, proposalBadgeClass, fmtDate, fmtDateTime, cn } from "@/lib/utils";
+import { reviewBadgeClass, proposalBadgeClass, fmtDate, fmtDateTime, fmtRelativeTime, cn, scoreColor } from "@/lib/utils";
 import { createNote, deleteNote, updateCompany } from "@/lib/api";
 import { REVIEW_STATUSES, PROPOSAL_STATUSES } from "@/lib/types";
 import type { Company, Note } from "@/lib/types";
+import "leaflet/dist/leaflet.css";
 
 interface Props {
   company: Company;
@@ -19,6 +19,72 @@ export function CompanyDetailClient({ company: initial }: Props) {
   const [saving, setSaving] = useState(false);
   const [noteText, setNoteText] = useState("");
   const [addingNote, setAddingNote] = useState(false);
+  const [purposeExpanded, setPurposeExpanded] = useState(false);
+
+  const mapRef = useRef<HTMLDivElement>(null);
+  const mapInstanceRef = useRef<import("leaflet").Map | null>(null);
+
+  const combinedScore = company.combined_score;
+
+  const headerAccentClass = useMemo(() => {
+    if (combinedScore == null) return "border-l-slate-200";
+    if (combinedScore >= 70) return "border-l-green-500";
+    if (combinedScore >= 40) return "border-l-yellow-400";
+    return "border-l-red-400";
+  }, [combinedScore]);
+
+  const scoreTextClass = useMemo(() => {
+    if (combinedScore == null) return "text-slate-600";
+    if (combinedScore >= 70) return "text-green-700";
+    if (combinedScore >= 40) return "text-yellow-700";
+    return "text-red-700";
+  }, [combinedScore]);
+
+  const lastScoredIso = useMemo(() => {
+    const dates = [company.zefix_scored_at, company.claude_scored_at, company.website_checked_at].filter(Boolean) as string[];
+    if (dates.length === 0) return null;
+    dates.sort((a, b) => new Date(b).getTime() - new Date(a).getTime());
+    return dates[0] ?? null;
+  }, [company.zefix_scored_at, company.claude_scored_at, company.website_checked_at]);
+
+  useEffect(() => {
+    const lat = company.lat;
+    const lon = company.lon;
+    if (!mapRef.current || lat == null || lon == null) return;
+    if (mapInstanceRef.current) return;
+
+    let mounted = true;
+    (async () => {
+      const L = await import("leaflet");
+      if (!mounted || !mapRef.current) return;
+
+      const map = L.map(mapRef.current, {
+        zoomControl: false,
+        attributionControl: false,
+      }).setView([lat, lon], 14);
+
+      L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+        maxZoom: 19,
+        attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
+      }).addTo(map);
+
+      L.circleMarker([lat, lon], {
+        radius: 7,
+        fillColor: "#3b82f6",
+        color: "#fff",
+        weight: 2,
+        fillOpacity: 0.9,
+      }).addTo(map);
+
+      mapInstanceRef.current = map;
+    })();
+
+    return () => {
+      mounted = false;
+      mapInstanceRef.current?.remove();
+      mapInstanceRef.current = null;
+    };
+  }, [company.lat, company.lon]);
 
   async function handleStatusChange(field: "review_status" | "proposal_status", value: string) {
     setSaving(true);
@@ -60,10 +126,18 @@ export function CompanyDetailClient({ company: initial }: Props) {
       </div>
 
       {/* Header */}
-      <div className="bg-white rounded-xl border border-slate-200 p-6 shadow-sm">
+      <div className={cn("bg-white rounded-xl border border-slate-200 border-l-4 p-6 shadow-sm", headerAccentClass)}>
         <div className="flex items-start justify-between gap-4">
           <div>
-            <h1 className="text-2xl font-bold text-slate-900">{company.name}</h1>
+            <div className="flex items-start gap-4">
+              <h1 className="text-2xl font-bold text-slate-900">{company.name}</h1>
+              <div className="shrink-0">
+                <div className={cn("text-2xl font-extrabold leading-none", scoreTextClass)}>
+                  {combinedScore == null ? "—" : Math.round(combinedScore)} <span className="text-sm font-semibold text-slate-400">/ 100</span>
+                </div>
+                <div className="text-xs text-slate-400 mt-0.5">Combined score</div>
+              </div>
+            </div>
             <p className="text-sm text-slate-500 mt-0.5">
               {[company.legal_form, company.canton, company.municipality].filter(Boolean).join(" · ")}
             </p>
@@ -81,37 +155,70 @@ export function CompanyDetailClient({ company: initial }: Props) {
               ))}
             </div>
           </div>
-          {company.website_url && (
-            <a
-              href={company.website_url}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="flex items-center gap-1.5 text-sm text-blue-600 hover:text-blue-800 px-3 py-1.5 rounded-lg border border-blue-200 hover:bg-blue-50 shrink-0 transition-colors"
-            >
-              <Globe size={13} /> Visit website <ExternalLink size={11} />
-            </a>
-          )}
+          <div className="flex flex-col gap-2 items-end shrink-0">
+            {company.website_url && (
+              <a
+                href={company.website_url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center gap-1.5 text-sm text-blue-600 hover:text-blue-800 px-3 py-1.5 rounded-lg border border-blue-200 hover:bg-blue-50 transition-colors"
+              >
+                <Globe size={13} /> Visit website <ExternalLink size={11} />
+              </a>
+            )}
+            {company.uid && (
+              <a
+                href={`https://www.zefix.ch/en/search/entity/list/firm/${company.uid}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center gap-1.5 text-sm text-slate-700 hover:text-slate-900 px-3 py-1.5 rounded-lg border border-slate-200 hover:bg-slate-50 transition-colors"
+              >
+                View on Zefix <ExternalLink size={11} />
+              </a>
+            )}
+          </div>
         </div>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Scores */}
         <div className="bg-white rounded-xl border border-slate-200 p-5 space-y-4 shadow-sm">
-          <h2 className="text-sm font-semibold text-slate-700">Scores</h2>
+          <div className="flex items-center justify-between">
+            <h2 className="text-sm font-semibold text-slate-700">Scores</h2>
+            {lastScoredIso && (
+              <span className="text-xs text-slate-500 bg-slate-50 border border-slate-200 rounded-full px-2 py-0.5">
+                last scored {fmtRelativeTime(lastScoredIso)}
+              </span>
+            )}
+          </div>
+
           {[
             { label: "Combined", score: company.combined_score, date: null },
             { label: "Google", score: company.website_match_score, date: company.website_checked_at },
             { label: "Claude", score: company.claude_score, date: company.claude_scored_at },
             { label: "Zefix", score: company.zefix_score, date: company.zefix_scored_at },
-          ].map(({ label, score, date }) => (
-            <div key={label}>
-              <div className="flex items-center justify-between mb-1">
-                <span className="text-xs text-slate-500">{label}</span>
-                {date && <span className="text-xs text-slate-400">{fmtDate(date)}</span>}
+          ].map(({ label, score, date }) => {
+            const textCls = score == null ? "text-slate-600" : score >= 70 ? "text-green-700" : score >= 40 ? "text-yellow-700" : "text-red-700";
+            return (
+              <div key={label} className="rounded-lg border border-slate-200 bg-white p-3">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <div className="text-xs text-slate-500">{label}</div>
+                    {date && <div className="text-xs text-slate-400">{fmtDate(date)}</div>}
+                  </div>
+                  <div className={cn("text-lg font-bold", textCls)}>
+                    {score == null ? "—" : Math.round(score)}
+                  </div>
+                </div>
+                <div className="mt-2 h-2 bg-slate-100 rounded-full overflow-hidden">
+                  <div
+                    className={cn("h-full rounded-full transition-all", scoreColor(score))}
+                    style={{ width: `${score ?? 0}%` }}
+                  />
+                </div>
               </div>
-              <ScoreBar score={score} />
-            </div>
-          ))}
+            );
+          })}
           {company.claude_category && (
             <div className="pt-2 border-t border-slate-100">
               <span className="text-xs text-slate-400 block mb-1">Category</span>
@@ -129,6 +236,13 @@ export function CompanyDetailClient({ company: initial }: Props) {
         {/* Company info */}
         <div className="bg-white rounded-xl border border-slate-200 p-5 space-y-3 shadow-sm">
           <h2 className="text-sm font-semibold text-slate-700">Company Info</h2>
+
+          {company.lat != null && company.lon != null && (
+            <div className="rounded-lg border border-slate-200 overflow-hidden">
+              <div ref={mapRef} className="h-40 w-full" />
+            </div>
+          )}
+
           <dl className="space-y-2 text-sm">
             {[
               { label: "UID", value: company.uid },
@@ -139,7 +253,7 @@ export function CompanyDetailClient({ company: initial }: Props) {
             ].map(({ label, value }) => value && (
               <div key={label} className="flex gap-2">
                 <dt className="text-slate-400 w-24 shrink-0">{label}</dt>
-                <dd className="text-slate-700">{value}</dd>
+                <dd className={cn("text-slate-700", label === "Status" && String(value).toLowerCase() === "cancelled" && "text-red-700 font-semibold")}>{value}</dd>
               </div>
             ))}
             {company.address && (
@@ -158,7 +272,28 @@ export function CompanyDetailClient({ company: initial }: Props) {
           {company.purpose && (
             <div className="pt-2 border-t border-slate-100">
               <span className="text-xs text-slate-400 flex items-center gap-1 mb-1"><FileText size={11} /> Purpose</span>
-              <p className="text-xs text-slate-600 leading-relaxed">{company.purpose}</p>
+              <div className="relative">
+                <p
+                  className={cn(
+                    "text-xs text-slate-600 leading-relaxed whitespace-pre-wrap",
+                    !purposeExpanded && "max-h-16 overflow-hidden",
+                  )}
+                >
+                  {company.purpose}
+                </p>
+                {!purposeExpanded && company.purpose.length > 220 && (
+                  <div className="absolute inset-x-0 bottom-0 h-8 bg-gradient-to-t from-white to-transparent" />
+                )}
+              </div>
+              {company.purpose.length > 220 && (
+                <button
+                  type="button"
+                  onClick={() => setPurposeExpanded(v => !v)}
+                  className="mt-1 text-xs text-blue-600 hover:underline"
+                >
+                  {purposeExpanded ? "Show less" : "Show more"}
+                </button>
+              )}
             </div>
           )}
           {company.cantonal_excerpt_web && (
@@ -172,18 +307,48 @@ export function CompanyDetailClient({ company: initial }: Props) {
         {/* Actions + Contact */}
         <div className="space-y-4">
           <div className="bg-white rounded-xl border border-slate-200 p-5 space-y-4 shadow-sm">
-            <h2 className="text-sm font-semibold text-slate-700">Status</h2>
+            <div className="relative">
+              <h2 className="text-sm font-semibold text-slate-700">Status</h2>
+
+              {saving && (
+                <div className="absolute inset-0 bg-white/60 rounded-xl flex items-center justify-center">
+                  <Loader2 size={18} className="animate-spin text-slate-600" />
+                </div>
+              )}
+            </div>
             <div>
               <label className="text-xs text-slate-500 block mb-1">Review status</label>
-              <select
-                value={company.review_status ?? ""}
-                disabled={saving}
-                onChange={e => handleStatusChange("review_status", e.target.value)}
-                className="w-full rounded-lg border border-slate-200 px-2.5 py-1.5 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-400"
-              >
-                <option value="">— pending —</option>
-                {REVIEW_STATUSES.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
-              </select>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  disabled={saving}
+                  onClick={() => handleStatusChange("review_status", "")}
+                  className={cn(
+                    "px-2.5 py-1 rounded-full text-xs font-medium border transition-colors",
+                    (company.review_status ?? "") === "" ? "bg-gray-100 text-gray-600 border-gray-200" : "bg-white text-gray-500 border-slate-200 hover:bg-slate-50",
+                  )}
+                >
+                  Pending
+                </button>
+                {REVIEW_STATUSES.map(s => {
+                  const active = company.review_status === s.value;
+                  return (
+                    <button
+                      key={s.value}
+                      type="button"
+                      disabled={saving}
+                      onClick={() => handleStatusChange("review_status", s.value)}
+                      className={cn(
+                        "px-2.5 py-1 rounded-full text-xs font-medium border transition-all",
+                        reviewBadgeClass(s.value),
+                        active ? "border-slate-300" : "border-transparent opacity-70 hover:opacity-100",
+                      )}
+                    >
+                      {s.label}
+                    </button>
+                  );
+                })}
+              </div>
             </div>
             <div>
               <label className="text-xs text-slate-500 block mb-1">Proposal status</label>
@@ -241,22 +406,27 @@ export function CompanyDetailClient({ company: initial }: Props) {
       {/* Notes */}
       <div className="bg-white rounded-xl border border-slate-200 p-5 shadow-sm">
         <h2 className="text-sm font-semibold text-slate-700 mb-4">Notes ({notes.length})</h2>
-        <form onSubmit={handleAddNote} className="flex gap-2 mb-4">
-          <textarea
-            value={noteText}
-            onChange={e => setNoteText(e.target.value)}
-            placeholder="Add a note…"
-            rows={2}
-            className="flex-1 px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-300 resize-none"
-          />
-          <button
-            type="submit"
-            disabled={addingNote || !noteText.trim()}
-            className="flex items-center gap-1.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white px-3 py-2 rounded-lg text-sm font-medium transition-colors self-start"
-          >
-            {addingNote ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} />}
-            Add
-          </button>
+        <form onSubmit={handleAddNote} className="mb-4">
+          <div className="flex gap-2">
+            <textarea
+              value={noteText}
+              onChange={e => setNoteText(e.target.value)}
+              placeholder="Add a note…"
+              rows={2}
+              className="flex-1 px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-300 resize-none"
+            />
+            <button
+              type="submit"
+              disabled={addingNote || !noteText.trim()}
+              className="flex items-center gap-1.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white px-3 py-2 rounded-lg text-sm font-medium transition-colors self-start"
+            >
+              {addingNote ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} />}
+              Add
+            </button>
+          </div>
+          <div className="mt-1 flex justify-end">
+            <span className="text-xs text-slate-400">{noteText.length} chars</span>
+          </div>
         </form>
         {notes.length === 0 && (
           <p className="text-sm text-slate-400 text-center py-4">No notes yet</p>
@@ -264,7 +434,16 @@ export function CompanyDetailClient({ company: initial }: Props) {
         <div className="space-y-2">
           {notes.map(n => (
             <div key={n.id} className="flex gap-3 bg-slate-50 rounded-lg p-3">
+              <div className="shrink-0 pt-0.5">
+                <div className="h-8 w-8 rounded-full bg-slate-200 text-slate-700 flex items-center justify-center text-xs font-semibold">
+                  U
+                </div>
+              </div>
               <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-semibold text-slate-600">User</span>
+                  <span className="text-xs text-slate-400">{fmtRelativeTime(n.created_at)}</span>
+                </div>
                 <p className="text-sm text-slate-700 whitespace-pre-wrap">{n.content}</p>
                 <p className="text-xs text-slate-400 mt-1">{fmtDateTime(n.created_at)}</p>
               </div>

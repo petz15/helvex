@@ -31,7 +31,7 @@ ingress:
   tlsSecret: ""
   annotations: {}
 
-# Name of the K8s Secret that holds all env vars (created via scripts/k8s-create-secret.sh)
+# Name of the K8s Secret that holds all env vars (created via Doppler operator or manually)
 envSecretName: helvex-env
 
 resources:
@@ -41,3 +41,18 @@ resources:
   limits:
     cpu: "1"
     memory: 1Gi
+
+# GHCR pull secret — set in prod.yaml; leave empty for dev (local registry needs no auth)
+imagePullSecrets: []
+
+# CloudNativePG PostgreSQL cluster
+postgres:
+  enabled: false   # set to true in prod once CloudNativePG operator is installed
+  instances: 2
+  storageSize: 20Gi
+  database: helvex
+  owner: helvex
+  backupEnabled: false
+  s3EndpointUrl: ""    # e.g. https://fsn1.your-objectstorage.com
+  s3BucketPath: ""     # e.g. s3://helvex-backups/pg/
+  backupRetention: "7d"

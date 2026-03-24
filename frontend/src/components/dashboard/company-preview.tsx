@@ -1,29 +1,103 @@
 "use client";
-import { X, ExternalLink, ChevronRight } from "lucide-react";
+import { useEffect, useState } from "react";
+import { X, ExternalLink, ChevronRight, MapPin, Loader2 } from "lucide-react";
 import Link from "next/link";
 import { ScoreBar } from "@/components/ui/score-bar";
 import { Badge } from "@/components/ui/badge";
-import { reviewBadgeClass, proposalBadgeClass, fmtDate } from "@/lib/utils";
+import { reviewBadgeClass, proposalBadgeClass, fmtDate, cn } from "@/lib/utils";
+import { updateCompany } from "@/lib/api";
 import type { Company } from "@/lib/types";
 
 interface CompanyPreviewProps {
   company: Company | null;
   onClose: () => void;
+  onUpdated?: (company: Company) => void;
 }
 
-export function CompanyPreview({ company, onClose }: CompanyPreviewProps) {
+function avatarBg(score: number | null): string {
+  if (score == null) return "bg-slate-200 text-slate-700";
+  if (score >= 70) return "bg-green-100 text-green-800";
+  if (score >= 40) return "bg-yellow-100 text-yellow-800";
+  return "bg-red-100 text-red-800";
+}
+
+export function CompanyPreview({ company: incoming, onClose, onUpdated }: CompanyPreviewProps) {
+  const [company, setCompany] = useState<Company | null>(incoming);
+  const [updating, setUpdating] = useState<string | null>(null);
+
+  // keep local copy in sync when selection changes
+  useEffect(() => {
+    setCompany(incoming);
+  }, [incoming]);
+
   if (!company) return null;
+
+  const initials = (company.name || "?").trim().slice(0, 1).toUpperCase();
+
+  async function quickSetReview(status: string) {
+    if (!company) return;
+    const current = company;
+    setUpdating(status);
+    try {
+      const updated = await updateCompany(current.id, { review_status: status });
+      setCompany((c) => (c ? { ...c, ...updated } : c));
+      onUpdated?.({ ...current, ...updated });
+    } finally {
+      setUpdating(null);
+    }
+  }
 
   return (
     <aside className="w-80 shrink-0 flex flex-col bg-white border-l border-slate-200 overflow-y-auto">
       {/* Header */}
       <div className="flex items-start justify-between px-4 py-3 border-b border-slate-100">
-        <div className="flex-1 min-w-0">
-          <h2 className="font-semibold text-slate-800 text-sm leading-snug">{company.name}</h2>
-          <p className="text-xs text-slate-500 mt-0.5">{company.canton} · {company.legal_form}</p>
+        <div className="flex-1 min-w-0 flex gap-2">
+          <div className={cn("h-8 w-8 rounded-full flex items-center justify-center text-xs font-bold shrink-0", avatarBg(company.combined_score))}>
+            {initials}
+          </div>
+          <div className="min-w-0">
+            <h2 className="font-semibold text-slate-800 text-sm leading-snug truncate">{company.name}</h2>
+            <p className="text-xs text-slate-500 mt-0.5 flex items-center gap-1">
+              <MapPin size={12} className="text-slate-400" />
+              <span className="truncate">{[company.municipality, company.canton].filter(Boolean).join(", ") || "—"}</span>
+              {company.legal_form && <span className="text-slate-300">·</span>}
+              {company.legal_form && <span className="truncate">{company.legal_form}</span>}
+            </p>
+          </div>
         </div>
         <button onClick={onClose} className="ml-2 text-slate-400 hover:text-slate-600 mt-0.5">
           <X size={16} />
+        </button>
+      </div>
+
+      {/* Quick actions */}
+      <div className="px-4 py-2 flex flex-wrap gap-2 border-b border-slate-100">
+        <button
+          type="button"
+          disabled={!!updating}
+          onClick={() => quickSetReview("interesting")}
+          className="px-2.5 py-1 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800 hover:bg-yellow-200 disabled:opacity-50 transition-colors"
+        >
+          {updating === "interesting" ? <Loader2 size={12} className="inline mr-1 animate-spin" /> : null}
+          Mark interesting
+        </button>
+        <button
+          type="button"
+          disabled={!!updating}
+          onClick={() => quickSetReview("rejected")}
+          className="px-2.5 py-1 rounded-full text-xs font-medium bg-red-100 text-red-800 hover:bg-red-200 disabled:opacity-50 transition-colors"
+        >
+          {updating === "rejected" ? <Loader2 size={12} className="inline mr-1 animate-spin" /> : null}
+          Mark rejected
+        </button>
+        <button
+          type="button"
+          disabled={!!updating}
+          onClick={() => quickSetReview("confirmed_proposal")}
+          className="px-2.5 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800 hover:bg-green-200 disabled:opacity-50 transition-colors"
+        >
+          {updating === "confirmed_proposal" ? <Loader2 size={12} className="inline mr-1 animate-spin" /> : null}
+          Mark confirmed
         </button>
       </div>
 

@@ -37,9 +37,47 @@ export function FilterSidebar({ filters, cantons, taxonomy, onChange, onClear, r
     [filters, onChange]
   );
 
+  const unset = useCallback(
+    (key: keyof CompanyFilters) => onChange({ ...filters, [key]: undefined, page: 1 }),
+    [filters, onChange]
+  );
+
   const activeCount = Object.entries(filters).filter(
     ([k, v]) => !["page", "page_size", "sort"].includes(k) && v !== undefined && v !== ""
   ).length;
+
+  const activeEntries = Object.entries(filters).filter(
+    ([k, v]) => !["page", "page_size", "sort"].includes(k) && v !== undefined && v !== ""
+  ) as [keyof CompanyFilters, string | number][];
+
+  function fmtChip(key: keyof CompanyFilters, value: string | number): string {
+    const labels: Partial<Record<keyof CompanyFilters, string>> = {
+      q: "Search",
+      canton: "Canton",
+      review_status: "Review",
+      proposal_status: "Proposal",
+      google_searched: "Google",
+      tags: "Tags",
+      claude_category: "Claude",
+      tfidf_cluster: "Cluster",
+      purpose_keywords: "Keyword",
+      min_google_score: "Min Google",
+      min_claude_score: "Min Claude",
+      min_zefix_score: "Min Zefix",
+      exclude_review_status: "Exclude review",
+      exclude_proposal_status: "Exclude proposal",
+      exclude_canton: "Exclude canton",
+      exclude_tags: "Exclude tags",
+      sort: "Sort",
+    };
+
+    const prettyValue = String(value)
+      .replace(/^_none$/, "none")
+      .replace(/^_any$/, "any")
+      .replace(/_/g, " ");
+
+    return `${labels[key] ?? String(key).replace(/_/g, " ")}: ${prettyValue}`;
+  }
 
   return (
     <aside className="w-64 shrink-0 flex flex-col bg-white border-r border-slate-200 overflow-y-auto">
@@ -55,6 +93,29 @@ export function FilterSidebar({ filters, cantons, taxonomy, onChange, onClear, r
       </div>
       <div className="flex-1 px-4 py-3 flex flex-col gap-4 text-sm">
 
+        {activeEntries.length > 0 && (
+          <div>
+            <div className="flex flex-wrap gap-1.5">
+              {activeEntries.map(([k, v]) => (
+                <span
+                  key={String(k)}
+                  className="inline-flex items-center gap-1 rounded-full bg-slate-100 text-slate-700 border border-slate-200 px-2 py-0.5 text-xs"
+                >
+                  {fmtChip(k, v)}
+                  <button
+                    type="button"
+                    onClick={() => unset(k)}
+                    className="text-slate-400 hover:text-slate-700"
+                    aria-label={`Remove ${String(k)}`}
+                  >
+                    <X size={12} />
+                  </button>
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
+
         <Field label="Search">
           <input
             type="text"
@@ -65,7 +126,7 @@ export function FilterSidebar({ filters, cantons, taxonomy, onChange, onClear, r
           />
         </Field>
 
-        <Field label="Canton">
+        <Field label={`Canton (${cantons.length} options)`}>
           <div className="relative">
             <select className={selectCls} value={filters.canton ?? ""} onChange={(e) => set("canton", e.target.value)}>
               <option value="">All cantons</option>
@@ -75,7 +136,7 @@ export function FilterSidebar({ filters, cantons, taxonomy, onChange, onClear, r
           </div>
         </Field>
 
-        <Field label="Review status">
+        <Field label={`Review status (${REVIEW_STATUSES.length + 2} options)`}>
           <div className="relative">
             <select className={selectCls} value={filters.review_status ?? ""} onChange={(e) => set("review_status", e.target.value)}>
               <option value="">All</option>
@@ -86,7 +147,7 @@ export function FilterSidebar({ filters, cantons, taxonomy, onChange, onClear, r
           </div>
         </Field>
 
-        <Field label="Proposal status">
+        <Field label={`Proposal status (${PROPOSAL_STATUSES.length + 2} options)`}>
           <div className="relative">
             <select className={selectCls} value={filters.proposal_status ?? ""} onChange={(e) => set("proposal_status", e.target.value)}>
               <option value="">All</option>
@@ -119,7 +180,7 @@ export function FilterSidebar({ filters, cantons, taxonomy, onChange, onClear, r
             onChange={(e) => set("claude_category", e.target.value)} />
         </Field>
 
-        <Field label="TF-IDF cluster">
+        <Field label={`TF-IDF cluster (${clusters.length} options)`}>
           <div className="relative">
             <select className={selectCls} value={filters.tfidf_cluster ?? ""} onChange={(e) => set("tfidf_cluster", e.target.value)}>
               <option value="">All</option>
@@ -131,7 +192,7 @@ export function FilterSidebar({ filters, cantons, taxonomy, onChange, onClear, r
           </div>
         </Field>
 
-        <Field label="Purpose keyword">
+        <Field label={`Purpose keyword (${keywords.length} options)`}>
           <div className="relative">
             <select className={selectCls} value={filters.purpose_keywords ?? ""} onChange={(e) => set("purpose_keywords", e.target.value)}>
               <option value="">All</option>

@@ -1,4 +1,39 @@
 {{- if .Values.ingress.enabled }}
+{{- if .Values.ingress.tls }}
+# Redirect HTTP → HTTPS via a Traefik Middleware + a separate Ingress on the web entrypoint
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: {{ include "helvex.fullname" . }}-redirect-https
+  namespace: {{ .Release.Namespace }}
+spec:
+  redirectScheme:
+    scheme: https
+    permanent: true
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "helvex.fullname" . }}-http-redirect
+  namespace: {{ .Release.Namespace }}
+  annotations:
+    traefik.ingress.kubernetes.io/router.entrypoints: web
+    traefik.ingress.kubernetes.io/router.middlewares: {{ .Release.Namespace }}-{{ include "helvex.fullname" . }}-redirect-https@kubernetescrd
+spec:
+  ingressClassName: traefik
+  rules:
+    - host: {{ .Values.ingress.host }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "helvex.fullname" . }}-frontend
+                port:
+                  number: 3000
+---
+{{- end }}
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
@@ -11,6 +46,7 @@ metadata:
     {{- toYaml . | nindent 4 }}
   {{- end }}
 spec:
+  ingressClassName: traefik
   {{- if .Values.ingress.tls }}
   tls:
     - hosts:

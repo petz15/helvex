@@ -1,3 +1,11 @@
+repositories:
+  - name: jetstack
+    url: https://charts.jetstack.io
+  - name: cloudnative-pg
+    url: https://cloudnative-pg.github.io/charts
+  - name: bitnami
+    url: https://charts.bitnami.com/bitnami
+
 environments:
   dev:
     values:
@@ -9,10 +17,54 @@ environments:
 ---
 
 releases:
+  # cert-manager — TLS certificate automation (Let's Encrypt)
+  - name: cert-manager
+    namespace: cert-manager
+    chart: jetstack/cert-manager
+    version: "v1.15.0"
+    createNamespace: true
+    set:
+      - name: crds.enabled
+        value: "true"
+
+  # CloudNativePG operator — K8s-native PostgreSQL
+  - name: cloudnative-pg
+    namespace: cnpg-system
+    chart: cloudnative-pg/cloudnative-pg
+    version: "0.22.0"
+    createNamespace: true
+
+  # Redis — job queue backing store
+  - name: redis
+    namespace: helvex-{{ .Environment.Name }}
+    chart: bitnami/redis
+    version: "19.6.4"
+    createNamespace: true
+    values:
+      - architecture: standalone
+        auth:
+          enabled: true
+          existingSecret: helvex-env
+          existingSecretPasswordKey: REDIS_PASSWORD
+        master:
+          persistence:
+            size: 10Gi
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+
+  # Main application
   - name: helvex
     namespace: helvex-{{ .Environment.Name }}
     chart: ./charts/helvex
     createNamespace: true
+    needs:
+      - cert-manager/cert-manager
+      - cnpg-system/cloudnative-pg
     values:
       - ./charts/helvex/values.yaml
       - environments/{{ .Environment.Name }}.yaml

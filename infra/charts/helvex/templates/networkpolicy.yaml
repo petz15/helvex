@@ -1,0 +1,21 @@
+# Block access to Hetzner's instance metadata API from all pods in this namespace.
+# A compromised container should not be able to retrieve cloud credentials via
+# the link-local metadata endpoint at 169.254.169.254.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "helvex.fullname" . }}-deny-metadata
+  namespace: {{ .Release.Namespace }}
+spec:
+  podSelector: {}   # applies to every pod in the namespace
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              - 169.254.169.254/32
+    - to:
+        - ipBlock:
+            cidr: ::/0
