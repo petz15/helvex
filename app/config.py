@@ -1,4 +1,5 @@
 import secrets
+from urllib.parse import urlparse
 
 from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -59,8 +60,18 @@ class Settings(BaseSettings):
             return self
 
         weak_db_passwords = {"", "password", "changeme", "your_password_here"}
-        if self.postgres_password.strip().lower() in weak_db_passwords:
-            raise ValueError("Unsafe POSTGRES_PASSWORD for production-like environment")
+        if self.database_url.strip():
+            parsed = urlparse(self.database_url)
+            scheme = (parsed.scheme or "").lower()
+            if not scheme.startswith("postgres"):
+                raise ValueError("DATABASE_URL must be a postgres/postgresql URL in production-like environment")
+
+            db_password = (parsed.password or "").strip().lower()
+            if db_password in weak_db_passwords:
+                raise ValueError("Unsafe DATABASE_URL password for production-like environment")
+        else:
+            if self.postgres_password.strip().lower() in weak_db_passwords:
+                raise ValueError("Unsafe POSTGRES_PASSWORD for production-like environment")
 
         if len(self.secret_key.strip()) < 32:
             raise ValueError("SECRET_KEY must be set and at least 32 characters in production-like environment")
