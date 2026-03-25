@@ -192,33 +192,58 @@ def require_tier(min_tier: str):
 
 
 # ---------------------------------------------------------------------------
-# Login rate limiting (in-memory; replaced by Redis in Phase 2)
+# ---------------------------------------------------------------------------
+# Rate limiting — Redis-backed with in-memory fallback
 # ---------------------------------------------------------------------------
 
-_login_attempts: dict[str, list[float]] = defaultdict(list)
 _RATE_WINDOW = 900   # 15 minutes
-_RATE_MAX = 10       # failed attempts per window per IP
+_RATE_MAX = 10       # failed login attempts per window per IP
 
-# General request rate limiter — counts every call regardless of outcome
+# In-memory fallback (used when Redis is unavailable)
+_login_attempts: dict[str, list[float]] = defaultdict(list)
 _request_counts: dict[str, list[float]] = defaultdict(list)
 
 
-def _trim_attempts(ip: str) -> list[float]:
-    now = time.monotonic()
-    attempts = [t for t in _login_attempts[ip] if now - t < _RATE_WINDOW]
-    _login_attempts[ip] = attempts
-    return attempts
+def _get_redis():
+    """Return a Redis client if configured, else None."""
+    try:
+        from app.config import settings as _s
+        if not _s.redis_url:
+            return None
+        import redis as _redis
+        client = _redis.Redis.from_url(_s.redis_url, socket_connect_timeout=1, socket_timeout=1)
+        client.ping()
+        return client
+    except Exception:
+        return None
 
 
 def is_login_allowed(ip: str) -> bool:
     """Return True if this IP can attempt another login."""
-    return len(_trim_attempts(ip)) < _RATE_MAX
+    r = _get_redis()
+    if r is not None:
+        count = r.get(f"rl:login:{ip}")
+        return int(count) < _RATE_MAX if count else True
+    now = time.monotonic()
+    attempts = [t for t in _login_attempts[ip] if now - t < _RATE_WINDOW]
+    _login_attempts[ip] = attempts
+    return len(attempts) < _RATE_MAX
 
 
 def record_login_failure(ip: str) -> None:
     """Record one failed login attempt for this IP."""
-    _trim_attempts(ip)
-    _login_attempts[ip].append(time.monotonic())
+    r = _get_redis()
+    if r is not None:
+        key = f"rl:login:{ip}"
+        pipe = r.pipeline()
+        pipe.incr(key)
+        pipe.expire(key, _RATE_WINDOW)
+        pipe.execute()
+        return
+    now = time.monotonic()
+    attempts = [t for t in _login_attempts[ip] if now - t < _RATE_WINDOW]
+    attempts.append(now)
+    _login_attempts[ip] = attempts
 
 
 def check_login_rate_limit(ip: str) -> bool:
@@ -235,11 +260,19 @@ def check_public_rate_limit(ip: str, action: str, *, window: float = 900, max_re
     Counts every call (success or failure). Returns False when the IP exceeds
     *max_requests* within *window* seconds for this action.
     """
+    r = _get_redis()
+    if r is not None:
+        key = f"rl:{action}:{ip}"
+        pipe = r.pipeline()
+        pipe.incr(key)
+        pipe.expire(key, int(window))
+        count, _ = pipe.execute()
+        return count <= max_requests
     bucket = f"{action}:{ip}"
     now = time.monotonic()
     calls = [t for t in _request_counts[bucket] if now - t < window]
     if len(calls) >= max_requests:
-        _request_counts[bucket] = calls  # keep trimmed
+        _request_counts[bucket] = calls
         return False
     calls.append(now)
     _request_counts[bucket] = calls

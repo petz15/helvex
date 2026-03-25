@@ -1,0 +1,20 @@
+# Prod monitoring overrides
+
+grafana:
+  adminPassword: ""  # TODO: move to K8s secret — set GRAFANA_ADMIN_PASSWORD in helvex-env
+  grafana.ini:
+    server:
+      root_url: https://grafana.helvex.dicy.ch
+  ingress:
+    enabled: true
+    ingressClassName: traefik
+    hosts:
+      - grafana.helvex.dicy.ch
+    tls:
+      - secretName: grafana-tls
+        hosts:
+          - grafana.helvex.dicy.ch
+    annotations:
+      traefik.ingress.kubernetes.io/router.entrypoints: websecure
+      traefik.ingress.kubernetes.io/router.tls: "true"
+      cert-manager.io/cluster-issuer: letsencrypt-prod

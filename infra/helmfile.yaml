@@ -7,6 +7,8 @@ repositories:
     url: https://actions-runner-controller.github.io/actions-runner-controller
   - name: arc-runners
     url: https://actions-runner-controller.github.io/actions-runner-controller
+  - name: prometheus-community
+    url: https://prometheus-community.github.io/helm-charts
 
 environments:
   dev:
@@ -68,6 +70,16 @@ releases:
         template:
           spec:
             serviceAccountName: arc-runner
+
+  # Prometheus + Grafana monitoring stack
+  - name: monitoring
+    namespace: monitoring
+    chart: prometheus-community/kube-prometheus-stack
+    version: "58.7.2"
+    createNamespace: true
+    values:
+      - ./charts/monitoring/values.yaml
+      - environments/monitoring-{{ .Environment.Name }}.yaml
 
   # Main application
   - name: helvex

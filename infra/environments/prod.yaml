@@ -45,3 +45,6 @@ postgres:
   backupRetention: "7d"
   pooler:
     enabled: false
+
+monitoring:
+  enabled: true
