@@ -40,3 +40,5 @@ postgres:
   s3EndpointUrl: "https://nbg1.your-objectstorage.com"
   s3BucketPath: "s3://helvex-backups/pg/"
   backupRetention: "7d"
+  pooler:
+    enabled: true

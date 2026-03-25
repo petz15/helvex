@@ -136,7 +136,9 @@
       "Bash(cmd.exe /c \"dir /s /b C:\\\\Users\\\\peter\\\\bin\\\\terraform\\\\*.exe 2>nul\")",
       "Bash(cmd.exe /c \"dir /s /b C:\\\\Users\\\\peter\\\\Downloads\\\\terraform*.exe 2>nul && dir /s /b C:\\\\tools\\\\terraform*.exe 2>nul && dir /s /b C:\\\\Users\\\\peter\\\\bin\\\\terraform\\\\*.exe 2>nul\")",
       "Bash(cmd.exe /c \"dir /s /b C:\\\\Users\\\\peter\\\\terraform.exe C:\\\\Windows\\\\System32\\\\terraform.exe C:\\\\Windows\\\\SysWOW64\\\\terraform.exe 2>nul\")",
-      "Bash(curl -s https://api.github.com/repos/actions/runner/releases/latest)"
+      "Bash(curl -s https://api.github.com/repos/actions/runner/releases/latest)",
+      "Bash(find c:Dcoding_projectszefix_analyzer/app/models -type f -name *.py)",
+      "Bash(find c:Dcoding_projectszefix_analyzer/app/crud -type f -name *.py)"
     ]
   }
 }

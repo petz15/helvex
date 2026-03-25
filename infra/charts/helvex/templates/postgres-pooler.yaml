@@ -1,0 +1,19 @@
+{{- if and .Values.postgres.enabled .Values.postgres.pooler.enabled }}
+apiVersion: postgresql.cnpg.io/v1
+kind: Pooler
+metadata:
+  name: {{ include "helvex.fullname" . }}-pg-pooler
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "helvex.labels" . | nindent 4 }}
+spec:
+  cluster:
+    name: {{ include "helvex.fullname" . }}-pg
+  instances: 1
+  type: rw
+  pgbouncer:
+    poolMode: transaction
+    parameters:
+      max_client_conn: "{{ .Values.postgres.pooler.maxClientConn }}"
+      default_pool_size: "{{ .Values.postgres.pooler.defaultPoolSize }}"
+{{- end }}

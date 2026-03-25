@@ -16,7 +16,7 @@ else:
         database=settings.postgres_db,
     )
 
-engine = create_engine(_url)
+engine = create_engine(_url, pool_pre_ping=True, pool_recycle=1800)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 

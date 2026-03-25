@@ -57,3 +57,7 @@ postgres:
   s3EndpointUrl: ""    # e.g. https://fsn1.your-objectstorage.com
   s3BucketPath: ""     # e.g. s3://helvex-backups/pg/
   backupRetention: "7d"
+  pooler:
+    enabled: false
+    maxClientConn: 200
+    defaultPoolSize: 20
