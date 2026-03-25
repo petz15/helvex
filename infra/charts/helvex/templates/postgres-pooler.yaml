@@ -11,7 +11,7 @@ metadata:
 spec:
   type: ExternalName
   {{- if .Values.postgres.pooler.enabled }}
-  externalName: {{ include "helvex.fullname" . }}-pg-pooler.{{ .Release.Namespace }}.svc.cluster.local
+  externalName: {{ include "helvex.fullname" . }}-pgb.{{ .Release.Namespace }}.svc.cluster.local
   {{- else }}
   externalName: {{ include "helvex.fullname" . }}-pg-rw.{{ .Release.Namespace }}.svc.cluster.local
   {{- end }}
@@ -20,7 +20,7 @@ spec:
 apiVersion: postgresql.cnpg.io/v1
 kind: Pooler
 metadata:
-  name: {{ include "helvex.fullname" . }}-pg-pooler
+  name: {{ include "helvex.fullname" . }}-pgb
   namespace: {{ .Release.Namespace }}
   labels:
     {{- include "helvex.labels" . | nindent 4 }}
