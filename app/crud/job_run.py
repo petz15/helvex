@@ -57,6 +57,15 @@ def get_next_queued_job(db: Session) -> JobRun | None:
     )
 
 
+def list_queued_jobs(db: Session) -> list[JobRun]:
+    return (
+        db.query(JobRun)
+        .filter(JobRun.status == "queued")
+        .order_by(JobRun.queued_at.asc())
+        .all()
+    )
+
+
 def requeue_interrupted_jobs(
     db: Session,
     *,

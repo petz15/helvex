@@ -71,6 +71,10 @@ def _run_job(app, job_id: int) -> None:  # noqa: C901
         if not job:
             return
 
+        # Guard against double-dispatch: another worker may have already picked this up
+        if job.status not in ("queued", "paused"):
+            return
+
         if job.status == "cancelled" or job.cancel_requested:
             crud.mark_cancelled(db, job, message="Cancelled before start")
             crud.create_event(db, job_id=job.id, level="info", message="Job cancelled before execution started")
@@ -432,8 +436,21 @@ def _ensure_job_worker(app) -> None:
 
 
 def kick_job_worker(app) -> None:
-    """Public wrapper used by app startup to ensure queued jobs begin processing."""
-    _ensure_job_worker(app)
+    """Ensure all DB-queued jobs are being processed.
+
+    RQ mode: push every queued job ID onto Redis. Safe to call multiple times —
+    _run_job() guards against double-execution by checking job.status on pickup.
+
+    Thread mode: start/wake the in-process daemon thread.
+    """
+    from app.config import settings as _settings
+    if _settings.use_rq and _settings.redis_url:
+        with SessionLocal() as db:
+            queued = crud.list_queued_jobs(db)
+        for job in queued:
+            _enqueue_rq(job.id)
+    else:
+        _ensure_job_worker(app)
 
 
 # ── Enqueue helpers (used by REST routes) ─────────────────────────────────────
