@@ -1,9 +1,11 @@
 import asyncio
 import html as _html
+import logging
 import os
 import pathlib
 import sys
 import time
+import traceback
 from contextlib import asynccontextmanager
 
 # ── Python 3.12 compatibility patch ───────────────────────────────────────────
@@ -68,6 +70,8 @@ def _read_version_info() -> tuple[str, str, str]:
 
 
 APP_VERSION, BUILD_DATE, BUILD_GIT_SHA = _read_version_info()
+
+logger = logging.getLogger(__name__)
 
 
 # ── Startup helpers ───────────────────────────────────────────────────────────
@@ -226,6 +230,18 @@ app.include_router(notes_router, prefix="/api/v1")
 app.include_router(jobs_router, prefix="/api/v1")
 app.include_router(map_router, prefix="/api/v1")
 app.include_router(settings_router, prefix="/api/v1")
+
+
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(request: Request, exc: Exception):
+    logger.error(
+        "Unhandled exception on %s %s\n%s",
+        request.method,
+        request.url.path,
+        traceback.format_exc(),
+    )
+    from fastapi.responses import JSONResponse
+    return JSONResponse({"detail": "Internal server error"}, status_code=500)
 
 
 # ── Auth routes (raw HTML — no Jinja2) ───────────────────────────────────────

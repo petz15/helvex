@@ -13,8 +13,11 @@ const NAV = [
   { href: "/app/settings", label: "Settings", icon: Cog },
 ];
 
+const AUTH_PATHS = ["/login", "/register", "/verify-email", "/forgot-password", "/reset-password"];
+
 export function NavBar() {
   const pathname = usePathname();
+  if (AUTH_PATHS.some((p) => pathname.startsWith(p))) return null;
   return (
     <header className="h-12 bg-white border-b border-slate-200 flex items-center px-4 shrink-0 z-40 shadow-sm">
       <Link href="/app/dashboard" className="flex items-center gap-2 font-bold text-blue-700 mr-6 tracking-tight">

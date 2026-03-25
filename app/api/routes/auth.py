@@ -190,7 +190,12 @@ def get_me(current_user: User = Depends(get_current_user)) -> UserRead:
 # ---------------------------------------------------------------------------
 
 def _send_verification(db: Session, user: User) -> None:
+    import logging
+    _log = logging.getLogger(__name__)
     token = create_verification_token(user.id)
     crud.record_verification_sent(db, user)
     if user.email:
-        send_verification_email(to=user.email, username=user.username, token=token)
+        try:
+            send_verification_email(to=user.email, username=user.username, token=token)
+        except Exception:
+            _log.exception("Failed to send verification email to %s", user.email)

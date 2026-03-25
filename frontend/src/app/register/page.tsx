@@ -22,7 +22,7 @@ export default function RegisterPage() {
       });
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
-        setError(body.detail ?? "Registration failed");
+        setError(body.detail ?? `Registration failed (HTTP ${res.status})`);
         return;
       }
       setDone(true);
