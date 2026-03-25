@@ -45,6 +45,18 @@ resources:
 # GHCR pull secret — set in prod.yaml; leave empty for dev (local registry needs no auth)
 imagePullSecrets: []
 
+# RQ job worker — separate Deployment running app/worker_entrypoint.py
+worker:
+  enabled: false   # set to true in prod when USE_RQ=true
+  replicaCount: 1
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      cpu: "1"
+      memory: 1Gi
+
 # CloudNativePG PostgreSQL cluster
 postgres:
   enabled: false   # set to true in prod once CloudNativePG operator is installed

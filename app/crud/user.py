@@ -1,5 +1,6 @@
 import base64
 import hashlib
+from datetime import datetime, timezone
 
 import bcrypt
 from sqlalchemy.orm import Session
@@ -58,6 +59,22 @@ def create_user(
     db.commit()
     db.refresh(user)
     return user
+
+
+def get_user_by_email(db: Session, email: str) -> User | None:
+    return db.query(User).filter(User.email == email).first()
+
+
+def mark_email_verified(db: Session, user: User) -> User:
+    user.email_verified = True
+    db.commit()
+    db.refresh(user)
+    return user
+
+
+def record_verification_sent(db: Session, user: User) -> None:
+    user.email_verification_sent_at = datetime.now(tz=timezone.utc)
+    db.commit()
 
 
 def authenticate(db: Session, *, username: str, password: str) -> User | None:

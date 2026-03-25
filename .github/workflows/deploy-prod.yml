@@ -110,6 +110,13 @@ jobs:
               --from-literal=SECRET_KEY="${{ secrets.SECRET_KEY }}" \
               --from-literal=S3_ACCESS_KEY="${{ secrets.S3_ACCESS_KEY }}" \
               --from-literal=S3_SECRET_KEY="${{ secrets.S3_SECRET_KEY }}" \
+              --from-literal=SMTP_HOST="${{ secrets.SMTP_HOST }}" \
+              --from-literal=SMTP_PORT="${{ secrets.SMTP_PORT }}" \
+              --from-literal=SMTP_USER="${{ secrets.SMTP_USER }}" \
+              --from-literal=SMTP_PASSWORD="${{ secrets.SMTP_PASSWORD }}" \
+              --from-literal=SMTP_FROM="${{ secrets.SMTP_FROM }}" \
+              --from-literal=APP_BASE_URL="https://helvex.dicy.ch" \
+              --from-literal=USE_RQ="true" \
               --from-literal=username="helvex" \
               --from-literal=password="${{ secrets.DB_PASSWORD }}" \
               -n helvex-prod

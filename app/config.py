@@ -33,6 +33,21 @@ class Settings(BaseSettings):
     # Useful when running the web API in a memory-limited pod and processing jobs elsewhere.
     disable_job_worker: bool = False
 
+    # Redis — used by RQ job queue and rate limiting
+    redis_url: str = ""
+
+    # Set USE_RQ=true to enqueue jobs into Redis (RQ) instead of the in-process thread.
+    # Requires REDIS_URL and a running RQ worker (app/worker_entrypoint.py).
+    use_rq: bool = False
+
+    # SMTP — for email verification and transactional emails
+    smtp_host: str = ""
+    smtp_port: int = 587
+    smtp_user: str = ""
+    smtp_password: str = ""
+    smtp_from: str = ""          # e.g. "Helvex <noreply@helvex.dicy.ch>"
+    app_base_url: str = "https://helvex.dicy.ch"   # used in email links
+
     # Security — dev gets an ephemeral random key if unset; production must set a strong key.
     secret_key: str = Field(default_factory=lambda: secrets.token_hex(32))
 

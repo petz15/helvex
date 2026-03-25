@@ -32,6 +32,9 @@ resources:
 imagePullSecrets:
   - name: ghcr-pull-secret
 
+worker:
+  enabled: true
+
 postgres:
   enabled: true
   instances: 1

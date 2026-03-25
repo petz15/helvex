@@ -30,5 +30,10 @@ class User(Base):
     payment_subscription_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
     subscription_status: Mapped[str | None] = mapped_column(String(32), nullable=True)
 
+    # Email verification
+    email_verification_sent_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
     # Organisation (for team-seat tiers)
     org_id: Mapped[int | None] = mapped_column(ForeignKey("organizations.id", ondelete="SET NULL"), nullable=True)

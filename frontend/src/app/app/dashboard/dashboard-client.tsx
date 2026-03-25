@@ -2,7 +2,7 @@
 import { useState, useCallback, useTransition } from "react";
 import useSWR from "swr";
 import { Download } from "lucide-react";
-import { FilterSidebar } from "@/components/dashboard/filter-sidebar";
+import { FilterBar } from "@/components/dashboard/filter-bar";
 import { StatsBar } from "@/components/dashboard/stats-bar";
 import { CompanyTable } from "@/components/dashboard/company-table";
 import { CompanyPreview } from "@/components/dashboard/company-preview";
@@ -77,18 +77,18 @@ export function DashboardClient({ initialCantons, initialStats }: DashboardClien
         activeValue={activeStat.value || undefined}
       />
 
-      {/* Three-panel layout */}
-      <div className="flex flex-1 overflow-hidden">
-        {/* Filter sidebar */}
-        <FilterSidebar
-          filters={filters}
-          cantons={cantons}
-          taxonomy={taxonomy}
-          onChange={handleFilterChange}
-          onClear={handleClear}
-          resultCount={page?.total ?? 0}
-        />
+      {/* Filter bar (top, collapsible) */}
+      <FilterBar
+        filters={filters}
+        cantons={cantons}
+        taxonomy={taxonomy}
+        onChange={handleFilterChange}
+        onClear={handleClear}
+        resultCount={page?.total ?? 0}
+      />
 
+      {/* Table + preview (horizontal split) */}
+      <div className="flex flex-1 overflow-hidden">
         {/* Table + pagination */}
         <div className="flex-1 flex flex-col overflow-hidden bg-white">
           <div className="flex items-center justify-end px-3 py-1 border-b border-slate-100 bg-slate-50">

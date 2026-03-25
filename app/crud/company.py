@@ -301,7 +301,7 @@ def get_taxonomy_stats(db: Session) -> dict:
             kw = kw.strip()
             if kw:
                 kw_counter[kw] += 1
-    keywords_list = kw_counter.most_common()
+    keywords_list = kw_counter.most_common(100)
 
     tags = (
         db.query(Company.tags, func.count(Company.id).label("cnt"))

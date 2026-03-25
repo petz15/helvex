@@ -1,7 +1,14 @@
-"""Background job worker — runs jobs from the DB queue in a daemon thread.
+"""Background job worker.
 
-Extracted from app/ui/routes.py so that main.py can import kick_job_worker
-without pulling in Jinja2 or any UI dependencies.
+Two modes:
+- Thread mode (default): a daemon thread polls the DB queue and runs jobs
+  sequentially in-process. Zero external dependencies.
+- RQ mode (USE_RQ=true + REDIS_URL set): jobs are pushed to a Redis queue
+  and executed by a separate `rq worker` process (app/worker_entrypoint.py).
+  The web pod sets DISABLE_JOB_WORKER=true so it never starts a thread.
+
+`enqueue_job()` is the only public entry point used by REST routes — it
+handles both modes transparently.
 """
 from __future__ import annotations
 
@@ -49,9 +56,16 @@ def _sync_active_task(
     }
 
 
+def _maybe_sync(app, **kwargs) -> None:
+    """Call _sync_active_task only when running inside the web process (app != None)."""
+    if app is not None:
+        _sync_active_task(app.state, **kwargs)
+
+
 # ── Job runner ─────────────────────────────────────────────────────────────────
 
-def _run_job(app, job_id: int) -> None:
+def _run_job(app, job_id: int) -> None:  # noqa: C901
+    """Execute one job. `app` may be None when called from an RQ worker."""
     with SessionLocal() as db:
         job = crud.get_job(db, job_id)
         if not job:
@@ -64,15 +78,16 @@ def _run_job(app, job_id: int) -> None:
 
         crud.mark_running(db, job, message="Starting…")
         crud.create_event(db, job_id=job.id, level="info", message="Job started")
-        _sync_active_task(
-            app.state,
-            job_type=job.job_type,
-            label=job.label,
-            message="Starting…",
-            stats={},
-            error=None,
-            done=False,
-        )
+        if app is not None:
+            _sync_active_task(
+                app.state,
+                job_type=job.job_type,
+                label=job.label,
+                message="Starting…",
+                stats={},
+                error=None,
+                done=False,
+            )
 
         params = json.loads(job.params_json or "{}")
         resume_from = max(0, int(job.progress_done or 0))
@@ -93,7 +108,7 @@ def _run_job(app, job_id: int) -> None:
                     msg = f"Geocoded {done}/{total} — {stats['geocoded']} updated, {stats['failed']} no match"
                     crud.update_progress(db, job, message=msg, done=done, total=total, stats=stats)
                     crud.create_event(db, job_id=job.id, level="debug", message=msg)
-                    _sync_active_task(app.state, job_type=job.job_type, label=job.label, message=msg, stats=dict(stats), error=None, done=False)
+                    _maybe_sync(app, job_type=job.job_type, label=job.label, message=msg, stats=dict(stats), error=None, done=False)
 
                 stats = re_geocode_all_companies(db, resume_from=resume_from, progress_cb=_progress)
                 done_msg = (
@@ -116,7 +131,7 @@ def _run_job(app, job_id: int) -> None:
                         msg = f"Computing raw scores — {done}/{total} ({stats.get('geocoded', 0)} geocoded)"
                     crud.update_progress(db, job, message=msg, done=done, total=total, stats=stats)
                     crud.create_event(db, job_id=job.id, level="debug", message=msg)
-                    _sync_active_task(app.state, job_type=job.job_type, label=job.label, message=msg, stats=dict(stats), error=None, done=False)
+                    _maybe_sync(app, job_type=job.job_type, label=job.label, message=msg, stats=dict(stats), error=None, done=False)
 
                 stats = recalculate_zefix_scores(db, resume_from=resume_from, progress_cb=_progress)
                 done_msg = f"Done — {stats['updated']} recalculated, {stats.get('geocoded', 0)} geocoded, {len(stats['errors'])} errors"
@@ -131,7 +146,7 @@ def _run_job(app, job_id: int) -> None:
                     msg = f"Recalculated Google scores for {done}/{total} companies"
                     crud.update_progress(db, job, message=msg, done=done, total=total, stats=stats)
                     crud.create_event(db, job_id=job.id, level="debug", message=msg)
-                    _sync_active_task(app.state, job_type=job.job_type, label=job.label, message=msg, stats=dict(stats), error=None, done=False)
+                    _maybe_sync(app, job_type=job.job_type, label=job.label, message=msg, stats=dict(stats), error=None, done=False)
 
                 stats = recalculate_google_scores(db, resume_from=resume_from, progress_cb=_progress)
                 done_msg = (
@@ -150,7 +165,7 @@ def _run_job(app, job_id: int) -> None:
                     stats_now = {"created": created, "updated": updated}
                     crud.update_progress(db, job, message=msg, stats=stats_now)
                     crud.create_event(db, job_id=job.id, level="debug", message=msg)
-                    _sync_active_task(app.state, job_type=job.job_type, label=job.label, message=msg, stats=stats_now, error=None, done=False)
+                    _maybe_sync(app, job_type=job.job_type, label=job.label, message=msg, stats=stats_now, error=None, done=False)
 
                 stats = bulk_import_zefix(
                     db,
@@ -170,7 +185,7 @@ def _run_job(app, job_id: int) -> None:
                     msg = f"Processing {done}/{total} companies"
                     crud.update_progress(db, job, message=msg, done=done, total=total, stats=stats)
                     crud.create_event(db, job_id=job.id, level="debug", message=msg)
-                    _sync_active_task(app.state, job_type=job.job_type, label=job.label, message=msg, stats=dict(stats), error=None, done=False)
+                    _maybe_sync(app, job_type=job.job_type, label=job.label, message=msg, stats=dict(stats), error=None, done=False)
 
                 stats = run_batch_collect(
                     db,
@@ -207,7 +222,7 @@ def _run_job(app, job_id: int) -> None:
                     )
                     crud.update_progress(db, job, message=msg, done=done, total=total, stats=stats)
                     crud.create_event(db, job_id=job.id, level="debug", message=msg)
-                    _sync_active_task(app.state, job_type=job.job_type, label=job.label, message=msg, stats=dict(stats), error=None, done=False)
+                    _maybe_sync(app, job_type=job.job_type, label=job.label, message=msg, stats=dict(stats), error=None, done=False)
 
                 stats = initial_collect(
                     db,
@@ -235,7 +250,7 @@ def _run_job(app, job_id: int) -> None:
                     msg = f"Processing {done}/{total}"
                     crud.update_progress(db, job, message=msg, done=done, total=total, stats=stats)
                     crud.create_event(db, job_id=job.id, level="debug", message=msg)
-                    _sync_active_task(app.state, job_type=job.job_type, label=job.label, message=msg, stats=dict(stats), error=None, done=False)
+                    _maybe_sync(app, job_type=job.job_type, label=job.label, message=msg, stats=dict(stats), error=None, done=False)
 
                 stats = run_zefix_detail_collect(
                     db,
@@ -260,7 +275,7 @@ def _run_job(app, job_id: int) -> None:
                     msg = f"[{step}] {done}/{total} — {stats.get('classified', 0)} clustered, {stats.get('noise', 0)} noise"
                     crud.update_progress(db, job, message=msg, done=done, total=total, stats=stats)
                     crud.create_event(db, job_id=job.id, level="debug", message=msg)
-                    _sync_active_task(app.state, job_type=job.job_type, label=job.label, message=msg, stats=dict(stats), error=None, done=False)
+                    _maybe_sync(app, job_type=job.job_type, label=job.label, message=msg, stats=dict(stats), error=None, done=False)
 
                 cfg = PipelineConfig(
                     n_clusters=int(params.get("n_clusters", 150)),
@@ -291,7 +306,7 @@ def _run_job(app, job_id: int) -> None:
                     _assert_not_cancelled()
                     msg = f"[{stats.get('step', 'keywords')}] {done}/{total} — {stats.get('updated', 0)} updated"
                     crud.update_progress(db, job, message=msg, done=done, total=total, stats=stats)
-                    _sync_active_task(app.state, job_type=job.job_type, label=job.label, message=msg, stats=dict(stats), error=None, done=False)
+                    _maybe_sync(app, job_type=job.job_type, label=job.label, message=msg, stats=dict(stats), error=None, done=False)
 
                 cfg = PipelineConfig(
                     top_keywords_per_company=int(params.get("top_keywords_per_company", 10)),
@@ -327,7 +342,7 @@ def _run_job(app, job_id: int) -> None:
                     msg = f"Classified {done}/{total} — {stats['classified']} scored, ~{tokens} tokens used{batch_hint}"
                     crud.update_progress(db, job, message=msg, done=done, total=total, stats=stats)
                     crud.create_event(db, job_id=job.id, level="debug", message=msg)
-                    _sync_active_task(app.state, job_type=job.job_type, label=job.label, message=msg, stats=dict(stats), error=None, done=False)
+                    _maybe_sync(app, job_type=job.job_type, label=job.label, message=msg, stats=dict(stats), error=None, done=False)
 
                 stats = claude_classify_batch(
                     db,
@@ -360,7 +375,7 @@ def _run_job(app, job_id: int) -> None:
                 crud.create_event(db, job_id=job.id, level="warn", message=str(_w))
             for _err in (stats.get("errors") or [])[:50]:
                 crud.create_event(db, job_id=job.id, level="warn", message=str(_err))
-            _sync_active_task(app.state, job_type=job.job_type, label=job.label, message=done_msg, stats=dict(stats), error=None, done=True)
+            _maybe_sync(app, job_type=job.job_type, label=job.label, message=done_msg, stats=dict(stats), error=None, done=True)
 
         except JobPausedError:
             current_stats = json.loads(job.stats_json) if job.stats_json else {}
@@ -369,13 +384,13 @@ def _run_job(app, job_id: int) -> None:
             pause_msg = f"Paused at {done_n}" + (f"/{total_n}" if total_n else "")
             crud.mark_paused(db, job, message=pause_msg, stats=current_stats)
             crud.create_event(db, job_id=job.id, level="info", message=pause_msg)
-            _sync_active_task(app.state, job_type=job.job_type, label=job.label, message=pause_msg, stats=current_stats, error=None, done=True)
+            _maybe_sync(app, job_type=job.job_type, label=job.label, message=pause_msg, stats=current_stats, error=None, done=True)
 
         except JobCancelledError:
             msg = "Cancelled by user"
             crud.mark_cancelled(db, job, message=msg)
             crud.create_event(db, job_id=job.id, level="warn", message=msg)
-            _sync_active_task(app.state, job_type=job.job_type, label=job.label, message=msg, stats={}, error=None, done=True)
+            _maybe_sync(app, job_type=job.job_type, label=job.label, message=msg, stats={}, error=None, done=True)
 
         except Exception:  # noqa: BLE001
             err = traceback.format_exc()
@@ -386,7 +401,7 @@ def _run_job(app, job_id: int) -> None:
             logger.error("Job %s (%s) failed:\n%s", job.id, job.job_type, err)
             crud.mark_failed(db, job, error=err)
             crud.create_event(db, job_id=job.id, level="error", message=err)
-            _sync_active_task(app.state, job_type=job.job_type, label=job.label, message="Failed", stats={}, error=err, done=True)
+            _maybe_sync(app, job_type=job.job_type, label=job.label, message="Failed", stats={}, error=err, done=True)
 
 
 # ── Worker loop ────────────────────────────────────────────────────────────────
@@ -447,5 +462,25 @@ def enqueue_job(
     else:
         job = _enqueue_job_in_session(db, job_type=job_type, label=label, params=params)
 
-    _ensure_job_worker(app)
+    from app.config import settings as _settings
+    if _settings.use_rq and _settings.redis_url:
+        _enqueue_rq(job.id)
+    else:
+        _ensure_job_worker(app)
     return job
+
+
+def _enqueue_rq(job_id: int) -> None:
+    """Push job_id onto the Redis queue for the RQ worker to pick up."""
+    from redis import Redis
+    from rq import Queue as RQueue
+    from app.config import settings as _settings
+
+    conn = Redis.from_url(_settings.redis_url)
+    q = RQueue("helvex", connection=conn)
+    q.enqueue(run_job_task, job_id, job_timeout=7200)  # 2h max per job
+
+
+def run_job_task(job_id: int) -> None:
+    """RQ task function — called by the worker process for each job."""
+    _run_job(None, job_id)

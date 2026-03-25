@@ -27,6 +27,11 @@ from app.models.user import User
 COOKIE_NAME = "session"
 _SESSION_MAX_AGE = 8 * 3600  # 8 hours
 _SALT = "session-v1"
+_EMAIL_VERIFY_SALT = "email-verify-v1"
+_EMAIL_VERIFY_MAX_AGE = 24 * 3600  # 24 hours
+
+# Tier hierarchy — higher index = higher tier
+_TIER_ORDER = ["free", "pro", "team", "enterprise"]
 
 # ---------------------------------------------------------------------------
 # Cookie-based sessions (browser UI)
@@ -113,6 +118,61 @@ def get_current_user(
             headers={"WWW-Authenticate": "Bearer"},
         )
     return user
+
+
+# ---------------------------------------------------------------------------
+# Email verification tokens (signed, no DB storage needed)
+# ---------------------------------------------------------------------------
+
+def create_verification_token(user_id: int) -> str:
+    return URLSafeTimedSerializer(settings.secret_key, salt=_EMAIL_VERIFY_SALT).dumps(user_id)
+
+
+def decode_verification_token(token: str) -> int | None:
+    try:
+        user_id = URLSafeTimedSerializer(settings.secret_key, salt=_EMAIL_VERIFY_SALT).loads(
+            token, max_age=_EMAIL_VERIFY_MAX_AGE
+        )
+        return int(user_id)
+    except (SignatureExpired, BadSignature, ValueError, TypeError):
+        return None
+
+
+# ---------------------------------------------------------------------------
+# Tier + email-verified dependencies
+# ---------------------------------------------------------------------------
+
+def require_verified_email(user: User = Depends(get_current_user)) -> User:
+    """Dependency — raises 403 if the user's email is not verified."""
+    if not user.email_verified:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Email address not verified. Please check your inbox.",
+        )
+    return user
+
+
+def require_tier(min_tier: str):
+    """Dependency factory — raises 403 if user's tier is below *min_tier*.
+
+    Usage::
+
+        @router.get("/premium")
+        def premium_route(user: User = Depends(require_tier("pro"))):
+            ...
+    """
+    def _check(user: User = Depends(get_current_user)) -> User:
+        user_level = _TIER_ORDER.index(user.tier) if user.tier in _TIER_ORDER else 0
+        required_level = _TIER_ORDER.index(min_tier) if min_tier in _TIER_ORDER else 0
+        if user.is_superadmin:
+            return user
+        if user_level < required_level:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"This feature requires the '{min_tier}' tier or above.",
+            )
+        return user
+    return _check
 
 
 # ---------------------------------------------------------------------------
