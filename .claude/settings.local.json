@@ -140,7 +140,11 @@
       "Bash(find c:Dcoding_projectszefix_analyzer/app/models -type f -name *.py)",
       "Bash(find c:Dcoding_projectszefix_analyzer/app/crud -type f -name *.py)",
       "Bash(kubectl get:*)",
-      "Bash(kubectl describe:*)"
+      "Bash(kubectl describe:*)",
+      "Bash(python3 -c \"import json,sys,base64; d=json.load\\(sys.stdin\\); [print\\(k,''''='''',base64.b64decode\\(v\\).decode\\(\\)\\) for k,v in d.items\\(\\)]\")",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(c:/D/coding_projects/zefix_analyzer/infra/charts/helvex/values.yaml:*)"
     ]
   }
 }
