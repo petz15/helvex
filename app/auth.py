@@ -8,6 +8,7 @@ The auth_gate middleware enforces authentication globally; the dependency
 is for routes that need to *act as* the user (audit logging, quota, etc.).
 """
 
+import ipaddress
 import time
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
@@ -204,6 +205,48 @@ _login_attempts: dict[str, list[float]] = defaultdict(list)
 _request_counts: dict[str, list[float]] = defaultdict(list)
 
 
+def _is_private_ip(ip: str) -> bool:
+    try:
+        parsed = ipaddress.ip_address(ip)
+    except ValueError:
+        return False
+    return bool(parsed.is_private or parsed.is_loopback or parsed.is_link_local)
+
+
+def _is_ip_literal(value: str) -> bool:
+    try:
+        ipaddress.ip_address(value)
+        return True
+    except ValueError:
+        return False
+
+
+def get_client_ip(request: Request) -> str:
+    """Best-effort client IP extraction.
+
+    In Kubernetes/Ingress setups, `request.client.host` is often the reverse proxy
+    (e.g. Traefik) which would make all users share a rate-limit bucket.
+
+    We prefer `X-Forwarded-For` / `X-Real-Ip` only when the direct peer is a
+    private/loopback address (i.e. likely a trusted proxy hop).
+    """
+    peer_ip = request.client.host if request.client else "unknown"
+    xff = request.headers.get("x-forwarded-for", "")
+    # Trust forwarded headers when the direct peer is a private/loopback address
+    # (typical reverse proxy), or when it's not an IP literal at all (e.g. Starlette
+    # TestClient uses 'testclient').
+    trust_forwarded = peer_ip != "unknown" and (_is_private_ip(peer_ip) or not _is_ip_literal(peer_ip))
+    if xff and trust_forwarded:
+        # XFF format: client, proxy1, proxy2 ...
+        first = xff.split(",", 1)[0].strip()
+        if first:
+            return first
+    xri = request.headers.get("x-real-ip", "").strip()
+    if xri and trust_forwarded:
+        return xri
+    return peer_ip
+
+
 def _get_redis():
     """Return a Redis client if configured, else None."""
     try:
@@ -262,11 +305,13 @@ def check_public_rate_limit(ip: str, action: str, *, window: float = 900, max_re
     """
     r = _get_redis()
     if r is not None:
+        # Fixed window: TTL starts on the first request and is not extended
+        # by subsequent requests. This avoids a "keep retrying → never resets"
+        # behavior.
         key = f"rl:{action}:{ip}"
-        pipe = r.pipeline()
-        pipe.incr(key)
-        pipe.expire(key, int(window))
-        count, _ = pipe.execute()
+        count = int(r.incr(key))
+        if count == 1:
+            r.expire(key, int(window))
         return count <= max_requests
     bucket = f"{action}:{ip}"
     now = time.monotonic()

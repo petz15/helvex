@@ -395,6 +395,9 @@ These are concrete security gaps spotted in the current webapp implementation/co
 - **Recommended fix:** Convert checklist items into enforceable CI/cluster policy checks (lint + admission/policy tests) with explicit pass/fail gates.
 - **Priority:** **High**
 
+### 5) Roate keys
+specifically for S3 as it was accidentally leaked
+
 ### Resolved Security Items
 
 These items were addressed in code/config and are now considered closed for the current phase.

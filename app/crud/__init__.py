@@ -57,10 +57,14 @@ from app.crud.user import (
     authenticate,
     count_users,
     create_user,
+    get_user_by_email,
     get_user,
     get_user_by_username,
     hash_password,
     list_users,
+    mark_email_verified,
+    record_verification_sent,
+    update_password,
 )
 
 __all__ = [
@@ -114,11 +118,15 @@ __all__ = [
     # user
     "get_user",
     "get_user_by_username",
+    "get_user_by_email",
     "list_users",
     "count_users",
     "create_user",
     "hash_password",
     "authenticate",
+    "update_password",
+    "mark_email_verified",
+    "record_verification_sent",
     # boilerplate
     "list_boilerplate_patterns",
     "get_boilerplate_pattern",

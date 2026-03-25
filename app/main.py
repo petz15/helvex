@@ -36,6 +36,7 @@ from app.auth import (
     COOKIE_NAME,
     _user_id_from_request,
     create_session_cookie,
+    get_client_ip,
     is_login_allowed,
     record_login_failure,
 )
@@ -234,14 +235,10 @@ app.include_router(settings_router, prefix="/api/v1")
 
 @app.exception_handler(Exception)
 async def unhandled_exception_handler(request: Request, exc: Exception):
-    logger.error(
-        "Unhandled exception on %s %s\n%s",
-        request.method,
-        request.url.path,
-        traceback.format_exc(),
-    )
+    tb = "".join(traceback.format_exception(type(exc), exc, exc.__traceback__))
+    print(f"UNHANDLED EXCEPTION {request.method} {request.url.path}\n{tb}", file=sys.stderr, flush=True)
     from fastapi.responses import JSONResponse
-    return JSONResponse({"detail": "Internal server error"}, status_code=500)
+    return JSONResponse({"detail": "Internal server error", "traceback": tb}, status_code=500)
 
 
 # ── Auth routes (raw HTML — no Jinja2) ───────────────────────────────────────
@@ -326,7 +323,7 @@ def login_submit(
     next: str = Form("/app/dashboard"),
     db: Session = Depends(get_db),
 ):
-    ip = request.client.host if request.client else "unknown"
+    ip = get_client_ip(request)
 
     if not is_login_allowed(ip):
         error_html = '<div class="error">Too many login attempts. Try again in 15 minutes.</div>'

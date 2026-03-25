@@ -13,6 +13,7 @@ from app.auth import (
     create_verification_token,
     decode_password_reset_token,
     decode_verification_token,
+    get_client_ip,
     get_current_user,
     is_login_allowed,
     record_login_failure,
@@ -38,7 +39,7 @@ def login_for_token(
     password: str = Form(...),
     db: Session = Depends(get_db),
 ) -> TokenResponse:
-    ip = request.client.host if request.client else "unknown"
+    ip = get_client_ip(request)
     if not is_login_allowed(ip):
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
@@ -63,7 +64,7 @@ def login_for_token(
 @router.post("/register", response_model=UserRead, status_code=status.HTTP_201_CREATED,
              summary="Create a new user account")
 def register(request: Request, body: RegisterRequest, db: Session = Depends(get_db)) -> UserRead:
-    ip = request.client.host if request.client else "unknown"
+    ip = get_client_ip(request)
     if not check_public_rate_limit(ip, "register", window=3600, max_requests=10):
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
@@ -147,7 +148,7 @@ def change_password(
 @router.post("/forgot-password", status_code=status.HTTP_204_NO_CONTENT,
              summary="Request a password reset email")
 def forgot_password(request: Request, email: str = Form(...), db: Session = Depends(get_db)) -> None:
-    ip = request.client.host if request.client else "unknown"
+    ip = get_client_ip(request)
     if not check_public_rate_limit(ip, "forgot-password", window=900, max_requests=5):
         # Return 204 even on rate limit to avoid confirming anything
         return
@@ -193,7 +194,16 @@ def _send_verification(db: Session, user: User) -> None:
     import logging
     _log = logging.getLogger(__name__)
     token = create_verification_token(user.id)
-    crud.record_verification_sent(db, user)
+    try:
+        crud.record_verification_sent(db, user)
+    except Exception:
+        # Don't fail user registration if the verification timestamp can't be stored.
+        # (e.g. schema drift during deploy).
+        try:
+            db.rollback()
+        except Exception:
+            pass
+        _log.exception("Failed to record verification email sent timestamp")
     if user.email:
         try:
             send_verification_email(to=user.email, username=user.username, token=token)

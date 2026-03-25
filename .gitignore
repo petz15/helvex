@@ -25,3 +25,5 @@ certs/*.pem
 terraform.tfvars
 
 /infra/environments/dev.yaml
+
+/*.tfstate
