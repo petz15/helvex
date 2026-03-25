@@ -22,8 +22,12 @@ def send_email(*, to: str, subject: str, html: str, text: str | None = None) -> 
     Silently skips if SMTP is not configured (dev mode).
     Raises on SMTP errors so callers can surface them to the user.
     """
+    is_prod_like = (settings.app_env or "").lower().strip() in {"prod", "production", "staging"}
     if not settings.smtp_host or not settings.smtp_from:
-        logger.warning("SMTP not configured — skipping email to %s (subject: %s)", to, subject)
+        msg = f"SMTP not configured (SMTP_HOST/SMTP_FROM missing) — cannot send email to {to} (subject: {subject})"
+        if is_prod_like:
+            raise RuntimeError(msg)
+        logger.warning("%s", msg)
         return
 
     msg = MIMEMultipart("alternative")

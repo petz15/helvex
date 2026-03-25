@@ -102,25 +102,29 @@ jobs:
           GHCR_PAT: ${{ secrets.GHCR_PAT }}
           REGISTRY_USER: ${{ github.actor }}
         run: |
-          if ! kubectl get secret helvex-env -n helvex-prod &>/dev/null; then
-            kubectl create secret generic helvex-env \
-              --from-literal=DATABASE_URL="${{ secrets.DB_URL }}" \
-              --from-literal=REDIS_URL="${{ secrets.REDIS_URL }}" \
-              --from-literal=REDIS_PASSWORD="${{ secrets.REDIS_PASSWORD }}" \
-              --from-literal=SECRET_KEY="${{ secrets.SECRET_KEY }}" \
-              --from-literal=S3_ACCESS_KEY="${{ secrets.S3_ACCESS_KEY }}" \
-              --from-literal=S3_SECRET_KEY="${{ secrets.S3_SECRET_KEY }}" \
-              --from-literal=SMTP_HOST="${{ secrets.SMTP_HOST }}" \
-              --from-literal=SMTP_PORT="${{ secrets.SMTP_PORT }}" \
-              --from-literal=SMTP_USER="${{ secrets.SMTP_USER }}" \
-              --from-literal=SMTP_PASSWORD="${{ secrets.SMTP_PASSWORD }}" \
-              --from-literal=SMTP_FROM="${{ secrets.SMTP_FROM }}" \
-              --from-literal=APP_BASE_URL="https://helvex.dicy.ch" \
-              --from-literal=USE_RQ="true" \
-              --from-literal=username="helvex" \
-              --from-literal=password="${{ secrets.DB_PASSWORD }}" \
-              -n helvex-prod
-          fi
+          kubectl create namespace helvex-prod --dry-run=client -o yaml | kubectl apply -f -
+
+          # Always apply (update) the env secret so changes to GitHub Secrets
+          # propagate to the cluster (SMTP creds, keys, etc.).
+          kubectl create secret generic helvex-env \
+            --from-literal=APP_ENV="prod" \
+            --from-literal=DATABASE_URL="${{ secrets.DB_URL }}" \
+            --from-literal=REDIS_URL="${{ secrets.REDIS_URL }}" \
+            --from-literal=REDIS_PASSWORD="${{ secrets.REDIS_PASSWORD }}" \
+            --from-literal=SECRET_KEY="${{ secrets.SECRET_KEY }}" \
+            --from-literal=S3_ACCESS_KEY="${{ secrets.S3_ACCESS_KEY }}" \
+            --from-literal=S3_SECRET_KEY="${{ secrets.S3_SECRET_KEY }}" \
+            --from-literal=SMTP_HOST="${{ secrets.SMTP_HOST }}" \
+            --from-literal=SMTP_PORT="${{ secrets.SMTP_PORT }}" \
+            --from-literal=SMTP_USER="${{ secrets.SMTP_USER }}" \
+            --from-literal=SMTP_PASSWORD="${{ secrets.SMTP_PASSWORD }}" \
+            --from-literal=SMTP_FROM="${{ secrets.SMTP_FROM }}" \
+            --from-literal=APP_BASE_URL="https://helvex.dicy.ch" \
+            --from-literal=USE_RQ="true" \
+            --from-literal=username="helvex" \
+            --from-literal=password="${{ secrets.DB_PASSWORD }}" \
+            -n helvex-prod \
+            --dry-run=client -o yaml | kubectl apply -f -
           if ! kubectl get secret ghcr-pull-secret -n helvex-prod &>/dev/null; then
             if [ -z "$GHCR_PAT" ]; then
               echo "ERROR: GHCR_PAT secret is not set in GitHub repo settings" >&2

@@ -207,5 +207,9 @@ def _send_verification(db: Session, user: User) -> None:
     if user.email:
         try:
             send_verification_email(to=user.email, username=user.username, token=token)
-        except Exception:
+        except Exception as exc:
             _log.exception("Failed to send verification email to %s", user.email)
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Email service unavailable. Please try again later.",
+            ) from exc

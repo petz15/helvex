@@ -39,6 +39,7 @@ _BUILDING_URL = (
 
 # ── Regex helpers ─────────────────────────────────────────────────────────────
 _PLZ_RE = re.compile(r"\b(\d{4})\b")
+_PLZ_SEGMENT_RE = re.compile(r"^(?:CH-)?(\d{4})\b", re.IGNORECASE)
 
 # Matches a "street housenumber" segment: the part immediately before the PLZ city segment.
 # Groups: street, house
@@ -131,10 +132,25 @@ def _load_plz_table() -> dict[str, tuple[float, float]]:
 
 
 def _plz_fallback(address: str) -> tuple[float, float] | None:
-    m = _PLZ_RE.search(address)
-    if not m:
-        return None
-    return _load_plz_table().get(m.group(1))
+    # Prefer the real postal-code segment (usually the last comma-delimited part
+    # like "8000 Zürich") instead of the first 4-digit number anywhere.
+    # This avoids picking up values like "Postfach 1234".
+    parts = [p.strip() for p in (address or "").split(",") if p.strip()]
+    plz: str | None = None
+    for part in reversed(parts):
+        m = _PLZ_SEGMENT_RE.match(part)
+        if m:
+            plz = m.group(1)
+            break
+
+    if plz is None:
+        # Backward-compatible fallback for addresses without commas.
+        m_any = _PLZ_RE.search(address or "")
+        if not m_any:
+            return None
+        plz = m_any.group(1)
+
+    return _load_plz_table().get(plz)
 
 
 # ── Building-level geocoding DB ───────────────────────────────────────────────

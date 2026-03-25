@@ -65,6 +65,12 @@ class Settings(BaseSettings):
         if len(self.secret_key.strip()) < 32:
             raise ValueError("SECRET_KEY must be set and at least 32 characters in production-like environment")
 
+        if not self.smtp_host.strip() or not self.smtp_from.strip():
+            raise ValueError("SMTP_HOST and SMTP_FROM must be set in production-like environment")
+
+        if not self.app_base_url.strip():
+            raise ValueError("APP_BASE_URL must be set in production-like environment")
+
         return self
 
 
