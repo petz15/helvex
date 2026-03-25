@@ -29,6 +29,8 @@ _SESSION_MAX_AGE = 8 * 3600  # 8 hours
 _SALT = "session-v1"
 _EMAIL_VERIFY_SALT = "email-verify-v1"
 _EMAIL_VERIFY_MAX_AGE = 24 * 3600  # 24 hours
+_PASSWORD_RESET_SALT = "password-reset-v1"
+_PASSWORD_RESET_MAX_AGE = 1 * 3600  # 1 hour
 
 # Tier hierarchy — higher index = higher tier
 _TIER_ORDER = ["free", "pro", "team", "enterprise"]
@@ -126,6 +128,20 @@ def get_current_user(
 
 def create_verification_token(user_id: int) -> str:
     return URLSafeTimedSerializer(settings.secret_key, salt=_EMAIL_VERIFY_SALT).dumps(user_id)
+
+
+def create_password_reset_token(user_id: int) -> str:
+    return URLSafeTimedSerializer(settings.secret_key, salt=_PASSWORD_RESET_SALT).dumps(user_id)
+
+
+def decode_password_reset_token(token: str) -> int | None:
+    try:
+        user_id = URLSafeTimedSerializer(settings.secret_key, salt=_PASSWORD_RESET_SALT).loads(
+            token, max_age=_PASSWORD_RESET_MAX_AGE
+        )
+        return int(user_id)
+    except (SignatureExpired, BadSignature, ValueError, TypeError):
+        return None
 
 
 def decode_verification_token(token: str) -> int | None:

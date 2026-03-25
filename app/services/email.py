@@ -68,6 +68,24 @@ def send_verification_email(*, to: str, username: str, token: str) -> None:
     send_email(to=to, subject=subject, html=html, text=text)
 
 
+def send_password_reset_email(*, to: str, username: str, token: str) -> None:
+    link = f"{settings.app_base_url}/reset-password?token={token}"
+    subject = "Reset your Helvex password"
+    html = f"""
+    <p>Hi {username},</p>
+    <p>You requested a password reset. Click the link below to set a new password.
+    The link expires in <strong>1 hour</strong>.</p>
+    <p><a href="{link}">{link}</a></p>
+    <p>If you did not request this, you can safely ignore this email — your password has not changed.</p>
+    """
+    text = (
+        f"Hi {username},\n\n"
+        f"Reset your password: {link}\n\n"
+        "Link expires in 1 hour.\n"
+    )
+    send_email(to=to, subject=subject, html=html, text=text)
+
+
 def send_welcome_email(*, to: str, username: str) -> None:
     subject = "Welcome to Helvex"
     html = f"""

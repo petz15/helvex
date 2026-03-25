@@ -2,7 +2,7 @@
 import { useEffect, useState } from "react";
 import useSWR from "swr";
 import { useRouter } from "next/navigation";
-import { Save, Plus, Trash2, ToggleLeft, ToggleRight, Loader2, Landmark, Search, MapPin } from "lucide-react";
+import { Save, Plus, Trash2, ToggleLeft, ToggleRight, Loader2, Landmark, Search, MapPin, KeyRound } from "lucide-react";
 import {
   createBoilerplate, deleteBoilerplate, fetchBoilerplate, fetchSettings,
   saveSettings, toggleBoilerplate, triggerJob,
@@ -24,6 +24,87 @@ function Field({ label, hint, children }: { label: string; hint?: string; childr
 
 function SectionTitle({ title }: { title: string }) {
   return <h2 className="text-sm font-semibold text-slate-500 uppercase tracking-wider pt-4 pb-2 border-b border-slate-100">{title}</h2>;
+}
+
+function ChangePasswordForm() {
+  const [current, setCurrent] = useState("");
+  const [next, setNext] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [banner, setBanner] = useState<{ kind: "success" | "error"; message: string } | null>(null);
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    setSaving(true);
+    setBanner(null);
+    try {
+      const res = await fetch("/api/v1/auth/change-password", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ current_password: current, new_password: next }),
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        setBanner({ kind: "error", message: body.detail ?? "Failed to change password" });
+        return;
+      }
+      setBanner({ kind: "success", message: "Password updated." });
+      setCurrent("");
+      setNext("");
+    } finally {
+      setSaving(false);
+      setTimeout(() => setBanner(null), 4000);
+    }
+  }
+
+  return (
+    <form onSubmit={handleSubmit} className="space-y-4">
+      <SectionTitle title="Security" />
+      {banner && (
+        <div
+          role="status"
+          className={cn(
+            "rounded-lg border px-4 py-3 text-sm",
+            banner.kind === "success"
+              ? "border-green-200 bg-green-50 text-green-800"
+              : "border-red-200 bg-red-50 text-red-800",
+          )}
+        >
+          {banner.message}
+        </div>
+      )}
+      <div className="grid grid-cols-2 gap-4">
+        <Field label="Current password">
+          <input
+            type="password"
+            required
+            autoComplete="current-password"
+            value={current}
+            onChange={(e) => setCurrent(e.target.value)}
+            className={inputCls}
+          />
+        </Field>
+        <Field label="New password" hint="Min. 8 characters">
+          <input
+            type="password"
+            required
+            minLength={8}
+            autoComplete="new-password"
+            value={next}
+            onChange={(e) => setNext(e.target.value)}
+            className={inputCls}
+          />
+        </Field>
+      </div>
+      <button
+        type="submit"
+        disabled={saving}
+        className="flex items-center gap-2 bg-slate-100 hover:bg-slate-200 disabled:opacity-60 text-slate-700 px-4 py-2 rounded-lg text-sm font-medium transition-colors"
+      >
+        {saving ? <Loader2 size={14} className="animate-spin" /> : <KeyRound size={14} />}
+        Change password
+      </button>
+    </form>
+  );
 }
 
 export function SettingsClient() {
@@ -300,6 +381,9 @@ export function SettingsClient() {
       </div>
 
       </form>
+
+      {/* Security — change password (separate form) */}
+      <ChangePasswordForm />
 
       {/* Boilerplate add form (separate form to avoid nested forms) */}
       <form onSubmit={handleAddPattern} className="flex gap-2">

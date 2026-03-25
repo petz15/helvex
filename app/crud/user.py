@@ -72,6 +72,13 @@ def mark_email_verified(db: Session, user: User) -> User:
     return user
 
 
+def update_password(db: Session, user: User, new_password: str) -> User:
+    user.hashed_password = hash_password(new_password)
+    db.commit()
+    db.refresh(user)
+    return user
+
+
 def record_verification_sent(db: Session, user: User) -> None:
     user.email_verification_sent_at = datetime.now(tz=timezone.utc)
     db.commit()
