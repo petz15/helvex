@@ -22,6 +22,9 @@ Internal leads dashboard for Swiss registered companies. Bulk-imports the entire
 * **CSV export** – export any filtered view to CSV
 * **HTTPS** – Nginx reverse proxy with self-signed certificate (or swap in a CA-signed cert); HTTP auto-redirects to HTTPS
 * **PostgreSQL** – all data persisted in Postgres; DB indexes on all filter columns
+* **Redis** – job queue backend (RQ) and rate-limit counters; app falls back gracefully when unavailable
+* **Rate limiting** – public auth endpoints (`/token`, `/register`, `/forgot-password`) rate-limited per IP via Redis `INCR + EXPIRE`; in-memory fallback when Redis is unavailable
+* **Monitoring** – Prometheus scrapes `/metrics` every 30 s; Grafana at `grafana.helvex.dicy.ch` with pre-built K8s + node dashboards
 * **FastAPI + Jinja2** – server-rendered UI, no JS framework required
 
 ---
@@ -464,6 +467,47 @@ All long-running actions are executed through a **persistent DB-backed queue** (
 
 ---
 
+## Monitoring
+
+Metrics and dashboards are provided by **kube-prometheus-stack** (Prometheus + Grafana), deployed to the `monitoring` namespace alongside the application.
+
+### Grafana
+
+Available at `https://grafana.helvex.dicy.ch` (prod). Login with the admin credentials set via `GRAFANA_ADMIN_PASSWORD`.
+
+Pre-built dashboards (enabled by default):
+
+| Dashboard | What it shows |
+|---|---|
+| **Kubernetes / Compute Resources / Node** | CPU, memory, disk per node |
+| **Kubernetes / Compute Resources / Namespace** | Per-namespace resource usage |
+| **Kubernetes / Compute Resources / Pod** | Per-pod CPU + memory over time |
+| **Node Exporter / Full** | Host-level disk, network, load |
+
+### Application metrics (`/metrics`)
+
+The FastAPI app exposes Prometheus metrics at `/metrics` via `prometheus-fastapi-instrumentator`. Key metrics:
+
+| Metric | Description |
+|---|---|
+| `http_requests_total` | Request count by method, path, status |
+| `http_request_duration_seconds` | Latency histogram by path |
+| `http_requests_in_progress` | Current in-flight requests |
+
+Prometheus scrapes these every 30 s via a `ServiceMonitor` in the `helvex-prod` namespace.
+
+### Infra layout
+
+```
+infra/charts/monitoring/values.yaml          # base values (lightweight)
+infra/environments/monitoring-prod.yaml      # prod overrides (Grafana ingress)
+infra/charts/helvex/templates/servicemonitor.yaml  # scrape config for the app
+```
+
+AlertManager is disabled — add it back in `monitoring/values.yaml` (`alertmanager.enabled: true`) when you have an on-call setup.
+
+---
+
 ## Roadmap
 
 ### Near-term
@@ -587,7 +631,8 @@ All long-running actions are executed through a **persistent DB-backed queue** (
 - [ ] **Password reset** — self-service reset flow or admin-triggered reset link
 - [ ] **Role-based access** — read-only viewer role vs full editor role
 - [ ] **Per-user quota tracking** — replace the global Google quota counter with per-user accounting
-- [ ] **Rate limiting** — throttle Google Search triggers per user to prevent quota exhaustion from concurrent users
+- [x] **Rate limiting** — public auth endpoints (`/token`, `/register`, `/forgot-password`) are rate-limited per IP using Redis (`INCR + EXPIRE`); falls back to in-memory on Redis unavailability
+- [ ] **Per-user Google quota throttling** — throttle Google Search triggers per user to prevent quota exhaustion from concurrent users
 
 ---
 
