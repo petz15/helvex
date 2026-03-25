@@ -199,6 +199,9 @@ _login_attempts: dict[str, list[float]] = defaultdict(list)
 _RATE_WINDOW = 900   # 15 minutes
 _RATE_MAX = 10       # failed attempts per window per IP
 
+# General request rate limiter — counts every call regardless of outcome
+_request_counts: dict[str, list[float]] = defaultdict(list)
+
 
 def _trim_attempts(ip: str) -> list[float]:
     now = time.monotonic()
@@ -223,6 +226,23 @@ def check_login_rate_limit(ip: str) -> bool:
     if not is_login_allowed(ip):
         return False
     record_login_failure(ip)
+    return True
+
+
+def check_public_rate_limit(ip: str, action: str, *, window: float = 900, max_requests: int = 5) -> bool:
+    """Rate-limit a public endpoint by IP + action label.
+
+    Counts every call (success or failure). Returns False when the IP exceeds
+    *max_requests* within *window* seconds for this action.
+    """
+    bucket = f"{action}:{ip}"
+    now = time.monotonic()
+    calls = [t for t in _request_counts[bucket] if now - t < window]
+    if len(calls) >= max_requests:
+        _request_counts[bucket] = calls  # keep trimmed
+        return False
+    calls.append(now)
+    _request_counts[bucket] = calls
     return True
 
 

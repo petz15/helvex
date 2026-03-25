@@ -166,8 +166,22 @@ jobs:
 
       - name: Wait for rollout
         run: |
-          kubectl rollout status deployment/helvex -n helvex-prod --timeout=180s
+          kubectl rollout status deployment/helvex -n helvex-prod --timeout=360s
           kubectl rollout status deployment/helvex-frontend -n helvex-prod --timeout=180s
+
+      - name: Dump diagnostics on failure
+        if: failure()
+        run: |
+          echo "=== Pods ==="
+          kubectl get pods -n helvex-prod -o wide
+          echo "=== Helvex pod describe ==="
+          kubectl describe pods -n helvex-prod -l app.kubernetes.io/name=helvex
+          echo "=== Helvex logs (current) ==="
+          kubectl logs -n helvex-prod -l app.kubernetes.io/name=helvex --tail=80 || true
+          echo "=== Helvex logs (previous, if crash-looped) ==="
+          kubectl logs -n helvex-prod -l app.kubernetes.io/name=helvex --previous --tail=80 || true
+          echo "=== Events ==="
+          kubectl get events -n helvex-prod --sort-by='.lastTimestamp' | tail -30
 
       - name: Bump minor version
         run: |

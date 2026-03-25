@@ -2,17 +2,20 @@
 
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, Form, HTTPException, status
+from fastapi import APIRouter, Depends, Form, HTTPException, Request, status
 from sqlalchemy.orm import Session
 
 from app import crud
 from app.auth import (
+    check_public_rate_limit,
     create_access_token,
     create_password_reset_token,
     create_verification_token,
     decode_password_reset_token,
     decode_verification_token,
     get_current_user,
+    is_login_allowed,
+    record_login_failure,
 )
 from app.database import get_db
 from app.models.user import User
@@ -30,12 +33,21 @@ _RESEND_COOLDOWN_SECONDS = 60
 
 @router.post("/token", response_model=TokenResponse, summary="Obtain a JWT Bearer token")
 def login_for_token(
+    request: Request,
     username: str = Form(...),
     password: str = Form(...),
     db: Session = Depends(get_db),
 ) -> TokenResponse:
+    ip = request.client.host if request.client else "unknown"
+    if not is_login_allowed(ip):
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Too many login attempts. Try again in 15 minutes.",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
     user = crud.authenticate(db, username=username, password=password)
     if not user:
+        record_login_failure(ip)
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid username or password",
@@ -50,7 +62,13 @@ def login_for_token(
 
 @router.post("/register", response_model=UserRead, status_code=status.HTTP_201_CREATED,
              summary="Create a new user account")
-def register(body: RegisterRequest, db: Session = Depends(get_db)) -> UserRead:
+def register(request: Request, body: RegisterRequest, db: Session = Depends(get_db)) -> UserRead:
+    ip = request.client.host if request.client else "unknown"
+    if not check_public_rate_limit(ip, "register", window=3600, max_requests=10):
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Too many registration attempts. Try again later.",
+        )
     if crud.get_user_by_username(db, body.username):
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Username already taken")
     if crud.get_user_by_email(db, body.email):
@@ -128,7 +146,11 @@ def change_password(
 
 @router.post("/forgot-password", status_code=status.HTTP_204_NO_CONTENT,
              summary="Request a password reset email")
-def forgot_password(email: str = Form(...), db: Session = Depends(get_db)) -> None:
+def forgot_password(request: Request, email: str = Form(...), db: Session = Depends(get_db)) -> None:
+    ip = request.client.host if request.client else "unknown"
+    if not check_public_rate_limit(ip, "forgot-password", window=900, max_requests=5):
+        # Return 204 even on rate limit to avoid confirming anything
+        return
     # Always return 204 — never reveal whether an email is registered
     user = crud.get_user_by_email(db, email)
     if user and user.email:

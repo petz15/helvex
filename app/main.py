@@ -466,11 +466,14 @@ async def security_headers(request: Request, call_next):
 
 @app.get("/health", tags=["health"])
 def health():
+    from fastapi.responses import JSONResponse
     ready = getattr(app.state, "ready", False)
     error = getattr(app.state, "startup_error", None)
     if error:
-        return {"status": "error"}
-    return {"status": "ok" if ready else "starting"}
+        return JSONResponse({"status": "error"}, status_code=500)
+    if not ready:
+        return JSONResponse({"status": "starting"}, status_code=503)
+    return {"status": "ok"}
 
 
 @app.get("/metadata", tags=["metadata"])
