@@ -72,11 +72,14 @@ releases:
             serviceAccountName: arc-runner
 
   # Prometheus + Grafana monitoring stack
+  # disableValidation: CRDs (ServiceMonitor, PrometheusRule, etc.) don't exist on a
+  # fresh cluster — skip server-side validation so helm diff doesn't fail before install.
   - name: monitoring
     namespace: monitoring
     chart: prometheus-community/kube-prometheus-stack
     version: "58.7.2"
     createNamespace: true
+    disableValidation: true
     values:
       - ./charts/monitoring/values.yaml
       - environments/monitoring-{{ .Environment.Name }}.yaml
@@ -86,9 +89,13 @@ releases:
     namespace: helvex-{{ .Environment.Name }}
     chart: ./charts/helvex
     createNamespace: true
+    # disableValidation: ServiceMonitor CRD is provided by monitoring; skip validation
+    # when CRDs aren't installed yet (fresh cluster or monitoring not yet deployed).
+    disableValidation: true
     needs:
       - cert-manager/cert-manager
       - cnpg-system/cloudnative-pg
+      - monitoring/monitoring
     values:
       - ./charts/helvex/values.yaml
       - environments/{{ .Environment.Name }}.yaml

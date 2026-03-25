@@ -1,46 +1,61 @@
-# kube-prometheus-stack base values (environment overrides in environments/monitoring-*.yaml)
+# kube-prometheus-stack — minimal footprint for single-node K3s
+# Philosophy: scrape app + node metrics, view in Grafana, no alerting overhead.
 
+# ── Prometheus ────────────────────────────────────────────────────────────────
 prometheus:
   prometheusSpec:
-    retention: 15d
-    resources:
-      requests:
-        cpu: 200m
-        memory: 512Mi
-      limits:
-        cpu: "1"
-        memory: 1Gi
-    # Scrape all PodMonitor / ServiceMonitor across namespaces
+    retention: 7d
+    # Scrape ServiceMonitors / PodMonitors from all namespaces
     podMonitorSelectorNilUsesHelmValues: false
     serviceMonitorSelectorNilUsesHelmValues: false
-
-grafana:
-  adminPassword: ""  # set via environment override
-  persistence:
-    enabled: true
-    size: 2Gi
-  resources:
-    requests:
-      cpu: 100m
-      memory: 128Mi
-    limits:
-      cpu: 500m
-      memory: 256Mi
-  grafana.ini:
-    server:
-      root_url: ""  # set via environment override
-
-alertmanager:
-  alertmanagerSpec:
+    # Strip down default recording/alerting rules to save memory
+    ruleSelectorNilUsesHelmValues: false
     resources:
       requests:
-        cpu: 50m
-        memory: 64Mi
+        cpu: 100m
+        memory: 256Mi
       limits:
-        cpu: 200m
-        memory: 128Mi
+        cpu: 500m
+        memory: 512Mi
+    storageSpec:
+      volumeClaimTemplate:
+        spec:
+          accessModes: ["ReadWriteOnce"]
+          resources:
+            requests:
+              storage: 5Gi
 
-# Disable components not needed on a single-node K3s cluster
+# ── Grafana ───────────────────────────────────────────────────────────────────
+grafana:
+  adminPassword: ""  # overridden per environment
+  # No persistent volume — dashboards are code, data is in Prometheus
+  persistence:
+    enabled: false
+  defaultDashboardsEnabled: true
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 200m
+      memory: 128Mi
+  grafana.ini:
+    server:
+      root_url: ""  # set per environment
+    analytics:
+      reporting_enabled: false
+      check_for_updates: false
+    # Disable unused Grafana features
+    alerting:
+      enabled: false
+    unified_alerting:
+      enabled: false
+
+# ── AlertManager — disabled (no on-call setup yet) ───────────────────────────
+alertmanager:
+  enabled: false
+
+# ── Disable control-plane components not exposed on K3s ──────────────────────
 kubeEtcd:
   enabled: false
 kubeControllerManager:
@@ -49,3 +64,21 @@ kubeScheduler:
   enabled: false
 kubeProxy:
   enabled: false
+
+# ── node-exporter — keep, very lightweight (~10Mi RAM) ───────────────────────
+nodeExporter:
+  enabled: true
+
+# ── kube-state-metrics — keep, lightweight, gives pod/deployment metrics ─────
+kubeStateMetrics:
+  enabled: true
+
+# ── Operator resource limits ──────────────────────────────────────────────────
+prometheusOperator:
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 200m
+      memory: 128Mi
