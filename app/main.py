@@ -280,6 +280,11 @@ _LOGIN_HTML = """\
       </div>
       <button class="btn" type="submit">Sign in</button>
     </form>
+    <p style="margin-top:1.25rem;text-align:center;font-size:.875rem;color:#6b7280;">
+      No account? <a href="/register" style="color:#1d4ed8;text-decoration:none;font-weight:500;">Create one</a>
+      &nbsp;·&nbsp;
+      <a href="/forgot-password" style="color:#6b7280;text-decoration:none;">Forgot password?</a>
+    </p>
   </div>
 </body>
 </html>

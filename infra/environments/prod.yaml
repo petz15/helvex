@@ -44,4 +44,4 @@ postgres:
   s3BucketPath: "s3://helvex-backups/pg/"
   backupRetention: "7d"
   pooler:
-    enabled: false   # re-enable after: kubectl delete pooler helvex-pg-pooler -n helvex-prod && verify cnpg_pooler_pgbouncer role exists
+    enabled: true   # re-enable after: kubectl delete pooler helvex-pg-pooler -n helvex-prod && verify cnpg_pooler_pgbouncer role exists
