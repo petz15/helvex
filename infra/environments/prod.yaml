@@ -44,4 +44,4 @@ postgres:
   s3BucketPath: "s3://helvex-backups/pg/"
   backupRetention: "7d"
   pooler:
-    enabled: true
+    enabled: false
