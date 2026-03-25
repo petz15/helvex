@@ -14,7 +14,7 @@ Go to **github.com/petz15/helvex → Settings → Secrets and variables → Acti
 
 | Secret | Value |
 |---|---|
-| `DB_URL` | Full PostgreSQL connection URL, e.g. `postgresql://helvex:PASSWORD@localhost/helvex` |
+| `DB_URL` | `postgresql://helvex:PASSWORD@helvex-db.helvex-prod.svc.cluster.local:5432/helvex` — use the stable `helvex-db` alias, not `helvex-pg-rw` directly (see note below) |
 | `DB_PASSWORD` | The PostgreSQL password alone (used by CloudNativePG bootstrap) |
 | `REDIS_URL` | `redis://:PASSWORD@redis-master.helvex-prod.svc.cluster.local:6379/0` |
 | `REDIS_PASSWORD` | Redis password |
@@ -25,6 +25,8 @@ Go to **github.com/petz15/helvex → Settings → Secrets and variables → Acti
 | `ARC_APP_ID` | GitHub App ID (from App settings page) |
 | `ARC_APP_INSTALLATION_ID` | Installation ID (from App → Install → URL contains the ID) |
 | `ARC_APP_PRIVATE_KEY` | Contents of the `.pem` file (paste the full multiline value) |
+
+> **`DB_URL` hostname:** Always use `helvex-db` (the Helm-managed ExternalName service), never `helvex-pg-rw` directly. The chart routes `helvex-db` → `helvex-pg-rw` when the connection pooler is disabled, and → `helvex-pg-pooler` when it is enabled. This means enabling/disabling the pooler is a Helm values change only — no secret rotation needed.
 
 ### GitHub App for ARC
 
