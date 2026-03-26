@@ -359,14 +359,14 @@ resources:
 ## 10. Useful kubectl Commands
 
 ```bash
-# Tail all app logs
-kubectl logs -n helvex-prod deploy/helvex -f
+# Tail backend logs (use -l selector — deploy/helvex matches frontend pods too)
+kubectl logs -n helvex-prod -l app.kubernetes.io/component=app -f
 
 # Tail worker logs
-kubectl logs -n helvex-prod deploy/helvex-worker -f
+kubectl logs -n helvex-prod -l app.kubernetes.io/component=worker -f
 
 # Tail frontend logs
-kubectl logs -n helvex-prod deploy/helvex-frontend -f
+kubectl logs -n helvex-prod -l app.kubernetes.io/component=frontend -f
 
 # Tail DB logs
 kubectl logs -n helvex-prod helvex-pg-1 -f
