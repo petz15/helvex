@@ -1,9 +1,12 @@
 """Auth API routes — login, registration, email verification, password management."""
 
+import logging
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Request, status
 from sqlalchemy.orm import Session
+
+logger = logging.getLogger(__name__)
 
 from app import crud
 from app.auth import (
@@ -49,11 +52,13 @@ def login_for_token(
     user = crud.authenticate(db, username=username, password=password)
     if not user:
         record_login_failure(ip)
+        logger.warning("auth.login_failed username=%r ip=%s", username, ip)
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid username or password",
             headers={"WWW-Authenticate": "Bearer"},
         )
+    logger.info("auth.login_ok user_id=%s username=%r ip=%s", user.id, user.username, ip)
     return TokenResponse(access_token=create_access_token(user.id))
 
 
@@ -71,10 +76,13 @@ def register(request: Request, body: RegisterRequest, db: Session = Depends(get_
             detail="Too many registration attempts. Try again later.",
         )
     if crud.get_user_by_username(db, body.username):
+        logger.warning("auth.register_conflict field=username value=%r ip=%s", body.username, ip)
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Username already taken")
     if crud.get_user_by_email(db, body.email):
+        logger.warning("auth.register_conflict field=email ip=%s", ip)
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Email already registered")
     user = crud.create_user(db, username=body.username, password=body.password, email=body.email)
+    logger.info("auth.register_ok user_id=%s username=%r ip=%s", user.id, user.username, ip)
     _send_verification(db, user)
     return UserRead.model_validate(user)
 
@@ -101,6 +109,7 @@ def resend_verification(
                 status_code=status.HTTP_429_TOO_MANY_REQUESTS,
                 detail=f"Please wait {int(_RESEND_COOLDOWN_SECONDS - elapsed)}s before requesting another email",
             )
+    logger.info("auth.resend_verification user_id=%s", current_user.id)
     _send_verification(db, current_user)
 
 
@@ -108,15 +117,18 @@ def resend_verification(
 def verify_email(token: str, db: Session = Depends(get_db)) -> UserRead:
     user_id = decode_verification_token(token)
     if user_id is None:
+        logger.warning("auth.verify_email_failed reason=invalid_or_expired_token")
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Invalid or expired verification link. Please request a new one.",
         )
     user = crud.get_user(db, user_id)
     if not user:
+        logger.warning("auth.verify_email_failed reason=user_not_found user_id=%s", user_id)
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
     if not user.email_verified:
         user = crud.mark_email_verified(db, user)
+        logger.info("auth.email_verified user_id=%s username=%r", user.id, user.username)
         if user.email:
             try:
                 send_welcome_email(to=user.email, username=user.username)
@@ -156,9 +168,11 @@ def forgot_password(request: Request, email: str = Form(...), db: Session = Depe
     user = crud.get_user_by_email(db, email)
     if user and user.email:
         token = create_password_reset_token(user.id)
+        logger.info("auth.password_reset_requested user_id=%s ip=%s", user.id, ip)
         try:
             send_password_reset_email(to=user.email, username=user.username, token=token)
         except Exception:
+            logger.exception("auth.password_reset_email_failed user_id=%s", user.id)
             pass  # swallow to avoid leaking whether the email exists
 
 

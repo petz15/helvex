@@ -22,6 +22,11 @@ Go to **github.com/petz15/helvex → Settings → Secrets and variables → Acti
 | `S3_ACCESS_KEY` | Hetzner Object Storage access key |
 | `S3_SECRET_KEY` | Hetzner Object Storage secret key |
 | `GHCR_PAT` | GitHub Personal Access Token with `write:packages` scope |
+| `SMTP_HOST` | SMTP server hostname, e.g. `smtp.mailgun.org` |
+| `SMTP_PORT` | SMTP port, typically `587` (STARTTLS) |
+| `SMTP_USER` | SMTP login username |
+| `SMTP_PASSWORD` | SMTP login password |
+| `SMTP_FROM` | Sender address, e.g. `Helvex <noreply@helvex.dicy.ch>` |
 | `ARC_APP_ID` | GitHub App ID (from App settings page) |
 | `ARC_APP_INSTALLATION_ID` | Installation ID (from App → Install → URL contains the ID) |
 | `ARC_APP_PRIVATE_KEY` | Contents of the `.pem` file (paste the full multiline value) |

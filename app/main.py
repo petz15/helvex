@@ -332,9 +332,11 @@ def login_submit(
     user = crud.authenticate(db, username=username, password=password)
     if not user:
         record_login_failure(ip)
+        logger.warning("auth.login_failed username=%r ip=%s", username, ip)
         error_html = '<div class="error">Invalid username or password.</div>'
         return HTMLResponse(_LOGIN_HTML.format(next=next, error_html=error_html), status_code=401)
 
+    logger.info("auth.login_ok user_id=%s username=%r ip=%s", user.id, user.username, ip)
     safe_next = next if next.startswith("/") and not next.startswith("//") else "/app/dashboard"
     forwarded_proto = request.headers.get("x-forwarded-proto", "")
     is_https = request.url.scheme == "https" or forwarded_proto.split(",")[0].strip().lower() == "https"
