@@ -1,14 +1,22 @@
 "use client";
-import { useState, FormEvent } from "react";
+import { useState, FormEvent, useEffect, Suspense } from "react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 
-export default function RegisterPage() {
-  const [username, setUsername] = useState("");
-  const [email, setEmail] = useState("");
+function RegisterForm() {
+  const searchParams = useSearchParams();
+  const inviteToken = searchParams.get("invite");
+  const prefillEmail = searchParams.get("email") ?? "";
+
+  const [email, setEmail] = useState(prefillEmail);
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState(false);
   const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    if (prefillEmail) setEmail(prefillEmail);
+  }, [prefillEmail]);
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
@@ -18,12 +26,15 @@ export default function RegisterPage() {
       const res = await fetch("/api/v1/auth/register", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ username, email, password }),
+        body: JSON.stringify({ email, password }),
       });
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
         setError(body.detail ?? `Registration failed (HTTP ${res.status})`);
         return;
+      }
+      if (inviteToken) {
+        sessionStorage.setItem("pendingInviteToken", inviteToken);
       }
       setDone(true);
     } finally {
@@ -40,6 +51,11 @@ export default function RegisterPage() {
           <p className="text-sm text-slate-500 mb-4">
             We sent a verification link to <strong>{email}</strong>. Click it to activate your account.
           </p>
+          {inviteToken && (
+            <p className="text-xs text-blue-600 mb-4">
+              After verifying your email, visit the invite link again to join the organization.
+            </p>
+          )}
           <Link href="/login" className="text-sm text-blue-600 hover:underline">
             Back to login
           </Link>
@@ -51,21 +67,14 @@ export default function RegisterPage() {
   return (
     <div className="flex min-h-[60vh] items-center justify-center">
       <div className="w-full max-w-sm rounded-xl border border-slate-200 bg-white p-8 shadow-sm">
-        <h1 className="text-xl font-semibold text-slate-800 mb-6">Create an account</h1>
+        <h1 className="text-xl font-semibold text-slate-800 mb-2">Create an account</h1>
+        {inviteToken && (
+          <p className="text-sm text-blue-600 mb-4 rounded bg-blue-50 px-3 py-2">
+            You were invited to join an organization. Create an account to accept.
+          </p>
+        )}
 
         <form onSubmit={handleSubmit} className="flex flex-col gap-4">
-          <div>
-            <label className="text-xs font-medium text-slate-500 uppercase tracking-wide">Username</label>
-            <input
-              type="text"
-              required
-              autoComplete="username"
-              value={username}
-              onChange={(e) => setUsername(e.target.value)}
-              className="mt-1 w-full rounded border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
-              placeholder="your-handle"
-            />
-          </div>
           <div>
             <label className="text-xs font-medium text-slate-500 uppercase tracking-wide">Email</label>
             <input
@@ -84,6 +93,7 @@ export default function RegisterPage() {
               type="password"
               required
               autoComplete="new-password"
+              minLength={8}
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               className="mt-1 w-full rounded border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
@@ -106,11 +116,22 @@ export default function RegisterPage() {
 
         <p className="mt-4 text-center text-sm text-slate-500">
           Already have an account?{" "}
-          <Link href="/login" className="text-blue-600 hover:underline">
+          <Link
+            href={inviteToken ? `/accept-invite?token=${inviteToken}` : "/login"}
+            className="text-blue-600 hover:underline"
+          >
             Sign in
           </Link>
         </p>
       </div>
     </div>
+  );
+}
+
+export default function RegisterPage() {
+  return (
+    <Suspense>
+      <RegisterForm />
+    </Suspense>
   );
 }

@@ -73,11 +73,11 @@ from app.crud.user import (
     create_user,
     get_user_by_email,
     get_user,
-    get_user_by_username,
     hash_password,
     list_users,
     mark_email_verified,
     record_verification_sent,
+    update_email,
     update_password,
 )
 
@@ -133,7 +133,6 @@ __all__ = [
     "create_event",
     # user
     "get_user",
-    "get_user_by_username",
     "get_user_by_email",
     "list_users",
     "count_users",
@@ -141,6 +140,7 @@ __all__ = [
     "hash_password",
     "authenticate",
     "update_password",
+    "update_email",
     "mark_email_verified",
     "record_verification_sent",
     # boilerplate

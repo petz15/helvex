@@ -49,11 +49,11 @@ from app.config import settings
 from app.database import Base, engine, get_db
 from app.services.job_worker import kick_job_worker
 from app.services.scoring import get_default_scoring_config
-from app.api.routes import auth_router, companies_router, jobs_router, map_router, notes_router, settings_router, workspace_router
+from app.api.routes import auth_router, companies_router, invites_router, jobs_router, map_router, notes_router, orgs_router, settings_router, workspace_router
 
 # Paths that do NOT require authentication
-_PUBLIC_PREFIXES = ("/static", "/login", "/health", "/api/v1/auth")
-_PUBLIC_EXACT = {"/login", "/logout", "/health", "/verify-email"}
+_PUBLIC_PREFIXES = ("/static", "/login", "/health", "/api/v1/auth", "/api/v1/invites/preview")
+_PUBLIC_EXACT = {"/login", "/logout", "/health", "/verify-email", "/accept-invite", "/confirm-email-change"}
 
 _REPO_ROOT = pathlib.Path(__file__).parent.parent
 
@@ -236,6 +236,8 @@ app.include_router(notes_router, prefix="/api/v1")
 app.include_router(jobs_router, prefix="/api/v1")
 app.include_router(map_router, prefix="/api/v1")
 app.include_router(settings_router, prefix="/api/v1")
+app.include_router(orgs_router, prefix="/api/v1")
+app.include_router(invites_router, prefix="/api/v1")
 app.include_router(workspace_router, prefix="/api/v1")
 
 
@@ -294,8 +296,8 @@ _LOGIN_HTML = """\
     <form method="post" action="/login">
       <input type="hidden" name="next" value="{next}">
       <div class="field">
-        <label for="username">Username</label>
-        <input id="username" name="username" type="text" autocomplete="username" autofocus required>
+        <label for="email">Email</label>
+        <input id="email" name="email" type="email" autocomplete="email" autofocus required>
       </div>
       <div class="field">
         <label for="password">Password</label>
@@ -324,7 +326,7 @@ def login_page(next: str = Query("/app/dashboard"), error: str | None = Query(No
 @app.post("/login", include_in_schema=False)
 def login_submit(
     request: Request,
-    username: str = Form(...),
+    email: str = Form(...),
     password: str = Form(...),
     next: str = Form("/app/dashboard"),
     db: Session = Depends(get_db),
@@ -335,14 +337,14 @@ def login_submit(
         error_html = '<div class="error">Too many login attempts. Try again in 15 minutes.</div>'
         return HTMLResponse(_LOGIN_HTML.format(next=next, error_html=error_html), status_code=429)
 
-    user = crud.authenticate(db, username=username, password=password)
+    user = crud.authenticate(db, email=email, password=password)
     if not user:
         record_login_failure(ip)
-        logger.warning("auth.login_failed username=%r ip=%s", username, ip)
-        error_html = '<div class="error">Invalid username or password.</div>'
+        logger.warning("auth.login_failed email=%r ip=%s", email, ip)
+        error_html = '<div class="error">Invalid email or password.</div>'
         return HTMLResponse(_LOGIN_HTML.format(next=next, error_html=error_html), status_code=401)
 
-    logger.info("auth.login_ok user_id=%s username=%r ip=%s", user.id, user.username, ip)
+    logger.info("auth.login_ok user_id=%s email=%r ip=%s", user.id, user.email, ip)
     safe_next = next if next.startswith("/") and not next.startswith("//") else "/app/dashboard"
     forwarded_proto = request.headers.get("x-forwarded-proto", "")
     is_https = request.url.scheme == "https" or forwarded_proto.split(",")[0].strip().lower() == "https"
@@ -414,12 +416,62 @@ def verify_email_page(token: str = Query(""), db: Session = Depends(get_db)):
         _crud.mark_email_verified(db, user)
         try:
             from app.services.email import send_welcome_email
-            if user.email:
-                send_welcome_email(to=user.email, username=user.username)
+            send_welcome_email(to=user.email)
         except Exception:
             pass
 
     return _page("Email verified", "Email verified!", "Your email address has been confirmed. You can now use all features.")
+
+
+@app.get("/confirm-email-change", response_class=HTMLResponse, include_in_schema=False)
+def confirm_email_change_page(token: str = Query(""), db: Session = Depends(get_db)):
+    from app.auth import decode_email_change_token
+    import html as _html2
+
+    def _page(title: str, heading: str, body: str, color: str = "#1d4ed8") -> HTMLResponse:
+        return HTMLResponse(f"""<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Helvex — {_html2.escape(title)}</title>
+  <style>
+    body {{ font-family: ui-sans-serif, system-ui, sans-serif; margin: 0; background: #f1f5f9; color: #1e293b; }}
+    .card {{ max-width: 440px; margin: 6rem auto; background: #fff; border-radius: 12px; padding: 2.5rem 2rem; box-shadow: 0 4px 24px rgba(0,0,0,.10); text-align: center; }}
+    h2 {{ color: {color}; margin-top: 0; }}
+    .btn {{ display: inline-block; margin-top: 1.5rem; padding: .65rem 1.5rem; background: #1d4ed8; color: #fff; border-radius: 8px; text-decoration: none; font-weight: 600; }}
+  </style>
+</head>
+<body>
+  <div class="card">
+    <p style="font-size:1.5rem;font-weight:700;color:#1d4ed8;margin:0 0 1rem">Helvex</p>
+    <h2>{_html2.escape(heading)}</h2>
+    <p>{body}</p>
+    <a class="btn" href="/app/account">Go to account</a>
+  </div>
+</body>
+</html>""")
+
+    if not token:
+        return _page("Invalid link", "Invalid link", "The confirmation link is missing a token.", color="#b91c1c")
+
+    result = decode_email_change_token(token)
+    if result is None:
+        return _page("Link expired", "Link expired or invalid",
+                     "This confirmation link has expired or is invalid. Please request a new one.",
+                     color="#b91c1c")
+
+    user_id, new_email = result
+    user = crud.get_user(db, user_id)
+    if not user:
+        return _page("Not found", "Account not found", "No account was found for this link.", color="#b91c1c")
+
+    if crud.get_user_by_email(db, new_email) and crud.get_user_by_email(db, new_email).id != user.id:
+        return _page("Email taken", "Email already in use",
+                     "This email address is already registered to another account.", color="#b91c1c")
+
+    crud.update_email(db, user, new_email)
+    return _page("Email updated", "Email address updated!", f"Your email is now <strong>{_html.escape(new_email)}</strong>.")
 
 
 # ── Startup gate middleware ───────────────────────────────────────────────────

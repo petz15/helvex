@@ -13,8 +13,7 @@ export interface OrgInfo {
 
 export interface CurrentUser {
   id: number;
-  username: string;
-  email: string | null;
+  email: string;
   tier: string;
   org_role: string;
   is_active: boolean;
@@ -283,4 +282,181 @@ export async function fetchOrgSettings(orgId: number): Promise<Record<string, st
   const res = await fetch(orgPath(orgId, "/settings"), { credentials: "include" });
   if (!res.ok) throw new Error("Failed to fetch org settings");
   return res.json();
+}
+
+// ── Org management ────────────────────────────────────────────────────────────
+
+export interface OrgDetail {
+  id: number;
+  name: string;
+  slug: string;
+  tier: string;
+  member_count: number;
+}
+
+export interface OrgMember {
+  id: number;
+  username: string;
+  email: string | null;
+  org_role: string;
+  is_active: boolean;
+  created_at: string;
+}
+
+export async function fetchOrg(orgId: number): Promise<OrgDetail> {
+  const res = await fetch(orgPath(orgId, ""), { credentials: "include" });
+  if (!res.ok) throw new Error("Failed to fetch org");
+  return res.json();
+}
+
+export async function updateOrg(orgId: number, data: { name?: string }): Promise<OrgDetail> {
+  const res = await fetch(orgPath(orgId, ""), {
+    method: "PATCH",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  });
+  if (!res.ok) throw new Error("Failed to update org");
+  return res.json();
+}
+
+export async function fetchOrgMembers(orgId: number): Promise<OrgMember[]> {
+  const res = await fetch(orgPath(orgId, "/members"), { credentials: "include" });
+  if (!res.ok) throw new Error("Failed to fetch members");
+  return res.json();
+}
+
+export async function addOrgMember(
+  orgId: number,
+  data: { username: string; email?: string; password: string; org_role: string },
+): Promise<OrgMember> {
+  const res = await fetch(orgPath(orgId, "/members"), {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.detail ?? "Failed to add member");
+  }
+  return res.json();
+}
+
+export async function updateMemberRole(
+  orgId: number,
+  userId: number,
+  org_role: string,
+): Promise<OrgMember> {
+  const res = await fetch(orgPath(orgId, `/members/${userId}`), {
+    method: "PATCH",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ org_role }),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.detail ?? "Failed to update role");
+  }
+  return res.json();
+}
+
+export async function removeOrgMember(orgId: number, userId: number): Promise<void> {
+  const res = await fetch(orgPath(orgId, `/members/${userId}`), {
+    method: "DELETE",
+    credentials: "include",
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.detail ?? "Failed to remove member");
+  }
+}
+
+export async function sendInvite(orgId: number, email: string): Promise<void> {
+  const res = await fetch(orgPath(orgId, "/invites"), {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email }),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.detail ?? "Failed to send invite");
+  }
+}
+
+// ── Org lifecycle ─────────────────────────────────────────────────────────────
+
+export async function createOrg(name: string): Promise<OrgInfo> {
+  const res = await fetch("/api/v1/orgs", {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name }),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.detail ?? "Failed to create org");
+  }
+  return res.json();
+}
+
+export async function leaveOrg(orgId: number): Promise<void> {
+  const res = await fetch(`/api/v1/orgs/${orgId}/leave`, {
+    method: "POST",
+    credentials: "include",
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.detail ?? "Failed to leave org");
+  }
+}
+
+// ── Invite acceptance ─────────────────────────────────────────────────────────
+
+export interface InvitePreview {
+  org_id: number;
+  org_name: string;
+  invited_email: string;
+}
+
+export async function fetchInvitePreview(token: string): Promise<InvitePreview> {
+  const res = await fetch(`/api/v1/invites/preview?token=${encodeURIComponent(token)}`, {
+    credentials: "include",
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.detail ?? "Invalid or expired invite");
+  }
+  return res.json();
+}
+
+export async function acceptInvite(token: string, force = false): Promise<void> {
+  const res = await fetch("/api/v1/invites/accept", {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ token, force }),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw Object.assign(new Error(body.detail?.code ?? body.detail ?? "Failed to accept invite"), {
+      detail: body.detail,
+    });
+  }
+}
+
+// ── Account / email change ────────────────────────────────────────────────────
+
+export async function requestEmailChange(newEmail: string, currentPassword: string): Promise<void> {
+  const res = await fetch("/api/v1/auth/request-email-change", {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ new_email: newEmail, current_password: currentPassword }),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.detail ?? "Failed to request email change");
+  }
 }

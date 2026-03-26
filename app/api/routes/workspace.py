@@ -5,6 +5,8 @@ on top of the global catalog. All endpoints require an authenticated user
 who belongs to an org.
 
 Route structure:
+  /orgs/{org_id}                                 — org info + update
+  /orgs/{org_id}/members                         — member management (admin+)
   /orgs/{org_id}/companies/{company_id}/state    — org-shared overlay (member+)
   /orgs/{org_id}/companies/{company_id}/my-state — private user overlay (any member)
   /orgs/{org_id}/jobs                            — org-scoped job list
@@ -12,8 +14,10 @@ Route structure:
 """
 from __future__ import annotations
 
+from datetime import datetime
+
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 from sqlalchemy.orm import Session
 
 from app import crud
@@ -79,6 +83,237 @@ class UserStateOut(BaseModel):
 class OrgSettingUpdate(BaseModel):
     key: str
     value: str | None
+
+
+class OrgOut(BaseModel):
+    id: int
+    name: str
+    slug: str
+    tier: str
+    member_count: int = 0
+
+    model_config = {"from_attributes": True}
+
+
+class OrgUpdate(BaseModel):
+    name: str | None = None
+
+
+class MemberOut(BaseModel):
+    id: int
+    email: str
+    org_role: str
+    is_active: bool
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class AddMemberRequest(BaseModel):
+    email: str
+    password: str
+    org_role: str = "member"
+
+    @field_validator("password")
+    @classmethod
+    def password_strong_enough(cls, v: str) -> str:
+        if len(v) < 8:
+            raise ValueError("Password must be at least 8 characters")
+        return v
+
+
+class InviteMemberRequest(BaseModel):
+    email: str
+
+
+class UpdateRoleRequest(BaseModel):
+    org_role: str
+
+
+_VALID_ROLES = {"viewer", "member", "admin", "owner"}
+
+
+# ── Org info & update ──────────────────────────────────────────────────────────
+
+@router.get(
+    "",
+    response_model=OrgOut,
+    summary="Get org info",
+)
+def get_org(
+    org_id: int,
+    db: Session = Depends(get_db),
+    user_org: tuple[User, Organization] = Depends(get_current_org),
+):
+    _validate_org_access(org_id, user_org)
+    _, org = user_org
+    member_count = db.query(User).filter(User.org_id == org.id).count()
+    return OrgOut(
+        id=org.id,
+        name=org.name,
+        slug=org.slug,
+        tier=org.tier,
+        member_count=member_count,
+    )
+
+
+@router.patch(
+    "",
+    response_model=OrgOut,
+    summary="Update org name (admin+)",
+)
+def update_org(
+    org_id: int,
+    body: OrgUpdate,
+    db: Session = Depends(get_db),
+    user_org: tuple[User, Organization] = Depends(require_org_role("admin", "owner")),
+):
+    _validate_org_access(org_id, user_org)
+    _, org = user_org
+    if body.name is not None:
+        org.name = body.name.strip()
+    db.commit()
+    db.refresh(org)
+    member_count = db.query(User).filter(User.org_id == org.id).count()
+    return OrgOut(
+        id=org.id,
+        name=org.name,
+        slug=org.slug,
+        tier=org.tier,
+        member_count=member_count,
+    )
+
+
+# ── Member management ──────────────────────────────────────────────────────────
+
+@router.get(
+    "/members",
+    response_model=list[MemberOut],
+    summary="List org members (admin+)",
+)
+def list_members(
+    org_id: int,
+    db: Session = Depends(get_db),
+    user_org: tuple[User, Organization] = Depends(require_org_role("admin", "owner")),
+):
+    _validate_org_access(org_id, user_org)
+    _, org = user_org
+    members = db.query(User).filter(User.org_id == org.id).order_by(User.created_at).all()
+    return members
+
+
+@router.post(
+    "/members",
+    response_model=MemberOut,
+    status_code=status.HTTP_201_CREATED,
+    summary="Create a new user and add them to the org (owner only)",
+)
+def add_member(
+    org_id: int,
+    body: AddMemberRequest,
+    db: Session = Depends(get_db),
+    user_org: tuple[User, Organization] = Depends(require_org_role("owner")),
+):
+    _validate_org_access(org_id, user_org)
+    _, org = user_org
+    if body.org_role not in _VALID_ROLES:
+        raise HTTPException(status_code=400, detail=f"Invalid role. Must be one of: {sorted(_VALID_ROLES)}")
+    if crud.get_user_by_email(db, body.email):
+        raise HTTPException(status_code=409, detail="Email already registered")
+    new_user = crud.create_user(
+        db,
+        email=body.email,
+        password=body.password,
+    )
+    new_user.org_id = org.id
+    new_user.org_role = body.org_role
+    new_user.email_verified = True  # admin-created users skip email verification
+    db.commit()
+    db.refresh(new_user)
+    return new_user
+
+
+@router.patch(
+    "/members/{user_id}",
+    response_model=MemberOut,
+    summary="Update a member's role (owner only)",
+)
+def update_member_role(
+    org_id: int,
+    user_id: int,
+    body: UpdateRoleRequest,
+    db: Session = Depends(get_db),
+    user_org: tuple[User, Organization] = Depends(require_org_role("owner")),
+):
+    _validate_org_access(org_id, user_org)
+    actor, org = user_org
+    if body.org_role not in _VALID_ROLES:
+        raise HTTPException(status_code=400, detail=f"Invalid role. Must be one of: {sorted(_VALID_ROLES)}")
+    target = db.get(User, user_id)
+    if not target or target.org_id != org.id:
+        raise HTTPException(status_code=404, detail="Member not found")
+    # Prevent demoting self if last owner
+    if target.id == actor.id and body.org_role != "owner":
+        owner_count = db.query(User).filter(User.org_id == org.id, User.org_role == "owner").count()
+        if owner_count <= 1:
+            raise HTTPException(status_code=400, detail="Cannot demote the last owner")
+    target.org_role = body.org_role
+    db.commit()
+    db.refresh(target)
+    return target
+
+
+@router.delete(
+    "/members/{user_id}",
+    status_code=204,
+    summary="Remove a member from the org (owner only)",
+)
+def remove_member(
+    org_id: int,
+    user_id: int,
+    db: Session = Depends(get_db),
+    user_org: tuple[User, Organization] = Depends(require_org_role("owner")),
+):
+    _validate_org_access(org_id, user_org)
+    actor, org = user_org
+    target = db.get(User, user_id)
+    if not target or target.org_id != org.id:
+        raise HTTPException(status_code=404, detail="Member not found")
+    if target.id == actor.id:
+        raise HTTPException(status_code=400, detail="Cannot remove yourself")
+    # Check: don't leave org with no owner
+    if target.org_role == "owner":
+        owner_count = db.query(User).filter(User.org_id == org.id, User.org_role == "owner").count()
+        if owner_count <= 1:
+            raise HTTPException(status_code=400, detail="Cannot remove the last owner")
+    target.org_id = None
+    target.org_role = "member"
+    db.commit()
+
+
+# ── Org invites ───────────────────────────────────────────────────────────────
+
+@router.post(
+    "/invites",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Send an invite email to join this org (admin+)",
+)
+def send_invite(
+    org_id: int,
+    body: InviteMemberRequest,
+    db: Session = Depends(get_db),
+    user_org: tuple[User, Organization] = Depends(require_org_role("admin", "owner")),
+):
+    _validate_org_access(org_id, user_org)
+    actor, org = user_org
+    # Don't invite someone already in this org
+    existing = crud.get_user_by_email(db, body.email)
+    if existing and existing.org_id == org.id:
+        raise HTTPException(status_code=409, detail="User is already a member of this org")
+    from app.auth import create_invite_token
+    from app.services.email import send_invite_email
+    token = create_invite_token(org.id, body.email)
+    send_invite_email(to=body.email, org_name=org.name, invited_by_email=actor.email, token=token)
 
 
 # ── Org company state ──────────────────────────────────────────────────────────

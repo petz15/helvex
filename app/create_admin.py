@@ -2,14 +2,14 @@
 
 Usage (via Docker Compose — see docker-compose.yml create-admin service):
     docker compose --profile create-admin run --rm create-admin \\
-        create --username admin --password secret --email admin@example.com
+        create --email admin@example.com --password secret
 
     docker compose --profile create-admin run --rm create-admin list
 
 Or directly (when running outside Docker):
-    python -m app.create_admin create --username admin --password secret
+    python -m app.create_admin create --email admin@example.com --password secret
     python -m app.create_admin list
-    python -m app.create_admin set-password --username admin --password newpassword
+    python -m app.create_admin set-password --email admin@example.com --password newpassword
 """
 
 import argparse
@@ -29,9 +29,8 @@ def _build_parser() -> argparse.ArgumentParser:
         "create",
         help="Create a new superadmin user, or update an existing one.",
     )
-    create.add_argument("--username", required=True, help="Login username.")
+    create.add_argument("--email", required=True, help="Login email address.")
     create.add_argument("--password", required=True, help="Login password (min 8 chars recommended).")
-    create.add_argument("--email", default=None, help="Email address (optional).")
     create.add_argument(
         "--tier",
         default="enterprise",
@@ -46,7 +45,7 @@ def _build_parser() -> argparse.ArgumentParser:
 
     # ── set-password ──────────────────────────────────────────────────────────
     setpw = subparsers.add_parser("set-password", help="Reset the password for an existing user.")
-    setpw.add_argument("--username", required=True, help="Username to update.")
+    setpw.add_argument("--email", required=True, help="Email of the user to update.")
     setpw.add_argument("--password", required=True, help="New password.")
 
     # ── list ──────────────────────────────────────────────────────────────────
@@ -59,8 +58,6 @@ def main() -> int:
     parser = _build_parser()
     args = parser.parse_args()
 
-    # Import here so the Python 3.12 patch in main.py runs first when invoked
-    # via the web process, but also works standalone.
     from app import crud
 
     with SessionLocal() as db:
@@ -71,34 +68,33 @@ def main() -> int:
                 print("ERROR: password must be at least 8 characters.", file=sys.stderr)
                 return 1
 
-            existing = crud.get_user_by_username(db, args.username)
+            existing = crud.get_user_by_email(db, args.email)
             if existing:
-                # Update in-place
                 existing.hashed_password = crud.hash_password(args.password)
                 existing.tier = args.tier
                 existing.is_superadmin = not args.no_superadmin
-                if args.email:
-                    existing.email = args.email
                 db.commit()
                 db.refresh(existing)
-                print(f"Updated user '{existing.username}' (id={existing.id})")
+                print(f"Updated user (id={existing.id})")
+                print(f"  email        : {existing.email}")
                 print(f"  tier         : {existing.tier}")
                 print(f"  is_superadmin: {existing.is_superadmin}")
-                print(f"  email        : {existing.email or '(not set)'}")
             else:
                 user = crud.create_user(
                     db,
-                    username=args.username,
+                    email=args.email,
                     password=args.password,
                     is_active=True,
-                    email=args.email,
                     tier=args.tier,
                     is_superadmin=not args.no_superadmin,
                 )
-                print(f"Created user '{user.username}' (id={user.id})")
+                # Admin-created users are considered verified
+                user.email_verified = True
+                db.commit()
+                print(f"Created user (id={user.id})")
+                print(f"  email        : {user.email}")
                 print(f"  tier         : {user.tier}")
                 print(f"  is_superadmin: {user.is_superadmin}")
-                print(f"  email        : {user.email or '(not set)'}")
 
             print("\nDone. You can now log in at /login")
             return 0
@@ -109,14 +105,14 @@ def main() -> int:
                 print("ERROR: password must be at least 8 characters.", file=sys.stderr)
                 return 1
 
-            user = crud.get_user_by_username(db, args.username)
+            user = crud.get_user_by_email(db, args.email)
             if not user:
-                print(f"ERROR: user '{args.username}' not found.", file=sys.stderr)
+                print(f"ERROR: user '{args.email}' not found.", file=sys.stderr)
                 return 1
 
             user.hashed_password = crud.hash_password(args.password)
             db.commit()
-            print(f"Password updated for '{user.username}'.")
+            print(f"Password updated for '{user.email}'.")
             return 0
 
         # ── list ──────────────────────────────────────────────────────────────
@@ -126,15 +122,15 @@ def main() -> int:
                 print("No users found.")
                 return 0
 
-            header = f"{'ID':<5} {'Username':<24} {'Tier':<14} {'Superadmin':<12} {'Active':<8} {'Email'}"
+            header = f"{'ID':<5} {'Email':<40} {'Tier':<14} {'Superadmin':<12} {'Active':<8} {'Org'}"
             print(header)
             print("-" * len(header))
             for u in users:
                 print(
-                    f"{u.id:<5} {u.username:<24} {u.tier:<14} "
+                    f"{u.id:<5} {u.email:<40} {u.tier:<14} "
                     f"{'yes' if u.is_superadmin else 'no':<12} "
                     f"{'yes' if u.is_active else 'no':<8} "
-                    f"{u.email or '(not set)'}"
+                    f"{u.org_id or '(none)'}"
                 )
             return 0
 

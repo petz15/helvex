@@ -25,8 +25,8 @@ def get_user(db: Session, user_id: int) -> User | None:
     return db.get(User, user_id)
 
 
-def get_user_by_username(db: Session, username: str) -> User | None:
-    return db.query(User).filter(User.username == username).first()
+def get_user_by_email(db: Session, email: str) -> User | None:
+    return db.query(User).filter(User.email == email).first()
 
 
 def list_users(db: Session) -> list[User]:
@@ -40,18 +40,16 @@ def count_users(db: Session) -> int:
 def create_user(
     db: Session,
     *,
-    username: str,
+    email: str,
     password: str,
     is_active: bool = True,
-    email: str | None = None,
     tier: str = "free",
     is_superadmin: bool = False,
 ) -> User:
     user = User(
-        username=username,
+        email=email,
         hashed_password=hash_password(password),
         is_active=is_active,
-        email=email,
         tier=tier,
         is_superadmin=is_superadmin,
     )
@@ -59,10 +57,6 @@ def create_user(
     db.commit()
     db.refresh(user)
     return user
-
-
-def get_user_by_email(db: Session, email: str) -> User | None:
-    return db.query(User).filter(User.email == email).first()
 
 
 def mark_email_verified(db: Session, user: User) -> User:
@@ -79,13 +73,20 @@ def update_password(db: Session, user: User, new_password: str) -> User:
     return user
 
 
+def update_email(db: Session, user: User, new_email: str) -> User:
+    user.email = new_email
+    db.commit()
+    db.refresh(user)
+    return user
+
+
 def record_verification_sent(db: Session, user: User) -> None:
     user.email_verification_sent_at = datetime.now(tz=timezone.utc)
     db.commit()
 
 
-def authenticate(db: Session, *, username: str, password: str) -> User | None:
-    user = get_user_by_username(db, username)
+def authenticate(db: Session, *, email: str, password: str) -> User | None:
+    user = get_user_by_email(db, email)
     if not user or not user.is_active:
         return None
     if not verify_password(password, user.hashed_password):

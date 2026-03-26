@@ -10,7 +10,6 @@ class User(Base):
     __tablename__ = "users"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    username: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
     hashed_password: Mapped[str] = mapped_column(String(256), nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     created_at: Mapped[datetime] = mapped_column(
@@ -19,8 +18,8 @@ class User(Base):
         default=lambda: datetime.now(tz=timezone.utc),
     )
 
-    # SaaS fields
-    email: Mapped[str | None] = mapped_column(String(256), unique=True, nullable=True)
+    # Primary identifier — required, unique
+    email: Mapped[str] = mapped_column(String(256), unique=True, nullable=False)
     tier: Mapped[str] = mapped_column(String(32), nullable=False, default="free")
     email_verified: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     is_superadmin: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)

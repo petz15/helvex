@@ -32,6 +32,10 @@ _EMAIL_VERIFY_SALT = "email-verify-v1"
 _EMAIL_VERIFY_MAX_AGE = 24 * 3600  # 24 hours
 _PASSWORD_RESET_SALT = "password-reset-v1"
 _PASSWORD_RESET_MAX_AGE = 1 * 3600  # 1 hour
+_INVITE_SALT = "org-invite-v1"
+_INVITE_MAX_AGE = 7 * 24 * 3600  # 7 days
+_EMAIL_CHANGE_SALT = "email-change-v1"
+_EMAIL_CHANGE_MAX_AGE = 1 * 3600  # 1 hour
 
 # Tier hierarchy — higher index = higher tier
 _TIER_ORDER = ["free", "pro", "team", "enterprise"]
@@ -151,6 +155,44 @@ def decode_verification_token(token: str) -> int | None:
             token, max_age=_EMAIL_VERIFY_MAX_AGE
         )
         return int(user_id)
+    except (SignatureExpired, BadSignature, ValueError, TypeError):
+        return None
+
+
+# ---------------------------------------------------------------------------
+# Org invite tokens — encode (org_id, email), 7-day expiry
+# ---------------------------------------------------------------------------
+
+def create_invite_token(org_id: int, email: str) -> str:
+    return URLSafeTimedSerializer(settings.secret_key, salt=_INVITE_SALT).dumps((org_id, email))
+
+
+def decode_invite_token(token: str) -> tuple[int, str] | None:
+    try:
+        data = URLSafeTimedSerializer(settings.secret_key, salt=_INVITE_SALT).loads(
+            token, max_age=_INVITE_MAX_AGE
+        )
+        org_id, email = data
+        return (int(org_id), str(email))
+    except (SignatureExpired, BadSignature, ValueError, TypeError):
+        return None
+
+
+# ---------------------------------------------------------------------------
+# Email change tokens — encode (user_id, new_email), 1-hour expiry
+# ---------------------------------------------------------------------------
+
+def create_email_change_token(user_id: int, new_email: str) -> str:
+    return URLSafeTimedSerializer(settings.secret_key, salt=_EMAIL_CHANGE_SALT).dumps((user_id, new_email))
+
+
+def decode_email_change_token(token: str) -> tuple[int, str] | None:
+    try:
+        data = URLSafeTimedSerializer(settings.secret_key, salt=_EMAIL_CHANGE_SALT).loads(
+            token, max_age=_EMAIL_CHANGE_MAX_AGE
+        )
+        user_id, new_email = data
+        return (int(user_id), str(new_email))
     except (SignatureExpired, BadSignature, ValueError, TypeError):
         return None
 

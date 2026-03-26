@@ -151,7 +151,9 @@
       "Bash(find /c/D/coding_projects/zefix_analyzer -not -path ./.git/* -not -path ./node_modules/* -not -path ./__pycache__/* -not -path ./.venv/* -not -path */__pycache__/* -type d)",
       "Bash(find /c/D/coding_projects/zefix_analyzer/app -name *membership* -o -name *member*)",
       "Bash(ls -1 /c/D/coding_projects/zefix_analyzer/alembic/versions/*.py)",
-      "Bash(find /c/D/coding_projects/zefix_analyzer -path *alembic* -o -path *migration*)"
+      "Bash(find /c/D/coding_projects/zefix_analyzer -path *alembic* -o -path *migration*)",
+      "Bash(xargs ls:*)",
+      "Bash(grep -E \"\\\\.py$\")"
     ]
   }
 }
