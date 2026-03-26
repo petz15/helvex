@@ -207,13 +207,13 @@ export function OrgClient() {
 
   async function handleRemove(member: OrgMember) {
     if (!orgId) return;
-    if (!confirm(`Remove "${member.username}" from the org?`)) return;
+    if (!confirm(`Remove "${member.email}" from the org?`)) return;
     setRemovingId(member.id);
     try {
       await removeOrgMember(orgId, member.id);
       await reloadMembers();
       await reloadOrg();
-      flash(setMemberBanner, "success", `"${member.username}" removed from org.`);
+      flash(setMemberBanner, "success", `"${member.email}" removed from org.`);
     } catch (e) {
       flash(setMemberBanner, "error", e instanceof Error ? e.message : "Failed to remove member");
     } finally {
@@ -468,7 +468,7 @@ export function OrgClient() {
                 <tr key={member.id} className="hover:bg-slate-50 transition-colors">
                   <td className="px-4 py-3">
                     <div className="flex items-center gap-2">
-                      <span className="font-medium text-slate-800">{member.username}</span>
+                      <span className="font-medium text-slate-800">{member.email}</span>
                       {member.id === me.id && (
                         <span className="text-xs text-slate-400">(you)</span>
                       )}

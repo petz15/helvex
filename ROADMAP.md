@@ -45,7 +45,7 @@
 ## Monetisation & Tiers
 
 - [ ] **Payment logic** — Stripe/Worldline integration; subscription billing, top-up credits for pay-per-use API calls
-- [ ] **Ad slots** — display ads for free tier users; evaluate injecting ads into CSV downloads (e.g. promo row) and map views (e.g. sponsored pin/banner)
+- [ ] **Ad slots** — display ads for free tier users map views (e.g. sponsored pin/banner) or rather loading screens
 - [ ] **Tier system** — free / pro / team tiers with defined feature gates
 - [ ] **High-paying tier: custom settings** — own scoring config, own LLM prompts, own categories, private job queue
 - [ ] **API access** — REST API for high-paying tiers; token management, rate limits, usage dashboard
