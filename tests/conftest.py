@@ -23,7 +23,7 @@ _TEST_USER = UserModel(
     is_active=True,
     tier="free",
     email_verified=False,
-    is_superadmin=False,
+    is_superadmin=True,
     created_at=datetime.now(timezone.utc),
 )
 

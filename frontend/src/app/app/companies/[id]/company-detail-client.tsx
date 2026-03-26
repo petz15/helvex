@@ -4,9 +4,9 @@ import Link from "next/link";
 import { ExternalLink, ChevronLeft, Globe, MapPin, Building2, Phone, Mail, FileText, Plus, Trash2, Loader2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { reviewBadgeClass, proposalBadgeClass, fmtDate, fmtDateTime, fmtRelativeTime, cn, scoreColor } from "@/lib/utils";
-import { createNote, deleteNote, updateCompany } from "@/lib/api";
+import { createNote, deleteNote, selectCompanyWebsite, updateCompany } from "@/lib/api";
 import { REVIEW_STATUSES, PROPOSAL_STATUSES } from "@/lib/types";
-import type { Company, Note } from "@/lib/types";
+import type { Company, Note, GoogleScoredResult } from "@/lib/types";
 import "leaflet/dist/leaflet.css";
 
 interface Props {
@@ -20,11 +20,40 @@ export function CompanyDetailClient({ company: initial }: Props) {
   const [noteText, setNoteText] = useState("");
   const [addingNote, setAddingNote] = useState(false);
   const [purposeExpanded, setPurposeExpanded] = useState(false);
+  const [showWebsitePicker, setShowWebsitePicker] = useState(false);
+  const [selectingWebsite, setSelectingWebsite] = useState<string | null>(null);
 
   const mapRef = useRef<HTMLDivElement>(null);
   const mapInstanceRef = useRef<import("leaflet").Map | null>(null);
 
   const combinedScore = company.combined_score;
+
+  const googleResults = useMemo<GoogleScoredResult[]>(() => {
+    const raw = company.google_search_results_raw;
+    if (!raw) return [];
+    try {
+      const parsed = JSON.parse(raw);
+      if (!Array.isArray(parsed)) return [];
+      return parsed
+        .map((r: unknown) => {
+          const obj = (typeof r === "object" && r !== null) ? (r as Record<string, unknown>) : {};
+          return {
+            title: String(obj.title ?? ""),
+            link: String(obj.link ?? ""),
+            snippet: String(obj.snippet ?? ""),
+            score: Number(obj.score ?? 0),
+          };
+        })
+        .filter(r => r.link);
+    } catch {
+      return [];
+    }
+  }, [company.google_search_results_raw]);
+
+  const alternativeWebsiteResults = useMemo(() => {
+    const current = (company.website_url ?? "").trim();
+    return googleResults.filter(r => (r.link ?? "").trim() !== current);
+  }, [googleResults, company.website_url]);
 
   const headerAccentClass = useMemo(() => {
     if (combinedScore == null) return "border-l-slate-200";
@@ -114,6 +143,17 @@ export function CompanyDetailClient({ company: initial }: Props) {
     setNotes(ns => ns.filter(n => n.id !== noteId));
   }
 
+  async function handleSelectWebsite(link: string) {
+    setSelectingWebsite(link);
+    try {
+      const updated = await selectCompanyWebsite(company.id, link);
+      setCompany(updated);
+      setShowWebsitePicker(false);
+    } finally {
+      setSelectingWebsite(null);
+    }
+  }
+
   return (
     <div className="max-w-5xl mx-auto px-4 py-6 space-y-6">
       {/* Breadcrumb */}
@@ -166,6 +206,16 @@ export function CompanyDetailClient({ company: initial }: Props) {
                 <Globe size={13} /> Visit website <ExternalLink size={11} />
               </a>
             )}
+
+            {alternativeWebsiteResults.length > 0 && (
+              <button
+                type="button"
+                onClick={() => setShowWebsitePicker(v => !v)}
+                className="flex items-center gap-1.5 text-sm text-slate-700 hover:text-slate-900 px-3 py-1.5 rounded-lg border border-slate-200 hover:bg-slate-50 transition-colors"
+              >
+                Change website
+              </button>
+            )}
             {company.uid && (
               <a
                 href={`https://www.zefix.ch/en/search/entity/list/firm/${company.uid}`}
@@ -179,6 +229,51 @@ export function CompanyDetailClient({ company: initial }: Props) {
           </div>
         </div>
       </div>
+
+      {showWebsitePicker && (
+        <div className="bg-white rounded-xl border border-slate-200 p-5 shadow-sm">
+          <div className="flex items-center justify-between">
+            <h2 className="text-sm font-semibold text-slate-700">Select a different website</h2>
+            <button
+              type="button"
+              onClick={() => setShowWebsitePicker(false)}
+              className="text-sm text-slate-600 hover:text-slate-900"
+            >
+              Close
+            </button>
+          </div>
+
+          <div className="mt-3 space-y-2">
+            {alternativeWebsiteResults.map(r => (
+              <div key={r.link} className="flex items-start justify-between gap-3 rounded-lg border border-slate-200 p-3">
+                <div className="min-w-0">
+                  <div className="text-sm font-medium text-slate-800 truncate">{r.title || r.link}</div>
+                  <div className="text-xs text-slate-500 truncate">{r.link}</div>
+                  {r.snippet && <div className="text-xs text-slate-500 mt-1 line-clamp-2">{r.snippet}</div>}
+                </div>
+                <div className="shrink-0 flex flex-col items-end gap-2">
+                  <div className={cn("text-sm font-bold", r.score >= 70 ? "text-green-700" : r.score >= 40 ? "text-yellow-700" : "text-red-700")}>
+                    {Math.round(r.score)}
+                  </div>
+                  <button
+                    type="button"
+                    disabled={selectingWebsite === r.link}
+                    onClick={() => handleSelectWebsite(r.link)}
+                    className={cn(
+                      "text-sm px-3 py-1.5 rounded-lg border transition-colors",
+                      selectingWebsite === r.link
+                        ? "border-slate-200 text-slate-400"
+                        : "border-blue-200 text-blue-600 hover:text-blue-800 hover:bg-blue-50"
+                    )}
+                  >
+                    {selectingWebsite === r.link ? "Selecting…" : "Use this"}
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Scores */}

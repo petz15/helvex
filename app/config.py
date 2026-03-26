@@ -27,6 +27,11 @@ class Settings(BaseSettings):
     serper_api_key: str = ""
     google_daily_quota: int = 100
 
+    # Global URL exclusion: comma-separated keywords (case-insensitive) that, if present
+    # anywhere in a candidate URL, force it to be excluded from scoring.
+    # This is a simple substring match list (NOT a regex).
+    google_url_exclude_keywords: str = ""
+
     anthropic_api_key: str = ""
 
     # Background worker

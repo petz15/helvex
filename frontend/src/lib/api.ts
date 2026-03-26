@@ -111,6 +111,17 @@ export async function updateCompany(id: number, data: Partial<Company>): Promise
   return res.json();
 }
 
+export async function selectCompanyWebsite(companyId: number, link: string): Promise<Company> {
+  const res = await fetch(`/api/v1/companies/${companyId}/website`, {
+    method: "PATCH",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ link }),
+  });
+  if (!res.ok) throw new Error("Failed to select website");
+  return res.json();
+}
+
 // ── Jobs ──────────────────────────────────────────────────────────────────────
 
 export async function fetchJobs(): Promise<Job[]> {

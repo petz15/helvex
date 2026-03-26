@@ -14,7 +14,7 @@
 - [ ] **Daily SHAB imports** — automated daily job pulling new/changed/deleted companies from SHAB to keep DB current without full re-import
 - [ ] **CSV export** — export current filtered/sorted dashboard view as CSV; include all visible columns; respect active filters and column selection
 - [ ] **Web crawler** — crawl company websites to extract description, contact info, product/service keywords; store as structured fields; feed into scoring and classification; replace/supplement current Google scrape
-- [ ] **Google results caching** — cache raw Google search results per company with a TTL (e.g. 30 days); re-use cached results for re-scoring/re-classification instead of re-querying; track cache age and allow forced refresh
+- [ ] **Google results & scoring** — Improve the selection and scoring of google results
 
 ## Company Profile
 
@@ -35,6 +35,12 @@
 - [ ] **Email verification** — user signup flow with email verification; mutation/account changes require re-verification
 - [ ] **Monitoring stack** — deploy Prometheus + Grafana on K3s; scrape app metrics (request rate, job queue depth, error rate), Kubernetes node/pod metrics, and Redis/PostgreSQL exporters; alert on pod restarts, high memory, queue stalls
 - [ ] **Web analytics** — integrate Google Tag Manager + GA4 (or privacy-first alternative like Plausible/Umami); track page views, funnel steps (signup, first job, first export), feature usage; cookie consent banner for GDPR compliance
+
+
+## Org-/Usermanagement
+- [ ] **remove username** — Remove username, just keep email adress as user 
+- [ ] **settings** — Add org management page and settings page for the users
+
 
 ## Monetisation & Tiers
 

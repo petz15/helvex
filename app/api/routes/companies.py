@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import StreamingResponse
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app import crud
@@ -24,6 +25,7 @@ from app.schemas.company import (
     GoogleSearchResult,
     ZefixSearchResult,
 )
+from app.services.scoring import is_social_lead_domain
 
 router = APIRouter(prefix="/companies", tags=["companies"])
 
@@ -172,6 +174,74 @@ def google_search_for_company(
         db.commit()
 
     return results
+
+
+class CompanyWebsiteSelect(BaseModel):
+    link: str
+
+
+@router.patch(
+    "/{company_id}/website",
+    response_model=CompanyRead,
+    summary="Select the company's website from stored Google results",
+)
+def select_company_website(
+    company_id: int,
+    body: CompanyWebsiteSelect,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    db_company = crud.get_company(db, company_id)
+    if not db_company:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Company not found")
+
+    if not db_company.google_search_results_raw:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="No stored Google results for this company")
+
+    wanted = (body.link or "").strip()
+    if not wanted:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="link is required")
+
+    try:
+        stored = json.loads(db_company.google_search_results_raw)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)) from exc
+
+    match: dict | None = next((r for r in stored if (r.get("link") or "").strip() == wanted), None)
+    if match is None:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Selected link not found in stored results")
+
+    score = match.get("score")
+    website_match_score = int(score) if isinstance(score, (int, float)) else None
+    social_media_only = is_social_lead_domain(wanted)
+
+    old_values = {f: getattr(db_company, f) for f in (
+        "website_url", "review_status", "proposal_status",
+        "contact_name", "contact_email", "contact_phone", "tags",
+    )}
+
+    updated = crud.update_company(
+        db,
+        db_company,
+        CompanyUpdate(
+            website_url=wanted,
+            website_match_score=website_match_score,
+            social_media_only=social_media_only,
+        ),
+    )
+    new_values = {
+        "website_url": wanted,
+        "website_match_score": website_match_score,
+        "social_media_only": social_media_only,
+    }
+    crud.record_company_changes(
+        db,
+        company_id=company_id,
+        user_id=current_user.id,
+        old_values=old_values,
+        new_values=new_values,
+    )
+    return updated
 
 
 # ---------------------------------------------------------------------------

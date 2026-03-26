@@ -428,11 +428,32 @@ kubectl exec -n helvex-prod -it helvex-pg-1 -- \
   env PGPASSWORD=$(kubectl get secret helvex-env -n helvex-prod -o jsonpath='{.data.password}' | base64 -d) \
   psql -U helvex -d helvex -h 127.0.0.1
 
-# Connect to Postgres via local pgAdmin (SSH tunnel — no local kubectl needed)
-# Run on your local machine, keep the terminal open while using pgAdmin
-ssh -L 5432:localhost:5432 ubuntu@<your-server-ip> \
-  "kubectl port-forward pod/helvex-pg-1 5432:5432 -n helvex-prod"
+# Connect to Postgres via local pgAdmin (SSH tunnel via control plane — no local kubectl needed)
+# Run on your local machine, keep the terminal open while using pgAdmin.
+#
+# Notes:
+# - Prefer the CloudNativePG read-write Service (stable across failover): svc/helvex-pg-rw
+# - On k3s, /etc/rancher/k3s/k3s.yaml is root-readable by default, so run kubectl via sudo.
+# - If kubectl works when you SSH in interactively but fails in the one-liner, it's usually because
+#   non-interactive SSH commands don't load your shell init files (where KUBECONFIG or kubectl aliases are set).
+ssh -t -L 5432:localhost:5432 ubuntu@<your-server-ip> \
+  "sudo kubectl -n helvex-prod port-forward svc/helvex-pg-rw 5432:5432"
 # pgAdmin credentials: host=localhost, port=5432, user=helvex, password=<from secret above>
+#
+# If your local port 5432 is already used, change the *left* side:
+# ssh -t -L 5433:localhost:5432 ubuntu@<your-server-ip> "sudo kubectl -n helvex-prod port-forward svc/helvex-pg-rw 5432:5432"
+# Then use host=localhost, port=5433 in pgAdmin.
+#
+# Optional: one-time setup on the control plane so you can run kubectl without sudo:
+# ssh ubuntu@<your-server-ip>
+#   sudo install -d -m 0700 -o ubuntu -g ubuntu /home/ubuntu/.kube
+#   sudo cp /etc/rancher/k3s/k3s.yaml /home/ubuntu/.kube/config
+#   sudo chown ubuntu:ubuntu /home/ubuntu/.kube/config
+#   sudo chmod 0600 /home/ubuntu/.kube/config
+#
+# If you already have ~/.kube/config (or KUBECONFIG) set up for the ubuntu user, you can run:
+# ssh -t -L 5432:localhost:5432 ubuntu@<your-server-ip> \
+#   "bash -lc 'kubectl -n helvex-prod port-forward svc/helvex-pg-rw 5432:5432'"
 
 # Force restart a deployment (e.g. after updating a secret)
 kubectl rollout restart deployment/helvex -n helvex-prod

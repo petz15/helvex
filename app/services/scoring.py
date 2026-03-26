@@ -4,6 +4,8 @@ import math
 import re
 from urllib.parse import urlparse
 
+from app.config import settings
+
 # Domains that are business directories, social networks, or government registries.
 _DIRECTORY_DOMAINS = {
     "wikipedia.org",
@@ -60,6 +62,16 @@ _DIRECTORY_DOMAINS = {
     "comparis.ch",
     "admin.ch",
     "sogenda.ch",
+    "treuhandsuisse-zh.ch",
+    "ccis.ch",
+    "konsumentenschutz.ch",
+    "konsumentenbewertung.ch",
+    "psychologie.ch",
+    "immoscout24.ch",
+    "immowelt.ch",
+    "homegate.ch",
+    "flatfox.ch",
+    "newhome.ch",
 }
 
 _NEWS_DOMAINS = {
@@ -109,6 +121,81 @@ _STOPWORDS = {
     "the", "and", "of", "in", "for", "to", "a", "an", "with", "its",
     "gesellschaft", "unternehmen", "betrieb", "zweck", "aktien", "gmbh",
 }
+
+
+_URL_EXCLUDE_KEYWORDS: tuple[str, ...] = ()
+_URL_EXCLUDE_KEYWORDS_RAW: str | None = None
+
+# Built-in global URL exclusions (case-insensitive substring match). This list is
+# always applied, and `GOOGLE_URL_EXCLUDE_KEYWORDS` extends it.
+_DEFAULT_URL_EXCLUDE_KEYWORDS: tuple[str, ...] = (
+    "treuhandsuisse",
+    "northdata",
+)
+
+
+def _get_url_exclude_keywords() -> tuple[str, ...]:
+    """Return normalized, lowercase keywords from settings.google_url_exclude_keywords.
+
+    Config format: comma-separated list (case-insensitive substring match; NOT regex).
+    The configured list is appended to a built-in default list.
+
+    Example value (starts with treuhandsuisse):
+      "treuhandsuisse, jobs, karriere, /careers, /stellen, /job/, /vacancies, /support, /kontakt"
+
+    Notes:
+      - Each entry is matched as a substring against the full URL.
+      - If any keyword matches, the URL is always excluded (score 0 / irrelevant).
+
+    Cached with simple globals to allow runtime override in tests.
+    """
+    global _URL_EXCLUDE_KEYWORDS, _URL_EXCLUDE_KEYWORDS_RAW
+
+    raw = (settings.google_url_exclude_keywords or "").strip()
+    if not raw:
+        _URL_EXCLUDE_KEYWORDS = _DEFAULT_URL_EXCLUDE_KEYWORDS
+        _URL_EXCLUDE_KEYWORDS_RAW = ""
+        return _URL_EXCLUDE_KEYWORDS
+
+    if raw == _URL_EXCLUDE_KEYWORDS_RAW:
+        return _URL_EXCLUDE_KEYWORDS
+
+    # Start with defaults, then extend with configured list.
+    seen: set[str] = set()
+    keywords: list[str] = []
+    for kw in _DEFAULT_URL_EXCLUDE_KEYWORDS:
+        kw_norm = (kw or "").strip().lower()
+        if kw_norm and kw_norm not in seen:
+            seen.add(kw_norm)
+            keywords.append(kw_norm)
+
+    for part in raw.split(","):
+        kw_norm = part.strip().lower()
+        if kw_norm and kw_norm not in seen:
+            seen.add(kw_norm)
+            keywords.append(kw_norm)
+
+    _URL_EXCLUDE_KEYWORDS = tuple(keywords)
+    _URL_EXCLUDE_KEYWORDS_RAW = raw
+    return _URL_EXCLUDE_KEYWORDS
+
+
+def _url_is_globally_excluded(url: str) -> bool:
+    keywords = _get_url_exclude_keywords()
+    if not keywords:
+        return False
+    url_lc = (url or "").lower()
+    if not url_lc:
+        return False
+    return any(kw in url_lc for kw in keywords)
+
+
+def _is_directory_domain(domain: str) -> bool:
+    return any(domain == d or domain.endswith("." + d) for d in _DIRECTORY_DOMAINS)
+
+
+def _is_news_domain(domain: str) -> bool:
+    return any(domain == d or domain.endswith("." + d) for d in _NEWS_DOMAINS)
 
 
 def _word_overlap_ratio(a: str, b: str) -> float:
@@ -211,9 +298,18 @@ def score_result(
     snippet = result.get("snippet", "") or ""
     link = result.get("link", "") or ""
 
+    if not link:
+        return 0
+
+    # Global exclusion (e.g. jobs/careers/support pages) always wins.
+    if _url_is_globally_excluded(link):
+        return 0
+
     # --- Directory / news domain → always 0, no further scoring ---
     domain = _root_domain(link)
-    if any(domain == d or domain.endswith("." + d) for d in _DIRECTORY_DOMAINS | _NEWS_DOMAINS):
+    if _is_news_domain(domain):
+        return 0
+    if _is_directory_domain(domain):
         return 0
 
     # --- Local directory URL path → always 0 (e.g. /unternehmensverzeichnis/) ---
@@ -286,8 +382,16 @@ def is_irrelevant_result(
     snippet = result.get("snippet", "") or ""
     link = result.get("link", "") or ""
 
+    if not link:
+        return True
+
+    if _url_is_globally_excluded(link):
+        return True
+
     domain = _root_domain(link)
-    if any(domain == d or domain.endswith("." + d) for d in _DIRECTORY_DOMAINS | _NEWS_DOMAINS):
+    if _is_news_domain(domain):
+        return True
+    if _is_directory_domain(domain):
         return True
 
     title_overlap = _word_overlap_ratio(company_name, title)
@@ -311,9 +415,17 @@ def fallback_result_score(
     snippet = result.get("snippet", "") or ""
     link = result.get("link", "") or ""
 
+    if not link:
+        return 0
+
+    if _url_is_globally_excluded(link):
+        return 0
+
     # Directory / news domains must never be selected as the company website
     domain = _root_domain(link)
-    if any(domain == d or domain.endswith("." + d) for d in _DIRECTORY_DOMAINS | _NEWS_DOMAINS):
+    if _is_news_domain(domain):
+        return 0
+    if _is_directory_domain(domain):
         return 0
 
     combined = f"{title} {snippet}"

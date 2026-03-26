@@ -1,7 +1,8 @@
 from types import SimpleNamespace
 
+from app.config import settings
 from app.services.collection import _score_google_results_for_company
-from app.services.scoring import is_social_lead_domain
+from app.services.scoring import is_irrelevant_result, is_social_lead_domain
 
 
 def _company_stub() -> SimpleNamespace:
@@ -45,3 +46,25 @@ def test_social_top_results_get_bonus():
     social_scores = [r["score"] for r in scored if "instagram.com" in r["link"] or "facebook.com" in r["link"]]
     assert social_scores
     assert all(s >= 20 for s in social_scores)  # includes +15 social bonus on top of base/fallback components
+
+
+def test_exclude_keywords_force_url_exclusion_even_for_normal_domains():
+    old = settings.google_url_exclude_keywords
+    try:
+        settings.google_url_exclude_keywords = "jobs, karriere, /careers"
+
+        company = _company_stub()
+        raw_results = [
+            {
+                "title": "Muster AG — Offizielle Website",
+                "link": "https://muster-ag.ch/jobs",
+                "snippet": "Bern BE",
+            }
+        ]
+
+        assert is_irrelevant_result(raw_results[0], company_name=company.name) is True
+
+        scored = _score_google_results_for_company(company, raw_results)
+        assert scored[0]["score"] == 0
+    finally:
+        settings.google_url_exclude_keywords = old

@@ -10,7 +10,9 @@ export interface Company {
   address: string | null;
   website_url: string | null;
   website_checked_at: string | null;
+  google_search_results_raw: string | null;
   website_match_score: number | null;
+  social_media_only: boolean | null;
   zefix_score: number | null;
   zefix_scored_at: string | null;
   claude_score: number | null;
@@ -35,6 +37,13 @@ export interface Company {
   created_at: string;
   updated_at: string;
   notes: Note[];
+}
+
+export interface GoogleScoredResult {
+  title: string;
+  link: string;
+  snippet: string;
+  score: number;
 }
 
 export interface Note {

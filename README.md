@@ -86,6 +86,7 @@ All settings are read from environment variables (or a `.env` file):
 | `GOOGLE_SEARCH_ENABLED` | Enable/disable website search (also settable via the UI) | `true` |
 | `SERPER_API_KEY` | Serper.dev API key | *(required for website search)* |
 | `GOOGLE_DAILY_QUOTA` | Daily search quota (also settable via the UI) | `83` |
+| `GOOGLE_URL_EXCLUDE_KEYWORDS` | Comma-separated URL substrings to always exclude from website scoring (case-insensitive; not a regex). See `app/services/scoring.py` for examples. | *(empty)* |
 | `ANTHROPIC_API_KEY` | Anthropic API key for Claude classification jobs (also settable via Settings UI) | *(empty)* |
 
 ---
