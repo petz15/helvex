@@ -14,6 +14,7 @@ to the ``data/`` directory.  No API key is required.
 
 import csv
 import io
+import logging
 import math
 import re
 import sqlite3
@@ -22,6 +23,8 @@ import zipfile
 from pathlib import Path
 
 import httpx
+
+logger = logging.getLogger(__name__)
 
 # ── Data paths ────────────────────────────────────────────────────────────────
 _DATA_DIR = Path(__file__).resolve().parents[2] / "data"
@@ -243,7 +246,7 @@ def _get_db() -> sqlite3.Connection | None:
             try:
                 build_geocoding_db()
             except Exception as exc:
-                print(f"[geocoding] Building DB unavailable ({exc}); using PLZ fallback.")
+                logger.error("geocoding.db build failed — PLZ fallback only: %s", exc)
                 return None
         _db_conn = sqlite3.connect(str(_BUILDING_DB), check_same_thread=False)
         return _db_conn
@@ -363,14 +366,27 @@ def geocode_address(address: str) -> tuple[float, float] | None:
     building_result = _lookup_building(address)
 
     if building_result is None:
+        parsed = _parse_address(address.strip())
+        if parsed is None:
+            logger.debug("geocode.plz_fallback reason=parse_failed address=%r", address)
+        elif _get_db() is None:
+            logger.debug("geocode.plz_fallback reason=db_unavailable address=%r", address)
+        else:
+            logger.debug("geocode.plz_fallback reason=no_street_match address=%r parsed=%r", address, parsed)
         return plz_coords
 
     if plz_coords is None:
+        logger.debug("geocode.building_only address=%r result=%r", address, building_result)
         return building_result
 
     # Sanity-check: building result must be within _MAX_PLZ_DEVIATION_KM of the PLZ centroid
     dist_km = _haversine_km(building_result[0], building_result[1], plz_coords[0], plz_coords[1])
     if dist_km > _MAX_PLZ_DEVIATION_KM:
+        logger.debug(
+            "geocode.plz_fallback reason=sanity_check_failed address=%r dist_km=%.1f",
+            address, dist_km,
+        )
         return plz_coords
 
+    logger.debug("geocode.building address=%r result=%r", address, building_result)
     return building_result

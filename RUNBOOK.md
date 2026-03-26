@@ -380,8 +380,16 @@ kubectl describe pod <pod-name> -n helvex-prod
 # Open a shell in the app pod
 kubectl exec -n helvex-prod -it deploy/helvex -- bash
 
-# Connect to Postgres directly
-kubectl exec -n helvex-prod -it helvex-pg-1 -- psql -U helvex -d helvex
+# Connect to Postgres directly (in-cluster)
+kubectl exec -n helvex-prod -it helvex-pg-1 -- \
+  env PGPASSWORD=$(kubectl get secret helvex-env -n helvex-prod -o jsonpath='{.data.password}' | base64 -d) \
+  psql -U helvex -d helvex -h 127.0.0.1
+
+# Connect to Postgres via local pgAdmin (SSH tunnel — no local kubectl needed)
+# Run on your local machine, keep the terminal open while using pgAdmin
+ssh -L 5432:localhost:5432 ubuntu@<your-server-ip> \
+  "kubectl port-forward pod/helvex-pg-1 5432:5432 -n helvex-prod"
+# pgAdmin credentials: host=localhost, port=5432, user=helvex, password=<from secret above>
 
 # Force restart a deployment (e.g. after updating a secret)
 kubectl rollout restart deployment/helvex -n helvex-prod
