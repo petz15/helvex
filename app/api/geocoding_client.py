@@ -340,7 +340,8 @@ def _haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     dlat = math.radians(lat2 - lat1)
     dlon = math.radians(lon2 - lon1)
     a = math.sin(dlat / 2) ** 2 + math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) * math.sin(dlon / 2) ** 2
-    return 2.0 * r * math.asin(math.sqrt(a))
+    c = 2.0 * math.asin(math.sqrt(a))
+    return r * c
 
 
 def geocode_address(address: str) -> tuple[float, float] | None:

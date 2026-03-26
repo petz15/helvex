@@ -41,7 +41,7 @@ postgres:
   storageSize: 20Gi
   backupEnabled: true
   s3EndpointUrl: "https://nbg1.your-objectstorage.com"
-  s3BucketPath: "s3://helvex-backups/pg/"
+  s3BucketPath: "s3://helvex-backups/pg-prod/"
   backupRetention: "7d"
   pooler:
     enabled: false
