@@ -164,9 +164,16 @@ def mark_completed(db: Session, job: JobRun, *, message: str, stats: dict[str, A
     return job
 
 
-def mark_failed(db: Session, job: JobRun, *, error: str, stats: dict[str, Any] | None = None) -> JobRun:
+def mark_failed(
+    db: Session,
+    job: JobRun,
+    *,
+    error: str,
+    message: str = "Failed",
+    stats: dict[str, Any] | None = None,
+) -> JobRun:
     job.status = "failed"
-    job.message = "Failed"
+    job.message = message
     job.error = error
     job.completed_at = datetime.now(tz=timezone.utc)
     if stats is not None:

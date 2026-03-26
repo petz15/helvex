@@ -33,6 +33,43 @@ class JobPausedError(Exception):
     """Raised when a running job receives a pause request."""
 
 
+class JobEnqueueError(RuntimeError):
+    """Raised when a job cannot be enqueued or processed due to configuration."""
+
+
+def _preflight_job(db: Session, *, job_type: str, params: dict) -> tuple[dict, list[str]]:
+    """Validate prerequisites for a job and optionally rewrite params.
+
+    Returns:
+        (new_params, warnings)
+
+    Raises:
+        ValueError: If the job cannot run as requested.
+    """
+    warnings: list[str] = []
+    new_params = dict(params or {})
+
+    if job_type in {"batch", "initial"}:
+        if bool(new_params.get("run_google", True)):
+            from app.services.collection import _google_search_ready
+
+            ok, reason = _google_search_ready(db)
+            if not ok:
+                warnings.append(reason or "Google enrichment is not ready")
+                new_params["run_google"] = False
+
+    if job_type == "claude_classify":
+        from app.config import settings as app_settings
+
+        api_key = (crud.get_setting(db, "anthropic_api_key", "") or "").strip() or app_settings.anthropic_api_key
+        if not (api_key or "").strip():
+            raise ValueError(
+                "Anthropic API key missing: set ANTHROPIC_API_KEY env var or configure 'anthropic_api_key' in Settings"
+            )
+
+    return new_params, warnings
+
+
 # ── Internal state helpers ─────────────────────────────────────────────────────
 
 def _sync_active_task(
@@ -396,16 +433,18 @@ def _run_job(app, job_id: int) -> None:  # noqa: C901
             crud.create_event(db, job_id=job.id, level="warn", message=msg)
             _maybe_sync(app, job_type=job.job_type, label=job.label, message=msg, stats={}, error=None, done=True)
 
-        except Exception:  # noqa: BLE001
+        except Exception as exc:  # noqa: BLE001
             err = traceback.format_exc()
+            summary = f"{type(exc).__name__}: {exc}".strip()
             try:
                 db.rollback()
             except Exception:  # noqa: BLE001
                 pass
             logger.error("Job %s (%s) failed:\n%s", job.id, job.job_type, err)
-            crud.mark_failed(db, job, error=err)
-            crud.create_event(db, job_id=job.id, level="error", message=err)
-            _maybe_sync(app, job_type=job.job_type, label=job.label, message="Failed", stats={}, error=err, done=True)
+            crud.mark_failed(db, job, error=err, message=summary)
+            crud.create_event(db, job_id=job.id, level="error", message=summary)
+            crud.create_event(db, job_id=job.id, level="debug", message=err)
+            _maybe_sync(app, job_type=job.job_type, label=job.label, message="Failed", stats={}, error=summary, done=True)
 
 
 # ── Worker loop ────────────────────────────────────────────────────────────────
@@ -456,8 +495,13 @@ def kick_job_worker(app) -> None:
 # ── Enqueue helpers (used by REST routes) ─────────────────────────────────────
 
 def _enqueue_job_in_session(db: Session, *, job_type: str, label: str, params: dict) -> object:
-    job = crud.create_job(db, job_type=job_type, label=label, params=params)
+    preflight_params, warnings = _preflight_job(db, job_type=job_type, params=params)
+    job = crud.create_job(db, job_type=job_type, label=label, params=preflight_params)
     crud.create_event(db, job_id=job.id, level="info", message="Job queued")
+    if warnings:
+        for w in warnings:
+            crud.create_event(db, job_id=job.id, level="warn", message=f"Preflight: {w}")
+        crud.update_progress(db, job, message=f"Queued — {warnings[0]}")
     # `create_event()` commits, which expires ORM attributes by default.
     # Refresh + expunge so the returned `job` can be serialized safely
     # after the session context closes (avoids DetachedInstanceError).
@@ -480,9 +524,18 @@ def enqueue_job(
         job = _enqueue_job_in_session(db, job_type=job_type, label=label, params=params)
 
     from app.config import settings as _settings
-    if _settings.use_rq and _settings.redis_url:
-        _enqueue_rq(job.id)
+    if _settings.use_rq:
+        if not _settings.redis_url:
+            raise JobEnqueueError("USE_RQ=true but REDIS_URL is not set — jobs cannot be processed")
+        try:
+            _enqueue_rq(job.id)
+        except Exception as exc:  # noqa: BLE001
+            raise JobEnqueueError(f"Failed to enqueue job onto Redis: {type(exc).__name__}: {exc}") from exc
     else:
+        if app is None:
+            raise JobEnqueueError("Thread worker mode requires a FastAPI app instance")
+        if getattr(app.state, "disable_job_worker", False):
+            raise JobEnqueueError("DISABLE_JOB_WORKER=true but USE_RQ is not enabled — no worker is available")
         _ensure_job_worker(app)
     return job
 

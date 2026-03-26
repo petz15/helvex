@@ -16,6 +16,15 @@ from app.services.job_worker import enqueue_job
 router = APIRouter(tags=["jobs"])
 
 
+def _enqueue_or_http_error(request: Request, *, job_type: str, label: str, params: dict, db: Session):
+    try:
+        return enqueue_job(request.app, job_type=job_type, label=label, params=params, db=db)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+
 # ── Schemas ────────────────────────────────────────────────────────────────────
 
 class JobOut(BaseModel):
@@ -227,8 +236,8 @@ class ClusterPipelineBody(BaseModel):
 def trigger_bulk(body: BulkImportBody, request: Request, db: Session = Depends(get_db)):
     canton_list = [c.upper() for c in body.cantons] if body.cantons else None
     label = f"Bulk import — cantons: {', '.join(canton_list) if canton_list else 'all 26'}"
-    job = enqueue_job(
-        request.app,
+    job = _enqueue_or_http_error(
+        request,
         job_type="bulk",
         label=label,
         params={"cantons": canton_list, "active_only": body.active_only, "delay": body.delay},
@@ -239,8 +248,8 @@ def trigger_bulk(body: BulkImportBody, request: Request, db: Session = Depends(g
 
 @router.post("/collection/batch", response_model=JobOut, status_code=status.HTTP_202_ACCEPTED)
 def trigger_batch(body: BatchCollectBody, request: Request, db: Session = Depends(get_db)):
-    job = enqueue_job(
-        request.app,
+    job = _enqueue_or_http_error(
+        request,
         job_type="batch",
         label=f"Batch enrichment — up to {body.limit} companies",
         params=body.model_dump(),
@@ -254,7 +263,7 @@ def trigger_initial(body: InitialCollectBody, request: Request, db: Session = De
     if not body.names and not body.uids:
         raise HTTPException(status_code=400, detail="Provide at least one name or UID")
     label = f"Specific search — {len(body.names)} name(s), {len(body.uids)} UID(s)"
-    job = enqueue_job(request.app, job_type="initial", label=label, params=body.model_dump(), db=db)
+    job = _enqueue_or_http_error(request, job_type="initial", label=label, params=body.model_dump(), db=db)
     return JobOut.from_orm_obj(job)
 
 
@@ -268,14 +277,14 @@ def trigger_detail(body: DetailCollectBody, request: Request, db: Session = Depe
         label = "Zefix detail fetch — all matching companies"
     if body.only_missing_details:
         label += " (missing details only)"
-    job = enqueue_job(request.app, job_type="detail", label=label, params=body.model_dump(), db=db)
+    job = _enqueue_or_http_error(request, job_type="detail", label=label, params=body.model_dump(), db=db)
     return JobOut.from_orm_obj(job)
 
 
 @router.post("/scoring/zefix", response_model=JobOut, status_code=status.HTTP_202_ACCEPTED)
 def trigger_recalc_zefix(request: Request, db: Session = Depends(get_db)):
-    job = enqueue_job(
-        request.app,
+    job = _enqueue_or_http_error(
+        request,
         job_type="recalculate_scores",
         label="Recalculate Zefix scores",
         params={},
@@ -286,8 +295,8 @@ def trigger_recalc_zefix(request: Request, db: Session = Depends(get_db)):
 
 @router.post("/scoring/google", response_model=JobOut, status_code=status.HTTP_202_ACCEPTED)
 def trigger_recalc_google(request: Request, db: Session = Depends(get_db)):
-    job = enqueue_job(
-        request.app,
+    job = _enqueue_or_http_error(
+        request,
         job_type="recalculate_google_scores",
         label="Recalculate Google scores",
         params={},
@@ -298,8 +307,8 @@ def trigger_recalc_google(request: Request, db: Session = Depends(get_db)):
 
 @router.post("/scoring/re-geocode", response_model=JobOut, status_code=status.HTTP_202_ACCEPTED)
 def trigger_re_geocode(request: Request, db: Session = Depends(get_db)):
-    job = enqueue_job(
-        request.app,
+    job = _enqueue_or_http_error(
+        request,
         job_type="re_geocode",
         label="Re-geocode all companies",
         params={},
@@ -310,8 +319,8 @@ def trigger_re_geocode(request: Request, db: Session = Depends(get_db)):
 
 @router.post("/scoring/claude", response_model=JobOut, status_code=status.HTTP_202_ACCEPTED)
 def trigger_claude_classify(body: ClaudeClassifyBody, request: Request, db: Session = Depends(get_db)):
-    job = enqueue_job(
-        request.app,
+    job = _enqueue_or_http_error(
+        request,
         job_type="claude_classify",
         label=f"Claude classify — up to {body.limit} companies",
         params=body.model_dump(),
@@ -322,8 +331,8 @@ def trigger_claude_classify(body: ClaudeClassifyBody, request: Request, db: Sess
 
 @router.post("/scoring/cluster", response_model=JobOut, status_code=status.HTTP_202_ACCEPTED)
 def trigger_cluster_pipeline(body: ClusterPipelineBody, request: Request, db: Session = Depends(get_db)):
-    job = enqueue_job(
-        request.app,
+    job = _enqueue_or_http_error(
+        request,
         job_type="hdbscan_cluster",
         label="Cluster pipeline",
         params=body.model_dump(),

@@ -147,7 +147,8 @@
       "Bash(c:/D/coding_projects/zefix_analyzer/infra/charts/helvex/values.yaml:*)",
       "Bash(find c:/D/coding_projects/zefix_analyzer/frontend/src -type f \\\\\\(-name *.tsx -o -name *.ts -o -name *.jsx -o -name *.js \\\\\\))",
       "Bash(grep -r login c:/D/coding_projects/zefix_analyzer/frontend/src --include=*.tsx --include=*.ts)",
-      "Bash(grep -r \"POST.*login\\\\|GET.*login\" c:/D/coding_projects/zefix_analyzer/app --include=*.py)"
+      "Bash(grep -r \"POST.*login\\\\|GET.*login\" c:/D/coding_projects/zefix_analyzer/app --include=*.py)",
+      "Bash(find /c/D/coding_projects/zefix_analyzer -not -path ./.git/* -not -path ./node_modules/* -not -path ./__pycache__/* -not -path ./.venv/* -not -path */__pycache__/* -type d)"
     ]
   }
 }

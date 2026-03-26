@@ -11,6 +11,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from app.auth import COOKIE_NAME, create_session_cookie, get_current_user
+from app.config import settings as app_settings
 from app.database import Base, get_db
 from app.main import app
 from app.models.user import User as UserModel
@@ -83,13 +84,20 @@ def client(db):
     with contextlib.ExitStack() as stack:
         for p in _STARTUP_PATCHES:
             stack.enter_context(p)
+
+        # Tests use an in-memory DB; avoid starting a background thread worker (it would
+        # use the real SessionLocal/Postgres). Instead, run in RQ mode and stub out the
+        # Redis enqueue.
+        stack.enter_context(patch.object(app_settings, "use_rq", True))
+        stack.enter_context(patch.object(app_settings, "redis_url", "redis://localhost:6379/0"))
+        stack.enter_context(patch("app.services.job_worker._enqueue_rq", return_value=None))
+
         with TestClient(app) as c:
             # Avoid race with async startup gate during tests.
             app.state.ready = True
             app.state.startup_error = None
             app.state.startup_message = "Ready"
-            # Tests use an in-memory DB; prevent the background worker thread
-            # from starting and trying to use the real SessionLocal (Postgres).
+            # Prevent the in-process worker thread from starting.
             app.state.disable_job_worker = True
             # Provide a signed session cookie so the auth gate lets requests through.
             c.cookies.set(COOKIE_NAME, create_session_cookie(1))

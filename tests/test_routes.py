@@ -1,9 +1,12 @@
 """Integration-style tests for the REST API routes using the in-memory DB."""
 
+import json
 from unittest.mock import patch
 
 import pytest
 
+from app import crud
+from app.config import settings as app_settings
 from app.schemas.company import GoogleSearchResult, ZefixSearchResult
 
 
@@ -219,3 +222,28 @@ def test_scoring_triggers_return_202_job(client, path, expected_job_type):
     assert data["status"] == "queued"
     assert isinstance(data["id"], int)
     assert data["created_at"]
+
+
+def test_batch_trigger_missing_serper_disables_google(client, db):
+    with patch.object(app_settings, "serper_api_key", ""):
+        resp = client.post(
+            "/api/v1/collection/batch",
+            json={"limit": 1, "run_google": True},
+        )
+    assert resp.status_code == 202
+    job_id = resp.json()["id"]
+
+    job = crud.get_job(db, job_id)
+    assert job is not None
+    params = json.loads(job.params_json or "{}")
+    assert params.get("run_google") is False
+    assert "SERPER_API_KEY is not configured" in (job.message or "")
+
+    events = crud.list_events(db, job_id=job_id, limit=50, exclude_debug=False)
+    assert any(e.level == "warn" and "Preflight:" in e.message for e in events)
+
+
+def test_claude_trigger_missing_key_returns_400(client):
+    resp = client.post("/api/v1/scoring/claude", json={})
+    assert resp.status_code == 400
+    assert "Anthropic API key missing" in resp.json()["detail"]

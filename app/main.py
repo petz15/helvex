@@ -48,7 +48,7 @@ from app.api.routes import auth_router, companies_router, jobs_router, map_route
 
 # Paths that do NOT require authentication
 _PUBLIC_PREFIXES = ("/static", "/login", "/health", "/api/v1/auth")
-_PUBLIC_EXACT = {"/login", "/logout", "/health"}
+_PUBLIC_EXACT = {"/login", "/logout", "/health", "/verify-email"}
 
 _REPO_ROOT = pathlib.Path(__file__).parent.parent
 
@@ -355,6 +355,63 @@ def logout():
     response = RedirectResponse(url="/login", status_code=status.HTTP_302_FOUND)
     response.delete_cookie(key=COOKIE_NAME)
     return response
+
+
+@app.get("/verify-email", response_class=HTMLResponse, include_in_schema=False)
+def verify_email_page(token: str = Query(""), db: Session = Depends(get_db)):
+    from app.auth import decode_verification_token
+    from app import crud as _crud
+
+    def _page(title: str, heading: str, body: str, color: str = "#1d4ed8") -> HTMLResponse:
+        return HTMLResponse(f"""<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Helvex — {_html.escape(title)}</title>
+  <style>
+    body {{ font-family: ui-sans-serif, system-ui, sans-serif; margin: 0; background: #f1f5f9; color: #1e293b; }}
+    .card {{ max-width: 440px; margin: 6rem auto; background: #fff; border-radius: 12px; padding: 2.5rem 2rem; box-shadow: 0 4px 24px rgba(0,0,0,.10); text-align: center; }}
+    h2 {{ color: {color}; margin-top: 0; }}
+    .btn {{ display: inline-block; margin-top: 1.5rem; padding: .65rem 1.5rem; background: #1d4ed8; color: #fff; border-radius: 8px; text-decoration: none; font-weight: 600; }}
+  </style>
+</head>
+<body>
+  <div class="card">
+    <p style="font-size:1.5rem;font-weight:700;color:#1d4ed8;margin:0 0 1rem">Helvex</p>
+    <h2>{_html.escape(heading)}</h2>
+    <p>{body}</p>
+    <a class="btn" href="/app/dashboard">Go to dashboard</a>
+  </div>
+</body>
+</html>""")
+
+    if not token:
+        return _page("Invalid link", "Invalid link", "The verification link is missing a token.", color="#b91c1c")
+
+    user_id = decode_verification_token(token)
+    if user_id is None:
+        return _page(
+            "Link expired",
+            "Link expired or invalid",
+            "This verification link has expired or is invalid. Please log in and request a new one.",
+            color="#b91c1c",
+        )
+
+    user = _crud.get_user(db, user_id)
+    if not user:
+        return _page("Not found", "Account not found", "No account was found for this link.", color="#b91c1c")
+
+    if not user.email_verified:
+        _crud.mark_email_verified(db, user)
+        try:
+            from app.services.email import send_welcome_email
+            if user.email:
+                send_welcome_email(to=user.email, username=user.username)
+        except Exception:
+            pass
+
+    return _page("Email verified", "Email verified!", "Your email address has been confirmed. You can now use all features.")
 
 
 # ── Startup gate middleware ───────────────────────────────────────────────────
