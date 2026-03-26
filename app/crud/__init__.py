@@ -1,9 +1,10 @@
-from app.crud.app_setting import get_all_settings, get_setting, seed_defaults, set_setting
+from app.crud.app_setting import get_all_settings, get_effective_setting, get_setting, seed_defaults, set_setting
 from app.crud.boilerplate import (
     create_boilerplate_pattern,
     delete_boilerplate_pattern,
     get_active_boilerplate_patterns,
     get_boilerplate_pattern,
+    get_effective_boilerplate_patterns,
     list_boilerplate_patterns,
     update_boilerplate_pattern,
 )
@@ -33,6 +34,18 @@ from app.crud.company import (
     update_company,
 )
 from app.crud.note import create_note, delete_note, get_note, list_notes_for_company, update_note
+from app.crud.org_company_state import (
+    get_or_create_org_company_state,
+    get_org_company_state,
+    update_org_company_state,
+    update_org_google_results,
+)
+from app.crud.user_company_state import (
+    get_or_create_user_company_state,
+    get_user_company_state,
+    update_personal_score_override,
+    update_user_claude_results,
+)
 from app.crud.job_run import (
     create_event,
     create_job,
@@ -41,6 +54,7 @@ from app.crud.job_run import (
     list_active_jobs,
     list_events,
     list_jobs,
+    list_org_jobs,
     list_queued_jobs,
     mark_cancel_requested,
     mark_cancelled,
@@ -87,6 +101,7 @@ __all__ = [
     "delete_note",
     # app settings
     "get_setting",
+    "get_effective_setting",
     "set_setting",
     "get_all_settings",
     "seed_defaults",
@@ -102,6 +117,7 @@ __all__ = [
     "get_next_queued_job",
     "list_active_jobs",
     "list_jobs",
+    "list_org_jobs",
     "list_queued_jobs",
     "list_events",
     "mark_running",
@@ -131,6 +147,7 @@ __all__ = [
     "list_boilerplate_patterns",
     "get_boilerplate_pattern",
     "get_active_boilerplate_patterns",
+    "get_effective_boilerplate_patterns",
     "create_boilerplate_pattern",
     "update_boilerplate_pattern",
     "delete_boilerplate_pattern",
@@ -139,4 +156,14 @@ __all__ = [
     "record_company_changes",
     "list_audit_for_company",
     "list_recent_audit",
+    # org company state overlay
+    "get_org_company_state",
+    "get_or_create_org_company_state",
+    "update_org_company_state",
+    "update_org_google_results",
+    # user company state overlay
+    "get_user_company_state",
+    "get_or_create_user_company_state",
+    "update_user_claude_results",
+    "update_personal_score_override",
 ]

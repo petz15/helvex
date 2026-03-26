@@ -123,6 +123,11 @@ jobs:
             --from-literal=SMTP_USER="${{ secrets.SMTP_USER }}" \
             --from-literal=SMTP_PASSWORD="${{ secrets.SMTP_PASSWORD }}" \
             --from-literal=SMTP_FROM="${{ secrets.SMTP_FROM }}" \
+            --from-literal=STORAGEBOX_HOST="${{ secrets.STORAGEBOX_HOST }}" \
+            --from-literal=STORAGEBOX_USER="${{ secrets.STORAGEBOX_USER }}" \
+            --from-literal=STORAGEBOX_PATH="${{ secrets.STORAGEBOX_PATH }}" \
+            --from-literal=STORAGEBOX_PORT="${{ secrets.STORAGEBOX_PORT }}" \
+            --from-literal=STORAGEBOX_SSH_PRIVATE_KEY="${{ secrets.STORAGEBOX_SSH_PRIVATE_KEY }}" \
             --from-literal=APP_BASE_URL="https://helvex.dicy.ch" \
             --from-literal=USE_RQ="true" \
             --from-literal=username="helvex" \

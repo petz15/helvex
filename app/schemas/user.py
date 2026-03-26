@@ -3,6 +3,15 @@ from datetime import datetime
 from pydantic import BaseModel, ConfigDict, EmailStr, field_validator
 
 
+class OrgRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    name: str
+    slug: str
+    tier: str
+
+
 class UserRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -10,10 +19,13 @@ class UserRead(BaseModel):
     username: str
     email: str | None = None
     tier: str
+    org_role: str
     is_active: bool
     email_verified: bool
     is_superadmin: bool
     created_at: datetime
+    org_id: int | None = None
+    org: OrgRead | None = None
 
 
 class TokenResponse(BaseModel):

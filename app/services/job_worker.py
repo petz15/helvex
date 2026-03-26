@@ -494,9 +494,17 @@ def kick_job_worker(app) -> None:
 
 # ── Enqueue helpers (used by REST routes) ─────────────────────────────────────
 
-def _enqueue_job_in_session(db: Session, *, job_type: str, label: str, params: dict) -> object:
+def _enqueue_job_in_session(
+    db: Session,
+    *,
+    job_type: str,
+    label: str,
+    params: dict,
+    org_id: int | None = None,
+    user_id: int | None = None,
+) -> object:
     preflight_params, warnings = _preflight_job(db, job_type=job_type, params=params)
-    job = crud.create_job(db, job_type=job_type, label=label, params=preflight_params)
+    job = crud.create_job(db, job_type=job_type, label=label, params=preflight_params, org_id=org_id, user_id=user_id)
     crud.create_event(db, job_id=job.id, level="info", message="Job queued")
     if warnings:
         for w in warnings:
@@ -516,12 +524,14 @@ def enqueue_job(
     label: str,
     params: dict,
     db: Session | None = None,
+    org_id: int | None = None,
+    user_id: int | None = None,
 ) -> object:
     if db is None:
         with SessionLocal() as session:
-            job = _enqueue_job_in_session(session, job_type=job_type, label=label, params=params)
+            job = _enqueue_job_in_session(session, job_type=job_type, label=label, params=params, org_id=org_id, user_id=user_id)
     else:
-        job = _enqueue_job_in_session(db, job_type=job_type, label=label, params=params)
+        job = _enqueue_job_in_session(db, job_type=job_type, label=label, params=params, org_id=org_id, user_id=user_id)
 
     from app.config import settings as _settings
     if _settings.use_rq:

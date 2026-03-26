@@ -10,15 +10,26 @@ from sqlalchemy.orm import Session
 
 from app import crud
 from app.api.zefix_client import SWISS_CANTONS
+from app.auth import get_current_user, require_superadmin
 from app.database import get_db
+from app.models.user import User
 from app.services.job_worker import enqueue_job
 
 router = APIRouter(tags=["jobs"])
 
 
-def _enqueue_or_http_error(request: Request, *, job_type: str, label: str, params: dict, db: Session):
+def _enqueue_or_http_error(
+    request: Request,
+    *,
+    job_type: str,
+    label: str,
+    params: dict,
+    db: Session,
+    org_id: int | None = None,
+    user_id: int | None = None,
+):
     try:
-        return enqueue_job(request.app, job_type=job_type, label=label, params=params, db=db)
+        return enqueue_job(request.app, job_type=job_type, label=label, params=params, db=db, org_id=org_id, user_id=user_id)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:  # noqa: BLE001
@@ -80,12 +91,12 @@ class EventOut(BaseModel):
 # ── Job CRUD ───────────────────────────────────────────────────────────────────
 
 @router.get("/jobs", response_model=list[JobOut])
-def list_jobs(limit: int = 100, db: Session = Depends(get_db)):
+def list_jobs(limit: int = 100, db: Session = Depends(get_db), _: User = Depends(get_current_user)):
     return [JobOut.from_orm_obj(j) for j in crud.list_jobs(db, limit=limit)]
 
 
 @router.get("/jobs/{job_id}", response_model=JobOut)
-def get_job(job_id: int, db: Session = Depends(get_db)):
+def get_job(job_id: int, db: Session = Depends(get_db), _: User = Depends(get_current_user)):
     job = crud.get_job(db, job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
@@ -93,12 +104,12 @@ def get_job(job_id: int, db: Session = Depends(get_db)):
 
 
 @router.get("/jobs/{job_id}/events", response_model=list[EventOut])
-def get_job_events(job_id: int, db: Session = Depends(get_db)):
+def get_job_events(job_id: int, db: Session = Depends(get_db), _: User = Depends(get_current_user)):
     return [EventOut.from_orm_obj(e) for e in crud.list_events(db, job_id=job_id, limit=200, exclude_debug=False)]
 
 
 @router.post("/jobs/{job_id}/cancel", response_model=JobOut)
-def cancel_job(job_id: int, request: Request, db: Session = Depends(get_db)):
+def cancel_job(job_id: int, request: Request, db: Session = Depends(get_db), _: User = Depends(get_current_user)):
     job = crud.get_job(db, job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
@@ -114,7 +125,7 @@ def cancel_job(job_id: int, request: Request, db: Session = Depends(get_db)):
 
 
 @router.post("/jobs/{job_id}/pause", response_model=JobOut)
-def pause_job(job_id: int, db: Session = Depends(get_db)):
+def pause_job(job_id: int, db: Session = Depends(get_db), _: User = Depends(get_current_user)):
     job = crud.get_job(db, job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
@@ -126,7 +137,7 @@ def pause_job(job_id: int, db: Session = Depends(get_db)):
 
 
 @router.post("/jobs/{job_id}/resume", response_model=JobOut)
-def resume_job(job_id: int, request: Request, db: Session = Depends(get_db)):
+def resume_job(job_id: int, request: Request, db: Session = Depends(get_db), _: User = Depends(get_current_user)):
     job = crud.get_job(db, job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
@@ -140,7 +151,7 @@ def resume_job(job_id: int, request: Request, db: Session = Depends(get_db)):
 
 
 @router.get("/jobs/stream/active")
-def stream_active_jobs(db: Session = Depends(get_db)):
+def stream_active_jobs(db: Session = Depends(get_db), _: User = Depends(get_current_user)):
     """SSE stream that sends 'update' while active jobs exist, 'done' when all finish."""
     def event_generator():
         while True:
@@ -233,7 +244,7 @@ class ClusterPipelineBody(BaseModel):
 
 
 @router.post("/collection/bulk", response_model=JobOut, status_code=status.HTTP_202_ACCEPTED)
-def trigger_bulk(body: BulkImportBody, request: Request, db: Session = Depends(get_db)):
+def trigger_bulk(body: BulkImportBody, request: Request, db: Session = Depends(get_db), _: User = Depends(require_superadmin)):
     canton_list = [c.upper() for c in body.cantons] if body.cantons else None
     label = f"Bulk import — cantons: {', '.join(canton_list) if canton_list else 'all 26'}"
     job = _enqueue_or_http_error(
@@ -247,7 +258,7 @@ def trigger_bulk(body: BulkImportBody, request: Request, db: Session = Depends(g
 
 
 @router.post("/collection/batch", response_model=JobOut, status_code=status.HTTP_202_ACCEPTED)
-def trigger_batch(body: BatchCollectBody, request: Request, db: Session = Depends(get_db)):
+def trigger_batch(body: BatchCollectBody, request: Request, db: Session = Depends(get_db), _: User = Depends(require_superadmin)):
     job = _enqueue_or_http_error(
         request,
         job_type="batch",
@@ -259,7 +270,7 @@ def trigger_batch(body: BatchCollectBody, request: Request, db: Session = Depend
 
 
 @router.post("/collection/initial", response_model=JobOut, status_code=status.HTTP_202_ACCEPTED)
-def trigger_initial(body: InitialCollectBody, request: Request, db: Session = Depends(get_db)):
+def trigger_initial(body: InitialCollectBody, request: Request, db: Session = Depends(get_db), _: User = Depends(require_superadmin)):
     if not body.names and not body.uids:
         raise HTTPException(status_code=400, detail="Provide at least one name or UID")
     label = f"Specific search — {len(body.names)} name(s), {len(body.uids)} UID(s)"
@@ -268,7 +279,7 @@ def trigger_initial(body: InitialCollectBody, request: Request, db: Session = De
 
 
 @router.post("/collection/detail", response_model=JobOut, status_code=status.HTTP_202_ACCEPTED)
-def trigger_detail(body: DetailCollectBody, request: Request, db: Session = Depends(get_db)):
+def trigger_detail(body: DetailCollectBody, request: Request, db: Session = Depends(get_db), _: User = Depends(require_superadmin)):
     if body.cantons:
         label = f"Zefix detail fetch — cantons: {', '.join(body.cantons)}"
     elif body.uids:
@@ -282,7 +293,7 @@ def trigger_detail(body: DetailCollectBody, request: Request, db: Session = Depe
 
 
 @router.post("/scoring/zefix", response_model=JobOut, status_code=status.HTTP_202_ACCEPTED)
-def trigger_recalc_zefix(request: Request, db: Session = Depends(get_db)):
+def trigger_recalc_zefix(request: Request, db: Session = Depends(get_db), _: User = Depends(require_superadmin)):
     job = _enqueue_or_http_error(
         request,
         job_type="recalculate_scores",
@@ -294,19 +305,21 @@ def trigger_recalc_zefix(request: Request, db: Session = Depends(get_db)):
 
 
 @router.post("/scoring/google", response_model=JobOut, status_code=status.HTTP_202_ACCEPTED)
-def trigger_recalc_google(request: Request, db: Session = Depends(get_db)):
+def trigger_recalc_google(request: Request, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     job = _enqueue_or_http_error(
         request,
         job_type="recalculate_google_scores",
         label="Recalculate Google scores",
         params={},
         db=db,
+        org_id=current_user.org_id,
+        user_id=current_user.id,
     )
     return JobOut.from_orm_obj(job)
 
 
 @router.post("/scoring/re-geocode", response_model=JobOut, status_code=status.HTTP_202_ACCEPTED)
-def trigger_re_geocode(request: Request, db: Session = Depends(get_db)):
+def trigger_re_geocode(request: Request, db: Session = Depends(get_db), _: User = Depends(require_superadmin)):
     job = _enqueue_or_http_error(
         request,
         job_type="re_geocode",
@@ -318,19 +331,21 @@ def trigger_re_geocode(request: Request, db: Session = Depends(get_db)):
 
 
 @router.post("/scoring/claude", response_model=JobOut, status_code=status.HTTP_202_ACCEPTED)
-def trigger_claude_classify(body: ClaudeClassifyBody, request: Request, db: Session = Depends(get_db)):
+def trigger_claude_classify(body: ClaudeClassifyBody, request: Request, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     job = _enqueue_or_http_error(
         request,
         job_type="claude_classify",
         label=f"Claude classify — up to {body.limit} companies",
         params=body.model_dump(),
         db=db,
+        org_id=current_user.org_id,
+        user_id=current_user.id,
     )
     return JobOut.from_orm_obj(job)
 
 
 @router.post("/scoring/cluster", response_model=JobOut, status_code=status.HTTP_202_ACCEPTED)
-def trigger_cluster_pipeline(body: ClusterPipelineBody, request: Request, db: Session = Depends(get_db)):
+def trigger_cluster_pipeline(body: ClusterPipelineBody, request: Request, db: Session = Depends(get_db), _: User = Depends(require_superadmin)):
     job = _enqueue_or_http_error(
         request,
         job_type="hdbscan_cluster",

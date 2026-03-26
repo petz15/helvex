@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import DateTime, Integer, String, Text, func
+from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database import Base
@@ -23,3 +23,5 @@ class CollectionRun(Base):
     last_offset: Mapped[int | None] = mapped_column(Integer, nullable=True)
     # JSON snapshot of stats at completion (or last checkpoint)
     stats_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # NULL for global catalog runs (superadmin); set for org-scoped future runs
+    org_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("organizations.id", ondelete="SET NULL"), nullable=True, index=True)

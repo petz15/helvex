@@ -49,7 +49,7 @@ from app.config import settings
 from app.database import Base, engine, get_db
 from app.services.job_worker import kick_job_worker
 from app.services.scoring import get_default_scoring_config
-from app.api.routes import auth_router, companies_router, jobs_router, map_router, notes_router, settings_router
+from app.api.routes import auth_router, companies_router, jobs_router, map_router, notes_router, settings_router, workspace_router
 
 # Paths that do NOT require authentication
 _PUBLIC_PREFIXES = ("/static", "/login", "/health", "/api/v1/auth")
@@ -236,6 +236,7 @@ app.include_router(notes_router, prefix="/api/v1")
 app.include_router(jobs_router, prefix="/api/v1")
 app.include_router(map_router, prefix="/api/v1")
 app.include_router(settings_router, prefix="/api/v1")
+app.include_router(workspace_router, prefix="/api/v1")
 
 
 @app.exception_handler(Exception)

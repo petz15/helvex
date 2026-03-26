@@ -121,8 +121,10 @@ export function MapClient() {
           iconAnchor: [s / 2, s / 2] as [number, number],
         });
         const marker = L.marker([f.lat, f.lon], { icon });
-        const popupHtml = group.map(buildPopup).join('<hr style="margin:5px 0;border-color:#e2e8f0">');
-        marker.bindPopup(popupHtml, { maxWidth: 320 });
+        const innerHtml = group.map(buildPopup).join('<hr style="margin:5px 0;border-color:#e2e8f0">');
+        // Wrap in a scrollable container so a large group doesn't push the map viewport
+        const popupHtml = `<div style="max-height:260px;overflow-y:auto;padding-right:4px">${innerHtml}</div>`;
+        marker.bindPopup(popupHtml, { maxWidth: 320, autoPan: false });
         layer.addLayer(marker);
       }
     }

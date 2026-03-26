@@ -52,6 +52,14 @@ spec:
     barmanObjectStore:
       destinationPath: {{ .Values.postgres.s3BucketPath }}
       endpointURL: {{ .Values.postgres.s3EndpointUrl }}
+      {{- if .Values.postgres.backupDataCompression }}
+      data:
+        compression: {{ .Values.postgres.backupDataCompression | quote }}
+      {{- end }}
+      {{- if .Values.postgres.backupWalCompression }}
+      wal:
+        compression: {{ .Values.postgres.backupWalCompression | quote }}
+      {{- end }}
       s3Credentials:
         accessKeyId:
           name: {{ .Values.envSecretName }}

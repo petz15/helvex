@@ -6,7 +6,9 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app import crud
+from app.auth import get_current_user, require_superadmin
 from app.database import get_db
+from app.models.user import User
 from app.services.scoring import get_default_scoring_config
 
 router = APIRouter(tags=["settings"])
@@ -63,7 +65,7 @@ class BoilerplateCreate(BaseModel):
 # ── Settings ───────────────────────────────────────────────────────────────────
 
 @router.get("/settings")
-def get_settings(db: Session = Depends(get_db)):
+def get_settings(db: Session = Depends(get_db), _: User = Depends(get_current_user)):
     current = crud.get_all_settings(db)
     defaults = get_default_scoring_config()
     # Merge defaults for any missing keys
@@ -71,7 +73,7 @@ def get_settings(db: Session = Depends(get_db)):
 
 
 @router.put("/settings")
-def save_settings(body: SettingsBody, db: Session = Depends(get_db)):
+def save_settings(body: SettingsBody, db: Session = Depends(get_db), _: User = Depends(require_superadmin)):
     crud.set_setting(db, "google_search_enabled", "true" if body.google_search_enabled else "false")
     try:
         crud.set_setting(db, "google_daily_quota", str(max(1, int(body.google_daily_quota))))
@@ -127,12 +129,12 @@ def save_settings(body: SettingsBody, db: Session = Depends(get_db)):
 # ── Boilerplate patterns ───────────────────────────────────────────────────────
 
 @router.get("/boilerplate", response_model=list[BoilerplateOut])
-def list_boilerplate(db: Session = Depends(get_db)):
+def list_boilerplate(db: Session = Depends(get_db), _: User = Depends(get_current_user)):
     return crud.list_boilerplate_patterns(db)
 
 
 @router.post("/boilerplate", response_model=BoilerplateOut, status_code=201)
-def create_boilerplate(body: BoilerplateCreate, db: Session = Depends(get_db)):
+def create_boilerplate(body: BoilerplateCreate, db: Session = Depends(get_db), _: User = Depends(require_superadmin)):
     import re as _re
     if not body.pattern.strip():
         raise HTTPException(status_code=400, detail="Pattern cannot be empty")
@@ -151,7 +153,7 @@ def create_boilerplate(body: BoilerplateCreate, db: Session = Depends(get_db)):
 
 
 @router.patch("/boilerplate/{pattern_id}/toggle", response_model=BoilerplateOut)
-def toggle_boilerplate(pattern_id: int, db: Session = Depends(get_db)):
+def toggle_boilerplate(pattern_id: int, db: Session = Depends(get_db), _: User = Depends(require_superadmin)):
     row = crud.get_boilerplate_pattern(db, pattern_id)
     if not row:
         raise HTTPException(status_code=404, detail="Pattern not found")
@@ -160,7 +162,7 @@ def toggle_boilerplate(pattern_id: int, db: Session = Depends(get_db)):
 
 
 @router.delete("/boilerplate/{pattern_id}", status_code=204)
-def delete_boilerplate(pattern_id: int, db: Session = Depends(get_db)):
+def delete_boilerplate(pattern_id: int, db: Session = Depends(get_db), _: User = Depends(require_superadmin)):
     row = crud.get_boilerplate_pattern(db, pattern_id)
     if not row:
         raise HTTPException(status_code=404, detail="Pattern not found")

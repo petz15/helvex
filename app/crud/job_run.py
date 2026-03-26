@@ -17,6 +17,8 @@ def create_job(
     job_type: str,
     label: str,
     params: dict[str, Any] | None = None,
+    org_id: int | None = None,
+    user_id: int | None = None,
 ) -> JobRun:
     job = JobRun(
         job_type=job_type,
@@ -24,6 +26,8 @@ def create_job(
         status="queued",
         message="Queued",
         params_json=json.dumps(params or {}),
+        org_id=org_id,
+        user_id=user_id,
     )
     db.add(job)
     db.commit()
@@ -37,6 +41,17 @@ def get_job(db: Session, job_id: int) -> JobRun | None:
 
 def list_jobs(db: Session, limit: int = 50) -> list[JobRun]:
     return db.query(JobRun).order_by(JobRun.queued_at.desc()).limit(limit).all()
+
+
+def list_org_jobs(db: Session, org_id: int, limit: int = 100) -> list[JobRun]:
+    """List jobs scoped to a specific org (excludes catalog/superadmin jobs with org_id=None)."""
+    return (
+        db.query(JobRun)
+        .filter(JobRun.org_id == org_id)
+        .order_by(JobRun.queued_at.desc())
+        .limit(limit)
+        .all()
+    )
 
 
 def list_active_jobs(db: Session) -> list[JobRun]:

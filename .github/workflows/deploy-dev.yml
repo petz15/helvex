@@ -89,6 +89,11 @@ jobs:
               --from-literal=SECRET_KEY="${{ secrets.SECRET_KEY }}" \
               --from-literal=S3_ACCESS_KEY="${{ secrets.S3_ACCESS_KEY }}" \
               --from-literal=S3_SECRET_KEY="${{ secrets.S3_SECRET_KEY }}" \
+              --from-literal=STORAGEBOX_HOST="${{ secrets.STORAGEBOX_HOST }}" \
+              --from-literal=STORAGEBOX_USER="${{ secrets.STORAGEBOX_USER }}" \
+              --from-literal=STORAGEBOX_PATH="${{ secrets.STORAGEBOX_PATH }}" \
+              --from-literal=STORAGEBOX_PORT="${{ secrets.STORAGEBOX_PORT }}" \
+              --from-literal=STORAGEBOX_SSH_PRIVATE_KEY="${{ secrets.STORAGEBOX_SSH_PRIVATE_KEY }}" \
               --from-literal=username="helvex" \
               --from-literal=password="${{ secrets.DB_PASSWORD }}" \
               -n helvex-dev

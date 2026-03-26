@@ -2,6 +2,42 @@ import type { AppSettings, BoilerplatePattern, Company, CompanyFilters, CompanyP
 
 const BASE = process.env.NEXT_PUBLIC_API_BASE ?? "";
 
+// ── Org context ────────────────────────────────────────────────────────────────
+
+export interface OrgInfo {
+  id: number;
+  name: string;
+  slug: string;
+  tier: string;
+}
+
+export interface CurrentUser {
+  id: number;
+  username: string;
+  email: string | null;
+  tier: string;
+  org_role: string;
+  is_active: boolean;
+  email_verified: boolean;
+  is_superadmin: boolean;
+  org_id: number | null;
+  org: OrgInfo | null;
+}
+
+export async function fetchCurrentUser(): Promise<CurrentUser> {
+  const res = await fetch("/api/v1/auth/me", { credentials: "include" });
+  if (!res.ok) throw new Error("Not authenticated");
+  return res.json();
+}
+
+/**
+ * Build an org-scoped path for workspace routes.
+ * Usage: orgPath(orgId, "/companies/123/state")
+ */
+export function orgPath(orgId: number, suffix: string): string {
+  return `/api/v1/orgs/${orgId}${suffix}`;
+}
+
 function buildUrl(path: string, params?: Record<string, string | number | undefined | null>): string {
   const url = new URL(BASE + path, typeof window !== "undefined" ? window.location.href : "http://localhost:3000");
   if (params) {
@@ -168,5 +204,72 @@ export async function fetchMapClusters(params?: Record<string, string>): Promise
   const url = buildUrl("/api/v1/map/clusters", params as Record<string, string | number | undefined | null>);
   const res = await fetch(url, { credentials: "include" });
   if (!res.ok) throw new Error("Failed to fetch map clusters");
+  return res.json();
+}
+
+// ── Workspace (org-scoped overlay) ────────────────────────────────────────────
+
+export interface OrgCompanyState {
+  org_id: number;
+  company_id: number;
+  tags: string | null;
+  review_status: string | null;
+  proposal_status: string | null;
+  contact_name: string | null;
+  contact_email: string | null;
+  contact_phone: string | null;
+  website_url: string | null;
+  website_match_score: number | null;
+  social_media_only: boolean | null;
+  website_checked_at: string | null;
+}
+
+export interface UserCompanyState {
+  user_id: number;
+  company_id: number;
+  claude_score: number | null;
+  claude_category: string | null;
+  claude_freeform: string | null;
+  personal_score_override: number | null;
+}
+
+export async function fetchOrgCompanyState(orgId: number, companyId: number): Promise<OrgCompanyState | null> {
+  const res = await fetch(orgPath(orgId, `/companies/${companyId}/state`), { credentials: "include" });
+  if (res.status === 404) return null;
+  if (!res.ok) throw new Error("Failed to fetch org company state");
+  return res.json();
+}
+
+export async function updateOrgCompanyState(
+  orgId: number,
+  companyId: number,
+  data: Partial<Omit<OrgCompanyState, "org_id" | "company_id" | "website_url" | "website_match_score" | "social_media_only" | "website_checked_at">>,
+): Promise<OrgCompanyState> {
+  const res = await fetch(orgPath(orgId, `/companies/${companyId}/state`), {
+    method: "PATCH",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  });
+  if (!res.ok) throw new Error("Failed to update org company state");
+  return res.json();
+}
+
+export async function fetchMyCompanyState(orgId: number, companyId: number): Promise<UserCompanyState | null> {
+  const res = await fetch(orgPath(orgId, `/companies/${companyId}/my-state`), { credentials: "include" });
+  if (res.status === 404) return null;
+  if (!res.ok) throw new Error("Failed to fetch user company state");
+  return res.json();
+}
+
+export async function fetchOrgJobs(orgId: number): Promise<Job[]> {
+  const res = await fetch(orgPath(orgId, "/jobs"), { credentials: "include" });
+  if (!res.ok) throw new Error("Failed to fetch org jobs");
+  return res.json();
+}
+
+export async function fetchOrgSettings(orgId: number): Promise<Record<string, string>> {
+  const res = await fetch(orgPath(orgId, "/settings"), { credentials: "include" });
+  if (!res.ok) throw new Error("Failed to fetch org settings");
   return res.json();
 }

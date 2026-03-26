@@ -196,7 +196,19 @@ def reset_password(body: ResetPasswordRequest, db: Session = Depends(get_db)) ->
 # ---------------------------------------------------------------------------
 
 @router.get("/me", response_model=UserRead, summary="Current authenticated user")
-def get_me(current_user: User = Depends(get_current_user)) -> UserRead:
+def get_me(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> UserRead:
+    # Eagerly load org relationship for the response
+    if current_user.org_id:
+        from sqlalchemy.orm import joinedload
+        current_user = (
+            db.query(User)
+            .options(joinedload(User.org))
+            .filter(User.id == current_user.id)
+            .first()
+        )
     return UserRead.model_validate(current_user)
 
 

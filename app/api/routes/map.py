@@ -113,9 +113,9 @@ def map_clusters(
     else:
         precision = 0.05   # ~5 km — city-district level at zoom 11
 
-    # Cell centre = floor(coord / precision) * precision + precision / 2
-    lat_cell = func.floor(CompanyModel.lat / precision) * precision + precision / 2.0
-    lon_cell = func.floor(CompanyModel.lon / precision) * precision + precision / 2.0
+    # Grid bucket keys (floor only — used for grouping, not positioning)
+    lat_bucket = func.floor(CompanyModel.lat / precision)
+    lon_bucket = func.floor(CompanyModel.lon / precision)
 
     base = db.query(CompanyModel).filter(
         CompanyModel.lat.isnot(None),
@@ -131,15 +131,17 @@ def map_clusters(
     )
 
     rows = base.with_entities(
-        lat_cell.label("lat"),
-        lon_cell.label("lon"),
+        # Use average of actual company coordinates so the bubble sits at the
+        # real centre of mass (e.g. a PLZ cluster), not a mathematical grid midpoint.
+        func.avg(CompanyModel.lat).label("lat"),
+        func.avg(CompanyModel.lon).label("lon"),
         func.count(CompanyModel.id).label("count"),
         func.avg(
             func.coalesce(CompanyModel.claude_score * 0.70, 0.0)
             + func.coalesce(CompanyModel.website_match_score * 0.20, 0.0)
             + func.coalesce(CompanyModel.zefix_score * 0.10, 0.0)
         ).label("avg_score"),
-    ).group_by(lat_cell, lon_cell).all()
+    ).group_by(lat_bucket, lon_bucket).all()
 
     cells = [
         {

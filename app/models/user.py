@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 
 from sqlalchemy import Boolean, DateTime, ForeignKey, String
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
 
@@ -37,3 +37,7 @@ class User(Base):
 
     # Organisation (for team-seat tiers)
     org_id: Mapped[int | None] = mapped_column(ForeignKey("organizations.id", ondelete="SET NULL"), nullable=True)
+    # Role within the org: owner | admin | member | viewer
+    org_role: Mapped[str] = mapped_column(String(32), nullable=False, default="member")
+
+    org: Mapped["Organization | None"] = relationship("Organization", back_populates="users", foreign_keys=[org_id])

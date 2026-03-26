@@ -672,7 +672,7 @@ cert-manager → cloudnative-pg → arc-controller → arc-rbac → arc-runner-s
 | `frontend-deployment.yaml` | Deployment | Next.js pod |
 | `worker-deployment.yaml` | Deployment | RQ worker (only if `worker.enabled`) |
 | `postgres-cluster.yaml` | `postgresql.cnpg.io/v1 Cluster` | CloudNativePG-managed PostgreSQL |
-| `postgres-backup-schedule.yaml` | ScheduledBackup | S3 backups, 7-day retention |
+| `postgres-backup-schedule.yaml` | ScheduledBackup | S3 backups, retention via Helm values |
 | `redis.yaml` | Deployment + Service | Redis for job queue + rate limiting |
 | `service.yaml` | Service | ClusterIP for backend |
 | `ingress.yaml` | Ingress | Traefik routing; TLS via cert-manager |

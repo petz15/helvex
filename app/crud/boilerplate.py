@@ -10,7 +10,10 @@ def list_boilerplate_patterns(db: Session) -> list[BoilerplatePattern]:
 
 
 def get_active_boilerplate_patterns(db: Session) -> list[re.Pattern]:
-    """Return compiled regex patterns for all active boilerplate entries."""
+    """Return compiled regex patterns for all active boilerplate entries (global only).
+
+    Deprecated in favour of get_effective_boilerplate_patterns() for org-aware callers.
+    """
     rows = db.query(BoilerplatePattern).filter(BoilerplatePattern.active.is_(True)).all()
     compiled = []
     for row in rows:
@@ -18,6 +21,34 @@ def get_active_boilerplate_patterns(db: Session) -> list[re.Pattern]:
             compiled.append(re.compile(row.pattern, re.IGNORECASE))
         except re.error:
             pass  # skip invalid patterns silently
+    return compiled
+
+
+def get_effective_boilerplate_patterns(db: Session, *, org_id: int | None = None) -> list[re.Pattern]:
+    """Return compiled regex patterns for global patterns PLUS org-specific overrides.
+
+    - Global patterns (org_id IS NULL) are always included.
+    - When org_id is provided, org-specific patterns for that org are merged in.
+    - Only active patterns are compiled.
+    """
+    q = db.query(BoilerplatePattern).filter(BoilerplatePattern.active.is_(True))
+    if org_id is not None:
+        from sqlalchemy import or_
+        q = q.filter(
+            or_(
+                BoilerplatePattern.org_id.is_(None),
+                BoilerplatePattern.org_id == org_id,
+            )
+        )
+    else:
+        q = q.filter(BoilerplatePattern.org_id.is_(None))
+    rows = q.all()
+    compiled = []
+    for row in rows:
+        try:
+            compiled.append(re.compile(row.pattern, re.IGNORECASE))
+        except re.error:
+            pass
     return compiled
 
 

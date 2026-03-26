@@ -16,6 +16,8 @@ General fixes, recovery procedures, and operational checklists.
 8. [Pod: OOMKilled](#8-pod-oomkilled)
 9. [Deploy: Migration Fails on Startup](#9-deploy-migration-fails-on-startup)
 10. [Useful kubectl Commands](#10-useful-kubectl-commands)
+11. [Logs: Where to Find Them](#11-logs-where-to-find-them)
+12. [Debug: Temporarily Enable Verbose Logging](#12-debug-temporarily-enable-verbose-logging)
 
 ---
 
@@ -98,7 +100,7 @@ git push
 
 Use this when you need to recover to a specific moment — e.g. before a bad migration, a `DELETE` without `WHERE`, or accidental data corruption.
 
-WAL segments are archived continuously (within seconds of each transaction), so you can target any point within the 7-day retention window.
+WAL segments are archived continuously (within seconds of each transaction), so you can target any point within the retention window (48h in prod by default).
 
 ### Steps
 
@@ -171,9 +173,21 @@ kubectl describe backup -n helvex-prod | grep -A 5 "Status:"
 # Check the scheduled backup object
 kubectl describe scheduledbackup helvex-pg-backup -n helvex-prod
 
+# If you see "hourly" backups in object storage, you almost certainly have more
+# than one ScheduledBackup resource in the namespace (e.g. an old/manual one).
+kubectl get scheduledbackup -n helvex-prod
+
+# Delete any unexpected schedules (keep only the one managed by Helm)
+kubectl delete scheduledbackup -n helvex-prod <NAME>
+
 # Check barman logs on the primary pod
 kubectl logs -n helvex-prod helvex-pg-1 -c postgres | grep -i "barman\|backup\|WAL"
 ```
+
+Notes on S3 usage:
+- WAL growth in object storage is expected when backups are enabled: WAL is archived continuously for PITR.
+- Your PITR window is effectively bounded by the oldest retained base backup; if you retain 2 days, you may store up to ~2 days of WAL.
+- To reduce object storage usage, reduce `postgres.backupRetention` (shorter PITR window) and/or enable compression (`postgres.backupWalCompression`, `postgres.backupDataCompression`) in Helm values.
 
 Expected output for a healthy backup:
 ```
@@ -183,6 +197,35 @@ WAL file archived successfully
 ```
 
 If you see `AccessDenied` or `NoSuchBucket` — the S3 credentials or bucket name are wrong.
+
+---
+
+## 3b. Database: Weekly Export to Storage Box (long retention)
+
+Prod also runs a weekly logical export (`pg_dump`) to a Storage Box as a second backup target (separate failure domain) with ~2 months retention.
+
+The job also prunes old exports automatically (deletes `helvex-*.dump` older than `retentionDays`).
+
+**Helm values (prod):** `postgres.weeklyExport.enabled: true`
+
+**Required GitHub Secrets (propagate into `helvex-env`):**
+- `STORAGEBOX_HOST` (e.g. `u12345.your-storagebox.de`)
+- `STORAGEBOX_USER` (e.g. `u12345`)
+- `STORAGEBOX_PATH` (optional; dedicated folder, e.g. `/backups/helvex/pg-prod`; if empty, uses the Storage Box user home)
+- `STORAGEBOX_PORT` (Hetzner Storage Box SSH is commonly `23`)
+- `STORAGEBOX_SSH_PRIVATE_KEY` (private key used for SFTP)
+
+**Verify it exists and is scheduled:**
+```bash
+kubectl get cronjob -n helvex-prod | grep pg-weekly-export
+kubectl describe cronjob -n helvex-prod helvex-pg-weekly-export
+```
+
+**Manually trigger once to test:**
+```bash
+kubectl create job -n helvex-prod --from=cronjob/helvex-pg-weekly-export pg-weekly-export-manual
+kubectl logs -n helvex-prod job/pg-weekly-export-manual -f
+```
 
 ---
 
@@ -421,4 +464,160 @@ kubectl describe cluster helvex-pg -n helvex-prod
 # List completed/scheduled backups
 kubectl get backup -n helvex-prod
 kubectl get scheduledbackup -n helvex-prod
+```
+
+---
+
+## 11. Logs: Where to Find Them
+
+### Pod logs (stdout — the primary source)
+
+All Python logging goes to stdout at `INFO` level and is captured by Kubernetes.
+
+```bash
+# Backend app — live tail
+kubectl logs -n helvex-prod -l app.kubernetes.io/component=app -f
+
+# RQ worker — live tail
+kubectl logs -n helvex-prod -l app.kubernetes.io/component=worker -f
+
+# Next.js frontend — live tail
+kubectl logs -n helvex-prod -l app.kubernetes.io/component=frontend -f
+
+# Postgres — live tail
+kubectl logs -n helvex-prod helvex-pg-1 -f
+
+# Last 500 lines (no follow)
+kubectl logs -n helvex-prod -l app.kubernetes.io/component=app --tail=500
+
+# Logs since a point in time
+kubectl logs -n helvex-prod -l app.kubernetes.io/component=app --since=1h
+kubectl logs -n helvex-prod -l app.kubernetes.io/component=app --since-time="2025-03-26T08:00:00Z"
+
+# Previous pod instance (after a crash-loop restart)
+kubectl logs -n helvex-prod -l app.kubernetes.io/component=app -p
+```
+
+Log format is `LEVEL:logger_name:message` (e.g. `INFO:app.api.routes.auth:auth.login_ok user_id=3`).
+
+### Grafana (metrics + dashboards)
+
+URL: **https://grafana.helvex.dicy.ch**
+
+Credentials: username `admin`, password from:
+```bash
+kubectl get secret monitoring-grafana -n monitoring -o jsonpath='{.data.admin-password}' | base64 -d
+```
+
+Useful dashboards to check:
+- **Node Exporter / Full** — CPU, memory, disk I/O, network on the host
+- **Kubernetes / Pods** — per-pod CPU/memory, restart counts
+- **FastAPI** — request rate, latency, error rate (if the `/metrics` endpoint is scraped)
+
+Grafana shows metrics only — it does **not** aggregate pod logs (no Loki installed).
+
+### Structured job logs (in the database)
+
+Job-level events (progress, warnings, errors) are stored in the `job_run_events` table and visible in the UI under each job's detail panel. To query directly:
+
+```bash
+# Connect to Postgres (see section 10 for full connection command), then:
+SELECT j.job_type, j.label, j.status, e.level, e.message, e.created_at
+FROM job_run_events e
+JOIN job_runs j ON j.id = e.job_id
+WHERE j.id = <job_id>
+ORDER BY e.created_at;
+
+# Last 50 error/warn events across all jobs
+SELECT j.job_type, j.label, e.level, e.message, e.created_at
+FROM job_run_events e
+JOIN job_runs j ON j.id = e.job_id
+WHERE e.level IN ('error', 'warn')
+ORDER BY e.created_at DESC
+LIMIT 50;
+```
+
+---
+
+## 12. Debug: Temporarily Enable Verbose Logging
+
+> **Always revert after diagnosis.** Debug logging is very noisy and will fill pod memory buffers quickly in production.
+
+### Option A — Uvicorn HTTP debug (request-level detail)
+
+Patches the app Deployment to pass `--log-level debug` to uvicorn. This logs every HTTP request/response, including headers. Does **not** change Python app-level log verbosity.
+
+```bash
+# Enable
+kubectl set env deployment/helvex \
+  UVICORN_LOG_LEVEL=debug \
+  -n helvex-prod
+
+# The Deployment will roll out a new pod automatically.
+# Tail to see debug output:
+kubectl logs -n helvex-prod -l app.kubernetes.io/component=app -f
+
+# Revert
+kubectl set env deployment/helvex \
+  UVICORN_LOG_LEVEL- \
+  -n helvex-prod
+```
+
+> `UVICORN_LOG_LEVEL` is read by uvicorn automatically from the environment — no code change needed.
+
+### Option B — Python app-level DEBUG logging
+
+The app hardcodes `logging.INFO` in `app/main.py`. To temporarily drop to DEBUG, patch the Deployment to override the startup command:
+
+```bash
+# Enable (overrides the Dockerfile CMD with --log-level debug added)
+kubectl patch deployment helvex -n helvex-prod --type=json -p='[
+  {"op":"replace","path":"/spec/template/spec/containers/0/args",
+   "value":["uvicorn","app.main:app","--host","0.0.0.0","--port","8000","--log-level","debug"]}
+]'
+
+# Tail
+kubectl logs -n helvex-prod -l app.kubernetes.io/component=app -f
+
+# Revert — remove the args override so the Dockerfile CMD takes over again
+kubectl patch deployment helvex -n helvex-prod --type=json -p='[
+  {"op":"remove","path":"/spec/template/spec/containers/0/args"}
+]'
+```
+
+For **persistent** debug support without patching, add `LOG_LEVEL` to `app/config.py` and read it in `app/main.py`:
+```python
+# app/main.py — replace the hardcoded INFO with:
+logging.basicConfig(level=getattr(logging, settings.log_level.upper(), logging.INFO), ...)
+# app/config.py — add:
+log_level: str = "INFO"
+```
+Then set `LOG_LEVEL=DEBUG` in `helvex-env` secret for a targeted pod restart.
+
+### Option C — SQLAlchemy query logging
+
+To see every SQL query the app executes (very verbose — use only for a specific investigation):
+
+```bash
+# Open a shell in the app pod
+kubectl exec -n helvex-prod -it deploy/helvex -- bash
+
+# From inside the pod — start a Python REPL against the live DB
+python3 - <<'EOF'
+import logging
+logging.getLogger("sqlalchemy.engine").setLevel(logging.INFO)
+# Now import and run whatever you need to trace
+EOF
+```
+
+This only affects the current shell session. The running uvicorn process is not affected — restart the pod to reset.
+
+### Option D — Worker debug logging
+
+Same options apply to the worker Deployment (`deployment/helvex-worker`):
+
+```bash
+kubectl set env deployment/helvex-worker UVICORN_LOG_LEVEL=debug -n helvex-prod
+# Revert:
+kubectl set env deployment/helvex-worker UVICORN_LOG_LEVEL- -n helvex-prod
 ```

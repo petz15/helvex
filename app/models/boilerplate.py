@@ -1,17 +1,23 @@
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, Integer, String, Text, func
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database import Base
 
 
 class BoilerplatePattern(Base):
-    """Regex pattern for stripping Swiss registry boilerplate from purpose texts."""
+    """Regex pattern for stripping Swiss registry boilerplate from purpose texts.
+
+    org_id=NULL means this is a global (superadmin-managed) pattern applied to all orgs.
+    org_id=<id> means this is an org-specific override pattern.
+    """
 
     __tablename__ = "boilerplate_patterns"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    # NULL = global pattern; set = org-specific override
+    org_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=True, index=True)
     # The regex pattern (applied with re.IGNORECASE)
     pattern: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
     # Human-readable description of what this pattern strips

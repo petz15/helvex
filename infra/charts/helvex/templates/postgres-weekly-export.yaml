@@ -1,0 +1,145 @@
+{{- if and .Values.postgres.enabled .Values.postgres.weeklyExport.enabled }}
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ include "helvex.fullname" . }}-pg-weekly-export
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "helvex.labels" . | nindent 4 }}
+    app.kubernetes.io/component: db-export
+spec:
+  schedule: {{ .Values.postgres.weeklyExport.schedule | quote }}
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 2
+  failedJobsHistoryLimit: 2
+  startingDeadlineSeconds: 3600
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      ttlSecondsAfterFinished: 86400
+      template:
+        metadata:
+          labels:
+            {{- include "helvex.labels" . | nindent 12 }}
+            app.kubernetes.io/component: db-export
+        spec:
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            runAsGroup: 1000
+          automountServiceAccountToken: false
+          {{- with .Values.imagePullSecrets }}
+          imagePullSecrets:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          restartPolicy: Never
+          volumes:
+            - name: backup
+              emptyDir: {}
+            - name: work
+              emptyDir: {}
+            - name: storagebox-key
+              secret:
+                secretName: {{ .Values.envSecretName }}
+                items:
+                  - key: STORAGEBOX_SSH_PRIVATE_KEY
+                    path: id_ed25519
+          initContainers:
+            - name: pg-dump
+              image: {{ .Values.postgres.weeklyExport.pgDumpImage | quote }}
+              imagePullPolicy: IfNotPresent
+              envFrom:
+                - secretRef:
+                    name: {{ .Values.envSecretName }}
+              command: ["sh", "-ec"]
+              args:
+                - |
+                  set -euo pipefail
+                  : "${DATABASE_URL:?DATABASE_URL missing}"
+                  ts=$(date -u +%Y%m%dT%H%M%SZ)
+                  out="/backup/helvex-${ts}.dump"
+                  pg_dump \
+                    --dbname="$DATABASE_URL" \
+                    --format=custom \
+                    --compress={{ .Values.postgres.weeklyExport.pgDumpCompress }} \
+                    --no-owner \
+                    --no-acl \
+                    --file="$out"
+                  echo "$out" > /backup/LATEST
+              volumeMounts:
+                - name: backup
+                  mountPath: /backup
+          containers:
+            - name: upload
+              image: {{ .Values.postgres.weeklyExport.uploadImage | quote }}
+              imagePullPolicy: IfNotPresent
+              envFrom:
+                - secretRef:
+                    name: {{ .Values.envSecretName }}
+              env:
+                - name: RETENTION_DAYS
+                  value: {{ .Values.postgres.weeklyExport.retentionDays | quote }}
+              command: ["sh", "-ec"]
+              args:
+                - |
+                  set -euo pipefail
+                  : "${STORAGEBOX_HOST:?STORAGEBOX_HOST missing}"
+                  : "${STORAGEBOX_USER:?STORAGEBOX_USER missing}"
+                  : "${STORAGEBOX_PORT:=23}"
+
+                  key_src=/secret/id_ed25519
+                  key_dst=/work/id_ed25519
+                  if [ ! -s "$key_src" ]; then
+                    echo "ERROR: STORAGEBOX_SSH_PRIVATE_KEY is missing/empty" >&2
+                    exit 1
+                  fi
+                  cp "$key_src" "$key_dst"
+                  chmod 600 "$key_dst"
+
+                  cat > /work/rclone.conf <<EOF
+                  [box]
+                  type = sftp
+                  host = ${STORAGEBOX_HOST}
+                  user = ${STORAGEBOX_USER}
+                  port = ${STORAGEBOX_PORT}
+                  key_file = /work/id_ed25519
+                  EOF
+
+                  file=$(cat /backup/LATEST)
+                  if [ ! -s "$file" ]; then
+                    echo "ERROR: dump file missing: $file" >&2
+                    exit 1
+                  fi
+
+                  remote="box:${STORAGEBOX_PATH:-}"
+
+                  rclone --config /work/rclone.conf \
+                    copy "$file" "$remote" \
+                    --sftp-disable-hashcheck \
+                    --retries 3 \
+                    --low-level-retries 10
+
+                  rclone --config /work/rclone.conf \
+                    delete "$remote" \
+                    --min-age "${RETENTION_DAYS}d" \
+                    --include "helvex-*.dump" \
+                    --exclude "**" \
+                    --retries 3 \
+                    --low-level-retries 10
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: false
+                capabilities:
+                  drop: ["ALL"]
+              resources:
+                {{- toYaml .Values.postgres.weeklyExport.resources | nindent 16 }}
+              volumeMounts:
+                - name: backup
+                  mountPath: /backup
+                  readOnly: true
+                - name: work
+                  mountPath: /work
+                - name: storagebox-key
+                  mountPath: /secret
+                  readOnly: true
+{{- end }}

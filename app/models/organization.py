@@ -1,7 +1,14 @@
 from datetime import datetime, timezone
 
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
 from sqlalchemy import DateTime, String
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, relationship
+
+if TYPE_CHECKING:
+    from app.models.user import User
 
 from app.database import Base
 
@@ -19,3 +26,5 @@ class Organization(Base):
         nullable=False,
         default=lambda: datetime.now(tz=timezone.utc),
     )
+
+    users: Mapped[list[User]] = relationship("User", back_populates="org", foreign_keys="User.org_id")

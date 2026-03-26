@@ -325,6 +325,20 @@ def check_public_rate_limit(ip: str, action: str, *, window: float = 900, max_re
 
 
 # ---------------------------------------------------------------------------
+# Superadmin dependency
+# ---------------------------------------------------------------------------
+
+def require_superadmin(user: User = Depends(get_current_user)) -> User:
+    """Dependency — raises 403 unless the user is a superadmin."""
+    if not user.is_superadmin:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Superadmin access required",
+        )
+    return user
+
+
+# ---------------------------------------------------------------------------
 # Legacy require_login dependency (kept for backward compat)
 # ---------------------------------------------------------------------------
 

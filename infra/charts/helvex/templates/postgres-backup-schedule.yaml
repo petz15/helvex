@@ -7,7 +7,7 @@ metadata:
   labels:
     {{- include "helvex.labels" . | nindent 4 }}
 spec:
-  schedule: "0 2 * * *"   # daily at 02:00 UTC
+  schedule: {{ .Values.postgres.backupSchedule | quote }}
   backupOwnerReference: self
   cluster:
     name: {{ include "helvex.fullname" . }}-pg

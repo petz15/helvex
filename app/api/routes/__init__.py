@@ -4,5 +4,6 @@ from app.api.routes.jobs import router as jobs_router
 from app.api.routes.map import router as map_router
 from app.api.routes.notes import router as notes_router
 from app.api.routes.ops_settings import router as settings_router
+from app.api.routes.workspace import router as workspace_router
 
-__all__ = ["auth_router", "companies_router", "notes_router", "jobs_router", "map_router", "settings_router"]
+__all__ = ["auth_router", "companies_router", "jobs_router", "map_router", "notes_router", "settings_router", "workspace_router"]
