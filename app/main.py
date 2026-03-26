@@ -8,6 +8,11 @@ import time
 import traceback
 from contextlib import asynccontextmanager
 
+# Configure root logger so all app.* loggers emit at INFO.
+# Uvicorn only configures its own named loggers and leaves root at WARNING.
+logging.basicConfig(level=logging.INFO, stream=sys.stdout,
+                    format="%(levelname)s:%(name)s:%(message)s")
+
 # ── Python 3.12 compatibility patch ───────────────────────────────────────────
 # pydantic.v1 (bundled inside pydantic v2) calls ForwardRef._evaluate() without
 # the `recursive_guard` keyword argument required by Python 3.12.  Patch it once

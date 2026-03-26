@@ -392,6 +392,16 @@ kubectl rollout status deployment/helvex -n helvex-prod --timeout=120s
 # List all K8s secrets (not their values)
 kubectl get secrets -n helvex-prod
 
+#List configs of secrets
+kubectl get secret monitoring-grafana -n monitoring -o yaml
+
+# Get a secret
+kubectl get secret <secret-name> -n <namespace> -o jsonpath='{.data.<key>}' | base64 -d
+
+#specifically for Grafana
+kubectl get secret monitoring-grafana -n monitoring -o jsonpath='{.data.admin-password}' | base64 -d
+
+
 # Check cert-manager certificate status
 kubectl get certificate -n helvex-prod
 kubectl describe certificate helvex-tls -n helvex-prod
