@@ -13,6 +13,9 @@ spec:
     size: {{ .Values.postgres.storageSize }}
 
   postgresql:
+    parameters:
+      wal_compression: "on"
+      checkpoint_completion_target: "0.9"
     pg_hba:
       - host all all 0.0.0.0/0 scram-sha-256
 

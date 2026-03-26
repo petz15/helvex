@@ -42,11 +42,10 @@ postgres:
   backupEnabled: true
   s3EndpointUrl: "https://nbg1.your-objectstorage.com"
   s3BucketPath: "s3://helvex-backups/pg-prod/"
-  backupSchedule: "0 2 * * *"
-  backupRetention: "2d"  # 48h PITR window
-  # Optional knobs to reduce object storage usage; enable only if supported by your CloudNativePG version.
-  # backupDataCompression: "gzip"
-  # backupWalCompression: "gzip"
+  backupSchedule: "0 0 2 * * *"
+  backupRetention: "7d"  # 7-day PITR window
+  backupDataCompression: "gzip"
+  backupWalCompression: "gzip"
   weeklyExport:
     enabled: true
     schedule: "30 3 * * 0"   # weekly export to Storage Box (UTC)

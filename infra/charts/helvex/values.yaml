@@ -68,7 +68,7 @@ postgres:
   restoreFromBackup: false   # set to true on rebuild to restore from S3 instead of initdb
   s3EndpointUrl: ""    # e.g. https://fsn1.your-objectstorage.com
   s3BucketPath: ""     # e.g. s3://helvex-backups/pg/
-  backupSchedule: "0 2 * * *"  # cron (UTC) for ScheduledBackup
+  backupSchedule: "0 0 2 * * *"  # 6-field cron (sec min hour day month weekday) for CNPG ScheduledBackup
   backupRetention: "7d"
   backupDataCompression: ""    # optional: "gzip" to compress base backups
   backupWalCompression: ""     # optional: "gzip" to compress archived WAL
