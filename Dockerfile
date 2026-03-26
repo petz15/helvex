@@ -43,6 +43,8 @@ RUN python -c "from app.api.geocoding_client import _load_plz_table; _load_plz_t
 RUN python -c "from app.api.geocoding_client import build_geocoding_db; build_geocoding_db()" \
     && echo "Building DB ready: $(du -sh data/geocoding.db)"
 
+# Ensure geocoding data is readable by the non-root app user (uid 1000)
+RUN chown -R 1000:1000 /app/data
 
 EXPOSE 8000
 

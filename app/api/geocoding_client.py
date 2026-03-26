@@ -248,7 +248,9 @@ def _get_db() -> sqlite3.Connection | None:
             except Exception as exc:
                 logger.error("geocoding.db build failed — PLZ fallback only: %s", exc)
                 return None
-        _db_conn = sqlite3.connect(str(_BUILDING_DB), check_same_thread=False)
+        _db_conn = sqlite3.connect(
+            f"file:{_BUILDING_DB}?mode=ro", uri=True, check_same_thread=False
+        )
         return _db_conn
 
 
@@ -325,7 +327,8 @@ def _lookup_building(address: str) -> tuple[float, float] | None:
             return float(row[0]), float(row[1])
 
         return None
-    except sqlite3.Error:
+    except sqlite3.Error as exc:
+        logger.error("geocoding.db query failed: %s", exc)
         return None
 
 
