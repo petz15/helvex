@@ -197,7 +197,7 @@ export function OrgClient() {
       await updateMemberRole(orgId, member.id, pendingRole);
       await reloadMembers();
       setEditingRoleFor(null);
-      flash(setMemberBanner, "success", `Role updated for "${member.username}".`);
+      flash(setMemberBanner, "success", `Role updated for "${member.email}".`);
     } catch (e) {
       flash(setMemberBanner, "error", e instanceof Error ? e.message : "Failed to update role");
     } finally {
