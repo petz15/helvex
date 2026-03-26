@@ -131,6 +131,7 @@ _URL_EXCLUDE_KEYWORDS_RAW: str | None = None
 _DEFAULT_URL_EXCLUDE_KEYWORDS: tuple[str, ...] = (
     "treuhandsuisse",
     "northdata",
+    "kununu",
 )
 
 
