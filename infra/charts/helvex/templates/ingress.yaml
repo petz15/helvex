@@ -57,22 +57,8 @@ spec:
     - host: {{ .Values.ingress.host }}
       http:
         paths:
-          # FastAPI: API, auth, docs, static assets, health
+          # FastAPI: API, docs, static assets, health
           - path: /api
-            pathType: Prefix
-            backend:
-              service:
-                name: {{ include "helvex.fullname" . }}
-                port:
-                  number: {{ .Values.service.port }}
-          - path: /login
-            pathType: Prefix
-            backend:
-              service:
-                name: {{ include "helvex.fullname" . }}
-                port:
-                  number: {{ .Values.service.port }}
-          - path: /logout
             pathType: Prefix
             backend:
               service:

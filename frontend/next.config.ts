@@ -7,8 +7,6 @@ const nextConfig: NextConfig = {
   async rewrites() {
     return [
       { source: "/api/:path*", destination: `${FASTAPI_URL}/api/:path*` },
-      { source: "/login", destination: `${FASTAPI_URL}/login` },
-      { source: "/logout", destination: `${FASTAPI_URL}/logout` },
       { source: "/health", destination: `${FASTAPI_URL}/health` },
       { source: "/static/:path*", destination: `${FASTAPI_URL}/static/:path*` },
     ];

@@ -4,16 +4,19 @@ import logging
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Request, status
+from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 
 logger = logging.getLogger(__name__)
 
 from app import crud
 from app.auth import (
+    COOKIE_NAME,
     check_public_rate_limit,
     create_access_token,
     create_email_change_token,
     create_password_reset_token,
+    create_session_cookie,
     create_verification_token,
     decode_email_change_token,
     decode_password_reset_token,
@@ -74,6 +77,88 @@ def login_for_token(
         )
     logger.info("auth.login_ok user_id=%s email=%r ip=%s", user.id, user.email, ip)
     return TokenResponse(access_token=create_access_token(user.id))
+
+
+# ---------------------------------------------------------------------------
+# Cookie-based login / logout (used by the Next.js login page)
+# ---------------------------------------------------------------------------
+
+from pydantic import BaseModel as _BaseModel
+
+
+class _LoginRequest(_BaseModel):
+    email: str
+    password: str
+
+
+@router.post("/login", summary="Login and set a session cookie")
+def login_cookie(
+    request: Request,
+    body: _LoginRequest,
+    db: Session = Depends(get_db),
+) -> JSONResponse:
+    ip = get_client_ip(request)
+    if not is_login_allowed(ip):
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Too many login attempts. Try again in 15 minutes.",
+        )
+    user = crud.authenticate(db, email=body.email, password=body.password)
+    if not user:
+        record_login_failure(ip)
+        logger.warning("auth.login_failed email=%r ip=%s", body.email, ip)
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid email or password")
+    logger.info("auth.login_ok user_id=%s email=%r ip=%s", user.id, user.email, ip)
+    forwarded_proto = request.headers.get("x-forwarded-proto", "")
+    is_https = request.url.scheme == "https" or forwarded_proto.split(",")[0].strip().lower() == "https"
+    response = JSONResponse({"ok": True})
+    response.set_cookie(
+        key=COOKIE_NAME,
+        value=create_session_cookie(user.id),
+        httponly=True,
+        samesite="lax",
+        secure=is_https,
+        max_age=8 * 3600,
+    )
+    return response
+
+
+@router.post("/logout", status_code=200, summary="Clear the session cookie")
+def logout_cookie() -> JSONResponse:
+    response = JSONResponse({"ok": True})
+    response.delete_cookie(key=COOKIE_NAME)
+    return response
+
+
+# ---------------------------------------------------------------------------
+# Confirm email change (token from link in email)
+# ---------------------------------------------------------------------------
+
+class _ConfirmEmailChangeRequest(_BaseModel):
+    token: str
+
+
+@router.post("/confirm-email-change", status_code=204,
+             summary="Confirm an email address change via signed token")
+def confirm_email_change_api(
+    body: _ConfirmEmailChangeRequest,
+    db: Session = Depends(get_db),
+) -> None:
+    result = decode_email_change_token(body.token)
+    if result is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid or expired confirmation link. Please request a new one.",
+        )
+    user_id, new_email = result
+    user = crud.get_user(db, user_id)
+    if not user:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Account not found")
+    existing = crud.get_user_by_email(db, new_email)
+    if existing and existing.id != user.id:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Email already in use")
+    crud.update_email(db, user, new_email)
+    logger.info("auth.email_changed user_id=%s new_email=%r", user.id, new_email)
 
 
 # ---------------------------------------------------------------------------

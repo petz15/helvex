@@ -33,6 +33,13 @@ spec:
             - name: http
               containerPort: 8000
               protocol: TCP
+          env:
+            {{- if .Values.worker.enabled }}
+            - name: DISABLE_JOB_WORKER
+              value: "true"
+            - name: USE_RQ
+              value: "true"
+            {{- end }}
           envFrom:
             - secretRef:
                 name: {{ .Values.envSecretName }}
