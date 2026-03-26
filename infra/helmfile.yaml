@@ -55,6 +55,9 @@ releases:
     namespace: arc-systems
     chart: oci://ghcr.io/actions/actions-runner-controller-charts/gha-runner-scale-set
     version: "0.9.3"
+    # disableValidation: AutoscalingRunnerSet CRD is installed by arc-controller; skip
+    # server-side validation so helm diff doesn't fail before arc-controller is deployed.
+    disableValidation: true
     needs:
       - arc-systems/arc-controller
       - arc-systems/arc-rbac
