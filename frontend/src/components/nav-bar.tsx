@@ -3,7 +3,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import useSWR from "swr";
 import { cn } from "@/lib/utils";
-import { BarChart3, KanbanSquare, Map, Cog, Database, Activity, Building2, Users, UserCircle } from "lucide-react";
+import { BarChart3, KanbanSquare, Map, Cog, Database, Activity, Building2, Users, UserCircle, Shield } from "lucide-react";
 import { fetchCurrentUser } from "@/lib/api";
 
 const NAV = [
@@ -50,6 +50,20 @@ export function NavBar() {
         })}
       </nav>
       <div className="ml-auto flex items-center gap-1">
+        {me?.is_superadmin && (
+          <Link
+            href="/app/admin"
+            className={cn(
+              "flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-sm transition-colors",
+              pathname.startsWith("/app/admin")
+                ? "bg-purple-600 text-white font-medium"
+                : "text-purple-600 hover:bg-purple-50"
+            )}
+          >
+            <Shield size={14} />
+            Admin
+          </Link>
+        )}
         {me?.email && (
           <span className="text-xs text-slate-400 px-2 hidden sm:block truncate max-w-[180px]" title={me.email}>
             {me.email}

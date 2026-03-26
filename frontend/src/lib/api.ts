@@ -296,8 +296,7 @@ export interface OrgDetail {
 
 export interface OrgMember {
   id: number;
-  username: string;
-  email: string | null;
+  email: string;
   org_role: string;
   is_active: boolean;
   created_at: string;
@@ -328,7 +327,7 @@ export async function fetchOrgMembers(orgId: number): Promise<OrgMember[]> {
 
 export async function addOrgMember(
   orgId: number,
-  data: { username: string; email?: string; password: string; org_role: string },
+  data: { email: string; password: string; org_role: string },
 ): Promise<OrgMember> {
   const res = await fetch(orgPath(orgId, "/members"), {
     method: "POST",
@@ -458,5 +457,122 @@ export async function requestEmailChange(newEmail: string, currentPassword: stri
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
     throw new Error(body.detail ?? "Failed to request email change");
+  }
+}
+
+export async function deleteOrg(orgId: number): Promise<void> {
+  const res = await fetch(`/api/v1/orgs/${orgId}`, {
+    method: "DELETE",
+    credentials: "include",
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.detail ?? "Failed to delete org");
+  }
+}
+
+// ── Admin (superadmin only) ───────────────────────────────────────────────────
+
+export interface AdminStats {
+  total_users: number;
+  active_users: number;
+  verified_users: number;
+  total_orgs: number;
+  users_in_org: number;
+}
+
+export interface AdminUser {
+  id: number;
+  email: string;
+  tier: string;
+  is_active: boolean;
+  email_verified: boolean;
+  is_superadmin: boolean;
+  org_id: number | null;
+  org_name: string | null;
+  org_role: string;
+  created_at: string;
+}
+
+export interface AdminOrg {
+  id: number;
+  name: string;
+  slug: string;
+  tier: string;
+  member_count: number;
+  created_at: string;
+}
+
+export interface AdminPage<T> {
+  items: T[];
+  total: number;
+  page: number;
+  page_size: number;
+}
+
+export async function fetchAdminStats(): Promise<AdminStats> {
+  const res = await fetch("/api/v1/admin/stats", { credentials: "include" });
+  if (!res.ok) throw new Error("Failed to fetch admin stats");
+  return res.json();
+}
+
+export async function fetchAdminUsers(params?: {
+  q?: string; tier?: string; is_active?: boolean; page?: number; page_size?: number;
+}): Promise<AdminPage<AdminUser>> {
+  const url = buildUrl("/api/v1/admin/users", params as Record<string, string | number | undefined | null>);
+  const res = await fetch(url, { credentials: "include" });
+  if (!res.ok) throw new Error("Failed to fetch users");
+  return res.json();
+}
+
+export async function updateAdminUser(userId: number, data: {
+  tier?: string; is_active?: boolean; is_superadmin?: boolean;
+}): Promise<AdminUser> {
+  const res = await fetch(`/api/v1/admin/users/${userId}`, {
+    method: "PATCH",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.detail ?? "Failed to update user");
+  }
+  return res.json();
+}
+
+export async function fetchAdminOrgs(params?: {
+  q?: string; tier?: string; page?: number; page_size?: number;
+}): Promise<AdminPage<AdminOrg>> {
+  const url = buildUrl("/api/v1/admin/orgs", params as Record<string, string | number | undefined | null>);
+  const res = await fetch(url, { credentials: "include" });
+  if (!res.ok) throw new Error("Failed to fetch orgs");
+  return res.json();
+}
+
+export async function updateAdminOrg(orgId: number, data: {
+  name?: string; tier?: string;
+}): Promise<AdminOrg> {
+  const res = await fetch(`/api/v1/admin/orgs/${orgId}`, {
+    method: "PATCH",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.detail ?? "Failed to update org");
+  }
+  return res.json();
+}
+
+export async function deleteAdminOrg(orgId: number): Promise<void> {
+  const res = await fetch(`/api/v1/admin/orgs/${orgId}`, {
+    method: "DELETE",
+    credentials: "include",
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.detail ?? "Failed to delete org");
   }
 }

@@ -1,3 +1,4 @@
+from app.api.routes.admin import router as admin_router
 from app.api.routes.auth import router as auth_router
 from app.api.routes.companies import router as companies_router
 from app.api.routes.invites import router as invites_router
@@ -9,6 +10,7 @@ from app.api.routes.orgs import router as orgs_router
 from app.api.routes.workspace import router as workspace_router
 
 __all__ = [
+    "admin_router",
     "auth_router",
     "companies_router",
     "invites_router",

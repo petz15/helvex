@@ -75,6 +75,30 @@ def create_org(
     return org
 
 
+@router.delete(
+    "/{org_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Delete organization (owner only)",
+)
+def delete_org(
+    org_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    if current_user.org_id != org_id and not current_user.is_superadmin:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not a member of this org")
+    if not current_user.is_superadmin and current_user.org_role != "owner":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only the owner can delete the org")
+    org = db.get(Organization, org_id)
+    if not org:
+        raise HTTPException(status_code=404, detail="Org not found")
+    db.query(User).filter(User.org_id == org_id).update(
+        {"org_id": None, "org_role": "member"}, synchronize_session=False
+    )
+    db.delete(org)
+    db.commit()
+
+
 @router.post(
     "/{org_id}/leave",
     status_code=status.HTTP_204_NO_CONTENT,

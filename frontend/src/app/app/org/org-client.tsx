@@ -4,6 +4,7 @@ import useSWR from "swr";
 import {
   Building2, Users, Edit2, Check, X, Trash2, Plus, Loader2, ShieldCheck, UserCog, Mail,
 } from "lucide-react";
+import { useRouter } from "next/navigation";
 import {
   fetchCurrentUser,
   fetchOrg,
@@ -13,6 +14,7 @@ import {
   updateMemberRole,
   removeOrgMember,
   sendInvite,
+  deleteOrg,
   type OrgMember,
 } from "@/lib/api";
 
@@ -62,7 +64,8 @@ function SectionTitle({ title }: { title: string }) {
 }
 
 export function OrgClient() {
-  const { data: me } = useSWR("me", fetchCurrentUser);
+  const { data: me, mutate: reloadMe } = useSWR("me", fetchCurrentUser);
+  const router = useRouter();
   const orgId = me?.org?.id;
 
   const { data: org, mutate: reloadOrg } = useSWR(
@@ -101,6 +104,9 @@ export function OrgClient() {
   const [removingId, setRemovingId] = useState<number | null>(null);
   const [memberBanner, setMemberBanner] = useState<{ kind: "success" | "error"; message: string } | null>(null);
 
+  // Delete org
+  const [deletingOrg, setDeletingOrg] = useState(false);
+
   const isOwner = me?.org_role === "owner" || me?.is_superadmin;
   const isAdmin = isOwner || me?.org_role === "admin";
 
@@ -111,6 +117,23 @@ export function OrgClient() {
   ) {
     setter({ kind, message });
     setTimeout(() => setter(null), 4000);
+  }
+
+  async function handleDeleteOrg() {
+    if (!orgId || !org) return;
+    const confirmed = confirm(
+      `Delete "${org.name}"? All ${org.member_count} member(s) will be removed from the org. This cannot be undone.`
+    );
+    if (!confirmed) return;
+    setDeletingOrg(true);
+    try {
+      await deleteOrg(orgId);
+      await reloadMe();
+      router.push("/app/dashboard");
+    } catch (e) {
+      flash(setNameBanner, "error", e instanceof Error ? e.message : "Failed to delete org");
+      setDeletingOrg(false);
+    }
   }
 
   async function handleSaveName() {
@@ -521,6 +544,31 @@ export function OrgClient() {
           </table>
         )}
       </div>
+
+      {/* Danger Zone */}
+      {isOwner && (
+        <div className="mt-6">
+          <h2 className="text-sm font-semibold text-red-500 uppercase tracking-wider pt-4 pb-2 border-b border-red-100">
+            Danger Zone
+          </h2>
+          <div className="mt-3 rounded-xl border border-red-200 bg-red-50 p-4 flex items-center justify-between">
+            <div>
+              <p className="text-sm font-medium text-red-800">Delete organization</p>
+              <p className="text-xs text-red-600 mt-0.5">
+                Permanently deletes the org and removes all members. This cannot be undone.
+              </p>
+            </div>
+            <button
+              onClick={handleDeleteOrg}
+              disabled={deletingOrg}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-red-600 hover:bg-red-700 text-white text-xs font-medium disabled:opacity-50 transition-colors"
+            >
+              {deletingOrg ? <Loader2 size={13} className="animate-spin" /> : <Trash2 size={13} />}
+              Delete org
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
