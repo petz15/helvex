@@ -15,6 +15,7 @@ from app.api.google_search_client import search_website
 from app.config import settings
 from app.api.zefix_client import (
     ALPHANUMERIC,
+    EXPANSION_CHARS,
     SWISS_CANTONS,
     ZEFIX_MAX_ENTRIES,
     _normalise_uid,
@@ -383,10 +384,22 @@ def _extract_company_fields(
 
     uid_normalised = _normalise_uid(str(raw.get("uid", fallback_uid)))
 
-    # Extract purpose from multilingual dict if needed
-    purpose_raw = raw.get("purpose") or raw.get("purposes") or None
+    # Extract purpose from multilingual dict if needed.
+    # CompanyFull uses "purposeTexts" (list of multilingual dicts); CompanyShort uses "purpose".
+    purpose_raw = raw.get("purpose") or raw.get("purposes") or raw.get("purposeTexts") or None
     if isinstance(purpose_raw, list):
-        purpose = " ".join(str(p) for p in purpose_raw if p) or None
+        texts: list[str] = []
+        for item in purpose_raw:
+            if isinstance(item, dict):
+                text = (
+                    item.get("de") or item.get("fr") or item.get("it") or item.get("en")
+                    or next(iter(item.values()), None)
+                )
+                if text:
+                    texts.append(str(text))
+            elif item:
+                texts.append(str(item))
+        purpose = " ".join(texts) or None
     elif isinstance(purpose_raw, dict):
         purpose = (
             purpose_raw.get("de") or purpose_raw.get("fr")
@@ -516,7 +529,9 @@ def import_company_from_zefix_uid(db: Session, uid: str) -> tuple[Company, bool]
     existing = crud.get_company_by_uid(db, company_data.uid)
     if existing:
         # Keep website enrichment data when refreshing core company data from Zefix.
-        payload = company_data.model_dump(exclude={"uid", "website_url"})
+        # Use exclude_none=True so that fields absent from the Zefix response (e.g. purpose
+        # on CompanyFull when the API omits it) never overwrite already-stored values.
+        payload = company_data.model_dump(exclude={"uid", "website_url"}, exclude_none=True)
         updated = crud.update_company(db, existing, CompanyUpdate(**payload))
         return updated, False
 
@@ -994,8 +1009,11 @@ def _iter_prefix_with_fallback(
                 yield r
         return
 
-    # Expand to next-level sub-prefixes, yielding results as they arrive
-    for char in ALPHANUMERIC:
+    # Expand to next-level sub-prefixes, yielding results as they arrive.
+    # Use EXPANSION_CHARS (alphanumeric + common symbols) so that companies
+    # like "T-Systems AG" or "M&A GmbH" are not skipped when the single-letter
+    # prefix hits the result cap.
+    for char in EXPANSION_CHARS:
         sub_prefix = prefix + char
         try:
             yield from _iter_prefix_with_fallback(

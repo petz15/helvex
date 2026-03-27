@@ -1,10 +1,10 @@
 "use client";
 import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import { ExternalLink, ChevronLeft, Globe, MapPin, Building2, Phone, Mail, FileText, Plus, Trash2, Loader2 } from "lucide-react";
+import { ExternalLink, ChevronLeft, Globe, MapPin, Building2, Phone, Mail, FileText, Plus, Trash2, Loader2, Search } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { reviewBadgeClass, proposalBadgeClass, fmtDate, fmtDateTime, fmtRelativeTime, cn, scoreColor } from "@/lib/utils";
-import { createNote, deleteNote, selectCompanyWebsite, updateCompany } from "@/lib/api";
+import { createNote, deleteNote, selectCompanyWebsite, triggerJob, updateCompany } from "@/lib/api";
 import { REVIEW_STATUSES, CONTACT_STATUSES } from "@/lib/types";
 import type { Company, Note, GoogleScoredResult } from "@/lib/types";
 import "leaflet/dist/leaflet.css";
@@ -80,6 +80,7 @@ export function CompanyDetailClient({ company: initial }: Props) {
   const [purposeExpanded, setPurposeExpanded] = useState(false);
   const [showWebsitePicker, setShowWebsitePicker] = useState(false);
   const [selectingWebsite, setSelectingWebsite] = useState<string | null>(null);
+  const [searchingWeb, setSearchingWeb] = useState(false);
 
   const mapRef = useRef<HTMLDivElement>(null);
   const mapInstanceRef = useRef<import("leaflet").Map | null>(null);
@@ -226,6 +227,16 @@ export function CompanyDetailClient({ company: initial }: Props) {
     }
   }
 
+  async function handleWebSearch() {
+    setSearchingWeb(true);
+    try {
+      await triggerJob("collection/initial", { uids: [company.uid], run_google: true, active_only: false });
+      window.location.href = "/app/jobs";
+    } finally {
+      setSearchingWeb(false);
+    }
+  }
+
   return (
     <div className="max-w-5xl mx-auto px-4 py-6 space-y-6">
       {/* Breadcrumb */}
@@ -268,6 +279,17 @@ export function CompanyDetailClient({ company: initial }: Props) {
             </div>
           </div>
           <div className="flex flex-col gap-2 items-end shrink-0">
+            {!company.website_checked_at && (
+              <button
+                type="button"
+                onClick={handleWebSearch}
+                disabled={searchingWeb}
+                className="flex items-center gap-1.5 text-sm text-emerald-700 hover:text-emerald-900 px-3 py-1.5 rounded-lg border border-emerald-200 hover:bg-emerald-50 transition-colors disabled:opacity-60"
+              >
+                {searchingWeb ? <Loader2 size={13} className="animate-spin" /> : <Search size={13} />}
+                {searchingWeb ? "Queuing…" : "Run web search"}
+              </button>
+            )}
             {company.website_url && (
               <a
                 href={company.website_url}
@@ -393,6 +415,27 @@ export function CompanyDetailClient({ company: initial }: Props) {
               </div>
             );
           })}
+          
+          {(company.tfidf_cluster || company.purpose_keywords) && (
+            <div className="pt-2 border-t border-slate-100 space-y-2">
+              {company.tfidf_cluster && (
+                <div>
+                  <span className="text-xs text-slate-400 block mb-1">Flex Cluster</span>
+                  <span className="text-sm text-slate-700">{company.tfidf_cluster}</span>
+                </div>
+              )}
+              {company.purpose_keywords && (
+                <div>
+                  <span className="text-xs text-slate-400 block mb-1">Purpose Keywords</span>
+                  <div className="flex flex-wrap gap-1">
+                    {company.purpose_keywords.split(",").map(k => (
+                      <Badge key={k.trim()} className="bg-blue-50 text-blue-700 text-xs">{k.trim()}</Badge>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
           {company.ai_category && (
             <div className="pt-2 border-t border-slate-100">
               <span className="text-xs text-slate-400 block mb-1">AI Category</span>
@@ -448,6 +491,26 @@ export function CompanyDetailClient({ company: initial }: Props) {
                 <dd className="text-slate-700">{company.sogc_date}</dd>
               </div>
             )}
+            {company.purpose && (
+              <div className="flex gap-2">
+                <dt className="text-slate-400 w-24 shrink-0 flex items-center gap-1 pt-0.5"><FileText size={11} /> Purpose</dt>
+                <dd className="flex-1 min-w-0">
+                  <div className="relative">
+                    <p className={cn("text-xs text-slate-600 leading-relaxed whitespace-pre-wrap", !purposeExpanded && "max-h-16 overflow-hidden")}>
+                      {company.purpose}
+                    </p>
+                    {!purposeExpanded && company.purpose.length > 220 && (
+                      <div className="absolute inset-x-0 bottom-0 h-8 bg-gradient-to-t from-white to-transparent" />
+                    )}
+                  </div>
+                  {company.purpose.length > 220 && (
+                    <button type="button" onClick={() => setPurposeExpanded(v => !v)} className="mt-1 text-xs text-blue-600 hover:underline">
+                      {purposeExpanded ? "Show less" : "Show more"}
+                    </button>
+                  )}
+                </dd>
+              </div>
+            )}
             {company.deletion_date && (
               <div className="flex gap-2">
                 <dt className="text-slate-400 w-24 shrink-0">Deleted</dt>
@@ -455,33 +518,6 @@ export function CompanyDetailClient({ company: initial }: Props) {
               </div>
             )}
           </dl>
-          {company.purpose && (
-            <div className="pt-2 border-t border-slate-100">
-              <span className="text-xs text-slate-400 flex items-center gap-1 mb-1"><FileText size={11} /> Purpose</span>
-              <div className="relative">
-                <p
-                  className={cn(
-                    "text-xs text-slate-600 leading-relaxed whitespace-pre-wrap",
-                    !purposeExpanded && "max-h-16 overflow-hidden",
-                  )}
-                >
-                  {company.purpose}
-                </p>
-                {!purposeExpanded && company.purpose.length > 220 && (
-                  <div className="absolute inset-x-0 bottom-0 h-8 bg-gradient-to-t from-white to-transparent" />
-                )}
-              </div>
-              {company.purpose.length > 220 && (
-                <button
-                  type="button"
-                  onClick={() => setPurposeExpanded(v => !v)}
-                  className="mt-1 text-xs text-blue-600 hover:underline"
-                >
-                  {purposeExpanded ? "Show less" : "Show more"}
-                </button>
-              )}
-            </div>
-          )}
           {company.cantonal_excerpt_web && (
             <a href={company.cantonal_excerpt_web} target="_blank" rel="noopener noreferrer"
               className="text-xs text-blue-600 hover:underline flex items-center gap-1 mt-2">
@@ -576,7 +612,7 @@ export function CompanyDetailClient({ company: initial }: Props) {
               {[
                 { label: "Created", value: fmtDate(company.created_at) },
                 { label: "Updated", value: fmtDateTime(company.updated_at) },
-                { label: "Google searched", value: fmtDateTime(company.website_checked_at) },
+                { label: "Web searched", value: fmtDateTime(company.website_checked_at) },
               ].map(({ label, value }) => (
                 <div key={label} className="flex justify-between">
                   <dt className="text-slate-400">{label}</dt>
