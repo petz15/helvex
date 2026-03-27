@@ -428,6 +428,7 @@ kubectl exec -n helvex-prod -it helvex-pg-1 -- \
   env PGPASSWORD=$(kubectl get secret helvex-env -n helvex-prod -o jsonpath='{.data.password}' | base64 -d) \
   psql -U helvex -d helvex -h 127.0.0.1
 
+
 # Connect to Postgres via local pgAdmin (SSH tunnel via control plane — no local kubectl needed)
 # Run on your local machine, keep the terminal open while using pgAdmin.
 #
