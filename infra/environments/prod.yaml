@@ -23,11 +23,11 @@ ingress:
 
 resources:
   requests:
-    cpu: 500m
+    cpu: 1000m
     memory: 512Mi
   limits:
-    cpu: "1"
-    memory: 1Gi
+    cpu: "2"
+    memory: 3Gi
 
 imagePullSecrets:
   - name: ghcr-pull-secret
@@ -38,7 +38,7 @@ worker:
 postgres:
   enabled: true
   instances: 1
-  storageSize: 20Gi
+  storageSize: 40Gi
   backupEnabled: true
   s3EndpointUrl: "https://nbg1.your-objectstorage.com"
   s3BucketPath: "s3://helvex-backups/pg-prod/"

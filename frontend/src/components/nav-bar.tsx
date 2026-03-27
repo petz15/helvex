@@ -3,11 +3,12 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import useSWR from "swr";
 import { cn } from "@/lib/utils";
-import { BarChart3, KanbanSquare, Map, Cog, Database, Activity, Building2, Users, UserCircle, Shield } from "lucide-react";
+import { BarChart3, KanbanSquare, Map, Cog, Database, Activity, Building2, Users, UserCircle, Shield, LayoutGrid } from "lucide-react";
 import { fetchCurrentUser } from "@/lib/api";
 
 const NAV = [
   { href: "/app/dashboard", label: "Dashboard", icon: BarChart3 },
+  { href: "/app/categories", label: "Categories", icon: LayoutGrid },
   { href: "/app/pipeline", label: "Pipeline", icon: KanbanSquare },
   { href: "/app/map", label: "Map", icon: Map },
   { href: "/app/collection", label: "Collection", icon: Database },

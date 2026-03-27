@@ -279,7 +279,7 @@ export function CompanyDetailClient({ company: initial }: Props) {
             </div>
           </div>
           <div className="flex flex-col gap-2 items-end shrink-0">
-            {googleResults.length === 0 && (
+            {!company.website_checked_at && (
               <button
                 type="button"
                 onClick={handleWebSearch}
@@ -300,7 +300,7 @@ export function CompanyDetailClient({ company: initial }: Props) {
                 <Globe size={13} /> Visit website <ExternalLink size={11} />
               </a>
             )}
-            {googleResults.length > 0 && (
+            {!!company.website_checked_at && (
               <button
                 type="button"
                 onClick={() => setShowWebsitePicker(v => !v)}
@@ -422,9 +422,9 @@ export function CompanyDetailClient({ company: initial }: Props) {
                 <div>
                   <span className="text-xs text-slate-400 block mb-1">Flex Cluster</span>
                   <div className="flex flex-wrap gap-1">
-                    {company.tfidf_cluster.split(",").map(k => (
-                      <Link key={k.trim()} href={`/app/dashboard?tfidf_cluster=${encodeURIComponent(k.trim())}`}>
-                        <Badge className="bg-purple-50 text-purple-700 text-xs cursor-pointer hover:bg-purple-100">{k.trim()}</Badge>
+                    {company.tfidf_cluster.split("|").map(cluster => cluster.trim()).filter(Boolean).map(cluster => (
+                      <Link key={cluster} href={`/app/dashboard?tfidf_cluster=${encodeURIComponent(cluster)}`}>
+                        <Badge className="bg-purple-50 text-purple-700 text-xs cursor-pointer hover:bg-purple-100">{cluster}</Badge>
                       </Link>
                     ))}
                   </div>
