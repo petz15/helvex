@@ -1,5 +1,6 @@
 "use client";
 import { useState, useCallback, useTransition } from "react";
+import { useRouter } from "next/navigation";
 import useSWR from "swr";
 import { Download } from "lucide-react";
 import { FilterBar } from "@/components/dashboard/filter-bar";
@@ -24,12 +25,32 @@ function buildExportUrl(filters: CompanyFilters): string {
 interface DashboardClientProps {
   initialCantons: string[];
   initialStats: CompanyStats;
+  initialFilters?: CompanyFilters;
 }
 
 const DEFAULT_FILTERS: CompanyFilters = { sort: "-updated", page: 1, page_size: 50 };
 
-export function DashboardClient({ initialCantons, initialStats }: DashboardClientProps) {
-  const [filters, setFilters] = useState<CompanyFilters>(DEFAULT_FILTERS);
+function syncFiltersToUrl(filters: CompanyFilters, router: ReturnType<typeof useRouter>) {
+  const params = new URLSearchParams();
+  for (const [k, v] of Object.entries(filters)) {
+    const isDefault = (k === "sort" && v === "-updated") || (k === "page" && v === 1) || (k === "page_size" && v === 50);
+    if (v !== undefined && v !== null && v !== "" && !isDefault) params.set(k, String(v));
+  }
+  const qs = params.toString();
+  router.replace(qs ? `/app/dashboard?${qs}` : "/app/dashboard", { scroll: false });
+}
+
+export function DashboardClient({ initialCantons, initialStats, initialFilters }: DashboardClientProps) {
+  const router = useRouter();
+  const [filters, setFiltersState] = useState<CompanyFilters>(initialFilters ?? DEFAULT_FILTERS);
+
+  const setFilters = useCallback((update: CompanyFilters | ((f: CompanyFilters) => CompanyFilters)) => {
+    setFiltersState(prev => {
+      const next = typeof update === "function" ? update(prev) : update;
+      syncFiltersToUrl(next, router);
+      return next;
+    });
+  }, [router]);
   const [selectedCompany, setSelectedCompany] = useState<Company | null>(null);
   const [, startTransition] = useTransition();
 
@@ -46,20 +67,20 @@ export function DashboardClient({ initialCantons, initialStats }: DashboardClien
 
   const handleFilterChange = useCallback((newFilters: CompanyFilters) => {
     startTransition(() => setFilters(newFilters));
-  }, []);
+  }, [setFilters]);
 
   const handleClear = useCallback(() => {
     setFilters(DEFAULT_FILTERS);
-  }, []);
+  }, [setFilters]);
 
   const handleSort = useCallback((sort: string) => {
     setFilters((f) => ({ ...f, sort, page: 1 }));
-  }, []);
+  }, [setFilters]);
 
   const handleStatFilter = useCallback((key: string, value: string) => {
     if (!key) { setFilters(DEFAULT_FILTERS); return; }
     setFilters({ ...DEFAULT_FILTERS, [key]: value });
-  }, []);
+  }, [setFilters]);
 
   const handleSaveView = useCallback(async (name: string) => {
     await saveView(name, filters);
@@ -73,7 +94,7 @@ export function DashboardClient({ initialCantons, initialStats }: DashboardClien
 
   const handleLoadView = useCallback((viewFilters: CompanyFilters) => {
     setFilters({ ...DEFAULT_FILTERS, ...viewFilters });
-  }, []);
+  }, [setFilters]);
 
   const activeStat = (() => {
     if (filters.review_status) return { key: "review_status", value: String(filters.review_status) };

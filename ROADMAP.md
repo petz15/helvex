@@ -2,24 +2,24 @@
 
 ## Dashboard & UI
 
-- [ ] **Dashboard filtering overhaul** — move filters to top of page, collapseable; TF-IDF / Purpose / Claude filters with freeform autocomplete, top 20 + show more, company count per value, exclude mode (double-click), save view as JSON per user?
+- [X] **Dashboard filtering overhaul** — move filters to top of page, collapseable; TF-IDF / Purpose / Claude filters with freeform autocomplete, top 20 + show more, company count per value, exclude mode (double-click), save view as JSON per user?
 - [ ] **Category overview page** — a page/dashboard which gives an overview over the different cluster, keywords, ai classifications etc. easier to understand than only over the filters
-- [ ] **Rename scoring fields** — "Zefix Score" → "Company Score", "Google/Website Match Score" → "Web Score" (future-proof for crawlers); update all labels, tooltips, column headers, CSV export
+- [X] **Rename scoring fields** — "Zefix Score" → "Company Score", "Google/Website Match Score" → "Web Score" (future-proof for crawlers); update all labels, tooltips, column headers, CSV export
 - [ ] **General QOL** — Impressum, Datenschutz pages, user settings page, general polish
-- [ ] **Save views** — serialize active filters/sort/columns as JSON, stored per user, quickly re-applied from a dropdown
+- [X] **Save views** — serialize active filters/sort/columns as JSON, stored per user, quickly re-applied from a dropdown
 
 ## Company Data
 
-- [ ] **Map: fix location clustering** — companies geocoded to PLZ centroid instead of address; increase map limit to 20 000; improve geocoding fallback logic
+- [ ] **Map: fix location clustering** — companies geocoded to PLZ centroid instead of address; increase map limit to 20 000; improve geocoding fallback logic -> already better but could still be improved
 - [ ] **Import all companies + full detail** — bulk import entire Zefix register including detailed fields (purpose, capital, offices, etc.) in one run
 - [ ] **Daily SHAB imports** — automated daily job pulling new/changed/deleted companies from SHAB to keep DB current without full re-import
-- [ ] **CSV export** — export current filtered/sorted dashboard view as CSV; include all visible columns; respect active filters and column selection
+- [ ] **CSV export** — export current filtered/sorted dashboard view as CSV; include all visible columns; respect active filters and column selection -> somewhat exists but not fully operational yet
 - [ ] **Web crawler** — crawl company websites to extract description, contact info, product/service keywords; store as structured fields; feed into scoring and classification; replace/supplement current Google scrape
 - [ ] **Google results & scoring** — Improve the selection and scoring of google results
 
 ## Company Profile
 
-- [ ] **Company profile overhaul** — display TF-IDF cluster, purpose keywords, Claude classification prominently
+- [ ] **Company profile overhaul** — display TF-IDF cluster, purpose keywords, Claude classification prominently -> ongoing
 - [ ] **Website correction flow** — "Report wrong website" button on company detail; shows all Google search results so user can pick the correct one; backend tallies user selections and auto-promotes a new URL if enough users agree; admins can override
 - [ ] **Company views for registered users** — full company detail accessible free with email registration (gated behind login, not tier)
 
@@ -34,7 +34,7 @@
 - [ ] **Redis-based concurrent job queue** — move job execution to Redis queue (Celery or RQ) enabling concurrent jobs from multiple users simultaneously; replace current single-threaded DB-backed queue
 - [ ] **Microservices architecture improvements** — decouple heavy jobs (classification, scraping, scoring) into separate workers; define clear service boundaries. make workers for standard jobs which only the system triggers (almost everything zefix related). create workers for free tier users, create workers for paid users
 - [ ] **Tiered job queues** — two RQ queues: `helvex-priority` (starter/professional/enterprise + orgs) and `helvex-free` (free tier); `enqueue_job()` routes based on org/user tier; two separate K8s worker Deployments with different resource allocations; org creation alone does not move user to priority queue — requires a tier upgrade
-- [ ] **Email verification** — user signup flow with email verification; mutation/account changes require re-verification
+- [X] **Email verification** — user signup flow with email verification; mutation/account changes require re-verification
 - [ ] **Monitoring stack** — deploy Prometheus + Grafana on K3s; scrape app metrics (request rate, job queue depth, error rate), Kubernetes node/pod metrics, and Redis/PostgreSQL exporters; alert on pod restarts, high memory, queue stalls
 - [ ] **Web analytics** — integrate Google Tag Manager + GA4 (or privacy-first alternative like Plausible/Umami); track page views, funnel steps (signup, first job, first export), feature usage; cookie consent banner for GDPR compliance
 

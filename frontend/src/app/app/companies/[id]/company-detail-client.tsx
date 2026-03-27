@@ -279,7 +279,7 @@ export function CompanyDetailClient({ company: initial }: Props) {
             </div>
           </div>
           <div className="flex flex-col gap-2 items-end shrink-0">
-            {!company.website_checked_at && (
+            {googleResults.length === 0 && (
               <button
                 type="button"
                 onClick={handleWebSearch}
@@ -300,7 +300,7 @@ export function CompanyDetailClient({ company: initial }: Props) {
                 <Globe size={13} /> Visit website <ExternalLink size={11} />
               </a>
             )}
-            {alternativeWebsiteResults.length > 0 && (
+            {googleResults.length > 0 && (
               <button
                 type="button"
                 onClick={() => setShowWebsitePicker(v => !v)}
@@ -421,7 +421,13 @@ export function CompanyDetailClient({ company: initial }: Props) {
               {company.tfidf_cluster && (
                 <div>
                   <span className="text-xs text-slate-400 block mb-1">Flex Cluster</span>
-                  <span className="text-sm text-slate-700">{company.tfidf_cluster}</span>
+                  <div className="flex flex-wrap gap-1">
+                    {company.tfidf_cluster.split(",").map(k => (
+                      <Link key={k.trim()} href={`/app/dashboard?tfidf_cluster=${encodeURIComponent(k.trim())}`}>
+                        <Badge className="bg-purple-50 text-purple-700 text-xs cursor-pointer hover:bg-purple-100">{k.trim()}</Badge>
+                      </Link>
+                    ))}
+                  </div>
                 </div>
               )}
               {company.purpose_keywords && (
@@ -429,7 +435,9 @@ export function CompanyDetailClient({ company: initial }: Props) {
                   <span className="text-xs text-slate-400 block mb-1">Purpose Keywords</span>
                   <div className="flex flex-wrap gap-1">
                     {company.purpose_keywords.split(",").map(k => (
-                      <Badge key={k.trim()} className="bg-blue-50 text-blue-700 text-xs">{k.trim()}</Badge>
+                      <Link key={k.trim()} href={`/app/dashboard?purpose_keywords=${encodeURIComponent(k.trim())}`}>
+                        <Badge className="bg-blue-50 text-blue-700 text-xs cursor-pointer hover:bg-blue-100">{k.trim()}</Badge>
+                      </Link>
                     ))}
                   </div>
                 </div>
@@ -439,7 +447,9 @@ export function CompanyDetailClient({ company: initial }: Props) {
           {company.ai_category && (
             <div className="pt-2 border-t border-slate-100">
               <span className="text-xs text-slate-400 block mb-1">AI Category</span>
-              <span className="text-sm text-slate-700">{company.ai_category}</span>
+              <Link href={`/app/dashboard?ai_category=${encodeURIComponent(company.ai_category)}`}>
+                <Badge className="bg-slate-100 text-slate-700 text-xs cursor-pointer hover:bg-slate-200">{company.ai_category}</Badge>
+              </Link>
             </div>
           )}
           {company.ai_freeform && (

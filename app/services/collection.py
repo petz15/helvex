@@ -1069,6 +1069,11 @@ def bulk_import_zefix(
             run = None  # stale / unrelated checkpoint
 
     if run is None:
+        # Close any stale incomplete run from a previous cancelled/interrupted import
+        # so it cannot be accidentally resumed by a future job.
+        stale = crud.get_last_incomplete_bulk(db)
+        if stale:
+            crud.complete_run(db, stale, json.loads(stale.stats_json or "{}"))
         run = crud.create_run(db, "bulk")
         existing_stats = {}
 
@@ -1082,8 +1087,10 @@ def bulk_import_zefix(
     # Fields that come exclusively from Zefix — safe to overwrite on every run
     _ZEFIX_UPDATE_FIELDS = {
         "name", "legal_form", "legal_form_id", "legal_form_uid", "legal_form_short_name",
-        "status", "municipality", "canton", "purpose", "flex_score", "flex_score_breakdown",
+        "status", "municipality", "canton", "flex_score", "flex_score_breakdown",
         "ehraid", "chid", "legal_seat_id", "sogc_date", "deletion_date",
+        # NOTE: "purpose" intentionally excluded — CompanyShort rarely carries purpose and
+        # would overwrite the richer purpose fetched by the detail refresh job.
     }
 
     # ── Main sweep ───────────────────────────────────────────────────────────

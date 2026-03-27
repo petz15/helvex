@@ -16,6 +16,7 @@ from app.api import google_search_client, zefix_client
 from app.auth import get_current_user
 from app.database import get_db
 from app.models.company import Company
+from app.models.org_company_state import OrgCompanyState
 from app.models.user import User
 from app.schemas.company import (
     CompanyCreate,
@@ -28,6 +29,33 @@ from app.schemas.company import (
 from app.services.scoring import is_social_lead_domain
 
 router = APIRouter(prefix="/companies", tags=["companies"])
+
+# Fields whose values are org-specific and live in OrgCompanyState, not Company.
+_ORG_FIELDS = frozenset({
+    "review_status", "contact_status",
+    "contact_name", "contact_email", "contact_phone",
+    "tags",
+})
+
+
+def _overlay(company: Company, org_state: OrgCompanyState | None) -> CompanyRead:
+    """Build CompanyRead, overlaying org-specific workflow fields from OrgCompanyState."""
+    base = CompanyRead.model_validate(company)
+    if org_state is None:
+        return base
+    overrides = {f: getattr(org_state, f) for f in _ORG_FIELDS if getattr(org_state, f) is not None}
+    return base.model_copy(update=overrides) if overrides else base
+
+
+def _bulk_org_states(db: Session, company_ids: list[int], org_id: int | None) -> dict[int, OrgCompanyState]:
+    """Return a {company_id: OrgCompanyState} map for the given org."""
+    if not org_id or not company_ids:
+        return {}
+    rows = db.query(OrgCompanyState).filter(
+        OrgCompanyState.org_id == org_id,
+        OrgCompanyState.company_id.in_(company_ids),
+    ).all()
+    return {r.company_id: r for r in rows}
 
 
 # ---------------------------------------------------------------------------
@@ -295,6 +323,7 @@ def list_companies(
     exclude_purpose_keywords: str | None = Query(None, description="Comma-separated purpose keywords to exclude"),
     exclude_ai_category: str | None = Query(None, description="Exclude companies with this exact ai_category"),
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ) -> CompanyPage:
     filter_kwargs = dict(
         name_filter=q,
@@ -324,6 +353,10 @@ def list_companies(
     )
     total = crud.count_companies(db, **filter_kwargs)
     items = crud.list_companies(db, page=page, page_size=page_size, sort=sort, **filter_kwargs)
+    if current_user.org_id:
+        ids = [c.id for c in items]
+        org_states = _bulk_org_states(db, ids, current_user.org_id)
+        items = [_overlay(c, org_states.get(c.id)) for c in items]
     return CompanyPage(
         items=items,
         total=total,
@@ -352,6 +385,7 @@ def export_companies_csv(
     exclude_canton: str | None = Query(None),
     exclude_contact_status: str | None = Query(None),
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     companies = crud.list_companies(
         db,
@@ -374,6 +408,12 @@ def export_companies_csv(
         exclude_canton=exclude_canton,
         exclude_contact_status=exclude_contact_status,
     )
+
+    # Apply org-specific workflow field overlay before CSV serialization
+    if current_user.org_id:
+        ids = [c.id for c in companies]
+        org_states = _bulk_org_states(db, ids, current_user.org_id)
+        companies = [_overlay(c, org_states.get(c.id)) for c in companies]
 
     _HEADERS = [
         "uid", "name", "legal_form", "status", "municipality", "canton",
@@ -423,11 +463,16 @@ def create_company(company_in: CompanyCreate, db: Session = Depends(get_db)):
 
 
 @router.get("/{company_id}", response_model=CompanyRead, summary="Get company by ID")
-def get_company(company_id: int, db: Session = Depends(get_db)):
+def get_company(
+    company_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     db_company = crud.get_company(db, company_id)
     if not db_company:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Company not found")
-    return db_company
+    org_state = crud.get_org_company_state(db, org_id=current_user.org_id, company_id=company_id) if current_user.org_id else None
+    return _overlay(db_company, org_state)
 
 
 @router.patch("/{company_id}", response_model=CompanyRead, summary="Update company")
@@ -440,17 +485,33 @@ def update_company(
     db_company = crud.get_company(db, company_id)
     if not db_company:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Company not found")
-    old_values = {f: getattr(db_company, f) for f in (
-        "website_url", "review_status", "contact_status",
-        "contact_name", "contact_email", "contact_phone", "tags",
-    )}
-    updated = crud.update_company(db, db_company, company_in)
-    new_values = company_in.model_dump(exclude_unset=True)
+
+    payload = company_in.model_dump(exclude_unset=True)
+    workflow = {k: v for k, v in payload.items() if k in _ORG_FIELDS}
+    catalog = {k: v for k, v in payload.items() if k not in _ORG_FIELDS}
+
+    old_values = {f: getattr(db_company, f) for f in ("website_url", *_ORG_FIELDS)}
+
+    # Route workflow fields to OrgCompanyState when user belongs to an org
+    if workflow and current_user.org_id:
+        org_state = crud.get_or_create_org_company_state(db, org_id=current_user.org_id, company_id=company_id)
+        for field, value in workflow.items():
+            setattr(org_state, field, value)
+        db.commit()
+        db.refresh(org_state)
+    elif workflow:
+        # Superadmin without org: write directly to Company (legacy path)
+        catalog.update(workflow)
+
+    if catalog:
+        crud.update_company(db, db_company, CompanyUpdate(**catalog))
+
     crud.record_company_changes(
         db, company_id=company_id, user_id=current_user.id,
-        old_values=old_values, new_values=new_values,
+        old_values=old_values, new_values=payload,
     )
-    return updated
+    org_state_final = crud.get_org_company_state(db, org_id=current_user.org_id, company_id=company_id) if current_user.org_id else None
+    return _overlay(db_company, org_state_final)
 
 
 @router.delete("/{company_id}", status_code=status.HTTP_204_NO_CONTENT, summary="Delete company")

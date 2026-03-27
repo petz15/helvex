@@ -114,7 +114,7 @@ export function StatsBar({ stats, onFilter, activeKey, activeValue }: StatsBarPr
       />
       <div className="w-px h-7 bg-slate-200 mx-1" />
       <Stat
-        label="Google searched"
+        label="Web searched"
         value={stats.searched}
         color="blue"
         icon={<Search size={16} />}

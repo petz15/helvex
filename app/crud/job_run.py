@@ -87,6 +87,7 @@ def requeue_interrupted_jobs(
     message: str = "Recovered after application restart",
 ) -> int:
     """Move interrupted running jobs back to queued so they can resume."""
+    import json as _json
     jobs = db.query(JobRun).filter(JobRun.status == "running").all()
     for job in jobs:
         job.status = "queued"
@@ -94,6 +95,15 @@ def requeue_interrupted_jobs(
         job.completed_at = None
         job.message = message
         job.error = None
+        # For bulk jobs mark resume=True so the worker knows to continue the
+        # existing CollectionRun checkpoint rather than starting a fresh sweep.
+        if job.job_type == "bulk":
+            try:
+                p = _json.loads(job.params_json or "{}")
+            except Exception:
+                p = {}
+            p["resume"] = True
+            job.params_json = _json.dumps(p)
     if jobs:
         db.commit()
     return len(jobs)
