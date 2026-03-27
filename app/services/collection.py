@@ -940,23 +940,32 @@ def initial_collect(
     return stats
 
 
-def _fetch_prefix_with_fallback(
+def _iter_prefix_with_fallback(
     canton: str | None,
     prefix: str,
     active_only: bool,
     request_delay: float,
     _depth: int = 0,
-) -> list[Any]:
-    """Return all companies for *prefix*, expanding to longer prefixes when the cap is hit.
+    _seen: set[str] | None = None,
+):
+    """Yield companies for *prefix*, expanding to longer prefixes when the cap is hit.
+
+    Generator version — results are yielded one-by-one so the caller can write
+    them to the DB immediately without accumulating a large list in RAM.
 
     Expands up to three levels deep (single → double → triple letter/digit prefix).
     Expansion is triggered when:
     - The query returns exactly ZEFIX_MAX_ENTRIES results (API truncated), or
     - The query returns HTTP 400 (Zefix rejects oversized result sets).
 
-    Results across all sub-prefixes are deduplicated by UID.
+    Results across all sub-prefixes are deduplicated by UID via a shared *_seen* set
+    that is created at the top level and passed down through recursive calls.
     """
     _MAX_DEPTH = 2  # 0 = single, 1 = double, 2 = triple
+
+    # Create the deduplication set once at the outermost call level.
+    if _seen is None:
+        _seen = set()
 
     expand = False
     results: list[Any] = []
@@ -971,31 +980,30 @@ def _fetch_prefix_with_fallback(
             raise
 
     if not expand:
-        return results
+        for r in results:
+            if r.uid and r.uid not in _seen:
+                _seen.add(r.uid)
+                yield r
+        return
 
     if _depth >= _MAX_DEPTH:
-        # Cannot expand further — return what we have (may be partial)
-        return results
+        # Cannot expand further — yield what we have (may be partial)
+        for r in results:
+            if r.uid and r.uid not in _seen:
+                _seen.add(r.uid)
+                yield r
+        return
 
-    # Expand to next-level sub-prefixes using full alphanumeric set
-    seen: set[str] = set()
-    expanded: list[Any] = []
-
+    # Expand to next-level sub-prefixes, yielding results as they arrive
     for char in ALPHANUMERIC:
         sub_prefix = prefix + char
         try:
-            sub_results = _fetch_prefix_with_fallback(
-                canton, sub_prefix, active_only, request_delay, _depth + 1
+            yield from _iter_prefix_with_fallback(
+                canton, sub_prefix, active_only, request_delay, _depth + 1, _seen
             )
         except Exception:  # noqa: BLE001
             continue
-        for r in sub_results:
-            if r.uid and r.uid not in seen:
-                seen.add(r.uid)
-                expanded.append(r)
         time.sleep(request_delay)
-
-    return expanded
 
 
 def bulk_import_zefix(
@@ -1069,7 +1077,7 @@ def bulk_import_zefix(
                 continue
 
             try:
-                results = _fetch_prefix_with_fallback(
+                result_iter = _iter_prefix_with_fallback(
                     canton, char, active_only=active_only, request_delay=request_delay
                 )
             except Exception as exc:  # noqa: BLE001
@@ -1078,47 +1086,50 @@ def bulk_import_zefix(
                 time.sleep(request_delay)
                 continue
 
-            for result in results:
-                if not result.uid:
-                    continue
-                _score_bd = compute_flex_score_breakdown(
-                    legal_form=result.legal_form,
-                    legal_form_short_name=result.legal_form_short_name,
-                    status=result.status,
-                    canton=result.canton or canton,
-                    municipality=result.municipality,
-                    config=scoring_config,
-                )
-                company_data = CompanyCreate(
-                    uid=result.uid,
-                    name=result.name,
-                    legal_form=result.legal_form,
-                    legal_form_id=result.legal_form_id,
-                    legal_form_uid=result.legal_form_uid,
-                    legal_form_short_name=result.legal_form_short_name,
-                    status=result.status,
-                    municipality=result.municipality,
-                    canton=result.canton or canton,
-                    purpose=result.purpose,
-                    flex_score=int(_score_bd["final_score"]),
-                    flex_score_breakdown=json.dumps(_score_bd),
-                    ehraid=result.ehraid,
-                    chid=result.chid,
-                    legal_seat_id=result.legal_seat_id,
-                    sogc_date=result.sogc_date,
-                    deletion_date=result.deletion_date,
-                )
-                existing = crud.get_company_by_uid(db, result.uid)
-                if existing:
-                    update_payload = {
-                        k: v for k, v in company_data.model_dump(exclude={"uid"}).items()
-                        if k in _ZEFIX_UPDATE_FIELDS
-                    }
-                    crud.update_company(db, existing, CompanyUpdate(**update_payload))
-                    stats["updated"] += 1
-                else:
-                    crud.create_company(db, company_data)
-                    stats["created"] += 1
+            try:
+                for result in result_iter:
+                    if not result.uid:
+                        continue
+                    _score_bd = compute_flex_score_breakdown(
+                        legal_form=result.legal_form,
+                        legal_form_short_name=result.legal_form_short_name,
+                        status=result.status,
+                        canton=result.canton or canton,
+                        municipality=result.municipality,
+                        config=scoring_config,
+                    )
+                    company_data = CompanyCreate(
+                        uid=result.uid,
+                        name=result.name,
+                        legal_form=result.legal_form,
+                        legal_form_id=result.legal_form_id,
+                        legal_form_uid=result.legal_form_uid,
+                        legal_form_short_name=result.legal_form_short_name,
+                        status=result.status,
+                        municipality=result.municipality,
+                        canton=result.canton or canton,
+                        purpose=result.purpose,
+                        flex_score=int(_score_bd["final_score"]),
+                        flex_score_breakdown=json.dumps(_score_bd),
+                        ehraid=result.ehraid,
+                        chid=result.chid,
+                        legal_seat_id=result.legal_seat_id,
+                        sogc_date=result.sogc_date,
+                        deletion_date=result.deletion_date,
+                    )
+                    existing = crud.get_company_by_uid(db, result.uid)
+                    if existing:
+                        update_payload = {
+                            k: v for k, v in company_data.model_dump(exclude={"uid"}).items()
+                            if k in _ZEFIX_UPDATE_FIELDS
+                        }
+                        crud.update_company(db, existing, CompanyUpdate(**update_payload))
+                        stats["updated"] += 1
+                    else:
+                        crud.create_company(db, company_data)
+                        stats["created"] += 1
+            except Exception as exc:  # noqa: BLE001
+                stats["errors"].append(f"Canton {canton} prefix {char} mid-stream [{type(exc).__name__}]: {exc}")
 
             # Checkpoint: last_offset = prefix index (0–35 for 0-9 + A-Z)
             crud.update_checkpoint(db, run, canton, prefix_idx, stats)
