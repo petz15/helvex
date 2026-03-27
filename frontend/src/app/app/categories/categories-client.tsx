@@ -1,5 +1,6 @@
 "use client";
 import Link from "next/link";
+import useSWR from "swr";
 import {
   BarChart,
   Bar,
@@ -11,10 +12,7 @@ import {
 } from "recharts";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
-
-interface Props {
-  taxonomy: Record<string, [string, number][]>;
-}
+import { fetchTaxonomy } from "@/lib/api";
 
 // ── Colour helpers ────────────────────────────────────────────────────────────
 
@@ -92,10 +90,14 @@ function ClusterCard({ label, count, maxCount }: { label: string; count: number;
 
 // ── Main component ────────────────────────────────────────────────────────────
 
-export function CategoriesClient({ taxonomy }: Props) {
-  const clusters: [string, number][] = taxonomy.clusters ?? [];
-  const categories: [string, number][] = taxonomy.categories ?? [];
-  const keywords: [string, number][] = taxonomy.keywords ?? [];
+export function CategoriesClient() {
+  const { data: taxonomy, isLoading, error } = useSWR("taxonomy", fetchTaxonomy);
+  const clusters: [string, number][] = taxonomy?.clusters ?? [];
+  const categories: [string, number][] = taxonomy?.categories ?? [];
+  const keywords: [string, number][] = taxonomy?.keywords ?? [];
+
+  if (isLoading) return <div className="max-w-7xl mx-auto px-4 py-6 text-sm text-slate-400">Loading…</div>;
+  if (error) return <div className="max-w-7xl mx-auto px-4 py-6 text-sm text-red-500">Failed to load taxonomy data.</div>;
 
   const maxClusterCount = clusters[0]?.[1] ?? 1;
   const maxCategoryCount = categories[0]?.[1] ?? 1;

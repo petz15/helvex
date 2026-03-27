@@ -40,8 +40,8 @@ export function Combobox({ options, value, onChange, placeholder = "Type to sear
   }, []);
 
   const filtered = query.length > 0
-    ? options.filter(([v]) => v.toLowerCase().includes(query.toLowerCase())).slice(0, 50)
-    : options.slice(0, 50);
+    ? options.filter(([v]) => v.toLowerCase().includes(query.toLowerCase())).slice(0, 100)
+    : options.slice(0, 20);
 
   const select = useCallback((val: string | undefined) => {
     onChange(val);

@@ -53,7 +53,7 @@ from app.api.routes import admin_router, auth_router, companies_router, invites_
 
 # Paths that do NOT require authentication
 _PUBLIC_PREFIXES = ("/static", "/health", "/api/v1/auth", "/api/v1/invites/preview")
-_PUBLIC_EXACT = {"/logout", "/health"}
+_PUBLIC_EXACT = {"/", "/logout", "/health"}
 
 _REPO_ROOT = pathlib.Path(__file__).parent.parent
 

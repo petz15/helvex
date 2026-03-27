@@ -96,9 +96,9 @@ export function FilterBar({
   const [showSaveInput, setShowSaveInput] = useState(false);
   const [showViewsMenu, setShowViewsMenu] = useState(false);
 
-  const clusters = (taxonomy?.clusters ?? []).slice(0, 20);
-  const keywords = (taxonomy?.keywords ?? []).slice(0, 20);
-  const categories = (taxonomy?.categories ?? []).slice(0, 20);
+  const clusters = taxonomy?.clusters ?? [];
+  const keywords = taxonomy?.keywords ?? [];
+  const categories = taxonomy?.categories ?? [];
 
   const set = useCallback(
     (key: keyof CompanyFilters, value: string | number | undefined) =>
@@ -322,7 +322,7 @@ export function FilterBar({
           <SectionLabel>Category (include)</SectionLabel>
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-x-4 gap-y-3">
             <div>
-              <Label>Cluster (top 20)</Label>
+              <Label>Cluster</Label>
               <Combobox
                 options={clusters}
                 value={filters.tfidf_cluster === "_none" || filters.tfidf_cluster === "_any" ? undefined : filters.tfidf_cluster}
@@ -335,7 +335,7 @@ export function FilterBar({
               />
             </div>
             <div>
-              <Label>Purpose keyword (top 20)</Label>
+              <Label>Purpose keyword</Label>
               <Combobox
                 options={keywords}
                 value={filters.purpose_keywords === "_none" ? undefined : filters.purpose_keywords}
@@ -345,7 +345,7 @@ export function FilterBar({
               />
             </div>
             <div>
-              <Label>AI Classification (top 20)</Label>
+              <Label>AI Classification</Label>
               <Combobox
                 options={categories}
                 value={filters.ai_category === "_none" ? undefined : filters.ai_category}

@@ -12,8 +12,8 @@ const NAV = [
   { href: "/app/categories", label: "Categories", icon: LayoutGrid },
   { href: "/app/pipeline", label: "Pipeline", icon: KanbanSquare },
   { href: "/app/map", label: "Map", icon: Map },
-  { href: "/app/collection", label: "Collection", icon: Database },
-  { href: "/app/jobs", label: "Jobs", icon: Activity },
+  { href: "/app/collection", label: "Collection", icon: Database, superadminOnly: true },
+  { href: "/app/jobs", label: "Jobs", icon: Activity, superadminOnly: true },
   { href: "/app/org", label: "Team", icon: Users },
   { href: "/app/settings", label: "Settings", icon: Cog },
 ];
@@ -48,7 +48,7 @@ export function NavBar() {
       {/* Logged-in: app nav */}
       {loggedIn && (
         <nav className="flex items-center gap-0.5">
-          {NAV.map(({ href, label, icon: Icon }) => {
+          {NAV.filter(({ superadminOnly }) => !superadminOnly || me?.is_superadmin).map(({ href, label, icon: Icon }) => {
             const active = pathname === href || pathname.startsWith(href + "/");
             return (
               <Link
