@@ -61,6 +61,10 @@ class Company(Base):
     audit_companies: Mapped[str | None] = mapped_column(Text, nullable=True)  # JSON
     old_names: Mapped[str | None] = mapped_column(Text, nullable=True)  # JSON
     cantonal_excerpt_web: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+    translations: Mapped[str | None] = mapped_column(Text, nullable=True)  # JSON array
+    zefix_detail_web: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+    address_city: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    address_zip: Mapped[str | None] = mapped_column(String(16), nullable=True)
     # Priority/lead score derived from Zefix data alone (0-100)
     flex_score: Mapped[int | None] = mapped_column(Integer, nullable=True)
     # JSON object with component-level flex scoring contributions

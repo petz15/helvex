@@ -46,6 +46,10 @@ class CompanyBase(BaseModel):
     audit_companies: str | None = None
     old_names: str | None = None
     cantonal_excerpt_web: str | None = None
+    translations: str | None = None
+    zefix_detail_web: str | None = None
+    address_city: str | None = None
+    address_zip: str | None = None
     flex_score: int | None = None
     flex_score_breakdown: str | None = None
     lat: float | None = None
@@ -106,6 +110,10 @@ class CompanyUpdate(BaseModel):
     audit_companies: str | None = None
     old_names: str | None = None
     cantonal_excerpt_web: str | None = None
+    translations: str | None = None
+    zefix_detail_web: str | None = None
+    address_city: str | None = None
+    address_zip: str | None = None
     flex_score: int | None = None
     flex_score_breakdown: str | None = None
     lat: float | None = None

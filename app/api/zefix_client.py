@@ -17,8 +17,9 @@ SWISS_CANTONS = [
 # Letters used for prefix sweep; Zefix name search is case-insensitive
 ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
 
-# Digits + letters for prefix sweep (companies can start with a number)
-ALPHANUMERIC = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+# Digits + letters + common Swiss-relevant accented capitals for prefix sweep.
+# Ä/Ö/Ü for German, É/È/À/Â/Ê/Î/Ô/Û/Ç for French/Italian cantons.
+ALPHANUMERIC = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZÄÖÜÉÈÀÂÊÎÔÛÇ"
 
 # Hard cap accepted by the Zefix search endpoint
 ZEFIX_MAX_ENTRIES = 20000

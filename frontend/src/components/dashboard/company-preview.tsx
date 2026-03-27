@@ -56,7 +56,14 @@ export function CompanyPreview({ company: incoming, onClose, onUpdated }: Compan
             {initials}
           </div>
           <div className="min-w-0">
-            <h2 className="font-semibold text-slate-800 text-sm leading-snug truncate">{company.name}</h2>
+            <h2 className="font-semibold text-slate-800 text-sm leading-snug truncate flex items-center gap-1">
+              {company.name}
+              {company.zefix_detail_web && (
+                <a href={company.zefix_detail_web} target="_blank" rel="noopener noreferrer" className="text-slate-400 hover:text-blue-600 shrink-0" title="View on Zefix">
+                  <ExternalLink size={11} />
+                </a>
+              )}
+            </h2>
             <p className="text-xs text-slate-500 mt-0.5 flex items-center gap-1">
               <MapPin size={12} className="text-slate-400" />
               <span className="truncate">{[company.municipality, company.canton].filter(Boolean).join(", ") || "—"}</span>
@@ -147,10 +154,15 @@ export function CompanyPreview({ company: incoming, onClose, onUpdated }: Compan
             </a>
           </div>
         )}
-        {company.address && (
+        {(company.address || company.address_city || company.address_zip) && (
           <div>
             <span className="text-xs text-slate-400 block mb-0.5">Address</span>
-            <span className="text-xs text-slate-700">{company.address}</span>
+            {company.address && <span className="text-xs text-slate-700">{company.address}</span>}
+            {(company.address_zip || company.address_city) && (
+              <span className="text-xs text-slate-500 block mt-0.5">
+                {[company.address_zip, company.address_city].filter(Boolean).join(" ")}
+              </span>
+            )}
           </div>
         )}
         {company.purpose && (
@@ -165,6 +177,26 @@ export function CompanyPreview({ company: incoming, onClose, onUpdated }: Compan
             <span className="text-xs text-slate-700">{company.ai_category}</span>
           </div>
         )}
+        {company.translations && (() => {
+          try {
+            const names: string[] = JSON.parse(company.translations);
+            if (names.length > 0) {
+              return (
+                <div>
+                  <span className="text-xs text-slate-400 block mb-0.5">Also known as:</span>
+                  <div className="flex flex-wrap gap-1">
+                    {names.map((t, i) => (
+                      <Badge key={i} className="bg-slate-100 text-slate-600 text-xs">{t}</Badge>
+                    ))}
+                  </div>
+                </div>
+              );
+            }
+          } catch {
+            // malformed JSON — skip
+          }
+          return null;
+        })()}
         {(company.contact_name || company.contact_email || company.contact_phone) && (
           <div>
             <span className="text-xs text-slate-400 block mb-0.5">Contact</span>

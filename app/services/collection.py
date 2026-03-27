@@ -436,6 +436,25 @@ def _extract_company_fields(
     old_names = _json_field(raw.get("oldNames"))
     cantonal_excerpt_web = raw.get("cantonalExcerptWeb") or None
 
+    # Name translations (other language variants)
+    translation_raw = raw.get("translation") or []
+    translations = json.dumps(translation_raw) if translation_raw else None
+
+    # Zefix web detail link (prefer DE)
+    zefix_web_raw = raw.get("zefixDetailWeb") or {}
+    zefix_detail_web: str | None = None
+    if isinstance(zefix_web_raw, dict):
+        zefix_detail_web = (
+            zefix_web_raw.get("de") or zefix_web_raw.get("fr")
+            or zefix_web_raw.get("it") or zefix_web_raw.get("en") or None
+        )
+    elif isinstance(zefix_web_raw, str):
+        zefix_detail_web = zefix_web_raw or None
+
+    # Structured address components (already parsed above in address_parts)
+    address_city = city if city else None
+    address_zip = zip_code if zip_code else None
+
     score_breakdown = compute_flex_score_breakdown(
         legal_form=legal_form_display,
         legal_form_short_name=legal_form_short,
@@ -476,6 +495,10 @@ def _extract_company_fields(
         audit_companies=audit_companies,
         old_names=old_names,
         cantonal_excerpt_web=cantonal_excerpt_web,
+        translations=translations,
+        zefix_detail_web=zefix_detail_web,
+        address_city=address_city,
+        address_zip=address_zip,
         zefix_raw=json.dumps(raw),
     )
 
@@ -979,7 +1002,7 @@ def bulk_import_zefix(
     db: Session,
     *,
     cantons: list[str] | None = None,
-    active_only: bool = True,
+    active_only: bool = False,
     request_delay: float = 0.5,
     resume: bool = False,
     progress_cb: Any = None,
@@ -996,7 +1019,7 @@ def bulk_import_zefix(
 
     Args:
         cantons: Canton codes to scan. Defaults to all 26.
-        active_only: Only import active register entries.
+        active_only: Only import active register entries. Defaults to False (import all statuses).
         request_delay: Seconds to sleep between API calls.
         resume: Continue from the last saved checkpoint if one exists.
         progress_cb: Optional callable(canton, prefix, created, skipped).

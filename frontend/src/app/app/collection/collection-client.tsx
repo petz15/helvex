@@ -116,7 +116,7 @@ export function CollectionClient() {
             refresh_zefix: fd.get("refresh_zefix") === "on",
             run_google: true,
             canton: (fd.get("canton") as string)?.trim().toUpperCase() || null,
-            min_zefix_score: parseInt(fd.get("min_zefix_score") as string) || null,
+            min_flex_score: parseInt(fd.get("min_flex_score") as string) || null,
           });
         }} className="space-y-4">
           <div className="grid grid-cols-2 gap-4">
@@ -128,8 +128,8 @@ export function CollectionClient() {
             </Field>
           </div>
           <div className="grid grid-cols-2 gap-4">
-            <Field label="Min Zefix score">
-              <input name="min_zefix_score" type="number" min="0" max="100" className={inputCls} placeholder="—" />
+            <Field label="Min Flex score">
+              <input name="min_flex_score" type="number" min="0" max="100" className={inputCls} placeholder="—" />
             </Field>
           </div>
           <div className="flex gap-6 flex-wrap">

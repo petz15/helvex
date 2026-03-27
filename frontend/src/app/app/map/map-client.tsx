@@ -31,7 +31,7 @@ function buildPopup(f: MapFeature): string {
     `<strong><a href="/app/companies/${f.id}" style="color:#3b82f6;text-decoration:none">${f.name}</a></strong>`,
     f.canton ? `<span style="color:#64748b">${f.municipality ?? ""}, ${f.canton}</span>` : "",
     f.website ? `<a href="${f.website}" target="_blank" rel="noopener" style="color:#3b82f6">${f.website.replace(/^https?:\/\//, "")}</a>` : "",
-    `Google: ${f.google_score ?? "—"} · Zefix: ${f.zefix_score ?? "—"} · Claude: ${f.claude_score ?? "—"}`,
+    `Web: ${f.web_score ?? "—"} · Flex: ${f.flex_score ?? "—"} · AI: ${f.ai_score ?? "—"}`,
     f.review ? `<em>${f.review.replace(/_/g, " ")}</em>` : "",
     `<a href="/app/companies/${f.id}" style="color:#3b82f6;font-size:11px">View profile →</a>`,
   ].filter(Boolean);
@@ -105,7 +105,7 @@ export function MapClient() {
     for (const group of byLocation.values()) {
       const f = group[0];
       if (group.length === 1) {
-        const color = scoreColor(f.claude_score ?? f.google_score ?? f.zefix_score ?? null);
+        const color = scoreColor(f.ai_score ?? f.web_score ?? f.flex_score ?? null);
         const marker = L.circleMarker([f.lat, f.lon], {
           radius: 6, fillColor: color, color: "#fff", weight: 1.5, fillOpacity: 0.85,
         });

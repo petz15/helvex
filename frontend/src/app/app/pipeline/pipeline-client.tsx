@@ -29,9 +29,9 @@ function CompanyCard({ company, onStatusChange }: { company: Company; onStatusCh
           <ScoreBar score={company.combined_score} />
         </div>
       )}
-      {company.proposal_status && company.proposal_status !== "not_sent" && (
-        <Badge className={`mt-2 text-xs ${proposalBadgeClass(company.proposal_status)}`}>
-          {company.proposal_status}
+      {company.contact_status && company.contact_status !== "not_sent" && (
+        <Badge className={`mt-2 text-xs ${proposalBadgeClass(company.contact_status)}`}>
+          {company.contact_status}
         </Badge>
       )}
       {company.website_url && (

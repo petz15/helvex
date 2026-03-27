@@ -31,6 +31,10 @@ export interface Company {
   capital_nominal: string | null;
   capital_currency: string | null;
   cantonal_excerpt_web: string | null;
+  translations: string | null;
+  zefix_detail_web: string | null;
+  address_city: string | null;
+  address_zip: string | null;
   old_names: string | null;
   lat: number | null;
   lon: number | null;
