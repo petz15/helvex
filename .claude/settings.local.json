@@ -154,7 +154,8 @@
       "Bash(find /c/D/coding_projects/zefix_analyzer -path *alembic* -o -path *migration*)",
       "Bash(xargs ls:*)",
       "Bash(grep -E \"\\\\.py$\")",
-      "Bash(npm list:*)"
+      "Bash(npm list:*)",
+      "Bash(file /c/D/coding_projects/zefix_analyzer/frontend/public/*)"
     ]
   }
 }
