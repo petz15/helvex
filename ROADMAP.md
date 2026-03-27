@@ -2,7 +2,7 @@
 
 ## Dashboard & UI
 
-- [ ] **General QOL** — Impressum, Datenschutz pages, user settings page, general polish
+- [ ] **General QOL** — Impressum, Datenschutz pages, user settings page, general polish; branding overhaul done (indigo theme, diamond-grid logo, public landing page)
 - [X] **Save views** — serialize active filters/sort/columns as JSON, stored per user, quickly re-applied from a dropdown
 - [ ] **Switch Index page** — change the entry page to something more welcoming to first time visitors
 - [ ] **Seperate Search/Hunting page -> call it Company Explorer(Unternehmens-Explorer)** — makes the flow for first time users and users without clear intentions much easier. guide them to the filtering, searching, create list etc much smoother

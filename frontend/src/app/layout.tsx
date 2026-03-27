@@ -3,8 +3,8 @@ import "./globals.css";
 import { NavBar } from "@/components/nav-bar";
 
 export const metadata: Metadata = {
-  title: "Helvex — Company Intelligence",
-  description: "Swiss company leads dashboard",
+  title: "Helvex — Swiss Company Intelligence",
+  description: "Search, qualify, and track Swiss companies from the commercial register. Powered by live SHAB data and AI classification.",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

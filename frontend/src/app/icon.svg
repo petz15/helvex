@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none">
+  <!-- Filled diamonds (checkerboard corners + centre) -->
+  <path d="M 5 1.8 L 8.2 5 L 5 8.2 L 1.8 5 Z" fill="#4f46e5"/>
+  <path d="M 19 1.8 L 22.2 5 L 19 8.2 L 15.8 5 Z" fill="#4f46e5"/>
+  <path d="M 12 8.8 L 15.2 12 L 12 15.2 L 8.8 12 Z" fill="#4f46e5"/>
+  <path d="M 5 15.8 L 8.2 19 L 5 22.2 L 1.8 19 Z" fill="#4f46e5"/>
+  <path d="M 19 15.8 L 22.2 19 L 19 22.2 L 15.8 19 Z" fill="#4f46e5"/>
+  <!-- Outlined diamonds (edges) -->
+  <path d="M 12 1.8 L 15.2 5 L 12 8.2 L 8.8 5 Z" stroke="#4f46e5" stroke-width="1" opacity="0.35"/>
+  <path d="M 5 8.8 L 8.2 12 L 5 15.2 L 1.8 12 Z" stroke="#4f46e5" stroke-width="1" opacity="0.35"/>
+  <path d="M 19 8.8 L 22.2 12 L 19 15.2 L 15.8 12 Z" stroke="#4f46e5" stroke-width="1" opacity="0.35"/>
+  <path d="M 12 15.8 L 15.2 19 L 12 22.2 L 8.8 19 Z" stroke="#4f46e5" stroke-width="1" opacity="0.35"/>
+</svg>
