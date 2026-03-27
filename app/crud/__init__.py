@@ -44,7 +44,7 @@ from app.crud.user_company_state import (
     get_or_create_user_company_state,
     get_user_company_state,
     update_personal_score_override,
-    update_user_claude_results,
+    update_user_ai_results,
 )
 from app.crud.job_run import (
     create_event,
@@ -164,6 +164,6 @@ __all__ = [
     # user company state overlay
     "get_user_company_state",
     "get_or_create_user_company_state",
-    "update_user_claude_results",
+    "update_user_ai_results",
     "update_personal_score_override",
 ]
