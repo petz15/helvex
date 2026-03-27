@@ -11,6 +11,13 @@ frontend:
     repository: ghcr.io/petz15/helvex-frontend
     tag: latest
     pullPolicy: Always
+  resources:
+    requests:
+      cpu: 500m
+      memory: 512Mi
+    limits:
+      cpu: 500m     # requests == limits → Guaranteed QoS
+      memory: 512Mi
 
 ingress:
   host: helvex.dicy.ch
