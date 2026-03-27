@@ -32,6 +32,7 @@ from app.schemas.user import (
     ChangeEmailRequest,
     ChangePasswordRequest,
     RegisterRequest,
+    ResendVerificationRequest,
     ResetPasswordRequest,
     TokenResponse,
     UserRead,
@@ -174,8 +175,11 @@ def register(request: Request, body: RegisterRequest, db: Session = Depends(get_
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
             detail="Too many registration attempts. Try again later.",
         )
-    if crud.get_user_by_email(db, body.email):
-        logger.warning("auth.register_conflict field=email ip=%s", ip)
+    existing = crud.get_user_by_email(db, body.email)
+    if existing:
+        logger.warning("auth.register_conflict field=email ip=%s verified=%s", ip, existing.email_verified)
+        if not existing.email_verified:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="email_unverified")
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Email already registered")
     user = crud.create_user(db, email=body.email, password=body.password)
     logger.info("auth.register_ok user_id=%s email=%r ip=%s", user.id, user.email, ip)
@@ -205,6 +209,29 @@ def resend_verification(
             )
     logger.info("auth.resend_verification user_id=%s", current_user.id)
     _send_verification(db, current_user)
+
+
+@router.post("/resend-verification-public", status_code=status.HTTP_204_NO_CONTENT,
+             summary="Re-send verification email (public, accepts email address)")
+def resend_verification_public(request: Request, body: ResendVerificationRequest, db: Session = Depends(get_db)) -> None:
+    """Public endpoint — always returns 204 to avoid user enumeration.
+    Sends a new verification email only if the account exists and is not yet verified,
+    and the per-user cooldown has elapsed.
+    """
+    ip = get_client_ip(request)
+    if not check_public_rate_limit(ip, "resend_verification", window=3600, max_requests=10):
+        # Silently ignore to avoid leaking rate-limit info tied to a specific email
+        return
+    user = crud.get_user_by_email(db, body.email)
+    if not user or user.email_verified:
+        return  # silent — don't reveal whether the email exists
+    last_sent = user.email_verification_sent_at
+    if last_sent:
+        elapsed = (datetime.now(tz=timezone.utc) - last_sent).total_seconds()
+        if elapsed < _RESEND_COOLDOWN_SECONDS:
+            return  # silent — cooldown enforced server-side
+    logger.info("auth.resend_verification_public user_id=%s", user.id)
+    _send_verification(db, user)
 
 
 @router.get("/verify-email", response_model=UserRead, summary="Verify email via signed token")

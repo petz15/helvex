@@ -1,11 +1,18 @@
 """Org invite acceptance routes (public preview + auth'd accept)."""
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel
+from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi.responses import JSONResponse
+from pydantic import BaseModel, field_validator
 from sqlalchemy.orm import Session
 
-from app.auth import decode_invite_token, get_current_user
+from app import crud
+from app.auth import (
+    COOKIE_NAME,
+    create_session_cookie,
+    decode_invite_token,
+    get_current_user,
+)
 from app.database import get_db
 from app.models.organization import Organization
 from app.models.user import User
@@ -17,11 +24,24 @@ class InvitePreview(BaseModel):
     org_id: int
     org_name: str
     invited_email: str
+    user_exists: bool  # False = new user, should see inline registration form
 
 
 class AcceptInviteRequest(BaseModel):
     token: str
     force: bool = False  # True = confirmed switch from existing org
+
+
+class RegisterAndAcceptRequest(BaseModel):
+    token: str
+    password: str
+
+    @field_validator("password")
+    @classmethod
+    def password_strong_enough(cls, v: str) -> str:
+        if len(v) < 8:
+            raise ValueError("Password must be at least 8 characters")
+        return v
 
 
 @router.get(
@@ -43,7 +63,61 @@ def preview_invite(
     org = db.get(Organization, org_id)
     if not org:
         raise HTTPException(status_code=404, detail="Organization not found")
-    return InvitePreview(org_id=org_id, org_name=org.name, invited_email=invited_email)
+    user_exists = crud.get_user_by_email(db, invited_email) is not None
+    return InvitePreview(org_id=org_id, org_name=org.name, invited_email=invited_email, user_exists=user_exists)
+
+
+@router.post(
+    "/register-and-accept",
+    summary="Create account via invite link and immediately join the org (sets session cookie)",
+)
+def register_and_accept(
+    request: Request,
+    body: RegisterAndAcceptRequest,
+    db: Session = Depends(get_db),
+) -> JSONResponse:
+    """New-user invite path.  The invited email is embedded in the signed token,
+    so we skip the normal email-verification step — the fact that they received
+    the invite proves they own the address.
+    """
+    result = decode_invite_token(body.token)
+    if result is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid or expired invite link.",
+        )
+    org_id, invited_email = result
+
+    if crud.get_user_by_email(db, invited_email):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="An account with this email already exists. Please sign in and accept the invite.",
+        )
+
+    org = db.get(Organization, org_id)
+    if not org:
+        raise HTTPException(status_code=404, detail="Organization not found")
+
+    # Create user — mark email verified immediately (invite proves ownership)
+    user = crud.create_user(db, email=invited_email, password=body.password)
+    user.email_verified = True
+    user.org_id = org_id
+    user.org_role = "member"
+    db.commit()
+    db.refresh(user)
+
+    forwarded_proto = request.headers.get("x-forwarded-proto", "")
+    is_https = request.url.scheme == "https" or forwarded_proto.split(",")[0].strip().lower() == "https"
+    response = JSONResponse({"ok": True})
+    response.set_cookie(
+        key=COOKIE_NAME,
+        value=create_session_cookie(user.id),
+        httponly=True,
+        samesite="lax",
+        secure=is_https,
+        max_age=8 * 3600,
+    )
+    return response
 
 
 @router.post(

@@ -1,8 +1,8 @@
 "use client";
-import { useEffect, useState, Suspense } from "react";
+import { useEffect, useState, FormEvent, Suspense } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { Building2, Loader2, AlertTriangle, Check } from "lucide-react";
-import { fetchCurrentUser, fetchInvitePreview, acceptInvite, type InvitePreview } from "@/lib/api";
+import { fetchCurrentUser, fetchInvitePreview, acceptInvite, registerAndAcceptInvite, type InvitePreview } from "@/lib/api";
 
 function AcceptInviteContent() {
   const searchParams = useSearchParams();
@@ -14,10 +14,15 @@ function AcceptInviteContent() {
   const [error, setError] = useState<string | null>(null);
   const [accepting, setAccepting] = useState(false);
   const [done, setDone] = useState(false);
+  const [isLoggedIn, setIsLoggedIn] = useState(false);
 
   // org switch warning state
   const [currentOrgName, setCurrentOrgName] = useState<string | null>(null);
   const [showSwitchWarning, setShowSwitchWarning] = useState(false);
+
+  // new-user registration form state
+  const [password, setPassword] = useState("");
+  const [registering, setRegistering] = useState(false);
 
   useEffect(() => {
     if (!token) {
@@ -33,6 +38,7 @@ function AcceptInviteContent() {
           fetchCurrentUser().catch(() => null),
         ]);
         setPreview(inv);
+        setIsLoggedIn(!!me);
         if (me?.org && me.org.id !== inv.org_id) {
           setCurrentOrgName(me.org.name);
         }
@@ -62,6 +68,21 @@ function AcceptInviteContent() {
       }
     } finally {
       setAccepting(false);
+    }
+  }
+
+  async function handleRegisterAndAccept(e: FormEvent) {
+    e.preventDefault();
+    setError(null);
+    setRegistering(true);
+    try {
+      await registerAndAcceptInvite(token, password);
+      setDone(true);
+      setTimeout(() => router.push("/app/dashboard"), 1500);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Registration failed.");
+    } finally {
+      setRegistering(false);
     }
   }
 
@@ -99,7 +120,59 @@ function AcceptInviteContent() {
           </div>
         )}
 
-        {preview && !showSwitchWarning && (
+        {/* ── New user: register inline ──────────────────────────────── */}
+        {preview && !isLoggedIn && !preview.user_exists && !showSwitchWarning && (
+          <>
+            <p className="text-sm text-slate-600 mb-1">
+              You've been invited to join{" "}
+              <strong className="text-slate-900">{preview.org_name}</strong>.
+            </p>
+            <p className="text-sm text-slate-500 mb-5">
+              Create a password to set up your account and join immediately.
+            </p>
+            <form onSubmit={handleRegisterAndAccept} className="flex flex-col gap-4">
+              <div>
+                <label className="text-xs font-medium text-slate-500 uppercase tracking-wide">Email</label>
+                <input
+                  type="email"
+                  readOnly
+                  value={preview.invited_email}
+                  className="mt-1 w-full rounded border border-slate-100 bg-slate-50 px-3 py-2 text-sm text-slate-500 cursor-not-allowed"
+                />
+              </div>
+              <div>
+                <label className="text-xs font-medium text-slate-500 uppercase tracking-wide">Choose a password</label>
+                <input
+                  type="password"
+                  required
+                  autoComplete="new-password"
+                  minLength={8}
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  className="mt-1 w-full rounded border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
+                  placeholder="Min. 8 characters"
+                />
+              </div>
+              <button
+                type="submit"
+                disabled={registering}
+                className="w-full rounded bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50 transition-colors flex items-center justify-center gap-2"
+              >
+                {registering ? <Loader2 size={14} className="animate-spin" /> : <Check size={14} />}
+                {registering ? "Creating account…" : `Create account & join ${preview.org_name}`}
+              </button>
+            </form>
+            <p className="mt-3 text-center text-xs text-slate-400">
+              Already have an account?{" "}
+              <a href={`/login?next=${encodeURIComponent(`/accept-invite?token=${token}`)}`} className="text-blue-600 hover:underline">
+                Sign in
+              </a>
+            </p>
+          </>
+        )}
+
+        {/* ── Existing user: accept / switch warning ─────────────────── */}
+        {preview && (isLoggedIn || preview.user_exists) && !showSwitchWarning && (
           <>
             <p className="text-sm text-slate-600 mb-6">
               You've been invited to join{" "}
@@ -116,14 +189,23 @@ function AcceptInviteContent() {
               </div>
             )}
 
-            <button
-              onClick={() => handleAccept(!!currentOrgName)}
-              disabled={accepting}
-              className="w-full rounded bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50 transition-colors flex items-center justify-center gap-2"
-            >
-              {accepting ? <Loader2 size={14} className="animate-spin" /> : <Check size={14} />}
-              {currentOrgName ? `Leave ${currentOrgName} & join ${preview.org_name}` : `Join ${preview.org_name}`}
-            </button>
+            {isLoggedIn ? (
+              <button
+                onClick={() => handleAccept(!!currentOrgName)}
+                disabled={accepting}
+                className="w-full rounded bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50 transition-colors flex items-center justify-center gap-2"
+              >
+                {accepting ? <Loader2 size={14} className="animate-spin" /> : <Check size={14} />}
+                {currentOrgName ? `Leave ${currentOrgName} & join ${preview.org_name}` : `Join ${preview.org_name}`}
+              </button>
+            ) : (
+              <a
+                href={`/login?next=${encodeURIComponent(`/accept-invite?token=${token}`)}`}
+                className="w-full rounded bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 transition-colors flex items-center justify-center gap-2"
+              >
+                Sign in to accept
+              </a>
+            )}
 
             <p className="mt-3 text-center text-xs text-slate-400">
               Invited to: {preview.invited_email}
@@ -161,17 +243,7 @@ function AcceptInviteContent() {
         )}
 
         {!preview && !error && (
-          <p className="text-sm text-slate-500">
-            Please{" "}
-            <a href={`/login?next=/accept-invite?token=${encodeURIComponent(token)}`} className="text-blue-600 hover:underline">
-              sign in
-            </a>{" "}
-            or{" "}
-            <a href={`/register?invite=${encodeURIComponent(token)}`} className="text-blue-600 hover:underline">
-              create an account
-            </a>{" "}
-            to accept this invite.
-          </p>
+          <p className="text-sm text-slate-500">Loading invite details…</p>
         )}
       </div>
     </div>

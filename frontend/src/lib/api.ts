@@ -417,6 +417,7 @@ export interface InvitePreview {
   org_id: number;
   org_name: string;
   invited_email: string;
+  user_exists: boolean;
 }
 
 export async function fetchInvitePreview(token: string): Promise<InvitePreview> {
@@ -442,6 +443,19 @@ export async function acceptInvite(token: string, force = false): Promise<void> 
     throw Object.assign(new Error(body.detail?.code ?? body.detail ?? "Failed to accept invite"), {
       detail: body.detail,
     });
+  }
+}
+
+export async function registerAndAcceptInvite(token: string, password: string): Promise<void> {
+  const res = await fetch("/api/v1/invites/register-and-accept", {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ token, password }),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.detail ?? "Registration failed");
   }
 }
 
