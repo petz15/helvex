@@ -21,6 +21,7 @@ spec:
         {{- include "helvex.selectorLabels" . | nindent 8 }}
         app.kubernetes.io/component: frontend
     spec:
+      priorityClassName: helvex-web
       automountServiceAccountToken: false
       {{- with .Values.imagePullSecrets }}
       imagePullSecrets:
