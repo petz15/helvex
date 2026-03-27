@@ -8,7 +8,7 @@ export default async function DashboardPage() {
     fetchCantons().catch(() => [] as string[]),
     fetchStats().catch(() => ({
       total: 0, searched: 0, with_website: 0, searches_today: 0,
-      review: {}, proposal: {},
+      review: {}, contact: {},
     })),
   ]);
 
