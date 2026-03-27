@@ -36,6 +36,17 @@ export interface Company {
   address_city: string | null;
   address_zip: string | null;
   old_names: string | null;
+  head_offices: string | null;
+  further_head_offices: string | null;
+  branch_offices: string | null;
+  has_taken_over: string | null;
+  was_taken_over_by: string | null;
+  audit_companies: string | null;
+  sogc_pub: string | null;
+  sogc_date: string | null;
+  deletion_date: string | null;
+  ehraid: string | null;
+  chid: string | null;
   lat: number | null;
   lon: number | null;
   created_at: string;
