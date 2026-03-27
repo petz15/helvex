@@ -9,6 +9,7 @@ import { createNote, deleteNote, selectCompanyWebsite, triggerJob, updateCompany
 import { REVIEW_STATUSES, CONTACT_STATUSES } from "@/lib/types";
 import type { Company, Note, GoogleScoredResult } from "@/lib/types";
 import "leaflet/dist/leaflet.css";
+import { SogcTimeline, SignersPanel } from "@/components/sogc-history";
 
 interface Props {
   company: Company;
@@ -677,6 +678,12 @@ export function CompanyDetailClient({ company: initial }: Props) {
           </dl>
         </div>
       )}
+
+      {/* SHAB signers */}
+      <SignersPanel sogcPubJson={company.sogc_pub} />
+
+      {/* SHAB timeline */}
+      <SogcTimeline sogcPubJson={company.sogc_pub} />
 
       {/* Notes */}
       <div className="bg-white rounded-xl border border-slate-200 p-5 shadow-sm">

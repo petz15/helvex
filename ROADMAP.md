@@ -25,6 +25,7 @@
 - [ ] **Company views for registered users** — full company detail accessible free with email registration (gated behind login, not tier)
 - [ ] **History overview** —  Old names and taken over is already visible but not SOGC publications, which needs to be custom handled in order to display changes such as people and other changes.
 - [ ] **Graph overview of relationships** — based on past SHAB changes and name changes, take overs etc
+- [ ] **Cross-company person graph** — normalize sogcPub organ changes into `persons` / `company_persons` tables via a pipeline job; build a graph UI showing where signers appear across multiple companies, what roles they held, and when — enabling network analysis of directors, beneficial owners, and corporate groups
 
 
 ## Classification & Scoring
