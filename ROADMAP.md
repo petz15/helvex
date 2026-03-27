@@ -7,6 +7,8 @@
 - [X] **Rename scoring fields** — "Zefix Score" → "Company Score", "Google/Website Match Score" → "Web Score" (future-proof for crawlers); update all labels, tooltips, column headers, CSV export
 - [ ] **General QOL** — Impressum, Datenschutz pages, user settings page, general polish
 - [X] **Save views** — serialize active filters/sort/columns as JSON, stored per user, quickly re-applied from a dropdown
+- [ ] **Switch Index page** — change the entry page to something more welcoming to first time visitors
+- [ ] **Seperate Search/Hunting page** — makes the flow for first time users and users without clear intentions much easier. guide them to the filtering, searching, create list etc much smoother
 
 ## Company Data
 
@@ -16,12 +18,16 @@
 - [ ] **CSV export** — export current filtered/sorted dashboard view as CSV; include all visible columns; respect active filters and column selection -> somewhat exists but not fully operational yet
 - [ ] **Web crawler** — crawl company websites to extract description, contact info, product/service keywords; store as structured fields; feed into scoring and classification; replace/supplement current Google scrape
 - [ ] **Google results & scoring** — Improve the selection and scoring of google results
+- [ ] **NOGA Data** — add NOGA data (or similar) https://www.kubb-tool.bfs.admin.ch/de/noga/2025 which is something other sites have such as https://business-monitor.ch or moneyhouse.ch
 
 ## Company Profile
 
 - [ ] **Company profile overhaul** — display TF-IDF cluster, purpose keywords, Claude classification prominently -> ongoing
 - [ ] **Website correction flow** — "Report wrong website" button on company detail; shows all Google search results so user can pick the correct one; backend tallies user selections and auto-promotes a new URL if enough users agree; admins can override
 - [ ] **Company views for registered users** — full company detail accessible free with email registration (gated behind login, not tier)
+- [ ] **History overview** —  Old names and taken over is already visible but not SOGC publications, which needs to be custom handled in order to display changes such as people and other changes.
+- [ ] **Graph overview of relationships** — based on past SHAB changes and name changes, take overs etc
+
 
 ## Classification & Scoring
 

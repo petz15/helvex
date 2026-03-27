@@ -169,8 +169,8 @@ export function CategoriesClient({ taxonomy }: Props) {
                   tickLine={false}
                 />
                 <Tooltip content={<CategoryTooltip />} cursor={{ fill: "#f1f5f9" }} />
-                <Bar dataKey="count" radius={[0, 4, 4, 0]} onClick={(d) => {
-                  window.location.href = `/app/dashboard?ai_category=${encodeURIComponent(d.name)}`;
+                <Bar dataKey="count" radius={[0, 4, 4, 0]} onClick={(d: { name?: string }) => {
+                  if (d.name) window.location.href = `/app/dashboard?ai_category=${encodeURIComponent(d.name)}`;
                 }} style={{ cursor: "pointer" }}>
                   {categoryData.map((_, i) => (
                     <Cell key={i} fill={barColor(i)} fillOpacity={0.85} />
