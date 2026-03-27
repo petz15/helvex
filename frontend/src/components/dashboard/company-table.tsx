@@ -1,5 +1,6 @@
 "use client";
 import { useState, useMemo } from "react";
+import Link from "next/link";
 import {
   useReactTable, getCoreRowModel, flexRender,
   createColumnHelper, type VisibilityState,
@@ -83,9 +84,14 @@ export function CompanyTable({ companies, selectedId, onSelect, filters, onSort,
               reviewLeftBorderClass(info.row.original.review_status),
             )}
           >
-            <div className="font-medium text-slate-800 max-w-[200px] truncate" title={info.getValue() as string}>
+            <Link
+              href={`/app/companies/${info.row.original.id}`}
+              onClick={(e) => e.stopPropagation()}
+              className="font-medium text-blue-700 hover:underline max-w-[200px] truncate block"
+              title={info.getValue() as string}
+            >
               {info.getValue() as string}
-            </div>
+            </Link>
           </div>
         ),
       }),

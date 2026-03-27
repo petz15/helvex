@@ -57,7 +57,7 @@ function AcceptInviteContent() {
     try {
       await acceptInvite(token, force);
       setDone(true);
-      setTimeout(() => router.push("/app/dashboard"), 1500);
+      setTimeout(() => router.push("/app/search"), 1500);
     } catch (e: unknown) {
       const err = e as { message?: string; detail?: { code?: string; current_org_name?: string } };
       if (err?.detail?.code === "already_in_org") {
@@ -78,7 +78,7 @@ function AcceptInviteContent() {
     try {
       await registerAndAcceptInvite(token, password);
       setDone(true);
-      setTimeout(() => router.push("/app/dashboard"), 1500);
+      setTimeout(() => router.push("/app/search"), 1500);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Registration failed.");
     } finally {

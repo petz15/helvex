@@ -61,7 +61,7 @@ function ClusterCard({ label, count, maxCount }: { label: string; count: number;
   const pct = Math.round((count / maxCount) * 100);
   return (
     <Link
-      href={`/app/dashboard?tfidf_cluster=${encodeURIComponent(label)}`}
+      href={`/app/search?tfidf_cluster=${encodeURIComponent(label)}`}
       className="group block rounded-xl border border-slate-200 bg-white p-4 shadow-sm hover:border-purple-300 hover:shadow-md transition-all"
     >
       <div className="flex items-start justify-between gap-2 mb-3">
@@ -170,7 +170,7 @@ export function CategoriesClient({ taxonomy }: Props) {
                 />
                 <Tooltip content={<CategoryTooltip />} cursor={{ fill: "#f1f5f9" }} />
                 <Bar dataKey="count" radius={[0, 4, 4, 0]} onClick={(d: { name?: string }) => {
-                  if (d.name) window.location.href = `/app/dashboard?ai_category=${encodeURIComponent(d.name)}`;
+                  if (d.name) window.location.href = `/app/search?ai_category=${encodeURIComponent(d.name)}`;
                 }} style={{ cursor: "pointer" }}>
                   {categoryData.map((_, i) => (
                     <Cell key={i} fill={barColor(i)} fillOpacity={0.85} />
@@ -195,7 +195,7 @@ export function CategoriesClient({ taxonomy }: Props) {
               {keywords.map(([kw, count]) => (
                 <Link
                   key={kw}
-                  href={`/app/dashboard?purpose_keywords=${encodeURIComponent(kw)}`}
+                  href={`/app/search?purpose_keywords=${encodeURIComponent(kw)}`}
                   className={cn(
                     "inline-flex items-center gap-1 px-2.5 py-1 rounded-full border transition-colors",
                     "bg-blue-50 text-blue-700 border-blue-100 hover:bg-blue-100 hover:border-blue-300",

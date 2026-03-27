@@ -68,7 +68,7 @@ function ScoreRange({
 }
 
 const CHIP_LABELS: Partial<Record<keyof CompanyFilters, string>> = {
-  q: "Search", canton: "Canton", review_status: "Review", contact_status: "Contact",
+  q: "Name", uid: "UID", canton: "Canton", review_status: "Review", contact_status: "Contact",
   google_searched: "Web search", tags: "Tags", ai_category: "AI Class.",
   tfidf_cluster: "Cluster", purpose_keywords: "Keyword",
   min_web_score: "Min Web", max_web_score: "Max Web",
@@ -131,8 +131,41 @@ export function FilterBar({
 
   return (
     <div className="border-b border-slate-200 bg-slate-50 text-sm">
-      {/* Toggle row */}
-      <div className="flex items-center gap-2 px-3 py-2 flex-wrap">
+      {/* ── Always-visible core row ── */}
+      <div className="flex items-center gap-2 px-3 py-2 flex-wrap bg-white border-b border-slate-100">
+        {/* Core inputs */}
+        <input
+          type="text"
+          className={cn(inputCls, "w-36")}
+          placeholder="Company name…"
+          value={filters.q ?? ""}
+          onChange={(e) => set("q", e.target.value)}
+        />
+        <div className="relative">
+          <select className={cn(selectCls, "w-32")} value={filters.canton ?? ""}
+            onChange={(e) => set("canton", e.target.value)}>
+            <option value="">All cantons</option>
+            {cantons.map((c) => <option key={c} value={c}>{c}</option>)}
+          </select>
+          <ChevronDown size={13} className="pointer-events-none absolute right-2 top-2 text-slate-400" />
+        </div>
+        <div className="relative">
+          <select className={cn(selectCls, "w-36")} value={filters.status ?? ""}
+            onChange={(e) => set("status" as keyof CompanyFilters, e.target.value)}>
+            <option value="">All statuses</option>
+            {ZEFIX_STATUSES.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
+          </select>
+          <ChevronDown size={13} className="pointer-events-none absolute right-2 top-2 text-slate-400" />
+        </div>
+        <input
+          type="text"
+          className={cn(inputCls, "w-36")}
+          placeholder="UID…"
+          value={filters.uid ?? ""}
+          onChange={(e) => set("uid", e.target.value)}
+        />
+
+        {/* Expand/collapse advanced filters */}
         <button
           type="button"
           onClick={() => setExpanded((e) => !e)}
@@ -140,7 +173,7 @@ export function FilterBar({
             "flex items-center gap-1.5 rounded px-2.5 py-1 text-sm font-medium transition-colors shrink-0",
             expanded
               ? "bg-blue-600 text-white"
-              : "bg-white border border-slate-200 text-slate-600 hover:bg-slate-100"
+              : "bg-slate-50 border border-slate-200 text-slate-600 hover:bg-slate-100"
           )}
         >
           <SlidersHorizontal size={13} />
@@ -158,26 +191,28 @@ export function FilterBar({
 
         {/* Active filter chips */}
         <div className="flex flex-wrap gap-1.5 flex-1 min-w-0">
-          {activeEntries.map(([k, v]) => (
-            <span
-              key={String(k)}
-              className="inline-flex items-center gap-1 rounded-full bg-white border border-slate-200 text-slate-700 px-2 py-0.5 text-xs"
-            >
-              <span className="text-slate-400">{CHIP_LABELS[k] ?? String(k).replace(/_/g, " ")}:</span>
-              <span>{String(v).replace(/^_none$/, "none").replace(/^_any$/, "any")}</span>
-              <button type="button" onClick={() => unset(k)} className="text-slate-400 hover:text-slate-700">
-                <X size={11} />
-              </button>
-            </span>
-          ))}
-          {activeCount > 0 && !expanded && (
+          {activeEntries
+            .filter(([k]) => !["q", "uid", "canton", "status"].includes(String(k)))
+            .map(([k, v]) => (
+              <span
+                key={String(k)}
+                className="inline-flex items-center gap-1 rounded-full bg-white border border-slate-200 text-slate-700 px-2 py-0.5 text-xs"
+              >
+                <span className="text-slate-400">{CHIP_LABELS[k] ?? String(k).replace(/_/g, " ")}:</span>
+                <span>{String(v).replace(/^_none$/, "none").replace(/^_any$/, "any")}</span>
+                <button type="button" onClick={() => unset(k)} className="text-slate-400 hover:text-slate-700">
+                  <X size={11} />
+                </button>
+              </span>
+            ))}
+          {activeCount > 0 && (
             <button onClick={onClear} className="text-xs text-slate-400 hover:text-slate-600 flex items-center gap-0.5">
               <X size={11} /> Clear all
             </button>
           )}
         </div>
 
-        {/* Saved views */}
+        {/* Saved views + result count */}
         <div className="flex items-center gap-1.5 shrink-0 ml-auto">
           {savedViews.length > 0 && (
             <div className="relative">
@@ -250,40 +285,13 @@ export function FilterBar({
         </div>
       </div>
 
-      {/* Expanded sections */}
+      {/* ── Advanced filters (expanded) ── */}
       {expanded && (
         <div className="px-3 pb-3 border-t border-slate-200 bg-white">
 
-          {/* ── CORE ── */}
-          <SectionLabel>Core</SectionLabel>
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-x-4 gap-y-3">
-            <div>
-              <Label>Name</Label>
-              <input type="text" className={inputCls} placeholder="Company name…"
-                value={filters.q ?? ""} onChange={(e) => set("q", e.target.value)} />
-            </div>
-            <div>
-              <Label>Canton</Label>
-              <div className="relative">
-                <select className={cn(selectCls)} value={filters.canton ?? ""}
-                  onChange={(e) => set("canton", e.target.value)}>
-                  <option value="">All cantons</option>
-                  {cantons.map((c) => <option key={c} value={c}>{c}</option>)}
-                </select>
-                <ChevronDown size={13} className="pointer-events-none absolute right-2 top-2 text-slate-400" />
-              </div>
-            </div>
-            <div>
-              <Label>Zefix status</Label>
-              <div className="relative">
-                <select className={cn(selectCls)} value={filters.status ?? ""}
-                  onChange={(e) => set("status" as keyof CompanyFilters, e.target.value)}>
-                  <option value="">All</option>
-                  {ZEFIX_STATUSES.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
-                </select>
-                <ChevronDown size={13} className="pointer-events-none absolute right-2 top-2 text-slate-400" />
-              </div>
-            </div>
+          {/* ── WORKFLOW ── */}
+          <SectionLabel>Workflow</SectionLabel>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-x-4 gap-y-3">
             <div>
               <Label>Review status</Label>
               <div className="relative">
@@ -389,14 +397,16 @@ export function FilterBar({
             </div>
           </div>
 
-          {/* Clear button */}
-          {activeCount > 0 && (
-            <div className="mt-3 pt-2 border-t border-slate-100 flex justify-end">
-              <button onClick={onClear} className="text-xs text-slate-500 hover:text-slate-700 flex items-center gap-1">
-                <X size={12} /> Clear all filters
-              </button>
-            </div>
-          )}
+          {/* ── Collapse button (full width) ── */}
+          <div className="mt-4 pt-3 border-t border-slate-100">
+            <button
+              type="button"
+              onClick={() => setExpanded(false)}
+              className="w-full flex items-center justify-center gap-1.5 rounded-lg border border-slate-200 bg-slate-50 py-2 text-xs font-medium text-slate-500 hover:bg-slate-100 hover:text-slate-700 transition-colors"
+            >
+              <ChevronDown size={13} className="rotate-180" /> Collapse filters
+            </button>
+          </div>
         </div>
       )}
     </div>

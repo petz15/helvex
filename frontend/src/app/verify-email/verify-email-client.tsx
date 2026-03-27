@@ -46,10 +46,10 @@ export function VerifyEmailClient() {
             <h1 className="text-lg font-semibold text-slate-800 mb-2">Email verified!</h1>
             <p className="text-sm text-slate-500 mb-4">Your account is now active.</p>
             <Link
-              href="/app/dashboard"
+              href="/app/search"
               className="inline-block rounded bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 transition-colors"
             >
-              Open dashboard →
+              Open search →
             </Link>
           </>
         )}

@@ -299,6 +299,7 @@ def list_companies(
     page_size: int = Query(50, ge=1, le=500),
     sort: str = Query("-updated", description="Sort key, e.g. -combined_score, name, -updated"),
     q: str | None = Query(None, description="Filter by name (case-insensitive)"),
+    uid: str | None = Query(None, description="Filter by UID (partial match)"),
     canton: str | None = Query(None),
     review_status: str | None = Query(None, description="Use _none for unset"),
     contact_status: str | None = Query(None, description="Use _none for unset"),
@@ -327,6 +328,7 @@ def list_companies(
 ) -> CompanyPage:
     filter_kwargs = dict(
         name_filter=q,
+        uid_filter=uid,
         canton=canton,
         review_status=review_status,
         contact_status=contact_status,
@@ -370,6 +372,7 @@ def list_companies(
 def export_companies_csv(
     sort: str = Query("-updated"),
     q: str | None = Query(None),
+    uid: str | None = Query(None),
     canton: str | None = Query(None),
     review_status: str | None = Query(None),
     contact_status: str | None = Query(None),
@@ -393,6 +396,7 @@ def export_companies_csv(
         page_size=10000,
         sort=sort,
         name_filter=q,
+        uid_filter=uid,
         canton=canton,
         review_status=review_status,
         contact_status=contact_status,

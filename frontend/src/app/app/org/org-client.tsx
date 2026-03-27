@@ -129,7 +129,7 @@ export function OrgClient() {
     try {
       await deleteOrg(orgId);
       await reloadMe();
-      router.push("/app/dashboard");
+      router.push("/app/search");
     } catch (e) {
       flash(setNameBanner, "error", e instanceof Error ? e.message : "Failed to delete org");
       setDeletingOrg(false);

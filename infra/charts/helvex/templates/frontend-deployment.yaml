@@ -9,6 +9,8 @@ metadata:
     app.kubernetes.io/component: frontend
 spec:
   replicas: 1
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
       {{- include "helvex.selectorLabels" . | nindent 6 }}

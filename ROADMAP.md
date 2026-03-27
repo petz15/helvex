@@ -2,13 +2,11 @@
 
 ## Dashboard & UI
 
-- [X] **Dashboard filtering overhaul** — move filters to top of page, collapseable; TF-IDF / Purpose / Claude filters with freeform autocomplete, top 20 + show more, company count per value, exclude mode (double-click), save view as JSON per user?
-- [X] **Category overview page** — a page/dashboard which gives an overview over the different cluster, keywords, ai classifications etc. easier to understand than only over the filters
-- [X] **Rename scoring fields** — "Zefix Score" → "Company Score", "Google/Website Match Score" → "Web Score" (future-proof for crawlers); update all labels, tooltips, column headers, CSV export
 - [ ] **General QOL** — Impressum, Datenschutz pages, user settings page, general polish
 - [X] **Save views** — serialize active filters/sort/columns as JSON, stored per user, quickly re-applied from a dropdown
 - [ ] **Switch Index page** — change the entry page to something more welcoming to first time visitors
-- [ ] **Seperate Search/Hunting page** — makes the flow for first time users and users without clear intentions much easier. guide them to the filtering, searching, create list etc much smoother
+- [ ] **Seperate Search/Hunting page -> call it Company Explorer(Unternehmens-Explorer)** — makes the flow for first time users and users without clear intentions much easier. guide them to the filtering, searching, create list etc much smoother
+- [ ] **Add dark mode** — add dark mode 
 
 ## Company Data
 
@@ -48,6 +46,7 @@
 ## Org-/Usermanagement
 - [X] **remove username** — Remove username, just keep email adress as user 
 - [X] **settings** — Add org management page and settings page for the users
+- [ ] ** Alternative logins such as google, github etc?** — Add alternative login methods such as google accounts, linkedin
 
 
 ## Monetisation & Tiers

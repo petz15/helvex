@@ -19,7 +19,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
 
   useEffect(() => {
     if (!isLoading && me && !me.is_superadmin) {
-      router.replace("/app/dashboard");
+      router.replace("/app/search");
     }
   }, [me, isLoading, router]);
 

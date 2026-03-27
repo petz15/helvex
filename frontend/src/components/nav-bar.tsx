@@ -7,7 +7,7 @@ import { BarChart3, KanbanSquare, Map, Cog, Database, Activity, Building2, Users
 import { fetchCurrentUser } from "@/lib/api";
 
 const NAV = [
-  { href: "/app/dashboard", label: "Dashboard", icon: BarChart3 },
+  { href: "/app/search", label: "Search", icon: BarChart3 },
   { href: "/app/categories", label: "Categories", icon: LayoutGrid },
   { href: "/app/pipeline", label: "Pipeline", icon: KanbanSquare },
   { href: "/app/map", label: "Map", icon: Map },
@@ -26,7 +26,7 @@ export function NavBar() {
   if (AUTH_PATHS.some((p) => pathname.startsWith(p))) return null;
   return (
     <header className="h-12 bg-white border-b border-slate-200 flex items-center px-4 shrink-0 z-40 shadow-sm">
-      <Link href="/app/dashboard" className="flex items-center gap-2 font-bold text-blue-700 mr-6 tracking-tight">
+      <Link href="/app/search" className="flex items-center gap-2 font-bold text-blue-700 mr-6 tracking-tight">
         <Building2 size={18} />
         Helvex
       </Link>

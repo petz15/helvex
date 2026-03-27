@@ -87,6 +87,7 @@ export interface CompanyStats {
 
 export interface CompanyFilters {
   q?: string;
+  uid?: string;
   status?: string;
   canton?: string;
   review_status?: string;

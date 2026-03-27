@@ -55,7 +55,7 @@ def get_company_by_uid(db: Session, uid: str) -> Company | None:
     return db.query(Company).filter(Company.uid == uid).first()
 
 
-def _apply_filters(query, *, name_filter, canton, review_status, contact_status,
+def _apply_filters(query, *, name_filter, uid_filter=None, canton, review_status, contact_status,
                    google_searched, min_web_score, min_flex_score, min_ai_score=None,
                    max_web_score=None, max_flex_score=None, max_ai_score=None,
                    min_combined_score=None, max_combined_score=None,
@@ -65,6 +65,8 @@ def _apply_filters(query, *, name_filter, canton, review_status, contact_status,
                    exclude_purpose_keywords=None, exclude_ai_category=None):
     if name_filter:
         query = query.filter(Company.name.ilike(f"%{name_filter}%"))
+    if uid_filter:
+        query = query.filter(Company.uid.ilike(f"%{uid_filter}%"))
     if canton:
         query = query.filter(Company.canton == canton)
     if review_status == "_none":
@@ -164,6 +166,7 @@ def list_companies(
     page_size: int = 50,
     sort: str = _DEFAULT_SORT,
     name_filter: str | None = None,
+    uid_filter: str | None = None,
     canton: str | None = None,
     review_status: str | None = None,
     contact_status: str | None = None,
@@ -195,6 +198,7 @@ def list_companies(
     query = _apply_filters(
         query,
         name_filter=name_filter,
+        uid_filter=uid_filter,
         canton=canton,
         review_status=review_status,
         contact_status=contact_status,
@@ -250,6 +254,7 @@ def list_companies(
 def count_companies(
     db: Session,
     name_filter: str | None = None,
+    uid_filter: str | None = None,
     canton: str | None = None,
     review_status: str | None = None,
     contact_status: str | None = None,
@@ -278,6 +283,7 @@ def count_companies(
     query = _apply_filters(
         query,
         name_filter=name_filter,
+        uid_filter=uid_filter,
         canton=canton,
         review_status=review_status,
         contact_status=contact_status,

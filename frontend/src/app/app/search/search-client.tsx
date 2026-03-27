@@ -21,7 +21,7 @@ function buildExportUrl(filters: CompanyFilters): string {
   return `/api/v1/companies/export.csv?${params.toString()}`;
 }
 
-interface DashboardClientProps {
+interface SearchClientProps {
   initialCantons: string[];
   initialStats: CompanyStats;
   initialFilters?: CompanyFilters;
@@ -36,10 +36,10 @@ function syncFiltersToUrl(filters: CompanyFilters, router: ReturnType<typeof use
     if (v !== undefined && v !== null && v !== "" && !isDefault) params.set(k, String(v));
   }
   const qs = params.toString();
-  router.replace(qs ? `/app/dashboard?${qs}` : "/app/dashboard", { scroll: false });
+  router.replace(qs ? `/app/search?${qs}` : "/app/search", { scroll: false });
 }
 
-export function DashboardClient({ initialCantons, initialStats, initialFilters }: DashboardClientProps) {
+export function SearchClient({ initialCantons, initialStats, initialFilters }: SearchClientProps) {
   const router = useRouter();
   const [filters, setFiltersState] = useState<CompanyFilters>(initialFilters ?? DEFAULT_FILTERS);
 

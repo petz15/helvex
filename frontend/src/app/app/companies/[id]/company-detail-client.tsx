@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { ExternalLink, ChevronLeft, Globe, MapPin, Building2, Phone, Mail, FileText, Plus, Trash2, Loader2, Search } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { reviewBadgeClass, proposalBadgeClass, fmtDate, fmtDateTime, fmtRelativeTime, cn, scoreColor } from "@/lib/utils";
@@ -72,6 +73,7 @@ function RelatedCompaniesList({ items, label }: { items: CompanyShortEntry[]; la
 }
 
 export function CompanyDetailClient({ company: initial }: Props) {
+  const router = useRouter();
   const [company, setCompany] = useState(initial);
   const [notes, setNotes] = useState<Note[]>(initial.notes ?? []);
   const [saving, setSaving] = useState(false);
@@ -241,9 +243,9 @@ export function CompanyDetailClient({ company: initial }: Props) {
     <div className="max-w-5xl mx-auto px-4 py-6 space-y-6">
       {/* Breadcrumb */}
       <div className="flex items-center gap-2 text-sm text-slate-500">
-        <Link href="/app/dashboard" className="hover:text-slate-700 flex items-center gap-1">
-          <ChevronLeft size={14} /> Dashboard
-        </Link>
+        <button type="button" onClick={() => router.back()} className="hover:text-slate-700 flex items-center gap-1">
+          <ChevronLeft size={14} /> Search
+        </button>
         <span>/</span>
         <span className="text-slate-800 font-medium">{company.name}</span>
       </div>
@@ -423,7 +425,7 @@ export function CompanyDetailClient({ company: initial }: Props) {
                   <span className="text-xs text-slate-400 block mb-1">Flex Cluster</span>
                   <div className="flex flex-wrap gap-1">
                     {company.tfidf_cluster.split("|").map(cluster => cluster.trim()).filter(Boolean).map(cluster => (
-                      <Link key={cluster} href={`/app/dashboard?tfidf_cluster=${encodeURIComponent(cluster)}`}>
+                      <Link key={cluster} href={`/app/search?tfidf_cluster=${encodeURIComponent(cluster)}`}>
                         <Badge className="bg-purple-50 text-purple-700 text-xs cursor-pointer hover:bg-purple-100">{cluster}</Badge>
                       </Link>
                     ))}
@@ -435,7 +437,7 @@ export function CompanyDetailClient({ company: initial }: Props) {
                   <span className="text-xs text-slate-400 block mb-1">Purpose Keywords</span>
                   <div className="flex flex-wrap gap-1">
                     {company.purpose_keywords.split(",").map(k => (
-                      <Link key={k.trim()} href={`/app/dashboard?purpose_keywords=${encodeURIComponent(k.trim())}`}>
+                      <Link key={k.trim()} href={`/app/search?purpose_keywords=${encodeURIComponent(k.trim())}`}>
                         <Badge className="bg-blue-50 text-blue-700 text-xs cursor-pointer hover:bg-blue-100">{k.trim()}</Badge>
                       </Link>
                     ))}
@@ -447,7 +449,7 @@ export function CompanyDetailClient({ company: initial }: Props) {
           {company.ai_category && (
             <div className="pt-2 border-t border-slate-100">
               <span className="text-xs text-slate-400 block mb-1">AI Category</span>
-              <Link href={`/app/dashboard?ai_category=${encodeURIComponent(company.ai_category)}`}>
+              <Link href={`/app/search?ai_category=${encodeURIComponent(company.ai_category)}`}>
                 <Badge className="bg-slate-100 text-slate-700 text-xs cursor-pointer hover:bg-slate-200">{company.ai_category}</Badge>
               </Link>
             </div>
