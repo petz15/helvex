@@ -11,12 +11,12 @@ from app.schemas.company import CompanyCreate, CompanyUpdate
 _SORT_MAP = {
     "name":             (Company.name,               True),
     "-name":            (Company.name,               False),
-    "google_score":     (Company.website_match_score, True),
-    "-google_score":    (Company.website_match_score, False),
-    "zefix_score":      (Company.zefix_score,        True),
-    "-zefix_score":     (Company.zefix_score,        False),
-    "claude_score":     (Company.claude_score,       True),
-    "-claude_score":    (Company.claude_score,       False),
+    "web_score":        (Company.web_score,          True),
+    "-web_score":       (Company.web_score,          False),
+    "flex_score":       (Company.flex_score,         True),
+    "-flex_score":      (Company.flex_score,         False),
+    "ai_score":         (Company.ai_score,           True),
+    "-ai_score":        (Company.ai_score,           False),
     "tfidf_cluster":    (Company.tfidf_cluster,      True),
     "-tfidf_cluster":   (Company.tfidf_cluster,      False),
     "canton":           (Company.canton,             True),
@@ -25,8 +25,8 @@ _SORT_MAP = {
     "-status":          (Company.status,             False),
     "review_status":    (Company.review_status,      True),
     "-review_status":   (Company.review_status,      False),
-    "proposal_status":  (Company.proposal_status,    True),
-    "-proposal_status": (Company.proposal_status,    False),
+    "contact_status":   (Company.contact_status,     True),
+    "-contact_status":  (Company.contact_status,     False),
     "website":          (Company.website_url,        True),
     "-website":         (Company.website_url,        False),
     "updated":              (Company.updated_at,          True),
@@ -37,12 +37,12 @@ _SORT_MAP = {
     "-created":             (Company.created_at,          False),
     "website_checked_at":   (Company.website_checked_at,  True),
     "-website_checked_at":  (Company.website_checked_at,  False),
-    "zefix_scored_at":      (Company.zefix_scored_at,     True),
-    "-zefix_scored_at":     (Company.zefix_scored_at,     False),
-    "claude_scored_at":     (Company.claude_scored_at,    True),
-    "-claude_scored_at":    (Company.claude_scored_at,    False),
-    "claude_category":      (Company.claude_category,     True),
-    "-claude_category":     (Company.claude_category,     False),
+    "flex_scored_at":       (Company.flex_scored_at,      True),
+    "-flex_scored_at":      (Company.flex_scored_at,      False),
+    "ai_scored_at":         (Company.ai_scored_at,        True),
+    "-ai_scored_at":        (Company.ai_scored_at,        False),
+    "ai_category":          (Company.ai_category,         True),
+    "-ai_category":         (Company.ai_category,         False),
 }
 _DEFAULT_SORT = "-updated"
 
@@ -55,11 +55,14 @@ def get_company_by_uid(db: Session, uid: str) -> Company | None:
     return db.query(Company).filter(Company.uid == uid).first()
 
 
-def _apply_filters(query, *, name_filter, canton, review_status, proposal_status,
-                   google_searched, min_google_score, min_zefix_score, min_claude_score=None,
-                   claude_category=None, tags, tfidf_cluster=None, purpose_keywords=None,
+def _apply_filters(query, *, name_filter, canton, review_status, contact_status,
+                   google_searched, min_web_score, min_flex_score, min_ai_score=None,
+                   max_web_score=None, max_flex_score=None, max_ai_score=None,
+                   min_combined_score=None, max_combined_score=None,
+                   ai_category=None, tags, tfidf_cluster=None, purpose_keywords=None,
                    exclude_tags=None, exclude_review_status=None, exclude_canton=None,
-                   exclude_proposal_status=None):
+                   exclude_contact_status=None, exclude_tfidf_cluster=None,
+                   exclude_purpose_keywords=None, exclude_ai_category=None):
     if name_filter:
         query = query.filter(Company.name.ilike(f"%{name_filter}%"))
     if canton:
@@ -68,10 +71,10 @@ def _apply_filters(query, *, name_filter, canton, review_status, proposal_status
         query = query.filter(Company.review_status.is_(None))
     elif review_status:
         query = query.filter(Company.review_status == review_status)
-    if proposal_status == "_none":
-        query = query.filter(Company.proposal_status.is_(None))
-    elif proposal_status:
-        query = query.filter(Company.proposal_status == proposal_status)
+    if contact_status == "_none":
+        query = query.filter(Company.contact_status.is_(None))
+    elif contact_status:
+        query = query.filter(Company.contact_status == contact_status)
     if google_searched == "yes":
         query = query.filter(Company.website_checked_at.isnot(None))
     elif google_searched == "no":
@@ -81,16 +84,32 @@ def _apply_filters(query, *, name_filter, canton, review_status, proposal_status
             Company.website_checked_at.isnot(None),
             Company.website_url.is_(None),
         )
-    if min_google_score is not None:
-        query = query.filter(Company.website_match_score >= min_google_score)
-    if min_zefix_score is not None:
-        query = query.filter(Company.zefix_score >= min_zefix_score)
-    if min_claude_score is not None:
-        query = query.filter(Company.claude_score >= min_claude_score)
-    if claude_category == "_none":
-        query = query.filter(Company.claude_category.is_(None))
-    elif claude_category:
-        query = query.filter(Company.claude_category.ilike(f"%{claude_category}%"))
+    if min_web_score is not None:
+        query = query.filter(Company.web_score >= min_web_score)
+    if max_web_score is not None:
+        query = query.filter(Company.web_score <= max_web_score)
+    if min_flex_score is not None:
+        query = query.filter(Company.flex_score >= min_flex_score)
+    if max_flex_score is not None:
+        query = query.filter(Company.flex_score <= max_flex_score)
+    if min_ai_score is not None:
+        query = query.filter(Company.ai_score >= min_ai_score)
+    if max_ai_score is not None:
+        query = query.filter(Company.ai_score <= max_ai_score)
+    if min_combined_score is not None or max_combined_score is not None:
+        _comb_expr = (
+            func.coalesce(Company.ai_score * 0.70, 0)
+            + func.coalesce(Company.web_score * 0.20, 0)
+            + func.coalesce(Company.flex_score * 0.10, 0)
+        )
+        if min_combined_score is not None:
+            query = query.filter(_comb_expr >= min_combined_score)
+        if max_combined_score is not None:
+            query = query.filter(_comb_expr <= max_combined_score)
+    if ai_category == "_none":
+        query = query.filter(Company.ai_category.is_(None))
+    elif ai_category:
+        query = query.filter(Company.ai_category.ilike(f"%{ai_category}%"))
     if tags:
         query = query.filter(Company.tags.ilike(f"%{tags}%"))
     if tfidf_cluster == "_none":
@@ -116,11 +135,25 @@ def _apply_filters(query, *, name_filter, canton, review_status, proposal_status
         query = query.filter(
             (Company.canton.is_(None)) | (Company.canton != exclude_canton)
         )
-    if exclude_proposal_status == "_none":
-        query = query.filter(Company.proposal_status.isnot(None))
-    elif exclude_proposal_status:
+    if exclude_contact_status == "_none":
+        query = query.filter(Company.contact_status.isnot(None))
+    elif exclude_contact_status:
         query = query.filter(
-            (Company.proposal_status.is_(None)) | (Company.proposal_status != exclude_proposal_status)
+            (Company.contact_status.is_(None)) | (Company.contact_status != exclude_contact_status)
+        )
+    if exclude_tfidf_cluster:
+        for term in [t.strip() for t in exclude_tfidf_cluster.split(",") if t.strip()]:
+            query = query.filter(
+                (Company.tfidf_cluster.is_(None)) | (Company.tfidf_cluster.notilike(f"%{term}%"))
+            )
+    if exclude_purpose_keywords:
+        for term in [t.strip() for t in exclude_purpose_keywords.split(",") if t.strip()]:
+            query = query.filter(
+                (Company.purpose_keywords.is_(None)) | (Company.purpose_keywords.notilike(f"%{term}%"))
+            )
+    if exclude_ai_category:
+        query = query.filter(
+            (Company.ai_category.is_(None)) | (Company.ai_category != exclude_ai_category)
         )
     return query
 
@@ -133,19 +166,27 @@ def list_companies(
     name_filter: str | None = None,
     canton: str | None = None,
     review_status: str | None = None,
-    proposal_status: str | None = None,
+    contact_status: str | None = None,
     google_searched: str | None = None,
-    min_google_score: int | None = None,
-    min_zefix_score: int | None = None,
-    min_claude_score: int | None = None,
-    claude_category: str | None = None,
+    min_web_score: int | None = None,
+    max_web_score: int | None = None,
+    min_flex_score: int | None = None,
+    max_flex_score: int | None = None,
+    min_ai_score: int | None = None,
+    max_ai_score: int | None = None,
+    min_combined_score: int | None = None,
+    max_combined_score: int | None = None,
+    ai_category: str | None = None,
     tags: str | None = None,
     tfidf_cluster: str | None = None,
     purpose_keywords: str | None = None,
     exclude_tags: str | None = None,
     exclude_review_status: str | None = None,
     exclude_canton: str | None = None,
-    exclude_proposal_status: str | None = None,
+    exclude_contact_status: str | None = None,
+    exclude_tfidf_cluster: str | None = None,
+    exclude_purpose_keywords: str | None = None,
+    exclude_ai_category: str | None = None,
     # kept for backward-compat with collection.py batch query
     limit: int | None = None,
     skip: int = 0,
@@ -156,32 +197,40 @@ def list_companies(
         name_filter=name_filter,
         canton=canton,
         review_status=review_status,
-        proposal_status=proposal_status,
+        contact_status=contact_status,
         google_searched=google_searched,
-        min_google_score=min_google_score,
-        min_zefix_score=min_zefix_score,
-        min_claude_score=min_claude_score,
-        claude_category=claude_category,
+        min_web_score=min_web_score,
+        max_web_score=max_web_score,
+        min_flex_score=min_flex_score,
+        max_flex_score=max_flex_score,
+        min_ai_score=min_ai_score,
+        max_ai_score=max_ai_score,
+        min_combined_score=min_combined_score,
+        max_combined_score=max_combined_score,
+        ai_category=ai_category,
         tags=tags,
         tfidf_cluster=tfidf_cluster,
         purpose_keywords=purpose_keywords,
         exclude_tags=exclude_tags,
         exclude_review_status=exclude_review_status,
         exclude_canton=exclude_canton,
-        exclude_proposal_status=exclude_proposal_status,
+        exclude_contact_status=exclude_contact_status,
+        exclude_tfidf_cluster=exclude_tfidf_cluster,
+        exclude_purpose_keywords=exclude_purpose_keywords,
+        exclude_ai_category=exclude_ai_category,
     )
 
     if sort in ("combined_score", "-combined_score"):
-        # SQL expression: avg of non-null scores (zefix, claude, google)
+        # SQL expression: avg of non-null scores (flex, ai, web)
         _sum = (
-            func.coalesce(Company.zefix_score, 0)
-            + func.coalesce(Company.claude_score, 0)
-            + func.coalesce(Company.website_match_score, 0)
+            func.coalesce(Company.flex_score, 0)
+            + func.coalesce(Company.ai_score, 0)
+            + func.coalesce(Company.web_score, 0)
         )
         _count = (
-            case((Company.zefix_score.isnot(None), 1), else_=0)
-            + case((Company.claude_score.isnot(None), 1), else_=0)
-            + case((Company.website_match_score.isnot(None), 1), else_=0)
+            case((Company.flex_score.isnot(None), 1), else_=0)
+            + case((Company.ai_score.isnot(None), 1), else_=0)
+            + case((Company.web_score.isnot(None), 1), else_=0)
         )
         _expr = _sum / func.nullif(_count, 0)
         asc = sort == "combined_score"
@@ -203,19 +252,27 @@ def count_companies(
     name_filter: str | None = None,
     canton: str | None = None,
     review_status: str | None = None,
-    proposal_status: str | None = None,
+    contact_status: str | None = None,
     google_searched: str | None = None,
-    min_google_score: int | None = None,
-    min_zefix_score: int | None = None,
-    min_claude_score: int | None = None,
-    claude_category: str | None = None,
+    min_web_score: int | None = None,
+    max_web_score: int | None = None,
+    min_flex_score: int | None = None,
+    max_flex_score: int | None = None,
+    min_ai_score: int | None = None,
+    max_ai_score: int | None = None,
+    min_combined_score: int | None = None,
+    max_combined_score: int | None = None,
+    ai_category: str | None = None,
     tags: str | None = None,
     tfidf_cluster: str | None = None,
     purpose_keywords: str | None = None,
     exclude_tags: str | None = None,
     exclude_review_status: str | None = None,
     exclude_canton: str | None = None,
-    exclude_proposal_status: str | None = None,
+    exclude_contact_status: str | None = None,
+    exclude_tfidf_cluster: str | None = None,
+    exclude_purpose_keywords: str | None = None,
+    exclude_ai_category: str | None = None,
 ) -> int:
     query = db.query(Company)
     query = _apply_filters(
@@ -223,19 +280,27 @@ def count_companies(
         name_filter=name_filter,
         canton=canton,
         review_status=review_status,
-        proposal_status=proposal_status,
+        contact_status=contact_status,
         google_searched=google_searched,
-        min_google_score=min_google_score,
-        min_zefix_score=min_zefix_score,
-        min_claude_score=min_claude_score,
-        claude_category=claude_category,
+        min_web_score=min_web_score,
+        max_web_score=max_web_score,
+        min_flex_score=min_flex_score,
+        max_flex_score=max_flex_score,
+        min_ai_score=min_ai_score,
+        max_ai_score=max_ai_score,
+        min_combined_score=min_combined_score,
+        max_combined_score=max_combined_score,
+        ai_category=ai_category,
         tags=tags,
         tfidf_cluster=tfidf_cluster,
         purpose_keywords=purpose_keywords,
         exclude_tags=exclude_tags,
         exclude_review_status=exclude_review_status,
         exclude_canton=exclude_canton,
-        exclude_proposal_status=exclude_proposal_status,
+        exclude_contact_status=exclude_contact_status,
+        exclude_tfidf_cluster=exclude_tfidf_cluster,
+        exclude_purpose_keywords=exclude_purpose_keywords,
+        exclude_ai_category=exclude_ai_category,
     )
     return query.count()
 
@@ -257,9 +322,9 @@ def get_company_stats(db: Session) -> dict:
         review_counts[label] = db.query(Company).filter(Company.review_status == label).count()
     review_counts["pending"] = db.query(Company).filter(Company.review_status.is_(None)).count()
 
-    proposal_counts: dict[str, int] = {}
+    contact_counts: dict[str, int] = {}
     for label in ("sent", "responded", "converted", "rejected"):
-        proposal_counts[label] = db.query(Company).filter(Company.proposal_status == label).count()
+        contact_counts[label] = db.query(Company).filter(Company.contact_status == label).count()
 
     return {
         "total": total,
@@ -267,7 +332,7 @@ def get_company_stats(db: Session) -> dict:
         "with_website": with_website,
         "searches_today": searches_today,
         "review": review_counts,
-        "proposal": proposal_counts,
+        "contact": contact_counts,
     }
 
 
@@ -311,9 +376,9 @@ def get_taxonomy_stats(db: Session) -> dict:
         .all()
     )
     categories = (
-        db.query(Company.claude_category, func.count(Company.id).label("cnt"))
-        .filter(Company.claude_category.isnot(None))
-        .group_by(Company.claude_category)
+        db.query(Company.ai_category, func.count(Company.id).label("cnt"))
+        .filter(Company.ai_category.isnot(None))
+        .group_by(Company.ai_category)
         .order_by(func.count(Company.id).desc())
         .all()
     )
@@ -321,7 +386,7 @@ def get_taxonomy_stats(db: Session) -> dict:
         "clusters": clusters_list,
         "keywords": keywords_list,
         "tags": [(r.tags, r.cnt) for r in tags],
-        "categories": [(r.claude_category, r.cnt) for r in categories],
+        "categories": [(r.ai_category, r.cnt) for r in categories],
     }
 
 
@@ -349,7 +414,7 @@ def bulk_update_status(
     value: str | None,
 ) -> int:
     """Update a single status field on multiple companies at once. Returns updated count."""
-    if field not in ("review_status", "proposal_status"):
+    if field not in ("review_status", "contact_status"):
         raise ValueError(f"bulk_update_status: unsupported field '{field}'")
     count = (
         db.query(Company)

@@ -28,23 +28,23 @@ def get_or_create_user_company_state(
     return row
 
 
-def update_user_claude_results(
+def update_user_ai_results(
     db: Session,
     *,
     user_id: int,
     company_id: int,
     org_id: int,
-    claude_score: float | None,
-    claude_category: str | None,
-    claude_freeform: str | None,
-    claude_scored_at: datetime,
+    ai_score: float | None,
+    ai_category: str | None,
+    ai_freeform: str | None,
+    ai_scored_at: datetime,
 ) -> UserCompanyState:
-    """Upsert Claude classification results. Called by workers."""
+    """Upsert AI classification results. Called by workers."""
     row = get_or_create_user_company_state(db, user_id=user_id, company_id=company_id, org_id=org_id)
-    row.claude_score = claude_score
-    row.claude_category = claude_category
-    row.claude_freeform = claude_freeform
-    row.claude_scored_at = claude_scored_at
+    row.ai_score = ai_score
+    row.ai_category = ai_category
+    row.ai_freeform = ai_freeform
+    row.ai_scored_at = ai_scored_at
     db.commit()
     db.refresh(row)
     return row

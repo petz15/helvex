@@ -161,7 +161,7 @@ def _run_job(app, job_id: int) -> None:  # noqa: C901
                 crud.set_setting(db, "geocoding_building_level_done", "true")
 
             elif job.job_type == "recalculate_scores":
-                from app.services.collection import recalculate_zefix_scores
+                from app.services.collection import recalculate_flex_scores
 
                 def _progress(done: int, total: int, stats: dict) -> None:
                     _assert_not_cancelled()
@@ -174,7 +174,7 @@ def _run_job(app, job_id: int) -> None:  # noqa: C901
                     crud.create_event(db, job_id=job.id, level="debug", message=msg)
                     _maybe_sync(app, job_type=job.job_type, label=job.label, message=msg, stats=dict(stats), error=None, done=False)
 
-                stats = recalculate_zefix_scores(db, resume_from=resume_from, progress_cb=_progress)
+                stats = recalculate_flex_scores(db, resume_from=resume_from, progress_cb=_progress)
                 done_msg = f"Done — {stats['updated']} recalculated, {stats.get('geocoded', 0)} geocoded, {len(stats['errors'])} errors"
                 if resume_from:
                     done_msg += f" (resumed from {resume_from})"
@@ -237,8 +237,8 @@ def _run_job(app, job_id: int) -> None:  # noqa: C901
                     resume_from=resume_from,
                     progress_cb=_progress,
                     canton=params.get("canton"),
-                    min_zefix_score=params.get("min_zefix_score"),
-                    min_claude_score=params.get("min_claude_score"),
+                    min_flex_score=params.get("min_zefix_score"),
+                    min_ai_score=params.get("min_claude_score"),
                     purpose_keywords=params.get("purpose_keywords"),
                     tfidf_cluster=params.get("tfidf_cluster"),
                     review_status=params.get("review_status"),
@@ -388,9 +388,9 @@ def _run_job(app, job_id: int) -> None:  # noqa: C901
                 stats = claude_classify_batch(
                     db,
                     canton=params.get("canton") or None,
-                    min_zefix_score=params.get("min_zefix_score"),
-                    max_zefix_score=params.get("max_zefix_score"),
-                    min_google_score=params.get("min_google_score"),
+                    min_flex_score=params.get("min_zefix_score"),
+                    max_flex_score=params.get("max_zefix_score"),
+                    min_web_score=params.get("min_google_score"),
                     purpose_keywords=params.get("purpose_keywords") or None,
                     rerun_classified=bool(params.get("rerun_classified", False)),
                     auto_filter_keywords=bool(params.get("auto_filter_keywords", False)),

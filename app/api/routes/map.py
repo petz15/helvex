@@ -21,9 +21,9 @@ def _apply_map_filters(
     canton: str | None,
     review_status: str | None,
     google_searched: str | None,
-    min_google_score: int | None,
-    min_zefix_score: int | None,
-    min_claude_score: int | None,
+    min_web_score: int | None,
+    min_flex_score: int | None,
+    min_ai_score: int | None,
     min_combined_score: int | None,
     keywords: str | None,
     hide_cancelled: bool,
@@ -41,17 +41,17 @@ def _apply_map_filters(
         query = query.filter(CompanyModel.website_checked_at.isnot(None))
     elif google_searched == "false":
         query = query.filter(CompanyModel.website_checked_at.is_(None))
-    if min_google_score is not None:
-        query = query.filter(CompanyModel.website_match_score >= min_google_score)
-    if min_zefix_score is not None:
-        query = query.filter(CompanyModel.zefix_score >= min_zefix_score)
-    if min_claude_score is not None:
-        query = query.filter(CompanyModel.claude_score >= min_claude_score)
+    if min_web_score is not None:
+        query = query.filter(CompanyModel.web_score >= min_web_score)
+    if min_flex_score is not None:
+        query = query.filter(CompanyModel.flex_score >= min_flex_score)
+    if min_ai_score is not None:
+        query = query.filter(CompanyModel.ai_score >= min_ai_score)
     if min_combined_score is not None:
         combined_expr = (
-            func.coalesce(CompanyModel.claude_score * 0.70, 0.0)
-            + func.coalesce(CompanyModel.website_match_score * 0.20, 0.0)
-            + func.coalesce(CompanyModel.zefix_score * 0.10, 0.0)
+            func.coalesce(CompanyModel.ai_score * 0.70, 0.0)
+            + func.coalesce(CompanyModel.web_score * 0.20, 0.0)
+            + func.coalesce(CompanyModel.flex_score * 0.10, 0.0)
         )
         query = query.filter(combined_expr >= min_combined_score)
     if keywords:
@@ -81,9 +81,9 @@ def map_clusters(
     canton: str | None = Query(None),
     review_status: str | None = Query(None),
     google_searched: str | None = Query(None),
-    min_google_score: int | None = Query(None),
-    min_zefix_score: int | None = Query(None),
-    min_claude_score: int | None = Query(None),
+    min_web_score: int | None = Query(None),
+    min_flex_score: int | None = Query(None),
+    min_ai_score: int | None = Query(None),
     min_combined_score: int | None = Query(None),
     keywords: str | None = Query(None),
     hide_cancelled: bool = Query(False),
@@ -124,8 +124,8 @@ def map_clusters(
     base = _apply_map_filters(
         base,
         canton=canton, review_status=review_status, google_searched=google_searched,
-        min_google_score=min_google_score, min_zefix_score=min_zefix_score,
-        min_claude_score=min_claude_score, min_combined_score=min_combined_score,
+        min_web_score=min_web_score, min_flex_score=min_flex_score,
+        min_ai_score=min_ai_score, min_combined_score=min_combined_score,
         keywords=keywords, hide_cancelled=hide_cancelled,
         min_lat=min_lat, max_lat=max_lat, min_lon=min_lon, max_lon=max_lon,
     )
@@ -137,9 +137,9 @@ def map_clusters(
         func.avg(CompanyModel.lon).label("lon"),
         func.count(CompanyModel.id).label("count"),
         func.avg(
-            func.coalesce(CompanyModel.claude_score * 0.70, 0.0)
-            + func.coalesce(CompanyModel.website_match_score * 0.20, 0.0)
-            + func.coalesce(CompanyModel.zefix_score * 0.10, 0.0)
+            func.coalesce(CompanyModel.ai_score * 0.70, 0.0)
+            + func.coalesce(CompanyModel.web_score * 0.20, 0.0)
+            + func.coalesce(CompanyModel.flex_score * 0.10, 0.0)
         ).label("avg_score"),
     ).group_by(lat_bucket, lon_bucket).all()
 
@@ -160,9 +160,9 @@ def map_data(
     canton: str | None = Query(None),
     review_status: str | None = Query(None),
     google_searched: str | None = Query(None),
-    min_google_score: int | None = Query(None),
-    min_zefix_score: int | None = Query(None),
-    min_claude_score: int | None = Query(None),
+    min_web_score: int | None = Query(None),
+    min_flex_score: int | None = Query(None),
+    min_ai_score: int | None = Query(None),
     min_combined_score: int | None = Query(None),
     keywords: str | None = Query(None),
     hide_cancelled: bool = Query(False),
@@ -178,9 +178,9 @@ def map_data(
         CompanyModel.name,
         CompanyModel.lat,
         CompanyModel.lon,
-        CompanyModel.website_match_score,
-        CompanyModel.zefix_score,
-        CompanyModel.claude_score,
+        CompanyModel.web_score,
+        CompanyModel.flex_score,
+        CompanyModel.ai_score,
         CompanyModel.canton,
         CompanyModel.municipality,
         CompanyModel.website_url,
@@ -194,8 +194,8 @@ def map_data(
     query = _apply_map_filters(
         query,
         canton=canton, review_status=review_status, google_searched=google_searched,
-        min_google_score=min_google_score, min_zefix_score=min_zefix_score,
-        min_claude_score=min_claude_score, min_combined_score=min_combined_score,
+        min_web_score=min_web_score, min_flex_score=min_flex_score,
+        min_ai_score=min_ai_score, min_combined_score=min_combined_score,
         keywords=keywords, hide_cancelled=hide_cancelled,
         min_lat=min_lat, max_lat=max_lat, min_lon=min_lon, max_lon=max_lon,
     )
@@ -211,9 +211,9 @@ def map_data(
             "name": r.name,
             "lat": r.lat,
             "lon": r.lon,
-            "google_score": r.website_match_score,
-            "zefix_score": r.zefix_score,
-            "claude_score": r.claude_score,
+            "web_score": r.web_score,
+            "flex_score": r.flex_score,
+            "ai_score": r.ai_score,
             "canton": r.canton,
             "municipality": r.municipality,
             "website": r.website_url,

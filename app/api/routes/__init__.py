@@ -7,6 +7,7 @@ from app.api.routes.map import router as map_router
 from app.api.routes.notes import router as notes_router
 from app.api.routes.ops_settings import router as settings_router
 from app.api.routes.orgs import router as orgs_router
+from app.api.routes.views import router as views_router
 from app.api.routes.workspace import router as workspace_router
 
 __all__ = [
@@ -19,5 +20,6 @@ __all__ = [
     "notes_router",
     "settings_router",
     "orgs_router",
+    "views_router",
     "workspace_router",
 ]

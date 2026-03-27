@@ -42,7 +42,7 @@ def _validate_org_access(org_id: int, user_org: tuple[User, Organization]) -> tu
 class OrgStateUpdate(BaseModel):
     tags: str | None = None
     review_status: str | None = None
-    proposal_status: str | None = None
+    contact_status: str | None = None
     contact_name: str | None = None
     contact_email: str | None = None
     contact_phone: str | None = None
@@ -53,12 +53,12 @@ class OrgStateOut(BaseModel):
     company_id: int
     tags: str | None
     review_status: str | None
-    proposal_status: str | None
+    contact_status: str | None
     contact_name: str | None
     contact_email: str | None
     contact_phone: str | None
     website_url: str | None
-    website_match_score: float | None
+    web_score: float | None
     social_media_only: bool | None
     website_checked_at: str | None
 
@@ -72,9 +72,9 @@ class UserStateUpdate(BaseModel):
 class UserStateOut(BaseModel):
     user_id: int
     company_id: int
-    claude_score: float | None
-    claude_category: str | None
-    claude_freeform: str | None
+    ai_score: float | None
+    ai_category: str | None
+    ai_freeform: str | None
     personal_score_override: float | None
 
     model_config = {"from_attributes": True}

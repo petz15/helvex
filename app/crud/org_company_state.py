@@ -30,7 +30,7 @@ def update_org_company_state(
     *,
     tags: str | None = ...,
     review_status: str | None = ...,
-    proposal_status: str | None = ...,
+    contact_status: str | None = ...,
     contact_name: str | None = ...,
     contact_email: str | None = ...,
     contact_phone: str | None = ...,
@@ -40,8 +40,8 @@ def update_org_company_state(
         row.tags = tags
     if review_status is not ...:
         row.review_status = review_status
-    if proposal_status is not ...:
-        row.proposal_status = proposal_status
+    if contact_status is not ...:
+        row.contact_status = contact_status
     if contact_name is not ...:
         row.contact_name = contact_name
     if contact_email is not ...:
@@ -59,7 +59,7 @@ def update_org_google_results(
     org_id: int,
     company_id: int,
     website_url: str | None,
-    website_match_score: float | None,
+    web_score: float | None,
     google_search_results_raw: str | None,
     website_checked_at,
     social_media_only: bool | None,
@@ -67,7 +67,7 @@ def update_org_google_results(
     """Upsert Google scoring results into the org overlay. Called by workers."""
     row = get_or_create_org_company_state(db, org_id=org_id, company_id=company_id)
     row.website_url = website_url
-    row.website_match_score = website_match_score
+    row.web_score = web_score
     row.google_search_results_raw = google_search_results_raw
     row.website_checked_at = website_checked_at
     row.social_media_only = social_media_only

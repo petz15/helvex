@@ -24,7 +24,7 @@ class Company(Base):
     # Top-5 Google results as JSON [{title, link, snippet, score}, ...] sorted by score desc
     google_search_results_raw: Mapped[str | None] = mapped_column(Text, nullable=True)
     # 0-100 auto match score for the current website_url; None = not yet scored
-    website_match_score: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    web_score: Mapped[int | None] = mapped_column(Integer, nullable=True)
     # True if Google only returned social media results (no real website found)
     social_media_only: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     # Manual workflow statuses
@@ -33,7 +33,7 @@ class Company(Base):
     # | 'potential_generic' | 'confirmed_generic'
     review_status: Mapped[str | None] = mapped_column(String(32), nullable=True)
     # 'not_sent' | 'sent' | 'responded' | 'converted' | 'rejected'
-    proposal_status: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    contact_status: Mapped[str | None] = mapped_column(String(32), nullable=True)
     # Contact info (manually entered)
     contact_name: Mapped[str | None] = mapped_column(String(256), nullable=True)
     contact_email: Mapped[str | None] = mapped_column(String(512), nullable=True)
@@ -62,9 +62,9 @@ class Company(Base):
     old_names: Mapped[str | None] = mapped_column(Text, nullable=True)  # JSON
     cantonal_excerpt_web: Mapped[str | None] = mapped_column(String(1024), nullable=True)
     # Priority/lead score derived from Zefix data alone (0-100)
-    zefix_score: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    # JSON object with component-level zefix scoring contributions
-    zefix_score_breakdown: Mapped[str | None] = mapped_column(Text, nullable=True)
+    flex_score: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # JSON object with component-level flex scoring contributions
+    flex_score_breakdown: Mapped[str | None] = mapped_column(Text, nullable=True)
     # Geocoded coordinates (from Nominatim, based on the Zefix address)
     lat: Mapped[float | None] = mapped_column(Float, nullable=True)
     lon: Mapped[float | None] = mapped_column(Float, nullable=True)
@@ -72,12 +72,12 @@ class Company(Base):
     tfidf_cluster: Mapped[str | None] = mapped_column(Text, nullable=True)
     # Per-company top TF-IDF keywords extracted from this company's own purpose text
     purpose_keywords: Mapped[str | None] = mapped_column(Text, nullable=True)
-    # Claude Haiku classification score, category, and optional free-form text
-    claude_score: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    claude_category: Mapped[str | None] = mapped_column(String(128), nullable=True)
-    claude_freeform: Mapped[str | None] = mapped_column(Text, nullable=True)
-    claude_scored_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    zefix_scored_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # AI classification score, category, and optional free-form text
+    ai_score: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    ai_category: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    ai_freeform: Mapped[str | None] = mapped_column(Text, nullable=True)
+    ai_scored_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    flex_scored_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     # Raw JSON from Zefix API stored for reference
     zefix_raw: Mapped[str | None] = mapped_column(Text, nullable=True)
 
@@ -92,11 +92,11 @@ class Company(Base):
     def combined_score(self) -> int | None:
         """Weighted average of available scores.
 
-        Weights: claude 70 %, google 20 %, zefix 10 %.
+        Weights: ai 70 %, web 20 %, flex 10 %.
         Only present scores contribute; weights are renormalised accordingly.
         Returns None if all three are absent.
         """
-        _WEIGHTS = ((self.claude_score, 0.70), (self.website_match_score, 0.20), (self.zefix_score, 0.10))
+        _WEIGHTS = ((self.ai_score, 0.70), (self.web_score, 0.20), (self.flex_score, 0.10))
         present = [(s, w) for s, w in _WEIGHTS if s is not None]
         if not present:
             return None

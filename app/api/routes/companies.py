@@ -212,11 +212,11 @@ def select_company_website(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Selected link not found in stored results")
 
     score = match.get("score")
-    website_match_score = int(score) if isinstance(score, (int, float)) else None
+    web_score = int(score) if isinstance(score, (int, float)) else None
     social_media_only = is_social_lead_domain(wanted)
 
     old_values = {f: getattr(db_company, f) for f in (
-        "website_url", "review_status", "proposal_status",
+        "website_url", "review_status", "contact_status",
         "contact_name", "contact_email", "contact_phone", "tags",
     )}
 
@@ -225,13 +225,13 @@ def select_company_website(
         db_company,
         CompanyUpdate(
             website_url=wanted,
-            website_match_score=website_match_score,
+            web_score=web_score,
             social_media_only=social_media_only,
         ),
     )
     new_values = {
         "website_url": wanted,
-        "website_match_score": website_match_score,
+        "web_score": web_score,
         "social_media_only": social_media_only,
     }
     crud.record_company_changes(
@@ -273,38 +273,54 @@ def list_companies(
     q: str | None = Query(None, description="Filter by name (case-insensitive)"),
     canton: str | None = Query(None),
     review_status: str | None = Query(None, description="Use _none for unset"),
-    proposal_status: str | None = Query(None, description="Use _none for unset"),
+    contact_status: str | None = Query(None, description="Use _none for unset"),
     google_searched: str | None = Query(None, description="yes | no | no_result"),
-    min_google_score: int | None = Query(None, ge=0, le=100),
-    min_zefix_score: int | None = Query(None, ge=0, le=100),
-    min_claude_score: int | None = Query(None, ge=0, le=100),
-    claude_category: str | None = Query(None, description="Use _none for unset"),
+    min_web_score: int | None = Query(None, ge=0, le=100),
+    max_web_score: int | None = Query(None, ge=0, le=100),
+    min_flex_score: int | None = Query(None, ge=0, le=100),
+    max_flex_score: int | None = Query(None, ge=0, le=100),
+    min_ai_score: int | None = Query(None, ge=0, le=100),
+    max_ai_score: int | None = Query(None, ge=0, le=100),
+    min_combined_score: int | None = Query(None, ge=0, le=100),
+    max_combined_score: int | None = Query(None, ge=0, le=100),
+    ai_category: str | None = Query(None, description="Use _none for unset"),
     tags: str | None = Query(None),
     tfidf_cluster: str | None = Query(None, description="_none | _any | keyword"),
     purpose_keywords: str | None = Query(None),
     exclude_tags: str | None = Query(None, description="Comma-separated tags to exclude"),
     exclude_review_status: str | None = Query(None),
     exclude_canton: str | None = Query(None),
-    exclude_proposal_status: str | None = Query(None),
+    exclude_contact_status: str | None = Query(None),
+    exclude_tfidf_cluster: str | None = Query(None, description="Comma-separated tfidf_cluster terms to exclude"),
+    exclude_purpose_keywords: str | None = Query(None, description="Comma-separated purpose keywords to exclude"),
+    exclude_ai_category: str | None = Query(None, description="Exclude companies with this exact ai_category"),
     db: Session = Depends(get_db),
 ) -> CompanyPage:
     filter_kwargs = dict(
         name_filter=q,
         canton=canton,
         review_status=review_status,
-        proposal_status=proposal_status,
+        contact_status=contact_status,
         google_searched=google_searched,
-        min_google_score=min_google_score,
-        min_zefix_score=min_zefix_score,
-        min_claude_score=min_claude_score,
-        claude_category=claude_category,
+        min_web_score=min_web_score,
+        max_web_score=max_web_score,
+        min_flex_score=min_flex_score,
+        max_flex_score=max_flex_score,
+        min_ai_score=min_ai_score,
+        max_ai_score=max_ai_score,
+        min_combined_score=min_combined_score,
+        max_combined_score=max_combined_score,
+        ai_category=ai_category,
         tags=tags,
         tfidf_cluster=tfidf_cluster,
         purpose_keywords=purpose_keywords,
         exclude_tags=exclude_tags,
         exclude_review_status=exclude_review_status,
         exclude_canton=exclude_canton,
-        exclude_proposal_status=exclude_proposal_status,
+        exclude_contact_status=exclude_contact_status,
+        exclude_tfidf_cluster=exclude_tfidf_cluster,
+        exclude_purpose_keywords=exclude_purpose_keywords,
+        exclude_ai_category=exclude_ai_category,
     )
     total = crud.count_companies(db, **filter_kwargs)
     items = crud.list_companies(db, page=page, page_size=page_size, sort=sort, **filter_kwargs)
@@ -323,18 +339,18 @@ def export_companies_csv(
     q: str | None = Query(None),
     canton: str | None = Query(None),
     review_status: str | None = Query(None),
-    proposal_status: str | None = Query(None),
+    contact_status: str | None = Query(None),
     google_searched: str | None = Query(None),
-    min_google_score: int | None = Query(None),
-    min_zefix_score: int | None = Query(None),
-    min_claude_score: int | None = Query(None),
+    min_web_score: int | None = Query(None),
+    min_flex_score: int | None = Query(None),
+    min_ai_score: int | None = Query(None),
     tags: str | None = Query(None),
     tfidf_cluster: str | None = Query(None),
     purpose_keywords: str | None = Query(None),
     exclude_tags: str | None = Query(None),
     exclude_review_status: str | None = Query(None),
     exclude_canton: str | None = Query(None),
-    exclude_proposal_status: str | None = Query(None),
+    exclude_contact_status: str | None = Query(None),
     db: Session = Depends(get_db),
 ):
     companies = crud.list_companies(
@@ -345,25 +361,25 @@ def export_companies_csv(
         name_filter=q,
         canton=canton,
         review_status=review_status,
-        proposal_status=proposal_status,
+        contact_status=contact_status,
         google_searched=google_searched,
-        min_google_score=min_google_score,
-        min_zefix_score=min_zefix_score,
-        min_claude_score=min_claude_score,
+        min_web_score=min_web_score,
+        min_flex_score=min_flex_score,
+        min_ai_score=min_ai_score,
         tags=tags,
         tfidf_cluster=tfidf_cluster,
         purpose_keywords=purpose_keywords,
         exclude_tags=exclude_tags,
         exclude_review_status=exclude_review_status,
         exclude_canton=exclude_canton,
-        exclude_proposal_status=exclude_proposal_status,
+        exclude_contact_status=exclude_contact_status,
     )
 
     _HEADERS = [
         "uid", "name", "legal_form", "status", "municipality", "canton",
-        "website_url", "website_match_score", "zefix_score", "claude_score", "combined_score",
-        "review_status", "proposal_status", "contact_name", "contact_email", "contact_phone",
-        "tags", "claude_category", "tfidf_cluster", "purpose_keywords",
+        "website_url", "web_score", "flex_score", "ai_score", "combined_score",
+        "review_status", "contact_status", "contact_name", "contact_email", "contact_phone",
+        "tags", "ai_category", "tfidf_cluster", "purpose_keywords",
         "created_at", "updated_at",
     ]
 
@@ -379,13 +395,13 @@ def export_companies_csv(
                 c.uid, c.name, c.legal_form or "", c.status or "",
                 c.municipality or "", c.canton or "",
                 c.website_url or "",
-                c.website_match_score if c.website_match_score is not None else "",
-                c.zefix_score if c.zefix_score is not None else "",
-                c.claude_score if c.claude_score is not None else "",
+                c.web_score if c.web_score is not None else "",
+                c.flex_score if c.flex_score is not None else "",
+                c.ai_score if c.ai_score is not None else "",
                 c.combined_score if c.combined_score is not None else "",
-                c.review_status or "", c.proposal_status or "",
+                c.review_status or "", c.contact_status or "",
                 c.contact_name or "", c.contact_email or "", c.contact_phone or "",
-                c.tags or "", c.claude_category or "", c.tfidf_cluster or "",
+                c.tags or "", c.ai_category or "", c.tfidf_cluster or "",
                 c.purpose_keywords or "",
                 c.created_at.isoformat(), c.updated_at.isoformat(),
             ])
@@ -425,7 +441,7 @@ def update_company(
     if not db_company:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Company not found")
     old_values = {f: getattr(db_company, f) for f in (
-        "website_url", "review_status", "proposal_status",
+        "website_url", "review_status", "contact_status",
         "contact_name", "contact_email", "contact_phone", "tags",
     )}
     updated = crud.update_company(db, db_company, company_in)

@@ -26,7 +26,7 @@ from app.api.zefix_client import (
 from app.models.company import Company
 from app.schemas.company import CompanyCreate, CompanyUpdate
 from app.services.scoring import (
-    compute_zefix_score_breakdown,
+    compute_flex_score_breakdown,
     distance_to_muri_km,
     distance_to_origin_km,
     fallback_result_score,
@@ -436,7 +436,7 @@ def _extract_company_fields(
     old_names = _json_field(raw.get("oldNames"))
     cantonal_excerpt_web = raw.get("cantonalExcerptWeb") or None
 
-    score_breakdown = compute_zefix_score_breakdown(
+    score_breakdown = compute_flex_score_breakdown(
         legal_form=legal_form_display,
         legal_form_short_name=legal_form_short,
         status=str(raw.get("status", "")) or None,
@@ -444,7 +444,7 @@ def _extract_company_fields(
         municipality=raw.get("municipality") or raw.get("legalSeat") or None,
         config=scoring_config,
     )
-    zefix_score = int(score_breakdown["final_score"])
+    flex_score = int(score_breakdown["final_score"])
 
     return CompanyCreate(
         uid=uid_normalised,
@@ -458,8 +458,8 @@ def _extract_company_fields(
         canton=raw.get("canton") or None,
         purpose=purpose,
         address=address_str,
-        zefix_score=zefix_score,
-        zefix_score_breakdown=json.dumps(score_breakdown),
+        flex_score=flex_score,
+        flex_score_breakdown=json.dumps(score_breakdown),
         ehraid=ehraid,
         chid=chid,
         legal_seat_id=legal_seat_id,
@@ -520,7 +520,7 @@ def geocode_and_update_company(db: Session, company: Company) -> bool:
 
     lat, lon = coords
     scoring_config = _load_scoring_config(db)
-    score_breakdown = compute_zefix_score_breakdown(
+    score_breakdown = compute_flex_score_breakdown(
         legal_form=company.legal_form,
         legal_form_short_name=company.legal_form_short_name,
         status=company.status,
@@ -538,15 +538,15 @@ def geocode_and_update_company(db: Session, company: Company) -> bool:
         CompanyUpdate(
             lat=lat,
             lon=lon,
-            zefix_score=int(score_breakdown["final_score"]),
-            zefix_score_breakdown=json.dumps(score_breakdown),
-            zefix_scored_at=datetime.now(tz=timezone.utc),
+            flex_score=int(score_breakdown["final_score"]),
+            flex_score_breakdown=json.dumps(score_breakdown),
+            flex_scored_at=datetime.now(tz=timezone.utc),
         ),
     )
     return True
 
 
-def recalculate_zefix_scores(
+def recalculate_flex_scores(
     db: Session,
     *,
     batch_size: int = 500,
@@ -584,7 +584,7 @@ def recalculate_zefix_scores(
                     if coords:
                         company.lat, company.lon = coords
                         stats["geocoded"] += 1
-                bd = compute_zefix_score_breakdown(
+                bd = compute_flex_score_breakdown(
                     legal_form=company.legal_form,
                     legal_form_short_name=company.legal_form_short_name,
                     status=company.status,
@@ -620,9 +620,9 @@ def recalculate_zefix_scores(
                 continue
             bd = breakdowns.get(company.id, {})
             bd["final_score"] = normalised[company.id]
-            company.zefix_score = normalised[company.id]
-            company.zefix_score_breakdown = json.dumps(bd)
-            company.zefix_scored_at = datetime.now(tz=timezone.utc)
+            company.flex_score = normalised[company.id]
+            company.flex_score_breakdown = json.dumps(bd)
+            company.flex_scored_at = datetime.now(tz=timezone.utc)
             stats["updated"] += 1
             write_done += 1
         db.commit()
@@ -748,9 +748,9 @@ def recalculate_google_scores(
             db.query(Company)
             .order_by(
                 (
-                    func.coalesce(Company.claude_score * 0.70, 0)
-                    + func.coalesce(Company.website_match_score * 0.20, 0)
-                    + func.coalesce(Company.zefix_score * 0.10, 0)
+                    func.coalesce(Company.ai_score * 0.70, 0)
+                    + func.coalesce(Company.web_score * 0.20, 0)
+                    + func.coalesce(Company.flex_score * 0.10, 0)
                 ).desc(),
                 Company.id.asc(),
             )
@@ -779,7 +779,7 @@ def recalculate_google_scores(
 
                 best = rescored[0]
                 company.website_url = best["link"]
-                company.website_match_score = best["score"]
+                company.web_score = best["score"]
                 company.social_media_only = is_social_lead_domain(best["link"])
                 company.google_search_results_raw = json.dumps(rescored)
                 stats["updated"] += 1
@@ -826,7 +826,7 @@ def enrich_company_website(db: Session, company: Company, *, num: int = 5) -> tu
         company,
         CompanyUpdate(
             website_url=best["link"],
-            website_match_score=best["score"],
+            web_score=best["score"],
             social_media_only=social_media_only,
             website_checked_at=now,
             google_search_results_raw=json.dumps(scored),
@@ -1033,7 +1033,7 @@ def bulk_import_zefix(
     # Fields that come exclusively from Zefix — safe to overwrite on every run
     _ZEFIX_UPDATE_FIELDS = {
         "name", "legal_form", "legal_form_id", "legal_form_uid", "legal_form_short_name",
-        "status", "municipality", "canton", "purpose", "zefix_score", "zefix_score_breakdown",
+        "status", "municipality", "canton", "purpose", "flex_score", "flex_score_breakdown",
         "ehraid", "chid", "legal_seat_id", "sogc_date", "deletion_date",
     }
 
@@ -1058,7 +1058,7 @@ def bulk_import_zefix(
             for result in results:
                 if not result.uid:
                     continue
-                _score_bd = compute_zefix_score_breakdown(
+                _score_bd = compute_flex_score_breakdown(
                     legal_form=result.legal_form,
                     legal_form_short_name=result.legal_form_short_name,
                     status=result.status,
@@ -1077,8 +1077,8 @@ def bulk_import_zefix(
                     municipality=result.municipality,
                     canton=result.canton or canton,
                     purpose=result.purpose,
-                    zefix_score=int(_score_bd["final_score"]),
-                    zefix_score_breakdown=json.dumps(_score_bd),
+                    flex_score=int(_score_bd["final_score"]),
+                    flex_score_breakdown=json.dumps(_score_bd),
                     ehraid=result.ehraid,
                     chid=result.chid,
                     legal_seat_id=result.legal_seat_id,
@@ -1139,7 +1139,7 @@ def rescore_from_stored_results(db: Session, company: Company) -> bool:
         company,
         CompanyUpdate(
             website_url=best["link"],
-            website_match_score=best["score"],
+            web_score=best["score"],
             social_media_only=is_social_lead_domain(best["link"]),
             google_search_results_raw=json.dumps(rescored),
         ),
@@ -1196,7 +1196,7 @@ def run_zefix_detail_collect(
             (Company.zefix_raw.isnot(None), 1),
             else_=0,
         )
-        return q.order_by(has_detail.asc(), Company.zefix_score.desc().nullslast(), Company.id.asc())
+        return q.order_by(has_detail.asc(), Company.flex_score.desc().nullslast(), Company.id.asc())
 
     _missing_details_filter = or_(
         Company.address.is_(None),
@@ -1238,7 +1238,7 @@ def run_zefix_detail_collect(
                 stats["geocoded"] += 1
 
             # Re-score only when no score exists yet and stored results are available
-            if score_if_missing and updated.website_match_score is None:
+            if score_if_missing and updated.web_score is None:
                 if rescore_from_stored_results(db, updated):
                     stats["scored"] += 1
 
@@ -1268,8 +1268,8 @@ def run_batch_collect(
     resume_from: int = 0,
     progress_cb: Any = None,
     canton: str | None = None,
-    min_zefix_score: int | None = None,
-    min_claude_score: int | None = None,
+    min_flex_score: int | None = None,
+    min_ai_score: int | None = None,
     purpose_keywords: str | None = None,
     tfidf_cluster: str | None = None,
     review_status: str | None = None,
@@ -1313,10 +1313,10 @@ def run_batch_collect(
         query = query.filter(or_(Company.website_url.is_(None), Company.website_url == ""))
     if canton:
         query = query.filter(Company.canton == canton.strip().upper())
-    if min_zefix_score is not None:
-        query = query.filter(Company.zefix_score >= min_zefix_score)
-    if min_claude_score is not None:
-        query = query.filter(Company.claude_score >= min_claude_score)
+    if min_flex_score is not None:
+        query = query.filter(Company.flex_score >= min_flex_score)
+    if min_ai_score is not None:
+        query = query.filter(Company.ai_score >= min_ai_score)
     if purpose_keywords:
         kw_terms = [t.strip() for t in purpose_keywords.split(",") if t.strip()]
         if kw_terms:
@@ -1339,9 +1339,9 @@ def run_batch_collect(
     if keep_n <= 0:
         return stats
 
-    def _combined_score_values(claude_score: float | None, website_match_score: float | None, zefix_score: float | None) -> float:
+    def _combined_score_values(ai_score: float | None, web_score: float | None, flex_score: float | None) -> float:
         """Combined score for Python-side ordering (same weights as Company.combined_score property)."""
-        _w = [(claude_score, 0.70), (website_match_score, 0.20), (zefix_score, 0.10)]
+        _w = [(ai_score, 0.70), (web_score, 0.20), (flex_score, 0.10)]
         present = [(s, w) for s, w in _w if s is not None]
         if not present:
             return 0.0
@@ -1354,9 +1354,9 @@ def run_batch_collect(
 
     row_query = query.with_entities(
         Company.id,
-        Company.claude_score,
-        Company.website_match_score,
-        Company.zefix_score,
+        Company.ai_score,
+        Company.web_score,
+        Company.flex_score,
         Company.canton,
         Company.municipality,
         Company.lat,
@@ -1365,7 +1365,7 @@ def run_batch_collect(
 
     for row in row_query.yield_per(1000):
         company_id = int(row.id)
-        score = _combined_score_values(row.claude_score, row.website_match_score, row.zefix_score)
+        score = _combined_score_values(row.ai_score, row.web_score, row.flex_score)
         distance = distance_to_muri_km(
             canton=row.canton,
             municipality=row.municipality,
@@ -1425,9 +1425,9 @@ def claude_classify_batch(
     db: Session,
     *,
     canton: str | None = None,
-    min_zefix_score: int | None = None,
-    max_zefix_score: int | None = None,
-    min_google_score: int | None = None,
+    min_flex_score: int | None = None,
+    max_flex_score: int | None = None,
+    min_web_score: int | None = None,
     purpose_keywords: str | None = None,
     tfidf_cluster: str | None = None,
     rerun_classified: bool = False,
@@ -1507,15 +1507,15 @@ def claude_classify_batch(
 
     query = db.query(Company).filter(Company.purpose.isnot(None))
     if not rerun_classified:
-        query = query.filter(Company.claude_score.is_(None))
+        query = query.filter(Company.ai_score.is_(None))
     if canton:
         query = query.filter(Company.canton == canton)
-    if min_zefix_score is not None:
-        query = query.filter(Company.zefix_score >= min_zefix_score)
-    if max_zefix_score is not None:
-        query = query.filter(Company.zefix_score <= max_zefix_score)
-    if min_google_score is not None:
-        query = query.filter(Company.website_match_score >= min_google_score)
+    if min_flex_score is not None:
+        query = query.filter(Company.flex_score >= min_flex_score)
+    if max_flex_score is not None:
+        query = query.filter(Company.flex_score <= max_flex_score)
+    if min_web_score is not None:
+        query = query.filter(Company.web_score >= min_web_score)
     if purpose_keywords:
         query = query.filter(Company.purpose_keywords.ilike(f"%{purpose_keywords}%"))
     if tfidf_cluster:
@@ -1533,7 +1533,7 @@ def claude_classify_batch(
 
     all_candidates = query.all()
     all_candidates.sort(key=lambda c: (
-        -(c.zefix_score if c.zefix_score is not None else -1),
+        -(c.flex_score if c.flex_score is not None else -1),
         distance_to_origin_km(origin_lat, origin_lon, canton=c.canton, municipality=c.municipality, lat=c.lat, lon=c.lon) or float("inf"),
         c.id,
     ))
@@ -1558,8 +1558,8 @@ def claude_classify_batch(
             parts.append(f"Clusters: {company.tfidf_cluster}")
         if company.website_url:
             parts.append(f"Website: {company.website_url}")
-        if company.website_match_score is not None:
-            parts.append(f"Google score: {company.website_match_score} (0–100 confidence that the website belongs to this company)")
+        if company.web_score is not None:
+            parts.append(f"Google score: {company.web_score} (0–100 confidence that the website belongs to this company)")
         if company.social_media_only:
             parts.append("Note: only social media presence found — no company website")
         return "\n".join(parts)
@@ -1573,10 +1573,10 @@ def claude_classify_batch(
 
     def _apply_single(company: Company, response_text: str) -> None:
         data = json.loads(_strip_fences(response_text))
-        company.claude_score = max(0, min(100, int(data.get("score", 0))))
-        company.claude_category = str(data.get("category", ""))[:128] if data.get("category") else None
-        company.claude_freeform = str(data["freeform"]) if data.get("freeform") else None
-        company.claude_scored_at = datetime.now(tz=timezone.utc)
+        company.ai_score = max(0, min(100, int(data.get("score", 0))))
+        company.ai_category = str(data.get("category", ""))[:128] if data.get("category") else None
+        company.ai_freeform = str(data["freeform"]) if data.get("freeform") else None
+        company.ai_scored_at = datetime.now(tz=timezone.utc)
 
     def _apply_chunk(chunk: list[Company], response_text: str) -> None:
         data = json.loads(_strip_fences(response_text))
@@ -1584,10 +1584,10 @@ def claude_classify_batch(
             raise ValueError(f"Expected JSON array, got {type(data).__name__}: {response_text!r}")
         now = datetime.now(tz=timezone.utc)
         for company, item in zip(chunk, data):
-            company.claude_score = max(0, min(100, int(item.get("score", 0))))
-            company.claude_category = str(item.get("category", ""))[:128] if item.get("category") else None
-            company.claude_freeform = str(item["freeform"]) if item.get("freeform") else None
-            company.claude_scored_at = now
+            company.ai_score = max(0, min(100, int(item.get("score", 0))))
+            company.ai_category = str(item.get("category", ""))[:128] if item.get("category") else None
+            company.ai_freeform = str(item["freeform"]) if item.get("freeform") else None
+            company.ai_scored_at = now
 
     def _chunk_ids(chunk: list[Company]) -> str:
         return ", ".join(c.uid for c in chunk)

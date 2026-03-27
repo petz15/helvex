@@ -3,6 +3,7 @@
 ## Dashboard & UI
 
 - [ ] **Dashboard filtering overhaul** — move filters to top of page, collapseable; TF-IDF / Purpose / Claude filters with freeform autocomplete, top 20 + show more, company count per value, exclude mode (double-click), save view as JSON per user?
+- [ ] **Category overview page** — a page/dashboard which gives an overview over the different cluster, keywords, ai classifications etc. easier to understand than only over the filters
 - [ ] **Rename scoring fields** — "Zefix Score" → "Company Score", "Google/Website Match Score" → "Web Score" (future-proof for crawlers); update all labels, tooltips, column headers, CSV export
 - [ ] **General QOL** — Impressum, Datenschutz pages, user settings page, general polish
 - [ ] **Save views** — serialize active filters/sort/columns as JSON, stored per user, quickly re-applied from a dropdown

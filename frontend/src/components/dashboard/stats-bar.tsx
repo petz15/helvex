@@ -97,20 +97,20 @@ export function StatsBar({ stats, onFilter, activeKey, activeValue }: StatsBarPr
       />
       <div className="w-px h-7 bg-slate-200 mx-1" />
       <Stat
-        label="Proposals sent"
-        value={stats.proposal.sent ?? 0}
+        label="Contacts sent"
+        value={stats.contact?.sent ?? 0}
         color="yellow"
         icon={<Send size={16} />}
-        active={activeKey === "proposal_status" && activeValue === "sent"}
-        onClick={() => onFilter("proposal_status", "sent")}
+        active={activeKey === "contact_status" && activeValue === "sent"}
+        onClick={() => onFilter("contact_status", "sent")}
       />
       <Stat
         label="Converted"
-        value={stats.proposal.converted ?? 0}
+        value={stats.contact?.converted ?? 0}
         color="green"
         icon={<CheckCircle2 size={16} />}
-        active={activeKey === "proposal_status" && activeValue === "converted"}
-        onClick={() => onFilter("proposal_status", "converted")}
+        active={activeKey === "contact_status" && activeValue === "converted"}
+        onClick={() => onFilter("contact_status", "converted")}
       />
       <div className="w-px h-7 bg-slate-200 mx-1" />
       <Stat

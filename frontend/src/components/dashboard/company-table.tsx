@@ -13,10 +13,11 @@ import type { Company, CompanyFilters } from "@/lib/types";
 const ch = createColumnHelper<Company>();
 
 const SORT_MAP: Record<string, string> = {
-  name: "name", canton: "canton", website_match_score: "google_score",
-  zefix_score: "zefix_score", claude_score: "claude_score",
+  name: "name", canton: "canton", web_score: "web_score",
+  flex_score: "flex_score", ai_score: "ai_score",
   combined_score: "combined_score", review_status: "review_status",
-  proposal_status: "proposal_status", updated_at: "updated",
+  contact_status: "contact_status", ai_category: "ai_category",
+  updated_at: "updated",
 };
 
 interface CompanyTableProps {
@@ -63,10 +64,10 @@ export function CompanyTable({ companies, selectedId, onSelect, filters, onSort,
 
   const [columnVisibility, setColumnVisibility] = useState<VisibilityState>({
     tfidf_cluster: false,
-    claude_category: false,
+    ai_category: false,
     website_checked_at: false,
-    zefix_scored_at: false,
-    claude_scored_at: false,
+    flex_scored_at: false,
+    ai_scored_at: false,
   });
   const [showColPicker, setShowColPicker] = useState(false);
 
@@ -111,19 +112,19 @@ export function CompanyTable({ companies, selectedId, onSelect, filters, onSort,
             : <span className="text-slate-300 text-xs">—</span>;
         },
       }),
-      ch.accessor("website_match_score", {
-        header: "Google",
+      ch.accessor("web_score", {
+        header: "Web",
         cell: (info) => <ScoreBar score={info.getValue() as number | null} />,
       }),
-      ch.accessor("zefix_score", {
-        header: "Zefix",
+      ch.accessor("flex_score", {
+        header: "Flex",
         cell: (info) => <ScoreBar score={info.getValue() as number | null} />,
       }),
-      ch.accessor("claude_score", {
-        header: "Claude",
+      ch.accessor("ai_score", {
+        header: "AI",
         cell: (info) => <ScoreBar score={info.getValue() as number | null} />,
       }),
-      ch.accessor("claude_category", {
+      ch.accessor("ai_category", {
         header: "Category",
         cell: (info) => <span className="text-slate-500 text-xs truncate max-w-[120px] block">{info.getValue() as string ?? "—"}</span>,
       }),
@@ -151,8 +152,8 @@ export function CompanyTable({ companies, selectedId, onSelect, filters, onSort,
           </Badge>
         ),
       }),
-      ch.accessor("proposal_status", {
-        header: "Proposal",
+      ch.accessor("contact_status", {
+        header: "Contact",
         cell: (info) => {
           const v = info.getValue() as string | null;
           if (!v || v === "not_sent") return <span className="text-slate-300 text-xs">—</span>;
@@ -166,15 +167,15 @@ export function CompanyTable({ companies, selectedId, onSelect, filters, onSort,
           return <span className="text-slate-400 text-xs">{v ? new Date(v).toLocaleDateString("de-CH") : "—"}</span>;
         },
       }),
-      ch.accessor("zefix_scored_at", {
-        header: "Last Zefix",
+      ch.accessor("flex_scored_at", {
+        header: "Last Flex",
         cell: (info) => {
           const v = info.getValue() as string | null;
           return <span className="text-slate-400 text-xs">{v ? new Date(v).toLocaleDateString("de-CH") : "—"}</span>;
         },
       }),
-      ch.accessor("claude_scored_at", {
-        header: "Last Claude",
+      ch.accessor("ai_scored_at", {
+        header: "Last AI",
         cell: (info) => {
           const v = info.getValue() as string | null;
           return <span className="text-slate-400 text-xs">{v ? new Date(v).toLocaleDateString("de-CH") : "—"}</span>;

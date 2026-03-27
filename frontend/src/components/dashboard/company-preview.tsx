@@ -106,9 +106,9 @@ export function CompanyPreview({ company: incoming, onClose, onUpdated }: Compan
         <Badge className={reviewBadgeClass(company.review_status)}>
           {company.review_status?.replace(/_/g, " ") ?? "Pending"}
         </Badge>
-        {company.proposal_status && company.proposal_status !== "not_sent" && (
-          <Badge className={proposalBadgeClass(company.proposal_status)}>
-            {company.proposal_status}
+        {company.contact_status && company.contact_status !== "not_sent" && (
+          <Badge className={proposalBadgeClass(company.contact_status)}>
+            {company.contact_status}
           </Badge>
         )}
         {company.tags && company.tags.split(",").map((t) => (
@@ -123,16 +123,16 @@ export function CompanyPreview({ company: incoming, onClose, onUpdated }: Compan
           <ScoreBar score={company.combined_score} className="flex-1" />
         </div>
         <div className="flex items-center justify-between text-xs">
-          <span className="text-slate-500 w-16">Google</span>
-          <ScoreBar score={company.website_match_score} className="flex-1" />
+          <span className="text-slate-500 w-16">Web</span>
+          <ScoreBar score={company.web_score} className="flex-1" />
         </div>
         <div className="flex items-center justify-between text-xs">
-          <span className="text-slate-500 w-16">Claude</span>
-          <ScoreBar score={company.claude_score} className="flex-1" />
+          <span className="text-slate-500 w-16">AI</span>
+          <ScoreBar score={company.ai_score} className="flex-1" />
         </div>
         <div className="flex items-center justify-between text-xs">
-          <span className="text-slate-500 w-16">Zefix</span>
-          <ScoreBar score={company.zefix_score} className="flex-1" />
+          <span className="text-slate-500 w-16">Flex</span>
+          <ScoreBar score={company.flex_score} className="flex-1" />
         </div>
       </div>
 
@@ -159,10 +159,10 @@ export function CompanyPreview({ company: incoming, onClose, onUpdated }: Compan
             <p className="text-xs text-slate-700 line-clamp-4">{company.purpose}</p>
           </div>
         )}
-        {company.claude_category && (
+        {company.ai_category && (
           <div>
-            <span className="text-xs text-slate-400 block mb-0.5">Claude category</span>
-            <span className="text-xs text-slate-700">{company.claude_category}</span>
+            <span className="text-xs text-slate-400 block mb-0.5">AI category</span>
+            <span className="text-xs text-slate-700">{company.ai_category}</span>
           </div>
         )}
         {(company.contact_name || company.contact_email || company.contact_phone) && (

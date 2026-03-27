@@ -686,7 +686,7 @@ def _is_cancelled(status: str | None) -> bool:
     return any(t in norm for t in _CANCELLED_STATUS_TERMS)
 
 
-def compute_zefix_score_breakdown(
+def compute_flex_score_breakdown(
     *,
     legal_form: str | None,
     legal_form_short_name: str | None,
@@ -782,7 +782,7 @@ def compute_zefix_score_breakdown(
     return breakdown
 
 
-def compute_zefix_score(
+def compute_flex_score(
     *,
     legal_form: str | None,
     legal_form_short_name: str | None,
@@ -799,7 +799,7 @@ def compute_zefix_score(
     purpose: str | None = None,
     branch_offices: str | None = None,
 ) -> int:
-    return int(compute_zefix_score_breakdown(
+    return int(compute_flex_score_breakdown(
         legal_form=legal_form,
         legal_form_short_name=legal_form_short_name,
         status=status,

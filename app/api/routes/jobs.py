@@ -182,8 +182,8 @@ class BatchCollectBody(BaseModel):
     refresh_zefix: bool = False
     run_google: bool = True
     canton: str | None = None
-    min_zefix_score: int | None = None
-    min_claude_score: int | None = None
+    min_zefix_score: int | None = None   # passed as-is to job params; worker maps to min_flex_score
+    min_claude_score: int | None = None  # passed as-is to job params; worker maps to min_ai_score
     purpose_keywords: str | None = None
     tfidf_cluster: str | None = None
     review_status: str | None = None
@@ -216,9 +216,9 @@ class RecalcGoogleBody(BaseModel):
 
 class ClaudeClassifyBody(BaseModel):
     canton: str | None = None
-    min_zefix_score: int | None = None
-    max_zefix_score: int | None = None
-    min_google_score: int | None = None
+    min_zefix_score: int | None = None   # passed as-is to job params; worker maps to min_flex_score
+    max_zefix_score: int | None = None   # passed as-is to job params; worker maps to max_flex_score
+    min_google_score: int | None = None  # passed as-is to job params; worker maps to min_web_score
     purpose_keywords: str | None = None
     rerun_classified: bool = False
     auto_filter_keywords: bool = False

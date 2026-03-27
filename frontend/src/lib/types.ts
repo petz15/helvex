@@ -11,17 +11,17 @@ export interface Company {
   website_url: string | null;
   website_checked_at: string | null;
   google_search_results_raw: string | null;
-  website_match_score: number | null;
+  web_score: number | null;
   social_media_only: boolean | null;
-  zefix_score: number | null;
-  zefix_scored_at: string | null;
-  claude_score: number | null;
-  claude_scored_at: string | null;
-  claude_category: string | null;
-  claude_freeform: string | null;
+  flex_score: number | null;
+  flex_scored_at: string | null;
+  ai_score: number | null;
+  ai_scored_at: string | null;
+  ai_category: string | null;
+  ai_freeform: string | null;
   combined_score: number | null;
   review_status: string | null;
-  proposal_status: string | null;
+  contact_status: string | null;
   contact_name: string | null;
   contact_email: string | null;
   contact_phone: string | null;
@@ -67,26 +67,35 @@ export interface CompanyStats {
   with_website: number;
   searches_today: number;
   review: Record<string, number>;
-  proposal: Record<string, number>;
+  contact: Record<string, number>;
 }
 
 export interface CompanyFilters {
   q?: string;
+  status?: string;
   canton?: string;
   review_status?: string;
-  proposal_status?: string;
+  contact_status?: string;
   google_searched?: string;
-  min_google_score?: number;
-  min_zefix_score?: number;
-  min_claude_score?: number;
-  claude_category?: string;
+  min_web_score?: number;
+  max_web_score?: number;
+  min_flex_score?: number;
+  max_flex_score?: number;
+  min_ai_score?: number;
+  max_ai_score?: number;
+  min_combined_score?: number;
+  max_combined_score?: number;
+  ai_category?: string;
   tags?: string;
   tfidf_cluster?: string;
   purpose_keywords?: string;
   exclude_tags?: string;
   exclude_review_status?: string;
   exclude_canton?: string;
-  exclude_proposal_status?: string;
+  exclude_contact_status?: string;
+  exclude_tfidf_cluster?: string;
+  exclude_purpose_keywords?: string;
+  exclude_ai_category?: string;
   sort?: string;
   page?: number;
   page_size?: number;
@@ -101,7 +110,7 @@ export const REVIEW_STATUSES = [
   { value: "rejected", label: "Rejected", color: "red" },
 ] as const;
 
-export const PROPOSAL_STATUSES = [
+export const CONTACT_STATUSES = [
   { value: "sent", label: "Sent", color: "yellow" },
   { value: "responded", label: "Responded", color: "blue" },
   { value: "converted", label: "Converted", color: "green" },
@@ -178,12 +187,19 @@ export interface MapFeature {
   name: string;
   lat: number;
   lon: number;
-  google_score: number | null;
-  zefix_score: number | null;
-  claude_score: number | null;
+  web_score: number | null;
+  flex_score: number | null;
+  ai_score: number | null;
   canton: string | null;
   municipality: string | null;
   website: string | null;
   review: string | null;
   status: string | null;
+}
+
+export interface SavedView {
+  id: number;
+  name: string;
+  filters: CompanyFilters;
+  created_at: string;
 }

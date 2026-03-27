@@ -1,4 +1,4 @@
-import type { AppSettings, BoilerplatePattern, Company, CompanyFilters, CompanyPage, CompanyStats, Job, JobEvent, MapCluster } from "./types";
+import type { AppSettings, BoilerplatePattern, Company, CompanyFilters, CompanyPage, CompanyStats, Job, JobEvent, MapCluster, SavedView } from "./types";
 
 const BASE = process.env.NEXT_PUBLIC_API_BASE ?? "";
 
@@ -224,12 +224,12 @@ export interface OrgCompanyState {
   company_id: number;
   tags: string | null;
   review_status: string | null;
-  proposal_status: string | null;
+  contact_status: string | null;
   contact_name: string | null;
   contact_email: string | null;
   contact_phone: string | null;
   website_url: string | null;
-  website_match_score: number | null;
+  web_score: number | null;
   social_media_only: boolean | null;
   website_checked_at: string | null;
 }
@@ -237,9 +237,9 @@ export interface OrgCompanyState {
 export interface UserCompanyState {
   user_id: number;
   company_id: number;
-  claude_score: number | null;
-  claude_category: string | null;
-  claude_freeform: string | null;
+  ai_score: number | null;
+  ai_category: string | null;
+  ai_freeform: string | null;
   personal_score_override: number | null;
 }
 
@@ -253,7 +253,7 @@ export async function fetchOrgCompanyState(orgId: number, companyId: number): Pr
 export async function updateOrgCompanyState(
   orgId: number,
   companyId: number,
-  data: Partial<Omit<OrgCompanyState, "org_id" | "company_id" | "website_url" | "website_match_score" | "social_media_only" | "website_checked_at">>,
+  data: Partial<Omit<OrgCompanyState, "org_id" | "company_id" | "website_url" | "web_score" | "social_media_only" | "website_checked_at">>,
 ): Promise<OrgCompanyState> {
   const res = await fetch(orgPath(orgId, `/companies/${companyId}/state`), {
     method: "PATCH",
@@ -575,4 +575,26 @@ export async function deleteAdminOrg(orgId: number): Promise<void> {
     const body = await res.json().catch(() => ({}));
     throw new Error(body.detail ?? "Failed to delete org");
   }
+}
+
+// ── Saved Views ───────────────────────────────────────────────────────────────
+
+export async function fetchSavedViews(): Promise<SavedView[]> {
+  const res = await fetch("/api/v1/views");
+  if (!res.ok) throw new Error("Failed to fetch views");
+  return res.json();
+}
+
+export async function saveView(name: string, filters: CompanyFilters): Promise<SavedView> {
+  const res = await fetch("/api/v1/views", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name, filters }),
+  });
+  if (!res.ok) throw new Error("Failed to save view");
+  return res.json();
+}
+
+export async function deleteView(id: number): Promise<void> {
+  await fetch(`/api/v1/views/${id}`, { method: "DELETE" });
 }

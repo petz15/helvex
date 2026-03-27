@@ -1,10 +1,10 @@
 "use client";
 import { useState, useCallback } from "react";
-import { X, SlidersHorizontal, ChevronDown } from "lucide-react";
+import { X, SlidersHorizontal, ChevronDown, Bookmark, BookmarkCheck, Trash2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Combobox } from "./combobox";
-import type { CompanyFilters } from "@/lib/types";
-import { REVIEW_STATUSES, PROPOSAL_STATUSES } from "@/lib/types";
+import type { CompanyFilters, SavedView } from "@/lib/types";
+import { REVIEW_STATUSES, CONTACT_STATUSES } from "@/lib/types";
 
 interface FilterBarProps {
   filters: CompanyFilters;
@@ -13,6 +13,10 @@ interface FilterBarProps {
   onChange: (filters: CompanyFilters) => void;
   onClear: () => void;
   resultCount: number;
+  savedViews?: SavedView[];
+  onSaveView?: (name: string) => void;
+  onLoadView?: (filters: CompanyFilters) => void;
+  onDeleteView?: (id: number) => void;
 }
 
 const inputCls =
@@ -20,28 +24,90 @@ const inputCls =
 
 const selectCls = cn(inputCls, "appearance-none pr-6");
 
+function SectionLabel({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="text-xs font-semibold text-slate-400 uppercase tracking-widest mb-2 mt-3 first:mt-0">
+      {children}
+    </div>
+  );
+}
+
 function Label({ children }: { children: React.ReactNode }) {
-  return <div className="text-xs font-medium text-slate-500 uppercase tracking-wide mb-1">{children}</div>;
+  return <div className="text-xs font-medium text-slate-500 mb-1">{children}</div>;
+}
+
+function ScoreRange({
+  label, minKey, maxKey, filters, set,
+}: {
+  label: string;
+  minKey: keyof CompanyFilters;
+  maxKey: keyof CompanyFilters;
+  filters: CompanyFilters;
+  set: (key: keyof CompanyFilters, value: number | undefined) => void;
+}) {
+  return (
+    <div>
+      <Label>{label}</Label>
+      <div className="flex gap-1 items-center">
+        <input
+          type="number" min={0} max={100} placeholder="Min"
+          className={cn(inputCls, "w-full")}
+          value={(filters[minKey] as number | undefined) ?? ""}
+          onChange={(e) => set(minKey, e.target.value ? Number(e.target.value) : undefined)}
+        />
+        <span className="text-slate-300 text-xs shrink-0">–</span>
+        <input
+          type="number" min={0} max={100} placeholder="Max"
+          className={cn(inputCls, "w-full")}
+          value={(filters[maxKey] as number | undefined) ?? ""}
+          onChange={(e) => set(maxKey, e.target.value ? Number(e.target.value) : undefined)}
+        />
+      </div>
+    </div>
+  );
 }
 
 const CHIP_LABELS: Partial<Record<keyof CompanyFilters, string>> = {
-  q: "Search", canton: "Canton", review_status: "Review", proposal_status: "Proposal",
-  google_searched: "Google", tags: "Tags", claude_category: "Claude",
+  q: "Search", canton: "Canton", review_status: "Review", contact_status: "Contact",
+  google_searched: "Web search", tags: "Tags", ai_category: "AI Class.",
   tfidf_cluster: "Cluster", purpose_keywords: "Keyword",
-  min_google_score: "Min Google", min_claude_score: "Min Claude", min_zefix_score: "Min Zefix",
-  exclude_review_status: "Excl. review", exclude_proposal_status: "Excl. proposal",
+  min_web_score: "Min Web", max_web_score: "Max Web",
+  min_flex_score: "Min Flex", max_flex_score: "Max Flex",
+  min_ai_score: "Min AI", max_ai_score: "Max AI",
+  min_combined_score: "Min Combined", max_combined_score: "Max Combined",
+  exclude_review_status: "Excl. review", exclude_contact_status: "Excl. contact",
   exclude_canton: "Excl. canton", exclude_tags: "Excl. tags",
+  exclude_tfidf_cluster: "Excl. cluster", exclude_purpose_keywords: "Excl. keyword",
+  exclude_ai_category: "Excl. AI class.",
 };
 
-export function FilterBar({ filters, cantons, taxonomy, onChange, onClear, resultCount }: FilterBarProps) {
-  const [expanded, setExpanded] = useState(false);
+const ZEFIX_STATUSES = [
+  { value: "ACTIVE", label: "Active" },
+  { value: "CANCELLED", label: "Cancelled" },
+  { value: "BEING_CANCELLED", label: "Being cancelled" },
+];
 
-  const clusters = taxonomy?.clusters ?? [];
-  const keywords = taxonomy?.keywords ?? [];
+export function FilterBar({
+  filters, cantons, taxonomy, onChange, onClear, resultCount,
+  savedViews = [], onSaveView, onLoadView, onDeleteView,
+}: FilterBarProps) {
+  const [expanded, setExpanded] = useState(false);
+  const [saveViewName, setSaveViewName] = useState("");
+  const [showSaveInput, setShowSaveInput] = useState(false);
+  const [showViewsMenu, setShowViewsMenu] = useState(false);
+
+  const clusters = (taxonomy?.clusters ?? []).slice(0, 20);
+  const keywords = (taxonomy?.keywords ?? []).slice(0, 20);
+  const categories = (taxonomy?.categories ?? []).slice(0, 20);
 
   const set = useCallback(
     (key: keyof CompanyFilters, value: string | number | undefined) =>
       onChange({ ...filters, [key]: value || undefined, page: 1 }),
+    [filters, onChange]
+  );
+  const setNum = useCallback(
+    (key: keyof CompanyFilters, value: number | undefined) =>
+      onChange({ ...filters, [key]: value, page: 1 }),
     [filters, onChange]
   );
   const unset = useCallback(
@@ -55,15 +121,23 @@ export function FilterBar({ filters, cantons, taxonomy, onChange, onClear, resul
 
   const activeCount = activeEntries.length;
 
+  function handleSaveView() {
+    if (saveViewName.trim() && onSaveView) {
+      onSaveView(saveViewName.trim());
+      setSaveViewName("");
+      setShowSaveInput(false);
+    }
+  }
+
   return (
     <div className="border-b border-slate-200 bg-slate-50 text-sm">
       {/* Toggle row */}
-      <div className="flex items-center gap-2 px-3 py-2">
+      <div className="flex items-center gap-2 px-3 py-2 flex-wrap">
         <button
           type="button"
           onClick={() => setExpanded((e) => !e)}
           className={cn(
-            "flex items-center gap-1.5 rounded px-2.5 py-1 text-sm font-medium transition-colors",
+            "flex items-center gap-1.5 rounded px-2.5 py-1 text-sm font-medium transition-colors shrink-0",
             expanded
               ? "bg-blue-600 text-white"
               : "bg-white border border-slate-200 text-slate-600 hover:bg-slate-100"
@@ -103,183 +177,219 @@ export function FilterBar({ filters, cantons, taxonomy, onChange, onClear, resul
           )}
         </div>
 
-        <span className="ml-auto shrink-0 text-xs text-slate-400">
-          {resultCount.toLocaleString()} result{resultCount !== 1 ? "s" : ""}
-        </span>
+        {/* Saved views */}
+        <div className="flex items-center gap-1.5 shrink-0 ml-auto">
+          {savedViews.length > 0 && (
+            <div className="relative">
+              <button
+                type="button"
+                onClick={() => { setShowViewsMenu((v) => !v); setShowSaveInput(false); }}
+                className="flex items-center gap-1 text-xs text-slate-500 hover:text-slate-700 px-2 py-1 rounded border border-slate-200 bg-white hover:bg-slate-50"
+              >
+                <BookmarkCheck size={13} /> Views ({savedViews.length})
+              </button>
+              {showViewsMenu && (
+                <div className="absolute right-0 top-full mt-1 z-50 bg-white border border-slate-200 rounded-lg shadow-lg min-w-[180px]">
+                  {savedViews.map((v) => (
+                    <div key={v.id} className="flex items-center justify-between px-3 py-2 hover:bg-slate-50 group">
+                      <button
+                        type="button"
+                        className="text-sm text-slate-700 truncate flex-1 text-left"
+                        onClick={() => { onLoadView?.(v.filters); setShowViewsMenu(false); }}
+                      >
+                        {v.name}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => onDeleteView?.(v.id)}
+                        className="text-slate-300 hover:text-red-500 ml-2 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity"
+                      >
+                        <Trash2 size={13} />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+          {showSaveInput ? (
+            <div className="flex items-center gap-1">
+              <input
+                autoFocus
+                type="text"
+                placeholder="View name…"
+                value={saveViewName}
+                onChange={(e) => setSaveViewName(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Enter") handleSaveView(); if (e.key === "Escape") setShowSaveInput(false); }}
+                className="text-xs border border-slate-200 rounded px-2 py-1 w-32 focus:outline-none focus:ring-2 focus:ring-blue-400"
+              />
+              <button
+                type="button"
+                onClick={handleSaveView}
+                disabled={!saveViewName.trim()}
+                className="text-xs bg-blue-600 text-white px-2 py-1 rounded hover:bg-blue-700 disabled:opacity-50"
+              >
+                Save
+              </button>
+              <button type="button" onClick={() => setShowSaveInput(false)} className="text-slate-400 hover:text-slate-600">
+                <X size={13} />
+              </button>
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={() => { setShowSaveInput(true); setShowViewsMenu(false); }}
+              className="flex items-center gap-1 text-xs text-slate-500 hover:text-slate-700 px-2 py-1 rounded border border-slate-200 bg-white hover:bg-slate-50"
+            >
+              <Bookmark size={13} /> Save view
+            </button>
+          )}
+          <span className="text-xs text-slate-400 px-1">
+            {resultCount.toLocaleString()} result{resultCount !== 1 ? "s" : ""}
+          </span>
+        </div>
       </div>
 
-      {/* Expanded filter grid */}
+      {/* Expanded sections */}
       {expanded && (
         <div className="px-3 pb-3 border-t border-slate-200 bg-white">
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6 gap-x-4 gap-y-3 pt-3">
 
-            {/* Search */}
+          {/* ── CORE ── */}
+          <SectionLabel>Core</SectionLabel>
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-x-4 gap-y-3">
             <div>
-              <Label>Search</Label>
+              <Label>Name</Label>
               <input type="text" className={inputCls} placeholder="Company name…"
                 value={filters.q ?? ""} onChange={(e) => set("q", e.target.value)} />
             </div>
-
-            {/* Canton */}
             <div>
               <Label>Canton</Label>
               <div className="relative">
-                <select className={cn(selectCls, "bg-[right_0.4rem_center] bg-no-repeat")}
-                  value={filters.canton ?? ""} onChange={(e) => set("canton", e.target.value)}>
+                <select className={cn(selectCls)} value={filters.canton ?? ""}
+                  onChange={(e) => set("canton", e.target.value)}>
                   <option value="">All cantons</option>
                   {cantons.map((c) => <option key={c} value={c}>{c}</option>)}
                 </select>
                 <ChevronDown size={13} className="pointer-events-none absolute right-2 top-2 text-slate-400" />
               </div>
             </div>
-
-            {/* TF-IDF cluster — combobox */}
             <div>
-              <Label>TF-IDF cluster</Label>
+              <Label>Zefix status</Label>
+              <div className="relative">
+                <select className={cn(selectCls)} value={filters.status ?? ""}
+                  onChange={(e) => set("status" as keyof CompanyFilters, e.target.value)}>
+                  <option value="">All</option>
+                  {ZEFIX_STATUSES.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
+                </select>
+                <ChevronDown size={13} className="pointer-events-none absolute right-2 top-2 text-slate-400" />
+              </div>
+            </div>
+            <div>
+              <Label>Review status</Label>
+              <div className="relative">
+                <select className={cn(selectCls)} value={filters.review_status ?? ""}
+                  onChange={(e) => set("review_status", e.target.value)}>
+                  <option value="">All</option>
+                  <option value="_none">Pending (none)</option>
+                  {REVIEW_STATUSES.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
+                </select>
+                <ChevronDown size={13} className="pointer-events-none absolute right-2 top-2 text-slate-400" />
+              </div>
+            </div>
+            <div>
+              <Label>Contact status</Label>
+              <div className="relative">
+                <select className={cn(selectCls)} value={filters.contact_status ?? ""}
+                  onChange={(e) => set("contact_status", e.target.value)}>
+                  <option value="">All</option>
+                  <option value="_none">Not sent (none)</option>
+                  {CONTACT_STATUSES.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
+                </select>
+                <ChevronDown size={13} className="pointer-events-none absolute right-2 top-2 text-slate-400" />
+              </div>
+            </div>
+          </div>
+
+          {/* ── CATEGORY (INCLUDE) ── */}
+          <SectionLabel>Category (include)</SectionLabel>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-x-4 gap-y-3">
+            <div>
+              <Label>Cluster (top 20)</Label>
               <Combobox
                 options={clusters}
                 value={filters.tfidf_cluster === "_none" || filters.tfidf_cluster === "_any" ? undefined : filters.tfidf_cluster}
                 onChange={(v) => set("tfidf_cluster", v)}
-                placeholder={`Search ${clusters.length} clusters…`}
+                placeholder="Search clusters…"
                 extraOptions={[
                   { value: "_none", label: "None (unset)" },
                   { value: "_any", label: "Any (set)" },
                 ]}
               />
             </div>
-
-            {/* Purpose keyword — combobox */}
             <div>
-              <Label>Purpose keyword (top 100)</Label>
+              <Label>Purpose keyword (top 20)</Label>
               <Combobox
                 options={keywords}
                 value={filters.purpose_keywords === "_none" ? undefined : filters.purpose_keywords}
                 onChange={(v) => set("purpose_keywords", v)}
-                placeholder={`Search ${keywords.length} keywords…`}
+                placeholder="Search keywords…"
                 extraOptions={[{ value: "_none", label: "None (unset)" }]}
               />
             </div>
-
-            {/* Review status */}
             <div>
-              <Label>Review status</Label>
-              <div className="relative">
-                <select className={cn(selectCls, "bg-[right_0.4rem_center] bg-no-repeat")}
-                  value={filters.review_status ?? ""} onChange={(e) => set("review_status", e.target.value)}>
-                  <option value="">All</option>
-                  <option value="_none">Pending (none set)</option>
-                  {REVIEW_STATUSES.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
-                </select>
-                <ChevronDown size={13} className="pointer-events-none absolute right-2 top-2 text-slate-400" />
-              </div>
+              <Label>AI Classification (top 20)</Label>
+              <Combobox
+                options={categories}
+                value={filters.ai_category === "_none" ? undefined : filters.ai_category}
+                onChange={(v) => set("ai_category", v)}
+                placeholder="Search categories…"
+                extraOptions={[{ value: "_none", label: "None (unset)" }]}
+              />
             </div>
-
-            {/* Proposal status */}
-            <div>
-              <Label>Proposal status</Label>
-              <div className="relative">
-                <select className={cn(selectCls, "bg-[right_0.4rem_center] bg-no-repeat")}
-                  value={filters.proposal_status ?? ""} onChange={(e) => set("proposal_status", e.target.value)}>
-                  <option value="">All</option>
-                  <option value="_none">Not sent (none set)</option>
-                  {PROPOSAL_STATUSES.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
-                </select>
-                <ChevronDown size={13} className="pointer-events-none absolute right-2 top-2 text-slate-400" />
-              </div>
-            </div>
-
-            {/* Tags */}
-            <div>
-              <Label>Tags</Label>
-              <input type="text" className={inputCls} placeholder="e.g. saas, warm-lead…"
-                value={filters.tags ?? ""} onChange={(e) => set("tags", e.target.value)} />
-            </div>
-
-            {/* Claude category */}
-            <div>
-              <Label>Claude category</Label>
-              <input type="text" className={inputCls} placeholder="e.g. SaaS or _none"
-                value={filters.claude_category ?? ""} onChange={(e) => set("claude_category", e.target.value)} />
-            </div>
-
-            {/* Google search */}
-            <div>
-              <Label>Google search</Label>
-              <div className="relative">
-                <select className={cn(selectCls, "bg-[right_0.4rem_center] bg-no-repeat")}
-                  value={filters.google_searched ?? ""} onChange={(e) => set("google_searched", e.target.value)}>
-                  <option value="">All</option>
-                  <option value="yes">Searched</option>
-                  <option value="no_result">No result</option>
-                  <option value="no">Not searched</option>
-                </select>
-                <ChevronDown size={13} className="pointer-events-none absolute right-2 top-2 text-slate-400" />
-              </div>
-            </div>
-
-            {/* Min scores */}
-            <div>
-              <Label>Min Google score</Label>
-              <input type="number" className={inputCls} min={0} max={100} placeholder="0–100"
-                value={filters.min_google_score ?? ""}
-                onChange={(e) => set("min_google_score", e.target.value ? Number(e.target.value) : undefined)} />
-            </div>
-            <div>
-              <Label>Min Claude score</Label>
-              <input type="number" className={inputCls} min={0} max={100} placeholder="0–100"
-                value={filters.min_claude_score ?? ""}
-                onChange={(e) => set("min_claude_score", e.target.value ? Number(e.target.value) : undefined)} />
-            </div>
-            <div>
-              <Label>Min Zefix score</Label>
-              <input type="number" className={inputCls} min={0} max={100} placeholder="0–100"
-                value={filters.min_zefix_score ?? ""}
-                onChange={(e) => set("min_zefix_score", e.target.value ? Number(e.target.value) : undefined)} />
-            </div>
-
-            {/* Exclude row */}
-            <div>
-              <Label>Excl. canton</Label>
-              <div className="relative">
-                <select className={cn(selectCls, "bg-[right_0.4rem_center] bg-no-repeat")}
-                  value={filters.exclude_canton ?? ""} onChange={(e) => set("exclude_canton", e.target.value)}>
-                  <option value="">— none —</option>
-                  {cantons.map((c) => <option key={c} value={c}>{c}</option>)}
-                </select>
-                <ChevronDown size={13} className="pointer-events-none absolute right-2 top-2 text-slate-400" />
-              </div>
-            </div>
-            <div>
-              <Label>Excl. review</Label>
-              <div className="relative">
-                <select className={cn(selectCls, "bg-[right_0.4rem_center] bg-no-repeat")}
-                  value={filters.exclude_review_status ?? ""} onChange={(e) => set("exclude_review_status", e.target.value)}>
-                  <option value="">— none —</option>
-                  {REVIEW_STATUSES.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
-                </select>
-                <ChevronDown size={13} className="pointer-events-none absolute right-2 top-2 text-slate-400" />
-              </div>
-            </div>
-            <div>
-              <Label>Excl. proposal</Label>
-              <div className="relative">
-                <select className={cn(selectCls, "bg-[right_0.4rem_center] bg-no-repeat")}
-                  value={filters.exclude_proposal_status ?? ""} onChange={(e) => set("exclude_proposal_status", e.target.value)}>
-                  <option value="">— none —</option>
-                  {PROPOSAL_STATUSES.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
-                </select>
-                <ChevronDown size={13} className="pointer-events-none absolute right-2 top-2 text-slate-400" />
-              </div>
-            </div>
-            <div>
-              <Label>Excl. tags</Label>
-              <input type="text" className={inputCls} placeholder="comma-separated"
-                value={filters.exclude_tags ?? ""} onChange={(e) => set("exclude_tags", e.target.value)} />
-            </div>
-
           </div>
 
-          {/* Clear button inside expanded panel */}
+          {/* ── SCORES ── */}
+          <SectionLabel>Scores</SectionLabel>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-x-4 gap-y-3">
+            <ScoreRange label="Web Score" minKey="min_web_score" maxKey="max_web_score" filters={filters} set={setNum} />
+            <ScoreRange label="Flex Score" minKey="min_flex_score" maxKey="max_flex_score" filters={filters} set={setNum} />
+            <ScoreRange label="AI Score" minKey="min_ai_score" maxKey="max_ai_score" filters={filters} set={setNum} />
+            <ScoreRange label="Combined Score" minKey="min_combined_score" maxKey="max_combined_score" filters={filters} set={setNum} />
+          </div>
+
+          {/* ── CATEGORY (EXCLUDE) ── */}
+          <SectionLabel>Category (exclude)</SectionLabel>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-x-4 gap-y-3">
+            <div>
+              <Label>Excl. cluster</Label>
+              <Combobox
+                options={clusters}
+                value={filters.exclude_tfidf_cluster}
+                onChange={(v) => set("exclude_tfidf_cluster", v)}
+                placeholder="Search clusters…"
+              />
+            </div>
+            <div>
+              <Label>Excl. purpose keyword</Label>
+              <Combobox
+                options={keywords}
+                value={filters.exclude_purpose_keywords}
+                onChange={(v) => set("exclude_purpose_keywords", v)}
+                placeholder="Search keywords…"
+              />
+            </div>
+            <div>
+              <Label>Excl. AI classification</Label>
+              <Combobox
+                options={categories}
+                value={filters.exclude_ai_category}
+                onChange={(v) => set("exclude_ai_category", v)}
+                placeholder="Search categories…"
+              />
+            </div>
+          </div>
+
+          {/* Clear button */}
           {activeCount > 0 && (
             <div className="mt-3 pt-2 border-t border-slate-100 flex justify-end">
               <button onClick={onClear} className="text-xs text-slate-500 hover:text-slate-700 flex items-center gap-1">

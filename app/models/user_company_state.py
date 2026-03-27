@@ -24,13 +24,13 @@ class UserCompanyState(Base):
     # org_id stored for fast scoping/cleanup when a user leaves an org
     org_id: Mapped[int] = mapped_column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
 
-    # Private Claude outputs
-    claude_score: Mapped[float | None] = mapped_column(Float, nullable=True)
-    claude_category: Mapped[str | None] = mapped_column(String(128), nullable=True)
-    claude_freeform: Mapped[str | None] = mapped_column(Text, nullable=True)
-    claude_scored_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Private AI outputs
+    ai_score: Mapped[float | None] = mapped_column(Float, nullable=True)
+    ai_category: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    ai_freeform: Mapped[str | None] = mapped_column(Text, nullable=True)
+    ai_scored_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
-    # Personal score override (null = no override, use catalog zefix_score)
+    # Personal score override (null = no override, use catalog flex_score)
     personal_score_override: Mapped[float | None] = mapped_column(Float, nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)

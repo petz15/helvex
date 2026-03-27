@@ -7,7 +7,7 @@ import { StatsBar } from "@/components/dashboard/stats-bar";
 import { CompanyTable } from "@/components/dashboard/company-table";
 import { CompanyPreview } from "@/components/dashboard/company-preview";
 import { Pagination } from "@/components/dashboard/pagination";
-import { fetchCompanies, fetchStats, fetchCantons, fetchTaxonomy } from "@/lib/api";
+import { fetchCompanies, fetchStats, fetchCantons, fetchTaxonomy, fetchSavedViews, saveView, deleteView } from "@/lib/api";
 import type { Company, CompanyFilters, CompanyStats } from "@/lib/types";
 
 function buildExportUrl(filters: CompanyFilters): string {
@@ -42,6 +42,7 @@ export function DashboardClient({ initialCantons, initialStats }: DashboardClien
   const { data: stats } = useSWR("stats", fetchStats, { fallbackData: initialStats });
   const { data: cantons = initialCantons } = useSWR("cantons", fetchCantons, { fallbackData: initialCantons });
   const { data: taxonomy = {} } = useSWR("taxonomy", fetchTaxonomy);
+  const { data: savedViews = [], mutate: mutateSavedViews } = useSWR("saved-views", fetchSavedViews);
 
   const handleFilterChange = useCallback((newFilters: CompanyFilters) => {
     startTransition(() => setFilters(newFilters));
@@ -60,9 +61,23 @@ export function DashboardClient({ initialCantons, initialStats }: DashboardClien
     setFilters({ ...DEFAULT_FILTERS, [key]: value });
   }, []);
 
+  const handleSaveView = useCallback(async (name: string) => {
+    await saveView(name, filters);
+    mutateSavedViews();
+  }, [filters, mutateSavedViews]);
+
+  const handleDeleteView = useCallback(async (id: number) => {
+    await deleteView(id);
+    mutateSavedViews();
+  }, [mutateSavedViews]);
+
+  const handleLoadView = useCallback((viewFilters: CompanyFilters) => {
+    setFilters({ ...DEFAULT_FILTERS, ...viewFilters });
+  }, []);
+
   const activeStat = (() => {
     if (filters.review_status) return { key: "review_status", value: String(filters.review_status) };
-    if (filters.proposal_status) return { key: "proposal_status", value: String(filters.proposal_status) };
+    if (filters.contact_status) return { key: "contact_status", value: String(filters.contact_status) };
     if (filters.google_searched) return { key: "google_searched", value: String(filters.google_searched) };
     return { key: "", value: "" };
   })();
@@ -85,6 +100,10 @@ export function DashboardClient({ initialCantons, initialStats }: DashboardClien
         onChange={handleFilterChange}
         onClear={handleClear}
         resultCount={page?.total ?? 0}
+        savedViews={savedViews}
+        onSaveView={handleSaveView}
+        onLoadView={handleLoadView}
+        onDeleteView={handleDeleteView}
       />
 
       {/* Table + preview (horizontal split) */}

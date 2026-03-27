@@ -46,14 +46,14 @@ class CompanyBase(BaseModel):
     audit_companies: str | None = None
     old_names: str | None = None
     cantonal_excerpt_web: str | None = None
-    zefix_score: int | None = None
-    zefix_score_breakdown: str | None = None
+    flex_score: int | None = None
+    flex_score_breakdown: str | None = None
     lat: float | None = None
     lon: float | None = None
     tfidf_cluster: str | None = None
-    claude_score: int | None = None
-    claude_category: str | None = None
-    claude_freeform: str | None = None
+    ai_score: int | None = None
+    ai_category: str | None = None
+    ai_freeform: str | None = None
 
     @field_validator("legal_form", "status", "municipality", "canton", "purpose", mode="before")
     @classmethod
@@ -77,10 +77,10 @@ class CompanyUpdate(BaseModel):
     website_checked_at: datetime | None = None
     zefix_raw: str | None = None
     google_search_results_raw: str | None = None
-    website_match_score: int | None = None
+    web_score: int | None = None
     social_media_only: bool | None = None
     review_status: str | None = None
-    proposal_status: str | None = None
+    contact_status: str | None = None
     contact_name: str | None = None
     contact_email: str | None = None
     contact_phone: str | None = None
@@ -106,16 +106,16 @@ class CompanyUpdate(BaseModel):
     audit_companies: str | None = None
     old_names: str | None = None
     cantonal_excerpt_web: str | None = None
-    zefix_score: int | None = None
-    zefix_score_breakdown: str | None = None
+    flex_score: int | None = None
+    flex_score_breakdown: str | None = None
     lat: float | None = None
     lon: float | None = None
     tfidf_cluster: str | None = None
-    claude_score: int | None = None
-    claude_category: str | None = None
-    claude_freeform: str | None = None
-    claude_scored_at: datetime | None = None
-    zefix_scored_at: datetime | None = None
+    ai_score: int | None = None
+    ai_category: str | None = None
+    ai_freeform: str | None = None
+    ai_scored_at: datetime | None = None
+    flex_scored_at: datetime | None = None
 
 
 class CompanyRead(CompanyBase):
@@ -124,17 +124,17 @@ class CompanyRead(CompanyBase):
     id: int
     website_checked_at: datetime | None = None
     google_search_results_raw: str | None = None
-    website_match_score: int | None = None
+    web_score: int | None = None
     review_status: str | None = None
-    proposal_status: str | None = None
+    contact_status: str | None = None
     contact_name: str | None = None
     contact_email: str | None = None
     contact_phone: str | None = None
     tags: str | None = None
     purpose_keywords: str | None = None
     combined_score: int | None = None
-    zefix_scored_at: datetime | None = None
-    claude_scored_at: datetime | None = None
+    flex_scored_at: datetime | None = None
+    ai_scored_at: datetime | None = None
     created_at: datetime
     updated_at: datetime
     notes: list[NoteRead] = []

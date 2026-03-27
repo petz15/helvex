@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 from app.models.audit_log import AuditLog
 
 _TRACKED_FIELDS = {
-    "website_url", "review_status", "proposal_status",
+    "website_url", "review_status", "contact_status",
     "contact_name", "contact_email", "contact_phone", "tags",
 }
 
