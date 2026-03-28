@@ -18,6 +18,7 @@ from app.database import get_db
 from app.models.company import Company
 from app.models.org_company_state import OrgCompanyState
 from app.models.user import User
+from app.schemas.note import NoteRead
 from app.schemas.company import (
     CompanyCreate,
     CompanyPage,
@@ -486,15 +487,14 @@ def get_company(
     db_company = crud.get_company(db, company_id)
     if not db_company:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Company not found")
+    # Filter notes at the ORM level (ORM objects carry org_id/user_id; NoteRead does not).
+    if current_user.org_id is not None:
+        scoped_notes = [n for n in db_company.notes if n.org_id == current_user.org_id]
+    else:
+        scoped_notes = [n for n in db_company.notes if n.user_id == current_user.id]
     org_state = crud.get_org_company_state(db, org_id=current_user.org_id, company_id=company_id) if current_user.org_id else None
     result = _overlay(db_company, org_state)
-    # Filter notes to the current org/user scope — the relationship loads all notes
-    # unfiltered, so we must restrict here before serialisation.
-    if current_user.org_id is not None:
-        result.notes = [n for n in result.notes if n.org_id == current_user.org_id]
-    else:
-        result.notes = [n for n in result.notes if n.user_id == current_user.id]
-    return result
+    return result.model_copy(update={"notes": [NoteRead.model_validate(n) for n in scoped_notes]})
 
 
 @router.patch("/{company_id}", response_model=CompanyRead, summary="Update company")

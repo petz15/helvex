@@ -19,6 +19,7 @@
 - [ ] **Web crawler** — crawl company websites to extract description, contact info, product/service keywords; store as structured fields; feed into scoring and classification; replace/supplement current Google scrape
 - [ ] **Google results & scoring** — Improve the selection and scoring of google results
 - [ ] **NOGA Data** — add NOGA data (or similar) https://www.kubb-tool.bfs.admin.ch/de/noga/2025 which is something other sites have such as https://business-monitor.ch or moneyhouse.ch
+- [ ] **Fix Zefix down** — on 28.03.2026 the zefix API seemed unreachable with status code 500. potentially that is a issue for the future, that zefix api should be checked if it is potentially down or I am getting rate limited or other isseu
 
 ## Company Profile
 
@@ -28,6 +29,7 @@
 - [ ] **History overview** —  Old names and taken over is already visible but not SOGC publications, which needs to be custom handled in order to display changes such as people and other changes.
 - [ ] **Graph overview of relationships** — based on past SHAB changes and name changes, take overs etc
 - [ ] **Cross-company person graph** — normalize sogcPub organ changes into `persons` / `company_persons` tables via a pipeline job; build a graph UI showing where signers appear across multiple companies, what roles they held, and when — enabling network analysis of directors, beneficial owners, and corporate groups
+- [ ] **Fix Zweck not showing up** — maybe add column for zweck at companies table but that would also require to import it for existing companies 
 
 
 ## Classification & Scoring
@@ -49,7 +51,7 @@
 ## Org-/Usermanagement
 - [X] **remove username** — Remove username, just keep email adress as user 
 - [X] **settings** — Add org management page and settings page for the users
-- [ ] ** Alternative logins such as google, github etc?** — Add alternative login methods such as google accounts, linkedin
+- [ ] ** Alternative logins such as google, github etc?** — Add alternative login methods such as google accounts, linkedin -> started but not working currently 500 error
 
 
 ## Monetisation & Tiers
@@ -75,6 +77,8 @@
 - [X] **S3 backup path isolation** — dev and prod must use separate S3 paths (`pg/` vs `pg-prod/`); CNPG refuses to archive to a non-empty path from a different cluster instance
 - [ ] **Testing suite** — introduce consistent testing suite
 - [ ] **Fix Branding favicon** — favicon is not consistent
+- [ ] **Fix Zweck not showing up in company profile page** — for some reason zweck is not showing up in the company profile page. maybe add a column for zweck in the companies table as it currently does not exist. 
+- [ ] **check company/2 404** - for somereason balogh consutling id = 2 is not showing up as company profile page. very weird as I cannot replicate it with other companies. maybe the issue is with the notes
 
 ## Multi-Language
 
