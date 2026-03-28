@@ -54,6 +54,14 @@ class Settings(BaseSettings):
     smtp_from: str = ""          # e.g. "Helvex <noreply@helvex.dicy.ch>"
     app_base_url: str = "https://helvex.dicy.ch"   # used in email links
 
+    # OAuth — Google and LinkedIn sign-in
+    # In dev: set APP_BASE_URL=http://localhost:3000 and register
+    # http://localhost:3000/api/v1/auth/google/callback (and linkedin) as dev redirect URIs.
+    google_client_id: str = ""
+    google_client_secret: str = ""
+    linkedin_client_id: str = ""
+    linkedin_client_secret: str = ""
+
     # Security — dev gets an ephemeral random key if unset; production must set a strong key.
     secret_key: str = Field(default_factory=lambda: secrets.token_hex(32))
 

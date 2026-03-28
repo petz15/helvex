@@ -205,7 +205,7 @@ def _run_job(app, job_id: int) -> None:  # noqa: C901
                     msg = f"Canton {canton} prefix {prefix} — {created} created, {updated} updated"
                     stats_now = {"created": created, "updated": updated}
                     crud.update_progress(db, job, message=msg, stats=stats_now)
-                    crud.create_event(db, job_id=job.id, level="debug", message=msg)
+                    crud.create_event(db, job_id=job.id, level="info", message=msg)
                     _maybe_sync(app, job_type=job.job_type, label=job.label, message=msg, stats=stats_now, error=None, done=False)
                     # Reset the RQ inactivity watchdog so a healthy long-running bulk
                     # import is never killed mid-sweep.  Silently ignored in thread mode.

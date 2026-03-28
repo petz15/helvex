@@ -5,7 +5,7 @@ import { HelvexMark } from "@/components/helvex-logo";
 
 const POST_CH = {
   name: "Post CH AG",
-  uid: "CHE-116.317.415",
+  uid: "CHE-435.551.225",
   legalForm: "Aktiengesellschaft",
   seat: "Bern",
   canton: "BE",

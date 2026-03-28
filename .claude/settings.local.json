@@ -157,7 +157,8 @@
       "Bash(npm list:*)",
       "Bash(file /c/D/coding_projects/zefix_analyzer/frontend/public/*)",
       "Bash(gh run:*)",
-      "Bash(python -c \"import rq; print\\(rq.__version__\\); import inspect; from rq import Queue; sig = inspect.signature\\(Queue.enqueue\\); print\\(sig\\)\")"
+      "Bash(python -c \"import rq; print\\(rq.__version__\\); import inspect; from rq import Queue; sig = inspect.signature\\(Queue.enqueue\\); print\\(sig\\)\")",
+      "Bash(find /c/D/coding_projects/zefix_analyzer/frontend/src/app -type f \\\\\\(-name layout.tsx -o -name _document.tsx -o -name *layout* \\\\\\))"
     ]
   }
 }

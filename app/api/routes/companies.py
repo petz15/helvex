@@ -292,8 +292,7 @@ def list_cantons(db: Session = Depends(get_db)):
 def get_taxonomy(db: Session = Depends(get_db)):
     return crud.get_taxonomy_stats(db)
 
-
-_DEMO_UID = "CHE-116.317.415"  # Post CH AG — shown on the public landing page
+_DEMO_UID = "CHE-435.551.225" # Post CH AG
 
 
 @router.get("/demo", response_model=CompanyRead, summary="Public demo company (no auth required)")

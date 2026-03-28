@@ -10,7 +10,8 @@ class User(Base):
     __tablename__ = "users"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    hashed_password: Mapped[str] = mapped_column(String(256), nullable=False)
+    # Nullable for OAuth-only users who have no password set.
+    hashed_password: Mapped[str | None] = mapped_column(String(256), nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
@@ -40,3 +41,4 @@ class User(Base):
     org_role: Mapped[str] = mapped_column(String(32), nullable=False, default="member")
 
     org: Mapped["Organization | None"] = relationship("Organization", back_populates="users", foreign_keys=[org_id])
+    oauth_accounts: Mapped[list["OAuthAccount"]] = relationship("OAuthAccount", back_populates="user", cascade="all, delete-orphan")

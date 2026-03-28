@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 import bcrypt
 from sqlalchemy.orm import Session
 
+from app.models.oauth_account import OAuthAccount
 from app.models.user import User
 
 
@@ -17,7 +18,9 @@ def hash_password(plain: str) -> str:
     return bcrypt.hashpw(_prehash(plain), bcrypt.gensalt()).decode()
 
 
-def verify_password(plain: str, hashed: str) -> bool:
+def verify_password(plain: str, hashed: str | None) -> bool:
+    if hashed is None:
+        return False  # OAuth-only user — no password set
     return bcrypt.checkpw(_prehash(plain), hashed.encode())
 
 
@@ -54,6 +57,53 @@ def create_user(
         is_superadmin=is_superadmin,
     )
     db.add(user)
+    db.commit()
+    db.refresh(user)
+    return user
+
+
+def get_or_create_oauth_user(
+    db: Session,
+    *,
+    provider: str,
+    provider_user_id: str,
+    email: str,
+) -> User:
+    """Return the User linked to this OAuth identity, creating or linking as needed.
+
+    Strategy (auto-link by email):
+    1. Existing OAuthAccount for (provider, provider_user_id) → return linked user.
+    2. Existing User with matching email → attach new OAuthAccount and return user.
+    3. Otherwise → create new User (no password, email pre-verified) + OAuthAccount.
+    """
+    # 1. Known OAuth identity
+    existing_oauth = (
+        db.query(OAuthAccount)
+        .filter(OAuthAccount.provider == provider, OAuthAccount.provider_user_id == provider_user_id)
+        .first()
+    )
+    if existing_oauth:
+        return existing_oauth.user
+
+    # 2. Email already registered — link the OAuth identity to the existing account
+    user = get_user_by_email(db, email)
+    if user:
+        oauth = OAuthAccount(provider=provider, provider_user_id=provider_user_id, user_id=user.id)
+        db.add(oauth)
+        db.commit()
+        return user
+
+    # 3. Brand new user — create account with no password, email already verified by provider
+    user = User(
+        email=email,
+        hashed_password=None,
+        is_active=True,
+        email_verified=True,
+    )
+    db.add(user)
+    db.flush()  # populate user.id before creating OAuthAccount
+    oauth = OAuthAccount(provider=provider, provider_user_id=provider_user_id, user_id=user.id)
+    db.add(oauth)
     db.commit()
     db.refresh(user)
     return user

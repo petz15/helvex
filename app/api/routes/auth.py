@@ -357,6 +357,202 @@ def get_me(
 
 
 # ---------------------------------------------------------------------------
+# Google OAuth2
+# ---------------------------------------------------------------------------
+
+import secrets as _secrets
+from urllib.parse import urlencode as _urlencode
+
+import httpx as _httpx
+from fastapi.responses import RedirectResponse as _Redirect
+
+_OAUTH_STATE_COOKIE = "oauth_state"
+_OAUTH_STATE_MAX_AGE = 600  # 10 minutes
+
+
+def _oauth_callback_uri(provider: str) -> str:
+    from app.config import settings as _s
+    return f"{_s.app_base_url}/api/v1/auth/{provider}/callback"
+
+
+def _set_session(response: _Redirect, user_id: int, *, is_https: bool) -> None:
+    response.set_cookie(
+        key=COOKIE_NAME,
+        value=create_session_cookie(user_id),
+        httponly=True,
+        samesite="lax",
+        secure=is_https,
+        max_age=8 * 3600,
+    )
+
+
+@router.get("/google/authorize", include_in_schema=False)
+async def google_authorize(request: Request) -> _Redirect:
+    from app.config import settings as _s
+    if not _s.google_client_id:
+        raise HTTPException(status_code=503, detail="Google sign-in is not configured")
+    state = _secrets.token_urlsafe(32)
+    params = _urlencode({
+        "client_id": _s.google_client_id,
+        "redirect_uri": _oauth_callback_uri("google"),
+        "response_type": "code",
+        "scope": "openid email profile",
+        "state": state,
+        "access_type": "online",
+    })
+    forwarded_proto = request.headers.get("x-forwarded-proto", "")
+    is_https = request.url.scheme == "https" or forwarded_proto.split(",")[0].strip().lower() == "https"
+    response = _Redirect(url=f"https://accounts.google.com/o/oauth2/v2/auth?{params}", status_code=302)
+    response.set_cookie(_OAUTH_STATE_COOKIE, state, httponly=True, max_age=_OAUTH_STATE_MAX_AGE, samesite="lax", secure=is_https)
+    return response
+
+
+@router.get("/google/callback", include_in_schema=False)
+async def google_callback(
+    request: Request,
+    db: Session = Depends(get_db),
+    code: str | None = None,
+    state: str | None = None,
+    error: str | None = None,
+) -> _Redirect:
+    from app.config import settings as _s
+    from app import crud as _crud
+
+    if error:
+        logger.info("auth.google_oauth_denied error=%r", error)
+        return _Redirect(url=f"{_s.app_base_url}/login?oauth_error=1", status_code=302)
+
+    stored_state = request.cookies.get(_OAUTH_STATE_COOKIE)
+    if not stored_state or stored_state != state or not code:
+        raise HTTPException(status_code=400, detail="Invalid OAuth state or missing code")
+
+    try:
+        async with _httpx.AsyncClient(timeout=10) as client:
+            token_resp = await client.post(
+                "https://oauth2.googleapis.com/token",
+                data={
+                    "code": code,
+                    "client_id": _s.google_client_id,
+                    "client_secret": _s.google_client_secret,
+                    "redirect_uri": _oauth_callback_uri("google"),
+                    "grant_type": "authorization_code",
+                },
+            )
+            token_resp.raise_for_status()
+            access_token = token_resp.json()["access_token"]
+
+            userinfo_resp = await client.get(
+                "https://www.googleapis.com/oauth2/v3/userinfo",
+                headers={"Authorization": f"Bearer {access_token}"},
+            )
+            userinfo_resp.raise_for_status()
+            userinfo = userinfo_resp.json()
+    except Exception:
+        logger.exception("auth.google_oauth_exchange_failed")
+        raise HTTPException(status_code=502, detail="Failed to complete Google sign-in. Please try again.")
+
+    email = userinfo.get("email")
+    provider_user_id = userinfo.get("sub")
+    if not email or not provider_user_id:
+        raise HTTPException(status_code=400, detail="Google account did not provide an email address")
+
+    user = _crud.get_or_create_oauth_user(db, provider="google", provider_user_id=provider_user_id, email=email)
+    logger.info("auth.google_oauth_ok user_id=%s email=%r", user.id, user.email)
+
+    forwarded_proto = request.headers.get("x-forwarded-proto", "")
+    is_https = request.url.scheme == "https" or forwarded_proto.split(",")[0].strip().lower() == "https"
+    response = _Redirect(url=f"{_s.app_base_url}/app/search", status_code=302)
+    _set_session(response, user.id, is_https=is_https)
+    response.delete_cookie(_OAUTH_STATE_COOKIE)
+    return response
+
+
+# ---------------------------------------------------------------------------
+# LinkedIn OAuth2 (Sign In with LinkedIn using OpenID Connect)
+# ---------------------------------------------------------------------------
+
+@router.get("/linkedin/authorize", include_in_schema=False)
+async def linkedin_authorize(request: Request) -> _Redirect:
+    from app.config import settings as _s
+    if not _s.linkedin_client_id:
+        raise HTTPException(status_code=503, detail="LinkedIn sign-in is not configured")
+    state = _secrets.token_urlsafe(32)
+    params = _urlencode({
+        "response_type": "code",
+        "client_id": _s.linkedin_client_id,
+        "redirect_uri": _oauth_callback_uri("linkedin"),
+        "state": state,
+        "scope": "openid profile email",
+    })
+    forwarded_proto = request.headers.get("x-forwarded-proto", "")
+    is_https = request.url.scheme == "https" or forwarded_proto.split(",")[0].strip().lower() == "https"
+    response = _Redirect(url=f"https://www.linkedin.com/oauth/v2/authorization?{params}", status_code=302)
+    response.set_cookie(_OAUTH_STATE_COOKIE, state, httponly=True, max_age=_OAUTH_STATE_MAX_AGE, samesite="lax", secure=is_https)
+    return response
+
+
+@router.get("/linkedin/callback", include_in_schema=False)
+async def linkedin_callback(
+    request: Request,
+    db: Session = Depends(get_db),
+    code: str | None = None,
+    state: str | None = None,
+    error: str | None = None,
+) -> _Redirect:
+    from app.config import settings as _s
+    from app import crud as _crud
+
+    if error:
+        logger.info("auth.linkedin_oauth_denied error=%r", error)
+        return _Redirect(url=f"{_s.app_base_url}/login?oauth_error=1", status_code=302)
+
+    stored_state = request.cookies.get(_OAUTH_STATE_COOKIE)
+    if not stored_state or stored_state != state or not code:
+        raise HTTPException(status_code=400, detail="Invalid OAuth state or missing code")
+
+    try:
+        async with _httpx.AsyncClient(timeout=10) as client:
+            token_resp = await client.post(
+                "https://www.linkedin.com/oauth/v2/accessToken",
+                data={
+                    "grant_type": "authorization_code",
+                    "code": code,
+                    "redirect_uri": _oauth_callback_uri("linkedin"),
+                    "client_id": _s.linkedin_client_id,
+                    "client_secret": _s.linkedin_client_secret,
+                },
+                headers={"Content-Type": "application/x-www-form-urlencoded"},
+            )
+            token_resp.raise_for_status()
+            access_token = token_resp.json()["access_token"]
+
+            userinfo_resp = await client.get(
+                "https://api.linkedin.com/v2/userinfo",
+                headers={"Authorization": f"Bearer {access_token}"},
+            )
+            userinfo_resp.raise_for_status()
+            userinfo = userinfo_resp.json()
+    except Exception:
+        logger.exception("auth.linkedin_oauth_exchange_failed")
+        raise HTTPException(status_code=502, detail="Failed to complete LinkedIn sign-in. Please try again.")
+
+    email = userinfo.get("email")
+    provider_user_id = userinfo.get("sub")
+    if not email or not provider_user_id:
+        raise HTTPException(status_code=400, detail="LinkedIn account did not provide an email address. Ensure your LinkedIn primary email is set to public.")
+
+    user = _crud.get_or_create_oauth_user(db, provider="linkedin", provider_user_id=provider_user_id, email=email)
+    logger.info("auth.linkedin_oauth_ok user_id=%s email=%r", user.id, user.email)
+
+    forwarded_proto = request.headers.get("x-forwarded-proto", "")
+    is_https = request.url.scheme == "https" or forwarded_proto.split(",")[0].strip().lower() == "https"
+    response = _Redirect(url=f"{_s.app_base_url}/app/search", status_code=302)
+    _set_session(response, user.id, is_https=is_https)
+    response.delete_cookie(_OAUTH_STATE_COOKIE)
+    return response
+
+
+# ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
 

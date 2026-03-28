@@ -11,7 +11,10 @@ export async function GET(request: NextRequest) {
     // Ignore errors — we clear the cookie client-side regardless
   }
 
-  const response = NextResponse.redirect(new URL("/login", request.url));
+  // Relative redirect — avoids using request.url which contains the internal pod
+  // hostname when running behind a reverse proxy in K8s.
+  const response = new NextResponse(null, { status: 302 });
+  response.headers.set("location", "/login");
   response.cookies.delete("session");
   return response;
 }

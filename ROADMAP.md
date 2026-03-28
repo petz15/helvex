@@ -7,6 +7,7 @@
 - [ ] **Switch Index page** — change the entry page to something more welcoming to first time visitors
 - [ ] **Seperate Search/Hunting page -> call it Company Explorer(Unternehmens-Explorer)** — makes the flow for first time users and users without clear intentions much easier. guide them to the filtering, searching, create list etc much smoother
 - [ ] **Add dark mode** — add dark mode 
+- [ ] **Demo on real pages instead of mock** — Find a way to demo the real webapp no use mock pages. seems weird. alternatively let users in without sign in but severly restrict access?
 
 ## Company Data
 
@@ -36,7 +37,7 @@
 
 ## Jobs & Infrastructure
 
-- [ ] **Redis-based concurrent job queue** — move job execution to Redis queue (Celery or RQ) enabling concurrent jobs from multiple users simultaneously; replace current single-threaded DB-backed queue
+- [X] **Redis-based concurrent job queue** — move job execution to Redis queue (Celery or RQ) enabling concurrent jobs from multiple users simultaneously; replace current single-threaded DB-backed queue -> should be done but not quite sure if it is correct i.e. how to check it is actually implemented
 - [ ] **Microservices architecture improvements** — decouple heavy jobs (classification, scraping, scoring) into separate workers; define clear service boundaries. make workers for standard jobs which only the system triggers (almost everything zefix related). create workers for free tier users, create workers for paid users
 - [ ] **Tiered job queues** — two RQ queues: `helvex-priority` (starter/professional/enterprise + orgs) and `helvex-free` (free tier); `enqueue_job()` routes based on org/user tier; two separate K8s worker Deployments with different resource allocations; org creation alone does not move user to priority queue — requires a tier upgrade
 - [X] **Email verification** — user signup flow with email verification; mutation/account changes require re-verification
