@@ -8,6 +8,7 @@
 - [ ] **Seperate Search/Hunting page -> call it Company Explorer(Unternehmens-Explorer)** — makes the flow for first time users and users without clear intentions much easier. guide them to the filtering, searching, create list etc much smoother
 - [ ] **Add dark mode** — add dark mode 
 - [ ] **Demo on real pages instead of mock** — Find a way to demo the real webapp no use mock pages. seems weird. alternatively let users in without sign in but severly restrict access?
+- [ ] **Fix Branding** — potentially change the icon to have a red cross in the middle (change google and linkedin app connection icons)
 
 ## Company Data
 
@@ -73,6 +74,7 @@
 - [ ] **WAL archiving backlog on bulk jobs** — For future large bulk jobs: run with `SET synchronous_commit = off;` in the session to reduce WAL flush overhead; for massive one-time loads use an unlogged staging table then insert into the real table.
 - [X] **S3 backup path isolation** — dev and prod must use separate S3 paths (`pg/` vs `pg-prod/`); CNPG refuses to archive to a non-empty path from a different cluster instance
 - [ ] **Testing suite** — introduce consistent testing suite
+- [ ] **Fix Branding favicon** — favicon is not consistent
 
 ## Multi-Language
 

@@ -1132,6 +1132,12 @@ def bulk_import_zefix(
         *was_too_short* is True when Zefix rejected at least one sub-prefix as too short,
         which means Zefix is up — this should NOT count against the empty-abort threshold.
         """
+        # Signal immediately that we're starting this prefix (before any API calls).
+        # Without this, a prefix that expands to hundreds of sub-prefixes would show
+        # no activity for 20–30 minutes until it completes.
+        if progress_cb:
+            progress_cb(canton, char, stats["created"], stats["updated"])
+
         too_short_log: list[str] = []
         try:
             result_iter = _iter_prefix_with_fallback(

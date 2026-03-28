@@ -71,6 +71,7 @@ from app.crud.user import (
     authenticate,
     count_users,
     create_user,
+    get_or_create_oauth_user,
     get_user_by_email,
     get_user,
     hash_password,
@@ -79,6 +80,7 @@ from app.crud.user import (
     record_verification_sent,
     update_email,
     update_password,
+    verify_password,
 )
 
 __all__ = [
@@ -134,10 +136,12 @@ __all__ = [
     # user
     "get_user",
     "get_user_by_email",
+    "get_or_create_oauth_user",
     "list_users",
     "count_users",
     "create_user",
     "hash_password",
+    "verify_password",
     "authenticate",
     "update_password",
     "update_email",

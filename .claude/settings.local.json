@@ -158,7 +158,8 @@
       "Bash(file /c/D/coding_projects/zefix_analyzer/frontend/public/*)",
       "Bash(gh run:*)",
       "Bash(python -c \"import rq; print\\(rq.__version__\\); import inspect; from rq import Queue; sig = inspect.signature\\(Queue.enqueue\\); print\\(sig\\)\")",
-      "Bash(find /c/D/coding_projects/zefix_analyzer/frontend/src/app -type f \\\\\\(-name layout.tsx -o -name _document.tsx -o -name *layout* \\\\\\))"
+      "Bash(find /c/D/coding_projects/zefix_analyzer/frontend/src/app -type f \\\\\\(-name layout.tsx -o -name _document.tsx -o -name *layout* \\\\\\))",
+      "Bash(find /c/D/coding_projects/zefix_analyzer -name \"*.py\" -type f -exec grep -l \"get_current_user\\\\|Depends.*get_current_user\" {})"
     ]
   }
 }
