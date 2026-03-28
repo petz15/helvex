@@ -223,6 +223,8 @@ def _run_job(app, job_id: int) -> None:  # noqa: C901
                     active_only=params.get("active_only", True),
                     request_delay=float(params.get("delay", 0.5)),
                     resume=bool(params.get("resume", False)),
+                    start_from_canton=params.get("start_from_canton"),
+                    empty_abort_threshold=int(params.get("empty_abort_threshold", 100)),
                     progress_cb=_progress,
                 )
                 done_msg = f"Done — {stats['created']} created, {stats['updated']} updated, {len(stats['errors'])} errors"

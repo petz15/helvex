@@ -172,8 +172,10 @@ def stream_active_jobs(db: Session = Depends(get_db), _: User = Depends(get_curr
 
 class BulkImportBody(BaseModel):
     cantons: list[str] | None = None
+    start_from_canton: str | None = None  # skip cantons before this one
     active_only: bool = True
     delay: float = 0.5
+    empty_abort_threshold: int = 100  # stop after this many consecutive empty prefixes
 
 
 class BatchCollectBody(BaseModel):
@@ -246,12 +248,20 @@ class ClusterPipelineBody(BaseModel):
 @router.post("/collection/bulk", response_model=JobOut, status_code=status.HTTP_202_ACCEPTED)
 def trigger_bulk(body: BulkImportBody, request: Request, db: Session = Depends(get_db), _: User = Depends(require_superadmin)):
     canton_list = [c.upper() for c in body.cantons] if body.cantons else None
-    label = f"Bulk import — cantons: {', '.join(canton_list) if canton_list else 'all 26'}"
+    start_from = body.start_from_canton.upper() if body.start_from_canton else None
+    scope = ', '.join(canton_list) if canton_list else 'all 26'
+    label = f"Bulk import — cantons: {scope}" + (f" (from {start_from})" if start_from else "")
     job = _enqueue_or_http_error(
         request,
         job_type="bulk",
         label=label,
-        params={"cantons": canton_list, "active_only": body.active_only, "delay": body.delay},
+        params={
+            "cantons": canton_list,
+            "start_from_canton": start_from,
+            "active_only": body.active_only,
+            "delay": body.delay,
+            "empty_abort_threshold": body.empty_abort_threshold,
+        },
         db=db,
     )
     return JobOut.from_orm_obj(job)

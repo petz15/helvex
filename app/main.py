@@ -52,7 +52,7 @@ from app.services.scoring import get_default_scoring_config
 from app.api.routes import admin_router, auth_router, companies_router, invites_router, jobs_router, map_router, notes_router, orgs_router, settings_router, views_router, workspace_router
 
 # Paths that do NOT require authentication
-_PUBLIC_PREFIXES = ("/static", "/health", "/api/v1/auth", "/api/v1/invites/preview")
+_PUBLIC_PREFIXES = ("/static", "/health", "/api/v1/auth", "/api/v1/invites/preview", "/api/v1/companies/demo")
 _PUBLIC_EXACT = {"/", "/logout", "/health"}
 
 _REPO_ROOT = pathlib.Path(__file__).parent.parent

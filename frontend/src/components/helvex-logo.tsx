@@ -4,19 +4,16 @@ interface Props {
 }
 
 /**
- * Helvex diamond-grid logo mark.
- * 3×3 grid of rhombus shapes — checkerboard fill (corners + centre solid,
- * edges outlined at 40% opacity).
+ * Helvex logo mark — 7×7 diamond grid with a cross-shaped gap in the centre
+ * (evokes the Swiss flag cross).  Inherits colour via `currentColor`.
  */
 export function HelvexMark({ size = 20, className }: Props) {
-  const s = 3.2; // diamond half-size (so each diamond is 6.4 px wide in a 24 px viewbox)
-  const cx = [5, 12, 19];
-  const cy = [5, 12, 19];
+  // 7 evenly-spaced centres in a 24 px viewbox
+  const positions = [1.7, 5.1, 8.6, 12.0, 15.4, 18.9, 22.3];
+  const s = 1.3; // diamond half-size
 
-  // checkerboard: (row+col) % 2 === 0 → filled
-  const diamonds = cx.flatMap((x, col) =>
-    cy.map((y, row) => ({ x, y, filled: (row + col) % 2 === 0 }))
-  );
+  // Cross cells (row, col) 0-indexed — the 5-cell + shape in the middle
+  const CROSS = new Set(["3,2", "3,3", "3,4", "2,3", "4,3"]);
 
   const d = (x: number, y: number) =>
     `M ${x} ${y - s} L ${x + s} ${y} L ${x} ${y + s} L ${x - s} ${y} Z`;
@@ -31,12 +28,11 @@ export function HelvexMark({ size = 20, className }: Props) {
       className={className}
       aria-hidden="true"
     >
-      {diamonds.map(({ x, y, filled }, i) =>
-        filled ? (
-          <path key={i} d={d(x, y)} fill="currentColor" />
-        ) : (
-          <path key={i} d={d(x, y)} stroke="currentColor" strokeWidth="1" opacity="0.35" />
-        )
+      {positions.map((x, col) =>
+        positions.map((y, row) => {
+          if (CROSS.has(`${row},${col}`)) return null;
+          return <path key={`${row}-${col}`} d={d(x, y)} fill="currentColor" />;
+        })
       )}
     </svg>
   );

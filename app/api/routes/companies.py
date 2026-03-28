@@ -293,6 +293,18 @@ def get_taxonomy(db: Session = Depends(get_db)):
     return crud.get_taxonomy_stats(db)
 
 
+_DEMO_UID = "CHE-116.317.415"  # Post CH AG — shown on the public landing page
+
+
+@router.get("/demo", summary="Public demo company (no auth required)")
+def get_demo_company(db: Session = Depends(get_db)):
+    """Return the Post CH AG company record for unauthenticated landing-page previews."""
+    company = crud.get_company_by_uid(db, _DEMO_UID)
+    if not company:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Demo company not found")
+    return _overlay(company, None)
+
+
 @router.get("", response_model=CompanyPage, summary="List companies (paginated, filterable)")
 def list_companies(
     page: int = Query(1, ge=1),

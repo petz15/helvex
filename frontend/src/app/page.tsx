@@ -29,7 +29,7 @@ function ScoreRing({ value }: { value: number }) {
         cy="26"
         r={r}
         fill="none"
-        stroke="#4f46e5"
+        stroke="#2563eb"
         strokeWidth="5"
         strokeDasharray={`${(value / 100) * circ} ${circ}`}
         strokeLinecap="round"
@@ -72,7 +72,7 @@ function CompanyMock() {
           </div>
           <div className="relative shrink-0">
             <ScoreRing value={POST_CH.fitScore} />
-            <span className="absolute inset-0 flex items-center justify-center text-[11px] font-bold text-indigo-600 rotate-90">
+            <span className="absolute inset-0 flex items-center justify-center text-[11px] font-bold text-blue-600 rotate-90">
               {POST_CH.fitScore}
             </span>
           </div>
@@ -97,7 +97,7 @@ function CompanyMock() {
         {/* Category tags */}
         <div className="flex flex-wrap gap-1">
           {POST_CH.categories.map((c) => (
-            <span key={c} className="text-[9px] px-1.5 py-0.5 rounded-full bg-indigo-50 text-indigo-600 font-medium">
+            <span key={c} className="text-[9px] px-1.5 py-0.5 rounded-full bg-blue-50 text-blue-600 font-medium">
               {c}
             </span>
           ))}
@@ -112,7 +112,7 @@ function CompanyMock() {
           <div className="space-y-1.5">
             {[
               { date: "2013-09-27", label: "Neueintragung", cls: "bg-emerald-100 text-emerald-700" },
-              { date: "2017-04-20", label: "Firmenänderung", cls: "bg-indigo-100 text-indigo-700" },
+              { date: "2017-04-20", label: "Firmenänderung", cls: "bg-blue-100 text-indigo-700" },
               { date: "2024-11-08", label: "Adressänderung", cls: "bg-amber-100 text-amber-700" },
             ].map((e) => (
               <div key={e.date} className="flex items-center gap-2">
@@ -157,7 +157,7 @@ export default function LandingPage() {
         {/* Copy */}
         <div className="flex-1 max-w-xl">
           <div className="flex items-center gap-2.5 mb-8">
-            <span className="text-indigo-600">
+            <span className="text-blue-600">
               <HelvexMark size={34} />
             </span>
             <span className="text-xl font-bold tracking-tight text-slate-900">Helvex</span>
@@ -165,7 +165,7 @@ export default function LandingPage() {
 
           <h1 className="text-4xl sm:text-5xl font-extrabold text-slate-900 leading-tight tracking-tight mb-5">
             Swiss company{" "}
-            <span className="text-indigo-600">intelligence</span>
+            <span className="text-blue-600">intelligence</span>
           </h1>
           <p className="text-lg text-slate-500 leading-relaxed mb-8">
             Search, qualify, and track companies from the Swiss commercial register.
@@ -175,15 +175,15 @@ export default function LandingPage() {
           <div className="flex flex-wrap items-center gap-3">
             <Link
               href="/register"
-              className="px-5 py-2.5 rounded-lg bg-indigo-600 text-white font-semibold text-sm hover:bg-indigo-700 transition-colors shadow-sm"
+              className="px-5 py-2.5 rounded-lg bg-blue-600 text-white font-semibold text-sm hover:bg-blue-700 transition-colors shadow-sm"
             >
               Sign up free →
             </Link>
             <Link
-              href="/login"
+              href="/demo"
               className="px-5 py-2.5 rounded-lg border border-slate-200 text-slate-700 font-medium text-sm hover:bg-slate-50 transition-colors"
             >
-              Sign in
+              View live demo
             </Link>
           </div>
           <p className="mt-3 text-xs text-slate-400">No credit card required.</p>
@@ -192,7 +192,7 @@ export default function LandingPage() {
         {/* Product preview */}
         <div className="flex-1 flex justify-center lg:justify-end">
           <div className="relative">
-            <div className="absolute -inset-6 bg-indigo-100 rounded-3xl blur-2xl opacity-60" />
+            <div className="absolute -inset-6 bg-blue-100 rounded-3xl blur-2xl opacity-60" />
             <div className="relative">
               <CompanyMock />
             </div>
@@ -209,7 +209,7 @@ export default function LandingPage() {
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
             {FEATURES.map((f) => (
               <div key={f.title} className="bg-white rounded-xl border border-slate-200 p-6 shadow-sm">
-                <span className="text-2xl text-indigo-500 mb-3 block">{f.icon}</span>
+                <span className="text-2xl text-blue-500 mb-3 block">{f.icon}</span>
                 <h3 className="font-semibold text-slate-800 mb-2 text-sm">{f.title}</h3>
                 <p className="text-sm text-slate-500 leading-relaxed">{f.body}</p>
               </div>
@@ -221,7 +221,7 @@ export default function LandingPage() {
       {/* ── Bottom CTA ── */}
       <section id="pricing" className="py-20 text-center px-6">
         <div className="max-w-lg mx-auto">
-          <div className="flex justify-center mb-4 text-indigo-600">
+          <div className="flex justify-center mb-4 text-blue-600">
             <HelvexMark size={30} />
           </div>
           <h2 className="text-2xl font-bold text-slate-900 mb-3">Start for free</h2>
@@ -230,7 +230,7 @@ export default function LandingPage() {
           </p>
           <Link
             href="/register"
-            className="inline-block px-6 py-3 rounded-lg bg-indigo-600 text-white font-semibold text-sm hover:bg-indigo-700 transition-colors shadow-sm"
+            className="inline-block px-6 py-3 rounded-lg bg-blue-600 text-white font-semibold text-sm hover:bg-blue-700 transition-colors shadow-sm"
           >
             Create your free account →
           </Link>

@@ -3,17 +3,27 @@ import { ImageResponse } from "next/og";
 export const size = { width: 32, height: 32 };
 export const contentType = "image/png";
 
-const COLOR = "#4f46e5"; // indigo-600
-const SQ = 6; // square side before 45° rotation → ~8.5 px diagonal
+const COLOR = "#2563eb"; // blue-600
 
-// 3×3 checkerboard: (col+row) % 2 === 0 → filled solid, else outlined
-const GRID: [cx: number, cy: number, filled: boolean][] = [
-  [5, 5, true],   [16, 5, false],  [27, 5, true],
-  [5, 16, false], [16, 16, true],  [27, 16, false],
-  [5, 27, true],  [16, 27, false], [27, 27, true],
-];
+// 7×7 grid, 7 positions mapped to 0..31
+const POS = [2, 6.5, 11, 15.5, 20, 24.5, 29];
+const S = 1.8; // diamond half-size
+
+// Cross cells to leave empty: (row, col) — the + in the centre
+const CROSS = new Set(["3,2", "3,3", "3,4", "2,3", "4,3"]);
+
+function diamond(cx: number, cy: number) {
+  return `M${cx},${cy - S} L${cx + S},${cy} L${cx},${cy + S} L${cx - S},${cy} Z`;
+}
 
 export default function Icon() {
+  const paths: string[] = [];
+  POS.forEach((x, col) => {
+    POS.forEach((y, row) => {
+      if (!CROSS.has(`${row},${col}`)) paths.push(diamond(x, y));
+    });
+  });
+
   return new ImageResponse(
     <div
       style={{
@@ -21,24 +31,17 @@ export default function Icon() {
         height: 32,
         display: "flex",
         position: "relative",
+        background: "transparent",
       }}
     >
-      {GRID.map(([cx, cy, filled], i) => (
-        <div
-          key={i}
-          style={{
-            position: "absolute",
-            width: SQ,
-            height: SQ,
-            left: cx - SQ / 2,
-            top: cy - SQ / 2,
-            background: filled ? COLOR : "transparent",
-            border: filled ? "none" : `1.2px solid ${COLOR}`,
-            opacity: filled ? 1 : 0.38,
-            transform: "rotate(45deg)",
-          }}
-        />
-      ))}
+      <svg
+        width="32"
+        height="32"
+        viewBox="0 0 32 32"
+        style={{ position: "absolute", inset: 0 }}
+      >
+        <path d={paths.join(" ")} fill={COLOR} />
+      </svg>
     </div>,
     { ...size },
   );

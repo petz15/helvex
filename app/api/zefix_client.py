@@ -56,7 +56,7 @@ def search_companies(
     if legal_form:
         payload["legalForm"] = legal_form
 
-    with httpx.Client(timeout=30.0) as client:
+    with httpx.Client(timeout=60.0) as client:
         response = client.post(url, json=payload, auth=_get_auth())
         response.raise_for_status()
 
@@ -83,7 +83,7 @@ def fetch_companies_by_canton(
     if active_only:
         payload["activeOnly"] = True
 
-    with httpx.Client(timeout=30.0) as client:
+    with httpx.Client(timeout=60.0) as client:
         response = client.post(url, json=payload, auth=_get_auth())
         response.raise_for_status()
 
@@ -110,7 +110,7 @@ def fetch_companies_by_prefix(
     if active_only:
         payload["activeOnly"] = True
 
-    with httpx.Client(timeout=30.0) as client:
+    with httpx.Client(timeout=60.0) as client:
         response = client.post(url, json=payload, auth=_get_auth())
         response.raise_for_status()
 
@@ -124,7 +124,7 @@ def get_company(uid: str) -> dict[str, Any]:
     uid_clean = uid.replace("-", "").replace(".", "")
     url = f"{settings.zefix_api_base_url}/company/uid/{uid_clean}"
 
-    with httpx.Client(timeout=30.0) as client:
+    with httpx.Client(timeout=60.0) as client:
         response = client.get(url, auth=_get_auth())
         response.raise_for_status()
 

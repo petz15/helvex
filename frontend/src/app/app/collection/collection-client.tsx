@@ -84,14 +84,21 @@ export function CollectionClient() {
           e.preventDefault();
           const fd = new FormData(e.currentTarget);
           const cantons = (fd.get("cantons") as string || "").split(",").map(c => c.trim().toUpperCase()).filter(Boolean);
+          const startFrom = (fd.get("start_from_canton") as string || "").trim().toUpperCase() || null;
+          const emptyAbort = parseInt(fd.get("empty_abort_threshold") as string) || 100;
           await submit("collection/bulk", {
             cantons: cantons.length ? cantons : null,
+            start_from_canton: startFrom,
             active_only: fd.get("active_only") === "on",
             delay: parseFloat(fd.get("delay") as string) || 0.5,
+            empty_abort_threshold: emptyAbort,
           });
         }} className="space-y-4">
           <Field label="Cantons" hint="Comma-separated codes (e.g. BE,ZH). Leave blank for all 26.">
             <input name="cantons" className={inputCls} placeholder="All cantons" />
+          </Field>
+          <Field label="Start from canton" hint="Resume a failed run by skipping cantons before this one (e.g. GL to restart from Glarus onwards).">
+            <input name="start_from_canton" className={cn(inputCls, "w-24")} placeholder="e.g. GL" />
           </Field>
           <div className="flex gap-6">
             <label className="flex items-center gap-2 text-sm text-slate-700">
@@ -99,9 +106,14 @@ export function CollectionClient() {
               Active companies only
             </label>
           </div>
-          <Field label="Request delay (seconds)">
-            <input name="delay" type="number" step="0.1" min="0.1" defaultValue="0.5" className={cn(inputCls, "w-32")} />
-          </Field>
+          <div className="grid grid-cols-2 gap-4">
+            <Field label="Request delay (seconds)">
+              <input name="delay" type="number" step="0.1" min="0.1" defaultValue="0.5" className={inputCls} />
+            </Field>
+            <Field label="Empty abort threshold" hint="Stop if this many consecutive prefixes return no results (Zefix may be down).">
+              <input name="empty_abort_threshold" type="number" min="1" defaultValue="100" className={inputCls} />
+            </Field>
+          </div>
           <SubmitBtn loading={loading === "collection/bulk"} />
         </form>
       </Section>

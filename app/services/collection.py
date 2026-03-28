@@ -1019,6 +1019,8 @@ def _iter_prefix_with_fallback(
             yield from _iter_prefix_with_fallback(
                 canton, sub_prefix, active_only, request_delay, _depth + 1, _seen
             )
+        except httpx.TimeoutException:
+            raise  # propagate timeouts so the outer sweep can queue for retry
         except Exception:  # noqa: BLE001
             continue
         time.sleep(request_delay)
@@ -1031,6 +1033,8 @@ def bulk_import_zefix(
     active_only: bool = False,
     request_delay: float = 0.5,
     resume: bool = False,
+    start_from_canton: str | None = None,
+    empty_abort_threshold: int = 100,
     progress_cb: Any = None,
 ) -> dict[str, Any]:
     """Import all companies from Zefix using an alphabet-prefix sweep per canton.
@@ -1077,6 +1081,17 @@ def bulk_import_zefix(
         run = crud.create_run(db, "bulk")
         existing_stats = {}
 
+        # start_from_canton: skip cantons before the named one (only when not resuming from DB)
+        if start_from_canton:
+            upper = start_from_canton.upper()
+            if upper in target_cantons:
+                start_canton_idx = target_cantons.index(upper)
+            else:
+                # unrecognised canton — log and proceed from the beginning
+                existing_stats.setdefault("errors", []).append(
+                    f"start_from_canton '{start_from_canton}' not found in target list; starting from beginning"
+                )
+
     stats: dict[str, Any] = {
         "cantons_done": existing_stats.get("cantons_done", 0),
         "created": existing_stats.get("created", 0),
@@ -1093,7 +1108,82 @@ def bulk_import_zefix(
         # would overwrite the richer purpose fetched by the detail refresh job.
     }
 
+    def _process_one_prefix(canton: str, char: str, prefix_idx: int) -> tuple[bool, int]:
+        """Process a single (canton, prefix) pair. Returns (not_timed_out, results_count)."""
+        try:
+            result_iter = _iter_prefix_with_fallback(
+                canton, char, active_only=active_only, request_delay=request_delay
+            )
+        except Exception as exc:  # noqa: BLE001
+            stats["errors"].append(f"Canton {canton} prefix {char} [{type(exc).__name__}]: {exc}")
+            crud.update_checkpoint(db, run, canton, prefix_idx, stats)
+            time.sleep(request_delay)
+            return True, 0  # non-timeout errors: don't retry
+
+        timed_out = False
+        results_count = 0
+        try:
+            for result in result_iter:
+                if not result.uid:
+                    continue
+                results_count += 1
+                _score_bd = compute_flex_score_breakdown(
+                    legal_form=result.legal_form,
+                    legal_form_short_name=result.legal_form_short_name,
+                    status=result.status,
+                    canton=result.canton or canton,
+                    municipality=result.municipality,
+                    config=scoring_config,
+                )
+                company_data = CompanyCreate(
+                    uid=result.uid,
+                    name=result.name,
+                    legal_form=result.legal_form,
+                    legal_form_id=result.legal_form_id,
+                    legal_form_uid=result.legal_form_uid,
+                    legal_form_short_name=result.legal_form_short_name,
+                    status=result.status,
+                    municipality=result.municipality,
+                    canton=result.canton or canton,
+                    purpose=result.purpose,
+                    flex_score=int(_score_bd["final_score"]),
+                    flex_score_breakdown=json.dumps(_score_bd),
+                    ehraid=result.ehraid,
+                    chid=result.chid,
+                    legal_seat_id=result.legal_seat_id,
+                    sogc_date=result.sogc_date,
+                    deletion_date=result.deletion_date,
+                )
+                existing = crud.get_company_by_uid(db, result.uid)
+                if existing:
+                    update_payload = {
+                        k: v for k, v in company_data.model_dump(exclude={"uid"}).items()
+                        if k in _ZEFIX_UPDATE_FIELDS
+                    }
+                    crud.update_company(db, existing, CompanyUpdate(**update_payload))
+                    stats["updated"] += 1
+                else:
+                    crud.create_company(db, company_data)
+                    stats["created"] += 1
+        except (httpx.TimeoutException, httpx.ConnectError) as exc:
+            timed_out = True
+            stats["errors"].append(
+                f"Canton {canton} prefix {char} [timeout, queued for retry]: {exc}"
+            )
+        except Exception as exc:  # noqa: BLE001
+            stats["errors"].append(f"Canton {canton} prefix {char} mid-stream [{type(exc).__name__}]: {exc}")
+
+        crud.update_checkpoint(db, run, canton, prefix_idx, stats)
+        if progress_cb:
+            progress_cb(canton, char, stats["created"], stats["updated"])
+        time.sleep(request_delay)
+        return not timed_out, results_count
+
     # ── Main sweep ───────────────────────────────────────────────────────────
+    retry_queue: list[tuple[str, str, int]] = []  # (canton, prefix_char, prefix_idx)
+    consecutive_empty = 0
+    aborted_early = False
+
     for canton in target_cantons[start_canton_idx:]:
         prefix_start = start_prefix_idx if canton == target_cantons[start_canton_idx] else 0
 
@@ -1101,72 +1191,44 @@ def bulk_import_zefix(
             if prefix_idx < prefix_start:
                 continue
 
-            try:
-                result_iter = _iter_prefix_with_fallback(
-                    canton, char, active_only=active_only, request_delay=request_delay
+            ok, count = _process_one_prefix(canton, char, prefix_idx)
+            if not ok:
+                retry_queue.append((canton, char, prefix_idx))
+
+            if count == 0:
+                consecutive_empty += 1
+            else:
+                consecutive_empty = 0
+
+            if empty_abort_threshold > 0 and consecutive_empty >= empty_abort_threshold:
+                stats["errors"].append(
+                    f"Aborted after {consecutive_empty} consecutive empty prefixes "
+                    f"(last: {canton}/{char}) — Zefix may be down or rate-limiting"
                 )
-            except Exception as exc:  # noqa: BLE001
-                stats["errors"].append(f"Canton {canton} prefix {char} [{type(exc).__name__}]: {exc}")
-                crud.update_checkpoint(db, run, canton, prefix_idx, stats)
-                time.sleep(request_delay)
-                continue
+                aborted_early = True
+                break
 
-            try:
-                for result in result_iter:
-                    if not result.uid:
-                        continue
-                    _score_bd = compute_flex_score_breakdown(
-                        legal_form=result.legal_form,
-                        legal_form_short_name=result.legal_form_short_name,
-                        status=result.status,
-                        canton=result.canton or canton,
-                        municipality=result.municipality,
-                        config=scoring_config,
-                    )
-                    company_data = CompanyCreate(
-                        uid=result.uid,
-                        name=result.name,
-                        legal_form=result.legal_form,
-                        legal_form_id=result.legal_form_id,
-                        legal_form_uid=result.legal_form_uid,
-                        legal_form_short_name=result.legal_form_short_name,
-                        status=result.status,
-                        municipality=result.municipality,
-                        canton=result.canton or canton,
-                        purpose=result.purpose,
-                        flex_score=int(_score_bd["final_score"]),
-                        flex_score_breakdown=json.dumps(_score_bd),
-                        ehraid=result.ehraid,
-                        chid=result.chid,
-                        legal_seat_id=result.legal_seat_id,
-                        sogc_date=result.sogc_date,
-                        deletion_date=result.deletion_date,
-                    )
-                    existing = crud.get_company_by_uid(db, result.uid)
-                    if existing:
-                        update_payload = {
-                            k: v for k, v in company_data.model_dump(exclude={"uid"}).items()
-                            if k in _ZEFIX_UPDATE_FIELDS
-                        }
-                        crud.update_company(db, existing, CompanyUpdate(**update_payload))
-                        stats["updated"] += 1
-                    else:
-                        crud.create_company(db, company_data)
-                        stats["created"] += 1
-            except Exception as exc:  # noqa: BLE001
-                stats["errors"].append(f"Canton {canton} prefix {char} mid-stream [{type(exc).__name__}]: {exc}")
-
-            # Checkpoint: last_offset = prefix index (0–35 for 0-9 + A-Z)
-            crud.update_checkpoint(db, run, canton, prefix_idx, stats)
-
-            if progress_cb:
-                progress_cb(canton, char, stats["created"], stats["updated"])
-
-            time.sleep(request_delay)
+        if aborted_early:
+            break
 
         stats["cantons_done"] += 1
         start_prefix_idx = 0  # reset for subsequent cantons
         time.sleep(request_delay)
+
+    # ── Retry pass (timed-out prefixes only, one more attempt) ───────────────
+    if retry_queue:
+        stats["errors"].append(
+            f"--- Retrying {len(retry_queue)} timed-out prefix(es) ---"
+        )
+        still_failed: list[str] = []
+        for canton, char, prefix_idx in retry_queue:
+            ok, _ = _process_one_prefix(canton, char, prefix_idx)
+            if not ok:
+                still_failed.append(f"{canton}/{char}")
+        if still_failed:
+            stats["errors"].append(
+                f"Permanently failed after retry: {', '.join(still_failed)}"
+            )
 
     crud.complete_run(db, run, stats)
     return stats
