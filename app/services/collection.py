@@ -955,6 +955,16 @@ def initial_collect(
     return stats
 
 
+def _is_name_too_short_error(response: Any) -> bool:
+    """Return True when Zefix rejected the query specifically because the name is too short."""
+    try:
+        body = response.json() if callable(getattr(response, "json", None)) else {}
+        msg = str(body).lower()
+        return "name to short" in msg or "name too short" in msg
+    except Exception:  # noqa: BLE001
+        return False
+
+
 def _iter_prefix_with_fallback(
     canton: str | None,
     prefix: str,
@@ -962,6 +972,8 @@ def _iter_prefix_with_fallback(
     request_delay: float,
     _depth: int = 0,
     _seen: set[str] | None = None,
+    _min_query_len: int = 2,
+    _too_short_log: list[str] | None = None,
 ):
     """Yield companies for *prefix*, expanding to longer prefixes when the cap is hit.
 
@@ -970,8 +982,12 @@ def _iter_prefix_with_fallback(
 
     Expands up to three levels deep (single → double → triple letter/digit prefix).
     Expansion is triggered when:
+    - The prefix is shorter than _min_query_len (Zefix rejects very short queries),
     - The query returns exactly ZEFIX_MAX_ENTRIES results (API truncated), or
     - The query returns HTTP 400 (Zefix rejects oversized result sets).
+
+    When Zefix returns 400 "name too short", the prefix is appended to *_too_short_log*
+    so the caller can distinguish this from genuine empty results or downtime.
 
     Results across all sub-prefixes are deduplicated by UID via a shared *_seen* set
     that is created at the top level and passed down through recursive calls.
@@ -984,15 +1000,23 @@ def _iter_prefix_with_fallback(
 
     expand = False
     results: list[Any] = []
-    try:
-        results = fetch_companies_by_prefix(prefix, canton, active_only=active_only)
-        if len(results) >= ZEFIX_MAX_ENTRIES:
-            expand = True
-    except httpx.HTTPStatusError as exc:
-        if exc.response.status_code == 400:
-            expand = True
-        else:
-            raise
+
+    # Skip querying Zefix for prefixes shorter than the minimum — the API requires
+    # at least 2 characters and silently returns 0 results for single-char queries.
+    if len(prefix) < _min_query_len:
+        expand = True
+    else:
+        try:
+            results = fetch_companies_by_prefix(prefix, canton, active_only=active_only)
+            if len(results) >= ZEFIX_MAX_ENTRIES:
+                expand = True
+        except httpx.HTTPStatusError as exc:
+            if exc.response.status_code == 400:
+                expand = True
+                if _is_name_too_short_error(exc.response) and _too_short_log is not None:
+                    _too_short_log.append(prefix)
+            else:
+                raise
 
     if not expand:
         for r in results:
@@ -1017,7 +1041,7 @@ def _iter_prefix_with_fallback(
         sub_prefix = prefix + char
         try:
             yield from _iter_prefix_with_fallback(
-                canton, sub_prefix, active_only, request_delay, _depth + 1, _seen
+                canton, sub_prefix, active_only, request_delay, _depth + 1, _seen, _min_query_len, _too_short_log
             )
         except httpx.TimeoutException:
             raise  # propagate timeouts so the outer sweep can queue for retry
@@ -1097,28 +1121,28 @@ def bulk_import_zefix(
         "created": existing_stats.get("created", 0),
         "updated": existing_stats.get("updated", 0),
         "errors": existing_stats.get("errors", []),
+        "too_short_skips": existing_stats.get("too_short_skips", 0),
     }
 
-    # Fields that come exclusively from Zefix — safe to overwrite on every run
-    _ZEFIX_UPDATE_FIELDS = {
-        "name", "legal_form", "legal_form_id", "legal_form_uid", "legal_form_short_name",
-        "status", "municipality", "canton", "flex_score", "flex_score_breakdown",
-        "ehraid", "chid", "legal_seat_id", "sogc_date", "deletion_date",
-        # NOTE: "purpose" intentionally excluded — CompanyShort rarely carries purpose and
-        # would overwrite the richer purpose fetched by the detail refresh job.
-    }
 
-    def _process_one_prefix(canton: str, char: str, prefix_idx: int) -> tuple[bool, int]:
-        """Process a single (canton, prefix) pair. Returns (not_timed_out, results_count)."""
+    def _process_one_prefix(canton: str, char: str, prefix_idx: int) -> tuple[bool, int, bool]:
+        """Process a single (canton, prefix) pair.
+
+        Returns (not_timed_out, results_count, was_too_short).
+        *was_too_short* is True when Zefix rejected at least one sub-prefix as too short,
+        which means Zefix is up — this should NOT count against the empty-abort threshold.
+        """
+        too_short_log: list[str] = []
         try:
             result_iter = _iter_prefix_with_fallback(
-                canton, char, active_only=active_only, request_delay=request_delay
+                canton, char, active_only=active_only, request_delay=request_delay,
+                _too_short_log=too_short_log,
             )
         except Exception as exc:  # noqa: BLE001
             stats["errors"].append(f"Canton {canton} prefix {char} [{type(exc).__name__}]: {exc}")
             crud.update_checkpoint(db, run, canton, prefix_idx, stats)
             time.sleep(request_delay)
-            return True, 0  # non-timeout errors: don't retry
+            return True, 0, False  # non-timeout errors: don't retry
 
         timed_out = False
         results_count = 0
@@ -1154,17 +1178,11 @@ def bulk_import_zefix(
                     sogc_date=result.sogc_date,
                     deletion_date=result.deletion_date,
                 )
-                existing = crud.get_company_by_uid(db, result.uid)
-                if existing:
-                    update_payload = {
-                        k: v for k, v in company_data.model_dump(exclude={"uid"}).items()
-                        if k in _ZEFIX_UPDATE_FIELDS
-                    }
-                    crud.update_company(db, existing, CompanyUpdate(**update_payload))
-                    stats["updated"] += 1
-                else:
-                    crud.create_company(db, company_data)
-                    stats["created"] += 1
+                if crud.get_company_by_uid(db, result.uid):
+                    stats["skipped"] = stats.get("skipped", 0) + 1
+                    continue
+                crud.create_company(db, company_data)
+                stats["created"] += 1
         except (httpx.TimeoutException, httpx.ConnectError) as exc:
             timed_out = True
             stats["errors"].append(
@@ -1173,11 +1191,14 @@ def bulk_import_zefix(
         except Exception as exc:  # noqa: BLE001
             stats["errors"].append(f"Canton {canton} prefix {char} mid-stream [{type(exc).__name__}]: {exc}")
 
+        was_too_short = bool(too_short_log)
+        if was_too_short:
+            stats["too_short_skips"] = stats.get("too_short_skips", 0) + len(too_short_log)
         crud.update_checkpoint(db, run, canton, prefix_idx, stats)
         if progress_cb:
             progress_cb(canton, char, stats["created"], stats["updated"])
         time.sleep(request_delay)
-        return not timed_out, results_count
+        return not timed_out, results_count, was_too_short
 
     # ── Main sweep ───────────────────────────────────────────────────────────
     retry_queue: list[tuple[str, str, int]] = []  # (canton, prefix_char, prefix_idx)
@@ -1191,11 +1212,15 @@ def bulk_import_zefix(
             if prefix_idx < prefix_start:
                 continue
 
-            ok, count = _process_one_prefix(canton, char, prefix_idx)
+            ok, count, was_too_short = _process_one_prefix(canton, char, prefix_idx)
             if not ok:
                 retry_queue.append((canton, char, prefix_idx))
 
-            if count == 0:
+            if was_too_short:
+                # Zefix responded (rejected query as too short) — it is NOT down or rate-limiting.
+                # Reset the consecutive-empty counter so this doesn't trigger an abort.
+                consecutive_empty = 0
+            elif count == 0:
                 consecutive_empty += 1
             else:
                 consecutive_empty = 0
@@ -1222,7 +1247,7 @@ def bulk_import_zefix(
         )
         still_failed: list[str] = []
         for canton, char, prefix_idx in retry_queue:
-            ok, _ = _process_one_prefix(canton, char, prefix_idx)
+            ok, _, _ = _process_one_prefix(canton, char, prefix_idx)
             if not ok:
                 still_failed.append(f"{canton}/{char}")
         if still_failed:

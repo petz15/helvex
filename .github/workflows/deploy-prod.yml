@@ -8,7 +8,9 @@ jobs:
   build:
     if: |
       contains(github.event.head_commit.message, '[deploy-prod]') ||
-      contains(github.event.head_commit.message, '[deploy-app]')
+      contains(github.event.head_commit.message, '[deploy-app]') ||
+      contains(github.event.head_commit.message, '[deploy-frontend]') ||
+      contains(github.event.head_commit.message, '[deploy-backend]')
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -29,6 +31,7 @@ jobs:
 
       - name: Build and push backend
         id: build
+        if: "!contains(github.event.head_commit.message, '[deploy-frontend]')"
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -44,15 +47,18 @@ jobs:
           cache-to: type=gha,mode=max,scope=backend
 
       - name: Install cosign
+        if: "!contains(github.event.head_commit.message, '[deploy-frontend]')"
         uses: sigstore/cosign-installer@v3
 
       - name: Sign image
+        if: "!contains(github.event.head_commit.message, '[deploy-frontend]')"
         continue-on-error: true
         run: |
           cosign sign --yes \
             ghcr.io/${{ github.repository }}@${{ steps.build.outputs.digest }}
 
       - name: Build and push frontend
+        if: "!contains(github.event.head_commit.message, '[deploy-backend]')"
         uses: docker/build-push-action@v6
         with:
           context: ./frontend
@@ -70,7 +76,9 @@ jobs:
     needs: build
     if: |
       contains(github.event.head_commit.message, '[deploy-prod]') ||
-      contains(github.event.head_commit.message, '[deploy-app]')
+      contains(github.event.head_commit.message, '[deploy-app]') ||
+      contains(github.event.head_commit.message, '[deploy-frontend]') ||
+      contains(github.event.head_commit.message, '[deploy-backend]')
     runs-on: helvex-prod
     environment: production
     permissions:
@@ -85,9 +93,8 @@ jobs:
           # kubectl
           curl -LO "https://dl.k8s.io/release/$(curl -Ls https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
           chmod +x kubectl && sudo mv kubectl /usr/local/bin/kubectl
-          # helm
+          # helm + helmfile (needed for full deploys; installed always to keep steps simple)
           curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
-          # helmfile
           HELMFILE_VERSION=0.171.0
           curl -Lo /tmp/helmfile.tar.gz https://github.com/helmfile/helmfile/releases/download/v${HELMFILE_VERSION}/helmfile_${HELMFILE_VERSION}_linux_amd64.tar.gz
           tar -xzf /tmp/helmfile.tar.gz -C /tmp && sudo mv /tmp/helmfile /usr/local/bin/helmfile
@@ -163,7 +170,10 @@ jobs:
           kubectl wait --for condition=established --timeout=60s crd/clusters.postgresql.cnpg.io
           kubectl wait --for condition=established --timeout=60s crd/clusterissuers.cert-manager.io
 
-      - name: Apply Helmfile (prod)
+      - name: Apply Helmfile (full deploy)
+        if: |
+          contains(github.event.head_commit.message, '[deploy-prod]') ||
+          contains(github.event.head_commit.message, '[deploy-app]')
         working-directory: infra
         env:
           COMMIT_MSG: ${{ github.event.head_commit.message }}
@@ -177,10 +187,31 @@ jobs:
             --set "frontend.image.tag=${{ github.sha }}" \
             --suppress-diff
 
+      - name: Deploy frontend only
+        if: contains(github.event.head_commit.message, '[deploy-frontend]')
+        run: |
+          kubectl set image deployment/helvex-frontend \
+            frontend=ghcr.io/${{ github.repository }}-frontend:${{ github.sha }} \
+            -n helvex-prod
+
+      - name: Deploy backend only
+        if: contains(github.event.head_commit.message, '[deploy-backend]')
+        run: |
+          kubectl set image deployment/helvex \
+            app=ghcr.io/${{ github.repository }}:${{ github.sha }} \
+            -n helvex-prod
+
       - name: Wait for rollout
         run: |
-          kubectl rollout status deployment/helvex -n helvex-prod --timeout=360s
-          kubectl rollout status deployment/helvex-frontend -n helvex-prod --timeout=180s
+          COMMIT_MSG="${{ github.event.head_commit.message }}"
+          if echo "$COMMIT_MSG" | grep -qF '[deploy-frontend]'; then
+            kubectl rollout status deployment/helvex-frontend -n helvex-prod --timeout=180s
+          elif echo "$COMMIT_MSG" | grep -qF '[deploy-backend]'; then
+            kubectl rollout status deployment/helvex -n helvex-prod --timeout=360s
+          else
+            kubectl rollout status deployment/helvex -n helvex-prod --timeout=360s
+            kubectl rollout status deployment/helvex-frontend -n helvex-prod --timeout=180s
+          fi
 
       - name: Dump diagnostics on failure
         if: failure()
@@ -197,6 +228,9 @@ jobs:
           kubectl get events -n helvex-prod --sort-by='.lastTimestamp' | tail -30
 
       - name: Bump minor version
+        if: |
+          contains(github.event.head_commit.message, '[deploy-prod]') ||
+          contains(github.event.head_commit.message, '[deploy-app]')
         run: |
           latest=$(git tag --list 'v*.*.*' --sort=-version:refname | head -1)
           latest=${latest:-v0.0.0}

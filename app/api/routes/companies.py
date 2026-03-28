@@ -296,7 +296,7 @@ def get_taxonomy(db: Session = Depends(get_db)):
 _DEMO_UID = "CHE-116.317.415"  # Post CH AG — shown on the public landing page
 
 
-@router.get("/demo", summary="Public demo company (no auth required)")
+@router.get("/demo", response_model=CompanyRead, summary="Public demo company (no auth required)")
 def get_demo_company(db: Session = Depends(get_db)):
     """Return the Post CH AG company record for unauthenticated landing-page previews."""
     company = crud.get_company_by_uid(db, _DEMO_UID)
