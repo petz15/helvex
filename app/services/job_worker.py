@@ -207,6 +207,15 @@ def _run_job(app, job_id: int) -> None:  # noqa: C901
                     crud.update_progress(db, job, message=msg, stats=stats_now)
                     crud.create_event(db, job_id=job.id, level="debug", message=msg)
                     _maybe_sync(app, job_type=job.job_type, label=job.label, message=msg, stats=stats_now, error=None, done=False)
+                    # Reset the RQ inactivity watchdog so a healthy long-running bulk
+                    # import is never killed mid-sweep.  Silently ignored in thread mode.
+                    try:
+                        from rq import get_current_job as _get_rq_job
+                        _rq_job = _get_rq_job()
+                        if _rq_job is not None:
+                            _rq_job.heartbeat(timeout=3600)
+                    except Exception:  # noqa: BLE001
+                        pass
 
                 stats = bulk_import_zefix(
                     db,
@@ -292,6 +301,13 @@ def _run_job(app, job_id: int) -> None:  # noqa: C901
                     crud.update_progress(db, job, message=msg, done=done, total=total, stats=stats)
                     crud.create_event(db, job_id=job.id, level="debug", message=msg)
                     _maybe_sync(app, job_type=job.job_type, label=job.label, message=msg, stats=dict(stats), error=None, done=False)
+                    try:
+                        from rq import get_current_job as _get_rq_job
+                        _rq_job = _get_rq_job()
+                        if _rq_job is not None:
+                            _rq_job.heartbeat(timeout=3600)
+                    except Exception:  # noqa: BLE001
+                        pass
 
                 stats = run_zefix_detail_collect(
                     db,
@@ -538,7 +554,7 @@ def enqueue_job(
         if not _settings.redis_url:
             raise JobEnqueueError("USE_RQ=true but REDIS_URL is not set — jobs cannot be processed")
         try:
-            _enqueue_rq(job.id)
+            _enqueue_rq(job.id, job_type=job_type)
         except Exception as exc:  # noqa: BLE001
             raise JobEnqueueError(f"Failed to enqueue job onto Redis: {type(exc).__name__}: {exc}") from exc
     else:
@@ -550,17 +566,58 @@ def enqueue_job(
     return job
 
 
-def _enqueue_rq(job_id: int) -> None:
-    """Push job_id onto the Redis queue for the RQ worker to pick up."""
+def _enqueue_rq(job_id: int, *, job_type: str = "") -> None:
+    """Push job_id onto the Redis queue for the RQ worker to pick up.
+
+    Bulk imports use a 1-hour inactivity timeout instead of a fixed wall-clock
+    limit.  The _progress callback calls rq_job.heartbeat() on every canton/prefix
+    tick, so the clock resets as long as the job is making progress.  A job that
+    stops progressing for more than 1 hour is considered genuinely stuck and will
+    be killed by RQ.
+    """
     from redis import Redis
     from rq import Queue as RQueue
     from app.config import settings as _settings
 
+    # Long-running jobs (bulk, detail) use a 1-hour inactivity timeout — the
+    # _progress heartbeat resets it on every tick so they run as long as needed.
+    # All other jobs keep a fixed 2-hour wall-clock limit.
+    timeout = 3600 if job_type in ("bulk", "detail") else 7200
+
     conn = Redis.from_url(_settings.redis_url)
     q = RQueue("helvex", connection=conn)
-    q.enqueue(run_job_task, job_id, job_timeout=7200)  # 2h max per job
+    q.enqueue(run_job_task, job_id, job_timeout=timeout, on_failure=_rq_job_failed)
 
 
 def run_job_task(job_id: int) -> None:
     """RQ task function — called by the worker process for each job."""
     _run_job(None, job_id)
+
+
+def _rq_job_failed(rq_job, connection, type, value, traceback) -> None:  # noqa: A002
+    """RQ on_failure callback — fired by the worker after a work horse dies.
+
+    Covers cases the in-process except handler cannot reach, e.g. SIGKILL from
+    a job timeout.  Marks the JobRun as failed so it doesn't stay stuck as
+    'running' in the DB.
+    """
+    import traceback as _tb
+    from app.database import SessionLocal
+    from app import crud
+
+    job_id: int = rq_job.args[0] if rq_job.args else None
+    if job_id is None:
+        return
+
+    error_msg = f"{type.__name__}: {value}" if type else "Killed by RQ worker (timeout or signal)"
+    tb_str = "".join(_tb.format_tb(traceback)) if traceback else ""
+    full_error = f"{error_msg}\n{tb_str}".strip()
+
+    try:
+        with SessionLocal() as db:
+            job = crud.get_job(db, job_id)
+            if job and job.status == "running":
+                crud.mark_failed(db, job, error=full_error, message=error_msg)
+                crud.create_event(db, job_id=job_id, level="error", message=error_msg)
+    except Exception:  # noqa: BLE001
+        pass

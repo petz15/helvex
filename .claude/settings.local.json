@@ -155,7 +155,9 @@
       "Bash(xargs ls:*)",
       "Bash(grep -E \"\\\\.py$\")",
       "Bash(npm list:*)",
-      "Bash(file /c/D/coding_projects/zefix_analyzer/frontend/public/*)"
+      "Bash(file /c/D/coding_projects/zefix_analyzer/frontend/public/*)",
+      "Bash(gh run:*)",
+      "Bash(python -c \"import rq; print\\(rq.__version__\\); import inspect; from rq import Queue; sig = inspect.signature\\(Queue.enqueue\\); print\\(sig\\)\")"
     ]
   }
 }
