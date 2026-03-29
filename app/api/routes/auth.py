@@ -439,7 +439,7 @@ async def google_callback(
 
     if error:
         logger.info("auth.google_oauth_denied error=%r", error)
-        return _Redirect(url=f"{_s.app_base_url}/login?oauth_error=1", status_code=302)
+        return _Redirect(url=f"{_public_base_url(request)}/login?oauth_error=1", status_code=302)
 
     stored_state = request.cookies.get(_OAUTH_STATE_COOKIE)
     if not stored_state or stored_state != state or not code:
@@ -457,7 +457,6 @@ async def google_callback(
                     "grant_type": "authorization_code",
                 },
             )
-                return _Redirect(url=f"{_public_base_url(request)}/login?oauth_error=1", status_code=302)
             token_resp.raise_for_status()
             access_token = token_resp.json()["access_token"]
 
@@ -481,7 +480,6 @@ async def google_callback(
 
     forwarded_proto = request.headers.get("x-forwarded-proto", "")
     is_https = request.url.scheme == "https" or forwarded_proto.split(",")[0].strip().lower() == "https"
-    response = _Redirect(url=f"{_s.app_base_url}/app/search", status_code=302)
     response = _Redirect(url=f"{_public_base_url(request)}/app/search", status_code=302)
     _set_session(response, user.id, is_https=is_https)
     response.delete_cookie(_OAUTH_STATE_COOKIE)

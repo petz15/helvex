@@ -23,7 +23,7 @@ ALPHANUMERIC = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZÄÖÜÉÈÀÂÛÇ"
 
 # Extended set used when expanding a prefix to sub-prefixes.
 # Adds common non-alphanumeric characters found in Swiss company names
-# (e.g. "T-Systems AG", "M&A GmbH", "K.I. Consulting") so that companies
+# (e.g. "M&A GmbH", "K.I. Consulting") so that companies
 # whose name starts with <letter><symbol> are not missed when a single-letter
 # prefix hits the API cap and must be expanded.
 EXPANSION_CHARS = ALPHANUMERIC + "-. &/+()"
