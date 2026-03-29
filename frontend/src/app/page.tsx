@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { HelvexMark } from "@/components/helvex-logo";
+import { CookieSettingsButton } from "../components/cookie-settings-button";
 
 // ─── Post CH AG mock data ─────────────────────────────────────────────────────
 
@@ -239,10 +240,19 @@ export default function LandingPage() {
 
       {/* ── Footer ── */}
       <footer className="border-t border-slate-100 py-8 text-center text-xs text-slate-400">
-        © {new Date().getFullYear()} Helvex · Balogh Consulting ·{" "}
-        <Link href="/login" className="hover:text-slate-600 underline-offset-2 hover:underline">
-          Sign in
-        </Link>
+        <div className="flex items-center justify-center gap-3 flex-wrap px-4">
+          <span>© {new Date().getFullYear()} Helvex · Balogh Consulting</span>
+          <span>·</span>
+          <Link href="/impressum" className="hover:text-slate-600 underline-offset-2 hover:underline">Impressum</Link>
+          <span>·</span>
+          <Link href="/datenschutz" className="hover:text-slate-600 underline-offset-2 hover:underline">Datenschutz</Link>
+          <span>·</span>
+          <Link href="/agb" className="hover:text-slate-600 underline-offset-2 hover:underline">AGB</Link>
+          <span>·</span>
+          <CookieSettingsButton className="hover:text-slate-600 underline-offset-2 hover:underline" label="Cookie-Einstellungen" />
+          <span>·</span>
+          <Link href="/login" className="hover:text-slate-600 underline-offset-2 hover:underline">Sign in</Link>
+        </div>
       </footer>
     </div>
   );

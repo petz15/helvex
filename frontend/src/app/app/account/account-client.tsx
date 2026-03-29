@@ -1,9 +1,8 @@
 "use client";
 import { useState } from "react";
 import useSWR from "swr";
-import { useRouter } from "next/navigation";
 import {
-  KeyRound, Mail, Building2, Loader2, Check, ExternalLink, Plus,
+  KeyRound, Mail, Building2, Loader2, Check, Plus,
 } from "lucide-react";
 import {
   fetchCurrentUser,
@@ -11,6 +10,7 @@ import {
   createOrg,
   leaveOrg,
 } from "@/lib/api";
+import { OrgClient } from "@/app/app/org/org-client";
 
 const inputCls =
   "w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-300 focus:border-transparent bg-white";
@@ -112,7 +112,6 @@ function ChangePasswordForm() {
 
 export function AccountClient() {
   const { data: me, mutate: reloadMe } = useSWR("me", fetchCurrentUser);
-  const router = useRouter();
 
   // Email change
   const [showEmailForm, setShowEmailForm] = useState(false);
@@ -201,7 +200,7 @@ export function AccountClient() {
     <div className="p-6 max-w-2xl mx-auto space-y-5">
       <div>
         <h1 className="text-xl font-semibold text-slate-900">My Account</h1>
-        <p className="text-sm text-slate-500 mt-0.5">Profile, security, and organization</p>
+        <p className="text-sm text-slate-500 mt-0.5">Profile, security, organization, and team</p>
       </div>
 
       {/* Profile */}
@@ -304,12 +303,7 @@ export function AccountClient() {
                 {me.org_role}
               </span>
             </div>
-            <a
-              href="/app/org"
-              className="flex items-center gap-1 text-xs text-blue-600 hover:text-blue-800 font-medium"
-            >
-              Manage team <ExternalLink size={11} />
-            </a>
+            <span className="text-xs text-slate-400">Team settings below</span>
           </div>
           <p className="text-xs text-slate-400 font-mono">{me.org.slug}</p>
           <div className="border-t border-slate-100 pt-3">
@@ -371,6 +365,12 @@ export function AccountClient() {
           )}
         </div>
       )}
+
+      {/* Team */}
+      <SectionTitle title="Team" />
+      <div id="team" className="rounded-xl border border-slate-200 bg-white p-4">
+        <OrgClient embedded />
+      </div>
     </div>
   );
 }

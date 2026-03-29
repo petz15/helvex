@@ -2,7 +2,7 @@
 
 ## Dashboard & UI
 
-- [ ] **General QOL** — Impressum, Datenschutz pages, user settings page, general polish; branding overhaul done (indigo theme, diamond-grid logo, public landing page)
+- [ ] **General QOL** — Impressum, Datenschutz pages, user settings page, general polish;
 - [X] **Save views** — serialize active filters/sort/columns as JSON, stored per user, quickly re-applied from a dropdown
 - [ ] **Switch Index page** — change the entry page to something more welcoming to first time visitors
 - [ ] **Seperate Search/Hunting page -> call it Company Explorer(Unternehmens-Explorer)** — makes the flow for first time users and users without clear intentions much easier. guide them to the filtering, searching, create list etc much smoother
@@ -19,7 +19,7 @@
 - [ ] **Web crawler** — crawl company websites to extract description, contact info, product/service keywords; store as structured fields; feed into scoring and classification; replace/supplement current Google scrape
 - [ ] **Google results & scoring** — Improve the selection and scoring of google results
 - [ ] **NOGA Data** — add NOGA data (or similar) https://www.kubb-tool.bfs.admin.ch/de/noga/2025 which is something other sites have such as https://business-monitor.ch or moneyhouse.ch
-- [ ] **Fix Zefix down** — on 28.03.2026 the zefix API seemed unreachable with status code 500. potentially that is a issue for the future, that zefix api should be checked if it is potentially down or I am getting rate limited or other isseu
+- [X] **Fix Zefix down** — on 28.03.2026 the zefix API seemed unreachable with status code 500. potentially that is a issue for the future, that zefix api should be checked if it is potentially down or I am getting rate limited or other isseu. -> should be fixed now. maybe implement a different rechecking strat
 
 ## Company Profile
 
@@ -27,7 +27,7 @@
 - [ ] **Website correction flow** — "Report wrong website" button on company detail; shows all Google search results so user can pick the correct one; backend tallies user selections and auto-promotes a new URL if enough users agree; admins can override
 - [ ] **Company views for registered users** — full company detail accessible free with email registration (gated behind login, not tier)
 - [ ] **History overview** —  Old names and taken over is already visible but not SOGC publications, which needs to be custom handled in order to display changes such as people and other changes.
-- [ ] **Graph overview of relationships** — based on past SHAB changes and name changes, take overs etc
+- [ ] **Graph overview of relationships** — based on past SHAB changes and name changes, take overs etc -> create nicer visuals for timeline. evaluate js on the fly calculations vs backend/DB
 - [ ] **Cross-company person graph** — normalize sogcPub organ changes into `persons` / `company_persons` tables via a pipeline job; build a graph UI showing where signers appear across multiple companies, what roles they held, and when — enabling network analysis of directors, beneficial owners, and corporate groups
 - [ ] **Fix Zweck not showing up** — maybe add column for zweck at companies table but that would also require to import it for existing companies 
 

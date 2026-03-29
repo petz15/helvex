@@ -63,7 +63,7 @@ function SectionTitle({ title }: { title: string }) {
   );
 }
 
-export function OrgClient() {
+export function OrgClient({ embedded = false }: { embedded?: boolean }) {
   const { data: me, mutate: reloadMe } = useSWR("me", fetchCurrentUser);
   const router = useRouter();
   const orgId = me?.org?.id;
@@ -222,12 +222,12 @@ export function OrgClient() {
   }
 
   if (!me || !org) {
-    return <div className="p-6 text-slate-400 text-sm">Loading…</div>;
+    return <div className={embedded ? "text-slate-400 text-sm" : "p-6 text-slate-400 text-sm"}>Loading…</div>;
   }
 
   if (!me.org_id) {
     return (
-      <div className="p-6 max-w-xl mx-auto">
+      <div className={embedded ? "" : "p-6 max-w-xl mx-auto"}>
         <div className="rounded-lg border border-slate-200 bg-slate-50 p-6 text-center text-slate-500 text-sm">
           You are not a member of any organization.
         </div>
@@ -237,7 +237,7 @@ export function OrgClient() {
 
   if (!isAdmin) {
     return (
-      <div className="p-6 max-w-xl mx-auto text-slate-500 text-sm">
+      <div className={embedded ? "text-slate-500 text-sm" : "p-6 max-w-xl mx-auto text-slate-500 text-sm"}>
         You need admin or owner role to manage the organization.
       </div>
     );
@@ -245,7 +245,7 @@ export function OrgClient() {
 
   if (me && !me.org_id) {
     return (
-      <div className="p-6 max-w-3xl mx-auto flex flex-col items-center justify-center py-24 text-center">
+      <div className={embedded ? "flex flex-col items-center justify-center py-16 text-center" : "p-6 max-w-3xl mx-auto flex flex-col items-center justify-center py-24 text-center"}>
         <span className="text-5xl mb-4 select-none">😢</span>
         <h2 className="text-lg font-semibold text-slate-800 mb-2">You are sadly not part of a Team.</h2>
         <p className="text-sm text-slate-500">Create one and invite others!</p>
@@ -254,15 +254,17 @@ export function OrgClient() {
   }
 
   return (
-    <div className="p-6 max-w-3xl mx-auto space-y-5">
+    <div className={embedded ? "space-y-5" : "p-6 max-w-3xl mx-auto space-y-5"}>
       {/* Header */}
-      <div className="flex items-center gap-3">
-        <Building2 size={22} className="text-blue-600" />
-        <div>
-          <h1 className="text-xl font-semibold text-slate-900">Organization</h1>
-          <p className="text-sm text-slate-500 mt-0.5">Manage your org and its members</p>
+      {!embedded && (
+        <div className="flex items-center gap-3">
+          <Building2 size={22} className="text-blue-600" />
+          <div>
+            <h1 className="text-xl font-semibold text-slate-900">Organization</h1>
+            <p className="text-sm text-slate-500 mt-0.5">Manage your org and its members</p>
+          </div>
         </div>
-      </div>
+      )}
 
       {/* Org info */}
       <SectionTitle title="Organization info" />

@@ -3,18 +3,17 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import useSWR from "swr";
 import { cn } from "@/lib/utils";
-import { BarChart3, KanbanSquare, Map, Cog, Database, Activity, Users, UserCircle, Shield, LayoutGrid } from "lucide-react";
+import { BarChart3, KanbanSquare, Map, Cog, Database, Activity, UserCircle, Shield, LayoutGrid } from "lucide-react";
 import { fetchCurrentUser } from "@/lib/api";
 import { HelvexMark } from "@/components/helvex-logo";
 
 const NAV = [
-  { href: "/app/search", label: "Search", icon: BarChart3 },
+  { href: "/app/search", label: "Explorer", icon: BarChart3 },
   { href: "/app/categories", label: "Categories", icon: LayoutGrid },
   { href: "/app/pipeline", label: "Pipeline", icon: KanbanSquare },
   { href: "/app/map", label: "Map", icon: Map },
   { href: "/app/collection", label: "Collection", icon: Database, superadminOnly: true },
   { href: "/app/jobs", label: "Jobs", icon: Activity, superadminOnly: true },
-  { href: "/app/org", label: "Team", icon: Users },
   { href: "/app/settings", label: "Settings", icon: Cog, superadminOnly: true },
 ];
 
