@@ -34,6 +34,15 @@ export interface OrganeChange {
   mutated: Person[];
 }
 
+function decodeHtmlEntities(value: string): string {
+  if (!value || value.indexOf("&") === -1 || typeof document === "undefined") {
+    return value;
+  }
+  const textarea = document.createElement("textarea");
+  textarea.innerHTML = value;
+  return textarea.value;
+}
+
 // ─── FT tag renderer ──────────────────────────────────────────────────────────
 
 function renderFtTags(message: string): React.ReactNode[] {
@@ -46,10 +55,10 @@ function renderFtTags(message: string): React.ReactNode[] {
   while ((match = regex.exec(message)) !== null) {
     if (match[3] !== undefined) {
       // plain text
-      parts.push(<span key={key++}>{match[3]}</span>);
+      parts.push(<span key={key++}>{decodeHtmlEntities(match[3])}</span>);
     } else {
       const type = match[1];
-      const text = match[2];
+      const text = decodeHtmlEntities(match[2]);
       switch (type) {
         case "F": // old firm name (strikethrough)
           parts.push(
@@ -129,8 +138,9 @@ function parsePerson(raw: string): Person {
 }
 
 function parseOrganeSection(message: string): OrganeChange {
+  const decodedMessage = decodeHtmlEntities(message);
   // Strip FT tags first for text parsing
-  const plain = message.replace(/<FT TYPE="[^"]+">([^<]*)<\/FT>/g, "$1");
+  const plain = decodedMessage.replace(/<FT TYPE="[^"]+">([^<]*)<\/FT>/g, "$1");
 
   const removedMatch = plain.match(
     /Ausgeschiedene Personen und erloschene Unterschriften:\s*([\s\S]*?)(?=Eingetragene Personen neu oder mutierend:|$)/i
@@ -282,12 +292,13 @@ const LONG_MSG_THRESHOLD = 400;
 function TimelineEntry({ entry }: { entry: SogcEntry }) {
   const [expanded, setExpanded] = useState(false);
   const isOrgane = entry.mutationTypes.some((m) => m.key === "aenderungorgane");
-  const plain = entry.message.replace(/<FT TYPE="[^"]+">([^<]*)<\/FT>/g, "$1");
+  const decodedMessage = decodeHtmlEntities(entry.message);
+  const plain = decodedMessage.replace(/<FT TYPE="[^"]+">([^<]*)<\/FT>/g, "$1");
   const isLong = plain.length > LONG_MSG_THRESHOLD;
 
   let organe: OrganeChange | null = null;
   if (isOrgane) {
-    organe = parseOrganeSection(entry.message);
+    organe = parseOrganeSection(decodedMessage);
   }
 
   // For non-organe entries, show the styled FT message
@@ -339,7 +350,7 @@ function TimelineEntry({ entry }: { entry: SogcEntry }) {
           </>
         ) : (
           <>
-            {renderFtTags(entry.message)}
+            {renderFtTags(decodedMessage)}
             {isLong && (
               <button
                 type="button"

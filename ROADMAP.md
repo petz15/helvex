@@ -1,5 +1,23 @@
 # Helvex Roadmap
 
+# Major changes
+
+- **Angebotsgestaltung**: 
+    - Create a simpler product called "search" which simply shows zefix information in a nice way and has google search for website (this might be limited in the tiering, add reveal website 5 free per month). 
+    - Then there is the explore function which reveals companies based on keywords, clusters, AI classification, regionality etc together with the scoring mechanisms and additional website enrichment. 
+    - Map functionality keep it simple with optional socring overlay.
+    - CRM stuff ? pipeline is already in place, more to come?
+    - History of removed companies (?)
+    - People finder and graph of connections potentially with linkedin?
+
+- **Major features**: 
+    - Webcrawler for company websites
+    - Linkedin unoffical API or scraper for people finder/graph and get more information
+    - API access
+    - Integrations with other products such as appollo etc?
+    - other industry specific directories
+
+
 ## Dashboard & UI
 
 - [X] **General QOL** — Impressum, Datenschutz pages, user settings page, general polish;
@@ -7,8 +25,9 @@
 - [X] **Switch Index page** — change the entry page to something more welcoming to first time visitors
 - [ ] **Seperate Search/Hunting page -> call it Company Explorer(Unternehmens-Explorer)** — makes the flow for first time users and users without clear intentions much easier. guide them to the filtering, searching, create list etc much smoother
 - [ ] **Add dark mode** — add dark mode 
-- [ ] **Demo on real pages instead of mock** — Find a way to demo the real webapp no use mock pages. seems weird. alternatively let users in without sign in but severly restrict access?
+- [X] **Demo on real pages instead of mock** — Find a way to demo the real webapp no use mock pages. seems weird. alternatively let users in without sign in but severly restrict access?
 - [ ] **Fix Branding** — potentially change the icon to have a red cross in the middle (change google and linkedin app connection icons)
+- [ ] **For search** - for search different default columns and filtering options. add web searched as a flag to it. potentially add more filterint for peopel or company type/history 
 
 ## Company Data
 
@@ -24,13 +43,13 @@
 ## Company Profile
 
 - [ ] **Company profile overhaul** — display TF-IDF cluster, purpose keywords, Claude classification prominently -> ongoing
-- [ ] **Website correction flow** — "Report wrong website" button on company detail; shows all Google search results so user can pick the correct one; backend tallies user selections and auto-promotes a new URL if enough users agree; admins can override
+- [X] **Website correction flow** — "Report wrong website" button on company detail; shows all Google search results so user can pick the correct one; backend tallies user selections and auto-promotes a new URL if enough users agree; admins can override
 - [ ] **Company views for registered users** — full company detail accessible free with email registration (gated behind login, not tier)
 - [ ] **History overview** —  Old names and taken over is already visible but not SOGC publications, which needs to be custom handled in order to display changes such as people and other changes. -> nicer overview
 - [ ] **Graph overview of relationships** — based on past SHAB changes and name changes, take overs etc -> create nicer visuals for timeline. evaluate js on the fly calculations vs backend/DB
 - [ ] **Cross-company person graph** — normalize sogcPub organ changes into `persons` / `company_persons` tables via a pipeline job; build a graph UI showing where signers appear across multiple companies, what roles they held, and when — enabling network analysis of directors, beneficial owners, and corporate groups
-- [ ] **Fix Zweck not showing up** — maybe add column for zweck at companies table but that would also require to import it for existing companies 
-
+- [X] **Fix Zweck not showing up** — maybe add column for zweck at companies table but that would also require to import it for existing companies 
+- [ ] **Do not immediatly show scoring unless explore has been setup for org or user** —
 
 ## Classification & Scoring
 
@@ -51,7 +70,7 @@
 ## Org-/Usermanagement
 - [X] **remove username** — Remove username, just keep email adress as user 
 - [X] **settings** — Add org management page and settings page for the users
-- [ ] ** Alternative logins such as google, github etc?** — Add alternative login methods such as google accounts, linkedin -> started but not working currently 500 error
+- [X] ** Alternative logins such as google, github etc?** — Add alternative login methods such as google accounts, linkedin -> started but not working currently 500 error
 
 
 ## Monetisation & Tiers

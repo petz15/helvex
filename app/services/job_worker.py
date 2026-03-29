@@ -197,6 +197,36 @@ def _run_job(app, job_id: int) -> None:  # noqa: C901
                 if resume_from:
                     done_msg += f" (resumed from {resume_from})"
 
+            elif job.job_type == "reextract_purpose":
+                from app.services.collection import reextract_purpose_from_zefix_raw
+
+                def _progress(done: int, total: int, stats: dict) -> None:
+                    _assert_not_cancelled()
+                    msg = (
+                        f"Processed {done}/{total} — {stats.get('updated', 0)} updated, "
+                        f"{stats.get('skipped_not_detailed', 0)} not-detailed, "
+                        f"{stats.get('skipped_existing', 0)} unchanged"
+                    )
+                    crud.update_progress(db, job, message=msg, done=done, total=total, stats=stats)
+                    crud.create_event(db, job_id=job.id, level="debug", message=msg)
+                    _maybe_sync(app, job_type=job.job_type, label=job.label, message=msg, stats=dict(stats), error=None, done=False)
+
+                stats = reextract_purpose_from_zefix_raw(
+                    db,
+                    resume_from=resume_from,
+                    only_missing_purpose=bool(params.get("only_missing_purpose", True)),
+                    progress_cb=_progress,
+                )
+                done_msg = (
+                    f"Done — {stats.get('updated', 0)} updated, "
+                    f"{stats.get('skipped_not_detailed', 0)} skipped (not detailed), "
+                    f"{stats.get('skipped_existing', 0)} skipped (existing), "
+                    f"{stats.get('skipped_empty_extracted', 0)} skipped (empty extraction), "
+                    f"{len(stats.get('errors', []))} errors"
+                )
+                if resume_from:
+                    done_msg += f" (resumed from {resume_from})"
+
             elif job.job_type == "bulk":
                 from app.services.collection import bulk_import_zefix
 

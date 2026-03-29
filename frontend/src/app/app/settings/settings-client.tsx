@@ -2,7 +2,7 @@
 import { useEffect, useState } from "react";
 import useSWR from "swr";
 import { useRouter } from "next/navigation";
-import { Save, Plus, Trash2, ToggleLeft, ToggleRight, Loader2, Landmark, Search, MapPin, KeyRound } from "lucide-react";
+import { Save, Plus, Trash2, ToggleLeft, ToggleRight, Loader2, Landmark, Search, MapPin, KeyRound, FileText } from "lucide-react";
 import {
   createBoilerplate, deleteBoilerplate, fetchBoilerplate, fetchSettings,
   saveSettings, toggleBoilerplate, triggerJob,
@@ -141,11 +141,11 @@ export function SettingsClient() {
     }
   }
 
-  async function handleTrigger(endpoint: string) {
+  async function handleTrigger(endpoint: string, payload?: object) {
     setTriggering(endpoint);
     setBanner(null);
     try {
-      await triggerJob(endpoint);
+      await triggerJob(endpoint, payload);
       setBanner({ kind: "success", message: "Job queued → redirecting to Jobs…" });
       setTimeout(() => router.push("/app/jobs"), 800);
     } catch (error) {
@@ -358,6 +358,28 @@ export function SettingsClient() {
         >
           {triggering === "scoring/re-geocode" ? <Loader2 size={16} className="animate-spin text-amber-700" /> : <MapPin size={16} className="text-amber-700" />}
           Re-geocode all companies
+        </button>
+        <button
+          type="button"
+          onClick={() => handleTrigger("scoring/reextract-purpose", { only_missing_purpose: true })}
+          disabled={!!triggering}
+          className={cn(
+            "flex items-center gap-2 bg-indigo-50 hover:bg-indigo-100 disabled:opacity-60 text-indigo-700 px-4 py-2 rounded-lg text-sm font-medium transition-colors",
+          )}
+        >
+          {triggering === "scoring/reextract-purpose" ? <Loader2 size={16} className="animate-spin text-indigo-700" /> : <FileText size={16} className="text-indigo-700" />}
+          Re-extract purpose (missing only)
+        </button>
+        <button
+          type="button"
+          onClick={() => handleTrigger("scoring/reextract-purpose", { only_missing_purpose: false })}
+          disabled={!!triggering}
+          className={cn(
+            "flex items-center gap-2 bg-indigo-100 hover:bg-indigo-200 disabled:opacity-60 text-indigo-800 px-4 py-2 rounded-lg text-sm font-medium transition-colors",
+          )}
+        >
+          {triggering === "scoring/reextract-purpose" ? <Loader2 size={16} className="animate-spin text-indigo-800" /> : <FileText size={16} className="text-indigo-800" />}
+          Re-extract purpose (overwrite all)
         </button>
       </div>
 

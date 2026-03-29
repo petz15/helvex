@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { ExternalLink, ChevronLeft, Globe, MapPin, Building2, Phone, Mail, FileText, Plus, Trash2, Loader2, Search } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { reviewBadgeClass, proposalBadgeClass, fmtDate, fmtDateTime, fmtRelativeTime, cn, scoreColor } from "@/lib/utils";
-import { createNote, deleteNote, runCompanyWebSearch, selectCompanyWebsite, updateCompany } from "@/lib/api";
+import { createNote, deleteNote, fetchCompany, runCompanyWebSearch, selectCompanyWebsite, updateCompany } from "@/lib/api";
 import { REVIEW_STATUSES, CONTACT_STATUSES } from "@/lib/types";
 import type { Company, Note, GoogleScoredResult } from "@/lib/types";
 import "leaflet/dist/leaflet.css";
@@ -13,6 +13,7 @@ import { SogcTimeline, SignersPanel } from "@/components/sogc-history";
 
 interface Props {
   company: Company;
+  readOnlyDemo?: boolean;
 }
 
 interface CompanyShortEntry {
@@ -73,7 +74,7 @@ function RelatedCompaniesList({ items, label }: { items: CompanyShortEntry[]; la
   );
 }
 
-export function CompanyDetailClient({ company: initial }: Props) {
+export function CompanyDetailClient({ company: initial, readOnlyDemo = false }: Props) {
   const router = useRouter();
   const [company, setCompany] = useState(initial);
   const [notes, setNotes] = useState<Note[]>(initial.notes ?? []);
@@ -192,6 +193,7 @@ export function CompanyDetailClient({ company: initial }: Props) {
   }, [company.lat, company.lon]);
 
   async function handleStatusChange(field: "review_status" | "contact_status", value: string) {
+    if (readOnlyDemo) return;
     setSaving(true);
     try {
       const updated = await updateCompany(company.id, { [field]: value || null });
@@ -202,6 +204,7 @@ export function CompanyDetailClient({ company: initial }: Props) {
   }
 
   async function handleAddNote(e: React.FormEvent) {
+    if (readOnlyDemo) return;
     e.preventDefault();
     if (!noteText.trim()) return;
     setAddingNote(true);
@@ -215,11 +218,13 @@ export function CompanyDetailClient({ company: initial }: Props) {
   }
 
   async function handleDeleteNote(noteId: number) {
+    if (readOnlyDemo) return;
     await deleteNote(company.id, noteId);
     setNotes(ns => ns.filter(n => n.id !== noteId));
   }
 
   async function handleSelectWebsite(link: string) {
+    if (readOnlyDemo) return;
     setSelectingWebsite(link);
     try {
       const updated = await selectCompanyWebsite(company.id, link);
@@ -231,10 +236,13 @@ export function CompanyDetailClient({ company: initial }: Props) {
   }
 
   async function handleWebSearch() {
+    if (readOnlyDemo) return;
     setSearchingWeb(true);
     try {
       await runCompanyWebSearch(company.id, 10);
-      router.refresh();
+      const fresh = await fetchCompany(company.id);
+      setCompany(fresh);
+      setNotes(fresh.notes ?? []);
     } finally {
       setSearchingWeb(false);
     }
@@ -244,9 +252,15 @@ export function CompanyDetailClient({ company: initial }: Props) {
     <div className="max-w-5xl mx-auto px-4 py-6 space-y-6">
       {/* Breadcrumb */}
       <div className="flex items-center gap-2 text-sm text-slate-500">
-        <button type="button" onClick={() => router.back()} className="hover:text-slate-700 flex items-center gap-1">
-          <ChevronLeft size={14} /> Search
-        </button>
+        {readOnlyDemo ? (
+          <Link href="/demo" className="hover:text-slate-700 flex items-center gap-1">
+            <ChevronLeft size={14} /> Demo
+          </Link>
+        ) : (
+          <button type="button" onClick={() => router.back()} className="hover:text-slate-700 flex items-center gap-1">
+            <ChevronLeft size={14} /> Search
+          </button>
+        )}
         <span>/</span>
         <span className="text-slate-800 font-medium">{company.name}</span>
       </div>
@@ -282,7 +296,7 @@ export function CompanyDetailClient({ company: initial }: Props) {
             </div>
           </div>
           <div className="flex flex-col gap-2 items-end shrink-0">
-            {!company.website_checked_at && (
+            {!readOnlyDemo && !company.website_checked_at && (
               <button
                 type="button"
                 onClick={handleWebSearch}
@@ -303,7 +317,7 @@ export function CompanyDetailClient({ company: initial }: Props) {
                 <Globe size={13} /> Visit website <ExternalLink size={11} />
               </a>
             )}
-            {!!company.website_checked_at && (
+            {!readOnlyDemo && !!company.website_checked_at && (
               <button
                 type="button"
                 onClick={() => setShowWebsitePicker(v => !v)}
@@ -335,7 +349,7 @@ export function CompanyDetailClient({ company: initial }: Props) {
         </div>
       </div>
 
-      {showWebsitePicker && (
+      {!readOnlyDemo && showWebsitePicker && (
         <div className="bg-white rounded-xl border border-slate-200 p-5 shadow-sm">
           <div className="flex items-center justify-between">
             <h2 className="text-sm font-semibold text-slate-700">Select a different website</h2>
@@ -550,52 +564,71 @@ export function CompanyDetailClient({ company: initial }: Props) {
                 </div>
               )}
             </div>
-            <div>
-              <label className="text-xs text-slate-500 block mb-1">Review status</label>
-              <div className="flex flex-wrap gap-2">
-                <button
-                  type="button"
-                  disabled={saving}
-                  onClick={() => handleStatusChange("review_status", "")}
-                  className={cn(
-                    "px-2.5 py-1 rounded-full text-xs font-medium border transition-colors",
-                    (company.review_status ?? "") === "" ? "bg-gray-100 text-gray-600 border-gray-200" : "bg-white text-gray-500 border-slate-200 hover:bg-slate-50",
-                  )}
-                >
-                  Pending
-                </button>
-                {REVIEW_STATUSES.map(s => {
-                  const active = company.review_status === s.value;
-                  return (
-                    <button
-                      key={s.value}
-                      type="button"
+              {readOnlyDemo ? (
+                <div className="space-y-2 text-sm">
+                  <div>
+                    <label className="text-xs text-slate-500 block mb-1">Review status</label>
+                    <Badge className={cn("text-xs", reviewBadgeClass(company.review_status))}>
+                      {company.review_status?.replace(/_/g, " ") ?? "Pending"}
+                    </Badge>
+                  </div>
+                  <div>
+                    <label className="text-xs text-slate-500 block mb-1">Contact status</label>
+                    <Badge className={cn("text-xs", proposalBadgeClass(company.contact_status ?? "not_sent"))}>
+                      {company.contact_status ?? "not sent"}
+                    </Badge>
+                  </div>
+                </div>
+              ) : (
+                <>
+                  <div>
+                    <label className="text-xs text-slate-500 block mb-1">Review status</label>
+                    <div className="flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        disabled={saving}
+                        onClick={() => handleStatusChange("review_status", "")}
+                        className={cn(
+                          "px-2.5 py-1 rounded-full text-xs font-medium border transition-colors",
+                          (company.review_status ?? "") === "" ? "bg-gray-100 text-gray-600 border-gray-200" : "bg-white text-gray-500 border-slate-200 hover:bg-slate-50",
+                        )}
+                      >
+                        Pending
+                      </button>
+                      {REVIEW_STATUSES.map(s => {
+                        const active = company.review_status === s.value;
+                        return (
+                          <button
+                            key={s.value}
+                            type="button"
+                            disabled={saving}
+                            onClick={() => handleStatusChange("review_status", s.value)}
+                            className={cn(
+                              "px-2.5 py-1 rounded-full text-xs font-medium border transition-all",
+                              reviewBadgeClass(s.value),
+                              active ? "border-slate-300" : "border-transparent opacity-70 hover:opacity-100",
+                            )}
+                          >
+                            {s.label}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                  <div>
+                    <label className="text-xs text-slate-500 block mb-1">Contact status</label>
+                    <select
+                      value={company.contact_status ?? ""}
                       disabled={saving}
-                      onClick={() => handleStatusChange("review_status", s.value)}
-                      className={cn(
-                        "px-2.5 py-1 rounded-full text-xs font-medium border transition-all",
-                        reviewBadgeClass(s.value),
-                        active ? "border-slate-300" : "border-transparent opacity-70 hover:opacity-100",
-                      )}
+                      onChange={e => handleStatusChange("contact_status", e.target.value)}
+                      className="w-full rounded-lg border border-slate-200 px-2.5 py-1.5 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-400"
                     >
-                      {s.label}
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-            <div>
-              <label className="text-xs text-slate-500 block mb-1">Contact status</label>
-              <select
-                value={company.contact_status ?? ""}
-                disabled={saving}
-                onChange={e => handleStatusChange("contact_status", e.target.value)}
-                className="w-full rounded-lg border border-slate-200 px-2.5 py-1.5 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-400"
-              >
-                <option value="">— none —</option>
-                {CONTACT_STATUSES.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
-              </select>
-            </div>
+                      <option value="">— none —</option>
+                      {CONTACT_STATUSES.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
+                    </select>
+                  </div>
+                </>
+              )}
           </div>
 
           {(company.contact_name || company.contact_email || company.contact_phone) && (
@@ -686,7 +719,7 @@ export function CompanyDetailClient({ company: initial }: Props) {
       <SogcTimeline sogcPubJson={company.sogc_pub} />
 
       {/* Notes */}
-      <div className="bg-white rounded-xl border border-slate-200 p-5 shadow-sm">
+      {!readOnlyDemo && <div className="bg-white rounded-xl border border-slate-200 p-5 shadow-sm">
         <h2 className="text-sm font-semibold text-slate-700 mb-4">Notes ({notes.length})</h2>
         <form onSubmit={handleAddNote} className="mb-4">
           <div className="flex gap-2">
@@ -738,7 +771,7 @@ export function CompanyDetailClient({ company: initial }: Props) {
             </div>
           ))}
         </div>
-      </div>
+      </div>}
     </div>
   );
 }

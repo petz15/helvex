@@ -312,7 +312,16 @@ def get_demo_company(db: Session = Depends(get_db)):
     company = crud.get_company_by_uid(db, _DEMO_UID)
     if not company:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Demo company not found")
-    return _overlay(company, None)
+    demo = _overlay(company, None)
+    return demo.model_copy(update={
+        "review_status": None,
+        "contact_status": None,
+        "contact_name": None,
+        "contact_email": None,
+        "contact_phone": None,
+        "tags": None,
+        "notes": [],
+    })
 
 
 @router.get("", response_model=CompanyPage, summary="List companies (paginated, filterable)")

@@ -333,6 +333,55 @@ def _load_scoring_config(db: Session) -> dict[str, str]:
     return {key: crud.get_setting(db, key, val) for key, val in defaults.items()}
 
 
+def _extract_purpose_from_raw(raw: dict[str, Any]) -> str | None:
+    """Extract purpose/zweck text from a Zefix payload."""
+    purpose_raw = raw.get("purpose") or raw.get("purposes") or raw.get("purposeTexts") or None
+    if isinstance(purpose_raw, list):
+        texts: list[str] = []
+        for item in purpose_raw:
+            if isinstance(item, dict):
+                text = (
+                    item.get("de") or item.get("fr") or item.get("it") or item.get("en")
+                    or next(iter(item.values()), None)
+                )
+                if text:
+                    texts.append(str(text))
+            elif item:
+                texts.append(str(item))
+        return " ".join(texts).strip() or None
+    if isinstance(purpose_raw, dict):
+        text = (
+            purpose_raw.get("de") or purpose_raw.get("fr")
+            or purpose_raw.get("it") or purpose_raw.get("en")
+            or next(iter(purpose_raw.values()), None)
+        )
+        return str(text).strip() if text else None
+    return str(purpose_raw).strip() if purpose_raw else None
+
+
+def _is_detailed_zefix_raw_payload(raw: dict[str, Any]) -> bool:
+    """Heuristic check for detailed Zefix payloads (per-UID/company-full style)."""
+    detail_keys = (
+        "purposeTexts",
+        "sogcPub",
+        "zefixDetailWeb",
+        "headOffices",
+        "furtherHeadOffices",
+        "branchOffices",
+        "hasTakenOver",
+        "wasTakenOverBy",
+        "auditCompanies",
+        "oldNames",
+        "capitalNominal",
+        "cantonalExcerptWeb",
+    )
+    for k in detail_keys:
+        v = raw.get(k)
+        if v not in (None, "", [], {}):
+            return True
+    return False
+
+
 def _extract_company_fields(
     raw: dict[str, Any],
     fallback_uid: str,
@@ -384,30 +433,8 @@ def _extract_company_fields(
 
     uid_normalised = _normalise_uid(str(raw.get("uid", fallback_uid)))
 
-    # Extract purpose from multilingual dict if needed.
-    # CompanyFull uses "purposeTexts" (list of multilingual dicts); CompanyShort uses "purpose".
-    purpose_raw = raw.get("purpose") or raw.get("purposes") or raw.get("purposeTexts") or None
-    if isinstance(purpose_raw, list):
-        texts: list[str] = []
-        for item in purpose_raw:
-            if isinstance(item, dict):
-                text = (
-                    item.get("de") or item.get("fr") or item.get("it") or item.get("en")
-                    or next(iter(item.values()), None)
-                )
-                if text:
-                    texts.append(str(text))
-            elif item:
-                texts.append(str(item))
-        purpose = " ".join(texts) or None
-    elif isinstance(purpose_raw, dict):
-        purpose = (
-            purpose_raw.get("de") or purpose_raw.get("fr")
-            or purpose_raw.get("it") or purpose_raw.get("en")
-            or next(iter(purpose_raw.values()), None) or None
-        )
-    else:
-        purpose = str(purpose_raw) if purpose_raw else None
+    # Extract purpose from multilingual dict/list if needed.
+    purpose = _extract_purpose_from_raw(raw)
 
     ehraid_raw = raw.get("ehraId") or raw.get("ehraid") or raw.get("ehra_id")
     ehraid = str(ehraid_raw) if ehraid_raw is not None else None
@@ -966,6 +993,84 @@ def initial_collect(
             stats["errors"].append(f"UID {uid_clean} [{type(exc).__name__}]: {exc}")
         if progress_cb:
             progress_cb(idx, total, stats)
+
+    return stats
+
+
+def reextract_purpose_from_zefix_raw(
+    db: Session,
+    *,
+    batch_size: int = 500,
+    resume_from: int = 0,
+    only_missing_purpose: bool = True,
+    progress_cb: Any = None,
+) -> dict[str, Any]:
+    """Re-extract purpose/zweck from stored detailed zefix_raw payloads.
+
+    Processes only companies that have a non-null zefix_raw payload and where the
+    payload appears to be detailed (company-full style). The caller can choose to
+    update only missing purpose values or overwrite all existing values.
+    """
+    stats: dict[str, Any] = {
+        "updated": 0,
+        "skipped_not_detailed": 0,
+        "skipped_existing": 0,
+        "skipped_empty_extracted": 0,
+        "errors": [],
+    }
+
+    total = db.query(Company).filter(Company.zefix_raw.isnot(None)).count()
+    offset = max(0, min(resume_from, total))
+
+    while True:
+        batch = (
+            db.query(Company)
+            .filter(Company.zefix_raw.isnot(None))
+            .order_by(Company.id.asc())
+            .offset(offset)
+            .limit(batch_size)
+            .all()
+        )
+        if not batch:
+            break
+
+        for company in batch:
+            try:
+                raw_text = (company.zefix_raw or "").strip()
+                if not raw_text:
+                    stats["skipped_not_detailed"] += 1
+                    continue
+
+                raw = json.loads(raw_text)
+                if not isinstance(raw, dict) or not _is_detailed_zefix_raw_payload(raw):
+                    stats["skipped_not_detailed"] += 1
+                    continue
+
+                if only_missing_purpose and (company.purpose or "").strip():
+                    stats["skipped_existing"] += 1
+                    continue
+
+                extracted = _extract_purpose_from_raw(raw)
+                if not extracted:
+                    stats["skipped_empty_extracted"] += 1
+                    continue
+
+                if (company.purpose or "").strip() == extracted:
+                    # Purpose already matches the extracted value.
+                    stats["skipped_existing"] += 1
+                    continue
+
+                crud.update_company(db, company, CompanyUpdate(purpose=extracted))
+                stats["updated"] += 1
+
+            except Exception as exc:  # noqa: BLE001
+                stats["errors"].append(f"Company {company.id} [{type(exc).__name__}]: {exc}")
+
+        db.commit()
+        offset += len(batch)
+
+        if progress_cb:
+            progress_cb(min(offset, total), total, stats)
 
     return stats
 

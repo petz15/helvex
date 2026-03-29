@@ -11,7 +11,7 @@ from app.models.company import Company as CompanyModel
 
 router = APIRouter(tags=["map"])
 
-_MAP_MAX_POINTS = 5_000
+_MAP_MAX_POINTS = 20_000
 _CANCELLED_TERMS = ["being_cancelled", "dissolved", "gelöscht", "radiation", "liquidation"]
 
 

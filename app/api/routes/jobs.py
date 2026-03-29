@@ -230,6 +230,10 @@ class RecalcGoogleBody(BaseModel):
     pass
 
 
+class ReextractPurposeBody(BaseModel):
+    only_missing_purpose: bool = True
+
+
 class ClaudeClassifyBody(BaseModel):
     canton: str | None = None
     min_zefix_score: int | None = None   # passed as-is to job params; worker maps to min_flex_score
@@ -349,6 +353,26 @@ def trigger_re_geocode(request: Request, db: Session = Depends(get_db), _: User 
         job_type="re_geocode",
         label="Re-geocode all companies",
         params={},
+        db=db,
+    )
+    return JobOut.from_orm_obj(job)
+
+
+@router.post("/scoring/reextract-purpose", response_model=JobOut, status_code=status.HTTP_202_ACCEPTED)
+def trigger_reextract_purpose(
+    body: ReextractPurposeBody,
+    request: Request,
+    db: Session = Depends(get_db),
+    _: User = Depends(require_superadmin),
+):
+    label = "Re-extract purpose from detailed zefix_raw"
+    if body.only_missing_purpose:
+        label += " (missing only)"
+    job = _enqueue_or_http_error(
+        request,
+        job_type="reextract_purpose",
+        label=label,
+        params=body.model_dump(),
         db=db,
     )
     return JobOut.from_orm_obj(job)
