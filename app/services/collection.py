@@ -927,6 +927,8 @@ def initial_collect(
     legal_form: str | None = None,
     resume_from: int = 0,
     progress_cb: Any = None,
+    status_cb: Any = None,
+    abort_cb: Any = None,
 ) -> dict[str, Any]:
     """Run a one-time collection from explicit UIDs and search terms."""
     stats: dict[str, Any] = {
@@ -981,7 +983,13 @@ def initial_collect(
 
     for idx, uid_clean in enumerate(target_uids[start_idx:], start=start_idx + 1):
         try:
-            company, created = import_company_from_zefix_uid(db, uid_clean)
+            company, created = import_company_from_zefix_uid(
+                db,
+                uid_clean,
+                pause_on_zefix_500=True,
+                status_cb=status_cb,
+                abort_cb=abort_cb,
+            )
             stats["created" if created else "updated"] += 1
             if run_google:
                 enriched, _ = enrich_company_website(db, company)
@@ -990,6 +998,8 @@ def initial_collect(
                 else:
                     stats["google_no_result"] += 1
         except Exception as exc:  # noqa: BLE001
+            if _is_control_signal_exception(exc):
+                raise
             stats["errors"].append(f"UID {uid_clean} [{type(exc).__name__}]: {exc}")
         if progress_cb:
             progress_cb(idx, total, stats)
@@ -1095,6 +1105,11 @@ def _sleep_with_abort(seconds: float, *, abort_cb: Any = None) -> None:
             abort_cb()
         time.sleep(min(step, remaining))
         remaining -= step
+
+
+def _is_control_signal_exception(exc: Exception) -> bool:
+    """Return True when an exception is a worker pause/cancel control signal."""
+    return exc.__class__.__name__ in {"JobPausedError", "JobCancelledError"}
 
 
 def _wait_for_zefix_availability(
@@ -1228,9 +1243,11 @@ def _iter_prefix_with_fallback(
             )
         except httpx.TimeoutException:
             raise  # propagate timeouts so the outer sweep can queue for retry
-        except Exception:  # noqa: BLE001
+        except Exception as exc:  # noqa: BLE001
+            if _is_control_signal_exception(exc):
+                raise
             continue
-        time.sleep(request_delay)
+        _sleep_with_abort(request_delay, abort_cb=abort_cb)
 
 
 def bulk_import_zefix(
@@ -1335,9 +1352,11 @@ def bulk_import_zefix(
                 abort_cb=abort_cb,
             )
         except Exception as exc:  # noqa: BLE001
+            if _is_control_signal_exception(exc):
+                raise
             stats["errors"].append(f"Canton {canton} prefix {char} [{type(exc).__name__}]: {exc}")
             crud.update_checkpoint(db, run, canton, prefix_idx, stats)
-            time.sleep(request_delay)
+            _sleep_with_abort(request_delay, abort_cb=abort_cb)
             return True, 0, False  # non-timeout errors: don't retry
 
         timed_out = False
@@ -1385,6 +1404,8 @@ def bulk_import_zefix(
                 f"Canton {canton} prefix {char} [timeout, queued for retry]: {exc}"
             )
         except Exception as exc:  # noqa: BLE001
+            if _is_control_signal_exception(exc):
+                raise
             stats["errors"].append(f"Canton {canton} prefix {char} mid-stream [{type(exc).__name__}]: {exc}")
 
         was_too_short = bool(too_short_log)
@@ -1393,7 +1414,7 @@ def bulk_import_zefix(
         crud.update_checkpoint(db, run, canton, prefix_idx, stats)
         if progress_cb:
             progress_cb(canton, char, stats["created"], stats["updated"])
-        time.sleep(request_delay)
+        _sleep_with_abort(request_delay, abort_cb=abort_cb)
         return not timed_out, results_count, was_too_short
 
     # ── Main sweep ───────────────────────────────────────────────────────────
@@ -1434,7 +1455,7 @@ def bulk_import_zefix(
 
         stats["cantons_done"] += 1
         start_prefix_idx = 0  # reset for subsequent cantons
-        time.sleep(request_delay)
+        _sleep_with_abort(request_delay, abort_cb=abort_cb)
 
     # ── Retry pass (timed-out prefixes only, one more attempt) ───────────────
     if retry_queue:
@@ -1593,6 +1614,8 @@ def run_zefix_detail_collect(
                     stats["scored"] += 1
 
         except Exception as exc:  # noqa: BLE001
+            if _is_control_signal_exception(exc):
+                raise
             stats["errors"].append(f"{company.uid} ({company.name}) [{type(exc).__name__}]: {exc}")
 
         if progress_cb:
@@ -1602,7 +1625,7 @@ def run_zefix_detail_collect(
         if i % 50 == 0:
             crud.update_checkpoint(db, run, company.canton or "—", i, stats)
 
-        time.sleep(request_delay)
+        _sleep_with_abort(request_delay, abort_cb=abort_cb)
 
     crud.complete_run(db, run, stats)
     return stats
@@ -1623,6 +1646,8 @@ def run_batch_collect(
     purpose_keywords: str | None = None,
     tfidf_cluster: str | None = None,
     review_status: str | None = None,
+    status_cb: Any = None,
+    abort_cb: Any = None,
 ) -> dict[str, Any]:
     """Run a recurring batch process over companies already in your DB."""
     import heapq
@@ -1745,10 +1770,18 @@ def run_batch_collect(
         current = company
         if refresh_zefix:
             try:
-                refreshed, _ = import_company_from_zefix_uid(db, company.uid)
+                refreshed, _ = import_company_from_zefix_uid(
+                    db,
+                    company.uid,
+                    pause_on_zefix_500=True,
+                    status_cb=status_cb,
+                    abort_cb=abort_cb,
+                )
                 current = refreshed
                 stats["zefix_refreshed"] += 1
             except Exception as exc:  # noqa: BLE001
+                if _is_control_signal_exception(exc):
+                    raise
                 stats["errors"].append(f"Zefix refresh {company.uid} [{type(exc).__name__}]: {exc}")
 
         if run_google:

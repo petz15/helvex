@@ -290,6 +290,13 @@ def _run_job(app, job_id: int) -> None:  # noqa: C901
                     purpose_keywords=params.get("purpose_keywords"),
                     tfidf_cluster=params.get("tfidf_cluster"),
                     review_status=params.get("review_status"),
+                    status_cb=lambda m: (
+                        _assert_not_cancelled(),
+                        crud.update_progress(db, job, message=str(m)),
+                        crud.create_event(db, job_id=job.id, level="info", message=str(m)),
+                        _maybe_sync(app, job_type=job.job_type, label=job.label, message=str(m), stats=json.loads(job.stats_json) if job.stats_json else {}, error=None, done=False),
+                    ),
+                    abort_cb=_assert_not_cancelled,
                 )
                 done_msg = (
                     f"Done — {stats['google_enriched']} enriched, "
@@ -323,6 +330,13 @@ def _run_job(app, job_id: int) -> None:  # noqa: C901
                     run_google=bool(params.get("run_google", True)),
                     resume_from=resume_from,
                     progress_cb=_progress,
+                    status_cb=lambda m: (
+                        _assert_not_cancelled(),
+                        crud.update_progress(db, job, message=str(m)),
+                        crud.create_event(db, job_id=job.id, level="info", message=str(m)),
+                        _maybe_sync(app, job_type=job.job_type, label=job.label, message=str(m), stats=json.loads(job.stats_json) if job.stats_json else {}, error=None, done=False),
+                    ),
+                    abort_cb=_assert_not_cancelled,
                 )
                 done_msg = (
                     f"Done — {stats['created']} created, {stats['updated']} updated, "
