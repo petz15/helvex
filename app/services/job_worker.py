@@ -226,6 +226,13 @@ def _run_job(app, job_id: int) -> None:  # noqa: C901
                     start_from_canton=params.get("start_from_canton"),
                     empty_abort_threshold=int(params.get("empty_abort_threshold", 100)),
                     progress_cb=_progress,
+                    status_cb=lambda m: (
+                        _assert_not_cancelled(),
+                        crud.update_progress(db, job, message=str(m)),
+                        crud.create_event(db, job_id=job.id, level="info", message=str(m)),
+                        _maybe_sync(app, job_type=job.job_type, label=job.label, message=str(m), stats={}, error=None, done=False),
+                    ),
+                    abort_cb=_assert_not_cancelled,
                 )
                 done_msg = f"Done — {stats['created']} created, {stats['updated']} updated, {len(stats['errors'])} errors"
 
@@ -320,6 +327,13 @@ def _run_job(app, job_id: int) -> None:  # noqa: C901
                     resume_from=resume_from,
                     request_delay=float(params.get("delay", 0.3)),
                     progress_cb=_progress,
+                    status_cb=lambda m: (
+                        _assert_not_cancelled(),
+                        crud.update_progress(db, job, message=str(m)),
+                        crud.create_event(db, job_id=job.id, level="info", message=str(m)),
+                        _maybe_sync(app, job_type=job.job_type, label=job.label, message=str(m), stats=json.loads(job.stats_json) if job.stats_json else {}, error=None, done=False),
+                    ),
+                    abort_cb=_assert_not_cancelled,
                 )
                 done_msg = f"Done — {stats['updated']} updated, {stats['scored']} scored, {stats.get('geocoded', 0)} geocoded, {len(stats['errors'])} errors"
                 if resume_from:

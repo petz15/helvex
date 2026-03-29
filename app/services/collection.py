@@ -516,13 +516,28 @@ def _extract_company_fields(
     )
 
 
-def import_company_from_zefix_uid(db: Session, uid: str) -> tuple[Company, bool]:
+def import_company_from_zefix_uid(
+    db: Session,
+    uid: str,
+    *,
+    pause_on_zefix_500: bool = False,
+    status_cb: Any = None,
+    abort_cb: Any = None,
+) -> tuple[Company, bool]:
     """Import or update a company from Zefix by UID.
 
     Returns:
         (company, created)
     """
-    raw = zefix_get_company(uid)
+    while True:
+        try:
+            raw = zefix_get_company(uid)
+            break
+        except httpx.HTTPStatusError as exc:
+            if pause_on_zefix_500 and exc.response is not None and exc.response.status_code == 500:
+                _wait_for_zefix_availability(status_cb=status_cb, abort_cb=abort_cb)
+                continue
+            raise
     scoring_config = _load_scoring_config(db)
     company_data = _extract_company_fields(raw, uid, scoring_config=scoring_config)
 
@@ -965,6 +980,46 @@ def _is_name_too_short_error(response: Any) -> bool:
         return False
 
 
+def _sleep_with_abort(seconds: float, *, abort_cb: Any = None) -> None:
+    if seconds <= 0:
+        return
+    remaining = float(seconds)
+    step = 1.0
+    while remaining > 0:
+        if abort_cb:
+            abort_cb()
+        time.sleep(min(step, remaining))
+        remaining -= step
+
+
+def _wait_for_zefix_availability(
+    *,
+    status_cb: Any = None,
+    abort_cb: Any = None,
+    check_every_seconds: float = 60.0,
+) -> None:
+    """Pause execution when ZEFIX returns HTTP 500 and poll until it recovers."""
+    interval = max(5.0, float(check_every_seconds))
+    while True:
+        if status_cb:
+            status_cb(
+                f"ZEFIX returned 500 Internal Server Error. Pausing import and rechecking availability in {int(interval)}s..."
+            )
+        _sleep_with_abort(interval, abort_cb=abort_cb)
+        try:
+            # Probe: ZEFIX name search requires >= 2 characters.
+            search_companies("AA", max_results=1, active_only=True)
+            if status_cb:
+                status_cb("ZEFIX is reachable again. Resuming import.")
+            return
+        except httpx.HTTPStatusError as exc:
+            if exc.response is not None and exc.response.status_code == 500:
+                continue
+            raise
+        except (httpx.TimeoutException, httpx.ConnectError):
+            continue
+
+
 def _iter_prefix_with_fallback(
     canton: str | None,
     prefix: str,
@@ -974,6 +1029,9 @@ def _iter_prefix_with_fallback(
     _seen: set[str] | None = None,
     _min_query_len: int = 2,
     _too_short_log: list[str] | None = None,
+    *,
+    status_cb: Any = None,
+    abort_cb: Any = None,
 ):
     """Yield companies for *prefix*, expanding to longer prefixes when the cap is hit.
 
@@ -1007,7 +1065,15 @@ def _iter_prefix_with_fallback(
         expand = True
     else:
         try:
-            results = fetch_companies_by_prefix(prefix, canton, active_only=active_only)
+            while True:
+                try:
+                    results = fetch_companies_by_prefix(prefix, canton, active_only=active_only)
+                    break
+                except httpx.HTTPStatusError as exc:
+                    if exc.response is not None and exc.response.status_code == 500:
+                        _wait_for_zefix_availability(status_cb=status_cb, abort_cb=abort_cb)
+                        continue
+                    raise
             if len(results) >= ZEFIX_MAX_ENTRIES:
                 expand = True
         except httpx.HTTPStatusError as exc:
@@ -1015,6 +1081,9 @@ def _iter_prefix_with_fallback(
                 expand = True
                 if _is_name_too_short_error(exc.response) and _too_short_log is not None:
                     _too_short_log.append(prefix)
+            elif exc.response.status_code == 500:
+                _wait_for_zefix_availability(status_cb=status_cb, abort_cb=abort_cb)
+                return
             else:
                 raise
 
@@ -1041,7 +1110,16 @@ def _iter_prefix_with_fallback(
         sub_prefix = prefix + char
         try:
             yield from _iter_prefix_with_fallback(
-                canton, sub_prefix, active_only, request_delay, _depth + 1, _seen, _min_query_len, _too_short_log
+                canton,
+                sub_prefix,
+                active_only,
+                request_delay,
+                _depth + 1,
+                _seen,
+                _min_query_len,
+                _too_short_log,
+                status_cb=status_cb,
+                abort_cb=abort_cb,
             )
         except httpx.TimeoutException:
             raise  # propagate timeouts so the outer sweep can queue for retry
@@ -1060,6 +1138,8 @@ def bulk_import_zefix(
     start_from_canton: str | None = None,
     empty_abort_threshold: int = 100,
     progress_cb: Any = None,
+    status_cb: Any = None,
+    abort_cb: Any = None,
 ) -> dict[str, Any]:
     """Import all companies from Zefix using an alphabet-prefix sweep per canton.
 
@@ -1141,8 +1221,13 @@ def bulk_import_zefix(
         too_short_log: list[str] = []
         try:
             result_iter = _iter_prefix_with_fallback(
-                canton, char, active_only=active_only, request_delay=request_delay,
+                canton,
+                char,
+                active_only=active_only,
+                request_delay=request_delay,
                 _too_short_log=too_short_log,
+                status_cb=status_cb,
+                abort_cb=abort_cb,
             )
         except Exception as exc:  # noqa: BLE001
             stats["errors"].append(f"Canton {canton} prefix {char} [{type(exc).__name__}]: {exc}")
@@ -1309,6 +1394,8 @@ def run_zefix_detail_collect(
     resume_from: int = 0,
     request_delay: float = 0.3,
     progress_cb: Any = None,
+    status_cb: Any = None,
+    abort_cb: Any = None,
 ) -> dict[str, Any]:
     """Fetch full Zefix detail records for companies already in the database.
 
@@ -1382,7 +1469,13 @@ def run_zefix_detail_collect(
     start_idx = max(0, min(resume_from, total))
     for i, company in enumerate(companies[start_idx:], start=start_idx + 1):
         try:
-            updated, _ = import_company_from_zefix_uid(db, company.uid)
+            updated, _ = import_company_from_zefix_uid(
+                db,
+                company.uid,
+                pause_on_zefix_500=True,
+                status_cb=status_cb,
+                abort_cb=abort_cb,
+            )
             stats["updated"] += 1
 
             # Geocode address → lat/lon (skipped if already set; Nominatim rate-limits itself)

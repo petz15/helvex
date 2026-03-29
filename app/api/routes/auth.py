@@ -370,9 +370,28 @@ _OAUTH_STATE_COOKIE = "oauth_state"
 _OAUTH_STATE_MAX_AGE = 600  # 10 minutes
 
 
-def _oauth_callback_uri(provider: str) -> str:
-    from app.config import settings as _s
-    return f"{_s.app_base_url}/api/v1/auth/{provider}/callback"
+def _first_forwarded(v: str | None) -> str | None:
+    if not v:
+        return None
+    return v.split(",")[0].strip() or None
+
+
+def _public_base_url(request: Request) -> str:
+    """Best-effort external base URL for redirects (scheme + host).
+
+    Prefers X-Forwarded-* headers as set by an ingress/reverse proxy.
+    """
+    xf_proto = _first_forwarded(request.headers.get("x-forwarded-proto"))
+    xf_host = _first_forwarded(request.headers.get("x-forwarded-host"))
+
+    scheme = (xf_proto or request.url.scheme or "http").lower()
+    host = xf_host or request.headers.get("host") or request.url.netloc
+
+    return f"{scheme}://{host}".rstrip("/")
+
+
+def _oauth_callback_uri(request: Request, provider: str) -> str:
+    return f"{_public_base_url(request)}/api/v1/auth/{provider}/callback"
 
 
 def _set_session(response: _Redirect, user_id: int, *, is_https: bool) -> None:
@@ -394,7 +413,7 @@ async def google_authorize(request: Request) -> _Redirect:
     state = _secrets.token_urlsafe(32)
     params = _urlencode({
         "client_id": _s.google_client_id,
-        "redirect_uri": _oauth_callback_uri("google"),
+        "redirect_uri": _oauth_callback_uri(request, "google"),
         "response_type": "code",
         "scope": "openid email profile",
         "state": state,
@@ -434,10 +453,11 @@ async def google_callback(
                     "code": code,
                     "client_id": _s.google_client_id,
                     "client_secret": _s.google_client_secret,
-                    "redirect_uri": _oauth_callback_uri("google"),
+                    "redirect_uri": _oauth_callback_uri(request, "google"),
                     "grant_type": "authorization_code",
                 },
             )
+                return _Redirect(url=f"{_public_base_url(request)}/login?oauth_error=1", status_code=302)
             token_resp.raise_for_status()
             access_token = token_resp.json()["access_token"]
 
@@ -462,6 +482,7 @@ async def google_callback(
     forwarded_proto = request.headers.get("x-forwarded-proto", "")
     is_https = request.url.scheme == "https" or forwarded_proto.split(",")[0].strip().lower() == "https"
     response = _Redirect(url=f"{_s.app_base_url}/app/search", status_code=302)
+    response = _Redirect(url=f"{_public_base_url(request)}/app/search", status_code=302)
     _set_session(response, user.id, is_https=is_https)
     response.delete_cookie(_OAUTH_STATE_COOKIE)
     return response
@@ -480,7 +501,7 @@ async def linkedin_authorize(request: Request) -> _Redirect:
     params = _urlencode({
         "response_type": "code",
         "client_id": _s.linkedin_client_id,
-        "redirect_uri": _oauth_callback_uri("linkedin"),
+        "redirect_uri": _oauth_callback_uri(request, "linkedin"),
         "state": state,
         "scope": "openid profile email",
     })
@@ -517,12 +538,13 @@ async def linkedin_callback(
                 data={
                     "grant_type": "authorization_code",
                     "code": code,
-                    "redirect_uri": _oauth_callback_uri("linkedin"),
+                    "redirect_uri": _oauth_callback_uri(request, "linkedin"),
                     "client_id": _s.linkedin_client_id,
                     "client_secret": _s.linkedin_client_secret,
                 },
                 headers={"Content-Type": "application/x-www-form-urlencoded"},
             )
+                return _Redirect(url=f"{_public_base_url(request)}/login?oauth_error=1", status_code=302)
             token_resp.raise_for_status()
             access_token = token_resp.json()["access_token"]
 
@@ -547,6 +569,7 @@ async def linkedin_callback(
     forwarded_proto = request.headers.get("x-forwarded-proto", "")
     is_https = request.url.scheme == "https" or forwarded_proto.split(",")[0].strip().lower() == "https"
     response = _Redirect(url=f"{_s.app_base_url}/app/search", status_code=302)
+    response = _Redirect(url=f"{_public_base_url(request)}/app/search", status_code=302)
     _set_session(response, user.id, is_https=is_https)
     response.delete_cookie(_OAUTH_STATE_COOKIE)
     return response

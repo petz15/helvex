@@ -19,7 +19,7 @@ ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
 
 # Digits + letters + common Swiss-relevant accented capitals for prefix sweep.
 # Ä/Ö/Ü for German, É/È/À/Â/Ê/Î/Ô/Û/Ç for French/Italian cantons.
-ALPHANUMERIC = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZÄÖÜÉÈÀÂÊÎÔÛÇ"
+ALPHANUMERIC = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZÄÖÜÉÈÀÂÛÇ"
 
 # Extended set used when expanding a prefix to sub-prefixes.
 # Adds common non-alphanumeric characters found in Swiss company names

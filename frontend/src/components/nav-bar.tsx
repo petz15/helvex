@@ -15,7 +15,7 @@ const NAV = [
   { href: "/app/collection", label: "Collection", icon: Database, superadminOnly: true },
   { href: "/app/jobs", label: "Jobs", icon: Activity, superadminOnly: true },
   { href: "/app/org", label: "Team", icon: Users },
-  { href: "/app/settings", label: "Settings", icon: Cog },
+  { href: "/app/settings", label: "Settings", icon: Cog, superadminOnly: true },
 ];
 
 const MARKETING_NAV = [
