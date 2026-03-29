@@ -848,7 +848,7 @@ def recalculate_google_scores(
     return stats
 
 
-def enrich_company_website(db: Session, company: Company, *, num: int = 5) -> tuple[bool, str | None]:
+def enrich_company_website(db: Session, company: Company, *, num: int = 10) -> tuple[bool, str | None]:
     """Fetch top-N Google results, score each against the company profile, and persist.
 
     Stores all scored results in google_search_results_raw (JSON).

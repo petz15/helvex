@@ -57,7 +57,7 @@ def list_org_jobs(db: Session, org_id: int, limit: int = 100) -> list[JobRun]:
 def list_active_jobs(db: Session) -> list[JobRun]:
     return (
         db.query(JobRun)
-        .filter(JobRun.status.in_(["queued", "running"]))
+        .filter(JobRun.status.in_(["queued", "running", "paused"]))
         .order_by(JobRun.queued_at.asc())
         .all()
     )
@@ -89,10 +89,16 @@ def requeue_interrupted_jobs(
     """Move interrupted running jobs back to queued so they can resume."""
     import json as _json
     jobs = db.query(JobRun).filter(JobRun.status == "running").all()
+    now = datetime.now(tz=timezone.utc)
     for job in jobs:
         job.status = "queued"
+        # Clear control flags so a recovered job doesn't instantly cancel/pause.
+        job.cancel_requested = False
+        job.pause_requested = False
         job.started_at = None
         job.completed_at = None
+        # Bubble recovered jobs to the top of job history/UI lists.
+        job.queued_at = now
         job.message = message
         job.error = None
         # For bulk jobs mark resume=True so the worker knows to continue the

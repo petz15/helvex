@@ -2,9 +2,9 @@
 
 ## Dashboard & UI
 
-- [ ] **General QOL** — Impressum, Datenschutz pages, user settings page, general polish;
+- [X] **General QOL** — Impressum, Datenschutz pages, user settings page, general polish;
 - [X] **Save views** — serialize active filters/sort/columns as JSON, stored per user, quickly re-applied from a dropdown
-- [ ] **Switch Index page** — change the entry page to something more welcoming to first time visitors
+- [X] **Switch Index page** — change the entry page to something more welcoming to first time visitors
 - [ ] **Seperate Search/Hunting page -> call it Company Explorer(Unternehmens-Explorer)** — makes the flow for first time users and users without clear intentions much easier. guide them to the filtering, searching, create list etc much smoother
 - [ ] **Add dark mode** — add dark mode 
 - [ ] **Demo on real pages instead of mock** — Find a way to demo the real webapp no use mock pages. seems weird. alternatively let users in without sign in but severly restrict access?
@@ -26,7 +26,7 @@
 - [ ] **Company profile overhaul** — display TF-IDF cluster, purpose keywords, Claude classification prominently -> ongoing
 - [ ] **Website correction flow** — "Report wrong website" button on company detail; shows all Google search results so user can pick the correct one; backend tallies user selections and auto-promotes a new URL if enough users agree; admins can override
 - [ ] **Company views for registered users** — full company detail accessible free with email registration (gated behind login, not tier)
-- [ ] **History overview** —  Old names and taken over is already visible but not SOGC publications, which needs to be custom handled in order to display changes such as people and other changes.
+- [ ] **History overview** —  Old names and taken over is already visible but not SOGC publications, which needs to be custom handled in order to display changes such as people and other changes. -> nicer overview
 - [ ] **Graph overview of relationships** — based on past SHAB changes and name changes, take overs etc -> create nicer visuals for timeline. evaluate js on the fly calculations vs backend/DB
 - [ ] **Cross-company person graph** — normalize sogcPub organ changes into `persons` / `company_persons` tables via a pipeline job; build a graph UI showing where signers appear across multiple companies, what roles they held, and when — enabling network analysis of directors, beneficial owners, and corporate groups
 - [ ] **Fix Zweck not showing up** — maybe add column for zweck at companies table but that would also require to import it for existing companies 

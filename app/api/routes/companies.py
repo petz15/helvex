@@ -27,6 +27,7 @@ from app.schemas.company import (
     GoogleSearchResult,
     ZefixSearchResult,
 )
+from app.services.collection import enrich_company_website
 from app.services.scoring import is_social_lead_domain
 
 router = APIRouter(prefix="/companies", tags=["companies"])
@@ -176,31 +177,40 @@ def import_from_zefix(uid: str, db: Session = Depends(get_db)):
 )
 def google_search_for_company(
     company_id: int,
-    num: int = Query(5, ge=1, le=10, description="Number of results"),
+    num: int = Query(10, ge=1, le=10, description="Number of results"),
     db: Session = Depends(get_db),
 ):
-    """Run a Google Custom Search for *company_id* and return the top results.
+    """Run Google enrichment for an existing company only (no Zefix refresh).
 
-    The first result's URL is automatically saved as the company's ``website_url``.
+    Persists scored results to ``google_search_results_raw`` and updates the selected
+    ``website_url`` / ``web_score`` when candidates are found.
     """
     db_company = crud.get_company(db, company_id)
     if not db_company:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Company not found")
+
     try:
-        results = google_search_client.search_website(db_company.name, num=num)
+        enrich_company_website(db, db_company, num=num)
+        db.refresh(db_company)
+
+        raw = db_company.google_search_results_raw or "[]"
+        stored = json.loads(raw)
+        if not isinstance(stored, list):
+            stored = []
+
+        results = [
+            GoogleSearchResult(
+                title=str(item.get("title") or ""),
+                link=str(item.get("link") or ""),
+                snippet=(str(item.get("snippet")) if item.get("snippet") is not None else None),
+            )
+            for item in stored
+            if isinstance(item, dict) and (item.get("link") or "")
+        ]
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
-
-    if results:
-        crud.update_company(
-            db,
-            db_company,
-            CompanyUpdate(website_url=results[0].link),
-        )
-        db_company.website_checked_at = datetime.now(tz=timezone.utc)
-        db.commit()
 
     return results
 

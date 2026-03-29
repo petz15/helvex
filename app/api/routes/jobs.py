@@ -92,7 +92,21 @@ class EventOut(BaseModel):
 
 @router.get("/jobs", response_model=list[JobOut])
 def list_jobs(limit: int = 100, db: Session = Depends(get_db), _: User = Depends(get_current_user)):
-    return [JobOut.from_orm_obj(j) for j in crud.list_jobs(db, limit=limit)]
+    # Always include active jobs so the UI never "loses" a recovered job due
+    # to history limit cutoffs after a restart/redeploy.
+    recent = crud.list_jobs(db, limit=limit)
+    active = crud.list_active_jobs(db)
+
+    by_id = {j.id: j for j in recent}
+    for j in active:
+        by_id[j.id] = j
+
+    merged = sorted(
+        by_id.values(),
+        key=lambda j: j.queued_at or j.started_at,
+        reverse=True,
+    )
+    return [JobOut.from_orm_obj(j) for j in merged]
 
 
 @router.get("/jobs/{job_id}", response_model=JobOut)

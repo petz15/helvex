@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { ExternalLink, ChevronLeft, Globe, MapPin, Building2, Phone, Mail, FileText, Plus, Trash2, Loader2, Search } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { reviewBadgeClass, proposalBadgeClass, fmtDate, fmtDateTime, fmtRelativeTime, cn, scoreColor } from "@/lib/utils";
-import { createNote, deleteNote, selectCompanyWebsite, triggerJob, updateCompany } from "@/lib/api";
+import { createNote, deleteNote, runCompanyWebSearch, selectCompanyWebsite, updateCompany } from "@/lib/api";
 import { REVIEW_STATUSES, CONTACT_STATUSES } from "@/lib/types";
 import type { Company, Note, GoogleScoredResult } from "@/lib/types";
 import "leaflet/dist/leaflet.css";
@@ -233,8 +233,8 @@ export function CompanyDetailClient({ company: initial }: Props) {
   async function handleWebSearch() {
     setSearchingWeb(true);
     try {
-      await triggerJob("collection/initial", { uids: [company.uid], run_google: true, active_only: false });
-      window.location.href = "/app/jobs";
+      await runCompanyWebSearch(company.id, 10);
+      router.refresh();
     } finally {
       setSearchingWeb(false);
     }

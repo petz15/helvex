@@ -10,7 +10,6 @@ export default function AgbPage() {
     <div className="mx-auto max-w-3xl px-6 py-10 space-y-6">
       <header>
         <h1 className="text-3xl font-bold text-slate-900">Allgemeine Geschaeftsbedingungen (AGB)</h1>
-        <p className="mt-2 text-sm text-slate-500">B2B-Nutzung der Helvex SaaS-Plattform.</p>
       </header>
 
       <section className="rounded-xl border border-slate-200 bg-white p-6 space-y-3 text-sm text-slate-700">

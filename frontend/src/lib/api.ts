@@ -121,6 +121,17 @@ export async function selectCompanyWebsite(companyId: number, link: string): Pro
   return res.json();
 }
 
+export async function runCompanyWebSearch(companyId: number, num = 10): Promise<void> {
+  const res = await fetch(`/api/v1/companies/${companyId}/google-search?num=${encodeURIComponent(String(num))}`, {
+    method: "GET",
+    credentials: "include",
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.detail ?? "Failed to run web search");
+  }
+}
+
 // ── Jobs ──────────────────────────────────────────────────────────────────────
 
 export async function fetchJobs(): Promise<Job[]> {
