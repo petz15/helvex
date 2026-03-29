@@ -80,6 +80,12 @@ class Company(Base):
     ai_score: Mapped[int | None] = mapped_column(Integer, nullable=True)
     ai_category: Mapped[str | None] = mapped_column(String(128), nullable=True)
     ai_freeform: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # NOGA classification derived from official taxonomy
+    noga_code: Mapped[str | None] = mapped_column(String(16), nullable=True, index=True)
+    noga_label: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    noga_level: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    noga_confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
+    noga_classified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     ai_scored_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     flex_scored_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     # Raw JSON from Zefix API stored for reference

@@ -31,12 +31,15 @@ from app.services.scoring import (
     distance_to_muri_km,
     distance_to_origin_km,
     fallback_result_score,
+    get_default_directory_domains,
+    get_default_google_stopwords,
     get_default_scoring_config,
     is_irrelevant_result,
     is_social_lead_domain,
     normalize_raw_scores,
     score_result,
 )
+from app.services.noga import apply_noga_classification
 
 
 def _google_search_ready(db: Session) -> tuple[bool, str | None]:
@@ -46,6 +49,31 @@ def _google_search_ready(db: Session) -> tuple[bool, str | None]:
     if not settings.serper_api_key:
         return False, "SERPER_API_KEY is not configured (website search cannot run)"
     return True, None
+
+
+def _parse_csv_or_lines(value: str) -> list[str]:
+    return [p.strip() for p in re.split(r"[,;\n\r]+", value or "") if p.strip()]
+
+
+def _google_scoring_overrides(db: Session) -> tuple[set[str], set[str]]:
+    """Load runtime Google scoring filters from app settings.
+
+    Both settings are additive and merged with built-in defaults:
+    - google_scoring_stopwords
+    - google_scoring_directory_domains
+    """
+    stopwords = get_default_google_stopwords()
+    directory_domains = get_default_directory_domains()
+
+    raw_stopwords = crud.get_setting(db, "google_scoring_stopwords", "")
+    for token in _parse_csv_or_lines(raw_stopwords):
+        stopwords.add(token.lower())
+
+    raw_domains = crud.get_setting(db, "google_scoring_directory_domains", "")
+    for domain in _parse_csv_or_lines(raw_domains):
+        directory_domains.add(domain.lower())
+
+    return stopwords, directory_domains
 
 
 
@@ -766,15 +794,21 @@ def re_geocode_all_companies(
     return stats
 
 
-def _score_google_results_for_company(company: Company, raw_results: list[dict]) -> list[dict]:
+def _score_google_results_for_company(db: Session, company: Company, raw_results: list[dict]) -> list[dict]:
     """Score and sort Google results for one company using current scoring rules."""
     if not raw_results:
         return []
 
+    purpose_stopwords, directory_domains = _google_scoring_overrides(db)
+
     top_window = raw_results[: min(3, len(raw_results))]
     irrelevant_count = sum(
         1 for rr in top_window
-        if is_irrelevant_result(rr, company_name=company.name)
+        if is_irrelevant_result(
+            rr,
+            company_name=company.name,
+            directory_domains=directory_domains,
+        )
     )
     use_fallback = bool(top_window) and irrelevant_count >= ((len(top_window) + 1) // 2)
 
@@ -792,6 +826,7 @@ def _score_google_results_for_company(company: Company, raw_results: list[dict])
                 canton=company.canton,
                 legal_form=company.legal_form,
                 address=company.address,
+                directory_domains=directory_domains,
             )
         else:
             s = score_result(
@@ -802,6 +837,8 @@ def _score_google_results_for_company(company: Company, raw_results: list[dict])
                 purpose=company.purpose,
                 legal_form=company.legal_form,
                 address=company.address,
+                directory_domains=directory_domains,
+                purpose_stopwords=purpose_stopwords,
             )
 
         scored.append({**row, "score": s})
@@ -852,7 +889,7 @@ def recalculate_google_scores(
                     stats["skipped"] += 1
                     continue
 
-                rescored = _score_google_results_for_company(company, raw_results)
+                rescored = _score_google_results_for_company(db, company, raw_results)
                 if not rescored:
                     stats["skipped"] += 1
                     continue
@@ -897,7 +934,7 @@ def enrich_company_website(db: Session, company: Company, *, num: int = 10) -> t
         return False, None
 
     raw_results = [{"title": r.title, "link": r.link, "snippet": r.snippet or ""} for r in results]
-    scored = _score_google_results_for_company(company, raw_results)
+    scored = _score_google_results_for_company(db, company, raw_results)
     best = scored[0]
     social_media_only = is_social_lead_domain(best["link"])
 
@@ -1495,7 +1532,7 @@ def rescore_from_stored_results(db: Session, company: Company) -> bool:
     if not stored:
         return False
 
-    rescored = _score_google_results_for_company(company, stored)
+    rescored = _score_google_results_for_company(db, company, stored)
     best = rescored[0]
     crud.update_company(
         db,
@@ -1543,10 +1580,12 @@ def run_zefix_detail_collect(
     stats: dict[str, Any] = {
         "selected": 0,
         "updated": 0,
+        "noga_classified": 0,
         "scored": 0,
         "geocoded": 0,
         "errors": [],
     }
+    noga_enabled = True
 
     run = crud.create_run(db, "detail")
 
@@ -1613,10 +1652,96 @@ def run_zefix_detail_collect(
                 if rescore_from_stored_results(db, updated):
                     stats["scored"] += 1
 
+            if noga_enabled:
+                try:
+                    noga_update = apply_noga_classification(db, updated)
+                    if noga_update is not None:
+                        crud.update_company(db, updated, noga_update)
+                        stats["noga_classified"] += 1
+                except FileNotFoundError as exc:
+                    stats["errors"].append(f"NOGA classification disabled: {exc}")
+                    noga_enabled = False
+
         except Exception as exc:  # noqa: BLE001
             if _is_control_signal_exception(exc):
                 raise
             stats["errors"].append(f"{company.uid} ({company.name}) [{type(exc).__name__}]: {exc}")
+
+
+def reclassify_noga(
+    db: Session,
+    *,
+    batch_size: int = 500,
+    resume_from: int = 0,
+    only_missing_noga: bool = False,
+    only_detailed_raw: bool = True,
+    progress_cb: Any = None,
+) -> dict[str, Any]:
+    """Bulk (re)classify companies with NOGA based on local taxonomy data."""
+    stats: dict[str, Any] = {
+        "selected": 0,
+        "updated": 0,
+        "skipped_existing": 0,
+        "skipped_not_detailed": 0,
+        "skipped_no_match": 0,
+        "errors": [],
+    }
+
+    query = db.query(Company)
+    if only_missing_noga:
+        query = query.filter(Company.noga_code.is_(None))
+
+    total = query.count()
+    stats["selected"] = total
+    offset = max(0, min(resume_from, total))
+
+    while True:
+        batch = (
+            query.order_by(Company.id.asc())
+            .offset(offset)
+            .limit(batch_size)
+            .all()
+        )
+        if not batch:
+            break
+
+        for company in batch:
+            try:
+                if only_missing_noga and company.noga_code:
+                    stats["skipped_existing"] += 1
+                    continue
+
+                if only_detailed_raw:
+                    raw_text = (company.zefix_raw or "").strip()
+                    if not raw_text:
+                        stats["skipped_not_detailed"] += 1
+                        continue
+                    try:
+                        raw = json.loads(raw_text)
+                    except json.JSONDecodeError:
+                        stats["skipped_not_detailed"] += 1
+                        continue
+                    if not isinstance(raw, dict) or not _is_detailed_zefix_raw_payload(raw):
+                        stats["skipped_not_detailed"] += 1
+                        continue
+
+                update = apply_noga_classification(db, company)
+                if update is None:
+                    stats["skipped_no_match"] += 1
+                    continue
+                crud.update_company(db, company, update)
+                stats["updated"] += 1
+
+            except Exception as exc:  # noqa: BLE001
+                stats["errors"].append(f"{company.uid} [{type(exc).__name__}]: {exc}")
+
+        db.commit()
+        offset += len(batch)
+
+        if progress_cb:
+            progress_cb(min(offset, total), total, stats)
+
+    return stats
 
         if progress_cb:
             progress_cb(i, total, stats)

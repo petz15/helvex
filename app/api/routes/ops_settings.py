@@ -19,6 +19,8 @@ router = APIRouter(tags=["settings"])
 class SettingsBody(BaseModel):
     google_search_enabled: bool = True
     google_daily_quota: str = "100"
+    google_scoring_stopwords: str = ""
+    google_scoring_directory_domains: str = ""
     # Scoring
     scoring_target_clusters: str = ""
     scoring_cluster_hit_points: str = "10"
@@ -82,6 +84,8 @@ def save_settings(body: SettingsBody, db: Session = Depends(get_db), _: User = D
 
     defaults = get_default_scoring_config()
     text_fields = {
+        "google_scoring_stopwords": body.google_scoring_stopwords,
+        "google_scoring_directory_domains": body.google_scoring_directory_domains,
         "scoring_target_clusters": body.scoring_target_clusters,
         "scoring_exclude_clusters": body.scoring_exclude_clusters,
         "scoring_target_keywords": body.scoring_target_keywords,

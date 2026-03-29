@@ -227,6 +227,37 @@ def _run_job(app, job_id: int) -> None:  # noqa: C901
                 if resume_from:
                     done_msg += f" (resumed from {resume_from})"
 
+            elif job.job_type == "reclassify_noga":
+                from app.services.collection import reclassify_noga
+
+                def _progress(done: int, total: int, stats: dict) -> None:
+                    _assert_not_cancelled()
+                    msg = (
+                        f"Processed {done}/{total} — {stats.get('updated', 0)} updated, "
+                        f"{stats.get('skipped_no_match', 0)} no match, "
+                        f"{stats.get('skipped_not_detailed', 0)} not-detailed"
+                    )
+                    crud.update_progress(db, job, message=msg, done=done, total=total, stats=stats)
+                    crud.create_event(db, job_id=job.id, level="debug", message=msg)
+                    _maybe_sync(app, job_type=job.job_type, label=job.label, message=msg, stats=dict(stats), error=None, done=False)
+
+                stats = reclassify_noga(
+                    db,
+                    resume_from=resume_from,
+                    only_missing_noga=bool(params.get("only_missing_noga", False)),
+                    only_detailed_raw=bool(params.get("only_detailed_raw", True)),
+                    progress_cb=_progress,
+                )
+                done_msg = (
+                    f"Done — {stats.get('updated', 0)} reclassified, "
+                    f"{stats.get('skipped_existing', 0)} skipped existing, "
+                    f"{stats.get('skipped_not_detailed', 0)} skipped not-detailed, "
+                    f"{stats.get('skipped_no_match', 0)} skipped no-match, "
+                    f"{len(stats.get('errors', []))} errors"
+                )
+                if resume_from:
+                    done_msg += f" (resumed from {resume_from})"
+
             elif job.job_type == "bulk":
                 from app.services.collection import bulk_import_zefix
 

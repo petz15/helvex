@@ -74,6 +74,11 @@ _DIRECTORY_DOMAINS = {
     "newhome.ch",
 }
 
+
+def get_default_directory_domains() -> set[str]:
+    """Return a copy of built-in directory domains excluded in Google scoring."""
+    return set(_DIRECTORY_DOMAINS)
+
 _NEWS_DOMAINS = {
     "news.google.com",
     "20min.ch",
@@ -121,6 +126,11 @@ _STOPWORDS = {
     "the", "and", "of", "in", "for", "to", "a", "an", "with", "its",
     "gesellschaft", "unternehmen", "betrieb", "zweck", "aktien", "gmbh",
 }
+
+
+def get_default_google_stopwords() -> set[str]:
+    """Return a copy of built-in stopwords used for purpose keyword extraction."""
+    return set(_STOPWORDS)
 
 
 _URL_EXCLUDE_KEYWORDS: tuple[str, ...] = ()
@@ -191,8 +201,9 @@ def _url_is_globally_excluded(url: str) -> bool:
     return any(kw in url_lc for kw in keywords)
 
 
-def _is_directory_domain(domain: str) -> bool:
-    return any(domain == d or domain.endswith("." + d) for d in _DIRECTORY_DOMAINS)
+def _is_directory_domain(domain: str, directory_domains: set[str] | None = None) -> bool:
+    domains = directory_domains or _DIRECTORY_DOMAINS
+    return any(domain == d or domain.endswith("." + d) for d in domains)
 
 
 def _is_news_domain(domain: str) -> bool:
@@ -234,12 +245,17 @@ def _root_domain(url: str) -> str:
         return ""
 
 
-def _purpose_keywords(purpose: str | None, max_keywords: int = 8) -> list[str]:
+def _purpose_keywords(
+    purpose: str | None,
+    max_keywords: int = 8,
+    stopwords: set[str] | None = None,
+) -> list[str]:
     """Extract meaningful content words from a company's purpose text."""
     if not purpose:
         return []
     words = re.findall(r"\b[a-zA-ZäöüÄÖÜ]{4,}\b", purpose.lower())
-    return [w for w in words if w not in _STOPWORDS][:max_keywords]
+    stopword_set = stopwords or _STOPWORDS
+    return [w for w in words if w not in stopword_set][:max_keywords]
 
 
 def _extract_address_parts(address: str) -> tuple[str | None, str | None]:
@@ -277,6 +293,8 @@ def score_result(
     purpose: str | None = None,
     legal_form: str | None = None,
     address: str | None = None,
+    directory_domains: set[str] | None = None,
+    purpose_stopwords: set[str] | None = None,
 ) -> int:
     """Score a single Google search result against a company profile.
 
@@ -310,7 +328,7 @@ def score_result(
     domain = _root_domain(link)
     if _is_news_domain(domain):
         return 0
-    if _is_directory_domain(domain):
+    if _is_directory_domain(domain, directory_domains):
         return 0
 
     # --- Local directory URL path → always 0 (e.g. /unternehmensverzeichnis/) ---
@@ -342,7 +360,7 @@ def score_result(
             score += 15
 
     # --- Purpose keywords in snippet (0-15) ---
-    keywords = _purpose_keywords(purpose)
+    keywords = _purpose_keywords(purpose, stopwords=purpose_stopwords)
     if keywords:
         hits = sum(1 for kw in keywords if kw in snippet_lower)
         if hits >= 3:
@@ -372,6 +390,7 @@ def is_irrelevant_result(
     result: dict,
     *,
     company_name: str,
+    directory_domains: set[str] | None = None,
 ) -> bool:
     """Return True when a search result is likely not the company's own website.
 
@@ -392,7 +411,7 @@ def is_irrelevant_result(
     domain = _root_domain(link)
     if _is_news_domain(domain):
         return True
-    if _is_directory_domain(domain):
+    if _is_directory_domain(domain, directory_domains):
         return True
 
     title_overlap = _word_overlap_ratio(company_name, title)
@@ -407,6 +426,7 @@ def fallback_result_score(
     canton: str | None,
     legal_form: str | None = None,
     address: str | None = None,
+    directory_domains: set[str] | None = None,
 ) -> int:
     """Fallback website score used when top results are mostly irrelevant.
 
@@ -426,7 +446,7 @@ def fallback_result_score(
     domain = _root_domain(link)
     if _is_news_domain(domain):
         return 0
-    if _is_directory_domain(domain):
+    if _is_directory_domain(domain, directory_domains):
         return 0
 
     combined = f"{title} {snippet}"
@@ -625,6 +645,9 @@ _DEFAULT_SCORING_CONFIG: dict[str, str] = {
     "scoring_undefined_cluster_penalty": "10", # deducted when tfidf_cluster is undefined/missing
     # Claude input token optimisation
     "scoring_claude_max_purpose_chars": "800", # purpose text truncated to this many chars before sending to Claude
+    # Google website match scoring filters (CSV/newline separated additions)
+    "google_scoring_stopwords": "",
+    "google_scoring_directory_domains": "",
 }
 
 _CANCELLED_STATUS_TERMS = frozenset({"being_cancelled", "dissolved", "gelöscht", "radiation", "liquidation"})

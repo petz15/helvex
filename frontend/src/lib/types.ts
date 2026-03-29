@@ -158,6 +158,8 @@ export interface JobEvent {
 export interface AppSettings {
   google_search_enabled: string;
   google_daily_quota: string;
+  google_scoring_stopwords: string;
+  google_scoring_directory_domains: string;
   scoring_target_clusters: string;
   scoring_cluster_hit_points: string;
   scoring_exclude_clusters: string;

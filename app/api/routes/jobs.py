@@ -234,6 +234,11 @@ class ReextractPurposeBody(BaseModel):
     only_missing_purpose: bool = True
 
 
+class ReclassifyNogaBody(BaseModel):
+    only_missing_noga: bool = False
+    only_detailed_raw: bool = True
+
+
 class ClaudeClassifyBody(BaseModel):
     canton: str | None = None
     min_zefix_score: int | None = None   # passed as-is to job params; worker maps to min_flex_score
@@ -371,6 +376,28 @@ def trigger_reextract_purpose(
     job = _enqueue_or_http_error(
         request,
         job_type="reextract_purpose",
+        label=label,
+        params=body.model_dump(),
+        db=db,
+    )
+    return JobOut.from_orm_obj(job)
+
+
+@router.post("/scoring/reclassify-noga", response_model=JobOut, status_code=status.HTTP_202_ACCEPTED)
+def trigger_reclassify_noga(
+    body: ReclassifyNogaBody,
+    request: Request,
+    db: Session = Depends(get_db),
+    _: User = Depends(require_superadmin),
+):
+    label = "Reclassify NOGA from local taxonomy"
+    if body.only_missing_noga:
+        label += " (missing only)"
+    if body.only_detailed_raw:
+        label += " (detailed zefix_raw only)"
+    job = _enqueue_or_http_error(
+        request,
+        job_type="reclassify_noga",
         label=label,
         params=body.model_dump(),
         db=db,
