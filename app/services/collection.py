@@ -1667,6 +1667,18 @@ def run_zefix_detail_collect(
                 raise
             stats["errors"].append(f"{company.uid} ({company.name}) [{type(exc).__name__}]: {exc}")
 
+        if progress_cb:
+            progress_cb(i, total, stats)
+
+        # Periodic checkpoint (every 50 companies)
+        if i % 50 == 0:
+            crud.update_checkpoint(db, run, company.canton or "—", i, stats)
+
+        _sleep_with_abort(request_delay, abort_cb=abort_cb)
+
+    crud.complete_run(db, run, stats)
+    return stats
+
 
 def reclassify_noga(
     db: Session,
@@ -1741,18 +1753,6 @@ def reclassify_noga(
         if progress_cb:
             progress_cb(min(offset, total), total, stats)
 
-    return stats
-
-        if progress_cb:
-            progress_cb(i, total, stats)
-
-        # Periodic checkpoint (every 50 companies)
-        if i % 50 == 0:
-            crud.update_checkpoint(db, run, company.canton or "—", i, stats)
-
-        _sleep_with_abort(request_delay, abort_cb=abort_cb)
-
-    crud.complete_run(db, run, stats)
     return stats
 
 
