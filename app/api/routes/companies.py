@@ -347,6 +347,9 @@ def list_companies(
     tags: str | None = Query(None),
     tfidf_cluster: str | None = Query(None, description="_none | _any | keyword"),
     purpose_keywords: str | None = Query(None),
+    noga_code: str | None = Query(None, description="_none | _any | code/substring"),
+    noga_label: str | None = Query(None),
+    noga_level: str | None = Query(None),
     exclude_tags: str | None = Query(None, description="Comma-separated tags to exclude"),
     exclude_review_status: str | None = Query(None),
     exclude_canton: str | None = Query(None),
@@ -354,6 +357,9 @@ def list_companies(
     exclude_tfidf_cluster: str | None = Query(None, description="Comma-separated tfidf_cluster terms to exclude"),
     exclude_purpose_keywords: str | None = Query(None, description="Comma-separated purpose keywords to exclude"),
     exclude_ai_category: str | None = Query(None, description="Exclude companies with this exact ai_category"),
+    exclude_noga_code: str | None = Query(None, description="Comma-separated NOGA codes/fragments to exclude"),
+    exclude_noga_label: str | None = Query(None, description="Comma-separated NOGA label terms to exclude"),
+    exclude_noga_level: str | None = Query(None, description="Exclude one NOGA level"),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> CompanyPage:
@@ -376,6 +382,9 @@ def list_companies(
         tags=tags,
         tfidf_cluster=tfidf_cluster,
         purpose_keywords=purpose_keywords,
+        noga_code=noga_code,
+        noga_label=noga_label,
+        noga_level=noga_level,
         exclude_tags=exclude_tags,
         exclude_review_status=exclude_review_status,
         exclude_canton=exclude_canton,
@@ -383,6 +392,9 @@ def list_companies(
         exclude_tfidf_cluster=exclude_tfidf_cluster,
         exclude_purpose_keywords=exclude_purpose_keywords,
         exclude_ai_category=exclude_ai_category,
+        exclude_noga_code=exclude_noga_code,
+        exclude_noga_label=exclude_noga_label,
+        exclude_noga_level=exclude_noga_level,
     )
     total = crud.count_companies(db, **filter_kwargs)
     items = crud.list_companies(db, page=page, page_size=page_size, sort=sort, **filter_kwargs)
@@ -414,10 +426,16 @@ def export_companies_csv(
     tags: str | None = Query(None),
     tfidf_cluster: str | None = Query(None),
     purpose_keywords: str | None = Query(None),
+    noga_code: str | None = Query(None),
+    noga_label: str | None = Query(None),
+    noga_level: str | None = Query(None),
     exclude_tags: str | None = Query(None),
     exclude_review_status: str | None = Query(None),
     exclude_canton: str | None = Query(None),
     exclude_contact_status: str | None = Query(None),
+    exclude_noga_code: str | None = Query(None),
+    exclude_noga_label: str | None = Query(None),
+    exclude_noga_level: str | None = Query(None),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -438,10 +456,16 @@ def export_companies_csv(
         tags=tags,
         tfidf_cluster=tfidf_cluster,
         purpose_keywords=purpose_keywords,
+        noga_code=noga_code,
+        noga_label=noga_label,
+        noga_level=noga_level,
         exclude_tags=exclude_tags,
         exclude_review_status=exclude_review_status,
         exclude_canton=exclude_canton,
         exclude_contact_status=exclude_contact_status,
+        exclude_noga_code=exclude_noga_code,
+        exclude_noga_label=exclude_noga_label,
+        exclude_noga_level=exclude_noga_level,
     )
 
     # Apply org-specific workflow field overlay before CSV serialization
@@ -455,6 +479,7 @@ def export_companies_csv(
         "website_url", "web_score", "flex_score", "ai_score", "combined_score",
         "review_status", "contact_status", "contact_name", "contact_email", "contact_phone",
         "tags", "ai_category", "tfidf_cluster", "purpose_keywords",
+        "noga_code", "noga_label", "noga_level", "noga_confidence",
         "created_at", "updated_at",
     ]
 
@@ -478,6 +503,8 @@ def export_companies_csv(
                 c.contact_name or "", c.contact_email or "", c.contact_phone or "",
                 c.tags or "", c.ai_category or "", c.tfidf_cluster or "",
                 c.purpose_keywords or "",
+                c.noga_code or "", c.noga_label or "", c.noga_level or "",
+                c.noga_confidence if c.noga_confidence is not None else "",
                 c.created_at.isoformat(), c.updated_at.isoformat(),
             ])
             yield buf.getvalue()

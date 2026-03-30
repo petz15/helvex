@@ -90,7 +90,21 @@ def get_stopwords(cfg: PipelineConfig) -> set[str]:
         base: set[str] = set(_TFIDF_STOPWORDS)
     except ImportError:
         base = set()
-    return base | set(cfg.extra_stopwords)
+
+    custom: set[str] = set()
+    try:
+        from app import crud
+        from app.database import SessionLocal
+
+        db = SessionLocal()
+        try:
+            custom = crud.get_active_tfidf_stopwords(db)
+        finally:
+            db.close()
+    except Exception:
+        custom = set()
+
+    return base | set(cfg.extra_stopwords) | custom
 
 
 # ── Step 1: Text Preprocessing ────────────────────────────────────────────────

@@ -645,9 +645,6 @@ _DEFAULT_SCORING_CONFIG: dict[str, str] = {
     "scoring_undefined_cluster_penalty": "10", # deducted when tfidf_cluster is undefined/missing
     # Claude input token optimisation
     "scoring_claude_max_purpose_chars": "800", # purpose text truncated to this many chars before sending to Claude
-    # Google website match scoring filters (CSV/newline separated additions)
-    "google_scoring_stopwords": "",
-    "google_scoring_directory_domains": "",
 }
 
 _CANCELLED_STATUS_TERMS = frozenset({"being_cancelled", "dissolved", "gelöscht", "radiation", "liquidation"})

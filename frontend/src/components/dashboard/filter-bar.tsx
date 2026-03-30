@@ -71,6 +71,7 @@ const CHIP_LABELS: Partial<Record<keyof CompanyFilters, string>> = {
   q: "Name", uid: "UID", canton: "Canton", review_status: "Review", contact_status: "Contact",
   google_searched: "Web search", tags: "Tags", ai_category: "AI Class.",
   tfidf_cluster: "Cluster", purpose_keywords: "Keyword",
+  noga_code: "NOGA code", noga_label: "NOGA label", noga_level: "NOGA level",
   min_web_score: "Min Web", max_web_score: "Max Web",
   min_flex_score: "Min Flex", max_flex_score: "Max Flex",
   min_ai_score: "Min AI", max_ai_score: "Max AI",
@@ -79,6 +80,7 @@ const CHIP_LABELS: Partial<Record<keyof CompanyFilters, string>> = {
   exclude_canton: "Excl. canton", exclude_tags: "Excl. tags",
   exclude_tfidf_cluster: "Excl. cluster", exclude_purpose_keywords: "Excl. keyword",
   exclude_ai_category: "Excl. AI class.",
+  exclude_noga_code: "Excl. NOGA code", exclude_noga_label: "Excl. NOGA label", exclude_noga_level: "Excl. NOGA level",
 };
 
 const ZEFIX_STATUSES = [
@@ -99,6 +101,8 @@ export function FilterBar({
   const clusters = taxonomy?.clusters ?? [];
   const keywords = taxonomy?.keywords ?? [];
   const categories = taxonomy?.categories ?? [];
+  const nogaCodes = taxonomy?.noga_codes ?? [];
+  const nogaLevels = taxonomy?.noga_levels ?? [];
 
   const set = useCallback(
     (key: keyof CompanyFilters, value: string | number | undefined) =>
@@ -320,7 +324,7 @@ export function FilterBar({
 
           {/* ── CATEGORY (INCLUDE) ── */}
           <SectionLabel>Category (include)</SectionLabel>
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-x-4 gap-y-3">
+          <div className="grid grid-cols-1 sm:grid-cols-3 lg:grid-cols-6 gap-x-4 gap-y-3">
             <div>
               <Label>Cluster</Label>
               <Combobox
@@ -354,6 +358,37 @@ export function FilterBar({
                 extraOptions={[{ value: "_none", label: "None (unset)" }]}
               />
             </div>
+            <div>
+              <Label>NOGA code + label</Label>
+              <Combobox
+                options={nogaCodes}
+                value={filters.noga_code === "_none" || filters.noga_code === "_any" ? undefined : filters.noga_code}
+                onChange={(v) => set("noga_code", v ? v.split(" — ")[0]?.trim() : undefined)}
+                placeholder="Search NOGA code…"
+                extraOptions={[
+                  { value: "_none", label: "None (unset)" },
+                  { value: "_any", label: "Any (set)" },
+                ]}
+              />
+            </div>
+            <div>
+              <Label>NOGA label</Label>
+              <Combobox
+                options={nogaCodes}
+                value={filters.noga_label}
+                onChange={(v) => set("noga_label", v ? (v.split(" — ").slice(1).join(" — ").trim() || undefined) : undefined)}
+                placeholder="Search NOGA label…"
+              />
+            </div>
+            <div>
+              <Label>NOGA level</Label>
+              <Combobox
+                options={nogaLevels}
+                value={filters.noga_level}
+                onChange={(v) => set("noga_level", v)}
+                placeholder="Search NOGA level…"
+              />
+            </div>
           </div>
 
           {/* ── SCORES ── */}
@@ -367,7 +402,7 @@ export function FilterBar({
 
           {/* ── CATEGORY (EXCLUDE) ── */}
           <SectionLabel>Category (exclude)</SectionLabel>
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-x-4 gap-y-3">
+          <div className="grid grid-cols-1 sm:grid-cols-3 lg:grid-cols-6 gap-x-4 gap-y-3">
             <div>
               <Label>Excl. cluster</Label>
               <Combobox
@@ -393,6 +428,33 @@ export function FilterBar({
                 value={filters.exclude_ai_category}
                 onChange={(v) => set("exclude_ai_category", v)}
                 placeholder="Search categories…"
+              />
+            </div>
+            <div>
+              <Label>Excl. NOGA code</Label>
+              <Combobox
+                options={nogaCodes}
+                value={filters.exclude_noga_code}
+                onChange={(v) => set("exclude_noga_code", v ? v.split(" — ")[0]?.trim() : undefined)}
+                placeholder="Search NOGA code…"
+              />
+            </div>
+            <div>
+              <Label>Excl. NOGA label</Label>
+              <Combobox
+                options={nogaCodes}
+                value={filters.exclude_noga_label}
+                onChange={(v) => set("exclude_noga_label", v ? (v.split(" — ").slice(1).join(" — ").trim() || undefined) : undefined)}
+                placeholder="Search NOGA label…"
+              />
+            </div>
+            <div>
+              <Label>Excl. NOGA level</Label>
+              <Combobox
+                options={nogaLevels}
+                value={filters.exclude_noga_level}
+                onChange={(v) => set("exclude_noga_level", v)}
+                placeholder="Search NOGA level…"
               />
             </div>
           </div>

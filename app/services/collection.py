@@ -51,27 +51,18 @@ def _google_search_ready(db: Session) -> tuple[bool, str | None]:
     return True, None
 
 
-def _parse_csv_or_lines(value: str) -> list[str]:
-    return [p.strip() for p in re.split(r"[,;\n\r]+", value or "") if p.strip()]
-
-
 def _google_scoring_overrides(db: Session) -> tuple[set[str], set[str]]:
-    """Load runtime Google scoring filters from app settings.
+    """Load runtime Google scoring filters from dedicated DB tables.
 
     Both settings are additive and merged with built-in defaults:
-    - google_scoring_stopwords
-    - google_scoring_directory_domains
+    - google_stopwords (active rows)
+    - google_directory_domains (active rows)
     """
     stopwords = get_default_google_stopwords()
     directory_domains = get_default_directory_domains()
 
-    raw_stopwords = crud.get_setting(db, "google_scoring_stopwords", "")
-    for token in _parse_csv_or_lines(raw_stopwords):
-        stopwords.add(token.lower())
-
-    raw_domains = crud.get_setting(db, "google_scoring_directory_domains", "")
-    for domain in _parse_csv_or_lines(raw_domains):
-        directory_domains.add(domain.lower())
+    stopwords |= crud.get_active_google_stopwords(db)
+    directory_domains |= crud.get_active_google_directory_domains(db)
 
     return stopwords, directory_domains
 

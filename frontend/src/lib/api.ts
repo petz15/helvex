@@ -1,4 +1,18 @@
-import type { AppSettings, BoilerplatePattern, Company, CompanyFilters, CompanyPage, CompanyStats, Job, JobEvent, MapCluster, SavedView } from "./types";
+import type {
+  AppSettings,
+  BoilerplatePattern,
+  Company,
+  CompanyFilters,
+  CompanyPage,
+  CompanyStats,
+  GoogleDirectoryDomain,
+  GoogleStopword,
+  Job,
+  JobEvent,
+  MapCluster,
+  SavedView,
+  TfidfStopword,
+} from "./types";
 
 const BASE = process.env.NEXT_PUBLIC_API_BASE ?? "";
 
@@ -210,6 +224,81 @@ export async function toggleBoilerplate(id: number): Promise<void> {
 
 export async function deleteBoilerplate(id: number): Promise<void> {
   await fetch(`/api/v1/boilerplate/${id}`, { method: "DELETE", credentials: "include" });
+}
+
+export async function fetchGoogleStopwords(): Promise<GoogleStopword[]> {
+  const res = await fetch("/api/v1/google-stopwords", { credentials: "include" });
+  if (!res.ok) return [];
+  return res.json();
+}
+
+export async function createGoogleStopword(data: { value: string; description?: string }): Promise<GoogleStopword> {
+  const res = await fetch("/api/v1/google-stopwords", {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  });
+  if (!res.ok) throw new Error("Failed to create stopword");
+  return res.json();
+}
+
+export async function toggleGoogleStopword(id: number): Promise<void> {
+  await fetch(`/api/v1/google-stopwords/${id}/toggle`, { method: "PATCH", credentials: "include" });
+}
+
+export async function deleteGoogleStopword(id: number): Promise<void> {
+  await fetch(`/api/v1/google-stopwords/${id}`, { method: "DELETE", credentials: "include" });
+}
+
+export async function fetchGoogleDirectoryDomains(): Promise<GoogleDirectoryDomain[]> {
+  const res = await fetch("/api/v1/google-directory-domains", { credentials: "include" });
+  if (!res.ok) return [];
+  return res.json();
+}
+
+export async function createGoogleDirectoryDomain(data: { value: string; description?: string }): Promise<GoogleDirectoryDomain> {
+  const res = await fetch("/api/v1/google-directory-domains", {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  });
+  if (!res.ok) throw new Error("Failed to create directory domain");
+  return res.json();
+}
+
+export async function toggleGoogleDirectoryDomain(id: number): Promise<void> {
+  await fetch(`/api/v1/google-directory-domains/${id}/toggle`, { method: "PATCH", credentials: "include" });
+}
+
+export async function deleteGoogleDirectoryDomain(id: number): Promise<void> {
+  await fetch(`/api/v1/google-directory-domains/${id}`, { method: "DELETE", credentials: "include" });
+}
+
+export async function fetchTfidfStopwords(): Promise<TfidfStopword[]> {
+  const res = await fetch("/api/v1/tfidf-stopwords", { credentials: "include" });
+  if (!res.ok) return [];
+  return res.json();
+}
+
+export async function createTfidfStopword(data: { value: string; description?: string }): Promise<TfidfStopword> {
+  const res = await fetch("/api/v1/tfidf-stopwords", {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  });
+  if (!res.ok) throw new Error("Failed to create TF-IDF stopword");
+  return res.json();
+}
+
+export async function toggleTfidfStopword(id: number): Promise<void> {
+  await fetch(`/api/v1/tfidf-stopwords/${id}/toggle`, { method: "PATCH", credentials: "include" });
+}
+
+export async function deleteTfidfStopword(id: number): Promise<void> {
+  await fetch(`/api/v1/tfidf-stopwords/${id}`, { method: "DELETE", credentials: "include" });
 }
 
 // ── Map ───────────────────────────────────────────────────────────────────────

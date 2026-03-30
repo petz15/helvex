@@ -95,6 +95,8 @@ export function CategoriesClient() {
   const clusters: [string, number][] = taxonomy?.clusters ?? [];
   const categories: [string, number][] = taxonomy?.categories ?? [];
   const keywords: [string, number][] = taxonomy?.keywords ?? [];
+  const nogaCodes: [string, number][] = taxonomy?.noga_codes ?? [];
+  const nogaLevels: [string, number][] = taxonomy?.noga_levels ?? [];
 
   if (isLoading) return <div className="max-w-7xl mx-auto px-4 py-6 text-sm text-slate-400">Loading…</div>;
   if (error) return <div className="max-w-7xl mx-auto px-4 py-6 text-sm text-red-500">Failed to load taxonomy data.</div>;
@@ -206,6 +208,59 @@ export function CategoriesClient() {
                 >
                   {kw}
                   <span className="text-blue-400 text-xs tabular-nums">{count}</span>
+                </Link>
+              ))}
+            </div>
+          </div>
+        )}
+      </Section>
+
+      {/* ── NOGA Codes ─────────────────────────────────────────────────── */}
+      <Section
+        title="NOGA Codes"
+        subtitle={`${nogaCodes.length} classified NOGA codes — click to filter dashboard`}
+      >
+        {nogaCodes.length === 0 ? (
+          <p className="text-sm text-slate-400">No NOGA classifications found yet.</p>
+        ) : (
+          <div className="bg-white rounded-xl border border-slate-200 p-5 shadow-sm">
+            <div className="flex flex-wrap gap-2">
+              {nogaCodes.map(([entry, count]) => {
+                const code = entry.split(" — ")[0]?.trim() || entry;
+                return (
+                  <Link
+                    key={entry}
+                    href={`/app/search?noga_code=${encodeURIComponent(code)}`}
+                    className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full border bg-emerald-50 text-emerald-700 border-emerald-100 hover:bg-emerald-100 hover:border-emerald-300 text-xs"
+                  >
+                    {entry}
+                    <span className="text-emerald-500 tabular-nums">{count}</span>
+                  </Link>
+                );
+              })}
+            </div>
+          </div>
+        )}
+      </Section>
+
+      {/* ── NOGA Levels ────────────────────────────────────────────────── */}
+      <Section
+        title="NOGA Levels"
+        subtitle={`${nogaLevels.length} NOGA hierarchy levels represented in your data`}
+      >
+        {nogaLevels.length === 0 ? (
+          <p className="text-sm text-slate-400">No NOGA levels found yet.</p>
+        ) : (
+          <div className="bg-white rounded-xl border border-slate-200 p-5 shadow-sm">
+            <div className="flex flex-wrap gap-2">
+              {nogaLevels.map(([level, count]) => (
+                <Link
+                  key={level}
+                  href={`/app/search?noga_level=${encodeURIComponent(level)}`}
+                  className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full border bg-teal-50 text-teal-700 border-teal-100 hover:bg-teal-100 hover:border-teal-300 text-xs"
+                >
+                  {level}
+                  <span className="text-teal-500 tabular-nums">{count}</span>
                 </Link>
               ))}
             </div>

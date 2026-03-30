@@ -64,6 +64,12 @@ export function CompanyTable({ companies, selectedId, onSelect, filters, onSort,
   const sort = filters.sort ?? "-updated";
 
   const [columnVisibility, setColumnVisibility] = useState<VisibilityState>({
+    web_score: false,
+    flex_score: false,
+    ai_score: false,
+    combined_score: false,
+    review_status: false,
+    contact_status: false,
     tfidf_cluster: false,
     ai_category: false,
     website_checked_at: false,

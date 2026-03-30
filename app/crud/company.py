@@ -60,9 +60,11 @@ def _apply_filters(query, *, name_filter, uid_filter=None, canton, review_status
                    max_web_score=None, max_flex_score=None, max_ai_score=None,
                    min_combined_score=None, max_combined_score=None,
                    ai_category=None, tags, tfidf_cluster=None, purpose_keywords=None,
+                   noga_code=None, noga_label=None, noga_level=None,
                    exclude_tags=None, exclude_review_status=None, exclude_canton=None,
                    exclude_contact_status=None, exclude_tfidf_cluster=None,
-                   exclude_purpose_keywords=None, exclude_ai_category=None):
+                   exclude_purpose_keywords=None, exclude_ai_category=None,
+                   exclude_noga_code=None, exclude_noga_label=None, exclude_noga_level=None):
     if name_filter:
         query = query.filter(Company.name.ilike(f"%{name_filter}%"))
     if uid_filter:
@@ -122,6 +124,16 @@ def _apply_filters(query, *, name_filter, uid_filter=None, canton, review_status
         query = query.filter(Company.tfidf_cluster.ilike(f"%{tfidf_cluster}%"))
     if purpose_keywords:
         query = query.filter(Company.purpose_keywords.ilike(f"%{purpose_keywords}%"))
+    if noga_code == "_none":
+        query = query.filter(Company.noga_code.is_(None))
+    elif noga_code == "_any":
+        query = query.filter(Company.noga_code.isnot(None))
+    elif noga_code:
+        query = query.filter(Company.noga_code.ilike(f"%{noga_code}%"))
+    if noga_label:
+        query = query.filter(Company.noga_label.ilike(f"%{noga_label}%"))
+    if noga_level:
+        query = query.filter(Company.noga_level == noga_level)
     if exclude_tags:
         for term in [t.strip() for t in exclude_tags.split(",") if t.strip()]:
             query = query.filter(
@@ -157,6 +169,20 @@ def _apply_filters(query, *, name_filter, uid_filter=None, canton, review_status
         query = query.filter(
             (Company.ai_category.is_(None)) | (Company.ai_category != exclude_ai_category)
         )
+    if exclude_noga_code:
+        for term in [t.strip() for t in exclude_noga_code.split(",") if t.strip()]:
+            query = query.filter(
+                (Company.noga_code.is_(None)) | (Company.noga_code.notilike(f"%{term}%"))
+            )
+    if exclude_noga_label:
+        for term in [t.strip() for t in exclude_noga_label.split(",") if t.strip()]:
+            query = query.filter(
+                (Company.noga_label.is_(None)) | (Company.noga_label.notilike(f"%{term}%"))
+            )
+    if exclude_noga_level:
+        query = query.filter(
+            (Company.noga_level.is_(None)) | (Company.noga_level != exclude_noga_level)
+        )
     return query
 
 
@@ -183,6 +209,9 @@ def list_companies(
     tags: str | None = None,
     tfidf_cluster: str | None = None,
     purpose_keywords: str | None = None,
+    noga_code: str | None = None,
+    noga_label: str | None = None,
+    noga_level: str | None = None,
     exclude_tags: str | None = None,
     exclude_review_status: str | None = None,
     exclude_canton: str | None = None,
@@ -190,6 +219,9 @@ def list_companies(
     exclude_tfidf_cluster: str | None = None,
     exclude_purpose_keywords: str | None = None,
     exclude_ai_category: str | None = None,
+    exclude_noga_code: str | None = None,
+    exclude_noga_label: str | None = None,
+    exclude_noga_level: str | None = None,
     # kept for backward-compat with collection.py batch query
     limit: int | None = None,
     skip: int = 0,
@@ -215,6 +247,9 @@ def list_companies(
         tags=tags,
         tfidf_cluster=tfidf_cluster,
         purpose_keywords=purpose_keywords,
+        noga_code=noga_code,
+        noga_label=noga_label,
+        noga_level=noga_level,
         exclude_tags=exclude_tags,
         exclude_review_status=exclude_review_status,
         exclude_canton=exclude_canton,
@@ -222,6 +257,9 @@ def list_companies(
         exclude_tfidf_cluster=exclude_tfidf_cluster,
         exclude_purpose_keywords=exclude_purpose_keywords,
         exclude_ai_category=exclude_ai_category,
+        exclude_noga_code=exclude_noga_code,
+        exclude_noga_label=exclude_noga_label,
+        exclude_noga_level=exclude_noga_level,
     )
 
     if sort in ("combined_score", "-combined_score"):
@@ -271,6 +309,9 @@ def count_companies(
     tags: str | None = None,
     tfidf_cluster: str | None = None,
     purpose_keywords: str | None = None,
+    noga_code: str | None = None,
+    noga_label: str | None = None,
+    noga_level: str | None = None,
     exclude_tags: str | None = None,
     exclude_review_status: str | None = None,
     exclude_canton: str | None = None,
@@ -278,6 +319,9 @@ def count_companies(
     exclude_tfidf_cluster: str | None = None,
     exclude_purpose_keywords: str | None = None,
     exclude_ai_category: str | None = None,
+    exclude_noga_code: str | None = None,
+    exclude_noga_label: str | None = None,
+    exclude_noga_level: str | None = None,
 ) -> int:
     query = db.query(Company)
     query = _apply_filters(
@@ -300,6 +344,9 @@ def count_companies(
         tags=tags,
         tfidf_cluster=tfidf_cluster,
         purpose_keywords=purpose_keywords,
+        noga_code=noga_code,
+        noga_label=noga_label,
+        noga_level=noga_level,
         exclude_tags=exclude_tags,
         exclude_review_status=exclude_review_status,
         exclude_canton=exclude_canton,
@@ -307,6 +354,9 @@ def count_companies(
         exclude_tfidf_cluster=exclude_tfidf_cluster,
         exclude_purpose_keywords=exclude_purpose_keywords,
         exclude_ai_category=exclude_ai_category,
+        exclude_noga_code=exclude_noga_code,
+        exclude_noga_label=exclude_noga_label,
+        exclude_noga_level=exclude_noga_level,
     )
     return query.count()
 
@@ -388,11 +438,27 @@ def get_taxonomy_stats(db: Session) -> dict:
         .order_by(func.count(Company.id).desc())
         .all()
     )
+    noga_codes = (
+        db.query(Company.noga_code, Company.noga_label, func.count(Company.id).label("cnt"))
+        .filter(Company.noga_code.isnot(None))
+        .group_by(Company.noga_code, Company.noga_label)
+        .order_by(func.count(Company.id).desc())
+        .all()
+    )
+    noga_levels = (
+        db.query(Company.noga_level, func.count(Company.id).label("cnt"))
+        .filter(Company.noga_level.isnot(None))
+        .group_by(Company.noga_level)
+        .order_by(func.count(Company.id).desc())
+        .all()
+    )
     return {
         "clusters": clusters_list,
         "keywords": keywords_list,
         "tags": [(r.tags, r.cnt) for r in tags],
         "categories": [(r.ai_category, r.cnt) for r in categories],
+        "noga_codes": [(((r.noga_code or "") + " — " + (r.noga_label or "")).strip(" —"), r.cnt) for r in noga_codes],
+        "noga_levels": [(r.noga_level, r.cnt) for r in noga_levels],
     }
 
 

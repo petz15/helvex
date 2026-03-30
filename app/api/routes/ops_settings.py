@@ -1,8 +1,11 @@
 """REST API for application settings and boilerplate patterns."""
 from __future__ import annotations
 
+import re
+
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app import crud
@@ -19,8 +22,6 @@ router = APIRouter(tags=["settings"])
 class SettingsBody(BaseModel):
     google_search_enabled: bool = True
     google_daily_quota: str = "100"
-    google_scoring_stopwords: str = ""
-    google_scoring_directory_domains: str = ""
     # Scoring
     scoring_target_clusters: str = ""
     scoring_cluster_hit_points: str = "10"
@@ -64,6 +65,48 @@ class BoilerplateCreate(BaseModel):
     example: str | None = None
 
 
+class GoogleStopwordOut(BaseModel):
+    id: int
+    value: str
+    description: str | None
+    active: bool
+
+    model_config = {"from_attributes": True}
+
+
+class GoogleStopwordCreate(BaseModel):
+    value: str
+    description: str | None = None
+
+
+class GoogleDirectoryDomainOut(BaseModel):
+    id: int
+    value: str
+    description: str | None
+    active: bool
+
+    model_config = {"from_attributes": True}
+
+
+class GoogleDirectoryDomainCreate(BaseModel):
+    value: str
+    description: str | None = None
+
+
+class TfidfStopwordOut(BaseModel):
+    id: int
+    value: str
+    description: str | None
+    active: bool
+
+    model_config = {"from_attributes": True}
+
+
+class TfidfStopwordCreate(BaseModel):
+    value: str
+    description: str | None = None
+
+
 # ── Settings ───────────────────────────────────────────────────────────────────
 
 @router.get("/settings")
@@ -84,8 +127,6 @@ def save_settings(body: SettingsBody, db: Session = Depends(get_db), _: User = D
 
     defaults = get_default_scoring_config()
     text_fields = {
-        "google_scoring_stopwords": body.google_scoring_stopwords,
-        "google_scoring_directory_domains": body.google_scoring_directory_domains,
         "scoring_target_clusters": body.scoring_target_clusters,
         "scoring_exclude_clusters": body.scoring_exclude_clusters,
         "scoring_target_keywords": body.scoring_target_keywords,
@@ -171,3 +212,121 @@ def delete_boilerplate(pattern_id: int, db: Session = Depends(get_db), _: User =
     if not row:
         raise HTTPException(status_code=404, detail="Pattern not found")
     crud.delete_boilerplate_pattern(db, row)
+
+
+# ── Google scoring filters ────────────────────────────────────────────────────
+
+_DOMAIN_RE = re.compile(r"^[a-z0-9][a-z0-9.-]*\.[a-z]{2,}$")
+
+
+def _normalize_stopword(value: str) -> str:
+    return value.strip().lower()
+
+
+def _normalize_domain(value: str) -> str:
+    cleaned = value.strip().lower()
+    cleaned = cleaned.removeprefix("http://").removeprefix("https://")
+    cleaned = cleaned.split("/", 1)[0]
+    cleaned = cleaned.removeprefix("www.")
+    return cleaned
+
+
+@router.get("/google-stopwords", response_model=list[GoogleStopwordOut])
+def list_google_stopwords(db: Session = Depends(get_db), _: User = Depends(get_current_user)):
+    return crud.list_google_stopwords(db)
+
+
+@router.post("/google-stopwords", response_model=GoogleStopwordOut, status_code=201)
+def create_google_stopword(body: GoogleStopwordCreate, db: Session = Depends(get_db), _: User = Depends(require_superadmin)):
+    value = _normalize_stopword(body.value)
+    if not value:
+        raise HTTPException(status_code=400, detail="Stopword cannot be empty")
+    try:
+        return crud.create_google_stopword(db, value=value, description=body.description, active=True)
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(status_code=409, detail="Stopword already exists")
+
+
+@router.patch("/google-stopwords/{row_id}/toggle", response_model=GoogleStopwordOut)
+def toggle_google_stopword(row_id: int, db: Session = Depends(get_db), _: User = Depends(require_superadmin)):
+    row = crud.get_google_stopword(db, row_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="Stopword not found")
+    return crud.update_google_stopword(db, row, active=not row.active)
+
+
+@router.delete("/google-stopwords/{row_id}", status_code=204)
+def delete_google_stopword(row_id: int, db: Session = Depends(get_db), _: User = Depends(require_superadmin)):
+    row = crud.get_google_stopword(db, row_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="Stopword not found")
+    crud.delete_google_stopword(db, row)
+
+
+@router.get("/google-directory-domains", response_model=list[GoogleDirectoryDomainOut])
+def list_google_directory_domains(db: Session = Depends(get_db), _: User = Depends(get_current_user)):
+    return crud.list_google_directory_domains(db)
+
+
+@router.post("/google-directory-domains", response_model=GoogleDirectoryDomainOut, status_code=201)
+def create_google_directory_domain(body: GoogleDirectoryDomainCreate, db: Session = Depends(get_db), _: User = Depends(require_superadmin)):
+    value = _normalize_domain(body.value)
+    if not value:
+        raise HTTPException(status_code=400, detail="Domain cannot be empty")
+    if not _DOMAIN_RE.match(value):
+        raise HTTPException(status_code=400, detail="Invalid domain format")
+    try:
+        return crud.create_google_directory_domain(db, value=value, description=body.description, active=True)
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(status_code=409, detail="Domain already exists")
+
+
+@router.patch("/google-directory-domains/{row_id}/toggle", response_model=GoogleDirectoryDomainOut)
+def toggle_google_directory_domain(row_id: int, db: Session = Depends(get_db), _: User = Depends(require_superadmin)):
+    row = crud.get_google_directory_domain(db, row_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="Domain not found")
+    return crud.update_google_directory_domain(db, row, active=not row.active)
+
+
+@router.delete("/google-directory-domains/{row_id}", status_code=204)
+def delete_google_directory_domain(row_id: int, db: Session = Depends(get_db), _: User = Depends(require_superadmin)):
+    row = crud.get_google_directory_domain(db, row_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="Domain not found")
+    crud.delete_google_directory_domain(db, row)
+
+
+@router.get("/tfidf-stopwords", response_model=list[TfidfStopwordOut])
+def list_tfidf_stopwords(db: Session = Depends(get_db), _: User = Depends(get_current_user)):
+    return crud.list_tfidf_stopwords(db)
+
+
+@router.post("/tfidf-stopwords", response_model=TfidfStopwordOut, status_code=201)
+def create_tfidf_stopword(body: TfidfStopwordCreate, db: Session = Depends(get_db), _: User = Depends(require_superadmin)):
+    value = _normalize_stopword(body.value)
+    if not value:
+        raise HTTPException(status_code=400, detail="Stopword cannot be empty")
+    try:
+        return crud.create_tfidf_stopword(db, value=value, description=body.description, active=True)
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(status_code=409, detail="Stopword already exists")
+
+
+@router.patch("/tfidf-stopwords/{row_id}/toggle", response_model=TfidfStopwordOut)
+def toggle_tfidf_stopword(row_id: int, db: Session = Depends(get_db), _: User = Depends(require_superadmin)):
+    row = crud.get_tfidf_stopword(db, row_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="Stopword not found")
+    return crud.update_tfidf_stopword(db, row, active=not row.active)
+
+
+@router.delete("/tfidf-stopwords/{row_id}", status_code=204)
+def delete_tfidf_stopword(row_id: int, db: Session = Depends(get_db), _: User = Depends(require_superadmin)):
+    row = crud.get_tfidf_stopword(db, row_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="Stopword not found")
+    crud.delete_tfidf_stopword(db, row)

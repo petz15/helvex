@@ -19,6 +19,11 @@ export interface Company {
   ai_scored_at: string | null;
   ai_category: string | null;
   ai_freeform: string | null;
+  noga_code: string | null;
+  noga_label: string | null;
+  noga_level: string | null;
+  noga_confidence: number | null;
+  noga_classified_at: string | null;
   combined_score: number | null;
   review_status: string | null;
   contact_status: string | null;
@@ -105,6 +110,9 @@ export interface CompanyFilters {
   tags?: string;
   tfidf_cluster?: string;
   purpose_keywords?: string;
+  noga_code?: string;
+  noga_label?: string;
+  noga_level?: string;
   exclude_tags?: string;
   exclude_review_status?: string;
   exclude_canton?: string;
@@ -112,6 +120,9 @@ export interface CompanyFilters {
   exclude_tfidf_cluster?: string;
   exclude_purpose_keywords?: string;
   exclude_ai_category?: string;
+  exclude_noga_code?: string;
+  exclude_noga_label?: string;
+  exclude_noga_level?: string;
   sort?: string;
   page?: number;
   page_size?: number;
@@ -158,8 +169,6 @@ export interface JobEvent {
 export interface AppSettings {
   google_search_enabled: string;
   google_daily_quota: string;
-  google_scoring_stopwords: string;
-  google_scoring_directory_domains: string;
   scoring_target_clusters: string;
   scoring_cluster_hit_points: string;
   scoring_exclude_clusters: string;
@@ -190,6 +199,27 @@ export interface BoilerplatePattern {
   pattern: string;
   description: string | null;
   example: string | null;
+  active: boolean;
+}
+
+export interface GoogleStopword {
+  id: number;
+  value: string;
+  description: string | null;
+  active: boolean;
+}
+
+export interface GoogleDirectoryDomain {
+  id: number;
+  value: string;
+  description: string | null;
+  active: boolean;
+}
+
+export interface TfidfStopword {
+  id: number;
+  value: string;
+  description: string | null;
   active: boolean;
 }
 

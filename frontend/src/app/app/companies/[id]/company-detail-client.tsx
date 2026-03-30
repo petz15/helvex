@@ -365,6 +365,29 @@ export function CompanyDetailClient({ company: initial, readOnlyDemo = false }: 
               )}
             </div>
           )}
+          {(company.noga_code || company.noga_label || company.noga_level) && (
+            <div className="pt-2 border-t border-slate-100 space-y-2">
+              <span className="text-xs text-slate-400 block">NOGA Classification</span>
+              {company.noga_code && (
+                <Link href={`/app/search?noga_code=${encodeURIComponent(company.noga_code)}`}>
+                  <Badge className="bg-emerald-50 text-emerald-700 text-xs cursor-pointer hover:bg-emerald-100">Code: {company.noga_code}</Badge>
+                </Link>
+              )}
+              {company.noga_level && (
+                <Link href={`/app/search?noga_level=${encodeURIComponent(company.noga_level)}`}>
+                  <Badge className="bg-teal-50 text-teal-700 text-xs cursor-pointer hover:bg-teal-100">Level: {company.noga_level}</Badge>
+                </Link>
+              )}
+              {company.noga_label && (
+                <Link href={`/app/search?noga_label=${encodeURIComponent(company.noga_label)}`}>
+                  <Badge className="bg-green-50 text-green-700 text-xs cursor-pointer hover:bg-green-100 max-w-full truncate">{company.noga_label}</Badge>
+                </Link>
+              )}
+              {company.noga_confidence != null && (
+                <p className="text-xs text-slate-500">Confidence: {Math.round(company.noga_confidence * 100)}%</p>
+              )}
+            </div>
+          )}
           {company.ai_category && (
             <div className="pt-2 border-t border-slate-100">
               <span className="text-xs text-slate-400 block mb-1">AI Category</span>
@@ -451,6 +474,29 @@ export function CompanyDetailClient({ company: initial, readOnlyDemo = false }: 
         </div>
       </div>
 
+      {/* Purpose */}
+      {company.purpose && (
+        <div className="bg-white rounded-xl border border-slate-200 p-5 shadow-sm">
+          <h2 className="text-sm font-semibold text-slate-700 mb-2 flex items-center gap-1.5">
+            <FileText size={14} /> Purpose
+          </h2>
+          <div className="relative">
+            <p className={cn("text-sm text-slate-700 leading-relaxed whitespace-pre-wrap", !purposeExpanded && "max-h-40 overflow-hidden")}>
+              {company.purpose}
+            </p>
+            {!purposeExpanded && company.purpose.length > 500 && (
+              <div className="absolute inset-x-0 bottom-0 h-10 bg-gradient-to-t from-white to-transparent" />
+            )}
+          </div>
+          {company.purpose.length > 500 && (
+            <button type="button" onClick={() => setPurposeExpanded(v => !v)} className="mt-2 text-xs text-blue-600 hover:underline">
+              {purposeExpanded ? "Show less" : "Show more"}
+            </button>
+          )}
+        </div>
+      )}
+
+
       {/* Corporate Structure */}
       {hasStructureData && (
         <div className="bg-white rounded-xl border border-slate-200 p-5 shadow-sm">
@@ -493,26 +539,6 @@ export function CompanyDetailClient({ company: initial, readOnlyDemo = false }: 
         </div>
       )}
 
-      {company.purpose && (
-        <div className="bg-white rounded-xl border border-slate-200 p-5 shadow-sm">
-          <h2 className="text-sm font-semibold text-slate-700 mb-2 flex items-center gap-1.5">
-            <FileText size={14} /> Purpose
-          </h2>
-          <div className="relative">
-            <p className={cn("text-sm text-slate-700 leading-relaxed whitespace-pre-wrap", !purposeExpanded && "max-h-40 overflow-hidden")}>
-              {company.purpose}
-            </p>
-            {!purposeExpanded && company.purpose.length > 500 && (
-              <div className="absolute inset-x-0 bottom-0 h-10 bg-gradient-to-t from-white to-transparent" />
-            )}
-          </div>
-          {company.purpose.length > 500 && (
-            <button type="button" onClick={() => setPurposeExpanded(v => !v)} className="mt-2 text-xs text-blue-600 hover:underline">
-              {purposeExpanded ? "Show less" : "Show more"}
-            </button>
-          )}
-        </div>
-      )}
 
       {/* SHAB signers */}
       <SignersPanel sogcPubJson={company.sogc_pub} />

@@ -4,10 +4,27 @@ import useSWR from "swr";
 import { useRouter } from "next/navigation";
 import { Save, Plus, Trash2, ToggleLeft, ToggleRight, Loader2, Landmark, Search, MapPin, FileText } from "lucide-react";
 import {
-  createBoilerplate, deleteBoilerplate, fetchBoilerplate, fetchSettings,
-  saveSettings, toggleBoilerplate, triggerJob,
+  createTfidfStopword,
+  createBoilerplate,
+  createGoogleDirectoryDomain,
+  createGoogleStopword,
+  deleteTfidfStopword,
+  deleteBoilerplate,
+  deleteGoogleDirectoryDomain,
+  deleteGoogleStopword,
+  fetchTfidfStopwords,
+  fetchBoilerplate,
+  fetchGoogleDirectoryDomains,
+  fetchGoogleStopwords,
+  fetchSettings,
+  saveSettings,
+  toggleTfidfStopword,
+  toggleBoilerplate,
+  toggleGoogleDirectoryDomain,
+  toggleGoogleStopword,
+  triggerJob,
 } from "@/lib/api";
-import type { AppSettings, BoilerplatePattern } from "@/lib/types";
+import type { AppSettings, BoilerplatePattern, GoogleDirectoryDomain, GoogleStopword, TfidfStopword } from "@/lib/types";
 
 const inputCls = "w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-300 focus:border-transparent bg-white";
 const textareaCls = inputCls + " resize-y";
@@ -29,8 +46,17 @@ function SectionTitle({ title }: { title: string }) {
 export function SettingsClient() {
   const { data: initial, mutate: reloadSettings } = useSWR<AppSettings>("settings", fetchSettings);
   const { data: boilerplate = [], mutate: reloadBoilerplate } = useSWR<BoilerplatePattern[]>("boilerplate", fetchBoilerplate);
+  const { data: stopwords = [], mutate: reloadStopwords } = useSWR<GoogleStopword[]>("google-stopwords", fetchGoogleStopwords);
+  const { data: directoryDomains = [], mutate: reloadDirectoryDomains } = useSWR<GoogleDirectoryDomain[]>("google-directory-domains", fetchGoogleDirectoryDomains);
+  const { data: tfidfStopwords = [], mutate: reloadTfidfStopwords } = useSWR<TfidfStopword[]>("tfidf-stopwords", fetchTfidfStopwords);
 
   const [form, setForm] = useState<Partial<AppSettings>>({});
+  const [newStopword, setNewStopword] = useState("");
+  const [newTfidfStopword, setNewTfidfStopword] = useState("");
+  const [newDirectoryDomain, setNewDirectoryDomain] = useState("");
+  const [addingStopword, setAddingStopword] = useState(false);
+  const [addingTfidfStopword, setAddingTfidfStopword] = useState(false);
+  const [addingDirectoryDomain, setAddingDirectoryDomain] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [newPattern, setNewPattern] = useState({ pattern: "", description: "", example: "" });
@@ -40,7 +66,8 @@ export function SettingsClient() {
   const router = useRouter();
 
   useEffect(() => {
-    if (initial) setForm(initial);
+    if (!initial) return;
+    setForm(initial);
   }, [initial]);
 
   function set(key: keyof AppSettings, value: string) {
@@ -98,6 +125,75 @@ export function SettingsClient() {
     }
   }
 
+  async function addStopword() {
+    const value = newStopword.trim();
+    if (!value) return;
+    setAddingStopword(true);
+    try {
+      await createGoogleStopword({ value });
+      setNewStopword("");
+      reloadStopwords();
+    } finally {
+      setAddingStopword(false);
+    }
+  }
+
+  async function addTfidfStopword() {
+    const value = newTfidfStopword.trim();
+    if (!value) return;
+    setAddingTfidfStopword(true);
+    try {
+      await createTfidfStopword({ value });
+      setNewTfidfStopword("");
+      reloadTfidfStopwords();
+    } finally {
+      setAddingTfidfStopword(false);
+    }
+  }
+
+  async function toggleStopword(id: number) {
+    await toggleGoogleStopword(id);
+    reloadStopwords();
+  }
+
+  async function removeStopword(id: number) {
+    await deleteGoogleStopword(id);
+    reloadStopwords();
+  }
+
+  async function toggleManagedTfidfStopword(id: number) {
+    await toggleTfidfStopword(id);
+    reloadTfidfStopwords();
+  }
+
+  async function removeTfidfStopword(id: number) {
+    await deleteTfidfStopword(id);
+    reloadTfidfStopwords();
+  }
+
+  async function addDirectoryDomain() {
+    const value = newDirectoryDomain.trim().toLowerCase();
+    if (!value) return;
+    setAddingDirectoryDomain(true);
+    try {
+      await createGoogleDirectoryDomain({ value });
+      setNewDirectoryDomain("");
+      reloadDirectoryDomains();
+    } finally {
+      setAddingDirectoryDomain(false);
+    }
+  }
+
+  async function toggleDirectoryDomain(id: number) {
+    await toggleGoogleDirectoryDomain(id);
+    reloadDirectoryDomains();
+  }
+
+  async function removeDirectoryDomain(id: number) {
+    await deleteGoogleDirectoryDomain(id);
+    reloadDirectoryDomains();
+  }
+
   if (!initial) return <div className="p-6 text-slate-400 text-sm">Loading…</div>;
 
   return (
@@ -152,30 +248,203 @@ export function SettingsClient() {
       </div>
 
       <SectionTitle title="Google scoring filters" />
-      <div className="grid grid-cols-2 gap-4">
+      <div className="space-y-5">
         <Field
-          label="Extra stop words"
-          hint="Comma, semicolon, or newline separated. Added to built-in stop words used in Google website match scoring."
+          label="Stop words"
+          hint="These are added to built-in stop words when extracting purpose keywords for Google match scoring."
         >
-          <textarea
-            rows={4}
-            value={form.google_scoring_stopwords ?? ""}
-            onChange={e => set("google_scoring_stopwords", e.target.value)}
-            className={textareaCls}
-            placeholder="example: holding, consulting, solutions"
-          />
+          <div className="space-y-2">
+            <div className="flex gap-2">
+              <input
+                value={newStopword}
+                onChange={e => setNewStopword(e.target.value)}
+                onKeyDown={e => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    addStopword();
+                  }
+                }}
+                placeholder="Add stop word"
+                className={cn(inputCls, "flex-1")}
+              />
+              <button
+                type="button"
+                onClick={addStopword}
+                disabled={addingStopword}
+                className="flex items-center gap-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 px-3 py-2 rounded-lg text-sm font-medium transition-colors"
+              >
+                {addingStopword ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} />}
+                Add
+              </button>
+            </div>
+            <div className="overflow-x-auto border border-slate-200 rounded-lg bg-white">
+              <table className="w-full text-sm">
+                <thead className="bg-slate-50 text-slate-600">
+                  <tr>
+                    <th className="text-left px-3 py-2 font-medium">Word</th>
+                    <th className="text-right px-3 py-2 font-medium w-20">Action</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {stopwords.map((row) => (
+                    <tr key={row.id} className="border-t border-slate-100">
+                      <td className="px-3 py-2 text-slate-800">
+                        <div className="flex items-center gap-2">
+                          <button type="button" onClick={() => toggleStopword(row.id)} className="shrink-0 text-slate-400 hover:text-slate-700 transition-colors">
+                            {row.active ? <ToggleRight size={18} className="text-blue-500" /> : <ToggleLeft size={18} />}
+                          </button>
+                          <span className={row.active ? "text-slate-800" : "text-slate-400 line-through"}>{row.value}</span>
+                        </div>
+                      </td>
+                      <td className="px-3 py-2 text-right">
+                        <button type="button" onClick={() => removeStopword(row.id)} className="text-slate-400 hover:text-red-500 transition-colors">
+                          <Trash2 size={14} />
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                  {stopwords.length === 0 && (
+                    <tr>
+                      <td colSpan={2} className="px-3 py-3 text-slate-400">No custom stop words configured.</td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
         </Field>
+
         <Field
-          label="Extra directory domains"
-          hint="Comma, semicolon, or newline separated domains to always ignore when picking website matches."
+          label="Directory domains"
+          hint="Domains in this table are always treated as directories and excluded from Google website matching."
         >
-          <textarea
-            rows={4}
-            value={form.google_scoring_directory_domains ?? ""}
-            onChange={e => set("google_scoring_directory_domains", e.target.value)}
-            className={textareaCls}
-            placeholder="example: firmenabc.ch, branchenguide.example"
-          />
+          <div className="space-y-2">
+            <div className="flex gap-2">
+              <input
+                value={newDirectoryDomain}
+                onChange={e => setNewDirectoryDomain(e.target.value)}
+                onKeyDown={e => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    addDirectoryDomain();
+                  }
+                }}
+                placeholder="Add directory domain (example.ch)"
+                className={cn(inputCls, "flex-1")}
+              />
+              <button
+                type="button"
+                onClick={addDirectoryDomain}
+                disabled={addingDirectoryDomain}
+                className="flex items-center gap-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 px-3 py-2 rounded-lg text-sm font-medium transition-colors"
+              >
+                {addingDirectoryDomain ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} />}
+                Add
+              </button>
+            </div>
+            <div className="overflow-x-auto border border-slate-200 rounded-lg bg-white">
+              <table className="w-full text-sm">
+                <thead className="bg-slate-50 text-slate-600">
+                  <tr>
+                    <th className="text-left px-3 py-2 font-medium">Domain</th>
+                    <th className="text-right px-3 py-2 font-medium w-20">Action</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {directoryDomains.map((row) => (
+                    <tr key={row.id} className="border-t border-slate-100">
+                      <td className="px-3 py-2 text-slate-800">
+                        <div className="flex items-center gap-2">
+                          <button type="button" onClick={() => toggleDirectoryDomain(row.id)} className="shrink-0 text-slate-400 hover:text-slate-700 transition-colors">
+                            {row.active ? <ToggleRight size={18} className="text-blue-500" /> : <ToggleLeft size={18} />}
+                          </button>
+                          <span className={row.active ? "text-slate-800" : "text-slate-400 line-through"}>{row.value}</span>
+                        </div>
+                      </td>
+                      <td className="px-3 py-2 text-right">
+                        <button type="button" onClick={() => removeDirectoryDomain(row.id)} className="text-slate-400 hover:text-red-500 transition-colors">
+                          <Trash2 size={14} />
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                  {directoryDomains.length === 0 && (
+                    <tr>
+                      <td colSpan={2} className="px-3 py-3 text-slate-400">No custom directory domains configured.</td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </Field>
+      </div>
+
+      <SectionTitle title="TF-IDF and purpose extraction" />
+      <div className="space-y-5">
+        <Field
+          label="Stop words"
+          hint="These are added to built-in stop words used by TF-IDF clustering and purpose keyword extraction."
+        >
+          <div className="space-y-2">
+            <div className="flex gap-2">
+              <input
+                value={newTfidfStopword}
+                onChange={e => setNewTfidfStopword(e.target.value)}
+                onKeyDown={e => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    addTfidfStopword();
+                  }
+                }}
+                placeholder="Add TF-IDF stop word"
+                className={cn(inputCls, "flex-1")}
+              />
+              <button
+                type="button"
+                onClick={addTfidfStopword}
+                disabled={addingTfidfStopword}
+                className="flex items-center gap-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 px-3 py-2 rounded-lg text-sm font-medium transition-colors"
+              >
+                {addingTfidfStopword ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} />}
+                Add
+              </button>
+            </div>
+            <div className="overflow-x-auto border border-slate-200 rounded-lg bg-white">
+              <table className="w-full text-sm">
+                <thead className="bg-slate-50 text-slate-600">
+                  <tr>
+                    <th className="text-left px-3 py-2 font-medium">Word</th>
+                    <th className="text-right px-3 py-2 font-medium w-20">Action</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {tfidfStopwords.map((row) => (
+                    <tr key={row.id} className="border-t border-slate-100">
+                      <td className="px-3 py-2 text-slate-800">
+                        <div className="flex items-center gap-2">
+                          <button type="button" onClick={() => toggleManagedTfidfStopword(row.id)} className="shrink-0 text-slate-400 hover:text-slate-700 transition-colors">
+                            {row.active ? <ToggleRight size={18} className="text-blue-500" /> : <ToggleLeft size={18} />}
+                          </button>
+                          <span className={row.active ? "text-slate-800" : "text-slate-400 line-through"}>{row.value}</span>
+                        </div>
+                      </td>
+                      <td className="px-3 py-2 text-right">
+                        <button type="button" onClick={() => removeTfidfStopword(row.id)} className="text-slate-400 hover:text-red-500 transition-colors">
+                          <Trash2 size={14} />
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                  {tfidfStopwords.length === 0 && (
+                    <tr>
+                      <td colSpan={2} className="px-3 py-3 text-slate-400">No custom TF-IDF stop words configured.</td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
         </Field>
       </div>
 
