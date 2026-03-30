@@ -1162,9 +1162,13 @@ def _wait_for_zefix_availability(
             return
         except httpx.HTTPStatusError as exc:
             if exc.response is not None and exc.response.status_code == 500:
+                if abort_cb:
+                    abort_cb()
                 continue
             raise
         except (httpx.TimeoutException, httpx.ConnectError):
+            if abort_cb:
+                abort_cb()
             continue
 
 

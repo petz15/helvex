@@ -28,6 +28,7 @@
 - [X] **Demo on real pages instead of mock** — Find a way to demo the real webapp no use mock pages. seems weird. alternatively let users in without sign in but severly restrict access?
 - [ ] **Fix Branding** — potentially change the icon to have a red cross in the middle (change google and linkedin app connection icons)
 - [ ] **For search** - for search different default columns and filtering options. add web searched as a flag to it. potentially add more filterint for peopel or company type/history 
+- [ ] **Improve colors** - improve some of the colors, look and feel for the website
 
 ## Company Data
 
@@ -37,7 +38,7 @@
 - [ ] **CSV export** — export current filtered/sorted dashboard view as CSV; include all visible columns; respect active filters and column selection -> somewhat exists but not fully operational yet
 - [ ] **Web crawler** — crawl company websites to extract description, contact info, product/service keywords; store as structured fields; feed into scoring and classification; replace/supplement current Google scrape
 - [ ] **Google results & scoring** — Improve the selection and scoring of google results
-- [ ] **NOGA Data** — add NOGA data (or similar) https://www.kubb-tool.bfs.admin.ch/de/noga/2025 which is something other sites have such as https://business-monitor.ch or moneyhouse.ch -> first implementation is done but probably needs to be improved, preferably without AI or optional with AI
+- [ ] **NOGA Data** — add NOGA data (or similar) https://www.kubb-tool.bfs.admin.ch/de/noga/2025 which is something other sites have such as https://business-monitor.ch or moneyhouse.ch -> first implementation is done but probably needs to be improved, preferably without AI or optional with AI. displaying is not looking too good yet. only shows the level it is confident in but not the rest of the hierarchy
 - [X] **Fix Zefix down** — on 28.03.2026 the zefix API seemed unreachable with status code 500. potentially that is a issue for the future, that zefix api should be checked if it is potentially down or I am getting rate limited or other isseu. -> should be fixed now. maybe implement a different rechecking strat
 
 ## Company Profile
