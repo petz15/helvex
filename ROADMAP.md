@@ -100,6 +100,12 @@
 - [ ] **Fix Zweck not showing up in company profile page** — for some reason zweck is not showing up in the company profile page. maybe add a column for zweck in the companies table as it currently does not exist. 
 - [X] **check company/2 404** - for somereason balogh consutling id = 2 is not showing up as company profile page. very weird as I cannot replicate it with other companies. maybe the issue is with the notes
 - [X] **Rerun websearch bug** - whole websearch stuff is not configured correctly on the company page. first of all, it triggers a job and then goes to the job page instead of waiting for the result on the company page. second the first time web search button appears even if there is a webpage and lastly, the switch webpage button doesnt consistently appear. (check myself)
+- [ ] **Node autoscaling**: cluster-autoscaler with Hetzner Cloud provider. Split responsibility: Terraform manages control plane + DB node; autoscaler manages worker node pool (CX32, minSize 0, maxSize ~5). Requires `hcloud-cloud-controller-manager`, worker cloud-init bootstrap template (derived from existing Terraform cloud-init), and removing worker nodes from Terraform state. Add PodDisruptionBudget for Redis before enabling scale-down. Trigger: when worker CPU regularly exceeds 70% or ml-worker jobs queue up.
+-[ ] **Google Tag Manager**: single `<Script>` in Next.js root layout (`app/layout.tsx`); GTM container manages GA4 + Google Ads conversion tracking. Cookie consent banner (IAB TCF v2) required — covers GTM, GA4, Ads, and reCAPTCHA under one consent flow.
+  - GA4: user behavior, funnels, retention
+  - Google Ads: conversion tracking for paid acquisition
+  - reCAPTCHA: auth/form protection (v3 recommended — invisible, no UX friction)
+  - All three load via GTM; one consent banner covers all Google tags
 
 ## Multi-Language
 
