@@ -2,24 +2,305 @@
 import { useState } from "react";
 import useSWR from "swr";
 import {
-  Building2, Users, Edit2, Check, X, Trash2, Plus, Loader2, ShieldCheck, UserCog, Mail,
+  Building2, Edit2, Check, X, Trash2, Plus, Loader2, ShieldCheck, UserCog, Mail, Sparkles, ChevronDown, ChevronUp,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import {
   fetchCurrentUser,
   fetchOrg,
   fetchOrgMembers,
+  fetchOrgSettings,
+  setOrgSetting,
+  deleteOrgSetting,
   updateOrg,
   addOrgMember,
   updateMemberRole,
   removeOrgMember,
   sendInvite,
   deleteOrg,
+  triggerJob,
   type OrgMember,
 } from "@/lib/api";
 
 const inputCls =
   "w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-300 focus:border-transparent bg-white";
+
+const textareaCls =
+  "w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-300 focus:border-transparent bg-white resize-y font-mono";
+
+// ── Scoring & AI config section ───────────────────────────────────────────────
+
+const AI_KEYS = [
+  "claude_target_description",
+  "claude_classify_categories",
+  "claude_classify_prompt",
+] as const;
+
+const FLEX_KEYS = [
+  "scoring_target_clusters",
+  "scoring_exclude_clusters",
+  "scoring_target_keywords",
+  "scoring_exclude_keywords",
+  "scoring_origin_lat",
+  "scoring_origin_lon",
+  "scoring_legal_form_scores",
+  "scoring_weight_ai",
+  "scoring_weight_web",
+  "scoring_weight_flex",
+] as const;
+
+type SettingKey = typeof AI_KEYS[number] | typeof FLEX_KEYS[number];
+
+function OrgScoringSection({ orgId, isAdmin }: { orgId: number; isAdmin: boolean }) {
+  const { data: saved = {}, mutate: reloadSettings } = useSWR(
+    ["org-settings", orgId],
+    () => fetchOrgSettings(orgId),
+  );
+
+  const [form, setForm] = useState<Record<string, string>>({});
+  const [dirty, setDirty] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [banner, setBanner] = useState<{ kind: "success" | "error"; message: string } | null>(null);
+  const [showAdvanced, setShowAdvanced] = useState(false);
+  const [classifying, setClassifying] = useState(false);
+  const [classifyBanner, setClassifyBanner] = useState<string | null>(null);
+
+  async function handleClassify() {
+    setClassifying(true);
+    setClassifyBanner(null);
+    try {
+      await triggerJob("jobs/scoring/claude", { limit: 500, only_unscored: false });
+      setClassifyBanner("AI classification job queued.");
+      setTimeout(() => setClassifyBanner(null), 5000);
+    } catch {
+      setClassifyBanner("Failed to start classification job.");
+    } finally {
+      setClassifying(false);
+    }
+  }
+
+  // Merge saved values into form on load (only if form not yet touched)
+  const effective = { ...saved, ...form };
+
+  function set(key: SettingKey, value: string) {
+    setForm((f) => ({ ...f, [key]: value }));
+    setDirty(true);
+  }
+
+  function val(key: SettingKey): string {
+    return effective[key] ?? "";
+  }
+
+  async function handleSave() {
+    setSaving(true);
+    setBanner(null);
+    try {
+      const allKeys: SettingKey[] = [...AI_KEYS, ...FLEX_KEYS];
+      await Promise.all(
+        allKeys.map((key) => {
+          const v = effective[key];
+          if (v === undefined || v === "") {
+            // Only delete if there was a saved value
+            return saved[key] !== undefined ? deleteOrgSetting(orgId, key) : Promise.resolve();
+          }
+          return setOrgSetting(orgId, key, v);
+        }),
+      );
+      await reloadSettings();
+      setForm({});
+      setDirty(false);
+      setBanner({ kind: "success", message: "Scoring & AI config saved." });
+      setTimeout(() => setBanner(null), 4000);
+    } catch (e) {
+      setBanner({ kind: "error", message: e instanceof Error ? e.message : "Failed to save." });
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="space-y-4">
+      {banner && (
+        <div className={`rounded-lg border px-4 py-3 text-sm ${banner.kind === "success" ? "border-green-200 bg-green-50 text-green-800" : "border-red-200 bg-red-50 text-red-800"}`}>
+          {banner.message}
+        </div>
+      )}
+
+      <div className="rounded-xl border border-slate-200 bg-white p-5 space-y-5">
+        {/* AI target description — most important */}
+        <div className="space-y-1.5">
+          <label className="block text-sm font-semibold text-slate-700">
+            What are you looking for?
+          </label>
+          <p className="text-xs text-slate-500">
+            Describe your ideal target company. This is appended to the AI classification prompt and directly shapes lead scores for your org.
+          </p>
+          <textarea
+            rows={4}
+            placeholder="e.g. We are looking for B2B software companies in the DACH region with 5–50 employees that could benefit from HR automation tools."
+            value={val("claude_target_description")}
+            onChange={(e) => set("claude_target_description", e.target.value)}
+            disabled={!isAdmin}
+            className={textareaCls}
+          />
+        </div>
+
+        {/* AI categories */}
+        <div className="space-y-1.5">
+          <label className="block text-sm font-medium text-slate-700">Custom categories</label>
+          <p className="text-xs text-slate-500">
+            One category per line. If set, the AI will only output these exact labels instead of free-form ones. Leave empty to use free-form categorisation.
+          </p>
+          <textarea
+            rows={5}
+            placeholder={"SaaS\nFinTech\nLogistics\nHealthcare\nE-Commerce"}
+            value={val("claude_classify_categories")}
+            onChange={(e) => set("claude_classify_categories", e.target.value)}
+            disabled={!isAdmin}
+            className={textareaCls}
+          />
+        </div>
+
+        {/* Advanced toggle */}
+        <button
+          type="button"
+          onClick={() => setShowAdvanced((v) => !v)}
+          className="flex items-center gap-1.5 text-xs text-slate-500 hover:text-slate-700 transition-colors"
+        >
+          {showAdvanced ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
+          {showAdvanced ? "Hide advanced settings" : "Show advanced settings"}
+        </button>
+
+        {showAdvanced && (
+          <div className="space-y-5 pt-2 border-t border-slate-100">
+
+            {/* Flex score — cluster targets */}
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-1.5">
+                <label className="block text-sm font-medium text-slate-700">Target clusters</label>
+                <p className="text-xs text-slate-500">Pipe-separated cluster label substrings. Hits add points to Flex score.</p>
+                <textarea rows={3} value={val("scoring_target_clusters")} onChange={(e) => set("scoring_target_clusters", e.target.value)} disabled={!isAdmin} className={textareaCls} placeholder="software|tech|digital" />
+              </div>
+              <div className="space-y-1.5">
+                <label className="block text-sm font-medium text-slate-700">Exclude clusters</label>
+                <p className="text-xs text-slate-500">Pipe-separated cluster label substrings to penalise.</p>
+                <textarea rows={3} value={val("scoring_exclude_clusters")} onChange={(e) => set("scoring_exclude_clusters", e.target.value)} disabled={!isAdmin} className={textareaCls} placeholder="immobilien|gastronomie" />
+              </div>
+            </div>
+
+            {/* Flex score — keyword targets */}
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-1.5">
+                <label className="block text-sm font-medium text-slate-700">Target keywords</label>
+                <p className="text-xs text-slate-500">Pipe-separated purpose keyword substrings. Hits add points.</p>
+                <textarea rows={3} value={val("scoring_target_keywords")} onChange={(e) => set("scoring_target_keywords", e.target.value)} disabled={!isAdmin} className={textareaCls} placeholder="software|beratung|entwicklung" />
+              </div>
+              <div className="space-y-1.5">
+                <label className="block text-sm font-medium text-slate-700">Exclude keywords</label>
+                <p className="text-xs text-slate-500">Pipe-separated keywords to penalise.</p>
+                <textarea rows={3} value={val("scoring_exclude_keywords")} onChange={(e) => set("scoring_exclude_keywords", e.target.value)} disabled={!isAdmin} className={textareaCls} placeholder="treuhand|buchhaltung" />
+              </div>
+            </div>
+
+            {/* Distance origin */}
+            <div className="space-y-1.5">
+              <label className="block text-sm font-medium text-slate-700">Distance origin (lat / lon)</label>
+              <p className="text-xs text-slate-500">Your geographic base for distance scoring. Closer companies score higher.</p>
+              <div className="flex gap-3">
+                <input type="number" step="0.0001" value={val("scoring_origin_lat")} onChange={(e) => set("scoring_origin_lat", e.target.value)} disabled={!isAdmin} className={inputCls + " max-w-[180px]"} placeholder="46.9266" />
+                <input type="number" step="0.0001" value={val("scoring_origin_lon")} onChange={(e) => set("scoring_origin_lon", e.target.value)} disabled={!isAdmin} className={inputCls + " max-w-[180px]"} placeholder="7.4817" />
+              </div>
+            </div>
+
+            {/* Legal form scores */}
+            <div className="space-y-1.5">
+              <label className="block text-sm font-medium text-slate-700">Legal form scores</label>
+              <p className="text-xs text-slate-500">Comma-separated <code className="bg-slate-100 px-1 rounded text-xs">form:points</code> pairs, e.g. <code className="bg-slate-100 px-1 rounded text-xs">ag:20,gmbh:15,eg:10</code></p>
+              <input type="text" value={val("scoring_legal_form_scores")} onChange={(e) => set("scoring_legal_form_scores", e.target.value)} disabled={!isAdmin} className={inputCls} placeholder="ag:20,gmbh:15,eg:10,einzelfirma:8" />
+            </div>
+
+            {/* Combined score weights */}
+            <div className="space-y-1.5">
+              <label className="block text-sm font-medium text-slate-700">Combined score weights</label>
+              <p className="text-xs text-slate-500">How much each score type contributes to the combined score. Defaults: AI 70 %, Web 20 %, Flex 10 %.</p>
+              <div className="flex gap-3">
+                {(["scoring_weight_ai", "scoring_weight_web", "scoring_weight_flex"] as const).map((key) => (
+                  <div key={key} className="flex-1">
+                    <label className="block text-xs text-slate-500 mb-1">
+                      {key === "scoring_weight_ai" ? "AI" : key === "scoring_weight_web" ? "Web" : "Flex"}
+                    </label>
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="range" min={0} max={1} step={0.05}
+                        value={val(key) || (key === "scoring_weight_ai" ? "0.70" : key === "scoring_weight_web" ? "0.20" : "0.10")}
+                        onChange={(e) => set(key, e.target.value)}
+                        disabled={!isAdmin}
+                        className="flex-1"
+                      />
+                      <span className="text-xs text-slate-600 w-10 text-right">
+                        {Math.round(parseFloat(val(key) || (key === "scoring_weight_ai" ? "0.70" : key === "scoring_weight_web" ? "0.20" : "0.10")) * 100)} %
+                      </span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Prompt override */}
+            <div className="space-y-1.5">
+              <label className="block text-sm font-medium text-slate-700">AI prompt override</label>
+              <p className="text-xs text-slate-500">
+                Replaces the entire default classification prompt. Advanced — leave empty to use the default prompt with your target description appended.
+              </p>
+              <textarea
+                rows={6}
+                value={val("claude_classify_prompt")}
+                onChange={(e) => set("claude_classify_prompt", e.target.value)}
+                disabled={!isAdmin}
+                className={textareaCls}
+                placeholder="Leave empty to use the default prompt…"
+              />
+            </div>
+          </div>
+        )}
+
+        {classifyBanner && (
+          <p className="text-xs text-blue-700 bg-blue-50 border border-blue-200 rounded-lg px-3 py-2">{classifyBanner}</p>
+        )}
+
+        {isAdmin && (
+          <div className="flex items-center gap-3 pt-2">
+            <button
+              onClick={handleSave}
+              disabled={saving || !dirty}
+              className="flex items-center gap-1.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors"
+            >
+              {saving ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />}
+              Save config
+            </button>
+            <button
+              onClick={handleClassify}
+              disabled={classifying}
+              className="flex items-center gap-1.5 bg-purple-600 hover:bg-purple-700 disabled:opacity-50 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors"
+            >
+              {classifying ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />}
+              Run AI Classification
+            </button>
+            {dirty && (
+              <button
+                onClick={() => { setForm({}); setDirty(false); }}
+                className="text-sm text-slate-500 hover:text-slate-700 px-3 py-2 rounded-lg hover:bg-slate-100 transition-colors"
+              >
+                Discard
+              </button>
+            )}
+            {!dirty && <span className="text-xs text-slate-400">No unsaved changes</span>}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
 
 const ROLES = ["viewer", "member", "admin", "owner"] as const;
 type Role = (typeof ROLES)[number];
@@ -556,6 +837,16 @@ export function OrgClient({ embedded = false }: { embedded?: boolean }) {
           </table>
         )}
       </div>
+
+      {/* Scoring & AI config */}
+      <div className="flex items-center gap-2 pt-2">
+        <Sparkles size={15} className="text-blue-500" />
+        <SectionTitle title="Scoring & AI config" />
+      </div>
+      <p className="text-xs text-slate-500 -mt-3">
+        Override the global scoring defaults for your org. Changes here only affect your org&apos;s lead scores and AI classification.
+      </p>
+      {orgId && <OrgScoringSection orgId={orgId} isAdmin={isAdmin} />}
 
       {/* Danger Zone */}
       {isOwner && (

@@ -492,6 +492,8 @@ def _run_job(app, job_id: int) -> None:  # noqa: C901
                     crud.create_event(db, job_id=job.id, level="debug", message=msg)
                     _maybe_sync(app, job_type=job.job_type, label=job.label, message=msg, stats=dict(stats), error=None, done=False)
 
+                _org_id = job.org_id
+                _eff = lambda key, default="": crud.get_effective_setting(db, key, org_id=_org_id, default=default)
                 stats = claude_classify_batch(
                     db,
                     canton=params.get("canton") or None,
@@ -503,9 +505,10 @@ def _run_job(app, job_id: int) -> None:  # noqa: C901
                     auto_filter_keywords=bool(params.get("auto_filter_keywords", False)),
                     use_fixed_categories=bool(params.get("use_fixed_categories", False)),
                     limit=int(params.get("limit", 500)),
-                    system_prompt=params.get("system_prompt") or None,
-                    target_description=crud.get_setting(db, "claude_target_description", "") or None,
+                    system_prompt=params.get("system_prompt") or _eff("claude_classify_prompt") or None,
+                    target_description=_eff("claude_target_description") or None,
                     api_key=crud.get_setting(db, "anthropic_api_key", "") or app_settings.anthropic_api_key,
+                    org_id=_org_id,
                     resume_from=resume_from,
                     use_batch_api=bool(params.get("use_batch_api", False)),
                     companies_per_message=int(params.get("companies_per_message", 1)),
@@ -701,7 +704,21 @@ def _rq_job_failed(rq_job, connection, type, value, traceback) -> None:  # noqa:
         return
 
     error_msg = f"{type.__name__}: {value}" if type else "Killed by RQ worker (timeout or signal)"
-    tb_str = "".join(_tb.format_tb(traceback)) if traceback else ""
+
+    # Robustly stringify traceback — RQ may pass a real tb, a StackSummary, or None
+    tb_str = ""
+    if traceback:
+        try:
+            tb_str = "".join(_tb.format_exception(type, value, traceback))
+        except Exception:
+            try:
+                # StackSummary has .format(); real tb objects do not
+                if hasattr(traceback, "format"):
+                    tb_str = "".join(traceback.format())
+                else:
+                    tb_str = "".join(_tb.format_tb(traceback))
+            except Exception:
+                tb_str = str(traceback)
     full_error = f"{error_msg}\n{tb_str}".strip()
 
     try:

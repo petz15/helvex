@@ -7,15 +7,21 @@ import { Search, Compass, KanbanSquare, Map, Cog, Database, Activity, UserCircle
 import { fetchCurrentUser } from "@/lib/api";
 import { HelvexMark } from "@/components/helvex-logo";
 
-const NAV = [
-  { href: "/app/explorer", label: "Explorer", icon: Compass },
+const NAV_MAIN = [
   { href: "/app/search", label: "Search", icon: Search },
+  { href: "/app/explorer", label: "Explorer", icon: Compass },
   { href: "/app/categories", label: "Categories", icon: LayoutGrid },
-  { href: "/app/pipeline", label: "Pipeline", icon: KanbanSquare },
   { href: "/app/map", label: "Map", icon: Map },
-  { href: "/app/collection", label: "Collection", icon: Database, superadminOnly: true },
-  { href: "/app/jobs", label: "Jobs", icon: Activity, superadminOnly: true },
-  { href: "/app/settings", label: "Settings", icon: Cog, superadminOnly: true },
+];
+
+const NAV_CRM = [
+  { href: "/app/pipeline", label: "Pipeline", icon: KanbanSquare },
+];
+
+const NAV_ADMIN = [
+  { href: "/app/collection", label: "Collection", icon: Database },
+  { href: "/app/jobs", label: "Jobs", icon: Activity },
+  { href: "/app/settings", label: "Settings", icon: Cog },
 ];
 
 const MARKETING_NAV = [
@@ -42,7 +48,7 @@ export function NavBar() {
     <header className="h-12 bg-white border-b border-slate-200 flex items-center px-4 shrink-0 z-40 shadow-sm">
       {/* Logo */}
       <Link
-        href={loggedIn ? "/app/explorer" : "/"}
+        href={loggedIn ? "/app/search" : "/"}
         className="flex items-center gap-2 font-bold text-blue-600 mr-6 tracking-tight shrink-0"
       >
         <HelvexMark size={18} />
@@ -52,7 +58,7 @@ export function NavBar() {
       {/* Logged-in: app nav */}
       {loggedIn && (
         <nav className="flex items-center gap-0.5">
-          {NAV.filter(({ superadminOnly }) => !superadminOnly || me?.is_superadmin).map(({ href, label, icon: Icon }) => {
+          {NAV_MAIN.map(({ href, label, icon: Icon }) => {
             const active = pathname === href || pathname.startsWith(href + "/");
             return (
               <Link
@@ -70,6 +76,49 @@ export function NavBar() {
               </Link>
             );
           })}
+          <div className="w-px h-4 bg-slate-200 mx-1" />
+          <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide px-1">CRM</span>
+          {NAV_CRM.map(({ href, label, icon: Icon }) => {
+            const active = pathname === href || pathname.startsWith(href + "/");
+            return (
+              <Link
+                key={href}
+                href={href}
+                className={cn(
+                  "flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm transition-colors",
+                  active
+                    ? "bg-blue-600 text-white font-medium"
+                    : "text-slate-600 hover:bg-slate-100 hover:text-slate-900"
+                )}
+              >
+                <Icon size={14} />
+                {label}
+              </Link>
+            );
+          })}
+          {me?.is_superadmin && (
+            <>
+              <div className="w-px h-4 bg-slate-200 mx-1" />
+              {NAV_ADMIN.map(({ href, label, icon: Icon }) => {
+                const active = pathname === href || pathname.startsWith(href + "/");
+                return (
+                  <Link
+                    key={href}
+                    href={href}
+                    className={cn(
+                      "flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm transition-colors",
+                      active
+                        ? "bg-blue-600 text-white font-medium"
+                        : "text-slate-600 hover:bg-slate-100 hover:text-slate-900"
+                    )}
+                  >
+                    <Icon size={14} />
+                    {label}
+                  </Link>
+                );
+              })}
+            </>
+          )}
         </nav>
       )}
 

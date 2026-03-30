@@ -10,7 +10,6 @@ import {
   ResponsiveContainer,
   Cell,
 } from "recharts";
-import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import { fetchTaxonomy } from "@/lib/api";
 
@@ -52,47 +51,10 @@ function Section({ title, subtitle, children }: { title: string; subtitle?: stri
   );
 }
 
-// ── Flex Cluster card ─────────────────────────────────────────────────────────
-
-function ClusterCard({ label, count, maxCount }: { label: string; count: number; maxCount: number }) {
-  const terms = label.split(",").map(t => t.trim()).filter(Boolean);
-  const pct = Math.round((count / maxCount) * 100);
-  return (
-    <Link
-      href={`/app/search?tfidf_cluster=${encodeURIComponent(label)}`}
-      className="group block rounded-xl border border-slate-200 bg-white p-4 shadow-sm hover:border-purple-300 hover:shadow-md transition-all"
-    >
-      <div className="flex items-start justify-between gap-2 mb-3">
-        <div className="flex flex-wrap gap-1">
-          {terms.slice(0, 6).map(t => (
-            <Badge key={t} className="bg-purple-50 text-purple-700 text-xs group-hover:bg-purple-100">
-              {t}
-            </Badge>
-          ))}
-          {terms.length > 6 && (
-            <Badge className="bg-slate-100 text-slate-500 text-xs">+{terms.length - 6}</Badge>
-          )}
-        </div>
-        <span className="shrink-0 text-sm font-semibold text-slate-700 tabular-nums">
-          {count.toLocaleString()}
-        </span>
-      </div>
-      {/* Proportion bar */}
-      <div className="h-1 bg-slate-100 rounded-full overflow-hidden">
-        <div
-          className="h-full bg-purple-400 rounded-full transition-all group-hover:bg-purple-500"
-          style={{ width: `${pct}%` }}
-        />
-      </div>
-    </Link>
-  );
-}
-
 // ── Main component ────────────────────────────────────────────────────────────
 
 export function CategoriesClient() {
   const { data: taxonomy, isLoading, error } = useSWR("taxonomy", fetchTaxonomy);
-  const clusters: [string, number][] = taxonomy?.clusters ?? [];
   const categories: [string, number][] = taxonomy?.categories ?? [];
   const keywords: [string, number][] = taxonomy?.keywords ?? [];
   const nogaCodes: [string, number][] = taxonomy?.noga_codes ?? [];
@@ -101,7 +63,6 @@ export function CategoriesClient() {
   if (isLoading) return <div className="max-w-7xl mx-auto px-4 py-6 text-sm text-slate-400">Loading…</div>;
   if (error) return <div className="max-w-7xl mx-auto px-4 py-6 text-sm text-red-500">Failed to load taxonomy data.</div>;
 
-  const maxClusterCount = clusters[0]?.[1] ?? 1;
   const maxCategoryCount = categories[0]?.[1] ?? 1;
   const maxKeywordCount = keywords[0]?.[1] ?? 1;
 
@@ -121,25 +82,9 @@ export function CategoriesClient() {
       <div>
         <h1 className="text-2xl font-bold text-slate-900">Category Overview</h1>
         <p className="text-sm text-slate-500 mt-1">
-          Browse clusters, keywords, and classifications — click any item to open the dashboard filtered to that value.
+          Browse keywords and classifications — click any item to open the dashboard filtered to that value.
         </p>
       </div>
-
-      {/* ── Flex Clusters ──────────────────────────────────────────────── */}
-      <Section
-        title="Flex Clusters"
-        subtitle={`${clusters.length} clusters from TF-IDF analysis — each cluster groups companies with similar purpose language`}
-      >
-        {clusters.length === 0 ? (
-          <p className="text-sm text-slate-400">No clusters found. Run the pipeline job to generate them.</p>
-        ) : (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
-            {clusters.map(([label, count]) => (
-              <ClusterCard key={label} label={label} count={count} maxCount={maxClusterCount} />
-            ))}
-          </div>
-        )}
-      </Section>
 
       {/* ── AI Categories ──────────────────────────────────────────────── */}
       <Section

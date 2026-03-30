@@ -40,12 +40,21 @@ _ORG_FIELDS = frozenset({
 })
 
 
-def _overlay(company: Company, org_state: OrgCompanyState | None) -> CompanyRead:
+def _overlay(
+    company: Company,
+    org_state: OrgCompanyState | None,
+    w_ai: float = 0.70,
+    w_web: float = 0.20,
+    w_flex: float = 0.10,
+) -> CompanyRead:
     """Build CompanyRead, overlaying org-specific workflow fields from OrgCompanyState."""
     base = CompanyRead.model_validate(company)
-    if org_state is None:
-        return base
-    overrides = {f: getattr(org_state, f) for f in _ORG_FIELDS if getattr(org_state, f) is not None}
+    overrides: dict = {}
+    if org_state is not None:
+        overrides.update({f: getattr(org_state, f) for f in _ORG_FIELDS if getattr(org_state, f) is not None})
+    # Apply custom combined_score weights if non-default
+    if (w_ai, w_web, w_flex) != (0.70, 0.20, 0.10):
+        overrides["combined_score"] = company._combined_score(w_ai, w_web, w_flex)
     return base.model_copy(update=overrides) if overrides else base
 
 
@@ -360,6 +369,11 @@ def list_companies(
     exclude_noga_code: str | None = Query(None, description="Comma-separated NOGA codes/fragments to exclude"),
     exclude_noga_label: str | None = Query(None, description="Comma-separated NOGA label terms to exclude"),
     exclude_noga_level: str | None = Query(None, description="Exclude one NOGA level"),
+    status: str | None = Query(None, description="Filter by Zefix company status, e.g. ACTIVE"),
+    has_website: bool | None = Query(None, description="true = has website, false = no website"),
+    legal_form: str | None = Query(None, description="Filter by exact legal form string"),
+    registered_after: str | None = Query(None, description="SOGC registration date >= (YYYY-MM-DD)"),
+    registered_before: str | None = Query(None, description="SOGC registration date <= (YYYY-MM-DD)"),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> CompanyPage:
@@ -395,13 +409,22 @@ def list_companies(
         exclude_noga_code=exclude_noga_code,
         exclude_noga_label=exclude_noga_label,
         exclude_noga_level=exclude_noga_level,
+        zefix_status=status,
+        has_website=has_website,
+        legal_form=legal_form,
+        registered_after=registered_after,
+        registered_before=registered_before,
     )
     total = crud.count_companies(db, **filter_kwargs)
     items = crud.list_companies(db, page=page, page_size=page_size, sort=sort, **filter_kwargs)
     if current_user.org_id:
         ids = [c.id for c in items]
         org_states = _bulk_org_states(db, ids, current_user.org_id)
-        items = [_overlay(c, org_states.get(c.id)) for c in items]
+        _eff = lambda key, default: crud.get_effective_setting(db, key, org_id=current_user.org_id, default=default)
+        w_ai = float(_eff("scoring_weight_ai", "0.70"))
+        w_web = float(_eff("scoring_weight_web", "0.20"))
+        w_flex = float(_eff("scoring_weight_flex", "0.10"))
+        items = [_overlay(c, org_states.get(c.id), w_ai=w_ai, w_web=w_web, w_flex=w_flex) for c in items]
     return CompanyPage(
         items=items,
         total=total,
@@ -514,6 +537,25 @@ def export_companies_csv(
         media_type="text/csv",
         headers={"Content-Disposition": "attachment; filename=helvex_export.csv"},
     )
+
+
+class BulkUpdateBody(BaseModel):
+    company_ids: list[int]
+    field: str
+    value: str | None
+
+
+@router.post("/bulk-update", summary="Bulk update a status field on multiple companies")
+def bulk_update_companies(
+    body: BulkUpdateBody,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    try:
+        updated = crud.bulk_update_status(db, body.company_ids, body.field, body.value)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    return {"updated": updated}
 
 
 @router.post("", response_model=CompanyRead, status_code=status.HTTP_201_CREATED, summary="Create company")

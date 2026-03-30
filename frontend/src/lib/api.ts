@@ -64,8 +64,10 @@ function buildUrl(path: string, params?: Record<string, string | number | undefi
 }
 
 export async function fetchCompanies(filters: CompanyFilters = {}): Promise<CompanyPage> {
-  const { page = 1, page_size = 50, sort = "-updated", ...rest } = filters;
-  const url = buildUrl("/api/v1/companies", { page, page_size, sort, ...rest });
+  const { page = 1, page_size = 50, sort = "-updated", has_website, ...rest } = filters;
+  const params: Record<string, string | number | undefined | null> = { page, page_size, sort, ...rest };
+  if (has_website !== undefined && has_website !== null) params.has_website = String(has_website);
+  const url = buildUrl("/api/v1/companies", params);
   const res = await fetch(url, { credentials: "include" });
   if (!res.ok) throw new Error(`Failed to fetch companies: ${res.status}`);
   return res.json();
@@ -121,6 +123,21 @@ export async function updateCompany(id: number, data: Partial<Company>): Promise
     body: JSON.stringify(data),
   });
   if (!res.ok) throw new Error("Failed to update company");
+  return res.json();
+}
+
+export async function bulkUpdateCompanies(
+  companyIds: number[],
+  field: string,
+  value: string | null,
+): Promise<{ updated: number }> {
+  const res = await fetch(`/api/v1/companies/bulk-update`, {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ company_ids: companyIds, field, value }),
+  });
+  if (!res.ok) throw new Error("Bulk update failed");
   return res.json();
 }
 
@@ -382,6 +399,24 @@ export async function fetchOrgSettings(orgId: number): Promise<Record<string, st
   const res = await fetch(orgPath(orgId, "/settings"), { credentials: "include" });
   if (!res.ok) throw new Error("Failed to fetch org settings");
   return res.json();
+}
+
+export async function setOrgSetting(orgId: number, key: string, value: string): Promise<void> {
+  const res = await fetch(orgPath(orgId, `/settings/${encodeURIComponent(key)}`), {
+    method: "PUT",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ value }),
+  });
+  if (!res.ok) throw new Error("Failed to save org setting");
+}
+
+export async function deleteOrgSetting(orgId: number, key: string): Promise<void> {
+  const res = await fetch(orgPath(orgId, `/settings/${encodeURIComponent(key)}`), {
+    method: "DELETE",
+    credentials: "include",
+  });
+  if (!res.ok && res.status !== 404) throw new Error("Failed to delete org setting");
 }
 
 // ── Org management ────────────────────────────────────────────────────────────

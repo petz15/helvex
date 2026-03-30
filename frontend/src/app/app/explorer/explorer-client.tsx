@@ -9,7 +9,7 @@ import { FilterBar } from "@/components/dashboard/filter-bar";
 import { Pagination } from "@/components/dashboard/pagination";
 import {
   fetchCompanies, fetchStats, fetchCantons, fetchTaxonomy,
-  fetchSavedViews, saveView, deleteView,
+  fetchSavedViews, saveView, deleteView, bulkUpdateCompanies,
 } from "@/lib/api";
 import type { Company, CompanyFilters, CompanyStats } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -57,12 +57,19 @@ interface GuidedPickerProps {
   onBrowse: (filters: CompanyFilters) => void;
 }
 
+type IndustryMode = "category" | "cluster";
+
 function GuidedPicker({ cantons, taxonomy, onBrowse }: GuidedPickerProps) {
+  const [industryMode, setIndustryMode] = useState<IndustryMode>("category");
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
+  const [selectedCluster, setSelectedCluster] = useState<string | null>(null);
   const [selectedCanton, setSelectedCanton] = useState<string | null>(null);
+  const [selectedLegalForm, setSelectedLegalForm] = useState<string | null>(null);
   const [scoreMin, setScoreMin] = useState(0);
 
   const aiCategories: [string, number][] = taxonomy["ai_category"] ?? [];
+  const clusters: [string, number][] = taxonomy["clusters"] ?? [];
+  const legalForms: [string, number][] = taxonomy["legal_forms"] ?? [];
 
   // Live count based on current guided filters
   const guidedFilters: CompanyFilters = {
@@ -71,7 +78,9 @@ function GuidedPicker({ cantons, taxonomy, onBrowse }: GuidedPickerProps) {
     page_size: 1,
     status: "ACTIVE",
     ...(selectedCategory ? { ai_category: selectedCategory } : {}),
+    ...(selectedCluster ? { tfidf_cluster: selectedCluster } : {}),
     ...(selectedCanton ? { canton: selectedCanton } : {}),
+    ...(selectedLegalForm ? { legal_form: selectedLegalForm } : {}),
     ...(scoreMin > 0 ? { min_combined_score: scoreMin } : {}),
   };
   const { data: preview } = useSWR(
@@ -84,7 +93,9 @@ function GuidedPicker({ cantons, taxonomy, onBrowse }: GuidedPickerProps) {
     const filters: CompanyFilters = {
       ...BROWSE_DEFAULTS,
       ...(selectedCategory ? { ai_category: selectedCategory } : {}),
+      ...(selectedCluster ? { tfidf_cluster: selectedCluster } : {}),
       ...(selectedCanton ? { canton: selectedCanton } : {}),
+      ...(selectedLegalForm ? { legal_form: selectedLegalForm } : {}),
       ...(scoreMin > 0 ? { min_combined_score: scoreMin } : {}),
     };
     onBrowse(filters);
@@ -107,39 +118,93 @@ function GuidedPicker({ cantons, taxonomy, onBrowse }: GuidedPickerProps) {
           </p>
         </div>
 
-        {/* Step 1: Industry */}
+        {/* Step 1: Industry / Cluster */}
         <div className="space-y-3">
           <div className="flex items-center gap-2">
             <span className="flex items-center justify-center w-5 h-5 rounded-full bg-blue-600 text-white text-xs font-bold shrink-0">1</span>
-            <h2 className="text-sm font-semibold text-slate-700 uppercase tracking-wide">Industry / Category</h2>
-            {selectedCategory && (
-              <button onClick={() => setSelectedCategory(null)} className="ml-auto text-xs text-slate-400 hover:text-slate-600 flex items-center gap-0.5">
+            <h2 className="text-sm font-semibold text-slate-700 uppercase tracking-wide">Industry</h2>
+            {/* Mode tabs */}
+            <div className="flex items-center gap-0.5 bg-slate-100 rounded-md p-0.5 ml-2">
+              <button
+                onClick={() => { setIndustryMode("category"); setSelectedCluster(null); }}
+                className={cn(
+                  "px-2.5 py-0.5 rounded text-xs font-medium transition-colors",
+                  industryMode === "category" ? "bg-white text-slate-800 shadow-sm" : "text-slate-500 hover:text-slate-700"
+                )}
+              >
+                AI Category
+              </button>
+              <button
+                onClick={() => { setIndustryMode("cluster"); setSelectedCategory(null); }}
+                className={cn(
+                  "px-2.5 py-0.5 rounded text-xs font-medium transition-colors",
+                  industryMode === "cluster" ? "bg-white text-slate-800 shadow-sm" : "text-slate-500 hover:text-slate-700"
+                )}
+              >
+                TF-IDF Cluster
+              </button>
+            </div>
+            {(selectedCategory || selectedCluster) && (
+              <button
+                onClick={() => { setSelectedCategory(null); setSelectedCluster(null); }}
+                className="ml-auto text-xs text-slate-400 hover:text-slate-600 flex items-center gap-0.5"
+              >
                 <X size={11} /> Clear
               </button>
             )}
           </div>
-          {aiCategories.length > 0 ? (
-            <div className="flex flex-wrap gap-2">
-              {aiCategories.slice(0, 24).map(([cat, count]) => (
-                <button
-                  key={cat}
-                  onClick={() => setSelectedCategory(selectedCategory === cat ? null : cat)}
-                  className={cn(
-                    "px-3 py-1.5 rounded-full text-sm border transition-colors",
-                    selectedCategory === cat
-                      ? "bg-blue-600 text-white border-blue-600 font-medium"
-                      : "bg-white text-slate-600 border-slate-200 hover:border-blue-300 hover:text-blue-600"
-                  )}
-                >
-                  {cat}
-                  <span className={cn("ml-1.5 text-xs", selectedCategory === cat ? "text-blue-200" : "text-slate-400")}>
-                    {count.toLocaleString()}
-                  </span>
-                </button>
-              ))}
-            </div>
+
+          {industryMode === "category" ? (
+            aiCategories.length > 0 ? (
+              <div className="flex flex-wrap gap-2">
+                {aiCategories.slice(0, 24).map(([cat, count]) => (
+                  <button
+                    key={cat}
+                    onClick={() => setSelectedCategory(selectedCategory === cat ? null : cat)}
+                    className={cn(
+                      "px-3 py-1.5 rounded-full text-sm border transition-colors",
+                      selectedCategory === cat
+                        ? "bg-blue-600 text-white border-blue-600 font-medium"
+                        : "bg-white text-slate-600 border-slate-200 hover:border-blue-300 hover:text-blue-600"
+                    )}
+                  >
+                    {cat}
+                    <span className={cn("ml-1.5 text-xs", selectedCategory === cat ? "text-blue-200" : "text-slate-400")}>
+                      {count.toLocaleString()}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            ) : (
+              <p className="text-sm text-slate-400 italic">No AI classifications available yet — run Claude classify first.</p>
+            )
           ) : (
-            <p className="text-sm text-slate-400 italic">No AI classifications available yet — run Claude classify first.</p>
+            clusters.length > 0 ? (
+              <div className="flex flex-wrap gap-2">
+                {clusters.slice(0, 24).map(([label, count]) => {
+                  const terms = label.split(",").map(t => t.trim()).filter(Boolean).slice(0, 3).join(", ");
+                  return (
+                    <button
+                      key={label}
+                      onClick={() => setSelectedCluster(selectedCluster === label ? null : label)}
+                      className={cn(
+                        "px-3 py-1.5 rounded-full text-sm border transition-colors",
+                        selectedCluster === label
+                          ? "bg-purple-600 text-white border-purple-600 font-medium"
+                          : "bg-white text-slate-600 border-slate-200 hover:border-purple-300 hover:text-purple-600"
+                      )}
+                    >
+                      {terms}
+                      <span className={cn("ml-1.5 text-xs", selectedCluster === label ? "text-purple-200" : "text-slate-400")}>
+                        {count.toLocaleString()}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            ) : (
+              <p className="text-sm text-slate-400 italic">No clusters available yet — run the pipeline job first.</p>
+            )
           )}
         </div>
 
@@ -173,10 +238,44 @@ function GuidedPicker({ cantons, taxonomy, onBrowse }: GuidedPickerProps) {
           </div>
         </div>
 
-        {/* Step 3: Minimum score */}
+        {/* Step 3: Legal form */}
+        {legalForms.length > 0 && (
+          <div className="space-y-3">
+            <div className="flex items-center gap-2">
+              <span className="flex items-center justify-center w-5 h-5 rounded-full bg-blue-600 text-white text-xs font-bold shrink-0">3</span>
+              <h2 className="text-sm font-semibold text-slate-700 uppercase tracking-wide">Legal Form</h2>
+              {selectedLegalForm && (
+                <button onClick={() => setSelectedLegalForm(null)} className="ml-auto text-xs text-slate-400 hover:text-slate-600 flex items-center gap-0.5">
+                  <X size={11} /> Clear
+                </button>
+              )}
+            </div>
+            <div className="flex flex-wrap gap-1.5">
+              {legalForms.slice(0, 16).map(([form, count]) => (
+                <button
+                  key={form}
+                  onClick={() => setSelectedLegalForm(selectedLegalForm === form ? null : form)}
+                  className={cn(
+                    "px-2.5 py-1 rounded text-xs font-medium border transition-colors",
+                    selectedLegalForm === form
+                      ? "bg-blue-600 text-white border-blue-600"
+                      : "bg-white text-slate-600 border-slate-200 hover:border-blue-300 hover:text-blue-600"
+                  )}
+                >
+                  {form}
+                  <span className={cn("ml-1 text-[10px]", selectedLegalForm === form ? "text-blue-200" : "text-slate-400")}>
+                    {count.toLocaleString()}
+                  </span>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Step 4: Minimum score */}
         <div className="space-y-3">
           <div className="flex items-center gap-2">
-            <span className="flex items-center justify-center w-5 h-5 rounded-full bg-blue-600 text-white text-xs font-bold shrink-0">3</span>
+            <span className="flex items-center justify-center w-5 h-5 rounded-full bg-blue-600 text-white text-xs font-bold shrink-0">4</span>
             <h2 className="text-sm font-semibold text-slate-700 uppercase tracking-wide">Minimum Quality Score</h2>
           </div>
           <div className="flex gap-2">
@@ -193,6 +292,42 @@ function GuidedPicker({ cantons, taxonomy, onBrowse }: GuidedPickerProps) {
                 )}
               >
                 {preset.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Quick starts */}
+        <div className="space-y-3">
+          <div className="flex items-center gap-2">
+            <span className="flex items-center justify-center w-5 h-5 rounded-full bg-slate-400 text-white text-xs font-bold shrink-0">✦</span>
+            <h2 className="text-sm font-semibold text-slate-700 uppercase tracking-wide">Quick Starts</h2>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {[
+              {
+                label: "New & Notable",
+                description: "Active companies with a website, score ≥ 40, sorted by newest",
+                filters: { status: "ACTIVE", has_website: true, min_combined_score: 40, sort: "-created" } as Partial<CompanyFilters>,
+              },
+              {
+                label: "Top Scored",
+                description: "Highest combined score across all active companies",
+                filters: { status: "ACTIVE", min_combined_score: 60, sort: "-combined_score" } as Partial<CompanyFilters>,
+              },
+              {
+                label: "Unscored",
+                description: "Active companies not yet classified by AI",
+                filters: { status: "ACTIVE", ai_category: "_none", sort: "-created" } as Partial<CompanyFilters>,
+              },
+            ].map((preset) => (
+              <button
+                key={preset.label}
+                onClick={() => onBrowse({ ...BROWSE_DEFAULTS, ...preset.filters })}
+                className="group flex flex-col items-start px-4 py-2.5 rounded-xl border border-slate-200 bg-white hover:border-blue-300 hover:shadow-sm transition-all text-left"
+              >
+                <span className="text-sm font-medium text-slate-700 group-hover:text-blue-700">{preset.label}</span>
+                <span className="text-xs text-slate-400 mt-0.5">{preset.description}</span>
               </button>
             ))}
           </div>
@@ -268,6 +403,8 @@ function BrowseView({ initialFilters, initialCantons, initialStats, initialTaxon
   }, [router]);
 
   const [selectedCompany, setSelectedCompany] = useState<Company | null>(null);
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
+  const [batchLoading, setBatchLoading] = useState(false);
 
   const { data: page, isLoading, mutate: mutateCompanies } = useSWR(
     ["companies", filters],
@@ -280,9 +417,38 @@ function BrowseView({ initialFilters, initialCantons, initialStats, initialTaxon
   const { data: taxonomy = initialTaxonomy } = useSWR("taxonomy", fetchTaxonomy, { fallbackData: initialTaxonomy });
   const { data: savedViews = [], mutate: mutateSavedViews } = useSWR("saved-views", fetchSavedViews);
 
+  function toggleSelect(id: number) {
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  }
+  function selectAll(ids: number[]) {
+    const allSelected = ids.every(id => selectedIds.has(id));
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      if (allSelected) ids.forEach(id => next.delete(id));
+      else ids.forEach(id => next.add(id));
+      return next;
+    });
+  }
+  async function batchUpdate(field: string, value: string | null) {
+    if (selectedIds.size === 0) return;
+    setBatchLoading(true);
+    try {
+      await bulkUpdateCompanies([...selectedIds], field, value);
+      setSelectedIds(new Set());
+      mutateCompanies();
+    } finally {
+      setBatchLoading(false);
+    }
+  }
+
   // Active filter chips summary for the browse bar
   const activeFilters: { label: string; key: string }[] = [];
   if (filters.ai_category) activeFilters.push({ label: `Industry: ${filters.ai_category}`, key: "ai_category" });
+  if (filters.tfidf_cluster) activeFilters.push({ label: `Cluster: ${filters.tfidf_cluster.split(",").slice(0, 2).join(", ")}`, key: "tfidf_cluster" });
   if (filters.canton) activeFilters.push({ label: `Canton: ${filters.canton}`, key: "canton" });
   if (filters.min_combined_score) activeFilters.push({ label: `Score ≥ ${filters.min_combined_score}`, key: "min_combined_score" });
 
@@ -339,7 +505,36 @@ function BrowseView({ initialFilters, initialCantons, initialStats, initialTaxon
       {/* Table + preview */}
       <div className="flex flex-1 overflow-hidden">
         <div className="flex-1 flex flex-col overflow-hidden bg-white">
-          <div className="flex items-center justify-end px-3 py-1 border-b border-slate-100 bg-slate-50">
+          <div className="flex items-center justify-between px-3 py-1 border-b border-slate-100 bg-slate-50">
+            {selectedIds.size > 0 ? (
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-medium text-blue-700">{selectedIds.size} selected</span>
+                <span className="text-slate-300">|</span>
+                <span className="text-xs text-slate-500">Set review:</span>
+                {["interesting", "potential_proposal", "confirmed_proposal"].map(v => (
+                  <button
+                    key={v}
+                    disabled={batchLoading}
+                    onClick={() => batchUpdate("review_status", v)}
+                    className="px-2 py-0.5 text-xs rounded border border-slate-200 bg-white hover:bg-blue-50 hover:border-blue-300 hover:text-blue-700 disabled:opacity-50 transition-colors"
+                  >
+                    {v.replace(/_/g, " ")}
+                  </button>
+                ))}
+                <button
+                  disabled={batchLoading}
+                  onClick={() => batchUpdate("review_status", null)}
+                  className="px-2 py-0.5 text-xs rounded border border-slate-200 bg-white hover:bg-red-50 hover:border-red-300 hover:text-red-700 disabled:opacity-50 transition-colors"
+                >
+                  Clear
+                </button>
+                <button onClick={() => setSelectedIds(new Set())} className="ml-1 text-xs text-slate-400 hover:text-slate-600">
+                  <X size={12} />
+                </button>
+              </div>
+            ) : (
+              <div />
+            )}
             <a
               href={buildExportUrl(filters)}
               download
@@ -355,6 +550,9 @@ function BrowseView({ initialFilters, initialCantons, initialStats, initialTaxon
             filters={filters}
             onSort={(sort) => setFilters((f) => ({ ...f, sort, page: 1 }))}
             isLoading={isLoading}
+            selectedIds={selectedIds}
+            onToggleSelect={toggleSelect}
+            onSelectAll={selectAll}
           />
           <Pagination
             page={page?.page ?? 1}

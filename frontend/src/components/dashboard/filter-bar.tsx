@@ -72,6 +72,7 @@ const CHIP_LABELS: Partial<Record<keyof CompanyFilters, string>> = {
   google_searched: "Web search", tags: "Tags", ai_category: "AI Class.",
   tfidf_cluster: "Cluster", purpose_keywords: "Keyword",
   noga_code: "NOGA code", noga_label: "NOGA label", noga_level: "NOGA level",
+  legal_form: "Legal form", registered_after: "Founded after", registered_before: "Founded before",
   min_web_score: "Min Web", max_web_score: "Max Web",
   min_flex_score: "Min Flex", max_flex_score: "Max Flex",
   min_ai_score: "Min AI", max_ai_score: "Max AI",
@@ -103,6 +104,7 @@ export function FilterBar({
   const categories = taxonomy?.categories ?? [];
   const nogaCodes = taxonomy?.noga_codes ?? [];
   const nogaLevels = taxonomy?.noga_levels ?? [];
+  const legalForms = taxonomy?.legal_forms ?? [];
 
   const set = useCallback(
     (key: keyof CompanyFilters, value: string | number | undefined) =>
@@ -387,6 +389,33 @@ export function FilterBar({
                 value={filters.noga_level}
                 onChange={(v) => set("noga_level", v)}
                 placeholder="Search NOGA level…"
+              />
+            </div>
+            <div>
+              <Label>Legal form</Label>
+              <Combobox
+                options={legalForms}
+                value={filters.legal_form}
+                onChange={(v) => set("legal_form", v)}
+                placeholder="Search legal form…"
+              />
+            </div>
+            <div>
+              <Label>Founded after</Label>
+              <input
+                type="date"
+                className={inputCls}
+                value={filters.registered_after ?? ""}
+                onChange={(e) => set("registered_after", e.target.value || undefined)}
+              />
+            </div>
+            <div>
+              <Label>Founded before</Label>
+              <input
+                type="date"
+                className={inputCls}
+                value={filters.registered_before ?? ""}
+                onChange={(e) => set("registered_before", e.target.value || undefined)}
               />
             </div>
           </div>

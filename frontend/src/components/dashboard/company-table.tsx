@@ -28,6 +28,10 @@ interface CompanyTableProps {
   filters: CompanyFilters;
   onSort: (sort: string) => void;
   isLoading: boolean;
+  // batch selection
+  selectedIds?: Set<number>;
+  onToggleSelect?: (id: number) => void;
+  onSelectAll?: (ids: number[]) => void;
 }
 
 function SortIcon({ col, sort }: { col: string; sort: string }) {
@@ -60,7 +64,61 @@ function scoreTextClass(score: number | null): string {
   return "text-red-700";
 }
 
-export function CompanyTable({ companies, selectedId, onSelect, filters, onSort, isLoading }: CompanyTableProps) {
+interface FlexBreakdown {
+  clusters: number;
+  keywords: number;
+  distance: number;
+  legal_form: number;
+  data_quality: number;
+  raw_total: number;
+  final_score: number;
+  cancelled: boolean;
+}
+
+function FlexScoreCell({ score, breakdownJson }: { score: number | null; breakdownJson: string | null }) {
+  let bd: FlexBreakdown | null = null;
+  try { if (breakdownJson) bd = JSON.parse(breakdownJson); } catch { /* ignore */ }
+
+  return (
+    <div className="relative group">
+      <ScoreBar score={score} />
+      {bd && (
+        <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1.5 z-50 hidden group-hover:block pointer-events-none">
+          <div className="bg-slate-800 text-white text-xs rounded-lg px-3 py-2 shadow-xl w-44 space-y-1">
+            {bd.cancelled ? (
+              <p className="text-slate-300 italic">Cancelled / dissolved</p>
+            ) : (
+              <>
+                <p className="font-semibold text-slate-200 mb-1.5">Flex breakdown</p>
+                {[
+                  ["Clusters", bd.clusters],
+                  ["Keywords", bd.keywords],
+                  ["Distance", bd.distance],
+                  ["Legal form", bd.legal_form],
+                  ["Data quality", bd.data_quality],
+                ].map(([label, val]) => (
+                  <div key={label as string} className="flex justify-between gap-2">
+                    <span className="text-slate-400">{label}</span>
+                    <span className={cn("tabular-nums font-medium", (val as number) > 0 ? "text-green-400" : (val as number) < 0 ? "text-red-400" : "text-slate-400")}>
+                      {(val as number) > 0 ? "+" : ""}{val as number}
+                    </span>
+                  </div>
+                ))}
+                <div className="border-t border-slate-600 pt-1 flex justify-between gap-2">
+                  <span className="text-slate-300 font-medium">Score</span>
+                  <span className="tabular-nums font-bold text-white">{bd.final_score}</span>
+                </div>
+              </>
+            )}
+            <div className="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-slate-800" />
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+export function CompanyTable({ companies, selectedId, onSelect, filters, onSort, isLoading, selectedIds, onToggleSelect, onSelectAll }: CompanyTableProps) {
   const sort = filters.sort ?? "-updated";
 
   const [columnVisibility, setColumnVisibility] = useState<VisibilityState>({
@@ -130,7 +188,12 @@ export function CompanyTable({ companies, selectedId, onSelect, filters, onSort,
       }),
       ch.accessor("flex_score", {
         header: "Flex",
-        cell: (info) => <ScoreBar score={info.getValue() as number | null} />,
+        cell: (info) => (
+          <FlexScoreCell
+            score={info.getValue() as number | null}
+            breakdownJson={info.row.original.flex_score_breakdown}
+          />
+        ),
       }),
       ch.accessor("ai_score", {
         header: "AI",
@@ -254,6 +317,16 @@ export function CompanyTable({ companies, selectedId, onSelect, filters, onSort,
           <thead className="sticky top-0 bg-white z-10 shadow-sm">
             {table.getHeaderGroups().map((hg) => (
               <tr key={hg.id}>
+                {onToggleSelect && (
+                  <th className="px-3 py-2 border-b border-slate-200 w-8">
+                    <input
+                      type="checkbox"
+                      className="rounded border-slate-300 text-blue-600"
+                      checked={companies.length > 0 && companies.every(c => selectedIds?.has(c.id))}
+                      onChange={() => onSelectAll?.(companies.map(c => c.id))}
+                    />
+                  </th>
+                )}
                 {hg.headers.map((header) => {
                   const sortable = !!SORT_MAP[header.id];
                   return (
@@ -292,11 +365,23 @@ export function CompanyTable({ companies, selectedId, onSelect, filters, onSort,
                   className={cn(
                     "border-b border-slate-100 cursor-pointer transition-colors",
                     String(row.original.status ?? "").toLowerCase() === "cancelled" && "opacity-60",
-                    row.original.id === selectedId
+                    selectedIds?.has(row.original.id)
                       ? "bg-blue-50"
-                      : "hover:bg-slate-50"
+                      : row.original.id === selectedId
+                        ? "bg-blue-50"
+                        : "hover:bg-slate-50"
                   )}
                 >
+                  {onToggleSelect && (
+                    <td className="px-3 py-2 align-middle w-8" onClick={(e) => { e.stopPropagation(); onToggleSelect(row.original.id); }}>
+                      <input
+                        type="checkbox"
+                        className="rounded border-slate-300 text-blue-600"
+                        checked={selectedIds?.has(row.original.id) ?? false}
+                        onChange={() => onToggleSelect(row.original.id)}
+                      />
+                    </td>
+                  )}
                   {row.getVisibleCells().map((cell) => (
                     <td key={cell.id} className="px-3 py-2 align-middle">
                       {flexRender(cell.column.columnDef.cell, cell.getContext())}

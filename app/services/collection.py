@@ -352,6 +352,12 @@ def _load_scoring_config(db: Session) -> dict[str, str]:
     return {key: crud.get_setting(db, key, val) for key, val in defaults.items()}
 
 
+def _load_scoring_config_for_org(db: Session, org_id: int | None) -> dict[str, str]:
+    """Load scoring config with org-level overrides merged on top of global defaults."""
+    defaults = get_default_scoring_config()
+    return {key: crud.get_effective_setting(db, key, org_id=org_id, default=val) for key, val in defaults.items()}
+
+
 def _extract_purpose_from_raw(raw: dict[str, Any]) -> str | None:
     """Extract purpose/zweck text from a Zefix payload."""
     purpose_raw = raw.get("purpose") or raw.get("purposes") or raw.get("purposeTexts") or None
@@ -1941,6 +1947,7 @@ def claude_classify_batch(
     system_prompt: str | None = None,
     target_description: str | None = None,
     api_key: str | None = None,
+    org_id: int | None = None,
     resume_from: int = 0,
     use_batch_api: bool = False,
     companies_per_message: int = 1,
@@ -1993,14 +2000,14 @@ def claude_classify_batch(
     # call — subsequent calls pay ~10% of normal input token price for the cached prefix.
     system_param: list[dict] = [{"type": "text", "text": prompt, "cache_control": {"type": "ephemeral"}}]
 
-    scoring_config = _load_scoring_config(db)
+    scoring_config = _load_scoring_config_for_org(db, org_id)
     origin_lat = float(scoring_config.get("scoring_origin_lat", 46.9266))
     origin_lon = float(scoring_config.get("scoring_origin_lon", 7.4817))
     max_purpose_chars = int(scoring_config.get("scoring_claude_max_purpose_chars") or 800)
 
     # Fixed category taxonomy — append allowed list to prompt so output tokens stay short
     if use_fixed_categories:
-        raw_cats = (crud.get_setting(db, "claude_classify_categories", "") or "").strip()
+        raw_cats = (crud.get_effective_setting(db, "claude_classify_categories", org_id=org_id, default="") or "").strip()
         if raw_cats:
             cat_list = [c.strip() for c in raw_cats.replace("\n", ",").split(",") if c.strip()]
             if cat_list:

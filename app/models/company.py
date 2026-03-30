@@ -106,7 +106,10 @@ class Company(Base):
         Only present scores contribute; weights are renormalised accordingly.
         Returns None if all three are absent.
         """
-        _WEIGHTS = ((self.ai_score, 0.70), (self.web_score, 0.20), (self.flex_score, 0.10))
+        return self._combined_score(0.70, 0.20, 0.10)
+
+    def _combined_score(self, w_ai: float, w_web: float, w_flex: float) -> int | None:
+        _WEIGHTS = ((self.ai_score, w_ai), (self.web_score, w_web), (self.flex_score, w_flex))
         present = [(s, w) for s, w in _WEIGHTS if s is not None]
         if not present:
             return None

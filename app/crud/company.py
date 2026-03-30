@@ -64,7 +64,21 @@ def _apply_filters(query, *, name_filter, uid_filter=None, canton, review_status
                    exclude_tags=None, exclude_review_status=None, exclude_canton=None,
                    exclude_contact_status=None, exclude_tfidf_cluster=None,
                    exclude_purpose_keywords=None, exclude_ai_category=None,
-                   exclude_noga_code=None, exclude_noga_label=None, exclude_noga_level=None):
+                   exclude_noga_code=None, exclude_noga_label=None, exclude_noga_level=None,
+                   zefix_status=None, has_website=None,
+                   legal_form=None, registered_after=None, registered_before=None):
+    if zefix_status:
+        query = query.filter(Company.status == zefix_status)
+    if has_website is True:
+        query = query.filter(Company.website_url.isnot(None))
+    elif has_website is False:
+        query = query.filter(Company.website_url.is_(None))
+    if legal_form:
+        query = query.filter(Company.legal_form == legal_form)
+    if registered_after:
+        query = query.filter(Company.sogc_date >= registered_after)
+    if registered_before:
+        query = query.filter(Company.sogc_date <= registered_before)
     if name_filter:
         query = query.filter(Company.name.ilike(f"%{name_filter}%"))
     if uid_filter:
@@ -222,6 +236,11 @@ def list_companies(
     exclude_noga_code: str | None = None,
     exclude_noga_label: str | None = None,
     exclude_noga_level: str | None = None,
+    zefix_status: str | None = None,
+    has_website: bool | None = None,
+    legal_form: str | None = None,
+    registered_after: str | None = None,
+    registered_before: str | None = None,
     # kept for backward-compat with collection.py batch query
     limit: int | None = None,
     skip: int = 0,
@@ -260,6 +279,11 @@ def list_companies(
         exclude_noga_code=exclude_noga_code,
         exclude_noga_label=exclude_noga_label,
         exclude_noga_level=exclude_noga_level,
+        zefix_status=zefix_status,
+        has_website=has_website,
+        legal_form=legal_form,
+        registered_after=registered_after,
+        registered_before=registered_before,
     )
 
     if sort in ("combined_score", "-combined_score"):
@@ -322,6 +346,11 @@ def count_companies(
     exclude_noga_code: str | None = None,
     exclude_noga_label: str | None = None,
     exclude_noga_level: str | None = None,
+    zefix_status: str | None = None,
+    has_website: bool | None = None,
+    legal_form: str | None = None,
+    registered_after: str | None = None,
+    registered_before: str | None = None,
 ) -> int:
     query = db.query(Company)
     query = _apply_filters(
@@ -357,6 +386,11 @@ def count_companies(
         exclude_noga_code=exclude_noga_code,
         exclude_noga_label=exclude_noga_label,
         exclude_noga_level=exclude_noga_level,
+        zefix_status=zefix_status,
+        has_website=has_website,
+        legal_form=legal_form,
+        registered_after=registered_after,
+        registered_before=registered_before,
     )
     return query.count()
 
@@ -452,6 +486,13 @@ def get_taxonomy_stats(db: Session) -> dict:
         .order_by(func.count(Company.id).desc())
         .all()
     )
+    legal_forms = (
+        db.query(Company.legal_form, func.count(Company.id).label("cnt"))
+        .filter(Company.legal_form.isnot(None))
+        .group_by(Company.legal_form)
+        .order_by(func.count(Company.id).desc())
+        .all()
+    )
     return {
         "clusters": clusters_list,
         "keywords": keywords_list,
@@ -459,6 +500,7 @@ def get_taxonomy_stats(db: Session) -> dict:
         "categories": [(r.ai_category, r.cnt) for r in categories],
         "noga_codes": [(((r.noga_code or "") + " — " + (r.noga_label or "")).strip(" —"), r.cnt) for r in noga_codes],
         "noga_levels": [(r.noga_level, r.cnt) for r in noga_levels],
+        "legal_forms": [(r.legal_form, r.cnt) for r in legal_forms],
     }
 
 

@@ -14,6 +14,7 @@ export interface Company {
   web_score: number | null;
   social_media_only: boolean | null;
   flex_score: number | null;
+  flex_score_breakdown: string | null;
   flex_scored_at: string | null;
   ai_score: number | null;
   ai_scored_at: string | null;
@@ -94,6 +95,7 @@ export interface CompanyFilters {
   q?: string;
   uid?: string;
   status?: string;
+  has_website?: boolean;
   canton?: string;
   review_status?: string;
   contact_status?: string;
@@ -123,6 +125,9 @@ export interface CompanyFilters {
   exclude_noga_code?: string;
   exclude_noga_label?: string;
   exclude_noga_level?: string;
+  legal_form?: string;
+  registered_after?: string;
+  registered_before?: string;
   sort?: string;
   page?: number;
   page_size?: number;
