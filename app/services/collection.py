@@ -1482,7 +1482,8 @@ def bulk_import_zefix(
             break
 
         stats["cantons_done"] += 1
-        start_prefix_idx = 0  # reset for subsequent cantons
+        start_prefix_idx = 0   # reset for subsequent cantons
+        consecutive_empty = 0  # reset per-canton; tail-end empty prefixes shouldn't bleed into the next canton
         _sleep_with_abort(request_delay, abort_cb=abort_cb)
 
     # ── Retry pass (timed-out prefixes only, one more attempt) ───────────────

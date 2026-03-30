@@ -3,12 +3,13 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import useSWR from "swr";
 import { cn } from "@/lib/utils";
-import { BarChart3, KanbanSquare, Map, Cog, Database, Activity, UserCircle, Shield, LayoutGrid } from "lucide-react";
+import { Search, Compass, KanbanSquare, Map, Cog, Database, Activity, UserCircle, Shield, LayoutGrid } from "lucide-react";
 import { fetchCurrentUser } from "@/lib/api";
 import { HelvexMark } from "@/components/helvex-logo";
 
 const NAV = [
-  { href: "/app/search", label: "Explorer", icon: BarChart3 },
+  { href: "/app/explorer", label: "Explorer", icon: Compass },
+  { href: "/app/search", label: "Search", icon: Search },
   { href: "/app/categories", label: "Categories", icon: LayoutGrid },
   { href: "/app/pipeline", label: "Pipeline", icon: KanbanSquare },
   { href: "/app/map", label: "Map", icon: Map },
@@ -26,7 +27,11 @@ const AUTH_PATHS = ["/login", "/register", "/verify-email", "/forgot-password", 
 
 export function NavBar() {
   const pathname = usePathname();
-  const { data: me, isLoading } = useSWR("me", fetchCurrentUser, { shouldRetryOnError: false });
+  const { data: me, isLoading } = useSWR("me", fetchCurrentUser, {
+    shouldRetryOnError: false,
+    revalidateOnMount: true,
+    revalidateOnFocus: false,
+  });
 
   if (AUTH_PATHS.some((p) => pathname.startsWith(p))) return null;
 
@@ -37,7 +42,7 @@ export function NavBar() {
     <header className="h-12 bg-white border-b border-slate-200 flex items-center px-4 shrink-0 z-40 shadow-sm">
       {/* Logo */}
       <Link
-        href={loggedIn ? "/app/search" : "/"}
+        href={loggedIn ? "/app/explorer" : "/"}
         className="flex items-center gap-2 font-bold text-blue-600 mr-6 tracking-tight shrink-0"
       >
         <HelvexMark size={18} />

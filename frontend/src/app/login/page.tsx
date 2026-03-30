@@ -62,6 +62,9 @@ function LoginForm() {
         setError(body.detail ?? `Login failed (HTTP ${res.status})`);
         return;
       }
+      // Refresh server components + clear SWR cache so NavBar re-fetches the
+      // authenticated user immediately without a stale "not logged in" flash.
+      router.refresh();
       router.push(next);
     } finally {
       setLoading(false);
