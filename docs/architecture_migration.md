@@ -328,8 +328,13 @@ Tier matrix (see User Tiers section below).
 
 ---
 
-### Phase 5 — Admin Panel + EthicalAds + Jinja2 Removal
+### Phase 5 — Admin Panel + Analytics + Ads + Jinja2 Removal
 
+- **Google Tag Manager**: single `<Script>` in Next.js root layout (`app/layout.tsx`); GTM container manages GA4 + Google Ads conversion tracking. Cookie consent banner (IAB TCF v2) required — covers GTM, GA4, Ads, and reCAPTCHA under one consent flow.
+  - GA4: user behavior, funnels, retention
+  - Google Ads: conversion tracking for paid acquisition
+  - reCAPTCHA: auth/form protection (v3 recommended — invisible, no UX friction)
+  - All three load via GTM; one consent banner covers all Google tags
 - **EthicalAds**: conditional `AdBanner` component in Next.js (free tier only); one ad per page
 - **Admin panel**: Next.js route group `(admin)` + FastAPI `/api/admin/` routes, behind `user.is_superadmin`; covers user management, tier override, job monitoring, feature flags, audit log
 - **Jinja2 removal**: delete `app/ui/routes.py` + all templates; 301 redirects from `/ui/...`
@@ -474,6 +479,7 @@ S3 Bucket as little as possible, use hetzner box for long term backups, due to i
 - Per-service separate databases
 - OpenTelemetry distributed tracing
 - Multi-region Hetzner deployment
+- **Node autoscaling**: cluster-autoscaler with Hetzner Cloud provider. Split responsibility: Terraform manages control plane + DB node; autoscaler manages worker node pool (CX32, minSize 0, maxSize ~5). Requires `hcloud-cloud-controller-manager`, worker cloud-init bootstrap template (derived from existing Terraform cloud-init), and removing worker nodes from Terraform state. Add PodDisruptionBudget for Redis before enabling scale-down. Trigger: when worker CPU regularly exceeds 70% or ml-worker jobs queue up.
 - **Audit log retention policy**: batch jobs generate high write volume (e.g. ~500k rows for a 50k-company import run). Add a scheduled DELETE for automated entries (`user_id IS NULL AND changed_at < NOW() - INTERVAL '90 days'`) via K8s CronJob or `pg_cron` once batch job frequency increases. Manual edits (`user_id IS NOT NULL`) should be kept indefinitely.
 
 ---

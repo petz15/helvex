@@ -1,0 +1,453 @@
+"use client";
+import { useState, useCallback, useTransition } from "react";
+import { useRouter } from "next/navigation";
+import useSWR from "swr";
+import { Compass, Search, ChevronRight, X, Download } from "lucide-react";
+import { CompanyTable } from "@/components/dashboard/company-table";
+import { CompanyPreview } from "@/components/dashboard/company-preview";
+import { FilterBar } from "@/components/dashboard/filter-bar";
+import { Pagination } from "@/components/dashboard/pagination";
+import {
+  fetchCompanies, fetchStats, fetchCantons, fetchTaxonomy,
+  fetchSavedViews, saveView, deleteView,
+} from "@/lib/api";
+import type { Company, CompanyFilters, CompanyStats } from "@/lib/types";
+import { cn } from "@/lib/utils";
+
+// ── Swiss cantons for the guided picker ──────────────────────────────────────
+
+const CANTON_LABELS: Record<string, string> = {
+  AG: "Aargau", AI: "Appenzell I.Rh.", AR: "Appenzell A.Rh.", BE: "Bern",
+  BL: "Basel-Land", BS: "Basel-Stadt", FR: "Fribourg", GE: "Genf",
+  GL: "Glarus", GR: "Graubünden", JU: "Jura", LU: "Luzern",
+  NE: "Neuenburg", NW: "Nidwalden", OW: "Obwalden", SG: "St. Gallen",
+  SH: "Schaffhausen", SO: "Solothurn", SZ: "Schwyz", TG: "Thurgau",
+  TI: "Tessin", UR: "Uri", VD: "Waadt", VS: "Wallis",
+  ZG: "Zug", ZH: "Zürich",
+};
+
+// Score preset options for guided mode
+const SCORE_PRESETS = [
+  { label: "Any", value: 0, description: "Show all companies" },
+  { label: "Good", value: 40, description: "Score ≥ 40" },
+  { label: "Strong", value: 60, description: "Score ≥ 60" },
+  { label: "Top", value: 80, description: "Score ≥ 80" },
+];
+
+type Mode = "guided" | "browse";
+
+function buildExportUrl(filters: CompanyFilters): string {
+  const params = new URLSearchParams();
+  const rest: Record<string, unknown> = { ...filters };
+  delete rest.page;
+  delete rest.page_size;
+  for (const [k, v] of Object.entries(rest)) {
+    if (v !== undefined && v !== null && v !== "") params.set(k, String(v));
+  }
+  return `/api/v1/companies/export.csv?${params.toString()}`;
+}
+
+const BROWSE_DEFAULTS: CompanyFilters = { sort: "-combined_score", page: 1, page_size: 50, status: "ACTIVE" };
+
+// ── Guided mode ───────────────────────────────────────────────────────────────
+
+interface GuidedPickerProps {
+  cantons: string[];
+  taxonomy: Record<string, [string, number][]>;
+  onBrowse: (filters: CompanyFilters) => void;
+}
+
+function GuidedPicker({ cantons, taxonomy, onBrowse }: GuidedPickerProps) {
+  const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
+  const [selectedCanton, setSelectedCanton] = useState<string | null>(null);
+  const [scoreMin, setScoreMin] = useState(0);
+
+  const aiCategories: [string, number][] = taxonomy["ai_category"] ?? [];
+
+  // Live count based on current guided filters
+  const guidedFilters: CompanyFilters = {
+    sort: "-combined_score",
+    page: 1,
+    page_size: 1,
+    status: "ACTIVE",
+    ...(selectedCategory ? { ai_category: selectedCategory } : {}),
+    ...(selectedCanton ? { canton: selectedCanton } : {}),
+    ...(scoreMin > 0 ? { min_combined_score: scoreMin } : {}),
+  };
+  const { data: preview } = useSWR(
+    ["companies-preview", guidedFilters],
+    () => fetchCompanies(guidedFilters),
+    { keepPreviousData: true }
+  );
+
+  function handleBrowse() {
+    const filters: CompanyFilters = {
+      ...BROWSE_DEFAULTS,
+      ...(selectedCategory ? { ai_category: selectedCategory } : {}),
+      ...(selectedCanton ? { canton: selectedCanton } : {}),
+      ...(scoreMin > 0 ? { min_combined_score: scoreMin } : {}),
+    };
+    onBrowse(filters);
+  }
+
+  const matchCount = preview?.total ?? null;
+
+  return (
+    <div className="flex flex-col items-center justify-start py-10 px-4 min-h-0 overflow-y-auto">
+      <div className="w-full max-w-2xl space-y-8">
+
+        {/* Hero */}
+        <div className="text-center space-y-2">
+          <div className="flex items-center justify-center gap-2 text-blue-600 mb-3">
+            <Compass size={28} />
+          </div>
+          <h1 className="text-2xl font-semibold text-slate-800">Explore Swiss Companies</h1>
+          <p className="text-slate-500 text-sm">
+            Narrow down by industry, canton, and quality — then browse matching companies.
+          </p>
+        </div>
+
+        {/* Step 1: Industry */}
+        <div className="space-y-3">
+          <div className="flex items-center gap-2">
+            <span className="flex items-center justify-center w-5 h-5 rounded-full bg-blue-600 text-white text-xs font-bold shrink-0">1</span>
+            <h2 className="text-sm font-semibold text-slate-700 uppercase tracking-wide">Industry / Category</h2>
+            {selectedCategory && (
+              <button onClick={() => setSelectedCategory(null)} className="ml-auto text-xs text-slate-400 hover:text-slate-600 flex items-center gap-0.5">
+                <X size={11} /> Clear
+              </button>
+            )}
+          </div>
+          {aiCategories.length > 0 ? (
+            <div className="flex flex-wrap gap-2">
+              {aiCategories.slice(0, 24).map(([cat, count]) => (
+                <button
+                  key={cat}
+                  onClick={() => setSelectedCategory(selectedCategory === cat ? null : cat)}
+                  className={cn(
+                    "px-3 py-1.5 rounded-full text-sm border transition-colors",
+                    selectedCategory === cat
+                      ? "bg-blue-600 text-white border-blue-600 font-medium"
+                      : "bg-white text-slate-600 border-slate-200 hover:border-blue-300 hover:text-blue-600"
+                  )}
+                >
+                  {cat}
+                  <span className={cn("ml-1.5 text-xs", selectedCategory === cat ? "text-blue-200" : "text-slate-400")}>
+                    {count.toLocaleString()}
+                  </span>
+                </button>
+              ))}
+            </div>
+          ) : (
+            <p className="text-sm text-slate-400 italic">No AI classifications available yet — run Claude classify first.</p>
+          )}
+        </div>
+
+        {/* Step 2: Canton */}
+        <div className="space-y-3">
+          <div className="flex items-center gap-2">
+            <span className="flex items-center justify-center w-5 h-5 rounded-full bg-blue-600 text-white text-xs font-bold shrink-0">2</span>
+            <h2 className="text-sm font-semibold text-slate-700 uppercase tracking-wide">Canton</h2>
+            {selectedCanton && (
+              <button onClick={() => setSelectedCanton(null)} className="ml-auto text-xs text-slate-400 hover:text-slate-600 flex items-center gap-0.5">
+                <X size={11} /> Clear
+              </button>
+            )}
+          </div>
+          <div className="flex flex-wrap gap-1.5">
+            {cantons.map((c) => (
+              <button
+                key={c}
+                onClick={() => setSelectedCanton(selectedCanton === c ? null : c)}
+                title={CANTON_LABELS[c] ?? c}
+                className={cn(
+                  "px-2.5 py-1 rounded text-xs font-medium border transition-colors",
+                  selectedCanton === c
+                    ? "bg-blue-600 text-white border-blue-600"
+                    : "bg-white text-slate-600 border-slate-200 hover:border-blue-300 hover:text-blue-600"
+                )}
+              >
+                {c}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Step 3: Minimum score */}
+        <div className="space-y-3">
+          <div className="flex items-center gap-2">
+            <span className="flex items-center justify-center w-5 h-5 rounded-full bg-blue-600 text-white text-xs font-bold shrink-0">3</span>
+            <h2 className="text-sm font-semibold text-slate-700 uppercase tracking-wide">Minimum Quality Score</h2>
+          </div>
+          <div className="flex gap-2">
+            {SCORE_PRESETS.map((preset) => (
+              <button
+                key={preset.value}
+                onClick={() => setScoreMin(preset.value)}
+                title={preset.description}
+                className={cn(
+                  "px-4 py-2 rounded-lg text-sm border transition-colors",
+                  scoreMin === preset.value
+                    ? "bg-blue-600 text-white border-blue-600 font-medium"
+                    : "bg-white text-slate-600 border-slate-200 hover:border-blue-300 hover:text-blue-600"
+                )}
+              >
+                {preset.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* CTA */}
+        <div className="flex flex-col items-center gap-2 pt-2">
+          <p className="text-sm text-slate-500">
+            {matchCount !== null ? (
+              <span>
+                <span className="font-semibold text-slate-800">{matchCount.toLocaleString()}</span> active companies match
+              </span>
+            ) : (
+              <span className="text-slate-300">Loading…</span>
+            )}
+          </p>
+          <button
+            onClick={handleBrowse}
+            disabled={matchCount === 0}
+            className={cn(
+              "flex items-center gap-2 px-6 py-2.5 rounded-lg text-sm font-medium transition-colors",
+              matchCount === 0
+                ? "bg-slate-100 text-slate-400 cursor-not-allowed"
+                : "bg-blue-600 text-white hover:bg-blue-700"
+            )}
+          >
+            Browse these companies
+            <ChevronRight size={16} />
+          </button>
+          <button
+            onClick={() => onBrowse(BROWSE_DEFAULTS)}
+            className="text-xs text-slate-400 hover:text-slate-600 underline underline-offset-2"
+          >
+            Skip — show all companies
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Browse mode ────────────────────────────────────────────────────────────────
+
+interface BrowseViewProps {
+  initialFilters: CompanyFilters;
+  initialCantons: string[];
+  initialStats: CompanyStats;
+  initialTaxonomy: Record<string, [string, number][]>;
+}
+
+function BrowseView({ initialFilters, initialCantons, initialStats, initialTaxonomy }: BrowseViewProps) {
+  const router = useRouter();
+  const [filters, setFiltersState] = useState<CompanyFilters>(initialFilters);
+  const [, startTransition] = useTransition();
+
+  const setFilters = useCallback((update: CompanyFilters | ((f: CompanyFilters) => CompanyFilters)) => {
+    setFiltersState(prev => {
+      const next = typeof update === "function" ? update(prev) : update;
+      // sync to URL so back-navigation works
+      const params = new URLSearchParams();
+      for (const [k, v] of Object.entries(next)) {
+        const isDefault =
+          (k === "sort" && v === "-combined_score") ||
+          (k === "page" && v === 1) ||
+          (k === "page_size" && v === 50) ||
+          (k === "status" && v === "ACTIVE");
+        if (v !== undefined && v !== null && v !== "" && !isDefault) params.set(k, String(v));
+      }
+      const qs = params.toString();
+      router.replace(qs ? `/app/explorer?${qs}` : "/app/explorer", { scroll: false });
+      return next;
+    });
+  }, [router]);
+
+  const [selectedCompany, setSelectedCompany] = useState<Company | null>(null);
+
+  const { data: page, isLoading, mutate: mutateCompanies } = useSWR(
+    ["companies", filters],
+    () => fetchCompanies(filters),
+    { keepPreviousData: true }
+  );
+
+  const { data: stats } = useSWR("stats", fetchStats, { fallbackData: initialStats });
+  const { data: cantons = initialCantons } = useSWR("cantons", fetchCantons, { fallbackData: initialCantons });
+  const { data: taxonomy = initialTaxonomy } = useSWR("taxonomy", fetchTaxonomy, { fallbackData: initialTaxonomy });
+  const { data: savedViews = [], mutate: mutateSavedViews } = useSWR("saved-views", fetchSavedViews);
+
+  // Active filter chips summary for the browse bar
+  const activeFilters: { label: string; key: string }[] = [];
+  if (filters.ai_category) activeFilters.push({ label: `Industry: ${filters.ai_category}`, key: "ai_category" });
+  if (filters.canton) activeFilters.push({ label: `Canton: ${filters.canton}`, key: "canton" });
+  if (filters.min_combined_score) activeFilters.push({ label: `Score ≥ ${filters.min_combined_score}`, key: "min_combined_score" });
+
+  return (
+    <div className="flex flex-col h-[calc(100vh-3rem)] overflow-hidden">
+
+      {/* Stats bar */}
+      <div className="flex items-center gap-4 px-4 py-2 bg-slate-50 border-b border-slate-100 text-xs text-slate-500 shrink-0">
+        <span><span className="font-semibold text-slate-700">{(stats?.total ?? 0).toLocaleString()}</span> total</span>
+        <span>·</span>
+        <span><span className="font-semibold text-slate-700">{(stats?.with_website ?? 0).toLocaleString()}</span> with website</span>
+        {page?.total !== undefined && (
+          <>
+            <span>·</span>
+            <span>
+              <span className="font-semibold text-blue-600">{page.total.toLocaleString()}</span> matching current filters
+            </span>
+          </>
+        )}
+        {activeFilters.length > 0 && (
+          <div className="flex items-center gap-1.5 ml-2">
+            {activeFilters.map(({ label, key }) => (
+              <span
+                key={key}
+                className="flex items-center gap-1 bg-blue-50 text-blue-700 border border-blue-200 rounded-full px-2 py-0.5 text-xs"
+              >
+                {label}
+                <button
+                  onClick={() => setFilters((f) => { const n = { ...f }; delete (n as Record<string, unknown>)[key]; return n; })}
+                  className="hover:text-blue-900"
+                >
+                  <X size={10} />
+                </button>
+              </span>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Filter bar */}
+      <FilterBar
+        filters={filters}
+        cantons={cantons}
+        taxonomy={taxonomy}
+        onChange={(f) => startTransition(() => setFilters(f))}
+        onClear={() => setFilters(BROWSE_DEFAULTS)}
+        resultCount={page?.total ?? 0}
+        savedViews={savedViews}
+        onSaveView={async (name) => { await saveView(name, filters); mutateSavedViews(); }}
+        onLoadView={(f) => setFilters({ ...BROWSE_DEFAULTS, ...f })}
+        onDeleteView={async (id) => { await deleteView(id); mutateSavedViews(); }}
+      />
+
+      {/* Table + preview */}
+      <div className="flex flex-1 overflow-hidden">
+        <div className="flex-1 flex flex-col overflow-hidden bg-white">
+          <div className="flex items-center justify-end px-3 py-1 border-b border-slate-100 bg-slate-50">
+            <a
+              href={buildExportUrl(filters)}
+              download
+              className="flex items-center gap-1.5 text-xs text-slate-500 hover:text-slate-700 px-2.5 py-1 rounded border border-slate-200 hover:bg-white transition-colors"
+            >
+              <Download size={12} /> Export CSV ({page?.total ?? 0})
+            </a>
+          </div>
+          <CompanyTable
+            companies={page?.items ?? []}
+            selectedId={selectedCompany?.id ?? null}
+            onSelect={setSelectedCompany}
+            filters={filters}
+            onSort={(sort) => setFilters((f) => ({ ...f, sort, page: 1 }))}
+            isLoading={isLoading}
+          />
+          <Pagination
+            page={page?.page ?? 1}
+            pages={page?.pages ?? 1}
+            total={page?.total ?? 0}
+            pageSize={filters.page_size ?? 50}
+            onChange={(p) => setFilters((f) => ({ ...f, page: p }))}
+            onPageSizeChange={(s) => setFilters((f) => ({ ...f, page_size: s, page: 1 }))}
+          />
+        </div>
+        {selectedCompany && (
+          <CompanyPreview
+            company={selectedCompany}
+            onClose={() => setSelectedCompany(null)}
+            onUpdated={(updated) => { setSelectedCompany(updated); mutateCompanies(); }}
+          />
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ── Root component ─────────────────────────────────────────────────────────────
+
+interface ExplorerClientProps {
+  initialCantons: string[];
+  initialStats: CompanyStats;
+  initialTaxonomy: Record<string, [string, number][]>;
+}
+
+export function ExplorerClient({ initialCantons, initialStats, initialTaxonomy }: ExplorerClientProps) {
+  const [mode, setMode] = useState<Mode>("guided");
+  const [browseFilters, setBrowseFilters] = useState<CompanyFilters>(BROWSE_DEFAULTS);
+
+  function handleBrowse(filters: CompanyFilters) {
+    setBrowseFilters(filters);
+    setMode("browse");
+  }
+
+  return (
+    <div className="flex flex-col h-[calc(100vh-3rem)] overflow-hidden">
+      {/* Mode toggle header */}
+      <div className="flex items-center justify-between px-4 py-2 bg-white border-b border-slate-200 shrink-0">
+        <div className="flex items-center gap-1 bg-slate-100 rounded-lg p-0.5">
+          <button
+            onClick={() => setMode("guided")}
+            className={cn(
+              "flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium transition-colors",
+              mode === "guided" ? "bg-white text-slate-800 shadow-sm" : "text-slate-500 hover:text-slate-700"
+            )}
+          >
+            <Compass size={14} />
+            Guided
+          </button>
+          <button
+            onClick={() => setMode("browse")}
+            className={cn(
+              "flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium transition-colors",
+              mode === "browse" ? "bg-white text-slate-800 shadow-sm" : "text-slate-500 hover:text-slate-700"
+            )}
+          >
+            <Search size={14} />
+            Browse
+          </button>
+        </div>
+        {mode === "guided" && (
+          <p className="text-xs text-slate-400 hidden sm:block">Pick your criteria, then click Browse</p>
+        )}
+        {mode === "browse" && (
+          <button
+            onClick={() => setMode("guided")}
+            className="text-xs text-blue-600 hover:underline hidden sm:block"
+          >
+            ← Back to guided selection
+          </button>
+        )}
+      </div>
+
+      {/* Content */}
+      {mode === "guided" ? (
+        <GuidedPicker
+          cantons={initialCantons}
+          taxonomy={initialTaxonomy}
+          onBrowse={handleBrowse}
+        />
+      ) : (
+        <BrowseView
+          initialFilters={browseFilters}
+          initialCantons={initialCantons}
+          initialStats={initialStats}
+          initialTaxonomy={initialTaxonomy}
+        />
+      )}
+    </div>
+  );
+}
