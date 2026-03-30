@@ -18,6 +18,8 @@ General fixes, recovery procedures, and operational checklists.
 10. [Useful kubectl Commands](#10-useful-kubectl-commands)
 11. [Logs: Where to Find Them](#11-logs-where-to-find-them)
 12. [Debug: Temporarily Enable Verbose Logging](#12-debug-temporarily-enable-verbose-logging)
+13. [Deploy: Node Disk Full Quick Cleanup](#13-deploy-node-disk-full-quick-cleanup)
+14. [Node: High CPU Load / k3s API Unresponsive](#14-node-high-cpu-load--k3s-api-unresponsive)
 
 ---
 
@@ -643,3 +645,163 @@ kubectl set env deployment/helvex-worker UVICORN_LOG_LEVEL=debug -n helvex-prod
 # Revert:
 kubectl set env deployment/helvex-worker UVICORN_LOG_LEVEL- -n helvex-prod
 ```
+
+---
+
+## 13. Deploy: Node Disk Full Quick Cleanup
+
+Use this when a large job or rollout filled the node and new pods cannot start (ImagePullBackOff, ErrImagePull, Evicted, or node DiskPressure).
+
+### 1) Confirm disk pressure and biggest folders
+
+```bash
+# Node-level free space
+df -h
+
+# Biggest K3s/container/log paths (run on the node via SSH)
+sudo du -xh --max-depth=1 /var/lib/rancher /var/lib/containerd /var/log 2>/dev/null | sort -h
+
+# Kubernetes signal
+kubectl describe node $(kubectl get nodes -o name | head -1) | grep -A5 -i "DiskPressure\|Allocated resources"
+```
+
+### 2) Fast safe cleanup (usually enough to unblock deploy)
+
+```bash
+# Remove completed and failed pods (frees writable layers)
+kubectl delete pod -A --field-selector=status.phase==Succeeded
+kubectl delete pod -A --field-selector=status.phase==Failed
+
+# Remove Evicted pods
+kubectl get pods -A | awk '$4=="Evicted" {print $1, $2}' | xargs -r -n2 sh -c 'kubectl delete pod -n "$0" "$1"'
+
+# Shrink systemd journal logs
+sudo journalctl --vacuum-time=3d
+
+# Prune unused container images (K3s/containerd)
+sudo k3s crictl rmi --prune
+```
+
+### 3) If still full, free space aggressively
+
+```bash
+# Truncate very large plain-text logs
+sudo find /var/log -type f -name "*.log" -size +200M -exec truncate -s 0 {} \;
+
+# Remove temporary Helm/Helmfile artifacts
+rm -rf ~/.cache/helm ~/.cache/helmfile /tmp/helmfile*
+```
+
+### 4) Retry deploy and verify
+
+```bash
+df -h
+kubectl get nodes
+kubectl get pods -A | grep -E "ImagePullBackOff|ErrImagePull|Evicted|CrashLoopBackOff" || true
+```
+
+Notes:
+- `k3s crictl rmi --prune` only removes images not used by running containers; images may be re-pulled on next deploy.
+- If DiskPressure returns quickly, reduce job concurrency and avoid running large batch jobs during full image rollouts.
+
+---
+
+## 14. Node: High CPU Load / k3s API Unresponsive
+
+**Symptoms:**
+- `kubectl` commands hang or return `TLS handshake timeout` to `127.0.0.1:6443`
+- k3s logs (`journalctl -u k3s`) full of `Slow SQL` messages
+- Deploy stuck at `helmfile apply` with no progress after the "Comparing release=..." lines
+- SSH still works but the cluster is unresponsive
+
+**Why this happens:** k3s uses an embedded SQLite database for cluster state. When a pod crash-loops at high frequency (hundreds of restarts), each restart floods k3s with state writes (pod status, events, conditions). SQLite serialises all writes, so under CPU or I/O pressure the queue backs up — the API server stops responding to new connections even though the k3s process is still running.
+
+### 1) Confirm it's CPU load
+
+```bash
+# On the node via SSH — check load average vs CPU count
+top -bn1 | head -5
+nproc  # number of CPUs; load average should be <= this
+
+# Which processes are burning CPU
+top -bn1 -o %CPU | head -20
+```
+
+### 2) Find the crash-looping pod
+
+```bash
+# Sort all pods by restart count — the top entry is usually the culprit
+kubectl get pods -A --sort-by='.status.containerStatuses[0].restartCount' | tail -10
+
+# Quick visual check — look for high RESTARTS column
+kubectl get pods -A | grep -v "0   \|1   \|2   "
+```
+
+A restart count in the hundreds (e.g. `646`) with status `1/2` or `CrashLoopBackOff` is the root cause.
+
+### 3) Stop the crash loop (even if kubectl is slow)
+
+If kubectl is too slow, bypass it with `crictl` directly on the node:
+
+```bash
+# Find the container
+sudo crictl ps | grep <pod-name-fragment>
+
+# Stop it (use the CONTAINER ID from above)
+sudo crictl stop <CONTAINER_ID>
+
+# Or stop all containers matching a name
+sudo crictl ps | grep prometheus | awk '{print $1}' | xargs -r sudo crictl stop
+```
+
+Once the crash loop stops, SQLite write pressure drops and kubectl becomes responsive within ~30–60 seconds.
+
+### 4) Properly scale down the offending workload
+
+Once kubectl responds:
+
+```bash
+# Example for Prometheus StatefulSet
+kubectl scale statefulset prometheus-monitoring-kube-prometheus-prometheus \
+  -n monitoring --replicas=0
+
+# Verify it stopped
+kubectl get pods -n monitoring
+```
+
+### 5) Investigate why the pod was crashing
+
+```bash
+# Check last termination reason and exit code
+kubectl describe pod <pod-name> -n <namespace> | grep -A 10 "Last State"
+
+# Common reasons:
+# OOMKilled (exit 137) → increase memory limit
+# Error (exit 1/2)     → check logs from previous instance
+kubectl logs <pod-name> -n <namespace> -p  # -p = previous container instance
+```
+
+### 6) Fix and re-enable
+
+For **Prometheus OOMKill** (the most common trigger), increase its memory limit in `infra/charts/monitoring/values.yaml`:
+
+```yaml
+prometheus:
+  prometheusSpec:
+    resources:
+      requests:
+        memory: 512Mi
+      limits:
+        memory: 1Gi   # was 512Mi — OOMKill trigger
+```
+
+Then scale back up:
+
+```bash
+kubectl scale statefulset prometheus-monitoring-kube-prometheus-prometheus \
+  -n monitoring --replicas=1
+```
+
+### 7) Retry the stuck deploy
+
+Once the node is stable, re-trigger the deploy from GitHub Actions (re-run the failed workflow). The helmfile apply will resume cleanly.
