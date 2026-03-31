@@ -174,6 +174,32 @@ jobs:
           kubectl wait --for condition=established --timeout=60s crd/clusters.postgresql.cnpg.io
           kubectl wait --for condition=established --timeout=60s crd/clusterissuers.cert-manager.io
 
+      - name: Resolve backup server name
+        if: |
+          contains(github.event.head_commit.message, '[deploy-prod]') ||
+          contains(github.event.head_commit.message, '[deploy-app]')
+        id: pg-meta
+        run: |
+          # On a fresh cluster the PG cluster doesn't exist yet — generate a
+          # unique backupServerName so the new WAL archive doesn't collide with
+          # the backup we're restoring from.  Store it in a ConfigMap so every
+          # subsequent deploy reuses the same name.
+          EXISTING=$(kubectl get configmap pg-backup-meta -n helvex-prod \
+            -o jsonpath='{.data.serverName}' 2>/dev/null || echo "")
+
+          if [ -n "$EXISTING" ]; then
+            echo "Reusing existing backupServerName: $EXISTING"
+            echo "server_name=$EXISTING" >> "$GITHUB_OUTPUT"
+          else
+            NEW_NAME="helvex-pg-$(date -u +%Y%m%dT%H%M%SZ)"
+            echo "Generated new backupServerName: $NEW_NAME"
+            kubectl create configmap pg-backup-meta \
+              -n helvex-prod \
+              --from-literal=serverName="$NEW_NAME" \
+              --dry-run=client -o yaml | kubectl apply -f -
+            echo "server_name=$NEW_NAME" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Apply Helmfile (full deploy)
         if: |
           contains(github.event.head_commit.message, '[deploy-prod]') ||
@@ -189,6 +215,7 @@ jobs:
           helmfile -e prod apply $SELECTOR \
             --set "image.tag=${{ github.sha }}" \
             --set "frontend.image.tag=${{ github.sha }}" \
+            --set "postgres.backupServerName=${{ steps.pg-meta.outputs.server_name }}" \
             --suppress-diff
 
       - name: Deploy frontend only

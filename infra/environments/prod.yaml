@@ -65,6 +65,10 @@ postgres:
   s3BucketPath: "s3://helvex-backups/pg-prod/"
   backupSchedule: "0 0 2 * * *"
   backupRetention: "7d"  # 7-day PITR window
+  backupPrune:
+    enabled: true
+    schedule: "0 4 * * 0"     # weekly Sunday 04:00 UTC
+    retentionDays: 14
   backupDataCompression: "gzip"
   backupWalCompression: "gzip"
   weeklyExport:

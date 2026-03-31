@@ -53,6 +53,9 @@ spec:
   backup:
     retentionPolicy: {{ .Values.postgres.backupRetention }}
     barmanObjectStore:
+      {{- if .Values.postgres.backupServerName }}
+      serverName: {{ .Values.postgres.backupServerName }}
+      {{- end }}
       destinationPath: {{ .Values.postgres.s3BucketPath }}
       endpointURL: {{ .Values.postgres.s3EndpointUrl }}
       {{- if .Values.postgres.backupDataCompression }}

@@ -1,0 +1,131 @@
+{{- if and .Values.postgres.enabled .Values.postgres.backupEnabled .Values.postgres.backupPrune.enabled }}
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ include "helvex.fullname" . }}-pg-backup-prune
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "helvex.labels" . | nindent 4 }}
+    app.kubernetes.io/component: db-backup-prune
+spec:
+  schedule: {{ .Values.postgres.backupPrune.schedule | quote }}
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 2
+  failedJobsHistoryLimit: 2
+  startingDeadlineSeconds: 3600
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      ttlSecondsAfterFinished: 86400
+      template:
+        metadata:
+          labels:
+            {{- include "helvex.labels" . | nindent 12 }}
+            app.kubernetes.io/component: db-backup-prune
+        spec:
+          serviceAccountName: {{ include "helvex.fullname" . }}-backup-prune
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            runAsGroup: 1000
+          restartPolicy: Never
+          containers:
+            - name: prune
+              image: {{ .Values.postgres.backupPrune.image | quote }}
+              imagePullPolicy: IfNotPresent
+              envFrom:
+                - secretRef:
+                    name: {{ .Values.envSecretName }}
+              env:
+                - name: DEST_PATH
+                  value: {{ .Values.postgres.s3BucketPath | quote }}
+                - name: ENDPOINT_URL
+                  value: {{ .Values.postgres.s3EndpointUrl | quote }}
+                - name: RETENTION_DAYS
+                  value: {{ .Values.postgres.backupPrune.retentionDays | quote }}
+                - name: NAMESPACE
+                  valueFrom:
+                    fieldRef:
+                      fieldPath: metadata.namespace
+              command: ["sh", "-ec"]
+              args:
+                - |
+                  set -euo pipefail
+
+                  export AWS_ACCESS_KEY_ID="$S3_ACCESS_KEY"
+                  export AWS_SECRET_ACCESS_KEY="$S3_SECRET_KEY"
+
+                  # Current backupServerName from the ConfigMap (set by deploy workflow)
+                  # We read it via a mounted file below.
+                  CURRENT_NAME=""
+                  if [ -f /meta/serverName ]; then
+                    CURRENT_NAME=$(cat /meta/serverName)
+                  fi
+
+                  echo "Current backupServerName: ${CURRENT_NAME:-<not set>}"
+                  echo "Retention: ${RETENTION_DAYS} days"
+                  echo "Bucket path: ${DEST_PATH}"
+
+                  cutoff=$(date -u -d "${RETENTION_DAYS} days ago" +%Y%m%dT%H%M%SZ)
+                  echo "Cutoff timestamp: $cutoff"
+
+                  # List top-level "directories" under the backup path
+                  # CNPG stores backups as: <destinationPath>/<serverName>/base/ and /wals/
+                  dirs=$(aws s3 ls "${DEST_PATH}" --endpoint-url "${ENDPOINT_URL}" \
+                    | awk '/PRE/{print $2}' | tr -d '/')
+
+                  for dir in $dirs; do
+                    # Never delete the active backup directory
+                    if [ "$dir" = "$CURRENT_NAME" ]; then
+                      echo "KEEP (active): $dir"
+                      continue
+                    fi
+
+                    # Extract timestamp from auto-generated names like helvex-pg-20260331T150000Z
+                    ts=$(echo "$dir" | grep -oP '\d{8}T\d{6}Z$' || echo "")
+                    if [ -z "$ts" ]; then
+                      echo "SKIP (no timestamp): $dir"
+                      continue
+                    fi
+
+                    if [ "$ts" \< "$cutoff" ]; then
+                      echo "DELETE (expired $ts < $cutoff): $dir"
+                      aws s3 rm "${DEST_PATH}${dir}/" \
+                        --endpoint-url "${ENDPOINT_URL}" \
+                        --recursive
+                    else
+                      echo "KEEP (recent $ts >= $cutoff): $dir"
+                    fi
+                  done
+
+                  echo "Prune complete."
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: ["ALL"]
+              resources:
+                requests:
+                  cpu: 50m
+                  memory: 64Mi
+                limits:
+                  cpu: 200m
+                  memory: 128Mi
+              volumeMounts:
+                - name: meta
+                  mountPath: /meta
+                  readOnly: true
+          volumes:
+            - name: meta
+              configMap:
+                name: pg-backup-meta
+                optional: true
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ include "helvex.fullname" . }}-backup-prune
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "helvex.labels" . | nindent 4 }}
+{{- end }}

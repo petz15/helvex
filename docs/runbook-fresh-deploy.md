@@ -179,12 +179,13 @@ Watch the workflow run at **github.com/petz15/helvex → Actions**.
 The `deploy` job will run on the `helvex-prod` ARC runner (the pod you started in step 5). It will:
 
 1. Create the `helvex-env` K8s secret (with S3 credentials, DB password, etc.)
-2. Deploy the helvex chart via helmfile (PostgreSQL, Redis, app, workers)
-3. Wait for PostgreSQL to become healthy (up to 10 minutes — restore from S3 backup)
-4. Wait for app rollout
+2. Generate a unique `backupServerName` (e.g. `helvex-pg-20260331T150000Z`) and store it in the `pg-backup-meta` ConfigMap — this prevents the new cluster's WAL archive from colliding with the old backup. Subsequent deploys reuse the same name from the ConfigMap.
+3. Deploy the helvex chart via helmfile (PostgreSQL, Redis, app, workers)
+4. Wait for PostgreSQL to become healthy (up to 10 minutes — restore from S3 backup)
+5. Wait for app rollout
 
 > **Database restore:** `prod.yaml` has `restoreFromBackup: true`, so the PostgreSQL
-> cluster bootstraps by restoring from `s3://helvex-backups/pg-prod/`. This only applies
+> cluster bootstraps by restoring from `s3://helvex-backups/{backupname}/`. This only applies
 > on first cluster creation — subsequent deploys ignore the bootstrap section because
 > the cluster already exists. If this is a first-time deploy with no S3 backup, set
 > `restoreFromBackup: false` in `prod.yaml` before pushing.
