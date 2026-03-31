@@ -153,6 +153,7 @@ Wait for ARC pods to start:
 kubectl get pods -n arc-systems -w
 ```
 
+
 You should see `arc-controller-*` and `arc-runner-set-*` pods reach `Running`.
 
 ### Step 6 — Restore database (if rebuilding with existing data)
