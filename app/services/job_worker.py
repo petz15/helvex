@@ -268,13 +268,14 @@ def _run_job(app, job_id: int) -> None:  # noqa: C901
                     crud.update_progress(db, job, message=msg, stats=stats_now)
                     crud.create_event(db, job_id=job.id, level="info", message=msg)
                     _maybe_sync(app, job_type=job.job_type, label=job.label, message=msg, stats=stats_now, error=None, done=False)
-                    # Reset the RQ inactivity watchdog so a healthy long-running bulk
-                    # import is never killed mid-sweep.  Silently ignored in thread mode.
+                    # Keep the job's started-registry TTL alive so clean_registries
+                    # doesn't mark it as stale.  RQ 2.x heartbeat(timestamp, ttl).
                     try:
+                        from datetime import datetime, timezone as _tz
                         from rq import get_current_job as _get_rq_job
                         _rq_job = _get_rq_job()
                         if _rq_job is not None:
-                            _rq_job.heartbeat(timeout=3600)
+                            _rq_job.heartbeat(datetime.now(tz=_tz.utc), 3600)
                     except Exception:  # noqa: BLE001
                         pass
 
@@ -386,10 +387,11 @@ def _run_job(app, job_id: int) -> None:  # noqa: C901
                     crud.create_event(db, job_id=job.id, level="debug", message=msg)
                     _maybe_sync(app, job_type=job.job_type, label=job.label, message=msg, stats=dict(stats), error=None, done=False)
                     try:
+                        from datetime import datetime, timezone as _tz
                         from rq import get_current_job as _get_rq_job
                         _rq_job = _get_rq_job()
                         if _rq_job is not None:
-                            _rq_job.heartbeat(timeout=3600)
+                            _rq_job.heartbeat(datetime.now(tz=_tz.utc), 3600)
                     except Exception:  # noqa: BLE001
                         pass
 
@@ -597,7 +599,7 @@ def kick_job_worker(app) -> None:
         with SessionLocal() as db:
             queued = crud.list_queued_jobs(db)
         for job in queued:
-            _enqueue_rq(job.id)
+            _enqueue_rq(job.id, job_type=job.job_type)
     else:
         _ensure_job_worker(app)
 
@@ -663,20 +665,20 @@ def enqueue_job(
 def _enqueue_rq(job_id: int, *, job_type: str = "") -> None:
     """Push job_id onto the Redis queue for the RQ worker to pick up.
 
-    Bulk imports use a 1-hour inactivity timeout instead of a fixed wall-clock
-    limit.  The _progress callback calls rq_job.heartbeat() on every canton/prefix
-    tick, so the clock resets as long as the job is making progress.  A job that
-    stops progressing for more than 1 hour is considered genuinely stuck and will
-    be killed by RQ.
+    Bulk/detail jobs run with job_timeout=-1 (no SIGALRM wall-clock limit).
+    They are cancelled explicitly via abort_cb / cancel_requested.
+    All other jobs cap at 2 hours.
+    The _progress heartbeat keeps the started-registry TTL alive so
+    clean_registries does not mark a healthy long-running job as stale.
     """
     from redis import Redis
     from rq import Queue as RQueue
     from app.config import settings as _settings
 
-    # Long-running jobs (bulk, detail) use a 1-hour inactivity timeout — the
-    # _progress heartbeat resets it on every tick so they run as long as needed.
-    # All other jobs keep a fixed 2-hour wall-clock limit.
-    timeout = 3600 if job_type in ("bulk", "detail") else 7200
+    # Long-running jobs have no wall-clock limit (-1 = no SIGALRM).
+    # The abort_cb / cancel_requested flag is the only kill switch for these.
+    # Short jobs cap at 2 hours; if they exceed that they are genuinely stuck.
+    timeout = -1 if job_type in ("bulk", "detail") else 7200
 
     conn = Redis.from_url(_settings.redis_url)
     q = RQueue("helvex", connection=conn)
