@@ -60,6 +60,7 @@ postgres:
   instances: 1
   storageSize: 40Gi
   backupEnabled: true
+  restoreFromBackup: true
   s3EndpointUrl: "https://nbg1.your-objectstorage.com"
   s3BucketPath: "s3://helvex-backups/pg-prod/"
   backupSchedule: "0 0 2 * * *"

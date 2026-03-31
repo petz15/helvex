@@ -169,7 +169,7 @@ helmfile -e prod apply --selector name=helvex \
   --suppress-diff
 ```
 
-CloudNativePG will read the latest base backup + WAL from `s3://helvex-backups/pg/` and replay them. Wait until the cluster is healthy:
+CloudNativePG will read the latest base backup + WAL from `s3://helvex-backups/pg-prod/` and replay them. Wait until the cluster is healthy:
 
 ```bash
 kubectl get cluster -n helvex-prod -w
