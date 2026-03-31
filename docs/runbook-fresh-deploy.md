@@ -132,7 +132,12 @@ rm /tmp/arc-key.pem
 kubectl get secret arc-github-app -n arc-systems
 ```
 
-### Step 5 — Run helmfile to deploy the full stack
+### Step 5 — Deploy operators and ARC only
+
+> **Important:** Do **not** deploy the `helvex` chart manually. The `helvex-env` secret
+> (which holds S3 credentials for PG backup restore, DB passwords, etc.) is created by the
+> GitHub Actions deploy workflow. If you deploy the helvex chart before the secret exists,
+> the PostgreSQL cluster will get stuck in "Setting up primary" forever.
 
 ```bash
 cd /opt/helvex
@@ -140,11 +145,16 @@ git checkout prod_init
 git pull
 cd infra
 
+# CRDs first
 helmfile -e prod apply --selector name=cert-manager --suppress-diff
 helmfile -e prod apply --selector name=cloudnative-pg --suppress-diff
 kubectl wait --for condition=established --timeout=120s crd/clusters.postgresql.cnpg.io
 kubectl wait --for condition=established --timeout=120s crd/clusterissuers.cert-manager.io
-helmfile -e prod apply --suppress-diff
+
+# ARC (self-hosted GitHub Actions runner)
+helmfile -e prod apply --selector name=arc-controller --suppress-diff
+helmfile -e prod apply --selector name=arc-rbac --suppress-diff
+helmfile -e prod apply --selector name=arc-runner-set --suppress-diff
 ```
 
 Wait for ARC pods to start:
@@ -153,31 +163,9 @@ Wait for ARC pods to start:
 kubectl get pods -n arc-systems -w
 ```
 
-
 You should see `arc-controller-*` and `arc-runner-set-*` pods reach `Running`.
 
-### Step 6 — Restore database (if rebuilding with existing data)
-
-Skip this step if the database is empty (first-time deploy).
-
-If you have existing data backed up in S3, restore it now while still SSH'd into `app1`. This uses `--set` to override the value at apply time — **no code change or commit needed**:
-
-```bash
-cd /opt/helvex/infra
-helmfile -e prod apply --selector name=helvex \
-  --set postgres.restoreFromBackup=true \
-  --suppress-diff
-```
-
-CloudNativePG will read the latest base backup + WAL from `s3://helvex-backups/pg-prod/` and replay them. Wait until the cluster is healthy:
-
-```bash
-kubectl get cluster -n helvex-prod -w
-```
-
-Wait for `STATUS: Cluster in healthy state`.
-
-### Step 7 — Trigger the first deploy
+### Step 6 — Trigger the first deploy
 
 Exit the SSH session. On your local machine:
 
@@ -188,17 +176,23 @@ git push
 
 Watch the workflow run at **github.com/petz15/helvex → Actions**.
 
-The `deploy` job will run on the `helvex-prod` ARC runner (the pod you started in step 5).
+The `deploy` job will run on the `helvex-prod` ARC runner (the pod you started in step 5). It will:
 
-> The deploy workflow uses `restoreFromBackup: false` (the default). No toggle commit needed — the `--set` override from step 6 only applied to that one manual helmfile run.
+1. Create the `helvex-env` K8s secret (with S3 credentials, DB password, etc.)
+2. Deploy the helvex chart via helmfile (PostgreSQL, Redis, app, workers)
+3. Wait for PostgreSQL to become healthy (up to 10 minutes — restore from S3 backup)
+4. Wait for app rollout
+
+> **Database restore:** `prod.yaml` has `restoreFromBackup: true`, so the PostgreSQL
+> cluster bootstraps by restoring from `s3://helvex-backups/pg-prod/`. This only applies
+> on first cluster creation — subsequent deploys ignore the bootstrap section because
+> the cluster already exists. If this is a first-time deploy with no S3 backup, set
+> `restoreFromBackup: false` in `prod.yaml` before pushing.
 
 ### Step 7 — Verify
 
 ```bash
-ssh-keygen -R <app1-public-ip>
 ssh ubuntu@<app1-public-ip>
-export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
-
 kubectl get pods -n helvex-prod
 ```
 
@@ -248,17 +242,15 @@ Then in `infra/environments/prod.yaml` set `mlWorker.keda.enabled: true` and pus
 
 ## Updating a secret value after deploy
 
-The deploy workflow only **creates** secrets if missing — it does not update them. To rotate a secret:
+The deploy workflow uses `kubectl create ... --dry-run=client -o yaml | kubectl apply -f -`, so it **always updates** `helvex-env` to match the current GitHub Secrets. To rotate a secret:
+
+1. Update the value in **GitHub → Settings → Secrets and variables → Actions**
+2. Push a `[deploy-prod]` or `[deploy-app]` commit — the workflow will overwrite the K8s secret with the new values
+3. Restart any pods that need the new value (they read env vars at startup):
 
 ```bash
-ssh-keygen -R <app1-public-ip>
 ssh ubuntu@<app1-public-ip>
-export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
-
-# Delete and let the next deploy recreate it
-kubectl delete secret helvex-env -n helvex-prod
-
-# Then update the value in GitHub Secrets and push a [deploy-prod] commit
+kubectl rollout restart deployment/helvex -n helvex-prod
 ```
 
 ---

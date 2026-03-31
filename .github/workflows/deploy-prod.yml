@@ -174,21 +174,6 @@ jobs:
           kubectl wait --for condition=established --timeout=60s crd/clusters.postgresql.cnpg.io
           kubectl wait --for condition=established --timeout=60s crd/clusterissuers.cert-manager.io
 
-      - name: Wait for PostgreSQL to be healthy (fresh deploy recovery)
-        if: contains(github.event.head_commit.message, '[deploy-prod]')
-        run: |
-          echo "Waiting for PostgreSQL cluster to be healthy..."
-          kubectl wait --for=jsonpath='{.status.phase}=Cluster in healthy state' \
-            cluster/helvex-pg \
-            -n helvex-prod \
-            --timeout=600s || true
-
-          # Give it a few more seconds to ensure the service is responsive
-          sleep 10
-
-          # Verify the service endpoint exists
-          kubectl get endpoints helvex-pg-rw -n helvex-prod
-
       - name: Apply Helmfile (full deploy)
         if: |
           contains(github.event.head_commit.message, '[deploy-prod]') ||
@@ -219,6 +204,27 @@ jobs:
           kubectl set image deployment/helvex \
             app=ghcr.io/${{ github.repository }}:${{ github.sha }} \
             -n helvex-prod
+
+      - name: Wait for PostgreSQL to be healthy
+        if: contains(github.event.head_commit.message, '[deploy-prod]')
+        run: |
+          echo "Waiting for PostgreSQL cluster to become healthy..."
+          for i in $(seq 1 60); do
+            phase=$(kubectl get cluster helvex-pg -n helvex-prod -o jsonpath='{.status.phase}' 2>/dev/null || echo "NotFound")
+            echo "  Attempt $i/60: phase=$phase"
+            if [ "$phase" = "Cluster in healthy state" ]; then
+              echo "PostgreSQL is healthy!"
+              break
+            fi
+            if [ "$i" -eq 60 ]; then
+              echo "ERROR: PostgreSQL did not become healthy within 10 minutes"
+              kubectl describe cluster helvex-pg -n helvex-prod || true
+              kubectl get pods -n helvex-prod -l cnpg.io/cluster=helvex-pg -o wide || true
+              kubectl logs -n helvex-prod -l cnpg.io/cluster=helvex-pg --tail=50 || true
+              exit 1
+            fi
+            sleep 10
+          done
 
       - name: Wait for rollout
         run: |
