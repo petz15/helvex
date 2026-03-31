@@ -1950,6 +1950,7 @@ def claude_classify_batch(
     org_id: int | None = None,
     resume_from: int = 0,
     use_batch_api: bool = False,
+    submit_only: bool = False,
     companies_per_message: int = 1,
     progress_cb: Any = None,
 ) -> dict[str, Any]:
@@ -2139,6 +2140,14 @@ def claude_classify_batch(
         batch = client.beta.messages.batches.create(requests=requests_list)
         stats["batch_id"] = batch.id
 
+        if submit_only:
+            # Serialise chunk_map (company IDs per custom_id) so the caller can
+            # store it and later reconstruct the mapping when polling for results.
+            stats["chunk_company_ids"] = {
+                cid: [c.id for c in cos] for cid, cos in chunk_map.items()
+            }
+            return stats
+
         if progress_cb:
             progress_cb(0, total, stats)
 
@@ -2220,3 +2229,94 @@ def claude_classify_batch(
         progress_cb(total, total, stats)
 
     return stats
+
+
+def resume_claude_batch(
+    db,
+    *,
+    batch_id: str,
+    chunk_company_ids: dict,
+    api_key: str,
+    org_id: int | None = None,
+) -> tuple[str, dict]:
+    """Poll an Anthropic Message Batch and process results if it has finished.
+
+    Returns ``(processing_status, stats)``.  When ``processing_status == "ended"``
+    the companies have been updated and the DB committed.  Any other value means
+    the batch is still in progress — the caller should retry later.
+    """
+    try:
+        import anthropic as _anthropic
+    except ImportError:
+        return ("error", {"error": "anthropic package not installed", "classified": 0, "skipped": 0, "errors": []})
+
+    if not api_key:
+        return ("error", {"error": "Anthropic API key not configured", "classified": 0, "skipped": 0, "errors": []})
+
+    client = _anthropic.Anthropic(api_key=api_key)
+    try:
+        batch = client.beta.messages.batches.retrieve(batch_id)
+    except Exception as exc:  # noqa: BLE001
+        return ("error", {"error": f"Anthropic API error: {exc}", "classified": 0, "skipped": 0, "errors": [str(exc)]})
+
+    if batch.processing_status != "ended":
+        return (batch.processing_status, {"classified": 0, "skipped": 0, "errors": []})
+
+    stats: dict = {"classified": 0, "skipped": 0, "errors": [], "input_tokens": 0, "output_tokens": 0}
+
+    all_ids = [cid for ids in chunk_company_ids.values() for cid in ids]
+    if not all_ids:
+        return ("ended", stats)
+
+    companies_by_id = {c.id: c for c in db.query(Company).filter(Company.id.in_(all_ids)).all()}
+    chunk_map = {
+        cid: [companies_by_id[cid2] for cid2 in ids if cid2 in companies_by_id]
+        for cid, ids in chunk_company_ids.items()
+    }
+
+    def _strip(text: str) -> str:
+        if text.startswith("```"):
+            text = text.split("```")[1]
+            if text.startswith("json"):
+                text = text[4:]
+        return text.strip()
+
+    now = datetime.now(tz=timezone.utc)
+
+    for result in client.beta.messages.batches.results(batch_id):
+        chunk = chunk_map.get(result.custom_id)
+        if not chunk:
+            continue
+        if result.result.type == "succeeded":
+            text = result.result.message.content[0].text.strip()
+            stats["input_tokens"] += result.result.message.usage.input_tokens
+            stats["output_tokens"] += result.result.message.usage.output_tokens
+            try:
+                data = json.loads(_strip(text))
+                if len(chunk) == 1:
+                    company = chunk[0]
+                    company.ai_score = max(0, min(100, int(data.get("score", 0))))
+                    company.ai_category = str(data.get("category", ""))[:128] if data.get("category") else None
+                    company.ai_freeform = str(data["freeform"]) if data.get("freeform") else None
+                    company.ai_scored_at = now
+                else:
+                    if not isinstance(data, list):
+                        raise ValueError(f"Expected array, got {type(data).__name__}")
+                    for company, item in zip(chunk, data):
+                        company.ai_score = max(0, min(100, int(item.get("score", 0))))
+                        company.ai_category = str(item.get("category", ""))[:128] if item.get("category") else None
+                        company.ai_freeform = str(item["freeform"]) if item.get("freeform") else None
+                        company.ai_scored_at = now
+                stats["classified"] += len(chunk)
+            except Exception as exc:  # noqa: BLE001
+                uids = ", ".join(c.uid for c in chunk)
+                stats["errors"].append(f"{uids}: {type(exc).__name__}: {exc}")
+                stats["skipped"] += len(chunk)
+        else:
+            err_info = getattr(result.result, "error", result.result.type)
+            uids = ", ".join(c.uid for c in chunk)
+            stats["errors"].append(f"{uids}: batch error — {err_info}")
+            stats["skipped"] += len(chunk)
+
+    db.commit()
+    return ("ended", stats)

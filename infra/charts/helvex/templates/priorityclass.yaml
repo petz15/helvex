@@ -16,4 +16,14 @@ metadata:
     {{- include "helvex.labels" . | nindent 4 }}
 value: 100
 globalDefault: false
-description: "Background job worker. Evicted before web pods under memory pressure."
+description: "Background job workers (zefix, api). Evicted before web pods under memory pressure."
+---
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: helvex-ml-worker
+  labels:
+    {{- include "helvex.labels" . | nindent 4 }}
+value: 50
+globalDefault: false
+description: "ML worker (HDBSCAN/TF-IDF). Evicted first — spun up on demand via KEDA."

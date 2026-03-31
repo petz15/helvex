@@ -45,9 +45,15 @@ resources:
 # GHCR pull secret — set in prod.yaml; leave empty for dev (local registry needs no auth)
 imagePullSecrets: []
 
-# RQ job worker — separate Deployment running app/worker_entrypoint.py
-worker:
-  enabled: false   # set to true in prod when USE_RQ=true
+# ── RQ workers — separate Deployments running app/worker_entrypoint.py ─────────
+#
+# Three specialized workers, each listening to its own queue:
+#   zefix-worker  helvex-zefix  bulk/detail/initial/batch imports
+#   api-worker    helvex-api    scoring, geocode, NOGA, Claude classify
+#   ml-worker     helvex-ml     HDBSCAN clustering, TF-IDF (scale-to-0 via KEDA)
+
+zefixWorker:
+  enabled: false   # set to true in prod
   replicaCount: 1
   resources:
     requests:
@@ -56,6 +62,32 @@ worker:
     limits:
       cpu: "1"
       memory: 1Gi
+
+apiWorker:
+  enabled: false   # set to true in prod
+  replicaCount: 2  # 2 replicas = 2 concurrent API jobs
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      cpu: "1"
+      memory: 1Gi
+
+mlWorker:
+  enabled: false   # set to true in prod
+  keda:
+    enabled: false   # set to true after KEDA + Hetzner Cluster Autoscaler are installed
+  # nodeSelector and tolerations for a dedicated ML node pool (set in prod.yaml after CA setup)
+  nodeSelector: {}
+  tolerations: []
+  resources:
+    requests:
+      cpu: 500m
+      memory: 1Gi
+    limits:
+      cpu: "2"
+      memory: 2Gi
 
 # CloudNativePG PostgreSQL cluster
 postgres:

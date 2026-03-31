@@ -37,12 +37,12 @@ variable "servers" {
   }))
   default = {
     app1 = {
-      server_type = "cx32"
+      server_type = "cx33"
       role        = "k3s-control-plane"
       private_ip  = "10.0.1.10"
     }
     db1 = {
-      server_type = "cx22"
+      server_type = "cx33"
       role        = "k3s-worker"
       private_ip  = "10.0.1.11"
       node_labels = ["helvex.io/role=database"]

@@ -153,7 +153,7 @@ export interface Job {
   id: number;
   job_type: string;
   label: string;
-  status: "queued" | "running" | "paused" | "completed" | "failed" | "cancelled";
+  status: "queued" | "running" | "paused" | "completed" | "failed" | "cancelled" | "waiting_external";
   message: string | null;
   progress_done: number | null;
   progress_total: number | null;

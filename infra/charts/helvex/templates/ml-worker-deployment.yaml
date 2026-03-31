@@ -1,27 +1,29 @@
-{{- if .Values.zefixWorker.enabled }}
+{{- if .Values.mlWorker.enabled }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: {{ include "helvex.fullname" . }}-zefix-worker
+  name: {{ include "helvex.fullname" . }}-ml-worker
   namespace: {{ .Release.Namespace }}
   labels:
     {{- include "helvex.labels" . | nindent 4 }}
-    app.kubernetes.io/component: zefix-worker
+    app.kubernetes.io/component: ml-worker
 spec:
-  replicas: {{ .Values.zefixWorker.replicaCount }}
+  # KEDA manages replicas (0 → 1) when mlWorker.keda.enabled=true.
+  # Set to 0 so the pod doesn't run without KEDA.
+  replicas: 0
   strategy:
     type: Recreate
   selector:
     matchLabels:
       {{- include "helvex.selectorLabels" . | nindent 6 }}
-      app.kubernetes.io/component: zefix-worker
+      app.kubernetes.io/component: ml-worker
   template:
     metadata:
       labels:
         {{- include "helvex.labels" . | nindent 8 }}
-        app.kubernetes.io/component: zefix-worker
+        app.kubernetes.io/component: ml-worker
     spec:
-      priorityClassName: helvex-worker
+      priorityClassName: helvex-ml-worker
       securityContext:
         runAsNonRoot: true
         runAsUser: 1000
@@ -31,8 +33,16 @@ spec:
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
       {{- end }}
+      {{- with .Values.mlWorker.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.mlWorker.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       containers:
-        - name: zefix-worker
+        - name: ml-worker
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           command: ["python", "-m", "app.worker_entrypoint"]
@@ -45,10 +55,10 @@ spec:
             - name: DISABLE_JOB_WORKER
               value: "true"
             - name: WORKER_TYPE
-              value: "zefix"
+              value: "ml"
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: false
           resources:
-            {{- toYaml .Values.zefixWorker.resources | nindent 12 }}
+            {{- toYaml .Values.mlWorker.resources | nindent 12 }}
 {{- end }}

@@ -39,8 +39,21 @@ resources:
 imagePullSecrets:
   - name: ghcr-pull-secret
 
-worker:
+zefixWorker:
   enabled: true
+
+apiWorker:
+  enabled: true
+
+mlWorker:
+  enabled: true
+  # keda.enabled: true  — uncomment after KEDA + Hetzner Cluster Autoscaler are installed
+  # nodeSelector: {workload: ml}
+  # tolerations:
+  #   - key: workload
+  #     operator: Equal
+  #     value: ml
+  #     effect: NoSchedule
 
 postgres:
   enabled: true

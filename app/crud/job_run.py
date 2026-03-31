@@ -243,3 +243,30 @@ def resume_paused_job(db: Session, job: JobRun) -> JobRun:
     db.commit()
     db.refresh(job)
     return job
+
+
+def mark_waiting_external(
+    db: Session,
+    job: JobRun,
+    *,
+    message: str,
+    params: dict[str, Any] | None = None,
+) -> JobRun:
+    """Set job status to 'waiting_external' (e.g. Anthropic Batch API submitted, awaiting results)."""
+    job.status = "waiting_external"
+    job.message = message
+    if params is not None:
+        job.params_json = json.dumps(params)
+    db.commit()
+    db.refresh(job)
+    return job
+
+
+def list_waiting_llm_batches(db: Session) -> list[JobRun]:
+    """Return all claude_classify jobs currently waiting for an external batch to complete."""
+    return (
+        db.query(JobRun)
+        .filter(JobRun.job_type == "claude_classify", JobRun.status == "waiting_external")
+        .order_by(JobRun.queued_at.asc())
+        .all()
+    )

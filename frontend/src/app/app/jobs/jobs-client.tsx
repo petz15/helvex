@@ -13,6 +13,7 @@ function statusIcon(status: Job["status"]) {
     case "cancelled": return <XCircle size={14} className="text-slate-400" />;
     case "running": return <Loader2 size={14} className="text-blue-500 animate-spin" />;
     case "paused": return <PauseCircle size={14} className="text-amber-500" />;
+    case "waiting_external": return <Clock size={14} className="text-violet-500 animate-pulse" />;
     default: return <Clock size={14} className="text-slate-400" />;
   }
 }
@@ -25,6 +26,7 @@ function statusBadge(status: Job["status"]) {
     case "cancelled": return <span className={cn(base, "bg-slate-100 text-slate-500")}>{statusIcon(status)} cancelled</span>;
     case "running": return <span className={cn(base, "bg-blue-50 text-blue-700")}>{statusIcon(status)} running</span>;
     case "paused": return <span className={cn(base, "bg-amber-50 text-amber-700")}>{statusIcon(status)} paused</span>;
+    case "waiting_external": return <span className={cn(base, "bg-violet-50 text-violet-700")}>{statusIcon(status)} waiting for Anthropic</span>;
     default: return <span className={cn(base, "bg-slate-100 text-slate-600")}>{statusIcon(status)} queued</span>;
   }
 }
@@ -72,7 +74,7 @@ function JobEvents({ jobId }: { jobId: number }) {
 
 function JobRow({ job, onAction }: { job: Job; onAction: () => void }) {
   const [expanded, setExpanded] = useState(false);
-  const active = job.status === "running" || job.status === "queued" || job.status === "paused";
+  const active = job.status === "running" || job.status === "queued" || job.status === "paused" || job.status === "waiting_external";
 
   async function doCancel() {
     await cancelJob(job.id);
@@ -93,6 +95,7 @@ function JobRow({ job, onAction }: { job: Job; onAction: () => void }) {
       job.status === "running" ? "border-blue-200 bg-blue-50/30" :
       job.status === "failed" ? "border-red-200 bg-red-50/30" :
       job.status === "paused" ? "border-amber-200 bg-amber-50/30" :
+      job.status === "waiting_external" ? "border-violet-200 bg-violet-50/30" :
       "border-slate-200 bg-white"
     )}>
       <div className="flex items-start gap-3">
@@ -151,8 +154,8 @@ function JobRow({ job, onAction }: { job: Job; onAction: () => void }) {
 export function JobsClient() {
   const { data: jobs = [], mutate: reloadJobs, isLoading } = useSWR<Job[]>("jobs", fetchJobs, { refreshInterval: 3000 });
 
-  const active = jobs.filter(j => ["running", "queued", "paused"].includes(j.status));
-  const finished = jobs.filter(j => !["running", "queued", "paused"].includes(j.status));
+  const active = jobs.filter(j => ["running", "queued", "paused", "waiting_external"].includes(j.status));
+  const finished = jobs.filter(j => !["running", "queued", "paused", "waiting_external"].includes(j.status));
 
   return (
     <div className="p-6 max-w-4xl mx-auto space-y-6">
