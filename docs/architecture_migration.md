@@ -1,8 +1,26 @@
 # Zefix Analyzer → Firmiq: Architecture Migration Plan
 
-## Current State
+## Current State (as of 2026-03-31)
 
-FastAPI monolith + Jinja2 server-rendered UI + PostgreSQL + in-process background job thread + ML pipeline (TF-IDF/K-Means + spaCy) + Claude Haiku AI classification. Deployed via Docker Compose with Nginx reverse proxy. Single-user, no tiers, no multi-tenancy.
+FastAPI backend + Next.js 14 App Router frontend + PostgreSQL (CloudNativePG) + Redis (RQ job queue) + ML pipeline (TF-IDF/HDBSCAN + spaCy) + Claude AI classification + NOGA classification. Deployed on K3s (Hetzner, single cluster `helvex-prod`) via Helm chart managed by GitHub Actions.
+
+**Implemented (deviations from original plan):**
+- ✅ Next.js frontend fully replaces Jinja2; separate K8s Deployment
+- ✅ RQ (Redis Queue) replaces the planned Redis Streams model — simpler, no XREADGROUP bookkeeping
+- ✅ Three-worker split: `zefix-worker` (bulk/detail/initial/batch), `api-worker` (scoring/geocode/NOGA/Claude), `ml-worker` (HDBSCAN/TF-IDF); each listens on its own RQ queue
+- ✅ `WORKER_TYPE` env var dispatches each pod to its queue; `api-worker` runs 2 replicas for concurrency
+- ✅ `job_timeout=-1` + `_heartbeat()` in every `_progress` callback — no SIGALRM kills; jobs live as long as they report progress
+- ✅ LLM Batch API two-phase: `claude_classify` with `use_batch_api=True` submits → `waiting_external`; api-worker daemon thread polls Anthropic every 5 min; queue never blocked for 24h
+- ✅ KEDA `ScaledObject` for ml-worker: scales 0→1 when `rq:queue:helvex-ml` has jobs; 5-min cooldown
+- ✅ CloudNativePG: 1 primary + 1 standby, WAL archiving + daily base backups to Hetzner Object Storage
+- ✅ Email verification, JWT auth, org management, user settings
+- ✅ Company Explorer page (Unternehmens-Explorer) replacing old search/hunt page
+- ✅ NOGA classification integrated into company profiles and explorer filters
+- ✅ Stopword management in settings, integrated into DB and ML pipeline
+- ✅ Monolith single Helm chart (not per-service charts) — deferred split until load requires it
+- ⏳ Cluster autoscaler (node-level, Hetzner CA) — prerequisites: `hcloud-cloud-controller-manager` + CA Helm chart; deferred
+- ⏳ Monitoring/Grafana stack — started but paused (resource cost vs value at current scale)
+- ❌ Doppler K8s operator — using native K8s secrets populated by GitHub Actions deploy workflow
 
 ---
 
@@ -58,19 +76,22 @@ FastAPI monolith + Jinja2 server-rendered UI + PostgreSQL + in-process backgroun
 
 ### Cloud: Hetzner
 - European/Swiss data residency for GDPR compliance
-- 3 nodes: CX32 × 2 (api + workers), CX22 × 1 (PostgreSQL)
-- ~€44/month total (2× CX32 €15 + CX22 €8 + LB11 €6 + Object Storage ~€1)
+- Current: `app1` (cx33, 4 vCPU/8 GiB — control-plane + all workers) + `db1` (cx23, 2 vCPU/4 GiB — CloudNativePG worker node)
+- Recommended upgrade: `app1` → cx43 (8 vCPU/16 GiB) once three-worker split is active to give each worker headroom
+- ML node: provisioned on-demand by Cluster Autoscaler (cx41 class) when ml-worker jobs queue up; scales to 0 between jobs
+- ~€44–60/month depending on ML node usage (cx33 €17 + cx23 €8 + LB11 €6 + Object Storage ~€1; cx43 upgrade adds ~€15)
 
 ### Orchestration: K3s
 - Single cluster, two namespaces: `zefix-dev` and `zefix-prod`
 - Helmfile for GitOps (dev/prod overlays via `infra/environments/`)
 - ArgoCD deferred until team grows beyond solo
 
-### Message Queue: Redis Streams
-- Redis StatefulSet (10 GB PV) — not Upstash (latency overhead for rate limiting)
-- Three stream keys: `jobs:collection`, `jobs:scoring`, `jobs:ml`
-- `XREADGROUP` consumer groups — multiple replicas won't double-process
-- `job_runs` PostgreSQL table is the source of truth; Redis is dispatch-only
+### Message Queue: RQ (Redis Queue)
+- Redis Helm chart (StatefulSet) — not Upstash
+- Three queues: `helvex-zefix`, `helvex-api`, `helvex-ml`
+- RQ workers: each picks jobs only from its queue; multiple replicas on `helvex-api` provide concurrency without double-processing
+- `job_runs` PostgreSQL table is the source of truth; Redis is dispatch + heartbeat only
+- **Note:** original plan used Redis Streams + `XREADGROUP`; RQ was chosen for simplicity and built-in job lifecycle management
 
 ### Database: CloudNativePG (K8s-native)
 - Runs inside K3s cluster as a CRD
@@ -135,41 +156,40 @@ firmiq/
 
 ---
 
-## Data Flow (Target)
+## Data Flow (Implemented)
 
 ```
-Cloudflare (TLS, CDN, DDoS)
+Cloudflare / cert-manager (TLS)
       │
 ┌─────▼──────────┐
-│   Next.js      │  K8s pod (cpu: 200m, memory: 256Mi)
+│   Next.js      │  K8s Deployment (cpu: 200m, memory: 256Mi)
 └─────┬──────────┘
       │ REST/JWT
 ┌─────▼──────────────────┐
-│  api (FastAPI)          │  K8s Deployment, 2 replicas
-│  JWT auth + rate limit  │  (cpu: 500m, memory: 512Mi)
-│  Tier enforcement       │
-│  OpenAPI docs           │
+│  FastAPI (app)          │  K8s Deployment, 1 replica
+│  JWT auth               │  (cpu: 500m, memory: 512Mi)
+│  Job dispatch → RQ      │
 └──┬──────────────────────┘
-   │ publish to Redis Streams
-┌──▼──────────────────────────────────────┐
-│              Redis Streams              │
-│  jobs:collection | jobs:scoring | jobs:ml│
-└──┬─────────────┬───────────────┬────────┘
-   │             │               │
-┌──▼───────┐ ┌───▼──────────┐ ┌─▼────────────┐
-│collection│ │scoring-      │ │ml-worker     │
-│-worker   │ │worker        │ │TF-IDF,       │
-│(Zefix,   │ │(scores,      │ │K-Means, spaCy│
-│Google,   │ │Claude AI)    │ │cpu:2000m     │
-│geocoding)│ │              │ │mem:3Gi       │
-└──────────┘ └──────────────┘ └──────────────┘
-      │             │               │
-┌─────▼─────────────▼───────────────▼──────┐
-│           CloudNativePG                   │
-│  PgBouncer (transaction mode)             │
-│  1 primary + 1 standby                   │
-│  WAL → Hetzner Object Storage             │
-└───────────────────────────────────────────┘
+   │ enqueue to RQ (Redis)
+┌──▼──────────────────────────────────────────┐
+│                   Redis (RQ)                │
+│  helvex-zefix | helvex-api | helvex-ml      │
+└──┬──────────────┬──────────────┬────────────┘
+   │              │              │
+┌──▼──────────┐ ┌─▼───────────┐ ┌─▼──────────────┐
+│zefix-worker │ │api-worker   │ │ml-worker       │
+│1 replica    │ │2 replicas   │ │KEDA 0→1        │
+│bulk/detail/ │ │geocode/score│ │HDBSCAN/TF-IDF  │
+│initial/batch│ │NOGA/Claude  │ │cpu:500m-2      │
+│             │ │+LLM poll    │ │mem:1-2Gi       │
+│             │ │  thread     │ │(on-demand node)│
+└─────────────┘ └─────────────┘ └────────────────┘
+      │              │                │
+┌─────▼──────────────▼────────────────▼──────┐
+│           CloudNativePG                    │
+│  1 primary + 1 standby                    │
+│  WAL archiving → Hetzner Object Storage   │
+└────────────────────────────────────────────┘
 ```
 
 ---
@@ -194,34 +214,28 @@ Cloudflare (TLS, CDN, DDoS)
 
 Deploy the existing monolith to K3s — no microservices split yet.
 
-#### Status (as of 2026-03-24)
+#### Status (as of 2026-03-31)
 
 **Done:**
 - ✅ Hetzner Object Storage bucket `helvex-backups` created (nbg1), Terraform S3 backend configured
-- ✅ Terraform provisioned: `app1` (cx23, control-plane) + `db1` (cx23, worker), LB `162.55.153.183`, private network, firewall
-- ✅ K3s installed on both nodes; flannel interface fixed (`eth1` → `enp7s0`)
-- ✅ Both nodes `Ready` (`kubectl get nodes` confirmed)
-- ✅ DNS: `helvex.dicy.ch` A → `162.55.153.183`
-- ✅ kubeconfig saved locally (`~/.kube/helvex-prod.yaml`)
-- ✅ Namespace `helvex-prod` created
-- ✅ K8s secrets created: `helvex-env`, `ghcr-pull-secret`, `arc-github-app`
-- ✅ ARC (Actions Runner Controller) added to helmfile — replaces self-hosted runner
-- ✅ Deploy workflows updated: tag `deploy-dev` → dev, `deploy-prod` → prod + minor version bump
-- ✅ Terraform updated: pre-allocates static primary IP for control-plane (fixes TLS SAN on rebuild)
-
-**Outstanding (blockers):**
-- ❌ `helm` + `helmfile` not yet installed on `app1` (cloud-init template updated; manual install needed for current server)
-- ❌ `helmfile -e prod apply` not yet run — nothing deployed to cluster yet (no app, no CloudNativePG, no Redis, no ARC, no cert-manager)
-- ❌ TLS SAN fix currently manual — will be automatic after next `terraform apply` (primary IP pre-allocation)
-- ❌ `ubuntu` user + k3s group setup not in cloud-init (still manual)
-- ❌ Data migration not done (`pg_dump` → CloudNativePG)
-- ❌ Post-deploy smoke test not done
+- ✅ Terraform provisioned: `app1` (cx33, control-plane) + `db1` (cx23, worker), LB, private network, firewall
+- ✅ K3s installed on both nodes; both `Ready`
+- ✅ DNS: `helvex.dicy.ch` → LB; TLS via cert-manager + Let's Encrypt
+- ✅ ARC (Actions Runner Controller) — ephemeral runner pods, survives rebuilds
+- ✅ CloudNativePG cluster live: 1 primary + 1 standby, WAL archiving to S3, daily base backups
+- ✅ App + frontend deployed; CI/CD via GitHub Actions `[deploy-app]` / `[deploy-prod]` tags
+- ✅ Data migration complete (pg_dump → CloudNativePG)
+- ✅ Three-worker split deployed: zefix-worker, api-worker (2 replicas), ml-worker (KEDA scale-to-0)
+- ✅ LLM Batch API two-phase: `waiting_external` status; api-worker poll thread handles completion
+- ✅ KEDA ScaledObject for ml-worker live (scales 0→1 on queue depth)
 
 **Deviations from original plan:**
 - Dropped `app2` worker node (cost saving — add back when load requires it)
-- Dropped Doppler K8s operator — using native K8s secrets directly for now
-- Replaced self-hosted GitHub Actions runner with ARC (ephemeral pods, survives rebuilds)
-- `replicaCount: 1` instead of 2 (matches single node)
+- Dropped Doppler K8s operator — using native K8s secrets populated by deploy workflow
+- Replaced self-hosted GitHub Actions runner with ARC
+- RQ (Redis Queue) instead of Redis Streams — simpler job lifecycle management
+- Single Helm chart for all services (monolith chart), not per-service charts
+- Cluster autoscaler (node-level) deferred — KEDA handles pod-level only for now
 
 #### Next Steps
 
@@ -280,20 +294,22 @@ Run alongside Jinja2 — remove Jinja2 only when Next.js covers 100% of routes.
 
 ---
 
-### Phase 2 — Redis Streams Job Queue
+### Phase 2 — RQ Job Queue + Three-Worker Split ✅ DONE
 
-Replace `kick_job_worker` threading model in `app/ui/routes.py` with Redis Streams.
+Replaced in-process background thread with RQ (Redis Queue) workers as separate K8s Deployments.
 
-Strategy: dual-write (thread + Redis Streams) for one week, then remove thread dispatch.
+**Implemented queue mapping:**
+- `helvex-zefix` → `bulk`, `detail`, `initial`, `batch` (zefix-worker, 1 replica, always up)
+- `helvex-api` → `re_geocode`, `recalculate_scores`, `recalculate_google_scores`, `reextract_purpose`, `reclassify_noga`, `claude_classify` (api-worker, 2 replicas, always up)
+- `helvex-ml` → `hdbscan_cluster`, `recompute_keywords`, `cluster_analysis` (ml-worker, KEDA scale-to-0)
 
-Stream mapping:
-- `jobs:collection` → `bulk_import`, `batch_collect`, `zefix_detail_collect`, `google_search`, `re_geocode`
-- `jobs:scoring` → `recalculate_zefix_scores`, `recalculate_google_scores`, `claude_classify`
-- `jobs:ml` → `cluster_pipeline`
+**Key decisions:**
+- `job_timeout=-1` for all jobs; `_heartbeat()` called in every `_progress` callback — no SIGALRM kills
+- `claude_classify` with `use_batch_api=True`: submit-only → `waiting_external` status; api-worker daemon thread polls Anthropic every 5 min
+- KEDA `ScaledObject` + `TriggerAuthentication` for ml-worker: 0→1 on queue depth, 5-min cooldown
+- Node-level autoscaling (Hetzner Cluster Autoscaler) deferred as next step after KEDA validated
 
-Message: `{ "job_id": <int>, "job_type": <str>, "params": <dict> }`
-
-**Exit gate:** all 9 job types complete via Redis Streams, zero duplicate executions.
+**Note:** original plan used Redis Streams (`XREADGROUP`); RQ was chosen for simpler job lifecycle and built-in heartbeat/registry management.
 
 ---
 
@@ -439,16 +455,17 @@ These items were addressed in code/config and are now considered closed for the 
 
 ## Cost Estimate (Hetzner, Production)
 
-Todo: reduce resources! ML only on demand. Start small, scale only when needed.
-S3 Bucket as little as possible, use hetzner box for long term backups, due to it being already covered. 
+S3 Bucket: keep as small as possible; use Hetzner Storage Box for long-term backups (already covered by existing subscription).
 
 | Resource | Specification | Monthly Cost |
 |---|---|---|
-| K3s node × 2 (api + workers) | CX32 — 4 vCPU, 8 GB RAM | ~€30 |
-| Database node | CX22 — 2 vCPU, 4 GB RAM | ~€8 |
+| K3s control-plane + workers | cx33 — 4 vCPU, 8 GiB RAM (recommended: upgrade to cx43 8 vCPU/16 GiB) | ~€17–32 |
+| Database node | cx23 — 2 vCPU, 4 GiB RAM | ~€8 |
 | Load Balancer | Hetzner LB11 | ~€6 |
-| Object Storage | ~300 GB (geocoding + exports + backups) | ~€1 |
-| **Total** | | **~€44/month** |
+| Object Storage | ~100 GB (geocoding + WAL + base backups) | ~€1 |
+| ML node (on-demand) | cx41 — 8 vCPU, 16 GiB RAM, provisioned by Cluster Autoscaler | ~€0 idle / ~€0.05/hr when active |
+| **Total (cx33)** | | **~€32/month** |
+| **Total (cx43 upgrade)** | | **~€47/month** |
 
 
 ---

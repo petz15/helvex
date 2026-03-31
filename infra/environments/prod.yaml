@@ -74,4 +74,4 @@ postgres:
     enabled: false
 
 monitoring:
-  enabled: true
+  enabled: false   # kube-prometheus-stack not installed; set true only after monitoring release is enabled in helmfile

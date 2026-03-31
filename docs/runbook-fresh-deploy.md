@@ -204,13 +204,44 @@ kubectl get pods -n helvex-prod
 Expected state:
 
 ```
-helvex-XXXXX          1/1   Running
-helvex-frontend-XXXXX 1/1   Running
-redis-master-0        1/1   Running
-helvex-db-1           1/1   Running   # CloudNativePG primary
+helvex-XXXXX                  1/1   Running   # FastAPI app
+helvex-frontend-XXXXX         1/1   Running   # Next.js
+helvex-zefix-worker-XXXXX     1/1   Running   # Zefix import jobs
+helvex-api-worker-XXXXX       1/1   Running   # Scoring/geocode/Claude jobs (2 replicas)
+helvex-api-worker-YYYYY       1/1   Running
+redis-master-0                1/1   Running
+helvex-db-1                   1/1   Running   # CloudNativePG primary
+helvex-db-2                   1/1   Running   # CloudNativePG standby
 ```
 
+> **ml-worker**: Not listed above — KEDA scales it to 0 replicas by default. It will appear as `helvex-ml-worker-XXXXX` only when an ML job (`hdbscan_cluster`, `recompute_keywords`, `cluster_analysis`) is queued. After the job completes and the 5-minute cooldown elapses, the pod terminates automatically.
+
 Then open https://helvex.dicy.ch in a browser. TLS should be valid (cert-manager issues the Let's Encrypt cert on first request — allow up to 60s).
+
+---
+
+## Installing KEDA (prerequisite for ml-worker scale-to-zero)
+
+KEDA must be installed before enabling `mlWorker.keda.enabled: true` in prod.yaml. Run once on a healthy cluster:
+
+```bash
+helm repo add kedacore https://kedacore.github.io/charts
+helm repo update
+helm install keda kedacore/keda \
+  --namespace keda \
+  --create-namespace \
+  --set watchNamespace=helvex-prod
+```
+
+Verify:
+
+```bash
+kubectl get pods -n keda
+# keda-operator-XXXXX            1/1   Running
+# keda-operator-metrics-XXXXX    1/1   Running
+```
+
+Then in `infra/environments/prod.yaml` set `mlWorker.keda.enabled: true` and push a `[deploy-prod]` commit. The `ScaledObject` and `TriggerAuthentication` resources will be created by the Helm chart.
 
 ---
 
