@@ -433,6 +433,7 @@ def list_companies(
 
 @router.get("/export.csv", summary="Export companies as CSV (enqueues async job)")
 def export_companies_csv(
+    request: Request,
     sort: str = Query("-updated"),
     q: str | None = Query(None),
     uid: str | None = Query(None),
@@ -456,7 +457,6 @@ def export_companies_csv(
     exclude_noga_code: str | None = Query(None),
     exclude_noga_label: str | None = Query(None),
     exclude_noga_level: str | None = Query(None),
-    request: Request,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
