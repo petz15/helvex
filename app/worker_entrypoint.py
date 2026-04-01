@@ -41,6 +41,29 @@ QUEUE_MAP: dict[str, list[str]] = {
 LLM_POLL_INTERVAL = 300  # 5 minutes
 
 
+class ResilientWorker:  # Thin wrapper to avoid importing rq at module import time.
+    """Worker factory that tolerates stale-job cleanup races.
+
+    RQ may raise AbandonedJobError while cleaning started-job registries if a
+    previous worker died mid-job. We log and continue so one stale registry
+    entry does not kill the whole worker process.
+    """
+
+    @staticmethod
+    def create(queues, *, connection):
+        from rq import Worker as _Worker
+        from rq.exceptions import AbandonedJobError
+
+        class _SafeWorker(_Worker):
+            def run_maintenance_tasks(self):
+                try:
+                    super().run_maintenance_tasks()
+                except AbandonedJobError as exc:
+                    logger.warning("Ignored RQ abandoned job during maintenance cleanup: %s", exc)
+
+        return _SafeWorker(queues, connection=connection)
+
+
 def _llm_poll_loop() -> None:
     """Background daemon thread: poll Anthropic Batch API jobs every 5 minutes."""
     from app.services.job_worker import poll_llm_batches
@@ -68,7 +91,7 @@ def main() -> None:
     queue_names = QUEUE_MAP[worker_type]
 
     from redis import Redis
-    from rq import Queue, Worker
+    from rq import Queue
 
     conn = Redis.from_url(settings.redis_url)
     queues = [Queue(name, connection=conn) for name in queue_names]
@@ -84,7 +107,7 @@ def main() -> None:
         t = threading.Thread(target=_llm_poll_loop, daemon=True, name="llm-batch-poller")
         t.start()
 
-    worker = Worker(queues, connection=conn)
+    worker = ResilientWorker.create(queues, connection=conn)
     worker.work(with_scheduler=False)
 
 

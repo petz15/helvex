@@ -82,6 +82,30 @@ def test_subscription_checkout_returns_service_unavailable_when_worldline_missin
     assert "WORLDLINE_CUSTOMER_ID" in resp.json()["detail"]
 
 
+def test_subscription_checkout_returns_service_unavailable_when_worldline_base_url_invalid(client, db, monkeypatch):
+    org = _seed_org(db, org_id=112)
+    _override_user(org.id)
+    monkeypatch.setattr("app.services.payments.settings.payment_provider_mode", "worldline")
+    monkeypatch.setattr("app.services.payments.settings.worldline_customer_id", "cust-1")
+    monkeypatch.setattr("app.services.payments.settings.worldline_terminal_id", "term-1")
+    monkeypatch.setattr("app.services.payments.settings.worldline_api_username", "api-user")
+    monkeypatch.setattr("app.services.payments.settings.worldline_api_password", "api-pass")
+    monkeypatch.setattr("app.services.payments.settings.worldline_api_base_url", "payment.preprod.direct.worldline-solutions.com")
+
+    resp = client.post(
+        "/api/v1/billing/checkout/subscription",
+        json={
+            "tier": "simple",
+            "billing_cycle": "monthly",
+            "success_url": "https://example.com/success",
+            "cancel_url": "https://example.com/cancel",
+        },
+    )
+
+    assert resp.status_code == 503
+    assert "WORLDLINE_API_BASE_URL" in resp.json()["detail"]
+
+
 def test_stripe_webhook_updates_org_subscription(client, db, monkeypatch):
     org = _seed_org(db, org_id=12)
     secret = "whsec_test"

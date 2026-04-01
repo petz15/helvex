@@ -99,6 +99,18 @@ def _worldline_terminal_id() -> str:
     return getattr(settings, "worldline_terminal_id", "").strip()
 
 
+def _worldline_api_base_url() -> str:
+    base = (settings.worldline_api_base_url or "").strip()
+    if not base:
+        raise PaymentConfigurationError("Worldline provider is not configured (WORLDLINE_API_BASE_URL missing)")
+    if not (base.startswith("https://") or base.startswith("http://")):
+        raise PaymentConfigurationError(
+            "Worldline provider is not configured "
+            "(WORLDLINE_API_BASE_URL must start with http:// or https://)"
+        )
+    return base.rstrip("/")
+
+
 def _worldline_callback_url(*, kind: str, order_reference: str, success_url: str, cancel_url: str, source: str) -> str:
     return _query_url(
         "/api/v1/billing/webhooks/worldline/return",
@@ -213,10 +225,8 @@ class WorldlineProvider:
             )
 
     def _create_transaction_initialize(self, payload: dict[str, Any]) -> CheckoutSession:
-        base = settings.worldline_api_base_url.rstrip("/")
+        base = _worldline_api_base_url()
         url = f"{base}/Payment/v1/Transaction/Initialize"
-        customer_id = _worldline_customer_id()
-        terminal_id = _worldline_terminal_id()
         api_username = _worldline_api_username()
         headers = {
             "Accept": "application/json",
@@ -224,12 +234,15 @@ class WorldlineProvider:
         }
 
         with httpx.Client(timeout=100.0) as client:
-            resp = client.post(
-                url,
-                headers=headers,
-                json=payload,
-                auth=(api_username, settings.worldline_api_password),
-            )
+            try:
+                resp = client.post(
+                    url,
+                    headers=headers,
+                    json=payload,
+                    auth=(api_username, settings.worldline_api_password),
+                )
+            except httpx.HTTPError as exc:
+                raise RuntimeError(f"Worldline checkout request failed: {exc}") from exc
             if resp.status_code >= 400:
                 raise RuntimeError(f"Worldline checkout creation failed: {resp.status_code} {resp.text}")
             data = resp.json()
@@ -285,7 +298,7 @@ class WorldlineProvider:
         return session
 
     def authorize_transaction(self, *, token: str) -> dict[str, Any]:
-        base = settings.worldline_api_base_url.rstrip("/")
+        base = _worldline_api_base_url()
         url = f"{base}/Payment/v1/Transaction/Authorize"
         customer_id = _worldline_customer_id()
         api_username = _worldline_api_username()
@@ -302,7 +315,10 @@ class WorldlineProvider:
             "Content-Type": "application/json",
         }
         with httpx.Client(timeout=100.0) as client:
-            resp = client.post(url, headers=headers, json=payload, auth=(api_username, settings.worldline_api_password))
+            try:
+                resp = client.post(url, headers=headers, json=payload, auth=(api_username, settings.worldline_api_password))
+            except httpx.HTTPError as exc:
+                raise RuntimeError(f"Worldline authorization request failed: {exc}") from exc
             if resp.status_code >= 400:
                 raise RuntimeError(f"Worldline authorization failed: {resp.status_code} {resp.text}")
             return resp.json()

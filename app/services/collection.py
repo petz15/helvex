@@ -575,7 +575,11 @@ def import_company_from_zefix_uid(
             raw = zefix_get_company(uid)
             break
         except httpx.HTTPStatusError as exc:
-            if pause_on_zefix_500 and exc.response is not None and exc.response.status_code == 500:
+            if (
+                pause_on_zefix_500
+                and exc.response is not None
+                and exc.response.status_code in {500, 502, 503, 504}
+            ):
                 _wait_for_zefix_availability(status_cb=status_cb, abort_cb=abort_cb)
                 continue
             raise
