@@ -54,6 +54,12 @@ class Settings(BaseSettings):
     smtp_from: str = ""          # e.g. "Helvex <noreply@helvex.dicy.ch>"
     app_base_url: str = "https://helvex.dicy.ch"   # used in email links
 
+    # S3 — for async CSV export file storage (Hetzner Object Storage, same region as DB backups)
+    s3_access_key: str = ""
+    s3_secret_key: str = ""
+    s3_endpoint_url: str = ""          # e.g. "https://nbg1.your-objectstorage.com"
+    s3_bucket_exports: str = ""        # "helvex-exports"
+
     # OAuth — Google and LinkedIn sign-in
     # In dev: set APP_BASE_URL=http://localhost:3000 and register
     # http://localhost:3000/api/v1/auth/google/callback (and linkedin) as dev redirect URIs.

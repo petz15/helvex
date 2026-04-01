@@ -54,6 +54,7 @@ _QUEUE_FOR_JOB_TYPE: dict[str, str] = {
     "reextract_purpose":         "helvex-api",
     "reclassify_noga":           "helvex-api",
     "claude_classify":           "helvex-api",
+    "csv_export":                "helvex-api",
     "hdbscan_cluster":           "helvex-ml",
     "recompute_keywords":        "helvex-ml",
     "cluster_analysis":          "helvex-ml",
@@ -591,6 +592,31 @@ def _run_job(app, job_id: int) -> None:  # noqa: C901
                 )
                 tokens = stats.get("input_tokens", 0) + stats.get("output_tokens", 0)
                 done_msg = f"Done — {stats['classified']} classified, {stats['skipped']} skipped, ~{tokens} tokens, {len(stats['errors'])} errors"
+
+            elif job.job_type == "csv_export":
+                from app.services.csv_export import run_csv_export
+                from app.services.s3_client import is_configured
+
+                if not is_configured():
+                    raise ValueError(
+                        "S3 not configured: set S3_ACCESS_KEY, S3_SECRET_KEY, S3_BUCKET, S3_ENDPOINT_URL"
+                    )
+
+                def _progress(done: int, total: int, _stats: dict) -> None:
+                    _assert_not_cancelled()
+                    msg = f"Exported {done:,}" + (f"/{total:,}" if total else "") + " rows…"
+                    crud.update_progress(db, job, message=msg, done=done, total=total, stats=_stats)
+                    _maybe_sync(app, job_type=job.job_type, label=job.label, message=msg, stats=dict(_stats), error=None, done=False)
+                    _heartbeat()
+
+                stats = run_csv_export(
+                    db,
+                    params=params,
+                    user_id=job.user_id,
+                    org_id=job.org_id,
+                    progress_cb=_progress,
+                )
+                done_msg = f"Done — {stats['row_count']:,} rows exported to S3"
 
             else:
                 raise RuntimeError(f"Unsupported job type: {job.job_type}")

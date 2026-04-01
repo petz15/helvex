@@ -2,12 +2,12 @@
 import { useState, useCallback, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import useSWR from "swr";
-import { Download } from "lucide-react";
+import { Download, Loader2 } from "lucide-react";
 import { FilterBar } from "@/components/dashboard/filter-bar";
 import { CompanyTable } from "@/components/dashboard/company-table";
 import { CompanyPreview } from "@/components/dashboard/company-preview";
 import { Pagination } from "@/components/dashboard/pagination";
-import { fetchCompanies, fetchStats, fetchCantons, fetchTaxonomy, fetchSavedViews, saveView, deleteView } from "@/lib/api";
+import { fetchCompanies, fetchStats, fetchCantons, fetchTaxonomy, fetchSavedViews, saveView, deleteView, enqueueCSVExport } from "@/lib/api";
 import type { Company, CompanyFilters, CompanyStats } from "@/lib/types";
 
 function buildExportUrl(filters: CompanyFilters): string {
@@ -42,6 +42,8 @@ function syncFiltersToUrl(filters: CompanyFilters, router: ReturnType<typeof use
 export function DashboardClient({ initialCantons, initialStats, initialFilters }: DashboardClientProps) {
   const router = useRouter();
   const [filters, setFiltersState] = useState<CompanyFilters>(initialFilters ?? DEFAULT_FILTERS);
+  const [queueingExport, setQueueingExport] = useState(false);
+  const [exportBanner, setExportBanner] = useState<{ kind: "success" | "error"; message: string } | null>(null);
 
   const setFilters = useCallback((update: CompanyFilters | ((f: CompanyFilters) => CompanyFilters)) => {
     setFiltersState(prev => {
@@ -102,6 +104,25 @@ export function DashboardClient({ initialCantons, initialStats, initialFilters }
     return { key: "", value: "" };
   })();
 
+  async function handleQueueExport() {
+    setQueueingExport(true);
+    setExportBanner(null);
+    try {
+      await enqueueCSVExport(filters);
+      setExportBanner({ kind: "success", message: "Export queued — check Account page to download when ready." });
+    } catch (err) {
+      setExportBanner({ kind: "error", message: err instanceof Error ? err.message : "Failed to queue export" });
+    } finally {
+      setQueueingExport(false);
+      setTimeout(() => setExportBanner(null), 6000);
+    }
+  }
+
+  // suppress unused-variable warnings for pre-existing vars used by parent components
+  void stats;
+  void activeStat;
+  void handleStatFilter;
+
   return (
     <div className="flex flex-col h-[calc(100vh-3rem)] overflow-hidden">
 
@@ -123,14 +144,32 @@ export function DashboardClient({ initialCantons, initialStats, initialFilters }
       <div className="flex flex-1 overflow-hidden">
         {/* Table + pagination */}
         <div className="flex-1 flex flex-col overflow-hidden bg-white">
-          <div className="flex items-center justify-end px-3 py-1 border-b border-slate-100 bg-slate-50">
-            <a
-              href={buildExportUrl(filters)}
-              download
-              className="flex items-center gap-1.5 text-xs text-slate-500 hover:text-slate-700 px-2.5 py-1 rounded border border-slate-200 hover:bg-white transition-colors"
-            >
-              <Download size={12} /> Export CSV ({page?.total ?? 0})
-            </a>
+          <div className="flex items-center justify-between px-3 py-1 border-b border-slate-100 bg-slate-50">
+            {exportBanner ? (
+              <span className={`text-xs px-2 py-0.5 rounded ${
+                exportBanner.kind === "success" ? "text-green-700 bg-green-50" : "text-red-700 bg-red-50"
+              }`}>
+                {exportBanner.message}
+              </span>
+            ) : <span />}
+            <div className="flex items-center gap-2">
+              <button
+                onClick={handleQueueExport}
+                disabled={queueingExport}
+                title="Queue an unlimited background export — download from Account page when ready"
+                className="flex items-center gap-1.5 text-xs text-slate-500 hover:text-slate-700 px-2.5 py-1 rounded border border-slate-200 hover:bg-white transition-colors disabled:opacity-50"
+              >
+                {queueingExport ? <Loader2 size={12} className="animate-spin" /> : <Download size={12} />}
+                Queue full export
+              </button>
+              <a
+                href={buildExportUrl(filters)}
+                download
+                className="flex items-center gap-1.5 text-xs text-slate-500 hover:text-slate-700 px-2.5 py-1 rounded border border-slate-200 hover:bg-white transition-colors"
+              >
+                <Download size={12} /> Export CSV ({page?.total ?? 0})
+              </a>
+            </div>
           </div>
           <CompanyTable
             companies={page?.items ?? []}

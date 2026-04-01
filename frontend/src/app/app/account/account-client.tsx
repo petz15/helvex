@@ -2,13 +2,14 @@
 import { useState } from "react";
 import useSWR from "swr";
 import {
-  KeyRound, Mail, Building2, Loader2, Check, Plus,
+  KeyRound, Mail, Building2, Loader2, Check, Plus, Download, FileText,
 } from "lucide-react";
 import {
   fetchCurrentUser,
   requestEmailChange,
   createOrg,
   leaveOrg,
+  fetchCSVExportStatus,
 } from "@/lib/api";
 import { OrgClient } from "@/app/app/org/org-client";
 
@@ -107,6 +108,86 @@ function ChangePasswordForm() {
         Change password
       </button>
     </form>
+  );
+}
+
+function CSVExportSection() {
+  const { data, mutate, isLoading } = useSWR("csv-export-status", fetchCSVExportStatus, { refreshInterval: 5000 });
+  const job = data?.job;
+  const status = job?.status;
+
+  function formatExpiry(iso: string) {
+    const d = new Date(iso);
+    return d.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
+  }
+
+  return (
+    <div className="rounded-xl border border-slate-200 bg-white p-5 space-y-3">
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <p className="text-sm font-medium text-slate-800 flex items-center gap-1.5">
+            <FileText size={14} className="text-slate-400" /> Full CSV export
+          </p>
+          <p className="text-xs text-slate-400 mt-0.5">
+            Queue an unlimited export from the dashboard. Files are kept for 7 days.
+          </p>
+        </div>
+        <button
+          onClick={() => mutate()}
+          disabled={isLoading}
+          className="text-xs text-slate-400 hover:text-slate-600 transition-colors shrink-0"
+        >
+          {isLoading ? <Loader2 size={12} className="animate-spin" /> : "Refresh"}
+        </button>
+      </div>
+
+      {!job && (
+        <p className="text-xs text-slate-400">No export queued yet. Use the dashboard to start one.</p>
+      )}
+
+      {job && (
+        <div className="border-t border-slate-100 pt-3 space-y-2">
+          <div className="flex items-center gap-2 text-xs">
+            <span className={`inline-flex items-center px-2 py-0.5 rounded font-medium capitalize ${
+              status === "completed" ? "bg-green-100 text-green-700"
+              : status === "running" ? "bg-blue-100 text-blue-700"
+              : status === "queued" ? "bg-amber-100 text-amber-700"
+              : status === "failed" ? "bg-red-100 text-red-700"
+              : "bg-slate-100 text-slate-600"
+            }`}>
+              {status}
+            </span>
+            {job.progress_done != null && job.progress_total != null && status === "running" && (
+              <span className="text-slate-500">{job.progress_done.toLocaleString()} / {job.progress_total.toLocaleString()} rows</span>
+            )}
+            {data?.row_count != null && status === "completed" && (
+              <span className="text-slate-500">{data.row_count.toLocaleString()} rows</span>
+            )}
+            {data?.expires_at && (
+              <span className="text-slate-400">expires {formatExpiry(data.expires_at)}</span>
+            )}
+          </div>
+
+          {job.message && (
+            <p className="text-xs text-slate-500">{job.message}</p>
+          )}
+
+          {data?.download_url && (
+            <a
+              href={data.download_url}
+              download="helvex_export.csv"
+              className="inline-flex items-center gap-1.5 text-xs bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded-lg font-medium transition-colors"
+            >
+              <Download size={12} /> Download CSV
+            </a>
+          )}
+
+          {status === "failed" && job.error && (
+            <p className="text-xs text-red-600 font-mono truncate">{job.error}</p>
+          )}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -371,6 +452,10 @@ export function AccountClient() {
       <div id="team" className="rounded-xl border border-slate-200 bg-white p-4">
         <OrgClient embedded />
       </div>
+
+      {/* CSV Export */}
+      <SectionTitle title="Data Export" />
+      <CSVExportSection />
     </div>
   );
 }

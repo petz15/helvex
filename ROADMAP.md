@@ -76,6 +76,7 @@
 - [X] **remove username** — Remove username, just keep email adress as user 
 - [X] **settings** — Add org management page and settings page for the users
 - [X] **Alternative logins such as google, github etc?** — Add alternative login methods such as google accounts, linkedin -> started but not working currently 500 error
+- [ ] **User Management for Orgs** - Set what users are allowed to do (read only or also execute)
 
 
 ## Monetisation & Tiers
@@ -86,6 +87,7 @@
 - [ ] **High-paying tier: custom settings** — own scoring config, own LLM prompts, own categories, private job queue
 - [ ] **API access** — REST API for high-paying tiers; token management, rate limits, usage dashboard
 - [ ] **Modular tiers** — user-assembled feature bundles (pick scoring + API + X credits etc.) rather than fixed plans
+
 
 ## Security & Infrastructure
 

@@ -436,3 +436,111 @@ def trigger_cluster_pipeline(body: ClusterPipelineBody, request: Request, db: Se
 @router.get("/cantons")
 def list_cantons():
     return {"cantons": SWISS_CANTONS}
+
+
+# ── CSV Export job ──────────────────────────────────────────────────────────────
+
+class CSVExportBody(BaseModel):
+    sort: str = "-updated"
+    q: str | None = None
+    uid: str | None = None
+    canton: str | None = None
+    review_status: str | None = None
+    contact_status: str | None = None
+    google_searched: str | None = None
+    min_web_score: int | None = None
+    min_flex_score: int | None = None
+    min_ai_score: int | None = None
+    tags: str | None = None
+    tfidf_cluster: str | None = None
+    purpose_keywords: str | None = None
+    noga_code: str | None = None
+    noga_label: str | None = None
+    noga_level: str | None = None
+    exclude_tags: str | None = None
+    exclude_review_status: str | None = None
+    exclude_canton: str | None = None
+    exclude_contact_status: str | None = None
+    exclude_noga_code: str | None = None
+    exclude_noga_label: str | None = None
+    exclude_noga_level: str | None = None
+
+
+class CSVExportStatusOut(BaseModel):
+    job: JobOut | None
+    download_url: str | None
+    expires_at: str | None
+    row_count: int | None
+
+
+@router.post("/jobs/enqueue/csv-export", response_model=JobOut, status_code=status.HTTP_202_ACCEPTED)
+def enqueue_csv_export(
+    body: CSVExportBody,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Queue an unlimited CSV export with the current dashboard filters.
+
+    Max 1 active export per user — any queued/running export is cancelled first.
+    The finished file is stored in S3 for 7 days.
+    """
+    from app.services.s3_client import is_configured
+    if not is_configured():
+        raise HTTPException(status_code=503, detail="S3 export storage is not configured on this server")
+
+    crud.cancel_active_csv_exports(db, user_id=current_user.id)
+
+    params = body.model_dump()
+    job = _enqueue_or_http_error(
+        request,
+        job_type="csv_export",
+        label="CSV export",
+        params=params,
+        db=db,
+        org_id=current_user.org_id,
+        user_id=current_user.id,
+    )
+    return JobOut.from_orm_obj(job)
+
+
+@router.get("/jobs/csv-export/status", response_model=CSVExportStatusOut)
+def get_csv_export_status(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Return the latest CSV export job for the current user and a presigned download URL if ready."""
+    import json as _json
+    from datetime import datetime, timezone as _tz
+
+    job = crud.get_latest_csv_export(db, user_id=current_user.id)
+    if job is None:
+        return CSVExportStatusOut(job=None, download_url=None, expires_at=None, row_count=None)
+
+    download_url = None
+    expires_at = None
+    row_count = None
+
+    if job.status == "completed" and job.stats_json:
+        try:
+            s = _json.loads(job.stats_json)
+            s3_key = s.get("s3_key")
+            exp = s.get("expires_at")
+            row_count = s.get("row_count")
+            if s3_key and exp:
+                # Only generate URL if not expired
+                exp_dt = datetime.fromisoformat(exp)
+                if exp_dt > datetime.now(tz=_tz.utc):
+                    from app.services.s3_client import generate_presigned_url
+                    remaining = int((exp_dt - datetime.now(tz=_tz.utc)).total_seconds())
+                    download_url = generate_presigned_url(s3_key, expires_in=min(remaining, 3600))
+                    expires_at = exp
+        except Exception:  # noqa: BLE001
+            pass
+
+    return CSVExportStatusOut(
+        job=JobOut.from_orm_obj(job),
+        download_url=download_url,
+        expires_at=expires_at,
+        row_count=row_count,
+    )

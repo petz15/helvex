@@ -36,7 +36,7 @@ Helvex is a B2B company intelligence platform. It bulk-imports the entire Swiss 
 2. **Detail fetch + geocode** — swisstopo building-level precision
 3. **Website enrichment** — Serper.dev Google Search, daily quota-aware
 4. **AI scoring** — Claude Haiku via Anthropic API
-5. **Dashboard / export** — filter, sort, paginate, CSV export
+5. **Dashboard / export** — filter, sort, paginate, CSV export (streaming sync or async unlimited)
 
 ---
 
@@ -90,7 +90,9 @@ zefix_analyzer/
 │       ├── scoring.py          # Zefix + Google + Claude score computation
 │       ├── job_worker.py       # Job orchestration (thread + RQ modes)
 │       ├── email.py            # SMTP transactional email + templates
-│       └── cluster_pipeline.py # TF-IDF K-Means clustering
+│       ├── cluster_pipeline.py # TF-IDF K-Means clustering
+│       ├── csv_export.py       # Async unlimited CSV export job logic
+│       └── s3_client.py        # boto3 wrapper for helvex-exports S3 bucket
 │
 ├── alembic/                    # Database migrations
 │   ├── env.py
@@ -211,7 +213,7 @@ HTML routes (browser, in `main.py`):
 | GET  | `/api/v1/companies/{id}` | Single company |
 | PATCH| `/api/v1/companies/{id}` | Update company fields |
 | DELETE| `/api/v1/companies/{id}` | Delete company |
-| GET  | `/api/v1/companies/export/csv` | CSV export (streaming) |
+| GET  | `/api/v1/companies/export.csv` | Streaming CSV export (capped at 10 k rows) |
 
 #### Jobs — `app/api/routes/jobs.py`
 
@@ -231,6 +233,8 @@ HTML routes (browser, in `main.py`):
 | POST | `/api/v1/jobs/enqueue/derive-industry` | Enqueue industry derivation |
 | POST | `/api/v1/jobs/enqueue/tfidf-cluster` | Enqueue TF-IDF clustering |
 | POST | `/api/v1/jobs/enqueue/claude-classify` | Enqueue Claude classification |
+| POST | `/api/v1/jobs/enqueue/csv-export` | Enqueue unlimited async CSV export (max 1 active per user) |
+| GET  | `/api/v1/jobs/csv-export/status` | Latest export status + presigned S3 download URL for current user |
 
 #### Other routes
 
@@ -310,7 +314,7 @@ Persistent record of every background job. Org-scoped: each job stores the org_i
 |---|---|
 | `org_id` | FK → organizations; used to resolve per-org API keys & scoring config |
 | `user_id` | FK → users; caller who triggered the job |
-| `job_type` | bulk / initial / batch / re_geocode / tfidf_cluster / claude_classify / derive_industry |
+| `job_type` | bulk / initial / batch / re_geocode / tfidf_cluster / claude_classify / derive_industry / csv_export |
 | `status` | queued → running → paused / completed / cancelled / failed |
 | `cancel_requested` / `pause_requested` | Flags polled by the worker at checkpoints |
 | `progress_done` / `progress_total` | Resume pointer + UI progress bar |
@@ -435,6 +439,7 @@ The worker checks `cancel_requested` / `pause_requested` **between companies** (
 | `tfidf_cluster` | `n_clusters`, `limit` | TF-IDF K-Means on purpose text | ✓ Uses org-effective scoring config |
 | `recalculate_scores` | `limit`, `refresh_zefix` | Recompute combined/flex/ai scores for companies | ✓ Uses org-effective config & API key |
 | `claude_classify` | `limit`, `system_prompt` | Claude Haiku scoring + categorization | ✓ Validated in preflight; uses org-effective API key |
+| `csv_export` | dashboard filter params | Unlimited paginated CSV written to S3 (`helvex-exports/{user_id}/export.csv`); stored 7 days | ✓ Per-user; max 1 active at a time |
 
 #### Org-scoped job execution
 
@@ -481,6 +486,24 @@ Both are downloaded and compiled into SQLite databases **at Docker build time**.
 - **Used for**: `claude_classify` job type only
 - **System prompt**: User-configurable via Settings API; resolved per-org
 - **Preflight check** (`_preflight_job`): Validates org has API key before queueing `claude_classify`
+
+### Hetzner Object Storage (S3-compatible) — `app/services/s3_client.py`
+
+Two separate buckets in region **nbg1** (`https://nbg1.your-objectstorage.com`):
+
+| Bucket | Purpose | Owner |
+|---|---|---|
+| `helvex-backups` | CloudNativePG PostgreSQL WAL + base backups, 7-day PITR | Helm chart / CNPG operator |
+| `helvex-exports` | Async CSV export files (`{user_id}/export.csv`), 7-day presigned URL TTL | Application (`s3_client.py`) |
+
+Both buckets share the same `S3_ACCESS_KEY` / `S3_SECRET_KEY` credentials.
+
+**Key design choices:**
+- One file per user — re-running an export overwrites `{user_id}/export.csv` in the bucket
+- Presigned URL generated fresh on each status poll (1 h expiry on the URL, 7 d on the file itself)
+- `is_configured()` guard — if env vars are missing the `/enqueue/csv-export` route returns HTTP 503
+
+**Bucket provisioning:** Hetzner Object Storage buckets are not managed by Terraform (the `hcloud` provider has no bucket resource). Create `helvex-exports` manually in the Hetzner Console under Object Storage → `nbg1`, using the same project and the same S3 credentials as `helvex-backups`.
 
 ### SMTP — `app/services/email.py`
 
@@ -563,6 +586,10 @@ All config is loaded from `.env` (or process env) by `pydantic-settings`. The `S
 | `SERPER_API_KEY` | No | Google Search (jobs fail gracefully without it) |
 | `ANTHROPIC_API_KEY` | No | Claude classification |
 | `REDIS_URL` | No | Required if `USE_RQ=true` |
+| `S3_ACCESS_KEY` | No* | Hetzner Object Storage key (shared by backup + export buckets) |
+| `S3_SECRET_KEY` | No* | Hetzner Object Storage secret |
+| `S3_ENDPOINT_URL` | No* | e.g. `https://nbg1.your-objectstorage.com` |
+| `S3_BUCKET_EXPORTS` | No* | `helvex-exports` — async CSV export storage; *required for csv_export job type |
 | `USE_RQ` | No | `false` by default |
 | `DISABLE_JOB_WORKER` | No | `false` by default |
 | `ZEFIX_API_USERNAME/PASSWORD` | No | Optional HTTP Basic for Zefix |
@@ -596,6 +623,8 @@ GitHub Actions secrets to keep up to date (stored in the repo's Settings → Sec
 | `SERPER_API_KEY` | Google Search |
 | `ANTHROPIC_API_KEY` | Claude |
 | `ZEFIX_API_USERNAME`, `ZEFIX_API_PASSWORD` | Zefix (optional) |
+| `S3_ACCESS_KEY`, `S3_SECRET_KEY` | Hetzner Object Storage (backups + CSV exports) |
+| `S3_BUCKET_EXPORTS` | `helvex-exports` bucket name |
 | `HETZNER_TOKEN` | Terraform / Hetzner Cloud API |
 | `GHCR_TOKEN` | GitHub Container Registry push |
 | `KUBECONFIG` or `KUBE_CONFIG` | kubectl access for deploy steps |

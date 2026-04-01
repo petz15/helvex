@@ -779,6 +779,36 @@ export async function deleteAdminOrg(orgId: number): Promise<void> {
   }
 }
 
+// ── CSV Export job ────────────────────────────────────────────────────────────
+
+export interface CSVExportStatus {
+  job: import("./types").Job | null;
+  download_url: string | null;
+  expires_at: string | null;
+  row_count: number | null;
+}
+
+export async function enqueueCSVExport(filters: import("./types").CompanyFilters): Promise<import("./types").Job> {
+  const { page: _p, page_size: _ps, ...rest } = filters;
+  const res = await fetch("/api/v1/jobs/enqueue/csv-export", {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(rest),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.detail ?? "Failed to queue CSV export");
+  }
+  return res.json();
+}
+
+export async function fetchCSVExportStatus(): Promise<CSVExportStatus> {
+  const res = await fetch("/api/v1/jobs/csv-export/status", { credentials: "include" });
+  if (!res.ok) throw new Error("Failed to fetch export status");
+  return res.json();
+}
+
 // ── Saved Views ───────────────────────────────────────────────────────────────
 
 export async function fetchSavedViews(): Promise<SavedView[]> {

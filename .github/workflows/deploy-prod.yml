@@ -129,6 +129,8 @@ jobs:
             --from-literal=SECRET_KEY="${{ secrets.SECRET_KEY }}" \
             --from-literal=S3_ACCESS_KEY="${{ secrets.S3_ACCESS_KEY }}" \
             --from-literal=S3_SECRET_KEY="${{ secrets.S3_SECRET_KEY }}" \
+            --from-literal=S3_ENDPOINT_URL="${{ secrets.S3_ENDPOINT_URL }}" \
+            --from-literal=S3_BUCKET_EXPORTS="${{ secrets.S3_BUCKET_EXPORTS }}" \
             --from-literal=SMTP_HOST="${{ secrets.SMTP_HOST }}" \
             --from-literal=SMTP_PORT="${{ secrets.SMTP_PORT }}" \
             --from-literal=SMTP_USER="${{ secrets.SMTP_USER }}" \

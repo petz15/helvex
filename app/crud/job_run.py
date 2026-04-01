@@ -262,6 +262,36 @@ def mark_waiting_external(
     return job
 
 
+def get_latest_csv_export(db: Session, user_id: int) -> JobRun | None:
+    """Return the most recent csv_export job for this user (any status)."""
+    return (
+        db.query(JobRun)
+        .filter(JobRun.job_type == "csv_export", JobRun.user_id == user_id)
+        .order_by(JobRun.queued_at.desc())
+        .first()
+    )
+
+
+def cancel_active_csv_exports(db: Session, user_id: int) -> None:
+    """Cancel any queued/running csv_export jobs for this user before creating a new one."""
+    active = (
+        db.query(JobRun)
+        .filter(
+            JobRun.job_type == "csv_export",
+            JobRun.user_id == user_id,
+            JobRun.status.in_(["queued", "running", "paused"]),
+        )
+        .all()
+    )
+    now = datetime.now(tz=timezone.utc)
+    for job in active:
+        job.status = "cancelled"
+        job.message = "Superseded by new export"
+        job.completed_at = now
+    if active:
+        db.commit()
+
+
 def list_waiting_llm_batches(db: Session) -> list[JobRun]:
     """Return all claude_classify jobs currently waiting for an external batch to complete."""
     return (
