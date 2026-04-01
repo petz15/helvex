@@ -30,6 +30,19 @@ TIER_NAMES = ["free", "simple", "explorer", "researcher", "strategist", "custom"
 #: Integer rank per tier (higher = more privileged).
 TIER_RANK: dict[str, int] = {name: idx for idx, name in enumerate(TIER_NAMES)}
 
+#: DB integer → canonical tier name (excludes "superadmin" which is not stored in DB).
+TIER_NAME_BY_ID: dict[int, str] = {
+    0: "free",
+    1: "simple",
+    2: "explorer",
+    3: "researcher",
+    4: "strategist",
+    5: "custom",
+}
+
+#: Canonical tier name → DB integer (reverse of TIER_NAME_BY_ID).
+TIER_ID_BY_NAME: dict[str, int] = {v: k for k, v in TIER_NAME_BY_ID.items()}
+
 #: Legacy DB values → new names (for rows not yet data-migrated).
 _LEGACY_TIER_MAP: dict[str, str] = {
     "pro": "simple",
@@ -137,8 +150,10 @@ WEB_RESULTS_PRIVATE_MONTHS: dict[str, float] = {
 # Helpers
 # ---------------------------------------------------------------------------
 
-def normalize_tier(raw_tier: str) -> str:
-    """Resolve legacy tier names to their canonical equivalents."""
+def normalize_tier(raw_tier: "str | int") -> str:
+    """Resolve a tier value (integer ID or string name) to its canonical name."""
+    if isinstance(raw_tier, int):
+        return TIER_NAME_BY_ID.get(raw_tier, "free")
     return _LEGACY_TIER_MAP.get(raw_tier, raw_tier)
 
 

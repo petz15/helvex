@@ -25,6 +25,7 @@ class InvitePreview(BaseModel):
     org_id: int
     org_name: str
     invited_email: str
+    role: str
     user_exists: bool  # False = new user, should see inline registration form
 
 
@@ -60,7 +61,7 @@ def _check_domain_restriction(org: Organization, email: str) -> None:
         )
 
 
-def _upsert_org_member(db: Session, org_id: int, user_id: int, role: str = "member") -> None:
+def _upsert_org_member(db: Session, org_id: int, user_id: int, role: str = "viewer") -> None:
     """Insert or update the org_members row for this (org, user) pair."""
     existing = db.query(OrgMember).filter(
         OrgMember.org_id == org_id, OrgMember.user_id == user_id
@@ -86,12 +87,13 @@ def preview_invite(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Invalid or expired invite link.",
         )
-    org_id, invited_email = result
+    org_id, invited_email, invite_role = result
     org = db.get(Organization, org_id)
     if not org:
         raise HTTPException(status_code=404, detail="Organization not found")
     user_exists = crud.get_user_by_email(db, invited_email) is not None
-    return InvitePreview(org_id=org_id, org_name=org.name, invited_email=invited_email, user_exists=user_exists)
+    return InvitePreview(org_id=org_id, org_name=org.name, invited_email=invited_email,
+                         role=invite_role, user_exists=user_exists)
 
 
 @router.post(
@@ -113,7 +115,7 @@ def register_and_accept(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Invalid or expired invite link.",
         )
-    org_id, invited_email = result
+    org_id, invited_email, invite_role = result
 
     if crud.get_user_by_email(db, invited_email):
         raise HTTPException(
@@ -133,8 +135,8 @@ def register_and_accept(
 
     # Join org: set active org and create/update org_members row
     user.org_id = org_id
-    user.org_role = "member"
-    _upsert_org_member(db, org_id, user.id, role="member")
+    user.org_role = invite_role
+    _upsert_org_member(db, org_id, user.id, role=invite_role)
 
     db.commit()
     db.refresh(user)
@@ -169,7 +171,7 @@ def accept_invite(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Invalid or expired invite link.",
         )
-    org_id, invited_email = result
+    org_id, invited_email, invite_role = result
 
     if current_user.email.lower() != invited_email.lower():
         raise HTTPException(
@@ -203,7 +205,7 @@ def accept_invite(
         pass
 
     # Add to org and switch active org
-    _upsert_org_member(db, org_id, current_user.id, role="member")
+    _upsert_org_member(db, org_id, current_user.id, role=invite_role)
     current_user.org_id = org_id
-    current_user.org_role = "member"
+    current_user.org_role = invite_role
     db.commit()

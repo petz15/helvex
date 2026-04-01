@@ -177,7 +177,7 @@ class MemberOut(BaseModel):
 class AddMemberRequest(BaseModel):
     email: str
     password: str
-    org_role: str = "member"
+    org_role: str = "viewer"
 
     @field_validator("password")
     @classmethod
@@ -189,13 +189,14 @@ class AddMemberRequest(BaseModel):
 
 class InviteMemberRequest(BaseModel):
     email: str
+    role: str = "viewer"
 
 
 class UpdateRoleRequest(BaseModel):
     org_role: str
 
 
-_VALID_ROLES = {"viewer", "member", "admin", "owner"}
+_VALID_ROLES = {"viewer", "contributor", "admin", "owner"}
 
 
 # ── Org info & update ──────────────────────────────────────────────────────────
@@ -271,10 +272,24 @@ def list_members(
 ):
     _validate_org_access(org_id, user_org)
     _, org = user_org
-    # Use org_members as the authoritative source for membership
-    user_ids = [m.user_id for m in db.query(OrgMember).filter(OrgMember.org_id == org.id).all()]
-    members = db.query(User).filter(User.id.in_(user_ids)).order_by(User.created_at).all()
-    return members
+    # Join with OrgMember so we get the role for *this* org, not the user's active org.
+    rows = (
+        db.query(OrgMember, User)
+        .join(User, OrgMember.user_id == User.id)
+        .filter(OrgMember.org_id == org.id)
+        .order_by(User.created_at)
+        .all()
+    )
+    result = []
+    for member, user in rows:
+        result.append(MemberOut(
+            id=user.id,
+            email=user.email,
+            org_role=member.role,
+            is_active=user.is_active,
+            created_at=user.created_at,
+        ))
+    return result
 
 
 @router.post(
@@ -392,7 +407,7 @@ def remove_member(
             OrgMember.user_id == target.id, OrgMember.org_id != org.id
         ).first()
         target.org_id = fallback.org_id if fallback else None
-        target.org_role = fallback.role if fallback else "member"
+        target.org_role = fallback.role if fallback else "viewer"
     db.commit()
 
 
@@ -423,9 +438,11 @@ def send_invite(
     ).first() if existing else None
     if existing_member:
         raise HTTPException(status_code=409, detail="User is already a member of this org")
+    if body.role not in _VALID_ROLES:
+        raise HTTPException(status_code=400, detail=f"Invalid role. Must be one of: {sorted(_VALID_ROLES)}")
     from app.auth import create_invite_token
     from app.services.email import send_invite_email
-    token = create_invite_token(org.id, body.email)
+    token = create_invite_token(org.id, body.email, role=body.role)
     send_invite_email(to=body.email, org_name=org.name, invited_by_email=actor.email, token=token)
 
 
@@ -629,6 +646,8 @@ def set_org_setting(
 ):
     _validate_org_access(org_id, user_org)
     _, org = user_org
+    if key not in _ORG_ALLOWED_SETTING_KEYS:
+        raise HTTPException(status_code=400, detail=f"Unknown setting key '{key}'")
     from app.models.org_setting import OrgSetting
     row = db.query(OrgSetting).filter(OrgSetting.org_id == org.id, OrgSetting.key == key).first()
     if row is None:
@@ -653,6 +672,8 @@ def delete_org_setting(
 ):
     _validate_org_access(org_id, user_org)
     _, org = user_org
+    if key not in _ORG_ALLOWED_SETTING_KEYS:
+        raise HTTPException(status_code=400, detail=f"Unknown setting key '{key}'")
     from app.models.org_setting import OrgSetting
     row = db.query(OrgSetting).filter(OrgSetting.org_id == org.id, OrgSetting.key == key).first()
     if not row:

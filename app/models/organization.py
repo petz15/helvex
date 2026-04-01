@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING
 
-from sqlalchemy import BigInteger, Boolean, DateTime, Float, ForeignKey, JSON, String, Text
+from sqlalchemy import BigInteger, Boolean, DateTime, Float, ForeignKey, Integer, JSON, String, Text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -22,8 +22,23 @@ class Organization(Base):
     name: Mapped[str] = mapped_column(String(256), nullable=False)
     slug: Mapped[str] = mapped_column(String(128), unique=True, nullable=False)
 
-    # Tier: free | simple | explorer | researcher | strategist | custom
-    tier: Mapped[str] = mapped_column(String(32), nullable=False, default="free")
+    # Tier stored as integer in the DB (0=free,1=simple,2=explorer,3=researcher,
+    # 4=strategist,5=custom).  The `tier` property below exposes the canonical
+    # string name so all existing code continues to work unchanged.
+    tier_id: Mapped[int] = mapped_column("tier", Integer, nullable=False, default=0)
+
+    @property
+    def tier(self) -> str:
+        from app.services.tiers import TIER_NAME_BY_ID
+        return TIER_NAME_BY_ID.get(self.tier_id, "free")
+
+    @tier.setter
+    def tier(self, value: "str | int") -> None:
+        from app.services.tiers import TIER_ID_BY_NAME
+        if isinstance(value, int):
+            self.tier_id = value
+        else:
+            self.tier_id = TIER_ID_BY_NAME.get(str(value), 0)
 
     # Payment
     payment_customer_id: Mapped[str | None] = mapped_column(String(128), nullable=True)

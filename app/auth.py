@@ -168,17 +168,25 @@ def decode_verification_token(token: str) -> int | None:
 # Org invite tokens — encode (org_id, email), 7-day expiry
 # ---------------------------------------------------------------------------
 
-def create_invite_token(org_id: int, email: str) -> str:
-    return URLSafeTimedSerializer(settings.secret_key, salt=_INVITE_SALT).dumps((org_id, email))
+def create_invite_token(org_id: int, email: str, role: str = "viewer") -> str:
+    return URLSafeTimedSerializer(settings.secret_key, salt=_INVITE_SALT).dumps(
+        (org_id, email, role)
+    )
 
 
-def decode_invite_token(token: str) -> tuple[int, str] | None:
+def decode_invite_token(token: str) -> tuple[int, str, str] | None:
+    """Return (org_id, email, role) or None if the token is invalid/expired."""
     try:
         data = URLSafeTimedSerializer(settings.secret_key, salt=_INVITE_SALT).loads(
             token, max_age=_INVITE_MAX_AGE
         )
-        org_id, email = data
-        return (int(org_id), str(email))
+        # Tokens created before 0041 only have (org_id, email) — default role to viewer.
+        if len(data) == 2:
+            org_id, email = data
+            role = "viewer"
+        else:
+            org_id, email, role = data
+        return (int(org_id), str(email), str(role))
     except (SignatureExpired, BadSignature, ValueError, TypeError):
         return None
 

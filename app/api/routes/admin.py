@@ -10,6 +10,7 @@ from app.auth import get_current_user
 from app.database import get_db
 from app.models.organization import Organization
 from app.models.user import User
+from app.services.tiers import TIER_ID_BY_NAME
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
@@ -151,7 +152,8 @@ def list_orgs(
     if q:
         query = query.filter(Organization.name.ilike(f"%{q}%"))
     if tier:
-        query = query.filter(Organization.tier == tier)
+        tier_id = TIER_ID_BY_NAME.get(tier, -1)
+        query = query.filter(Organization.tier_id == tier_id)
     total = query.count()
     orgs = (
         query.order_by(Organization.created_at.desc())
