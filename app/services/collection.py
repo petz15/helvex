@@ -1665,7 +1665,7 @@ def run_zefix_detail_collect(
         except Exception as exc:  # noqa: BLE001
             if _is_control_signal_exception(exc):
                 raise
-            stats["errors"].append(f"{company.uid} ({company.name}) [{type(exc).__name__}]: {exc}")
+            stats["errors"].append(f"{company.uid} [{type(exc).__name__}]: {exc}")
 
         if progress_cb:
             progress_cb(i, total, stats)
