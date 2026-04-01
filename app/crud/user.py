@@ -38,7 +38,11 @@ def ensure_personal_org(db: Session, user: User) -> None:
     email_prefix = user.email.split("@")[0]
     base = _slugify(email_prefix) or "workspace"
     slug = _unique_slug(db, base)
-    org = Organization(name=f"{email_prefix}'s workspace", slug=slug)
+    org = Organization(
+        name=f"{email_prefix}'s workspace",
+        slug=slug,
+        credits_unlimited=user.is_superadmin,
+    )
     db.add(org)
     db.flush()
     user.org_id = org.id

@@ -23,8 +23,15 @@
 - Adjust sites for Superadmin and normal admin
 - Adjust sites for setup (seperate some features out from account page)
 - Continue on Explore page
-- Pricing page displaying the wrong prices also not the correct consumption based and generally not looking great
-- Web search results are weird. for Balogh Design did not manage to find the right page
+- More adjustments to pricing page: remove flex rescore from, some consumptions are not available for certain tiers and the question marks are not filled in. also for first time org accounts, give about 1k credits or even more
+
+
+## PROD CHANGES
+- wordline notification url
+- linkedin and google
+- email validator? 
+- SMTP for emails?
+- DNS eintrag auf balogh consulting bei hostpoint
 
 ## Dashboard & UI
 
@@ -89,12 +96,31 @@
 
 ## Monetisation & Tiers
 
-- [ ] **Payment logic** — Stripe/Worldline integration; subscription billing, top-up credits for pay-per-use API calls
-- [ ] **Ad slots** — display ads for free tier users map views (e.g. sponsored pin/banner) or rather loading screens
-- [ ] **Tier system** — free / pro / team tiers with defined feature gates
-- [ ] **High-paying tier: custom settings** — own scoring config, own LLM prompts, own categories, private job queue
-- [ ] **API access** — REST API for high-paying tiers; token management, rate limits, usage dashboard
-- [ ] **Modular tiers** — user-assembled feature bundles (pick scoring + API + X credits etc.) rather than fixed plans
+### Completed
+- [X] **Tier system** — 5 fixed tiers (free/simple/explorer/researcher/strategist) + custom modular tier; tier stored as integer (0–5) in DB for future-proofing
+- [X] **Feature gates** — `has_feature(org, feature)` checks per-tier permissions; custom tiers read from `custom_features` JSONB column; all 24+ features gated (multi-user, no ads, LLM modes, API access, etc.)
+- [X] **Credit consumption system** — 7 action types (batch_llm, immediate_llm, web_search, flex_rescore, recluster, bulk_export_basic, bulk_export_detail) with base costs; `compute_cost(action, count)` returns the full cost; deductions checked/enforced in `check_and_deduct()`
+- [X] **Topup bonus model** — higher tiers receive bonus credits on purchase (free: 0%, simple: 10%, explorer: 15%, researcher: 20%, strategist: 30%); bonus granted via `topup_credits()` as separate ledger entry
+- [X] **Credit entitlements** — simple: 1 free flex_rescore/month; explorer+: unlimited free flex_rescore; role-based access (viewer→read-only, contributor→write, admin/owner)
+- [X] **Multi-org membership** — users join multiple orgs via `org_members` table (unique org_id/user_id); roles per-org; org switcher in UI
+- [X] **Org invites** — token-based invite flow (7-day expiry), role embedded in token, domain restriction for verified business orgs
+- [X] **Role hierarchy** — viewer/contributor/admin/owner per org; superadmin bypasses all checks
+- [X] **Superadmin credits** — `credits_unlimited` flag on superadmin personal orgs bypasses balance checks entirely; no ledger entry for unlimited orgs
+- [X] **Verified business** — auto-verify from Zefix link + web_score ≥70; manual verification fallback; domain-based email restriction for multi-user invite
+- [X] **Custom tier configurator** — interactive modular pricing: base +web_months +export_100k +bonus_steps +priority_level +immediate_llm +byo_llm_keys +flex_auto_score +llm_auto_score; real-time CHF calculation
+- [X] **Pricing page overhaul** — tier cards with visual hierarchy; full feature matrix table; consumption credits table with topup bonus preview; custom configurator with live pricing
+
+### Still Open
+- [ ] **Payment processor integration** — Stripe product/price setup, subscription webhooks, credit top-up Checkout session handler; Worldline as alternative
+- [ ] **Billing admin panel** — superadmin view of all orgs' tiers, subscription status, credit balance, transaction history; tier/credit adjustment UI
+- [ ] **Invoice & receipt generation** — PDF invoices for annual subscriptions; receipts for top-up purchases; email delivery
+- [ ] **Verified business discount** — 20% extra discount (on top of tier bonus) for verified business orgs; applied at Stripe price calculation
+- [ ] **Free tier limitations enforcement** — export limit enforcement in CSV export endpoint; API rate limits (once API access is gated)
+- [ ] **Ad banner integration** — EthicalAds embed for free tier; currently renders placeholder div
+- [ ] **Credit grant system** — admin interface to grant/refund credits with reason; used for migration credits, promotions, support refunds
+- [ ] **Credit expiry automation** — background job to expire grant-type credits after 1 year; topup credits never expire
+- [ ] **Usage dashboard** — org member view of credit balance (in CHF), transaction history, monthly spend, forecast
+- [ ] **Enterprise features** — SAML/SSO for custom tier; audit logging; custom role definitions; team/department isolation within an org
 
 
 ## Security & Infrastructure
@@ -122,6 +148,24 @@
   - All three load via GTM; one consent banner covers all Google tags
 - [ ] **How are new companies added to clusters?**: Find a logic how new companies are added to tf-idf/HBDscan clusters without recomputing all of them
 
+
+
+## Architecture & Refactoring
+
+### Completed (Session: Tier System Phase M0–M5)
+- [X] **Tier stored as integer** — migration 0041 converts `organizations.tier` VARCHAR → INTEGER (0=free…5=custom); Organization model exposes `tier` as a property that translates int↔string, so all existing code sees a string and never breaks
+- [X] **Role rename: member → contributor** — migration 0041 renames `org_members.role` and `users.org_role` from "member" to "contributor" to clarify write access; viewer (read-only) is now the default invite role
+- [X] **Invite token with role** — `create_invite_token` and `decode_invite_token` now embed the role; old 2-element tokens (no role) gracefully default to viewer; org admin can pick the role when sending invites
+- [X] **Removed dead code** — deleted `require_tier()` from auth.py (unused; org-scoped tier gating via `require_org_tier` in tiers.py is the standard)
+- [X] **Credits unlimited for superadmin** — migration 0042 adds `organizations.credits_unlimited BOOLEAN`; superadmin personal orgs get this flag set at creation, causing `check_and_deduct` to always succeed without touching balance or ledger
+- [X] **5-level job queue priority** — completed in earlier phase; queues named `{job_type}-p{0..4}`; workers listen in descending order; `get_queue_priority` maps tier/custom to priority level
+
+### Still Open
+- [ ] **Message-based job status** — replace polling with server-sent events (SSE) or WebSocket for real-time job status in UI
+- [ ] **Idempotent job retries** — ensure all job types can be safely re-run without duplicating work; implement job deduplication via hash/signature
+- [ ] **Org member audit log** — track all role changes, additions, removals with user/timestamp
+- [ ] **Rename users.tier → deprecated_user_tier** — `users.tier` is legacy (pre-org migration); once all routes use `org.tier`, rename the column and add a deprecation comment
+- [ ] **API key management** — token creation/revocation UI for org admins to manage their API credentials; currently only available via admin panel
 
 
 ## Multi-Language

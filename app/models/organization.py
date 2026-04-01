@@ -50,6 +50,9 @@ class Organization(Base):
     # --- Credit ledger ---
     # Balance stored as integer credits (1 credit = 0.0001 CHF)
     credits_balance: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
+    # When True, check_and_deduct always succeeds without touching the balance.
+    # Set on superadmin personal orgs so they are never blocked by credits.
+    credits_unlimited: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 
     # --- Tier entitlements ---
     # Simple tier: one free flex-rescore per billing month

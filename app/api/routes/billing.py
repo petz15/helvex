@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 from typing import Literal
+from urllib.parse import urlparse
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
+from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
@@ -42,6 +44,15 @@ class CheckoutResponse(BaseModel):
 class WebhookResponse(BaseModel):
     ok: bool
     ignored: bool = False
+
+
+def _safe_redirect_target(url: str | None) -> str:
+    if not url:
+        return payments.settings.app_base_url.rstrip("/")
+    parsed = urlparse(url)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        return payments.settings.app_base_url.rstrip("/")
+    return url
 
 
 @router.post("/checkout/subscription", response_model=CheckoutResponse)
@@ -143,51 +154,56 @@ async def stripe_webhook(
     return WebhookResponse(ok=True, ignored=True)
 
 
-@router.post("/webhooks/worldline", response_model=WebhookResponse)
-async def worldline_webhook(
+@router.get("/webhooks/worldline/return")
+@router.get("/webhooks/worldline/return/{token}")
+async def worldline_return(
     request: Request,
     db: Session = Depends(get_db),
-    worldline_signature: str | None = Header(default=None, alias="X-Worldline-Signature"),
-) -> WebhookResponse:
-    payload = await request.body()
-    if not payments.verify_worldline_signature(
-        payload=payload,
-        signature_header=worldline_signature,
-        secret=payments.settings.worldline_webhook_secret,
-    ):
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid Worldline signature")
+    token: str | None = None,
+) -> RedirectResponse:
+    params = request.query_params
+    token = str(token or params.get("token") or params.get("Token") or params.get("transaction_token") or "").strip()
+    success_url = str(params.get("success_url") or "").strip()
+    cancel_url = str(params.get("cancel_url") or "").strip()
+    source = str(params.get("source") or "").strip().lower()
+    order_reference = str(params.get("order_reference") or "").strip()
+    kind = str(params.get("kind") or "").strip().lower()
 
-    event = payments.parse_json_payload(payload)
-    event_type = str(event.get("event_type") or "")
-    data = event.get("data") if isinstance(event.get("data"), dict) else {}
+    if not token:
+        target = success_url if source == "return" else cancel_url
+        return RedirectResponse(_safe_redirect_target(target), status_code=status.HTTP_303_SEE_OTHER)
 
-    if event_type in {"subscription.created", "subscription.updated"}:
-        org_id = int((data.get("org_id") or 0))
-        if org_id <= 0:
-            return WebhookResponse(ok=True, ignored=True)
-        payments.apply_subscription_update(
-            db,
-            org_id=org_id,
-            tier=(data.get("tier") if isinstance(data, dict) else None),
-            billing_cycle=(data.get("billing_cycle") if isinstance(data, dict) else None),
-            customer_id=(data.get("customer_id") if isinstance(data, dict) else None),
-            period_end_ts=(int(data.get("period_end_ts")) if isinstance(data, dict) and data.get("period_end_ts") else None),
-        )
-        return WebhookResponse(ok=True)
+    parsed_ref = payments.parse_worldline_merchant_reference(order_reference)
+    try:
+        result = payments.WorldlineProvider().authorize_transaction(token=token)
+        transaction = result.get("Transaction") if isinstance(result, dict) else {}
+        transaction_status = str(transaction.get("Status") or "").upper() if isinstance(transaction, dict) else ""
 
-    if event_type == "topup.completed":
-        org_id = int((data.get("org_id") or 0))
-        topup_credits = int((data.get("topup_credits") or 0))
-        if org_id > 0 and topup_credits > 0:
+        if kind == "subscription" and parsed_ref.get("org_id") and parsed_ref.get("tier"):
+            payments.apply_subscription_update(
+                db,
+                org_id=int(parsed_ref["org_id"]),
+                tier=str(parsed_ref["tier"]),
+                billing_cycle=(str(parsed_ref.get("billing_cycle")) if parsed_ref.get("billing_cycle") else None),
+                customer_id=None,
+                period_end_ts=None,
+            )
+        elif kind == "topup" and parsed_ref.get("org_id") and parsed_ref.get("topup_credits"):
             payments.apply_credit_topup(
                 db,
-                org_id=org_id,
-                credits_amount=topup_credits,
-                reference_id=(data.get("reference_id") if isinstance(data, dict) else None),
+                org_id=int(parsed_ref["org_id"]),
+                credits_amount=int(parsed_ref["topup_credits"]),
+                reference_id=(str(transaction.get("Id")) if isinstance(transaction, dict) and transaction.get("Id") else token),
             )
-            return WebhookResponse(ok=True)
 
-    return WebhookResponse(ok=True, ignored=True)
+        if transaction_status in {"AUTHORIZED", "CAPTURED"}:
+            return RedirectResponse(_safe_redirect_target(success_url), status_code=status.HTTP_303_SEE_OTHER)
+        return RedirectResponse(_safe_redirect_target(cancel_url), status_code=status.HTTP_303_SEE_OTHER)
+    except RuntimeError as exc:
+        message = str(exc)
+        if "TOKEN_INVALID" in message or "TRANSACTION_IN_WRONG_STATE" in message:
+            return RedirectResponse(_safe_redirect_target(success_url), status_code=status.HTTP_303_SEE_OTHER)
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=message) from exc
 
 
 @router.get("/providers")

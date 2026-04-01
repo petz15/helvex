@@ -100,24 +100,33 @@ def test_stripe_webhook_updates_org_subscription(client, db, monkeypatch):
     assert org.payment_customer_id == "cus_123"
 
 
-def test_worldline_webhook_topup_grants_credits(client, db, monkeypatch):
-    org = _seed_org(db, org_id=13)
-    secret = "wlsec_test"
-    monkeypatch.setattr("app.services.payments.settings.worldline_webhook_secret", secret)
+def test_worldline_return_authorizes_and_redirects(client, db, monkeypatch):
+    org = _seed_org(db, org_id=15)
 
-    payload_obj = {
-        "event_type": "topup.completed",
-        "data": {"org_id": org.id, "topup_credits": 25000, "reference_id": "wl-pay-1"},
-    }
-    payload = json.dumps(payload_obj).encode("utf-8")
-    digest = hmac.new(secret.encode("utf-8"), payload, hashlib.sha256).hexdigest()
+    def _fake_authorize(self, *, token):
+        assert token == "tok_15"
+        return {
+            "Transaction": {
+                "Status": "AUTHORIZED",
+                "Id": "tx_15",
+            }
+        }
 
-    resp = client.post(
-        "/api/v1/billing/webhooks/worldline",
-        data=payload,
-        headers={"X-Worldline-Signature": digest, "Content-Type": "application/json"},
+    monkeypatch.setattr("app.services.payments.WorldlineProvider.authorize_transaction", _fake_authorize)
+
+    resp = client.get(
+        "/api/v1/billing/webhooks/worldline/return/tok_15",
+        params={
+            "kind": "topup",
+            "order_reference": f"wl_topup_{org.id}_25000_deadbeef",
+            "success_url": "https://example.com/success",
+            "cancel_url": "https://example.com/cancel",
+            "source": "notify",
+        },
+        follow_redirects=False,
     )
 
-    assert resp.status_code == 200
+    assert resp.status_code == 303
+    assert resp.headers["location"] == "https://example.com/success"
     db.refresh(org)
     assert org.credits_balance == 25000

@@ -33,9 +33,9 @@ def _build_parser() -> argparse.ArgumentParser:
     create.add_argument("--password", required=True, help="Login password (min 8 chars recommended).")
     create.add_argument(
         "--tier",
-        default="enterprise",
-        choices=["free", "starter", "professional", "enterprise"],
-        help="User tier (default: enterprise).",
+        default="strategist",
+        choices=["free", "simple", "explorer", "researcher", "strategist"],
+        help="User tier (default: strategist).",
     )
     create.add_argument(
         "--no-superadmin",

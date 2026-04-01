@@ -74,10 +74,10 @@ class Settings(BaseSettings):
 
     # Worldline
     worldline_api_base_url: str = "https://payment.preprod.direct.worldline-solutions.com"
-    worldline_api_key: str = ""
+    worldline_customer_id: str = ""
+    worldline_terminal_id: str = ""
+    worldline_api_username: str = ""
     worldline_api_password: str = ""
-    worldline_merchant_id: str = ""
-    worldline_webhook_secret: str = ""
 
     # Stripe
     stripe_api_base_url: str = "https://api.stripe.com"

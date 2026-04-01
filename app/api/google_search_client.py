@@ -16,7 +16,7 @@ def search_website(company_name: str, *, num: int = 5) -> list[GoogleSearchResul
 
     Args:
         company_name: The company name to search for.
-        num: Number of results to return (1-10).
+        num: Number of results to return (1-25).
 
     Returns:
         A list of :class:`GoogleSearchResult` instances.
@@ -30,7 +30,9 @@ def search_website(company_name: str, *, num: int = 5) -> list[GoogleSearchResul
 
     payload = {
         "q": company_name,
-        "num": min(max(1, num), 10),
+        "num": min(max(1, num), 25),
+        "gl": "ch", # geographic location for search results
+        "hl": "de", # language for search results -> TODO: make gl/hl configurable per request if needed
     }
     headers = {
         "X-API-KEY": settings.serper_api_key,

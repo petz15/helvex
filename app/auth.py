@@ -224,35 +224,6 @@ def require_verified_email(user: User = Depends(get_current_user)) -> User:
     return user
 
 
-def require_tier(min_tier: str):
-    """Dependency factory — raises 403 if user's tier is below *min_tier*.
-
-    Checks ``user.tier`` (legacy path).  For org-scoped tier enforcement use
-    ``app.services.tiers.require_org_tier`` instead.
-
-    Usage::
-
-        @router.get("/premium")
-        def premium_route(user: User = Depends(require_tier("simple"))):
-            ...
-    """
-    def _check(user: User = Depends(get_current_user)) -> User:
-        if user.is_superadmin:
-            return user
-        normalised = _TIER_LEGACY.get(user.tier, user.tier)
-        min_normalised = _TIER_LEGACY.get(min_tier, min_tier)
-        user_level = _TIER_ORDER.index(normalised) if normalised in _TIER_ORDER else 0
-        required_level = _TIER_ORDER.index(min_normalised) if min_normalised in _TIER_ORDER else 0
-        if user_level < required_level:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail=f"This feature requires the '{min_tier}' tier or above.",
-            )
-        return user
-    return _check
-
-
-# ---------------------------------------------------------------------------
 # ---------------------------------------------------------------------------
 # Rate limiting — Redis-backed with in-memory fallback
 # ---------------------------------------------------------------------------

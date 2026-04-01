@@ -15,6 +15,7 @@ import secrets
 import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from urllib.parse import urlencode
 from typing import Any, Literal, Protocol
 
 import httpx
@@ -82,6 +83,35 @@ def _base_url() -> str:
     return settings.app_base_url.rstrip("/")
 
 
+def _query_url(base_path: str, params: dict[str, str]) -> str:
+    return f"{_base_url()}{base_path}?{urlencode(params)}"
+
+
+def _worldline_api_username() -> str:
+    return settings.worldline_api_username.strip()
+
+
+def _worldline_customer_id() -> str:
+    return settings.worldline_customer_id.strip()
+
+
+def _worldline_terminal_id() -> str:
+    return getattr(settings, "worldline_terminal_id", "").strip()
+
+
+def _worldline_callback_url(*, kind: str, order_reference: str, success_url: str, cancel_url: str, source: str) -> str:
+    return _query_url(
+        "/api/v1/billing/webhooks/worldline/return",
+        {
+            "kind": kind,
+            "order_reference": order_reference,
+            "success_url": success_url,
+            "cancel_url": cancel_url,
+            "source": source,
+        },
+    )
+
+
 def compute_subscription_price_chf(
     *,
     tier: str,
@@ -110,6 +140,52 @@ def credits_to_chf(credits_amount: int) -> float:
     return round(float(credits_amount) * 0.0001, 4)
 
 
+def parse_worldline_merchant_reference(reference: str | None) -> dict[str, Any]:
+    """Parse order reference token created for Worldline transactions.
+
+    Supported formats:
+    - wl_sub_<org_id>_<tier>_<billing_cycle>_<nonce>
+    - wl_topup_<org_id>_<credits>_<nonce>
+
+    Backward-compatible legacy formats are also accepted:
+    - wl_sub_<org_id>_<nonce>
+    - wl_topup_<org_id>_<nonce>
+    """
+    ref = (reference or "").strip()
+    if not ref.startswith("wl_"):
+        return {}
+
+    parts = ref.split("_")
+    if len(parts) < 4:
+        return {}
+
+    kind = parts[1]
+    try:
+        org_id = int(parts[2])
+    except ValueError:
+        return {}
+
+    out: dict[str, Any] = {"kind": kind, "org_id": org_id}
+
+    if kind == "sub":
+        if len(parts) >= 6:
+            # wl_sub_<org_id>_<tier>_<billing_cycle>_<nonce>
+            out["tier"] = parts[3]
+            out["billing_cycle"] = parts[4]
+        return out
+
+    if kind == "topup":
+        if len(parts) >= 5:
+            # wl_topup_<org_id>_<credits>_<nonce>
+            try:
+                out["topup_credits"] = int(parts[3])
+            except ValueError:
+                pass
+        return out
+
+    return {}
+
+
 def get_enabled_provider_order() -> list[ProviderName]:
     """Return provider priority order based on PAYMENT_PROVIDER_MODE.
 
@@ -127,42 +203,109 @@ class WorldlineProvider:
     name: ProviderName = "worldline"
 
     def _assert_configured(self) -> None:
-        if (
-            not settings.worldline_api_key.strip()
-            or not settings.worldline_api_password.strip()
-            or not settings.worldline_merchant_id.strip()
-        ):
+        customer_id = _worldline_customer_id()
+        terminal_id = _worldline_terminal_id()
+        api_username = _worldline_api_username()
+        if not customer_id or not terminal_id or not api_username or not settings.worldline_api_password.strip():
             raise PaymentConfigurationError(
                 "Worldline provider is not configured "
-                "(WORLDLINE_API_KEY/WORLDLINE_API_PASSWORD/WORLDLINE_MERCHANT_ID missing)"
+                "(WORLDLINE_CUSTOMER_ID/WORLDLINE_TERMINAL_ID/WORLDLINE_API_USERNAME/WORLDLINE_API_PASSWORD missing)"
             )
 
-    def _create_hosted_checkout(self, payload: dict[str, Any]) -> CheckoutSession:
+    def _create_transaction_initialize(self, payload: dict[str, Any]) -> CheckoutSession:
         base = settings.worldline_api_base_url.rstrip("/")
-        url = f"{base}/v1/{settings.worldline_merchant_id}/hostedcheckouts"
+        url = f"{base}/Payment/v1/Transaction/Initialize"
+        customer_id = _worldline_customer_id()
+        terminal_id = _worldline_terminal_id()
+        api_username = _worldline_api_username()
         headers = {
             "Accept": "application/json",
             "Content-Type": "application/json",
         }
 
-        with httpx.Client(timeout=20.0) as client:
+        with httpx.Client(timeout=100.0) as client:
             resp = client.post(
                 url,
                 headers=headers,
                 json=payload,
-                auth=(settings.worldline_api_key, settings.worldline_api_password),
+                auth=(api_username, settings.worldline_api_password),
             )
             if resp.status_code >= 400:
                 raise RuntimeError(f"Worldline checkout creation failed: {resp.status_code} {resp.text}")
             data = resp.json()
 
-        hosted_id = data.get("hostedCheckoutId") or data.get("id")
-        redirect = data.get("redirectUrl") or data.get("partialRedirectUrl")
-        if not redirect and hosted_id:
-            redirect = f"{base}/hostedcheckout/PaymentMethodsSelection/{hosted_id}"
+        token = str(data.get("Token") or data.get("token") or "")
+        redirect = data.get("RedirectUrl")
+        if not redirect:
+            redirect = ((data.get("Redirect") or {}).get("RedirectUrl") if isinstance(data.get("Redirect"), dict) else None)
         if not redirect:
             raise RuntimeError("Worldline response did not include a redirect URL")
-        return CheckoutSession(provider=self.name, checkout_url=str(redirect), external_id=str(hosted_id or ""))
+        if not token:
+            raise RuntimeError("Worldline response did not include a transaction token")
+        return CheckoutSession(provider=self.name, checkout_url=str(redirect), external_id=token)
+
+    def _initialize_request(
+        self,
+        *,
+        org_id: int,
+        amount_chf: float,
+        order_reference: str,
+        description: str,
+        return_url: str,
+        notify_url: str,
+        success_url: str,
+        cancel_url: str,
+    ) -> CheckoutSession:
+        customer_id = _worldline_customer_id()
+        terminal_id = _worldline_terminal_id()
+        payload = {
+            "RequestHeader": {
+                "CustomerId": customer_id,
+                "RequestId": f"wl_{org_id}_{secrets.token_hex(8)}",
+                "RetryIndicator": 0,
+            },
+            "TerminalId": terminal_id,
+            "Payment": {
+                "Amount": {
+                    "Value": str(int(round(amount_chf * 100))),
+                    "CurrencyCode": "CHF",
+                },
+                "OrderId": order_reference,
+                "Description": description,
+            },
+            "ReturnUrl": {
+                "Url": return_url,
+            },
+            "RedirectNotifyUrls": {
+                "SuccessNotifyUrl": notify_url,
+                "FailNotifyUrl": notify_url,
+            },
+        }
+        session = self._create_transaction_initialize(payload)
+        return session
+
+    def authorize_transaction(self, *, token: str) -> dict[str, Any]:
+        base = settings.worldline_api_base_url.rstrip("/")
+        url = f"{base}/Payment/v1/Transaction/Authorize"
+        customer_id = _worldline_customer_id()
+        api_username = _worldline_api_username()
+        payload = {
+            "RequestHeader": {
+                "CustomerId": customer_id,
+                "RequestId": f"wl_auth_{secrets.token_hex(8)}",
+                "RetryIndicator": 0,
+            },
+            "Token": token,
+        }
+        headers = {
+            "Accept": "application/json",
+            "Content-Type": "application/json",
+        }
+        with httpx.Client(timeout=100.0) as client:
+            resp = client.post(url, headers=headers, json=payload, auth=(api_username, settings.worldline_api_password))
+            if resp.status_code >= 400:
+                raise RuntimeError(f"Worldline authorization failed: {resp.status_code} {resp.text}")
+            return resp.json()
 
     def create_subscription_checkout(
         self,
@@ -175,27 +318,31 @@ class WorldlineProvider:
     ) -> CheckoutSession:
         self._assert_configured()
         price = compute_subscription_price_chf(tier=tier, billing_cycle=billing_cycle)
-        amount_cents = int(round(price * 100))
-        ext_id = f"wl_sub_{org_id}_{secrets.token_hex(6)}"
-        payload = {
-            "order": {
-                "amountOfMoney": {"currencyCode": "CHF", "amount": amount_cents},
-                "customer": {"merchantCustomerId": str(org_id)},
-                "references": {"merchantReference": ext_id},
-            },
-            "hostedCheckoutSpecificInput": {
-                "returnUrl": success_url,
-                "locale": "en_GB",
-                "showResultPage": False,
-            },
-            "metadata": {
-                "org_id": str(org_id),
-                "tier": tier,
-                "billing_cycle": billing_cycle,
-                "kind": "subscription",
-            },
-        }
-        return self._create_hosted_checkout(payload)
+        order_reference = f"wl_sub_{org_id}_{tier}_{billing_cycle}_{secrets.token_hex(6)}"
+        return_url = _worldline_callback_url(
+            kind="subscription",
+            order_reference=order_reference,
+            success_url=success_url,
+            cancel_url=cancel_url,
+            source="return",
+        )
+        notify_url = _worldline_callback_url(
+            kind="subscription",
+            order_reference=order_reference,
+            success_url=success_url,
+            cancel_url=cancel_url,
+            source="notify",
+        )
+        return self._initialize_request(
+            org_id=org_id,
+            amount_chf=price,
+            order_reference=order_reference,
+            description=f"Helvex {tier.title()} ({billing_cycle})",
+            return_url=return_url,
+            notify_url=notify_url,
+            success_url=success_url,
+            cancel_url=cancel_url,
+        )
 
     def create_topup_checkout(
         self,
@@ -206,26 +353,32 @@ class WorldlineProvider:
         cancel_url: str,
     ) -> CheckoutSession:
         self._assert_configured()
-        amount_cents = int(round(credits_to_chf(credits) * 100))
-        ext_id = f"wl_topup_{org_id}_{secrets.token_hex(6)}"
-        payload = {
-            "order": {
-                "amountOfMoney": {"currencyCode": "CHF", "amount": amount_cents},
-                "customer": {"merchantCustomerId": str(org_id)},
-                "references": {"merchantReference": ext_id},
-            },
-            "hostedCheckoutSpecificInput": {
-                "returnUrl": success_url,
-                "locale": "en_GB",
-                "showResultPage": False,
-            },
-            "metadata": {
-                "org_id": str(org_id),
-                "topup_credits": str(credits),
-                "kind": "topup",
-            },
-        }
-        return self._create_hosted_checkout(payload)
+        amount_chf = credits_to_chf(credits)
+        order_reference = f"wl_topup_{org_id}_{credits}_{secrets.token_hex(6)}"
+        return_url = _worldline_callback_url(
+            kind="topup",
+            order_reference=order_reference,
+            success_url=success_url,
+            cancel_url=cancel_url,
+            source="return",
+        )
+        notify_url = _worldline_callback_url(
+            kind="topup",
+            order_reference=order_reference,
+            success_url=success_url,
+            cancel_url=cancel_url,
+            source="notify",
+        )
+        return self._initialize_request(
+            org_id=org_id,
+            amount_chf=amount_chf,
+            order_reference=order_reference,
+            description=f"Helvex top-up {credits} credits",
+            return_url=return_url,
+            notify_url=notify_url,
+            success_url=success_url,
+            cancel_url=cancel_url,
+        )
 
 
 class StripeProvider:
@@ -389,17 +542,6 @@ def verify_stripe_signature(*, payload: bytes, signature_header: str | None, sec
     except ValueError:
         return False
     return age <= 300
-
-
-def verify_worldline_signature(*, payload: bytes, signature_header: str | None, secret: str) -> bool:
-    """Verify Worldline webhook HMAC signature (sha256 hex body digest)."""
-    if not signature_header or not secret:
-        return False
-    sig = signature_header.strip()
-    if sig.startswith("sha256="):
-        sig = sig[len("sha256="):]
-    digest = hmac.new(secret.encode("utf-8"), payload, hashlib.sha256).hexdigest()
-    return hmac.compare_digest(digest, sig)
 
 
 def apply_subscription_update(

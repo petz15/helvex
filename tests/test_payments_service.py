@@ -62,12 +62,13 @@ def test_worldline_topup_checkout_calls_api(monkeypatch):
         captured["headers"] = headers
         captured["json"] = json
         captured["auth"] = auth
-        return _FakeResponse(200, {"hostedCheckoutId": "hc_1", "redirectUrl": "https://payment.preprod.worldline/hc_1"})
+        return _FakeResponse(200, {"Token": "tok_1", "RedirectUrl": "https://payment.preprod.worldline/tok_1"})
 
     monkeypatch.setattr(payments.settings, "payment_provider_mode", "worldline")
-    monkeypatch.setattr(payments.settings, "worldline_api_key", "wl_key")
+    monkeypatch.setattr(payments.settings, "worldline_customer_id", "customer_test")
+    monkeypatch.setattr(payments.settings, "worldline_terminal_id", "12345678")
+    monkeypatch.setattr(payments.settings, "worldline_api_username", "wl_key")
     monkeypatch.setattr(payments.settings, "worldline_api_password", "wl_pwd")
-    monkeypatch.setattr(payments.settings, "worldline_merchant_id", "merchant_test")
     monkeypatch.setattr(payments.httpx.Client, "post", _fake_post)
 
     out = payments.create_topup_checkout(
@@ -77,8 +78,21 @@ def test_worldline_topup_checkout_calls_api(monkeypatch):
         cancel_url="https://example.com/cancel",
     )
     assert out.provider == "worldline"
-    assert out.external_id == "hc_1"
-    assert out.checkout_url.endswith("hc_1")
-    assert "/v1/merchant_test/hostedcheckouts" in captured["url"]
-    assert captured["json"]["metadata"]["topup_credits"] == "25000"
+    assert out.external_id == "tok_1"
+    assert out.checkout_url.endswith("tok_1")
+    assert captured["url"].endswith("/Payment/v1/Transaction/Initialize")
+    assert captured["json"]["RequestHeader"]["CustomerId"] == "customer_test"
+    assert captured["json"]["TerminalId"] == "12345678"
+    assert captured["json"]["Payment"]["OrderId"].startswith("wl_topup_7_25000_")
+    assert captured["json"]["RedirectNotifyUrls"]["SuccessNotifyUrl"].endswith("source=notify")
     assert captured["auth"] == ("wl_key", "wl_pwd")
+
+
+def test_parse_worldline_merchant_reference_subscription():
+    parsed = payments.parse_worldline_merchant_reference("wl_sub_42_researcher_yearly_deadbeef")
+    assert parsed["kind"] == "sub"
+    assert parsed["org_id"] == 42
+    assert parsed["tier"] == "researcher"
+    assert parsed["billing_cycle"] == "yearly"
+
+

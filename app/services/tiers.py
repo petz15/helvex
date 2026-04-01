@@ -121,15 +121,16 @@ QUEUE_PRIORITY: dict[str, int] = {
     # custom: driven by custom_features["priority_level"] (0–4)
 }
 
-#: Consumption-credit discount rates per tier.
-DISCOUNT_RATE: dict[str, float] = {
+#: Bonus credit rate applied when topping up credits (not at deduction time).
+#: E.g. simple=0.10 means buying 10,000 credits grants 1,000 bonus credits on top.
+BONUS_RATE: dict[str, float] = {
     "free": 0.0,
     "simple": 0.10,
     "explorer": 0.15,
     "researcher": 0.20,
     "strategist": 0.30,
-    "superadmin": 1.0,  # 100% discount (free usage)
-    # custom: discount_steps * 0.05, capped at 0.40
+    "superadmin": 0.0,  # superadmin orgs use credits_unlimited instead
+    # custom: bonus_steps * 0.05, capped at 0.40
 }
 
 #: Web-results privacy duration in months per tier.
@@ -213,14 +214,18 @@ def get_queue_priority(org: Organization) -> int:
     return QUEUE_PRIORITY.get(tier, 0)
 
 
-def get_consumption_discount(org: Organization) -> float:
-    """Credit discount rate in [0.0, 0.40].  Multiplied as (1 - rate)."""
+def get_topup_bonus_rate(org: Organization) -> float:
+    """Bonus credit rate for this org's tier, applied when topping up credits.
+
+    E.g. 0.15 means buying 10,000 credits also grants 1,500 bonus credits.
+    Range: [0.0, 0.40] for fixed tiers; up to 0.40 for custom (8 bonus steps).
+    """
     tier = normalize_tier(org.tier)
     if tier == "custom":
         features: dict = org.custom_features or {}
-        steps = max(0, min(8, int(features.get("discount_steps", 0))))  # max 40%
+        steps = max(0, min(8, int(features.get("bonus_steps", 0))))  # max 40%
         return steps * 0.05
-    return DISCOUNT_RATE.get(tier, 0.0)
+    return BONUS_RATE.get(tier, 0.0)
 
 
 def get_web_results_privacy_months(org: Organization) -> float:
@@ -245,7 +250,7 @@ CUSTOM_FEATURE_PRICES: dict[str, float] = {
     "base": 1.0,                  # no_ads + multi_user (required)
     "web_results_month": 1.0,     # per additional month of web-result privacy
     "export_100k": 2.0,           # unlimited CSV export
-    "discount_step": 2.0,         # per 5% discount step (max 8 steps = 40%)
+    "bonus_step": 2.0,            # per 5% topup bonus step (max 8 steps = 40%)
     "priority_level": 2.0,        # per job-queue priority level (max 4)
     "immediate_llm": 1.0,
     "byo_llm_keys": 14.0,
@@ -266,7 +271,7 @@ def calculate_custom_tier_price(features: dict) -> float:
         calculate_custom_tier_price({
             "web_results_months": 2,
             "export_100k": True,
-            "discount_steps": 3,
+            "bonus_steps": 3,
             "priority_level": 2,
             "immediate_llm": True,
             "byo_llm_keys": False,
@@ -281,8 +286,8 @@ def calculate_custom_tier_price(features: dict) -> float:
     if features.get("export_100k"):
         price += CUSTOM_FEATURE_PRICES["export_100k"]
 
-    discount_steps = max(0, min(8, int(features.get("discount_steps", 0))))
-    price += discount_steps * CUSTOM_FEATURE_PRICES["discount_step"]
+    bonus_steps = max(0, min(8, int(features.get("bonus_steps", 0))))
+    price += bonus_steps * CUSTOM_FEATURE_PRICES["bonus_step"]
 
     priority_level = max(0, min(4, int(features.get("priority_level", 0))))
     price += priority_level * CUSTOM_FEATURE_PRICES["priority_level"]

@@ -88,6 +88,24 @@ All settings are read from environment variables (or a `.env` file):
 | `GOOGLE_DAILY_QUOTA` | Daily search quota (also settable via the UI) | `83` |
 | `GOOGLE_URL_EXCLUDE_KEYWORDS` | Comma-separated URL substrings to always exclude from website scoring (case-insensitive; not a regex). See `app/services/scoring.py` for examples. | *(empty)* |
 | `ANTHROPIC_API_KEY` | Anthropic API key for Claude classification jobs (also settable via Settings UI) | *(empty)* |
+| `PAYMENT_PROVIDER_MODE` | Payment provider mode: `worldline`, `stripe`, or `dual` | `worldline` |
+| `WORLDLINE_API_BASE_URL` | Saferpay JSON API base URL for the Transaction Interface | `https://test.saferpay.com/api/` |
+| `WORLDLINE_CUSTOMER_ID` | Saferpay customer ID used in `RequestHeader.CustomerId` | *(empty)* |
+| `WORLDLINE_TERMINAL_ID` | Saferpay terminal ID used in `TerminalId` | *(empty)* |
+| `WORLDLINE_API_USERNAME` | Saferpay JSON API basic-auth username | *(empty)* |
+| `WORLDLINE_API_PASSWORD` | Worldline API secret | *(empty)* |
+| `STRIPE_API_BASE_URL` | Stripe API base URL | `https://api.stripe.com` |
+| `STRIPE_SECRET_KEY` | Stripe secret key | *(empty)* |
+| `STRIPE_WEBHOOK_SECRET` | Stripe webhook signing secret | *(empty)* |
+
+### Wordline deployment checklist
+
+1. Expose a public HTTPS endpoint for webhooks and browser returns: `GET /api/v1/billing/webhooks/worldline/return` and `POST /api/v1/billing/webhooks/worldline`.
+2. Set provider mode and credentials: `PAYMENT_PROVIDER_MODE=worldline` (or `dual`), `WORLDLINE_CUSTOMER_ID`, `WORLDLINE_TERMINAL_ID`, `WORLDLINE_API_USERNAME`, `WORLDLINE_API_PASSWORD`.
+3. Ensure reverse proxy / ingress allows GET requests to `/api/v1/billing/webhooks/worldline/return` without auth redirects.
+4. Keep checkout success/cancel URLs customer-facing and validate they are HTTPS URLs.
+5. Send a test initialize flow and verify: redirect URL returned, token present, authorize succeeds, and org credits/tier update in DB.
+6. Configure retries/monitoring: alert on repeated non-2xx responses and keep callback logs for troubleshooting.
 
 ---
 

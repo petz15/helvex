@@ -44,6 +44,52 @@ export async function fetchCurrentUser(): Promise<CurrentUser> {
   return res.json();
 }
 
+export interface BillingCheckoutResponse {
+  provider: string;
+  checkout_url: string;
+  external_id: string | null;
+  amount_chf: number;
+}
+
+export async function createSubscriptionCheckout(data: {
+  tier: string;
+  billing_cycle: "monthly" | "yearly";
+  success_url: string;
+  cancel_url: string;
+  provider?: "worldline" | "stripe" | null;
+}): Promise<BillingCheckoutResponse> {
+  const res = await fetch("/api/v1/billing/checkout/subscription", {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.detail ?? "Failed to create subscription checkout");
+  }
+  return res.json();
+}
+
+export async function createTopupCheckout(data: {
+  credits: number;
+  success_url: string;
+  cancel_url: string;
+  provider?: "worldline" | "stripe" | null;
+}): Promise<BillingCheckoutResponse> {
+  const res = await fetch("/api/v1/billing/checkout/topup", {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.detail ?? "Failed to create top-up checkout");
+  }
+  return res.json();
+}
+
 /**
  * Build an org-scoped path for workspace routes.
  * Usage: orgPath(orgId, "/companies/123/state")
