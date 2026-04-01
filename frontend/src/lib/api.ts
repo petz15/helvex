@@ -65,8 +65,15 @@ export async function createSubscriptionCheckout(data: {
     body: JSON.stringify(data),
   });
   if (!res.ok) {
-    const body = await res.json().catch(() => ({}));
-    throw new Error(body.detail ?? "Failed to create subscription checkout");
+    const raw = await res.text();
+    let detail: string | undefined;
+    try {
+      const parsed = JSON.parse(raw) as { detail?: string };
+      detail = parsed?.detail;
+    } catch {
+      detail = raw.trim() || undefined;
+    }
+    throw new Error(detail ?? `Subscription checkout failed (HTTP ${res.status})`);
   }
   return res.json();
 }
@@ -84,8 +91,15 @@ export async function createTopupCheckout(data: {
     body: JSON.stringify(data),
   });
   if (!res.ok) {
-    const body = await res.json().catch(() => ({}));
-    throw new Error(body.detail ?? "Failed to create top-up checkout");
+    const raw = await res.text();
+    let detail: string | undefined;
+    try {
+      const parsed = JSON.parse(raw) as { detail?: string };
+      detail = parsed?.detail;
+    } catch {
+      detail = raw.trim() || undefined;
+    }
+    throw new Error(detail ?? `Top-up checkout failed (HTTP ${res.status})`);
   }
   return res.json();
 }
