@@ -49,6 +49,7 @@ git push
 kubectl get secret helvex-env -n helvex-prod -o jsonpath='{.data}' | \
   python3 -c "import sys,json,base64; d=json.load(sys.stdin); [print(k) for k in d]"
 # S3_ACCESS_KEY and S3_SECRET_KEY must appear in the output
+# For payments, WORLDLINE_API_BASE_URL (and WORLDLINE_CUSTOMER_ID / WORLDLINE_TERMINAL_ID) should also appear.
 ```
 
 If they're missing, add them to the GitHub Actions secrets (`S3_ACCESS_KEY`, `S3_SECRET_KEY`) and re-run the deploy workflow to recreate the secret.
