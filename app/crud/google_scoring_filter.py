@@ -1,8 +1,69 @@
 from sqlalchemy.orm import Session
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from app.models.google_directory_domain import GoogleDirectoryDomain
 from app.models.google_stopword import GoogleStopword
 from app.models.tfidf_stopword import TfidfStopword
+
+
+def seed_default_google_stopwords(db: Session) -> int:
+    """Insert all built-in Google stopwords into the DB, skipping existing ones.
+
+    Returns number of rows actually inserted.
+    """
+    from app.services.scoring import _STOPWORDS  # import here to avoid circular
+    inserted = 0
+    for value in _STOPWORDS:
+        v = value.strip().lower()
+        if not v:
+            continue
+        exists = db.query(GoogleStopword).filter(GoogleStopword.value == v).first()
+        if not exists:
+            db.add(GoogleStopword(value=v, description="built-in default", active=True))
+            inserted += 1
+    if inserted:
+        db.commit()
+    return inserted
+
+
+def seed_default_directory_domains(db: Session) -> int:
+    """Insert all built-in directory domains into the DB, skipping existing ones.
+
+    Returns number of rows actually inserted.
+    """
+    from app.services.scoring import _DIRECTORY_DOMAINS  # import here to avoid circular
+    inserted = 0
+    for value in _DIRECTORY_DOMAINS:
+        v = value.strip().lower()
+        if not v:
+            continue
+        exists = db.query(GoogleDirectoryDomain).filter(GoogleDirectoryDomain.value == v).first()
+        if not exists:
+            db.add(GoogleDirectoryDomain(value=v, description="built-in default", active=True))
+            inserted += 1
+    if inserted:
+        db.commit()
+    return inserted
+
+
+def seed_default_tfidf_stopwords(db: Session) -> int:
+    """Insert all built-in TF-IDF stopwords into the DB, skipping existing ones.
+
+    Returns number of rows actually inserted.
+    """
+    from app.services.collection import _TFIDF_STOPWORDS  # import here to avoid circular
+    inserted = 0
+    for value in _TFIDF_STOPWORDS:
+        v = value.strip().lower()
+        if not v:
+            continue
+        exists = db.query(TfidfStopword).filter(TfidfStopword.value == v).first()
+        if not exists:
+            db.add(TfidfStopword(value=v, description="built-in default", active=True))
+            inserted += 1
+    if inserted:
+        db.commit()
+    return inserted
 
 
 def list_google_stopwords(db: Session) -> list[GoogleStopword]:

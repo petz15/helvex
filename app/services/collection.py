@@ -31,8 +31,6 @@ from app.services.scoring import (
     distance_to_muri_km,
     distance_to_origin_km,
     fallback_result_score,
-    get_default_directory_domains,
-    get_default_google_stopwords,
     get_default_scoring_config,
     is_irrelevant_result,
     is_social_lead_domain,
@@ -52,18 +50,9 @@ def _google_search_ready(db: Session) -> tuple[bool, str | None]:
 
 
 def _google_scoring_overrides(db: Session) -> tuple[set[str], set[str]]:
-    """Load runtime Google scoring filters from dedicated DB tables.
-
-    Both settings are additive and merged with built-in defaults:
-    - google_stopwords (active rows)
-    - google_directory_domains (active rows)
-    """
-    stopwords = get_default_google_stopwords()
-    directory_domains = get_default_directory_domains()
-
-    stopwords |= crud.get_active_google_stopwords(db)
-    directory_domains |= crud.get_active_google_directory_domains(db)
-
+    """Load runtime Google scoring filters exclusively from DB tables."""
+    stopwords = crud.get_active_google_stopwords(db)
+    directory_domains = crud.get_active_google_directory_domains(db)
     return stopwords, directory_domains
 
 
@@ -654,6 +643,7 @@ def geocode_and_update_company(db: Session, company: Company) -> bool:
 def recalculate_flex_scores(
     db: Session,
     *,
+    org_id: int | None = None,
     batch_size: int = 500,
     resume_from: int = 0,
     progress_cb: Any = None,
@@ -668,7 +658,7 @@ def recalculate_flex_scores(
         ``{"updated": int, "geocoded": int, "errors": list[str]}``
     """
     stats: dict[str, Any] = {"updated": 0, "geocoded": 0, "errors": []}
-    scoring_config = _load_scoring_config(db)
+    scoring_config = _load_scoring_config_for_org(db, org_id)
     cancelled_score = int(scoring_config.get("scoring_cancelled_score", "5"))
 
     # ── Pass 1: compute raw scores ────────────────────────────────────────────

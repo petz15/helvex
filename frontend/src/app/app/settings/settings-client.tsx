@@ -18,6 +18,7 @@ import {
   fetchGoogleStopwords,
   fetchSettings,
   saveSettings,
+  seedDefaults,
   toggleTfidfStopword,
   toggleBoilerplate,
   toggleGoogleDirectoryDomain,
@@ -62,6 +63,7 @@ export function SettingsClient() {
   const [newPattern, setNewPattern] = useState({ pattern: "", description: "", example: "" });
   const [addingPattern, setAddingPattern] = useState(false);
   const [triggering, setTriggering] = useState<string | null>(null);
+  const [seeding, setSeeding] = useState(false);
   const [banner, setBanner] = useState<{ kind: "success" | "error"; message: string } | null>(null);
   const router = useRouter();
 
@@ -72,6 +74,21 @@ export function SettingsClient() {
 
   function set(key: keyof AppSettings, value: string) {
     setForm(f => ({ ...f, [key]: value }));
+  }
+
+  async function handleSeedDefaults() {
+    setSeeding(true);
+    try {
+      const result = await seedDefaults();
+      reloadStopwords();
+      reloadDirectoryDomains();
+      reloadTfidfStopwords();
+      setBanner({ kind: "success", message: `Seeded: ${result.google_stopwords} Google stopwords, ${result.directory_domains} directory domains, ${result.tfidf_stopwords} TF-IDF stopwords.` });
+    } catch {
+      setBanner({ kind: "error", message: "Failed to seed defaults." });
+    } finally {
+      setSeeding(false);
+    }
   }
 
   async function handleSave(e: React.FormEvent) {
@@ -248,10 +265,22 @@ export function SettingsClient() {
       </div>
 
       <SectionTitle title="Google scoring filters" />
+      <div className="flex items-center justify-between py-2">
+        <p className="text-xs text-slate-500">Seed the database with all built-in defaults: Google stopwords, directory domains, and TF-IDF stopwords. Safe to run multiple times — skips existing rows.</p>
+        <button
+          type="button"
+          onClick={handleSeedDefaults}
+          disabled={seeding}
+          className="flex items-center gap-1.5 rounded border border-slate-200 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50 transition-colors"
+        >
+          {seeding ? <Loader2 size={13} className="animate-spin" /> : <Plus size={13} />}
+          Seed defaults
+        </button>
+      </div>
       <div className="space-y-5">
         <Field
           label="Stop words"
-          hint="These are added to built-in stop words when extracting purpose keywords for Google match scoring."
+          hint="Stop words used when extracting purpose keywords for Google match scoring. Use 'Seed defaults' to load the built-in list."
         >
           <div className="space-y-2">
             <div className="flex gap-2">
@@ -305,7 +334,7 @@ export function SettingsClient() {
                   ))}
                   {stopwords.length === 0 && (
                     <tr>
-                      <td colSpan={2} className="px-3 py-3 text-slate-400">No custom stop words configured.</td>
+                      <td colSpan={2} className="px-3 py-3 text-slate-400">No stop words configured. Click &ldquo;Seed defaults&rdquo; to load built-ins.</td>
                     </tr>
                   )}
                 </tbody>
@@ -370,7 +399,7 @@ export function SettingsClient() {
                   ))}
                   {directoryDomains.length === 0 && (
                     <tr>
-                      <td colSpan={2} className="px-3 py-3 text-slate-400">No custom directory domains configured.</td>
+                      <td colSpan={2} className="px-3 py-3 text-slate-400">No directory domains configured. Click &ldquo;Seed defaults&rdquo; to load built-ins.</td>
                     </tr>
                   )}
                 </tbody>
@@ -384,7 +413,7 @@ export function SettingsClient() {
       <div className="space-y-5">
         <Field
           label="Stop words"
-          hint="These are added to built-in stop words used by TF-IDF clustering and purpose keyword extraction."
+          hint="Stop words used by TF-IDF clustering and purpose keyword extraction. Use 'Seed defaults' to load the built-in list."
         >
           <div className="space-y-2">
             <div className="flex gap-2">
@@ -438,7 +467,7 @@ export function SettingsClient() {
                   ))}
                   {tfidfStopwords.length === 0 && (
                     <tr>
-                      <td colSpan={2} className="px-3 py-3 text-slate-400">No custom TF-IDF stop words configured.</td>
+                      <td colSpan={2} className="px-3 py-3 text-slate-400">No TF-IDF stop words configured. Click &ldquo;Seed defaults&rdquo; to load built-ins.</td>
                     </tr>
                   )}
                 </tbody>

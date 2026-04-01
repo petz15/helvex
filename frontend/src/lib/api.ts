@@ -318,6 +318,12 @@ export async function deleteTfidfStopword(id: number): Promise<void> {
   await fetch(`/api/v1/tfidf-stopwords/${id}`, { method: "DELETE", credentials: "include" });
 }
 
+export async function seedDefaults(): Promise<{ google_stopwords: number; directory_domains: number; tfidf_stopwords: number }> {
+  const res = await fetch("/api/v1/settings/seed-defaults", { method: "POST", credentials: "include" });
+  if (!res.ok) throw new Error("Failed to seed defaults");
+  return res.json();
+}
+
 // ── Map ───────────────────────────────────────────────────────────────────────
 
 export async function fetchMapData(params?: Record<string, string>): Promise<{ features: import("./types").MapFeature[]; truncated: boolean; count: number }> {
@@ -399,6 +405,53 @@ export async function fetchOrgSettings(orgId: number): Promise<Record<string, st
   const res = await fetch(orgPath(orgId, "/settings"), { credentials: "include" });
   if (!res.ok) throw new Error("Failed to fetch org settings");
   return res.json();
+}
+
+export interface OrgEffectiveSettings {
+  anthropic_api_key_set: boolean;
+  claude_target_description: string;
+  claude_classify_prompt: string;
+  claude_classify_categories: string;
+  scoring_target_clusters: string;
+  scoring_exclude_clusters: string;
+  scoring_cluster_hit_points: string;
+  scoring_cluster_exclude_points: string;
+  scoring_target_keywords: string;
+  scoring_exclude_keywords: string;
+  scoring_keyword_hit_points: string;
+  scoring_keyword_exclude_points: string;
+  scoring_origin_lat: string;
+  scoring_origin_lon: string;
+  scoring_dist_15km: string;
+  scoring_dist_40km: string;
+  scoring_dist_80km: string;
+  scoring_dist_130km: string;
+  scoring_dist_far: string;
+  scoring_legal_form_scores: string;
+  scoring_legal_form_default: string;
+  scoring_cancelled_score: string;
+  scoring_weight_ai: string;
+  scoring_weight_web: string;
+  scoring_weight_flex: string;
+}
+
+export async function fetchOrgEffectiveSettings(orgId: number): Promise<OrgEffectiveSettings> {
+  const res = await fetch(orgPath(orgId, "/settings/effective"), { credentials: "include" });
+  if (!res.ok) throw new Error("Failed to fetch org effective settings");
+  return res.json();
+}
+
+export async function saveOrgWorkspaceSettings(
+  orgId: number,
+  data: Partial<Record<string, string | null>>,
+): Promise<void> {
+  const res = await fetch(orgPath(orgId, "/settings"), {
+    method: "PUT",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  });
+  if (!res.ok) throw new Error("Failed to save workspace settings");
 }
 
 export async function setOrgSetting(orgId: number, key: string, value: string): Promise<void> {

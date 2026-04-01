@@ -179,16 +179,23 @@ Watch the workflow run at **github.com/petz15/helvex → Actions**.
 The `deploy` job will run on the `helvex-prod` ARC runner (the pod you started in step 5). It will:
 
 1. Create the `helvex-env` K8s secret (with S3 credentials, DB password, etc.)
-2. Generate a unique `backupServerName` (e.g. `helvex-pg-20260331T150000Z`) and store it in the `pg-backup-meta` ConfigMap — this prevents the new cluster's WAL archive from colliding with the old backup. Subsequent deploys reuse the same name from the ConfigMap.
+2. **Auto-detect backup names** — no manual configuration needed:
+   - `restoreSourceServerName`: scans `s3://helvex-backups/pg-prod/` for the most recent subdirectory containing a base backup (falls back to `helvex-pg`)
+   - `backupServerName`: generates a unique timestamped name (e.g. `helvex-pg-20260331T150000Z`) and stores it in the `pg-backup-meta` ConfigMap. Subsequent deploys reuse the same name.
+   - This ensures the new cluster restores from the old backup but writes new backups to a separate path, avoiding WAL archive collisions.
 3. Deploy the helvex chart via helmfile (PostgreSQL, Redis, app, workers)
 4. Wait for PostgreSQL to become healthy (up to 10 minutes — restore from S3 backup)
 5. Wait for app rollout
 
 > **Database restore:** `prod.yaml` has `restoreFromBackup: true`, so the PostgreSQL
-> cluster bootstraps by restoring from `s3://helvex-backups/{backupname}/`. This only applies
+> cluster bootstraps by restoring from the auto-detected S3 backup. This only applies
 > on first cluster creation — subsequent deploys ignore the bootstrap section because
 > the cluster already exists. If this is a first-time deploy with no S3 backup, set
 > `restoreFromBackup: false` in `prod.yaml` before pushing.
+>
+> **Backup pruning:** A weekly CronJob (`helvex-pg-backup-prune`) deletes orphaned backup
+> directories older than 14 days, keeping only the active backup path. This prevents S3
+> storage from growing unbounded across rebuilds.
 
 ### Step 7 — Verify
 

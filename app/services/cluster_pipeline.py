@@ -72,7 +72,7 @@ class PipelineConfig:
     # ── DB write ──
     db_batch_size: int = 200
 
-    # ── Extra domain stopwords merged with _TFIDF_STOPWORDS ──
+    # ── Extra stopwords merged with DB tfidf_stopwords ──
     extra_stopwords: list[str] = field(default_factory=lambda: [
         "gesellschaft", "zweck", "unternehmen", "dienstleistungen", "kunden",
         "erbringt", "betreibt", "sowie", "alle", "art", "insbesondere",
@@ -84,13 +84,7 @@ class PipelineConfig:
 # ── Stopword helper ───────────────────────────────────────────────────────────
 
 def get_stopwords(cfg: PipelineConfig) -> set[str]:
-    """Return the combined stopword set: domain list from collection.py + extras."""
-    try:
-        from app.services.collection import _TFIDF_STOPWORDS
-        base: set[str] = set(_TFIDF_STOPWORDS)
-    except ImportError:
-        base = set()
-
+    """Return the stopword set from DB (active tfidf_stopwords rows)."""
     custom: set[str] = set()
     try:
         from app import crud
@@ -104,7 +98,7 @@ def get_stopwords(cfg: PipelineConfig) -> set[str]:
     except Exception:
         custom = set()
 
-    return base | set(cfg.extra_stopwords) | custom
+    return custom | set(cfg.extra_stopwords)
 
 
 # ── Step 1: Text Preprocessing ────────────────────────────────────────────────

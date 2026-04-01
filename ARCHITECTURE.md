@@ -304,10 +304,12 @@ The core entity. Key columns:
 
 #### `JobRun` — `app/models/job_run.py`
 
-Persistent record of every background job.
+Persistent record of every background job. Org-scoped: each job stores the org_id of the user who triggered it.
 
 | Column | Notes |
 |---|---|
+| `org_id` | FK → organizations; used to resolve per-org API keys & scoring config |
+| `user_id` | FK → users; caller who triggered the job |
 | `job_type` | bulk / initial / batch / re_geocode / tfidf_cluster / claude_classify / derive_industry |
 | `status` | queued → running → paused / completed / cancelled / failed |
 | `cancel_requested` / `pause_requested` | Flags polled by the worker at checkpoints |
@@ -423,15 +425,25 @@ The worker checks `cancel_requested` / `pause_requested` **between companies** (
 
 ### Job types
 
-| Type | Params | What it does |
-|---|---|---|
-| `bulk` | `canton`, `page_size`, `include_inactive` | Mass-import minimal company records from Zefix canton by canton |
-| `initial` | `limit`, `run_google` | Fetch Zefix detail + geocode for companies without lat/lon |
-| `batch` | `limit`, `refresh_zefix` | Google Search enrichment, quota-aware |
-| `re_geocode` | — | Re-geocode all companies to building-level precision |
-| `derive_industry` | `limit` | Re-derive industry field from taxonomy keyword mapping |
-| `tfidf_cluster` | `n_clusters`, `limit` | TF-IDF K-Means on purpose text |
-| `claude_classify` | `limit`, `system_prompt` | Claude Haiku scoring + categorization |
+| Type | Params | What it does | Org-scoped |
+|---|---|---|---|
+| `bulk` | `canton`, `page_size`, `include_inactive` | Mass-import minimal company records from Zefix canton by canton | — |
+| `initial` | `limit`, `run_google` | Fetch Zefix detail + geocode for companies without lat/lon | — |
+| `batch` | `limit`, `refresh_zefix` | Google Search enrichment, quota-aware | — |
+| `re_geocode` | — | Re-geocode all companies to building-level precision | — |
+| `derive_industry` | `limit` | Re-derive industry field from taxonomy keyword mapping | — |
+| `tfidf_cluster` | `n_clusters`, `limit` | TF-IDF K-Means on purpose text | ✓ Uses org-effective scoring config |
+| `recalculate_scores` | `limit`, `refresh_zefix` | Recompute combined/flex/ai scores for companies | ✓ Uses org-effective config & API key |
+| `claude_classify` | `limit`, `system_prompt` | Claude Haiku scoring + categorization | ✓ Validated in preflight; uses org-effective API key |
+
+#### Org-scoped job execution
+
+- **Job trigger**: Each user-initiated job stores `job.org_id = current_user.org_id`
+- **Config resolution**: Jobs fetch their per-org settings inside the worker loop:
+  - `recalculate_flex_scores(db, org_id=job.org_id)` → uses org-effective flex scoring config
+  - `claude_classify` job → fetches `get_effective_setting(db, "anthropic_api_key", org_id=job.org_id)` per-job; skips jobs without a key
+- **Preflight check**: Before queueing a `claude_classify` job, `_preflight_job` validates the org has both an API key and target description
+- **API key never stored in job params**: The API key is fetched fresh from the database during execution, never persisted in job JSON
 
 ---
 
@@ -462,10 +474,13 @@ Both are downloaded and compiled into SQLite databases **at Docker build time**.
 
 ### Claude (Anthropic) — `app/services/collection.py` + `app/crud/app_setting.py`
 
-- API key: `ANTHROPIC_API_KEY` (env var) or overridable via `app_settings` key
-- Model: Claude Haiku (cheapest; ~$0.25 per 1000 companies)
-- Used for: `claude_classify` job type only
-- System prompt: user-configurable via Settings API
+- **API key**: Resolved per-org via `get_effective_setting(db, "anthropic_api_key", org_id=...)`
+  - Falls back to global `ANTHROPIC_API_KEY` env var if no org override
+  - Never exposed in APIs (replaced with `anthropic_api_key_set: bool` in frontend)
+- **Model**: Claude Haiku (cheapest; ~$0.25 per 1000 companies)
+- **Used for**: `claude_classify` job type only
+- **System prompt**: User-configurable via Settings API; resolved per-org
+- **Preflight check** (`_preflight_job`): Validates org has API key before queueing `claude_classify`
 
 ### SMTP — `app/services/email.py`
 

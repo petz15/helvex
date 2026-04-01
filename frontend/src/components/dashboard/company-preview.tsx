@@ -141,6 +141,29 @@ export function CompanyPreview({ company: incoming, onClose, onUpdated }: Compan
           <span className="text-slate-500 w-16">Flex</span>
           <ScoreBar score={company.flex_score} className="flex-1" />
         </div>
+        {company.flex_score_breakdown && (() => {
+          try {
+            const bd = JSON.parse(company.flex_score_breakdown);
+            const entries: [string, number][] = [
+              ["Clusters", bd.clusters], ["Keywords", bd.keywords],
+              ["Distance", bd.distance], ["Legal form", bd.legal_form],
+              ["Data quality", bd.data_quality],
+            ].filter(([, v]) => v !== undefined && v !== 0) as [string, number][];
+            if (!entries.length) return null;
+            return (
+              <div className="mt-1 pl-16 space-y-0.5">
+                {entries.map(([label, val]) => (
+                  <div key={label} className="flex justify-between text-[11px] text-slate-400">
+                    <span>{label}</span>
+                    <span className={val > 0 ? "text-green-600" : val < 0 ? "text-red-500" : ""}>
+                      {val > 0 ? "+" : ""}{val}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            );
+          } catch { return null; }
+        })()}
       </div>
 
       {/* Details */}

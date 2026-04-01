@@ -2,7 +2,7 @@
 import { useState, useCallback, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import useSWR from "swr";
-import { Compass, Search, ChevronRight, X, Download } from "lucide-react";
+import { Compass, Search, ChevronRight, X, Download, Settings, AlertTriangle, Star } from "lucide-react";
 import { CompanyTable } from "@/components/dashboard/company-table";
 import { CompanyPreview } from "@/components/dashboard/company-preview";
 import { FilterBar } from "@/components/dashboard/filter-bar";
@@ -10,6 +10,7 @@ import { Pagination } from "@/components/dashboard/pagination";
 import {
   fetchCompanies, fetchStats, fetchCantons, fetchTaxonomy,
   fetchSavedViews, saveView, deleteView, bulkUpdateCompanies,
+  fetchCurrentUser, fetchOrgEffectiveSettings,
 } from "@/lib/api";
 import type { Company, CompanyFilters, CompanyStats } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -34,6 +35,15 @@ const SCORE_PRESETS = [
   { label: "Top", value: 80, description: "Score ≥ 80" },
 ];
 
+// Review status quick filter options
+const REVIEW_QUICK_FILTERS = [
+  { label: "Not yet reviewed", value: "_none", description: "No review status set" },
+  { label: "Interesting", value: "interesting", description: "Marked as interesting" },
+  { label: "Potential proposal", value: "potential_proposal", description: "" },
+  { label: "Confirmed", value: "confirmed_proposal", description: "" },
+  { label: "Rejected", value: "rejected", description: "Marked as rejected" },
+];
+
 type Mode = "guided" | "browse";
 
 function buildExportUrl(filters: CompanyFilters): string {
@@ -49,23 +59,126 @@ function buildExportUrl(filters: CompanyFilters): string {
 
 const BROWSE_DEFAULTS: CompanyFilters = { sort: "-combined_score", page: 1, page_size: 50, status: "ACTIVE" };
 
+// ── Setup gate banner ─────────────────────────────────────────────────────────
+
+interface SetupGateProps {
+  orgId: number | null;
+  hasApiKey: boolean;
+  hasTargetDescription: boolean;
+}
+
+function SetupGateBanner({ orgId, hasApiKey, hasTargetDescription }: SetupGateProps) {
+  if (hasApiKey && hasTargetDescription) return null;
+
+  const missing: string[] = [];
+  if (!hasApiKey) missing.push("Anthropic API key");
+  if (!hasTargetDescription) missing.push("target company description");
+
+  return (
+    <div className="mx-4 mt-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 flex items-start gap-3">
+      <AlertTriangle size={16} className="text-amber-500 shrink-0 mt-0.5" />
+      <div className="flex-1 min-w-0">
+        <p className="text-sm font-medium text-amber-800">
+          AI scoring is not configured
+        </p>
+        <p className="text-xs text-amber-700 mt-0.5">
+          Set your {missing.join(" and ")} to enable AI-powered lead scoring.
+        </p>
+      </div>
+      <a
+        href="/app/account#team"
+        className="shrink-0 flex items-center gap-1 text-xs font-medium text-amber-700 hover:text-amber-900 border border-amber-300 bg-white rounded-lg px-2.5 py-1.5 hover:bg-amber-50 transition-colors"
+      >
+        <Settings size={12} />
+        Set up
+      </a>
+    </div>
+  );
+}
+
+// ── Score distribution mini-bar ───────────────────────────────────────────────
+
+interface ScoreDistributionProps {
+  filters: CompanyFilters;
+}
+
+function ScoreDistributionBar({ filters }: ScoreDistributionProps) {
+  // Fetch counts for each score band using page_size=1 tricks
+  const makeFilters = (min: number, max?: number): CompanyFilters => ({
+    ...filters, page: 1, page_size: 1,
+    min_combined_score: min,
+    ...(max !== undefined ? { max_combined_score: max } : {}),
+  });
+
+  const { data: top } = useSWR(
+    ["score-dist-top", filters],
+    () => fetchCompanies(makeFilters(70)),
+    { keepPreviousData: true }
+  );
+  const { data: mid } = useSWR(
+    ["score-dist-mid", filters],
+    () => fetchCompanies(makeFilters(40, 69)),
+    { keepPreviousData: true }
+  );
+  const { data: low } = useSWR(
+    ["score-dist-low", filters],
+    () => fetchCompanies(makeFilters(1, 39)),
+    { keepPreviousData: true }
+  );
+  const { data: zero } = useSWR(
+    ["score-dist-zero", filters],
+    () => fetchCompanies(makeFilters(0, 0)),
+    { keepPreviousData: true }
+  );
+
+  const t = top?.total ?? 0;
+  const m = mid?.total ?? 0;
+  const l = low?.total ?? 0;
+  const z = zero?.total ?? 0;
+  const total = t + m + l + z;
+  if (!total) return null;
+
+  const pct = (n: number) => Math.round((n / total) * 100);
+
+  return (
+    <div className="flex items-center gap-2 text-[10px] text-slate-500">
+      <span className="hidden sm:inline">Score dist:</span>
+      <div className="flex h-2 w-20 rounded-full overflow-hidden gap-px">
+        {t > 0 && <div className="bg-green-500" style={{ width: `${pct(t)}%` }} title={`Top (≥70): ${t}`} />}
+        {m > 0 && <div className="bg-yellow-400" style={{ width: `${pct(m)}%` }} title={`Mid (40–69): ${m}`} />}
+        {l > 0 && <div className="bg-orange-300" style={{ width: `${pct(l)}%` }} title={`Low (1–39): ${l}`} />}
+        {z > 0 && <div className="bg-slate-200" style={{ width: `${pct(z)}%` }} title={`Unscored: ${z}`} />}
+      </div>
+      <span className="text-green-600">{pct(t)}%</span>
+      <span className="text-yellow-600">{pct(m)}%</span>
+      <span className="text-slate-400">{pct(z)}% unscored</span>
+    </div>
+  );
+}
+
 // ── Guided mode ───────────────────────────────────────────────────────────────
 
 interface GuidedPickerProps {
   cantons: string[];
   taxonomy: Record<string, [string, number][]>;
   onBrowse: (filters: CompanyFilters) => void;
+  orgId: number | null;
+  hasApiKey: boolean;
+  hasTargetDescription: boolean;
 }
 
 type IndustryMode = "category" | "cluster";
 
-function GuidedPicker({ cantons, taxonomy, onBrowse }: GuidedPickerProps) {
+function GuidedPicker({ cantons, taxonomy, onBrowse, orgId, hasApiKey, hasTargetDescription }: GuidedPickerProps) {
   const [industryMode, setIndustryMode] = useState<IndustryMode>("category");
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
   const [selectedCluster, setSelectedCluster] = useState<string | null>(null);
   const [selectedCanton, setSelectedCanton] = useState<string | null>(null);
   const [selectedLegalForm, setSelectedLegalForm] = useState<string | null>(null);
   const [scoreMin, setScoreMin] = useState(0);
+  const [selectedReview, setSelectedReview] = useState<string | null>(null);
+  const [bulkMarking, setBulkMarking] = useState(false);
+  const [bulkBanner, setBulkBanner] = useState<string | null>(null);
 
   const aiCategories: [string, number][] = taxonomy["ai_category"] ?? [];
   const clusters: [string, number][] = taxonomy["clusters"] ?? [];
@@ -82,6 +195,8 @@ function GuidedPicker({ cantons, taxonomy, onBrowse }: GuidedPickerProps) {
     ...(selectedCanton ? { canton: selectedCanton } : {}),
     ...(selectedLegalForm ? { legal_form: selectedLegalForm } : {}),
     ...(scoreMin > 0 ? { min_combined_score: scoreMin } : {}),
+    ...(selectedReview === "_none" ? { exclude_review_status: "interesting,potential_proposal,confirmed_proposal,rejected" } : {}),
+    ...(selectedReview && selectedReview !== "_none" ? { review_status: selectedReview } : {}),
   };
   const { data: preview } = useSWR(
     ["companies-preview", guidedFilters],
@@ -97,8 +212,32 @@ function GuidedPicker({ cantons, taxonomy, onBrowse }: GuidedPickerProps) {
       ...(selectedCanton ? { canton: selectedCanton } : {}),
       ...(selectedLegalForm ? { legal_form: selectedLegalForm } : {}),
       ...(scoreMin > 0 ? { min_combined_score: scoreMin } : {}),
+      ...(selectedReview === "_none" ? { exclude_review_status: "interesting,potential_proposal,confirmed_proposal,rejected" } : {}),
+      ...(selectedReview && selectedReview !== "_none" ? { review_status: selectedReview } : {}),
     };
     onBrowse(filters);
+  }
+
+  async function handleBulkMark() {
+    const matchCount = preview?.total ?? 0;
+    if (!matchCount) return;
+    const limit = Math.min(matchCount, 200);
+    setBulkMarking(true);
+    setBulkBanner(null);
+    try {
+      // Fetch all matching IDs
+      const result = await fetchCompanies({ ...guidedFilters, page: 1, page_size: limit });
+      const ids = result.items.map((c) => c.id);
+      if (ids.length) {
+        await bulkUpdateCompanies(ids, "review_status", "interesting");
+        setBulkBanner(`Marked ${ids.length} companies as interesting.`);
+        setTimeout(() => setBulkBanner(null), 4000);
+      }
+    } catch {
+      setBulkBanner("Failed to mark companies.");
+    } finally {
+      setBulkMarking(false);
+    }
   }
 
   const matchCount = preview?.total ?? null;
@@ -176,7 +315,20 @@ function GuidedPicker({ cantons, taxonomy, onBrowse }: GuidedPickerProps) {
                 ))}
               </div>
             ) : (
-              <p className="text-sm text-slate-400 italic">No AI classifications available yet — run Claude classify first.</p>
+              <div className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-5 text-center space-y-2">
+                <p className="text-sm text-slate-500">No AI classifications yet.</p>
+                <p className="text-xs text-slate-400">
+                  {hasApiKey
+                    ? "Run the AI classification job from the Pipeline page."
+                    : "Configure your Anthropic API key in workspace settings first."}
+                </p>
+                <a
+                  href={hasApiKey ? "/app/pipeline" : "/app/account#team"}
+                  className="inline-block text-xs text-blue-600 hover:underline"
+                >
+                  {hasApiKey ? "Go to Pipeline →" : "Go to Workspace settings →"}
+                </a>
+              </div>
             )
           ) : (
             clusters.length > 0 ? (
@@ -203,7 +355,11 @@ function GuidedPicker({ cantons, taxonomy, onBrowse }: GuidedPickerProps) {
                 })}
               </div>
             ) : (
-              <p className="text-sm text-slate-400 italic">No clusters available yet — run the pipeline job first.</p>
+              <div className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-5 text-center space-y-2">
+                <p className="text-sm text-slate-500">No TF-IDF clusters yet.</p>
+                <p className="text-xs text-slate-400">Run the clustering job from the Pipeline page.</p>
+                <a href="/app/pipeline" className="inline-block text-xs text-blue-600 hover:underline">Go to Pipeline →</a>
+              </div>
             )
           )}
         </div>
@@ -297,6 +453,36 @@ function GuidedPicker({ cantons, taxonomy, onBrowse }: GuidedPickerProps) {
           </div>
         </div>
 
+        {/* Step 5: Review status filter */}
+        <div className="space-y-3">
+          <div className="flex items-center gap-2">
+            <span className="flex items-center justify-center w-5 h-5 rounded-full bg-blue-600 text-white text-xs font-bold shrink-0">5</span>
+            <h2 className="text-sm font-semibold text-slate-700 uppercase tracking-wide">Review Status</h2>
+            {selectedReview && (
+              <button onClick={() => setSelectedReview(null)} className="ml-auto text-xs text-slate-400 hover:text-slate-600 flex items-center gap-0.5">
+                <X size={11} /> Clear
+              </button>
+            )}
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {REVIEW_QUICK_FILTERS.map((f) => (
+              <button
+                key={f.value}
+                onClick={() => setSelectedReview(selectedReview === f.value ? null : f.value)}
+                title={f.description}
+                className={cn(
+                  "px-3 py-1.5 rounded-full text-sm border transition-colors",
+                  selectedReview === f.value
+                    ? "bg-slate-700 text-white border-slate-700 font-medium"
+                    : "bg-white text-slate-600 border-slate-200 hover:border-slate-400 hover:text-slate-700"
+                )}
+              >
+                {f.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
         {/* Quick starts */}
         <div className="space-y-3">
           <div className="flex items-center gap-2">
@@ -319,6 +505,11 @@ function GuidedPicker({ cantons, taxonomy, onBrowse }: GuidedPickerProps) {
                 label: "Unscored",
                 description: "Active companies not yet classified by AI",
                 filters: { status: "ACTIVE", ai_category: "_none", sort: "-created" } as Partial<CompanyFilters>,
+              },
+              {
+                label: "Not yet reviewed",
+                description: "Active companies with no review status",
+                filters: { status: "ACTIVE", exclude_review_status: "interesting,potential_proposal,confirmed_proposal,rejected", sort: "-combined_score" } as Partial<CompanyFilters>,
               },
             ].map((preset) => (
               <button
@@ -344,19 +535,35 @@ function GuidedPicker({ cantons, taxonomy, onBrowse }: GuidedPickerProps) {
               <span className="text-slate-300">Loading…</span>
             )}
           </p>
-          <button
-            onClick={handleBrowse}
-            disabled={matchCount === 0}
-            className={cn(
-              "flex items-center gap-2 px-6 py-2.5 rounded-lg text-sm font-medium transition-colors",
-              matchCount === 0
-                ? "bg-slate-100 text-slate-400 cursor-not-allowed"
-                : "bg-blue-600 text-white hover:bg-blue-700"
+          <div className="flex items-center gap-2">
+            <button
+              onClick={handleBrowse}
+              disabled={matchCount === 0}
+              className={cn(
+                "flex items-center gap-2 px-6 py-2.5 rounded-lg text-sm font-medium transition-colors",
+                matchCount === 0
+                  ? "bg-slate-100 text-slate-400 cursor-not-allowed"
+                  : "bg-blue-600 text-white hover:bg-blue-700"
+              )}
+            >
+              Browse these companies
+              <ChevronRight size={16} />
+            </button>
+            {matchCount !== null && matchCount > 0 && (
+              <button
+                onClick={handleBulkMark}
+                disabled={bulkMarking}
+                title={`Mark up to ${Math.min(matchCount, 200)} matches as interesting`}
+                className="flex items-center gap-1.5 px-4 py-2.5 rounded-lg text-sm font-medium border border-yellow-300 bg-yellow-50 text-yellow-800 hover:bg-yellow-100 transition-colors disabled:opacity-50"
+              >
+                <Star size={14} />
+                Mark interesting
+              </button>
             )}
-          >
-            Browse these companies
-            <ChevronRight size={16} />
-          </button>
+          </div>
+          {bulkBanner && (
+            <p className="text-xs text-green-700 bg-green-50 border border-green-200 rounded-lg px-3 py-1.5">{bulkBanner}</p>
+          )}
           <button
             onClick={() => onBrowse(BROWSE_DEFAULTS)}
             className="text-xs text-slate-400 hover:text-slate-600 underline underline-offset-2"
@@ -451,12 +658,13 @@ function BrowseView({ initialFilters, initialCantons, initialStats, initialTaxon
   if (filters.tfidf_cluster) activeFilters.push({ label: `Cluster: ${filters.tfidf_cluster.split(",").slice(0, 2).join(", ")}`, key: "tfidf_cluster" });
   if (filters.canton) activeFilters.push({ label: `Canton: ${filters.canton}`, key: "canton" });
   if (filters.min_combined_score) activeFilters.push({ label: `Score ≥ ${filters.min_combined_score}`, key: "min_combined_score" });
+  if (filters.review_status) activeFilters.push({ label: `Review: ${filters.review_status.replace(/_/g, " ")}`, key: "review_status" });
 
   return (
     <div className="flex flex-col h-[calc(100vh-3rem)] overflow-hidden">
 
       {/* Stats bar */}
-      <div className="flex items-center gap-4 px-4 py-2 bg-slate-50 border-b border-slate-100 text-xs text-slate-500 shrink-0">
+      <div className="flex items-center gap-4 px-4 py-2 bg-slate-50 border-b border-slate-100 text-xs text-slate-500 shrink-0 flex-wrap">
         <span><span className="font-semibold text-slate-700">{(stats?.total ?? 0).toLocaleString()}</span> total</span>
         <span>·</span>
         <span><span className="font-semibold text-slate-700">{(stats?.with_website ?? 0).toLocaleString()}</span> with website</span>
@@ -464,12 +672,12 @@ function BrowseView({ initialFilters, initialCantons, initialStats, initialTaxon
           <>
             <span>·</span>
             <span>
-              <span className="font-semibold text-blue-600">{page.total.toLocaleString()}</span> matching current filters
+              <span className="font-semibold text-blue-600">{page.total.toLocaleString()}</span> matching
             </span>
           </>
         )}
         {activeFilters.length > 0 && (
-          <div className="flex items-center gap-1.5 ml-2">
+          <div className="flex items-center gap-1.5 ml-1">
             {activeFilters.map(({ label, key }) => (
               <span
                 key={key}
@@ -486,6 +694,9 @@ function BrowseView({ initialFilters, initialCantons, initialStats, initialTaxon
             ))}
           </div>
         )}
+        <div className="ml-auto">
+          <ScoreDistributionBar filters={filters} />
+        </div>
       </div>
 
       {/* Filter bar */}
@@ -587,6 +798,17 @@ export function ExplorerClient({ initialCantons, initialStats, initialTaxonomy }
   const [mode, setMode] = useState<Mode>("guided");
   const [browseFilters, setBrowseFilters] = useState<CompanyFilters>(BROWSE_DEFAULTS);
 
+  const { data: me } = useSWR("me", fetchCurrentUser);
+  const orgId = me?.org_id ?? null;
+
+  const { data: effectiveSettings } = useSWR(
+    orgId ? ["org-effective-settings", orgId] : null,
+    () => fetchOrgEffectiveSettings(orgId!),
+  );
+
+  const hasApiKey = effectiveSettings?.anthropic_api_key_set ?? false;
+  const hasTargetDescription = !!(effectiveSettings?.claude_target_description?.trim());
+
   function handleBrowse(filters: CompanyFilters) {
     setBrowseFilters(filters);
     setMode("browse");
@@ -631,12 +853,18 @@ export function ExplorerClient({ initialCantons, initialStats, initialTaxonomy }
         )}
       </div>
 
+      {/* Setup gate — shown in both modes */}
+      <SetupGateBanner orgId={orgId} hasApiKey={hasApiKey} hasTargetDescription={hasTargetDescription} />
+
       {/* Content */}
       {mode === "guided" ? (
         <GuidedPicker
           cantons={initialCantons}
           taxonomy={initialTaxonomy}
           onBrowse={handleBrowse}
+          orgId={orgId}
+          hasApiKey={hasApiKey}
+          hasTargetDescription={hasTargetDescription}
         />
       ) : (
         <BrowseView

@@ -10,8 +10,7 @@ import {
   fetchOrg,
   fetchOrgMembers,
   fetchOrgSettings,
-  setOrgSetting,
-  deleteOrgSetting,
+  saveOrgWorkspaceSettings,
   updateOrg,
   addOrgMember,
   updateMemberRole,
@@ -30,13 +29,11 @@ const textareaCls =
 
 // ── Scoring & AI config section ───────────────────────────────────────────────
 
-const AI_KEYS = [
+const ALL_SETTING_KEYS = [
+  "anthropic_api_key",
   "claude_target_description",
   "claude_classify_categories",
   "claude_classify_prompt",
-] as const;
-
-const FLEX_KEYS = [
   "scoring_target_clusters",
   "scoring_exclude_clusters",
   "scoring_target_keywords",
@@ -49,7 +46,7 @@ const FLEX_KEYS = [
   "scoring_weight_flex",
 ] as const;
 
-type SettingKey = typeof AI_KEYS[number] | typeof FLEX_KEYS[number];
+type SettingKey = typeof ALL_SETTING_KEYS[number];
 
 function OrgScoringSection({ orgId, isAdmin }: { orgId: number; isAdmin: boolean }) {
   const { data: saved = {}, mutate: reloadSettings } = useSWR(
@@ -95,17 +92,12 @@ function OrgScoringSection({ orgId, isAdmin }: { orgId: number; isAdmin: boolean
     setSaving(true);
     setBanner(null);
     try {
-      const allKeys: SettingKey[] = [...AI_KEYS, ...FLEX_KEYS];
-      await Promise.all(
-        allKeys.map((key) => {
-          const v = effective[key];
-          if (v === undefined || v === "") {
-            // Only delete if there was a saved value
-            return saved[key] !== undefined ? deleteOrgSetting(orgId, key) : Promise.resolve();
-          }
-          return setOrgSetting(orgId, key, v);
-        }),
-      );
+      const payload: Record<string, string | null> = {};
+      for (const key of ALL_SETTING_KEYS) {
+        const v = effective[key];
+        payload[key] = (v === undefined || v === "") ? null : v;
+      }
+      await saveOrgWorkspaceSettings(orgId, payload);
       await reloadSettings();
       setForm({});
       setDirty(false);
@@ -118,6 +110,9 @@ function OrgScoringSection({ orgId, isAdmin }: { orgId: number; isAdmin: boolean
     }
   }
 
+  const apiKeyIsSet = !!saved["anthropic_api_key"];
+  const apiKeyDraftSet = form["anthropic_api_key"] !== undefined;
+
   return (
     <div className="space-y-4">
       {banner && (
@@ -127,6 +122,44 @@ function OrgScoringSection({ orgId, isAdmin }: { orgId: number; isAdmin: boolean
       )}
 
       <div className="rounded-xl border border-slate-200 bg-white p-5 space-y-5">
+
+        {/* Anthropic API key */}
+        <div className="space-y-1.5">
+          <label className="block text-sm font-semibold text-slate-700">
+            Anthropic API key
+            {apiKeyIsSet && !apiKeyDraftSet && (
+              <span className="ml-2 text-xs font-normal text-green-600 bg-green-50 border border-green-200 rounded px-1.5 py-0.5">configured</span>
+            )}
+          </label>
+          <p className="text-xs text-slate-500">
+            Required for AI scoring. Stored per-workspace — never shared across orgs.
+          </p>
+          {apiKeyIsSet && !apiKeyDraftSet ? (
+            <div className="flex items-center gap-2">
+              <span className="text-sm text-slate-400 font-mono">sk-ant-••••••••</span>
+              {isAdmin && (
+                <button
+                  type="button"
+                  onClick={() => set("anthropic_api_key", "")}
+                  className="text-xs text-blue-600 hover:underline"
+                >
+                  Replace
+                </button>
+              )}
+            </div>
+          ) : (
+            <input
+              type="password"
+              placeholder="sk-ant-…"
+              value={val("anthropic_api_key")}
+              onChange={(e) => set("anthropic_api_key", e.target.value)}
+              disabled={!isAdmin}
+              className={inputCls}
+              autoComplete="new-password"
+            />
+          )}
+        </div>
+
         {/* AI target description — most important */}
         <div className="space-y-1.5">
           <label className="block text-sm font-semibold text-slate-700">

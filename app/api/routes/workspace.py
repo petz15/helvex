@@ -85,6 +85,65 @@ class OrgSettingUpdate(BaseModel):
     value: str | None
 
 
+# Keys that org admins are allowed to set at org level
+_ORG_ALLOWED_SETTING_KEYS: frozenset[str] = frozenset({
+    "anthropic_api_key",
+    "claude_target_description",
+    "claude_classify_prompt",
+    "claude_classify_categories",
+    "scoring_target_clusters",
+    "scoring_exclude_clusters",
+    "scoring_cluster_hit_points",
+    "scoring_cluster_exclude_points",
+    "scoring_target_keywords",
+    "scoring_exclude_keywords",
+    "scoring_keyword_hit_points",
+    "scoring_keyword_exclude_points",
+    "scoring_origin_lat",
+    "scoring_origin_lon",
+    "scoring_dist_15km",
+    "scoring_dist_40km",
+    "scoring_dist_80km",
+    "scoring_dist_130km",
+    "scoring_dist_far",
+    "scoring_legal_form_scores",
+    "scoring_legal_form_default",
+    "scoring_cancelled_score",
+    "scoring_weight_ai",
+    "scoring_weight_web",
+    "scoring_weight_flex",
+})
+
+
+class OrgWorkspaceSettingsBatch(BaseModel):
+    """Batch of org-level scoring/AI setting overrides."""
+    anthropic_api_key: str | None = None
+    claude_target_description: str | None = None
+    claude_classify_prompt: str | None = None
+    claude_classify_categories: str | None = None
+    scoring_target_clusters: str | None = None
+    scoring_exclude_clusters: str | None = None
+    scoring_cluster_hit_points: str | None = None
+    scoring_cluster_exclude_points: str | None = None
+    scoring_target_keywords: str | None = None
+    scoring_exclude_keywords: str | None = None
+    scoring_keyword_hit_points: str | None = None
+    scoring_keyword_exclude_points: str | None = None
+    scoring_origin_lat: str | None = None
+    scoring_origin_lon: str | None = None
+    scoring_dist_15km: str | None = None
+    scoring_dist_40km: str | None = None
+    scoring_dist_80km: str | None = None
+    scoring_dist_130km: str | None = None
+    scoring_dist_far: str | None = None
+    scoring_legal_form_scores: str | None = None
+    scoring_legal_form_default: str | None = None
+    scoring_cancelled_score: str | None = None
+    scoring_weight_ai: str | None = None
+    scoring_weight_web: str | None = None
+    scoring_weight_flex: str | None = None
+
+
 class OrgOut(BaseModel):
     id: int
     name: str
@@ -438,6 +497,69 @@ def get_org_settings(
     from app.models.org_setting import OrgSetting
     rows = db.query(OrgSetting).filter(OrgSetting.org_id == org.id).all()
     return {r.key: r.value for r in rows}
+
+
+@router.get(
+    "/settings/effective",
+    summary="Get effective settings for this org (global defaults merged with org overrides)",
+)
+def get_org_effective_settings(
+    org_id: int,
+    db: Session = Depends(get_db),
+    user_org: tuple[User, Organization] = Depends(get_current_org),
+):
+    """Returns the subset of workspace-relevant settings with org overrides applied.
+
+    Useful for the explorer setup gate: check if api key and target description are configured.
+    Does NOT expose the actual anthropic_api_key value — only whether it is set.
+    """
+    _validate_org_access(org_id, user_org)
+    _, org = user_org
+    from app import crud as _crud
+    result: dict[str, str | bool] = {}
+    for key in _ORG_ALLOWED_SETTING_KEYS:
+        val = _crud.get_effective_setting(db, key, org_id=org.id, default="")
+        if key == "anthropic_api_key":
+            # Never expose the actual key value — just whether it is set
+            result["anthropic_api_key_set"] = bool(val.strip())
+        else:
+            result[key] = val
+    return result
+
+
+@router.put(
+    "/settings",
+    summary="Batch-save org workspace settings (admin+)",
+)
+def save_org_workspace_settings(
+    org_id: int,
+    body: OrgWorkspaceSettingsBatch,
+    db: Session = Depends(get_db),
+    user_org: tuple[User, Organization] = Depends(require_org_role("admin", "owner")),
+):
+    """Save multiple org-level scoring/AI settings in one request.
+
+    Fields set to null or empty string are deleted (reset to global default).
+    """
+    _validate_org_access(org_id, user_org)
+    _, org = user_org
+    from app.models.org_setting import OrgSetting
+
+    updates = body.model_dump()
+    for key, value in updates.items():
+        if key not in _ORG_ALLOWED_SETTING_KEYS:
+            continue
+        row = db.query(OrgSetting).filter(OrgSetting.org_id == org.id, OrgSetting.key == key).first()
+        if value is None or value == "":
+            if row is not None:
+                db.delete(row)
+        else:
+            if row is None:
+                db.add(OrgSetting(org_id=org.id, key=key, value=value))
+            else:
+                row.value = value
+    db.commit()
+    return {"ok": True}
 
 
 @router.put(

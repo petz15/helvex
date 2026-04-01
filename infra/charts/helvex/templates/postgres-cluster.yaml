@@ -38,7 +38,7 @@ spec:
   externalClusters:
     - name: helvex-backup
       barmanObjectStore:
-        serverName: {{ include "helvex.fullname" . }}-pg
+        serverName: {{ .Values.postgres.restoreSourceServerName | default (printf "%s-pg" (include "helvex.fullname" .)) }}
         destinationPath: {{ .Values.postgres.s3BucketPath }}
         endpointURL: {{ .Values.postgres.s3EndpointUrl }}
         s3Credentials:

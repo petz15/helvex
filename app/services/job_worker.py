@@ -47,7 +47,7 @@ _QUEUE_FOR_JOB_TYPE: dict[str, str] = {
     "bulk":                      "helvex-zefix",
     "detail":                    "helvex-zefix",
     "initial":                   "helvex-zefix",
-    "batch":                     "helvex-zefix",
+    "batch":                     "helvex-api",
     "re_geocode":                "helvex-api",
     "recalculate_scores":        "helvex-api",
     "recalculate_google_scores": "helvex-api",
@@ -99,10 +99,13 @@ def _preflight_job(db: Session, *, job_type: str, params: dict) -> tuple[dict, l
     if job_type == "claude_classify":
         from app.config import settings as app_settings
 
-        api_key = (crud.get_setting(db, "anthropic_api_key", "") or "").strip() or app_settings.anthropic_api_key
+        _preflight_org_id = new_params.get("org_id") or None
+        api_key = (
+            crud.get_effective_setting(db, "anthropic_api_key", org_id=_preflight_org_id, default="") or ""
+        ).strip() or app_settings.anthropic_api_key
         if not (api_key or "").strip():
             raise ValueError(
-                "Anthropic API key missing: set ANTHROPIC_API_KEY env var or configure 'anthropic_api_key' in Settings"
+                "Anthropic API key missing: set ANTHROPIC_API_KEY env var or configure it in your workspace settings"
             )
 
     return new_params, warnings
@@ -214,7 +217,7 @@ def _run_job(app, job_id: int) -> None:  # noqa: C901
                     _maybe_sync(app, job_type=job.job_type, label=job.label, message=msg, stats=dict(stats), error=None, done=False)
                     _heartbeat()
 
-                stats = recalculate_flex_scores(db, resume_from=resume_from, progress_cb=_progress)
+                stats = recalculate_flex_scores(db, org_id=job.org_id, resume_from=resume_from, progress_cb=_progress)
                 done_msg = f"Done — {stats['updated']} recalculated, {stats.get('geocoded', 0)} geocoded, {len(stats['errors'])} errors"
                 if resume_from:
                     done_msg += f" (resumed from {resume_from})"
@@ -517,7 +520,7 @@ def _run_job(app, job_id: int) -> None:  # noqa: C901
 
                 _org_id = job.org_id
                 _eff = lambda key, default="": crud.get_effective_setting(db, key, org_id=_org_id, default=default)
-                _api_key = crud.get_setting(db, "anthropic_api_key", "") or app_settings.anthropic_api_key
+                _api_key = _eff("anthropic_api_key") or app_settings.anthropic_api_key
                 _use_batch = bool(params.get("use_batch_api", False))
 
                 if _use_batch:
@@ -819,13 +822,6 @@ def poll_llm_batches() -> None:
             if not waiting:
                 return
 
-            api_key = (
-                _crud.get_setting(db, "anthropic_api_key", "") or _settings.anthropic_api_key or ""
-            ).strip()
-            if not api_key:
-                logger.warning("poll_llm_batches: no Anthropic API key configured; skipping")
-                return
-
             from app.services.collection import resume_claude_batch
 
             for job in waiting:
@@ -834,6 +830,16 @@ def poll_llm_batches() -> None:
                 chunk_company_ids = params.get("chunk_company_ids") or {}
                 if not batch_id:
                     logger.warning("poll_llm_batches: job %s has no batch_id; skipping", job.id)
+                    continue
+
+                # Use org-effective API key so per-org keys are honoured
+                api_key = (
+                    _crud.get_effective_setting(db, "anthropic_api_key", org_id=job.org_id, default="")
+                    or _settings.anthropic_api_key
+                    or ""
+                ).strip()
+                if not api_key:
+                    logger.warning("poll_llm_batches: job %s has no Anthropic API key; skipping", job.id)
                     continue
 
                 try:

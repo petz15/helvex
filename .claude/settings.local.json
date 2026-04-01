@@ -162,7 +162,8 @@
       "Bash(find /c/D/coding_projects/zefix_analyzer -name \"*.py\" -type f -exec grep -l \"get_current_user\\\\|Depends.*get_current_user\" {})",
       "Bash(grep -l \"collection_run\\\\|job_run\" /c/D/coding_projects/zefix_analyzer/alembic/versions/*.py)",
       "Bash(find /c/D/coding_projects/zefix_analyzer/frontend/src -type f \\\\\\(-name *.tsx -o -name *.ts \\\\\\))",
-      "Bash(npx tsc:*)"
+      "Bash(npx tsc:*)",
+      "Bash(grep -A 20 \"def create_boilerplate\\\\|def list_boilerplate\" /c/D/coding_projects/zefix_analyzer/app/crud/*.py)"
     ]
   }
 }

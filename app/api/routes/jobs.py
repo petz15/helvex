@@ -326,13 +326,15 @@ def trigger_detail(body: DetailCollectBody, request: Request, db: Session = Depe
 
 
 @router.post("/scoring/zefix", response_model=JobOut, status_code=status.HTTP_202_ACCEPTED)
-def trigger_recalc_zefix(request: Request, db: Session = Depends(get_db), _: User = Depends(require_superadmin)):
+def trigger_recalc_zefix(request: Request, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     job = _enqueue_or_http_error(
         request,
         job_type="recalculate_scores",
         label="Recalculate Zefix scores",
         params={},
         db=db,
+        org_id=current_user.org_id,
+        user_id=current_user.id,
     )
     return JobOut.from_orm_obj(job)
 

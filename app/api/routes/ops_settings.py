@@ -330,3 +330,13 @@ def delete_tfidf_stopword(row_id: int, db: Session = Depends(get_db), _: User = 
     if not row:
         raise HTTPException(status_code=404, detail="Stopword not found")
     crud.delete_tfidf_stopword(db, row)
+
+
+@router.post("/settings/seed-defaults", status_code=200)
+def seed_defaults(db: Session = Depends(get_db), _: User = Depends(require_superadmin)):
+    """Seed the DB with all built-in default stopwords and directory domains.
+    Safe to call multiple times — skips rows that already exist."""
+    gs = crud.seed_default_google_stopwords(db)
+    gd = crud.seed_default_directory_domains(db)
+    ts = crud.seed_default_tfidf_stopwords(db)
+    return {"google_stopwords": gs, "directory_domains": gd, "tfidf_stopwords": ts}

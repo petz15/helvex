@@ -1,12 +1,48 @@
 import base64
 import hashlib
+import re
 from datetime import datetime, timezone
 
 import bcrypt
 from sqlalchemy.orm import Session
 
 from app.models.oauth_account import OAuthAccount
+from app.models.organization import Organization
 from app.models.user import User
+
+
+def _slugify(name: str) -> str:
+    slug = name.lower().strip()
+    slug = re.sub(r"[^a-z0-9]+", "-", slug)
+    return slug.strip("-") or "workspace"
+
+
+def _unique_slug(db: Session, base: str) -> str:
+    slug = base
+    n = 1
+    while db.query(Organization).filter(Organization.slug == slug).first():
+        slug = f"{base}-{n}"
+        n += 1
+    return slug
+
+
+def ensure_personal_org(db: Session, user: User) -> None:
+    """Create and assign a personal workspace org if the user has none.
+
+    Safe to call multiple times — no-ops if user already has an org.
+    """
+    if user.org_id is not None:
+        return
+    email_prefix = user.email.split("@")[0]
+    base = _slugify(email_prefix) or "workspace"
+    slug = _unique_slug(db, base)
+    org = Organization(name=f"{email_prefix}'s workspace", slug=slug)
+    db.add(org)
+    db.flush()
+    user.org_id = org.id
+    user.org_role = "owner"
+    db.commit()
+    db.refresh(user)
 
 
 def _prehash(plain: str) -> bytes:
@@ -57,7 +93,8 @@ def create_user(
         is_superadmin=is_superadmin,
     )
     db.add(user)
-    db.commit()
+    db.flush()
+    ensure_personal_org(db, user)
     db.refresh(user)
     return user
 
@@ -104,7 +141,7 @@ def get_or_create_oauth_user(
     db.flush()  # populate user.id before creating OAuthAccount
     oauth = OAuthAccount(provider=provider, provider_user_id=provider_user_id, user_id=user.id)
     db.add(oauth)
-    db.commit()
+    ensure_personal_org(db, user)
     db.refresh(user)
     return user
 

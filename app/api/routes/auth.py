@@ -345,14 +345,16 @@ def get_me(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> UserRead:
-    if current_user.org_id:
-        from sqlalchemy.orm import joinedload
-        current_user = (
-            db.query(User)
-            .options(joinedload(User.org))
-            .filter(User.id == current_user.id)
-            .first()
-        )
+    # Lazy migration: ensure every user has a personal workspace org
+    if not current_user.org_id:
+        crud.ensure_personal_org(db, current_user)
+    from sqlalchemy.orm import joinedload
+    current_user = (
+        db.query(User)
+        .options(joinedload(User.org))
+        .filter(User.id == current_user.id)
+        .first()
+    )
     return UserRead.model_validate(current_user)
 
 

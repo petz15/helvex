@@ -174,16 +174,18 @@ jobs:
           kubectl wait --for condition=established --timeout=60s crd/clusters.postgresql.cnpg.io
           kubectl wait --for condition=established --timeout=60s crd/clusterissuers.cert-manager.io
 
-      - name: Resolve backup server name
+      - name: Resolve backup server names
         if: |
           contains(github.event.head_commit.message, '[deploy-prod]') ||
           contains(github.event.head_commit.message, '[deploy-app]')
         id: pg-meta
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.S3_ACCESS_KEY }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.S3_SECRET_KEY }}
+          S3_ENDPOINT: ${{ vars.S3_ENDPOINT_URL || 'https://nbg1.your-objectstorage.com' }}
         run: |
-          # On a fresh cluster the PG cluster doesn't exist yet — generate a
-          # unique backupServerName so the new WAL archive doesn't collide with
-          # the backup we're restoring from.  Store it in a ConfigMap so every
-          # subsequent deploy reuses the same name.
+          # --- backupServerName (where the NEW cluster writes backups) ---
+          # Reuse from ConfigMap if it exists, otherwise generate a unique name.
           EXISTING=$(kubectl get configmap pg-backup-meta -n helvex-prod \
             -o jsonpath='{.data.serverName}' 2>/dev/null || echo "")
 
@@ -199,6 +201,31 @@ jobs:
               --dry-run=client -o yaml | kubectl apply -f -
             echo "server_name=$NEW_NAME" >> "$GITHUB_OUTPUT"
           fi
+
+          # --- restoreSourceServerName (where to restore FROM) ---
+          # Auto-detect the most recent backup directory in S3 by finding the
+          # subdirectory that contains a base_backup/ catalogue.
+          # Falls back to "helvex-pg" (the default CNPG cluster name).
+          pip install -q awscli 2>/dev/null || true
+          BUCKET_PATH="s3://helvex-backups/pg-prod/"
+          RESTORE_SOURCE=""
+          dirs=$(aws s3 ls "$BUCKET_PATH" --endpoint-url "$S3_ENDPOINT" \
+            2>/dev/null | awk '/PRE/{print $2}' | tr -d '/' | sort -r) || true
+
+          for dir in $dirs; do
+            # Check if this dir has a base backup catalogue
+            has_base=$(aws s3 ls "${BUCKET_PATH}${dir}/base/" --endpoint-url "$S3_ENDPOINT" \
+              2>/dev/null | head -1) || true
+            if [ -n "$has_base" ]; then
+              RESTORE_SOURCE="$dir"
+              echo "Auto-detected restore source: $RESTORE_SOURCE"
+              break
+            fi
+          done
+
+          RESTORE_SOURCE="${RESTORE_SOURCE:-helvex-pg}"
+          echo "restore_source=$RESTORE_SOURCE" >> "$GITHUB_OUTPUT"
+          echo "Will restore from: ${BUCKET_PATH}${RESTORE_SOURCE}/"
 
       - name: Apply Helmfile (full deploy)
         if: |
@@ -216,6 +243,7 @@ jobs:
             --set "image.tag=${{ github.sha }}" \
             --set "frontend.image.tag=${{ github.sha }}" \
             --set "postgres.backupServerName=${{ steps.pg-meta.outputs.server_name }}" \
+            --set "postgres.restoreSourceServerName=${{ steps.pg-meta.outputs.restore_source }}" \
             --suppress-diff
 
       - name: Deploy frontend only

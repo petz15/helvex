@@ -2,6 +2,7 @@
 import { useState, FormEvent, Suspense } from "react";
 import Link from "next/link";
 import { useSearchParams, useRouter } from "next/navigation";
+import { mutate } from "swr";
 
 function OAuthButtons() {
   return (
@@ -62,8 +63,9 @@ function LoginForm() {
         setError(body.detail ?? `Login failed (HTTP ${res.status})`);
         return;
       }
-      // Refresh server components + clear SWR cache so NavBar re-fetches the
-      // authenticated user immediately without a stale "not logged in" flash.
+      // Invalidate the SWR "me" cache so NavBar (which never unmounts from
+      // the root layout) re-fetches the authenticated user immediately.
+      await mutate("me");
       router.refresh();
       router.push(next);
     } finally {
