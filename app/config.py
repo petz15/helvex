@@ -74,6 +74,7 @@ class Settings(BaseSettings):
 
     # Worldline
     worldline_api_base_url: str = "https://payment.preprod.direct.worldline-solutions.com"
+    worldline_spec_version: str = "1.51"
     worldline_customer_id: str = ""
     worldline_terminal_id: str = ""
     worldline_api_username: str = ""

@@ -111,6 +111,10 @@ def _worldline_api_base_url() -> str:
     return base.rstrip("/")
 
 
+def _worldline_spec_version() -> str:
+    return (getattr(settings, "worldline_spec_version", "") or "1.51").strip() or "1.51"
+
+
 def _worldline_callback_url(*, kind: str, order_reference: str, success_url: str, cancel_url: str, source: str) -> str:
     return _query_url(
         "/api/v1/billing/webhooks/worldline/return",
@@ -273,6 +277,7 @@ class WorldlineProvider:
         terminal_id = _worldline_terminal_id()
         payload = {
             "RequestHeader": {
+                "SpecVersion": _worldline_spec_version(),
                 "CustomerId": customer_id,
                 "RequestId": f"wl_{org_id}_{secrets.token_hex(8)}",
                 "RetryIndicator": 0,
@@ -304,6 +309,7 @@ class WorldlineProvider:
         api_username = _worldline_api_username()
         payload = {
             "RequestHeader": {
+                "SpecVersion": _worldline_spec_version(),
                 "CustomerId": customer_id,
                 "RequestId": f"wl_auth_{secrets.token_hex(8)}",
                 "RetryIndicator": 0,
