@@ -1619,17 +1619,16 @@ def run_zefix_detail_collect(
         if only_missing_details:
             q = q.filter(_missing_details_filter)
         q = _detail_priority_order(q)
-        # NOTE: Do not `.all()` here — with large datasets this loads hundreds of
-        # thousands of ORM objects (including large Text fields like zefix_raw) into
-        # memory at once and will OOMKill the pod before any processing starts.
-        # Instead, count first, then stream row-by-row via yield_per.
-        total = q.count()
-        start_idx = max(0, min(resume_from, total))
-        companies_iter = iter(
-            q.with_entities(Company.uid, Company.canton)
-            .offset(start_idx)
-            .yield_per(1000)
+        # Fetch uid+canton for all matching companies upfront — this is cheap
+        # (two small columns, no text blobs) even for large datasets. Full ORM
+        # objects are never held in memory; detail data is loaded one at a time
+        # inside import_company_from_zefix_uid.
+        rows: list[tuple[str, str | None]] = (
+            q.with_entities(Company.uid, Company.canton).all()
         )
+        total = len(rows)
+        start_idx = max(0, min(resume_from, total))
+        companies_iter = iter(rows[start_idx:])
 
     stats["selected"] = total
 
