@@ -425,6 +425,14 @@ kubectl describe pod <pod-name> -n helvex-prod
 # Open a shell in the app pod
 kubectl exec -n helvex-prod -it deploy/helvex -- bash
 
+# Connect to Redis directly
+kubectl exec -it -n helvex-prod helvex-redis-0 -- redis-cli
+#then in the interactive enter the following: AUTH default [password-here]
+
+# Conenct to Redis one-line
+redis-cli -h helvex-redis-master.helvex-prod.svc.cluster.local -p 6379 -a "password-here"
+
+
 # Connect to Postgres directly (in-cluster)
 kubectl exec -n helvex-prod -it helvex-pg-1 -- \
   env PGPASSWORD=$(kubectl get secret helvex-env -n helvex-prod -o jsonpath='{.data.password}' | base64 -d) \

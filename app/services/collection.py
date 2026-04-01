@@ -1601,30 +1601,39 @@ def run_zefix_detail_collect(
     )
 
     if uids:
-        companies: list[Company] = [
+        companies_list: list[Company] = [
             c for uid in uids if (c := crud.get_company_by_uid(db, uid)) is not None
         ]
         if only_missing_details:
-            companies = [
-                c for c in companies
+            companies_list = [
+                c for c in companies_list
                 if c.address is None or c.purpose is None or c.cantonal_excerpt_web is None
             ]
-    elif cantons:
-        q = db.query(Company).filter(Company.canton.in_(cantons))
-        if only_missing_details:
-            q = q.filter(_missing_details_filter)
-        companies = _detail_priority_order(q).all()
+        total = len(companies_list)
+        start_idx = max(0, min(resume_from, total))
+        companies_iter = iter(companies_list[start_idx:])
     else:
         q = db.query(Company)
+        if cantons:
+            q = q.filter(Company.canton.in_(cantons))
         if only_missing_details:
             q = q.filter(_missing_details_filter)
-        companies = _detail_priority_order(q).all()
+        q = _detail_priority_order(q)
+        # NOTE: Do not `.all()` here — with large datasets this loads hundreds of
+        # thousands of ORM objects (including large Text fields like zefix_raw) into
+        # memory at once and will OOMKill the pod before any processing starts.
+        # Instead, count first, then stream row-by-row via yield_per.
+        total = q.count()
+        start_idx = max(0, min(resume_from, total))
+        companies_iter = iter(
+            q.with_entities(Company.uid, Company.canton)
+            .offset(start_idx)
+            .yield_per(1000)
+        )
 
-    stats["selected"] = len(companies)
-    total = len(companies)
+    stats["selected"] = total
 
-    start_idx = max(0, min(resume_from, total))
-    for i, company in enumerate(companies[start_idx:], start=start_idx + 1):
+    for i, company in enumerate(companies_iter, start=start_idx + 1):
         try:
             updated, _ = import_company_from_zefix_uid(
                 db,
