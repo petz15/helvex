@@ -1,13 +1,10 @@
 """Routes for company management and Zefix / Google Search integration."""
 
-import csv
-import io
 import json
 import math
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
-from fastapi.responses import StreamingResponse
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
@@ -434,7 +431,7 @@ def list_companies(
     )
 
 
-@router.get("/export.csv", summary="Export companies as CSV")
+@router.get("/export.csv", summary="Export companies as CSV (enqueues async job)")
 def export_companies_csv(
     sort: str = Query("-updated"),
     q: str | None = Query(None),
@@ -459,84 +456,60 @@ def export_companies_csv(
     exclude_noga_code: str | None = Query(None),
     exclude_noga_label: str | None = Query(None),
     exclude_noga_level: str | None = Query(None),
+    request: Request,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    companies = crud.list_companies(
-        db,
-        page=1,
-        page_size=10000,
-        sort=sort,
-        name_filter=q,
-        uid_filter=uid,
-        canton=canton,
-        review_status=review_status,
-        contact_status=contact_status,
-        google_searched=google_searched,
-        min_web_score=min_web_score,
-        min_flex_score=min_flex_score,
-        min_ai_score=min_ai_score,
-        tags=tags,
-        tfidf_cluster=tfidf_cluster,
-        purpose_keywords=purpose_keywords,
-        noga_code=noga_code,
-        noga_label=noga_label,
-        noga_level=noga_level,
-        exclude_tags=exclude_tags,
-        exclude_review_status=exclude_review_status,
-        exclude_canton=exclude_canton,
-        exclude_contact_status=exclude_contact_status,
-        exclude_noga_code=exclude_noga_code,
-        exclude_noga_label=exclude_noga_label,
-        exclude_noga_level=exclude_noga_level,
+    """Enqueue a CSV export job with the given filters.
+    
+    Returns job details. The file will be available via /jobs/csv-export/status 
+    once the job completes. File is stored in S3 for 7 days.
+    """
+    from app.api.routes.jobs import _enqueue_or_http_error
+    from app.services.s3_client import is_configured
+    
+    if not is_configured():
+        raise HTTPException(status_code=503, detail="S3 export storage is not configured on this server")
+
+    crud.cancel_active_csv_exports(db, user_id=current_user.id)
+
+    params = {
+        "sort": sort,
+        "q": q,
+        "uid": uid,
+        "canton": canton,
+        "review_status": review_status,
+        "contact_status": contact_status,
+        "google_searched": google_searched,
+        "min_web_score": min_web_score,
+        "min_flex_score": min_flex_score,
+        "min_ai_score": min_ai_score,
+        "tags": tags,
+        "tfidf_cluster": tfidf_cluster,
+        "purpose_keywords": purpose_keywords,
+        "noga_code": noga_code,
+        "noga_label": noga_label,
+        "noga_level": noga_level,
+        "exclude_tags": exclude_tags,
+        "exclude_review_status": exclude_review_status,
+        "exclude_canton": exclude_canton,
+        "exclude_contact_status": exclude_contact_status,
+        "exclude_noga_code": exclude_noga_code,
+        "exclude_noga_label": exclude_noga_label,
+        "exclude_noga_level": exclude_noga_level,
+    }
+    
+    from app.schemas.job import JobOut
+    job = _enqueue_or_http_error(
+        request,
+        job_type="csv_export",
+        label="CSV export",
+        params=params,
+        db=db,
+        org_id=current_user.org_id,
+        user_id=current_user.id,
     )
-
-    # Apply org-specific workflow field overlay before CSV serialization
-    if current_user.org_id:
-        ids = [c.id for c in companies]
-        org_states = _bulk_org_states(db, ids, current_user.org_id)
-        companies = [_overlay(c, org_states.get(c.id)) for c in companies]
-
-    _HEADERS = [
-        "uid", "name", "legal_form", "status", "municipality", "canton",
-        "website_url", "web_score", "flex_score", "ai_score", "combined_score",
-        "review_status", "contact_status", "contact_name", "contact_email", "contact_phone",
-        "tags", "ai_category", "tfidf_cluster", "purpose_keywords",
-        "noga_code", "noga_label", "noga_level", "noga_confidence",
-        "created_at", "updated_at",
-    ]
-
-    def _generate():
-        buf = io.StringIO()
-        writer = csv.writer(buf)
-        writer.writerow(_HEADERS)
-        yield buf.getvalue()
-        for c in companies:
-            buf = io.StringIO()
-            writer = csv.writer(buf)
-            writer.writerow([
-                c.uid, c.name, c.legal_form or "", c.status or "",
-                c.municipality or "", c.canton or "",
-                c.website_url or "",
-                c.web_score if c.web_score is not None else "",
-                c.flex_score if c.flex_score is not None else "",
-                c.ai_score if c.ai_score is not None else "",
-                c.combined_score if c.combined_score is not None else "",
-                c.review_status or "", c.contact_status or "",
-                c.contact_name or "", c.contact_email or "", c.contact_phone or "",
-                c.tags or "", c.ai_category or "", c.tfidf_cluster or "",
-                c.purpose_keywords or "",
-                c.noga_code or "", c.noga_label or "", c.noga_level or "",
-                c.noga_confidence if c.noga_confidence is not None else "",
-                c.created_at.isoformat(), c.updated_at.isoformat(),
-            ])
-            yield buf.getvalue()
-
-    return StreamingResponse(
-        _generate(),
-        media_type="text/csv",
-        headers={"Content-Disposition": "attachment; filename=helvex_export.csv"},
-    )
+    return JobOut.from_orm_obj(job)
 
 
 class BulkUpdateBody(BaseModel):

@@ -25,7 +25,7 @@ if TYPE_CHECKING:
 # ---------------------------------------------------------------------------
 
 #: Canonical tier names in ascending privilege order.
-TIER_NAMES = ["free", "simple", "explorer", "researcher", "strategist", "custom"]
+TIER_NAMES = ["free", "simple", "explorer", "researcher", "strategist", "custom", "superadmin"]
 
 #: Integer rank per tier (higher = more privileged).
 TIER_RANK: dict[str, int] = {name: idx for idx, name in enumerate(TIER_NAMES)}
@@ -62,6 +62,13 @@ _TIER_FEATURES: dict[str, frozenset[str]] = {
     }),
     # "custom" tier has no fixed feature set — entirely driven by custom_features JSONB
     "custom": frozenset(),
+    # "superadmin" tier has all features and unlimited rights
+    "superadmin": frozenset({
+        "no_ads", "multi_user", "daily_notifications",
+        "immediate_llm", "flex_auto_score_new",
+        "llm_auto_score_new", "custom_ml_stopwords",
+        "byo_llm_keys", "api_access",
+    }),
 }
 
 # Custom-tier JSONB key → feature name mapping
@@ -85,10 +92,11 @@ EXPORT_LIMITS: dict[str, int] = {
     "researcher": 20_000,
     "strategist": 100_000,
     # custom: 100k if export_100k feature purchased, else 100 (base)
+    "superadmin": 999_999_999_999,  # unlimited
 }
 
-#: RQ queue priority (0 = lowest, 4 = highest).
-#  Workers listen to all five queues in descending order so higher-priority
+#: RQ queue priority (0 = lowest, 5 = highest).
+#  Workers listen to all queues in descending order so higher-priority
 #  jobs are always processed first when a worker is free.
 QUEUE_PRIORITY: dict[str, int] = {
     "free": 0,
@@ -96,6 +104,7 @@ QUEUE_PRIORITY: dict[str, int] = {
     "explorer": 2,
     "researcher": 3,
     "strategist": 4,
+    "superadmin": 5,  # highest priority
     # custom: driven by custom_features["priority_level"] (0–4)
 }
 
@@ -106,6 +115,7 @@ DISCOUNT_RATE: dict[str, float] = {
     "explorer": 0.15,
     "researcher": 0.20,
     "strategist": 0.30,
+    "superadmin": 1.0,  # 100% discount (free usage)
     # custom: discount_steps * 0.05, capped at 0.40
 }
 
@@ -118,6 +128,7 @@ WEB_RESULTS_PRIVATE_MONTHS: dict[str, float] = {
     "explorer": 1.0,
     "researcher": 3.0,
     "strategist": 999.0,   # effectively indefinite while active
+    "superadmin": 999.0,   # effectively indefinite
     # custom: custom_features["web_results_months"]
 }
 

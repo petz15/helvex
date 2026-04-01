@@ -44,36 +44,128 @@ export function PricingClient() {
   const customYearly = customMonthly * 10;
 
   return (
-    <div className="p-6 max-w-6xl mx-auto space-y-6">
-      <div className="flex items-end justify-between gap-4 flex-wrap">
-        <div>
-          <h1 className="text-2xl font-semibold text-slate-900">Pricing</h1>
-          <p className="text-sm text-slate-500 mt-1">Choose a fixed tier or assemble your own custom bundle.</p>
+    <div className="p-6 max-w-6xl mx-auto space-y-8">
+      <div>
+        <h1 className="text-3xl font-bold text-slate-900">Pricing</h1>
+        <p className="text-slate-600 mt-2">Pay for what you use. Get discounts on consumption based on your tier.</p>
+      </div>
+
+      <div className="rounded-lg border border-slate-200 bg-slate-50 p-6 space-y-4">
+        <h2 className="text-lg font-semibold text-slate-900">Consumption-Based Pricing</h2>
+        <p className="text-sm text-slate-700">
+          Each search consumes credits based on the number of results returned. Your tier determines:
+        </p>
+        <ul className="space-y-2 text-sm text-slate-700">
+          <li className="flex items-start gap-3">
+            <span className="text-blue-600 font-semibold mt-0.5">•</span>
+            <span><strong>Credit Discount:</strong> Higher tiers pay less per credit consumed (Free: 0%, Strategist: 30%)</span>
+          </li>
+          <li className="flex items-start gap-3">
+            <span className="text-blue-600 font-semibold mt-0.5">•</span>
+            <span><strong>Export Limits:</strong> CSV exports capped by tier (Free: 100 rows, Strategist: 100k rows)</span>
+          </li>
+          <li className="flex items-start gap-3">
+            <span className="text-blue-600 font-semibold mt-0.5">•</span>
+            <span><strong>Queue Priority:</strong> Higher tiers get faster job processing</span>
+          </li>
+          <li className="flex items-start gap-3">
+            <span className="text-blue-600 font-semibold mt-0.5">•</span>
+            <span><strong>Features:</strong> Tier determines access to advanced features like LLM scoring, API access, and more</span>
+          </li>
+        </ul>
+      </div>
+
+      <div className="space-y-4">
+        <div className="flex items-center justify-between">
+          <h2 className="text-lg font-semibold text-slate-900">Plans & Benefits</h2>
+          <label className="inline-flex items-center gap-2 text-sm text-slate-600">
+            <input type="checkbox" checked={yearly} onChange={(e) => setYearly(e.target.checked)} />
+            Yearly billing (2 months free)
+          </label>
         </div>
-        <label className="inline-flex items-center gap-2 text-sm text-slate-600">
-          <input type="checkbox" checked={yearly} onChange={(e) => setYearly(e.target.checked)} />
-          Yearly billing (2 months free)
-        </label>
+        
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm border border-slate-200 rounded-lg overflow-hidden">
+            <thead>
+              <tr className="bg-slate-100 border-b border-slate-200">
+                <th className="px-4 py-3 text-left font-semibold text-slate-900">Feature</th>
+                {TIERS.map((tier) => (
+                  <th key={tier.name} className="px-4 py-3 text-center font-semibold text-slate-900">{tier.name}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              <tr className="border-b border-slate-200 bg-white">
+                <td className="px-4 py-3 font-semibold text-slate-900">Price</td>
+                {TIERS.map((tier) => (
+                  <td key={`price-${tier.name}`} className="px-4 py-3 text-center">
+                    <p className="font-bold text-lg">CHF {yearly ? tier.yearly : tier.monthly}</p>
+                    <p className="text-xs text-slate-500">{yearly ? "per year" : "per month"}</p>
+                  </td>
+                ))}
+              </tr>
+              <tr className="border-b border-slate-200 bg-white">
+                <td className="px-4 py-3 font-semibold text-slate-900">CSV Export Limit</td>
+                {TIERS.map((tier, idx) => {
+                  const limits = ["100", "1,000", "5,000", "20,000", "100,000"];
+                  return (
+                    <td key={`export-${tier.name}`} className="px-4 py-3 text-center text-slate-700">{limits[idx]} rows</td>
+                  );
+                })}
+              </tr>
+              <tr className="border-b border-slate-200 bg-white">
+                <td className="px-4 py-3 font-semibold text-slate-900">Credit Discount</td>
+                {TIERS.map((tier, idx) => {
+                  const discounts = ["0%", "10%", "15%", "20%", "30%"];
+                  return (
+                    <td key={`discount-${tier.name}`} className="px-4 py-3 text-center text-slate-700">{discounts[idx]}</td>
+                  );
+                })}
+              </tr>
+              <tr className="border-b border-slate-200 bg-white">
+                <td className="px-4 py-3 font-semibold text-slate-900">Multi-user</td>
+                {TIERS.map((tier, idx) => (
+                  <td key={`multiuser-${tier.name}`} className="px-4 py-3 text-center text-slate-700">{idx > 0 ? "✓" : "–"}</td>
+                ))}
+              </tr>
+              <tr className="border-b border-slate-200 bg-white">
+                <td className="px-4 py-3 font-semibold text-slate-900">No Ads</td>
+                {TIERS.map((tier, idx) => (
+                  <td key={`noads-${tier.name}`} className="px-4 py-3 text-center text-slate-700">{idx > 0 ? "✓" : "–"}</td>
+                ))}
+              </tr>
+              <tr className="border-b border-slate-200 bg-white">
+                <td className="px-4 py-3 font-semibold text-slate-900">Immediate LLM Scoring</td>
+                {TIERS.map((tier, idx) => (
+                  <td key={`immediatellm-${tier.name}`} className="px-4 py-3 text-center text-slate-700">{idx > 1 ? "✓" : "–"}</td>
+                ))}
+              </tr>
+              <tr className="border-b border-slate-200 bg-white">
+                <td className="px-4 py-3 font-semibold text-slate-900">LLM Auto Scoring</td>
+                {TIERS.map((tier, idx) => (
+                  <td key={`llmauto-${tier.name}`} className="px-4 py-3 text-center text-slate-700">{idx > 2 ? "✓" : "–"}</td>
+                ))}
+              </tr>
+              <tr className="border-b border-slate-200 bg-white">
+                <td className="px-4 py-3 font-semibold text-slate-900">API Access</td>
+                {TIERS.map((tier, idx) => (
+                  <td key={`api-${tier.name}`} className="px-4 py-3 text-center text-slate-700">{idx > 3 ? "✓" : "–"}</td>
+                ))}
+              </tr>
+              <tr className="bg-white">
+                <td className="px-4 py-3 font-semibold text-slate-900">Custom Features</td>
+                {TIERS.map((tier) => (
+                  <td key={`custom-${tier.name}`} className="px-4 py-3 text-center text-slate-700">–</td>
+                ))}
+              </tr>
+            </tbody>
+          </table>
+        </div>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 gap-4">
-        {TIERS.map((tier) => (
-          <div key={tier.name} className={`rounded-xl border p-4 ${cardClass(tier.name)}`}>
-            <p className="text-sm font-semibold">{tier.name}</p>
-            <p className="mt-2 text-2xl font-bold">CHF {yearly ? tier.yearly : tier.monthly}</p>
-            <p className="text-xs opacity-80">{yearly ? "per year" : "per month"}</p>
-            <ul className="mt-3 text-xs space-y-1 opacity-90">
-              {tier.highlights.map((h) => (
-                <li key={h}>• {h}</li>
-              ))}
-            </ul>
-          </div>
-        ))}
-      </div>
-
-      <div className="rounded-xl border border-slate-200 bg-white p-5 space-y-4">
+      <div className="mt-8 rounded-xl border border-slate-200 bg-white p-6 space-y-4">
         <h2 className="text-lg font-semibold text-slate-900">Custom Tier Configurator</h2>
-        <p className="text-xs text-slate-500">Build a modular plan and estimate your monthly/yearly price.</p>
+        <p className="text-sm text-slate-600">Not sure which plan is right for you? Build a modular plan tailored to your needs and see your estimated price.</p>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
           <label className="flex items-center justify-between gap-2 border border-slate-200 rounded-lg px-3 py-2">
@@ -112,11 +204,11 @@ export function PricingClient() {
 
         <div className="flex items-center justify-between border-t border-slate-100 pt-4">
           <div>
-            <p className="text-sm text-slate-500">Estimated custom price</p>
+            <p className="text-sm text-slate-600">Estimated custom price</p>
             <p className="text-2xl font-bold text-slate-900">CHF {yearly ? customYearly : customMonthly}</p>
-            <p className="text-xs text-slate-500">{yearly ? "per year" : "per month"}</p>
+            <p className="text-xs text-slate-600">{yearly ? "per year" : "per month"}</p>
           </div>
-          <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 max-w-xs">
+          <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
             Checkout is not yet implemented. This page currently provides plan visibility and estimation only.
           </div>
         </div>

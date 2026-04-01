@@ -9,6 +9,7 @@ const EXPORT_LIMITS: Record<string, number> = {
   explorer: 5000,
   researcher: 20000,
   strategist: 100000,
+  superadmin: 999999999999,  // unlimited
 };
 
 export function creditsToChf(credits: number): number {
