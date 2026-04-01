@@ -98,6 +98,12 @@ jobs:
             --from-literal=GOOGLE_CLIENT_SECRET="${{ secrets.GOOGLE_CLIENT_SECRET }}" \
             --from-literal=LINKEDIN_CLIENT_ID="${{ secrets.LINKEDIN_CLIENT_ID }}" \
             --from-literal=LINKEDIN_CLIENT_SECRET="${{ secrets.LINKEDIN_CLIENT_SECRET }}" \
+            --from-literal=PAYMENT_PROVIDER_MODE="${{ secrets.PAYMENT_PROVIDER_MODE }}" \
+            --from-literal=WORLDLINE_API_BASE_URL="${{ secrets.WORLDLINE_API_BASE_URL }}" \
+            --from-literal=WORLDLINE_CUSTOMER_ID="${{ secrets.WORLDLINE_CUSTOMER_ID }}" \
+            --from-literal=WORLDLINE_TERMINAL_ID="${{ secrets.WORLDLINE_TERMINAL_ID }}" \
+            --from-literal=WORLDLINE_API_USERNAME="${{ secrets.WORLDLINE_API_USERNAME }}" \
+            --from-literal=WORLDLINE_API_PASSWORD="${{ secrets.WORLDLINE_API_PASSWORD }}" \
             --from-literal=username="helvex" \
             --from-literal=password="${{ secrets.DB_PASSWORD }}" \
             -n helvex-dev \
