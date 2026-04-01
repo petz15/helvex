@@ -37,8 +37,13 @@ _INVITE_MAX_AGE = 7 * 24 * 3600  # 7 days
 _EMAIL_CHANGE_SALT = "email-change-v1"
 _EMAIL_CHANGE_MAX_AGE = 1 * 3600  # 1 hour
 
-# Tier hierarchy — higher index = higher tier
-_TIER_ORDER = ["free", "pro", "team", "enterprise"]
+# Tier hierarchy — higher index = higher tier.
+# Canonical names post-migration-0039; legacy names are mapped in tiers.py.
+_TIER_ORDER = ["free", "simple", "explorer", "researcher", "strategist", "custom"]
+
+# Backward-compat map for rows not yet data-migrated.
+_TIER_LEGACY = {"pro": "simple", "team": "explorer", "enterprise": "strategist",
+                "starter": "simple", "professional": "explorer"}
 
 # ---------------------------------------------------------------------------
 # Cookie-based sessions (browser UI)
@@ -214,17 +219,22 @@ def require_verified_email(user: User = Depends(get_current_user)) -> User:
 def require_tier(min_tier: str):
     """Dependency factory — raises 403 if user's tier is below *min_tier*.
 
+    Checks ``user.tier`` (legacy path).  For org-scoped tier enforcement use
+    ``app.services.tiers.require_org_tier`` instead.
+
     Usage::
 
         @router.get("/premium")
-        def premium_route(user: User = Depends(require_tier("pro"))):
+        def premium_route(user: User = Depends(require_tier("simple"))):
             ...
     """
     def _check(user: User = Depends(get_current_user)) -> User:
-        user_level = _TIER_ORDER.index(user.tier) if user.tier in _TIER_ORDER else 0
-        required_level = _TIER_ORDER.index(min_tier) if min_tier in _TIER_ORDER else 0
         if user.is_superadmin:
             return user
+        normalised = _TIER_LEGACY.get(user.tier, user.tier)
+        min_normalised = _TIER_LEGACY.get(min_tier, min_tier)
+        user_level = _TIER_ORDER.index(normalised) if normalised in _TIER_ORDER else 0
+        required_level = _TIER_ORDER.index(min_normalised) if min_normalised in _TIER_ORDER else 0
         if user_level < required_level:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,

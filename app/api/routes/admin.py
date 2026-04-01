@@ -13,7 +13,7 @@ from app.models.user import User
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
-_VALID_TIERS = {"free", "starter", "professional", "enterprise"}
+_VALID_TIERS = {"free", "simple", "explorer", "researcher", "strategist", "custom"}
 
 
 def _require_superadmin(current_user: User = Depends(get_current_user)) -> User:

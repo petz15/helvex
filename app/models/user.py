@@ -42,3 +42,4 @@ class User(Base):
 
     org: Mapped["Organization | None"] = relationship("Organization", back_populates="users", foreign_keys=[org_id])
     oauth_accounts: Mapped[list["OAuthAccount"]] = relationship("OAuthAccount", back_populates="user", cascade="all, delete-orphan")
+    org_memberships: Mapped[list["OrgMember"]] = relationship("OrgMember", back_populates="user", cascade="all, delete-orphan")

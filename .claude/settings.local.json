@@ -163,7 +163,9 @@
       "Bash(grep -l \"collection_run\\\\|job_run\" /c/D/coding_projects/zefix_analyzer/alembic/versions/*.py)",
       "Bash(find /c/D/coding_projects/zefix_analyzer/frontend/src -type f \\\\\\(-name *.tsx -o -name *.ts \\\\\\))",
       "Bash(npx tsc:*)",
-      "Bash(grep -A 20 \"def create_boilerplate\\\\|def list_boilerplate\" /c/D/coding_projects/zefix_analyzer/app/crud/*.py)"
+      "Bash(grep -A 20 \"def create_boilerplate\\\\|def list_boilerplate\" /c/D/coding_projects/zefix_analyzer/app/crud/*.py)",
+      "Bash(grep -E \".py$\")",
+      "Bash(grep -l \"org_id\" /c/D/coding_projects/zefix_analyzer/alembic/versions/*.py)"
     ]
   }
 }

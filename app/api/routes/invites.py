@@ -14,6 +14,7 @@ from app.auth import (
     get_current_user,
 )
 from app.database import get_db
+from app.models.org_member import OrgMember
 from app.models.organization import Organization
 from app.models.user import User
 
@@ -44,6 +45,32 @@ class RegisterAndAcceptRequest(BaseModel):
         return v
 
 
+def _check_domain_restriction(org: Organization, email: str) -> None:
+    """Raise 403 if the org is a verified business with a domain restriction
+    and the invitee's email domain does not match."""
+    if not org.verified_business or not org.verified_domain:
+        return
+    domain = email.lower().split("@")[-1]
+    if domain != org.verified_domain.lower():
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=(
+                f"This organization only accepts members from @{org.verified_domain} email addresses."
+            ),
+        )
+
+
+def _upsert_org_member(db: Session, org_id: int, user_id: int, role: str = "member") -> None:
+    """Insert or update the org_members row for this (org, user) pair."""
+    existing = db.query(OrgMember).filter(
+        OrgMember.org_id == org_id, OrgMember.user_id == user_id
+    ).first()
+    if existing:
+        existing.role = role
+    else:
+        db.add(OrgMember(org_id=org_id, user_id=user_id, role=role))
+
+
 @router.get(
     "/preview",
     response_model=InvitePreview,
@@ -52,7 +79,7 @@ class RegisterAndAcceptRequest(BaseModel):
 def preview_invite(
     token: str,
     db: Session = Depends(get_db),
-):
+) -> InvitePreview:
     result = decode_invite_token(token)
     if result is None:
         raise HTTPException(
@@ -98,11 +125,17 @@ def register_and_accept(
     if not org:
         raise HTTPException(status_code=404, detail="Organization not found")
 
+    _check_domain_restriction(org, invited_email)
+
     # Create user — mark email verified immediately (invite proves ownership)
     user = crud.create_user(db, email=invited_email, password=body.password)
     user.email_verified = True
+
+    # Join org: set active org and create/update org_members row
     user.org_id = org_id
     user.org_role = "member"
+    _upsert_org_member(db, org_id, user.id, role="member")
+
     db.commit()
     db.refresh(user)
 
@@ -129,7 +162,7 @@ def accept_invite(
     body: AcceptInviteRequest,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
-):
+) -> None:
     result = decode_invite_token(body.token)
     if result is None:
         raise HTTPException(
@@ -148,35 +181,29 @@ def accept_invite(
     if not org:
         raise HTTPException(status_code=404, detail="Organization not found")
 
+    _check_domain_restriction(org, current_user.email)
+
     # Already in this org — idempotent
-    if current_user.org_id == org_id:
+    existing_member = db.query(OrgMember).filter(
+        OrgMember.org_id == org_id, OrgMember.user_id == current_user.id
+    ).first()
+    if existing_member:
+        # Switch active org to this one if not already
+        if current_user.org_id != org_id:
+            current_user.org_id = org_id
+            current_user.org_role = existing_member.role
+            db.commit()
         return
 
-    # In a different org — require explicit force confirmation
+    # Accepting moves the active org to the new org.
+    # Guard: don't abandon current org if last owner (multi-org: user stays in both)
     if current_user.org_id is not None and not body.force:
-        current_org = db.get(Organization, current_user.org_id)
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail={
-                "code": "already_in_org",
-                "current_org_name": current_org.name if current_org else "Unknown",
-                "current_org_id": current_user.org_id,
-            },
-        )
+        # In multi-org model, joining another org doesn't require leaving the current one.
+        # The active org will switch; the old membership remains.
+        pass
 
-    # Guard: don't leave current org if last owner
-    if current_user.org_id is not None and current_user.org_role == "owner":
-        owner_count = (
-            db.query(User)
-            .filter(User.org_id == current_user.org_id, User.org_role == "owner")
-            .count()
-        )
-        if owner_count <= 1:
-            raise HTTPException(
-                status_code=400,
-                detail="You are the only owner of your current org. Transfer ownership before switching.",
-            )
-
+    # Add to org and switch active org
+    _upsert_org_member(db, org_id, current_user.id, role="member")
     current_user.org_id = org_id
     current_user.org_role = "member"
     db.commit()

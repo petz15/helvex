@@ -7,6 +7,7 @@ import bcrypt
 from sqlalchemy.orm import Session
 
 from app.models.oauth_account import OAuthAccount
+from app.models.org_member import OrgMember
 from app.models.organization import Organization
 from app.models.user import User
 
@@ -29,6 +30,7 @@ def _unique_slug(db: Session, base: str) -> str:
 def ensure_personal_org(db: Session, user: User) -> None:
     """Create and assign a personal workspace org if the user has none.
 
+    Also creates the OrgMember row so the new org_members table stays in sync.
     Safe to call multiple times — no-ops if user already has an org.
     """
     if user.org_id is not None:
@@ -41,6 +43,10 @@ def ensure_personal_org(db: Session, user: User) -> None:
     db.flush()
     user.org_id = org.id
     user.org_role = "owner"
+    # Keep org_members in sync — upsert so this is idempotent
+    existing = db.query(OrgMember).filter(OrgMember.org_id == org.id, OrgMember.user_id == user.id).first()
+    if not existing:
+        db.add(OrgMember(org_id=org.id, user_id=user.id, role="owner"))
     db.commit()
     db.refresh(user)
 

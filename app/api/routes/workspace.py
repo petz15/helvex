@@ -23,8 +23,10 @@ from sqlalchemy.orm import Session
 from app import crud
 from app.api.deps import get_current_org, require_org_role
 from app.database import get_db
+from app.models.org_member import OrgMember
 from app.models.organization import Organization
 from app.models.user import User
+from app.services.tiers import has_feature
 
 router = APIRouter(prefix="/orgs/{org_id}", tags=["workspace"])
 
@@ -206,7 +208,7 @@ def get_org(
 ):
     _validate_org_access(org_id, user_org)
     _, org = user_org
-    member_count = db.query(User).filter(User.org_id == org.id).count()
+    member_count = db.query(OrgMember).filter(OrgMember.org_id == org.id).count()
     return OrgOut(
         id=org.id,
         name=org.name,
@@ -233,7 +235,7 @@ def update_org(
         org.name = body.name.strip()
     db.commit()
     db.refresh(org)
-    member_count = db.query(User).filter(User.org_id == org.id).count()
+    member_count = db.query(OrgMember).filter(OrgMember.org_id == org.id).count()
     return OrgOut(
         id=org.id,
         name=org.name,
@@ -257,7 +259,9 @@ def list_members(
 ):
     _validate_org_access(org_id, user_org)
     _, org = user_org
-    members = db.query(User).filter(User.org_id == org.id).order_by(User.created_at).all()
+    # Use org_members as the authoritative source for membership
+    user_ids = [m.user_id for m in db.query(OrgMember).filter(OrgMember.org_id == org.id).all()]
+    members = db.query(User).filter(User.id.in_(user_ids)).order_by(User.created_at).all()
     return members
 
 
@@ -275,6 +279,11 @@ def add_member(
 ):
     _validate_org_access(org_id, user_org)
     _, org = user_org
+    if not has_feature(org, "multi_user"):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Your plan does not support multiple users. Upgrade to Simple or above.",
+        )
     if body.org_role not in _VALID_ROLES:
         raise HTTPException(status_code=400, detail=f"Invalid role. Must be one of: {sorted(_VALID_ROLES)}")
     if crud.get_user_by_email(db, body.email):
@@ -287,6 +296,14 @@ def add_member(
     new_user.org_id = org.id
     new_user.org_role = body.org_role
     new_user.email_verified = True  # admin-created users skip email verification
+    # Sync org_members for the target org
+    existing_member = db.query(OrgMember).filter(
+        OrgMember.org_id == org.id, OrgMember.user_id == new_user.id
+    ).first()
+    if existing_member:
+        existing_member.role = body.org_role
+    else:
+        db.add(OrgMember(org_id=org.id, user_id=new_user.id, role=body.org_role))
     db.commit()
     db.refresh(new_user)
     return new_user
@@ -309,14 +326,20 @@ def update_member_role(
     if body.org_role not in _VALID_ROLES:
         raise HTTPException(status_code=400, detail=f"Invalid role. Must be one of: {sorted(_VALID_ROLES)}")
     target = db.get(User, user_id)
-    if not target or target.org_id != org.id:
+    target_member = db.query(OrgMember).filter(
+        OrgMember.org_id == org.id, OrgMember.user_id == user_id
+    ).first() if target else None
+    if not target_member:
         raise HTTPException(status_code=404, detail="Member not found")
     # Prevent demoting self if last owner
     if target.id == actor.id and body.org_role != "owner":
-        owner_count = db.query(User).filter(User.org_id == org.id, User.org_role == "owner").count()
+        owner_count = db.query(OrgMember).filter(
+            OrgMember.org_id == org.id, OrgMember.role == "owner"
+        ).count()
         if owner_count <= 1:
             raise HTTPException(status_code=400, detail="Cannot demote the last owner")
-    target.org_role = body.org_role
+    target_member.role = body.org_role
+    target.org_role = body.org_role  # keep legacy field in sync
     db.commit()
     db.refresh(target)
     return target
@@ -336,17 +359,28 @@ def remove_member(
     _validate_org_access(org_id, user_org)
     actor, org = user_org
     target = db.get(User, user_id)
-    if not target or target.org_id != org.id:
+    target_member = db.query(OrgMember).filter(
+        OrgMember.org_id == org.id, OrgMember.user_id == user_id
+    ).first() if target else None
+    if not target_member:
         raise HTTPException(status_code=404, detail="Member not found")
     if target.id == actor.id:
         raise HTTPException(status_code=400, detail="Cannot remove yourself")
     # Check: don't leave org with no owner
-    if target.org_role == "owner":
-        owner_count = db.query(User).filter(User.org_id == org.id, User.org_role == "owner").count()
+    if target_member.role == "owner":
+        owner_count = db.query(OrgMember).filter(
+            OrgMember.org_id == org.id, OrgMember.role == "owner"
+        ).count()
         if owner_count <= 1:
             raise HTTPException(status_code=400, detail="Cannot remove the last owner")
-    target.org_id = None
-    target.org_role = "member"
+    db.delete(target_member)
+    # If this org was the target user's active org, fall back to another membership
+    if target.org_id == org.id:
+        fallback = db.query(OrgMember).filter(
+            OrgMember.user_id == target.id, OrgMember.org_id != org.id
+        ).first()
+        target.org_id = fallback.org_id if fallback else None
+        target.org_role = fallback.role if fallback else "member"
     db.commit()
 
 
@@ -365,9 +399,17 @@ def send_invite(
 ):
     _validate_org_access(org_id, user_org)
     actor, org = user_org
+    if not has_feature(org, "multi_user"):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Your plan does not support multiple users. Upgrade to Simple or above.",
+        )
     # Don't invite someone already in this org
     existing = crud.get_user_by_email(db, body.email)
-    if existing and existing.org_id == org.id:
+    existing_member = db.query(OrgMember).filter(
+        OrgMember.org_id == org.id, OrgMember.user_id == existing.id
+    ).first() if existing else None
+    if existing_member:
         raise HTTPException(status_code=409, detail="User is already a member of this org")
     from app.auth import create_invite_token
     from app.services.email import send_invite_email

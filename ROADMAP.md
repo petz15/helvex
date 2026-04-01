@@ -17,6 +17,12 @@
     - Integrations with other products such as appollo etc?
     - other industry specific directories
 
+### Todos
+- Check new CSV export
+- Implement Wordline integration next to stripe (or instead of stripe?)
+- Adjust sites for Superadmin and normal admin
+- Adjust sites for setup (seperate some features out from account page)
+- Continue on Explore page
 
 ## Dashboard & UI
 
