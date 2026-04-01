@@ -1,6 +1,5 @@
 "use client";
 import { useState } from "react";
-import { useSearchParams } from "next/navigation";
 import useSWR from "swr";
 import {
   KeyRound, Mail, Building2, Loader2, Check, Plus, Download, FileText,
@@ -17,6 +16,13 @@ import {
 } from "@/lib/api";
 import { creditsToChf } from "@/lib/entitlements";
 import { OrgClient } from "@/app/app/org/org-client";
+
+type AccountClientProps = {
+  checkout?: string;
+  kind?: string;
+  tier?: string;
+  credits?: string;
+};
 
 const inputCls =
   "w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-300 focus:border-transparent bg-white";
@@ -196,10 +202,9 @@ function CSVExportSection() {
   );
 }
 
-export function AccountClient() {
+export function AccountClient({ checkout, kind, tier, credits }: AccountClientProps) {
   const { data: me, mutate: reloadMe } = useSWR("me", fetchCurrentUser);
   const { data: orgDetail } = useSWR(me?.org?.id ? ["org-detail", me.org.id] : null, () => fetchOrg(me!.org!.id));
-  const searchParams = useSearchParams();
 
   // Email change
   const [showEmailForm, setShowEmailForm] = useState(false);
@@ -219,10 +224,10 @@ export function AccountClient() {
   const [billingLoading, setBillingLoading] = useState<string | null>(null);
   const [billingBanner, setBillingBanner] = useState<{ kind: "success" | "error"; message: string } | null>(null);
 
-  const checkoutState = searchParams.get("checkout");
-  const checkoutKind = searchParams.get("kind");
-  const checkoutTier = searchParams.get("tier");
-  const checkoutCredits = searchParams.get("credits");
+  const checkoutState = checkout;
+  const checkoutKind = kind;
+  const checkoutTier = tier;
+  const checkoutCredits = credits;
   const checkoutLabel = checkoutKind === "topup"
     ? checkoutCredits
       ? `${Number(checkoutCredits).toLocaleString()} credits`
