@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING
 
-from sqlalchemy import BigInteger, Boolean, DateTime, Float, ForeignKey, String, Text
+from sqlalchemy import BigInteger, Boolean, DateTime, Float, ForeignKey, JSON, String, Text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -57,7 +57,7 @@ class Organization(Base):
     # {"web_results_months": 2, "export_100k": true, "discount_steps": 3,
     #  "priority_level": 2, "immediate_llm": true, "byo_llm_keys": false,
     #  "flex_auto_score": false, "llm_auto_score": false}
-    custom_features: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    custom_features: Mapped[dict | None] = mapped_column(JSONB().with_variant(JSON(), "sqlite"), nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),

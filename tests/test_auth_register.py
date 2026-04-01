@@ -25,7 +25,6 @@ def test_register_creates_user(client):
         )
     assert resp.status_code == 201
     data = resp.json()
-    assert data["username"] == "newuser"
     assert data["email"] == "newuser@example.com"
 
 
@@ -69,4 +68,4 @@ def test_register_does_not_500_if_record_verification_sent_fails(client):
                 headers={"X-Forwarded-For": "203.0.113.55"},
             )
     assert resp.status_code == 201
-    assert resp.json()["username"] == "dbfail"
+    assert resp.json()["email"] == "dbfail@example.com"

@@ -49,10 +49,17 @@ from app.config import settings
 from app.database import Base, engine, get_db
 from app.services.job_worker import kick_job_worker
 from app.services.scoring import get_default_scoring_config
-from app.api.routes import admin_router, auth_router, companies_router, invites_router, jobs_router, map_router, notes_router, orgs_router, settings_router, views_router, workspace_router
+from app.api.routes import admin_router, auth_router, billing_router, companies_router, invites_router, jobs_router, map_router, notes_router, orgs_router, settings_router, views_router, workspace_router
 
 # Paths that do NOT require authentication
-_PUBLIC_PREFIXES = ("/static", "/health", "/api/v1/auth", "/api/v1/invites/preview", "/api/v1/companies/demo")
+_PUBLIC_PREFIXES = (
+    "/static",
+    "/health",
+    "/api/v1/auth",
+    "/api/v1/invites/preview",
+    "/api/v1/companies/demo",
+    "/api/v1/billing/webhooks",
+)
 _PUBLIC_EXACT = {"/", "/logout", "/health"}
 
 _REPO_ROOT = pathlib.Path(__file__).parent.parent
@@ -232,6 +239,7 @@ Instrumentator().instrument(app).expose(app, endpoint="/metrics", include_in_sch
 
 app.include_router(admin_router, prefix="/api/v1")
 app.include_router(auth_router, prefix="/api/v1")
+app.include_router(billing_router, prefix="/api/v1")
 app.include_router(companies_router, prefix="/api/v1")
 app.include_router(notes_router, prefix="/api/v1")
 app.include_router(jobs_router, prefix="/api/v1")

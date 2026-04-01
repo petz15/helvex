@@ -23,6 +23,7 @@ export interface OrgInfo {
   name: string;
   slug: string;
   tier: string;
+  role?: string | null;
 }
 
 export interface CurrentUser {
@@ -479,6 +480,10 @@ export interface OrgDetail {
   name: string;
   slug: string;
   tier: string;
+  credits_balance: number;
+  verified_business: boolean;
+  verified_domain: string | null;
+  custom_features: Record<string, unknown> | null;
   member_count: number;
 }
 
@@ -586,6 +591,23 @@ export async function createOrg(name: string): Promise<OrgInfo> {
     throw new Error(body.detail ?? "Failed to create org");
   }
   return res.json();
+}
+
+export async function fetchMyOrgs(): Promise<OrgInfo[]> {
+  const res = await fetch("/api/v1/orgs/me", { credentials: "include" });
+  if (!res.ok) throw new Error("Failed to fetch organizations");
+  return res.json();
+}
+
+export async function switchOrg(orgId: number): Promise<void> {
+  const res = await fetch(`/api/v1/orgs/switch/${orgId}`, {
+    method: "POST",
+    credentials: "include",
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.detail ?? "Failed to switch organization");
+  }
 }
 
 export async function leaveOrg(orgId: number): Promise<void> {

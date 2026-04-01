@@ -11,9 +11,11 @@ import {
   fetchCompanies, fetchStats, fetchCantons, fetchTaxonomy,
   fetchSavedViews, saveView, deleteView, bulkUpdateCompanies,
   fetchCurrentUser, fetchOrgEffectiveSettings,
+  fetchOrg,
 } from "@/lib/api";
 import type { Company, CompanyFilters, CompanyStats } from "@/lib/types";
 import { cn } from "@/lib/utils";
+import { getExportLimit } from "@/lib/entitlements";
 
 // ── Swiss cantons for the guided picker ──────────────────────────────────────
 
@@ -623,6 +625,8 @@ function BrowseView({ initialFilters, initialCantons, initialStats, initialTaxon
   const { data: cantons = initialCantons } = useSWR("cantons", fetchCantons, { fallbackData: initialCantons });
   const { data: taxonomy = initialTaxonomy } = useSWR("taxonomy", fetchTaxonomy, { fallbackData: initialTaxonomy });
   const { data: savedViews = [], mutate: mutateSavedViews } = useSWR("saved-views", fetchSavedViews);
+  const { data: me } = useSWR("me", fetchCurrentUser);
+  const { data: org } = useSWR(me?.org?.id ? ["org-detail", me.org.id] : null, () => fetchOrg(me!.org!.id));
 
   function toggleSelect(id: number) {
     setSelectedIds(prev => {
@@ -659,6 +663,10 @@ function BrowseView({ initialFilters, initialCantons, initialStats, initialTaxon
   if (filters.canton) activeFilters.push({ label: `Canton: ${filters.canton}`, key: "canton" });
   if (filters.min_combined_score) activeFilters.push({ label: `Score ≥ ${filters.min_combined_score}`, key: "min_combined_score" });
   if (filters.review_status) activeFilters.push({ label: `Review: ${filters.review_status.replace(/_/g, " ")}`, key: "review_status" });
+
+  const exportLimit = org ? getExportLimit({ tier: org.tier, customFeatures: org.custom_features }) : 100;
+  const matchingCount = page?.total ?? 0;
+  const exportBlocked = matchingCount > exportLimit;
 
   return (
     <div className="flex flex-col h-[calc(100vh-3rem)] overflow-hidden">
@@ -747,13 +755,23 @@ function BrowseView({ initialFilters, initialCantons, initialStats, initialTaxon
               <div />
             )}
             <a
-              href={buildExportUrl(filters)}
-              download
-              className="flex items-center gap-1.5 text-xs text-slate-500 hover:text-slate-700 px-2.5 py-1 rounded border border-slate-200 hover:bg-white transition-colors"
+              href={exportBlocked ? undefined : buildExportUrl(filters)}
+              download={exportBlocked ? undefined : true}
+              className={`flex items-center gap-1.5 text-xs px-2.5 py-1 rounded border transition-colors ${
+                exportBlocked
+                  ? "text-slate-300 border-slate-200 bg-slate-100 cursor-not-allowed pointer-events-none"
+                  : "text-slate-500 hover:text-slate-700 border-slate-200 hover:bg-white"
+              }`}
+              title={exportBlocked ? `Your current plan allows up to ${exportLimit.toLocaleString()} rows per CSV export.` : undefined}
             >
               <Download size={12} /> Export CSV ({page?.total ?? 0})
             </a>
           </div>
+          {exportBlocked && (
+            <div className="px-3 py-1 text-xs text-amber-700 bg-amber-50 border-b border-amber-100">
+              Export limited to {exportLimit.toLocaleString()} rows for your current plan.
+            </div>
+          )}
           <CompanyTable
             companies={page?.items ?? []}
             selectedId={selectedCompany?.id ?? null}

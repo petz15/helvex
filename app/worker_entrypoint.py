@@ -9,9 +9,9 @@ Or via the Docker image CMD:
 Requires REDIS_URL and USE_RQ=true in the environment.
 
 WORKER_TYPE controls which queue(s) this worker listens to:
-    zefix  — helvex-zefix (bulk/detail/initial/batch)
-    api    — helvex-api   (scoring, geocode, NOGA, Claude classify)
-    ml     — helvex-ml    (HDBSCAN clustering, keyword extraction)
+    zefix  — helvex-zefix-p4 ... helvex-zefix-p0 (bulk/detail/initial)
+    api    — helvex-api-p4   ... helvex-api-p0   (scoring, geocode, NOGA, Claude classify)
+    ml     — helvex-ml                             (HDBSCAN clustering, keyword extraction)
 
 Defaults to "api" when WORKER_TYPE is not set (backward-compatible).
 
@@ -33,8 +33,8 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 QUEUE_MAP: dict[str, list[str]] = {
-    "zefix": ["helvex-zefix"],
-    "api":   ["helvex-api"],
+    "zefix": ["helvex-zefix-p4", "helvex-zefix-p3", "helvex-zefix-p2", "helvex-zefix-p1", "helvex-zefix-p0"],
+    "api":   ["helvex-api-p4", "helvex-api-p3", "helvex-api-p2", "helvex-api-p1", "helvex-api-p0"],
     "ml":    ["helvex-ml"],
 }
 

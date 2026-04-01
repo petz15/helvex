@@ -813,3 +813,98 @@ kubectl scale statefulset prometheus-monitoring-kube-prometheus-prometheus \
 ### 7) Retry the stuck deploy
 
 Once the node is stable, re-trigger the deploy from GitHub Actions (re-run the failed workflow). The helmfile apply will resume cleanly.
+
+---
+
+## 15. Monetization Ops Checks (Phase 4 and Phase 5)
+
+Use this section after deploying queue-priority routing and credit enforcement.
+
+### A) Queue Priority Routing (Phase 4)
+
+1) Confirm worker pods are up:
+
+```bash
+kubectl get pods -n helvex-prod -l app.kubernetes.io/component=api-worker
+kubectl get pods -n helvex-prod -l app.kubernetes.io/component=zefix-worker
+kubectl get pods -n helvex-prod -l app.kubernetes.io/component=ml-worker
+```
+
+2) Confirm startup log shows p4..p0 queue list (highest first):
+
+```bash
+kubectl logs -n helvex-prod -l app.kubernetes.io/component=api-worker --tail=100 | grep "Starting RQ"
+kubectl logs -n helvex-prod -l app.kubernetes.io/component=zefix-worker --tail=100 | grep "Starting RQ"
+```
+
+Expected queues:
+- API worker: helvex-api-p4, helvex-api-p3, helvex-api-p2, helvex-api-p1, helvex-api-p0
+- Zefix worker: helvex-zefix-p4, helvex-zefix-p3, helvex-zefix-p2, helvex-zefix-p1, helvex-zefix-p0
+- ML worker: helvex-ml
+
+3) Trigger one low-tier org job and one high-tier org job of the same type.
+
+4) Check Redis queue depth directly:
+
+```bash
+kubectl exec -n helvex-prod -it statefulset/helvex-redis -- sh -lc '
+  for q in helvex-api-p4 helvex-api-p3 helvex-api-p2 helvex-api-p1 helvex-api-p0; do
+    n=$(redis-cli -a "$REDIS_PASSWORD" LLEN rq:queue:$q)
+    echo "$q: $n"
+  done
+'
+```
+
+5) Verify high-priority queue drains first:
+
+```bash
+kubectl logs -n helvex-prod -l app.kubernetes.io/component=api-worker -f
+```
+
+When both p4 and p0 have jobs, p4 should be processed before p0 by each free worker.
+
+### B) Credit Deductions and Ledger (Phase 5)
+
+1) Check org balance before enqueue:
+
+```sql
+SELECT id, name, tier, credits_balance, monthly_rescore_used
+FROM organizations
+WHERE id = <org_id>;
+```
+
+2) Enqueue a billable job for that org (example: Claude classify).
+
+3) Verify balance decreased (or entitlement path used):
+
+```sql
+SELECT id, tier, credits_balance, monthly_rescore_used
+FROM organizations
+WHERE id = <org_id>;
+```
+
+4) Verify ledger row exists:
+
+```sql
+SELECT id, org_id, amount, type, action_type, reference_id, credits_before, credits_after, created_at
+FROM org_credit_transactions
+WHERE org_id = <org_id>
+ORDER BY created_at DESC
+LIMIT 20;
+```
+
+Expected:
+- Deductions use type='deduction' and negative amount.
+- Simple tier first flex rescore can produce amount=0 with monthly_rescore_used=true.
+- Explorer and above flex rescore should not consume credits.
+
+5) Insufficient-balance behavior:
+
+- Enqueue returns HTTP 400 with insufficient-credits error text.
+- No new job row should be created for that request.
+- No deduction row should be written.
+
+6) Superadmin bypass behavior:
+
+- Jobs enqueued by a superadmin should bypass credit checks.
+- No deduction row is required for bypassed jobs.

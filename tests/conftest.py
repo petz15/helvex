@@ -18,7 +18,7 @@ from app.models.user import User as UserModel
 
 _TEST_USER = UserModel(
     id=1,
-    username="testuser",
+    email="testuser@example.com",
     hashed_password="x",
     is_active=True,
     tier="free",

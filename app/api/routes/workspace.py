@@ -151,6 +151,10 @@ class OrgOut(BaseModel):
     name: str
     slug: str
     tier: str
+    credits_balance: int = 0
+    verified_business: bool = False
+    verified_domain: str | None = None
+    custom_features: dict | None = None
     member_count: int = 0
 
     model_config = {"from_attributes": True}
@@ -214,6 +218,10 @@ def get_org(
         name=org.name,
         slug=org.slug,
         tier=org.tier,
+        credits_balance=org.credits_balance,
+        verified_business=org.verified_business,
+        verified_domain=org.verified_domain,
+        custom_features=org.custom_features,
         member_count=member_count,
     )
 
@@ -241,6 +249,10 @@ def update_org(
         name=org.name,
         slug=org.slug,
         tier=org.tier,
+        credits_balance=org.credits_balance,
+        verified_business=org.verified_business,
+        verified_domain=org.verified_domain,
+        custom_features=org.custom_features,
         member_count=member_count,
     )
 

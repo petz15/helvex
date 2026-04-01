@@ -10,7 +10,9 @@ import {
   createOrg,
   leaveOrg,
   fetchCSVExportStatus,
+  fetchOrg,
 } from "@/lib/api";
+import { creditsToChf } from "@/lib/entitlements";
 import { OrgClient } from "@/app/app/org/org-client";
 
 const inputCls =
@@ -193,6 +195,7 @@ function CSVExportSection() {
 
 export function AccountClient() {
   const { data: me, mutate: reloadMe } = useSWR("me", fetchCurrentUser);
+  const { data: orgDetail } = useSWR(me?.org?.id ? ["org-detail", me.org.id] : null, () => fetchOrg(me!.org!.id));
 
   // Email change
   const [showEmailForm, setShowEmailForm] = useState(false);
@@ -399,7 +402,7 @@ export function AccountClient() {
         </div>
       ) : (
         <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50 p-5 space-y-3">
-          <p className="text-sm text-slate-500">You're not part of any organization.</p>
+          <p className="text-sm text-slate-500">You are not part of any organization.</p>
           <p className="text-xs text-slate-400">
             Create your own or ask a team owner to send you an invite link.
           </p>
@@ -451,6 +454,34 @@ export function AccountClient() {
       <SectionTitle title="Team" />
       <div id="team" className="rounded-xl border border-slate-200 bg-white p-4">
         <OrgClient embedded />
+      </div>
+
+      {/* Billing */}
+      <SectionTitle title="Credits & Billing" />
+      <div className="rounded-xl border border-slate-200 bg-white p-5 space-y-3">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <p className="text-sm font-semibold text-slate-800">Credit balance</p>
+            <p className="text-xs text-slate-500 mt-0.5">1 credit = CHF 0.0001</p>
+          </div>
+          <div className="text-right">
+            <p className="text-sm font-semibold text-slate-900">
+              {(orgDetail?.credits_balance ?? 0).toLocaleString()} credits
+            </p>
+            <p className="text-xs text-slate-500">
+              CHF {creditsToChf(orgDetail?.credits_balance ?? 0).toFixed(2)}
+            </p>
+          </div>
+        </div>
+        <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+          Payments are not yet implemented. Top-ups and plan checkout will be enabled in a later release.
+        </div>
+        <a
+          href="/app/pricing"
+          className="inline-flex items-center gap-1.5 text-xs bg-slate-800 hover:bg-slate-900 text-white px-3 py-1.5 rounded-lg transition-colors"
+        >
+          View pricing
+        </a>
       </div>
 
       {/* CSV Export */}

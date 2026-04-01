@@ -47,10 +47,10 @@ imagePullSecrets: []
 
 # ── RQ workers — separate Deployments running app/worker_entrypoint.py ─────────
 #
-# Three specialized workers, each listening to its own queue:
-#   zefix-worker  helvex-zefix  bulk/detail/initial/batch imports
-#   api-worker    helvex-api    scoring, geocode, NOGA, Claude classify
-#   ml-worker     helvex-ml     HDBSCAN clustering, TF-IDF (scale-to-0 via KEDA)
+# Three specialized workers:
+#   zefix-worker  helvex-zefix-p4..p0  bulk/detail/initial imports
+#   api-worker    helvex-api-p4..p0    scoring, geocode, NOGA, Claude classify
+#   ml-worker     helvex-ml            HDBSCAN clustering, TF-IDF (scale-to-0 via KEDA)
 
 zefixWorker:
   enabled: false   # set to true in prod

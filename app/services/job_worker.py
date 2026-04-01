@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import threading
 import time
 import traceback
@@ -110,6 +111,83 @@ def _preflight_job(db: Session, *, job_type: str, params: dict) -> tuple[dict, l
             )
 
     return new_params, warnings
+
+
+def _resolve_credit_action_and_count(db: Session, *, job_type: str, params: dict) -> tuple[str, int] | None:
+    """Map a queued job to (credit_action, count) for deduction.
+
+    Returns None when the job type is not credit-metered.
+    """
+    if job_type == "claude_classify":
+        action = "batch_llm" if bool(params.get("use_batch_api", False)) else "immediate_llm"
+        return action, max(1, int(params.get("limit") or 500))
+
+    if job_type in {"batch", "initial"}:
+        if not bool(params.get("run_google", True)):
+            return None
+        if job_type == "batch":
+            return "web_search", max(1, int(params.get("limit") or 100))
+        names = params.get("names") or []
+        uids = params.get("uids") or []
+        return "web_search", max(1, len(names) + len(uids))
+
+    if job_type == "recalculate_scores":
+        return "flex_rescore", max(1, int(crud.count_companies(db)))
+
+    if job_type == "hdbscan_cluster":
+        return "recluster", 1
+
+    if job_type == "csv_export":
+        filters = dict(params or {})
+        filters.pop("sort", None)
+        filters["name_filter"] = filters.pop("q", None)
+        filters["uid_filter"] = filters.pop("uid", None)
+        rows = crud.count_companies(
+            db,
+            **{k: v for k, v in filters.items() if v is not None},
+        )
+        units = max(1, math.ceil(max(1, int(rows)) / 10_000))
+        return "bulk_export_basic", units
+
+    return None
+
+
+def _apply_credit_deduction_if_needed(
+    db: Session,
+    *,
+    job_type: str,
+    params: dict,
+    org_id: int | None,
+    user_id: int | None,
+) -> None:
+    """Deduct enqueue-time credits for credit-metered actions.
+
+    Superadmins and org-less jobs bypass checks.
+    """
+    if org_id is None:
+        return
+
+    if user_id is not None:
+        user = crud.get_user(db, user_id)
+        if user is not None and bool(user.is_superadmin):
+            return
+
+    action_count = _resolve_credit_action_and_count(db, job_type=job_type, params=params)
+    if action_count is None:
+        return
+
+    from app.services.credits import check_and_deduct
+
+    action, count = action_count
+    ok = check_and_deduct(
+        db,
+        org_id=org_id,
+        action=action,
+        count=count,
+        reference_id=f"enqueue:{job_type}",
+    )
+    if not ok:
+        raise ValueError(f"Insufficient credits for {action} (required units: {count})")
 
 
 # ── Internal state helpers ─────────────────────────────────────────────────────
@@ -721,6 +799,13 @@ def _enqueue_job_in_session(
     user_id: int | None = None,
 ) -> object:
     preflight_params, warnings = _preflight_job(db, job_type=job_type, params=params)
+    _apply_credit_deduction_if_needed(
+        db,
+        job_type=job_type,
+        params=preflight_params,
+        org_id=org_id,
+        user_id=user_id,
+    )
     job = crud.create_job(db, job_type=job_type, label=label, params=preflight_params, org_id=org_id, user_id=user_id)
     crud.create_event(db, job_id=job.id, level="info", message="Job queued")
     if warnings:
@@ -777,8 +862,24 @@ def _enqueue_rq(job_id: int, *, job_type: str = "") -> None:
     from redis import Redis
     from rq import Queue as RQueue
     from app.config import settings as _settings
+    from app.models.organization import Organization
+    from app.services.tiers import get_queue_priority
 
-    queue_name = _QUEUE_FOR_JOB_TYPE.get(job_type, "helvex-api")
+    queue_name_base = _QUEUE_FOR_JOB_TYPE.get(job_type, "helvex-api")
+    queue_name = queue_name_base
+
+    # ML jobs keep a dedicated non-tiered queue. API/Zefix queues are suffixed
+    # with p0..p4 based on org tier priority.
+    if queue_name_base != "helvex-ml":
+        priority = 0
+        with SessionLocal() as db:
+            job = crud.get_job(db, job_id)
+            if job and job.org_id is not None:
+                org = db.query(Organization).filter(Organization.id == job.org_id).first()
+                if org is not None:
+                    priority = get_queue_priority(org)
+        queue_name = f"{queue_name_base}-p{priority}"
+
     conn = Redis.from_url(_settings.redis_url)
     q = RQueue(queue_name, connection=conn)
     q.enqueue(run_job_task, job_id, job_timeout=-1, on_failure=_rq_job_failed)

@@ -833,6 +833,15 @@ def compute_flex_score(
     )["final_score"])
 
 
+# Backward-compat API kept for tests and older call sites.
+def compute_zefix_score_breakdown(**kwargs) -> dict:
+    return compute_flex_score_breakdown(**kwargs)
+
+
+def compute_zefix_score(**kwargs) -> int:
+    return compute_flex_score(**kwargs)
+
+
 def normalize_raw_scores(
     raw_scores: dict[int, int | None],
     cancelled_score: int = 5,

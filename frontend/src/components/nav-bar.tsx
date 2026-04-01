@@ -1,10 +1,10 @@
 "use client";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
-import useSWR from "swr";
+import { usePathname, useRouter } from "next/navigation";
+import useSWR, { useSWRConfig } from "swr";
 import { cn } from "@/lib/utils";
 import { Search, Compass, KanbanSquare, Map, Cog, Database, Activity, UserCircle, Shield, LayoutGrid } from "lucide-react";
-import { fetchCurrentUser } from "@/lib/api";
+import { fetchCurrentUser, fetchMyOrgs, switchOrg } from "@/lib/api";
 import { HelvexMark } from "@/components/helvex-logo";
 
 const NAV_MAIN = [
@@ -33,9 +33,15 @@ const AUTH_PATHS = ["/login", "/register", "/verify-email", "/forgot-password", 
 
 export function NavBar() {
   const pathname = usePathname();
+  const router = useRouter();
+  const { mutate } = useSWRConfig();
   const { data: me, isLoading } = useSWR("me", fetchCurrentUser, {
     shouldRetryOnError: false,
     revalidateOnMount: true,
+    revalidateOnFocus: false,
+  });
+  const { data: orgs = [] } = useSWR(me ? "my-orgs" : null, fetchMyOrgs, {
+    shouldRetryOnError: false,
     revalidateOnFocus: false,
   });
 
@@ -43,6 +49,14 @@ export function NavBar() {
 
   const loggedIn = !isLoading && !!me;
   const loggedOut = !isLoading && !me;
+
+  async function handleOrgSwitch(nextOrgId: number) {
+    if (!me || !nextOrgId || nextOrgId === me.org_id) return;
+    await switchOrg(nextOrgId);
+    await mutate("me");
+    await mutate("my-orgs");
+    router.refresh();
+  }
 
   return (
     <header className="h-12 bg-white border-b border-slate-200 flex items-center px-4 shrink-0 z-40 shadow-sm">
@@ -96,6 +110,17 @@ export function NavBar() {
               </Link>
             );
           })}
+          <Link
+            href="/app/pricing"
+            className={cn(
+              "flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm transition-colors",
+              pathname === "/app/pricing"
+                ? "bg-blue-600 text-white font-medium"
+                : "text-slate-600 hover:bg-slate-100 hover:text-slate-900"
+            )}
+          >
+            Pricing
+          </Link>
           {me?.is_superadmin && (
             <>
               <div className="w-px h-4 bg-slate-200 mx-1" />
@@ -159,6 +184,20 @@ export function NavBar() {
               <span className="text-xs text-slate-400 px-2 hidden sm:block truncate max-w-[180px]" title={me.email}>
                 {me.email}
               </span>
+            )}
+            {orgs.length > 1 && me?.org_id && (
+              <select
+                className="text-xs border border-slate-200 rounded-md px-2 py-1 bg-white text-slate-600 max-w-[170px]"
+                value={String(me.org_id)}
+                onChange={(e) => handleOrgSwitch(Number(e.target.value))}
+                title="Switch organization"
+              >
+                {orgs.map((org) => (
+                  <option key={org.id} value={org.id}>
+                    {org.name}
+                  </option>
+                ))}
+              </select>
             )}
             <Link
               href="/app/account"

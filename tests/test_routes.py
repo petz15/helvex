@@ -180,7 +180,7 @@ def test_zefix_search_propagates_error(client):
 def test_google_search_route(client):
     company_id = _create_company(client)
     mock_results = [GoogleSearchResult(title="Test AG", link="https://test-ag.ch")]
-    with patch("app.api.routes.companies.google_search_client.search_website", return_value=mock_results):
+    with patch("app.services.collection.search_website", return_value=mock_results):
         resp = client.get(f"/api/v1/companies/{company_id}/google-search")
     assert resp.status_code == 200
     data = resp.json()
@@ -194,7 +194,7 @@ def test_google_search_route(client):
 def test_google_search_not_configured(client):
     company_id = _create_company(client)
     with patch(
-        "app.api.routes.companies.google_search_client.search_website",
+        "app.services.collection.search_website",
         side_effect=ValueError("GOOGLE_API_KEY and GOOGLE_CSE_ID must be set"),
     ):
         resp = client.get(f"/api/v1/companies/{company_id}/google-search")
