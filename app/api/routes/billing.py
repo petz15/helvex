@@ -61,21 +61,25 @@ def create_subscription_checkout(
     user_org: tuple[User, object] = Depends(get_current_org),
 ) -> CheckoutResponse:
     _user, org = user_org
-
-    amount_chf = payments.compute_subscription_price_chf(
-        tier=body.tier,
-        billing_cycle=body.billing_cycle,
-        custom_features=(getattr(org, "custom_features", None) if body.tier == "custom" else None),
-        verified_business=bool(getattr(org, "verified_business", False)),
-    )
-    session = payments.create_subscription_checkout(
-        org_id=org.id,
-        tier=body.tier,
-        billing_cycle=body.billing_cycle,
-        success_url=body.success_url,
-        cancel_url=body.cancel_url,
-        preferred_provider=body.provider,
-    )
+    try:
+        amount_chf = payments.compute_subscription_price_chf(
+            tier=body.tier,
+            billing_cycle=body.billing_cycle,
+            custom_features=(getattr(org, "custom_features", None) if body.tier == "custom" else None),
+            verified_business=bool(getattr(org, "verified_business", False)),
+        )
+        session = payments.create_subscription_checkout(
+            org_id=org.id,
+            tier=body.tier,
+            billing_cycle=body.billing_cycle,
+            success_url=body.success_url,
+            cancel_url=body.cancel_url,
+            preferred_provider=body.provider,
+        )
+    except payments.PaymentConfigurationError as exc:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
     return CheckoutResponse(
         provider=session.provider,
         checkout_url=session.checkout_url,
@@ -90,13 +94,18 @@ def create_topup_checkout(
     user_org: tuple[User, object] = Depends(get_current_org),
 ) -> CheckoutResponse:
     _user, org = user_org
-    session = payments.create_topup_checkout(
-        org_id=org.id,
-        credits=body.credits,
-        success_url=body.success_url,
-        cancel_url=body.cancel_url,
-        preferred_provider=body.provider,
-    )
+    try:
+        session = payments.create_topup_checkout(
+            org_id=org.id,
+            credits=body.credits,
+            success_url=body.success_url,
+            cancel_url=body.cancel_url,
+            preferred_provider=body.provider,
+        )
+    except payments.PaymentConfigurationError as exc:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
     return CheckoutResponse(
         provider=session.provider,
         checkout_url=session.checkout_url,

@@ -64,6 +64,24 @@ def test_subscription_checkout_returns_provider_and_amount(client, db, monkeypat
     assert data["checkout_url"]
 
 
+def test_subscription_checkout_returns_service_unavailable_when_worldline_missing_config(client, db):
+    org = _seed_org(db, org_id=111)
+    _override_user(org.id)
+
+    resp = client.post(
+        "/api/v1/billing/checkout/subscription",
+        json={
+            "tier": "simple",
+            "billing_cycle": "monthly",
+            "success_url": "https://example.com/success",
+            "cancel_url": "https://example.com/cancel",
+        },
+    )
+
+    assert resp.status_code == 503
+    assert "WORLDLINE_CUSTOMER_ID" in resp.json()["detail"]
+
+
 def test_stripe_webhook_updates_org_subscription(client, db, monkeypatch):
     org = _seed_org(db, org_id=12)
     secret = "whsec_test"
