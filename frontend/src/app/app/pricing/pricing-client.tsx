@@ -1,7 +1,12 @@
 "use client";
 
-import { useMemo, useState } from "react";
-import { createSubscriptionCheckout } from "@/lib/api";
+import { useEffect, useMemo, useState } from "react";
+import useSWR from "swr";
+import {
+  createSubscriptionCheckout,
+  fetchCurrentUser,
+  parseBillingAddressJson,
+} from "@/lib/api";
 
 // ── Data ──────────────────────────────────────────────────────────────────────
 
@@ -254,7 +259,30 @@ export function PricingClient() {
   const [yearly, setYearly] = useState(false);
   const [creditTier, setCreditTier] = useState<TierId>("explorer");
   const [checkoutLoading, setCheckoutLoading] = useState<string | null>(null);
+  const [pendingTier, setPendingTier] = useState<TierId | null>(null);
   const [checkoutMessage, setCheckoutMessage] = useState<{ kind: "success" | "error"; message: string } | null>(null);
+  const { data: me } = useSWR("me", fetchCurrentUser);
+  const billingAddress = parseBillingAddressJson(me?.billing_address_json);
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const checkout = params.get("checkout");
+    const tier = params.get("tier");
+    const reason = params.get("reason");
+    const alreadyProcessed = params.get("already_processed") === "true";
+    if (!checkout && !alreadyProcessed && !reason) return;
+    if (alreadyProcessed) {
+      setCheckoutMessage({ kind: "success", message: "This checkout was already processed." });
+    } else if (checkout === "cancel") {
+      setCheckoutMessage({
+        kind: "error",
+        message: tier ? `${tier} checkout was cancelled.` : reason === "payment_declined" ? "Payment was declined or cancelled." : "Checkout cancelled.",
+      });
+    } else if (checkout === "success") {
+      setCheckoutMessage({ kind: "success", message: tier ? `${tier} checkout completed.` : "Checkout completed." });
+    }
+    window.history.replaceState({}, "", window.location.pathname);
+  }, []);
 
   // Custom configurator state
   const [webMonths, setWebMonths] = useState(0);
@@ -267,6 +295,19 @@ export function PricingClient() {
   const [llmAuto, setLlmAuto] = useState(false);
 
   async function handlePlanCheckout(tier: TierId) {
+    if (!billingAddress) {
+      setCheckoutMessage({ kind: "error", message: "Add a billing address in Account before starting checkout." });
+      return;
+    }
+    setPendingTier(tier);
+    setCheckoutMessage(null);
+  }
+
+  async function confirmPlanCheckout(tier: TierId) {
+    if (!billingAddress) {
+      setCheckoutMessage({ kind: "error", message: "Add a billing address in Account before starting checkout." });
+      return;
+    }
     setCheckoutLoading(tier);
     setCheckoutMessage(null);
     try {
@@ -282,6 +323,7 @@ export function PricingClient() {
         billing_cycle: yearly ? "yearly" : "monthly",
         success_url: successUrl.toString(),
         cancel_url: cancelUrl.toString(),
+        billing_address: billingAddress,
       });
       window.location.assign(session.checkout_url);
     } catch (err) {
@@ -291,6 +333,7 @@ export function PricingClient() {
       });
     } finally {
       setCheckoutLoading(null);
+      setPendingTier(null);
     }
   }
 
@@ -407,6 +450,25 @@ export function PricingClient() {
             {checkoutMessage.message}
           </div>
         )}
+
+          {pendingTier && billingAddress && (
+            <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm space-y-3">
+              <div className="text-xs font-semibold uppercase tracking-wider text-slate-400">Confirm billing address</div>
+              <div className="text-sm text-slate-700">
+                {billingAddress.first_name} {billingAddress.last_name}, {billingAddress.street} {billingAddress.number}, {billingAddress.postal_code} {billingAddress.city}, {billingAddress.country}
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => confirmPlanCheckout(pendingTier)}
+                  disabled={checkoutLoading !== null}
+                  className="rounded-lg bg-blue-600 px-3 py-2 text-xs font-semibold text-white transition-colors hover:bg-blue-700 disabled:opacity-60"
+                >
+                  {checkoutLoading === pendingTier ? "Starting…" : `Continue with ${pendingTier}`}
+                </button>
+                <a href="/app/account" className="text-xs text-blue-600 hover:underline">Edit address</a>
+              </div>
+            </div>
+          )}
 
         {/* ── Feature comparison table ── */}
         <div className="space-y-3">

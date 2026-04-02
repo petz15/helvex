@@ -1,5 +1,6 @@
 from app.models.app_setting import AppSetting
 from app.models.audit_log import AuditLog
+from app.models.billing_tier import BillingTier
 from app.models.boilerplate import BoilerplatePattern
 from app.models.collection_run import CollectionRun
 from app.models.company import Company
@@ -20,7 +21,7 @@ from app.models.user import User
 from app.models.user_company_state import UserCompanyState
 
 __all__ = [
-    "AppSetting", "AuditLog", "BoilerplatePattern", "Company", "CollectionRun",
+    "AppSetting", "AuditLog", "BillingTier", "BoilerplatePattern", "Company", "CollectionRun",
     "GoogleDirectoryDomain", "GoogleStopword",
     "JobRun", "JobRunEvent", "Note", "OAuthAccount", "OrgCompanyState",
     "OrgCreditTransaction", "OrgMember", "OrgSetting",

@@ -30,3 +30,6 @@ def get_db():
         yield db
     finally:
         db.close()
+
+
+import app.models  # noqa: E402,F401  # Register SQLAlchemy models with Base metadata.

@@ -154,6 +154,7 @@ class OrgOut(BaseModel):
     credits_balance: int = 0
     verified_business: bool = False
     verified_domain: str | None = None
+    billing_address_json: str | None = None
     custom_features: dict | None = None
     member_count: int = 0
 
@@ -162,6 +163,17 @@ class OrgOut(BaseModel):
 
 class OrgUpdate(BaseModel):
     name: str | None = None
+
+
+class BillingAddress(BaseModel):
+    first_name: str
+    last_name: str
+    street: str
+    number: str
+    postal_code: str
+    city: str
+    country: str
+    company_name: str | None = None
 
 
 class MemberOut(BaseModel):
@@ -222,6 +234,7 @@ def get_org(
         credits_balance=org.credits_balance,
         verified_business=org.verified_business,
         verified_domain=org.verified_domain,
+        billing_address_json=org.billing_address_json,
         custom_features=org.custom_features,
         member_count=member_count,
     )
@@ -242,6 +255,8 @@ def update_org(
     _, org = user_org
     if body.name is not None:
         org.name = body.name.strip()
+    if body.billing_address is not None:
+        org.billing_address_json = json.dumps(body.billing_address.model_dump())
     db.commit()
     db.refresh(org)
     member_count = db.query(OrgMember).filter(OrgMember.org_id == org.id).count()
@@ -253,6 +268,38 @@ def update_org(
         credits_balance=org.credits_balance,
         verified_business=org.verified_business,
         verified_domain=org.verified_domain,
+        billing_address_json=org.billing_address_json,
+        custom_features=org.custom_features,
+        member_count=member_count,
+    )
+
+
+@router.put(
+    "/billing-address",
+    response_model=OrgOut,
+    summary="Update org billing address",
+)
+def update_billing_address(
+    org_id: int,
+    body: BillingAddress,
+    db: Session = Depends(get_db),
+    user_org: tuple[User, Organization] = Depends(get_current_org),
+):
+    _validate_org_access(org_id, user_org)
+    _, org = user_org
+    org.billing_address_json = json.dumps(body.model_dump())
+    db.commit()
+    db.refresh(org)
+    member_count = db.query(OrgMember).filter(OrgMember.org_id == org.id).count()
+    return OrgOut(
+        id=org.id,
+        name=org.name,
+        slug=org.slug,
+        tier=org.tier,
+        credits_balance=org.credits_balance,
+        verified_business=org.verified_business,
+        verified_domain=org.verified_domain,
+        billing_address_json=org.billing_address_json,
         custom_features=org.custom_features,
         member_count=member_count,
     )

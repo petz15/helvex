@@ -22,6 +22,7 @@ _TEST_USER = UserModel(
     hashed_password="x",
     is_active=True,
     tier="free",
+    billing_address_json='{"first_name":"Test","last_name":"User","street":"Main Street","number":"1","postal_code":"8000","city":"Zurich","country":"CH","company_name":""}',
     email_verified=False,
     is_superadmin=True,
     created_at=datetime.now(timezone.utc),

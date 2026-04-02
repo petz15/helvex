@@ -162,8 +162,8 @@ def parse_worldline_merchant_reference(reference: str | None) -> dict[str, Any]:
     """Parse order reference token created for Worldline transactions.
 
     Supported formats:
-    - wl_sub_<org_id>_<tier>_<billing_cycle>_<nonce>
-    - wl_topup_<org_id>_<credits>_<nonce>
+    - wl_sub_<org_id>_<user_id>_<tier>_<billing_cycle>_<nonce>
+    - wl_topup_<org_id>_<user_id>_<credits>_<nonce>
 
     Backward-compatible legacy formats are also accepted:
     - wl_sub_<org_id>_<nonce>
@@ -186,14 +186,24 @@ def parse_worldline_merchant_reference(reference: str | None) -> dict[str, Any]:
     out: dict[str, Any] = {"kind": kind, "org_id": org_id}
 
     if kind == "sub":
-        if len(parts) >= 6:
+        if len(parts) >= 7 and parts[3].isdigit():
+            out["user_id"] = int(parts[3])
+            out["tier"] = parts[4]
+            out["billing_cycle"] = parts[5]
+        elif len(parts) >= 6:
             # wl_sub_<org_id>_<tier>_<billing_cycle>_<nonce>
             out["tier"] = parts[3]
             out["billing_cycle"] = parts[4]
         return out
 
     if kind == "topup":
-        if len(parts) >= 5:
+        if len(parts) >= 6 and parts[3].isdigit():
+            out["user_id"] = int(parts[3])
+            try:
+                out["topup_credits"] = int(parts[4])
+            except ValueError:
+                pass
+        elif len(parts) >= 5:
             # wl_topup_<org_id>_<credits>_<nonce>
             try:
                 out["topup_credits"] = int(parts[3])
@@ -352,15 +362,20 @@ class WorldlineProvider:
         self,
         *,
         org_id: int,
+        user_id: int | None = None,
         tier: str,
         billing_cycle: Literal["monthly", "yearly"],
         success_url: str,
         cancel_url: str,
         billing_address: dict[str, str] | None = None,
+        amount_chf: float | None = None,
     ) -> CheckoutSession:
         self._assert_configured()
-        price = compute_subscription_price_chf(tier=tier, billing_cycle=billing_cycle)
-        order_reference = f"wl_sub_{org_id}_{tier}_{billing_cycle}_{secrets.token_hex(6)}"
+        price = amount_chf if amount_chf is not None else compute_subscription_price_chf(tier=tier, billing_cycle=billing_cycle)
+        if user_id is not None:
+            order_reference = f"wl_sub_{org_id}_{user_id}_{tier}_{billing_cycle}_{secrets.token_hex(6)}"
+        else:
+            order_reference = f"wl_sub_{org_id}_{tier}_{billing_cycle}_{secrets.token_hex(6)}"
         return_url = _worldline_callback_url(
             kind="subscription",
             order_reference=order_reference,
@@ -391,14 +406,19 @@ class WorldlineProvider:
         self,
         *,
         org_id: int,
+        user_id: int | None = None,
         credits: int,
         success_url: str,
         cancel_url: str,
         billing_address: dict[str, str] | None = None,
+        amount_chf: float | None = None,
     ) -> CheckoutSession:
         self._assert_configured()
-        amount_chf = credits_to_chf(credits)
-        order_reference = f"wl_topup_{org_id}_{credits}_{secrets.token_hex(6)}"
+        amount_chf = amount_chf if amount_chf is not None else credits_to_chf(credits)
+        if user_id is not None:
+            order_reference = f"wl_topup_{org_id}_{user_id}_{credits}_{secrets.token_hex(6)}"
+        else:
+            order_reference = f"wl_topup_{org_id}_{credits}_{secrets.token_hex(6)}"
         return_url = _worldline_callback_url(
             kind="topup",
             order_reference=order_reference,
@@ -455,14 +475,16 @@ class StripeProvider:
         self,
         *,
         org_id: int,
+        user_id: int | None = None,
         tier: str,
         billing_cycle: Literal["monthly", "yearly"],
         success_url: str,
         cancel_url: str,
         billing_address: dict[str, str] | None = None,
+        amount_chf: float | None = None,
     ) -> CheckoutSession:
         self._assert_configured()
-        price = compute_subscription_price_chf(tier=tier, billing_cycle=billing_cycle)
+        price = amount_chf if amount_chf is not None else compute_subscription_price_chf(tier=tier, billing_cycle=billing_cycle)
         amount_cents = int(round(price * 100))
         interval = "year" if billing_cycle == "yearly" else "month"
         ext_id = f"st_sub_{org_id}_{secrets.token_hex(6)}"
@@ -476,6 +498,7 @@ class StripeProvider:
             "line_items[0][price_data][recurring][interval]": interval,
             "line_items[0][price_data][product_data][name]": f"Helvex {tier.title()} ({billing_cycle})",
             "metadata[org_id]": str(org_id),
+            "metadata[user_id]": str(user_id) if user_id is not None else "",
             "metadata[tier]": tier,
             "metadata[billing_cycle]": billing_cycle,
             "metadata[kind]": "subscription",
@@ -487,13 +510,16 @@ class StripeProvider:
         self,
         *,
         org_id: int,
+        user_id: int | None = None,
         credits: int,
         success_url: str,
         cancel_url: str,
         billing_address: dict[str, str] | None = None,
+        amount_chf: float | None = None,
     ) -> CheckoutSession:
         self._assert_configured()
-        amount_cents = int(round(credits_to_chf(credits) * 100))
+        topup_amount = amount_chf if amount_chf is not None else credits_to_chf(credits)
+        amount_cents = int(round(topup_amount * 100))
         ext_id = f"st_topup_{org_id}_{secrets.token_hex(6)}"
         data = {
             "mode": "payment",
@@ -504,6 +530,7 @@ class StripeProvider:
             "line_items[0][price_data][unit_amount]": str(amount_cents),
             "line_items[0][price_data][product_data][name]": f"Helvex top-up {credits} credits",
             "metadata[org_id]": str(org_id),
+            "metadata[user_id]": str(user_id) if user_id is not None else "",
             "metadata[topup_credits]": str(credits),
             "metadata[kind]": "topup",
             "client_reference_id": ext_id,
@@ -531,40 +558,48 @@ def _pick_provider(preferred: ProviderName | None = None) -> PaymentProvider:
 def create_subscription_checkout(
     *,
     org_id: int,
+    user_id: int | None = None,
     tier: str,
     billing_cycle: Literal["monthly", "yearly"],
     success_url: str,
     cancel_url: str,
     billing_address: dict[str, str] | None = None,
+    amount_chf: float | None = None,
     preferred_provider: ProviderName | None = None,
 ) -> CheckoutSession:
     provider = _pick_provider(preferred_provider)
     return provider.create_subscription_checkout(
         org_id=org_id,
+        user_id=user_id,
         tier=tier,
         billing_cycle=billing_cycle,
         success_url=success_url,
         cancel_url=cancel_url,
         billing_address=billing_address,
+        amount_chf=amount_chf,
     )
 
 
 def create_topup_checkout(
     *,
     org_id: int,
+    user_id: int | None = None,
     credits: int,
     success_url: str,
     cancel_url: str,
     billing_address: dict[str, str] | None = None,
+    amount_chf: float | None = None,
     preferred_provider: ProviderName | None = None,
 ) -> CheckoutSession:
     provider = _pick_provider(preferred_provider)
     return provider.create_topup_checkout(
         org_id=org_id,
+        user_id=user_id,
         credits=credits,
         success_url=success_url,
         cancel_url=cancel_url,
         billing_address=billing_address,
+        amount_chf=amount_chf,
     )
 
 

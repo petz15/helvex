@@ -30,6 +30,7 @@ export interface CurrentUser {
   id: number;
   email: string;
   tier: string;
+  billing_address_json: string | null;
   org_role: string;
   is_active: boolean;
   email_verified: boolean;
@@ -49,6 +50,20 @@ export interface BillingCheckoutResponse {
   checkout_url: string;
   external_id: string | null;
   amount_chf: number;
+}
+
+export interface BillingTier {
+  id: number;
+  slug: string;
+  display_name: string;
+  description: string;
+  monthly_price_chf: number;
+  yearly_multiplier: number;
+  yearly_price_chf: number;
+  topup_bonus_rate: number;
+  sort_order: number;
+  is_active: boolean;
+  is_public: boolean;
 }
 
 // ── Billing history (user-facing) ─────────────────────────────────────────────
@@ -101,6 +116,12 @@ export interface PaginatedResult<T> {
 export async function fetchBillingSummary(): Promise<BillingSummary> {
   const res = await fetch("/api/v1/billing/summary", { credentials: "include" });
   if (!res.ok) throw new Error("Failed to fetch billing summary");
+  return res.json();
+}
+
+export async function fetchBillingTiers(): Promise<BillingTier[]> {
+  const res = await fetch("/api/v1/billing/tiers", { credentials: "include" });
+  if (!res.ok) throw new Error("Failed to fetch billing tiers");
   return res.json();
 }
 
@@ -670,6 +691,7 @@ export interface OrgDetail {
   credits_balance: number;
   verified_business: boolean;
   verified_domain: string | null;
+  billing_address_json: string | null;
   custom_features: Record<string, unknown> | null;
   member_count: number;
 }
@@ -688,7 +710,18 @@ export async function fetchOrg(orgId: number): Promise<OrgDetail> {
   return res.json();
 }
 
-export async function updateOrg(orgId: number, data: { name?: string }): Promise<OrgDetail> {
+export function parseBillingAddressJson(value: string | null | undefined): BillingAddressPayload | null {
+  if (!value) return null;
+  try {
+    const parsed = JSON.parse(value) as BillingAddressPayload;
+    if (!parsed || typeof parsed !== "object") return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+export async function updateOrg(orgId: number, data: { name?: string; billing_address?: BillingAddressPayload | null }): Promise<OrgDetail> {
   const res = await fetch(orgPath(orgId, ""), {
     method: "PATCH",
     credentials: "include",
@@ -696,6 +729,17 @@ export async function updateOrg(orgId: number, data: { name?: string }): Promise
     body: JSON.stringify(data),
   });
   if (!res.ok) throw new Error("Failed to update org");
+  return res.json();
+}
+
+export async function updateCurrentUserBillingAddress(billingAddress: BillingAddressPayload): Promise<CurrentUser> {
+  const res = await fetch("/api/v1/auth/me/billing-address", {
+    method: "PUT",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ ...billingAddress }),
+  });
+  if (!res.ok) throw new Error("Failed to save billing address");
   return res.json();
 }
 
@@ -719,6 +763,17 @@ export async function addOrgMember(
     const body = await res.json().catch(() => ({}));
     throw new Error(body.detail ?? "Failed to add member");
   }
+  return res.json();
+}
+
+export async function updateOrgBillingAddress(orgId: number, billingAddress: BillingAddressPayload): Promise<OrgDetail> {
+  const res = await fetch(orgPath(orgId, "/billing-address"), {
+    method: "PUT",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ ...billingAddress }),
+  });
+  if (!res.ok) throw new Error("Failed to save billing address");
   return res.json();
 }
 
@@ -919,6 +974,12 @@ export interface AdminPage<T> {
   total: number;
   page: number;
   page_size: number;
+}
+
+export async function fetchAdminTiers(): Promise<BillingTier[]> {
+  const res = await fetch("/api/v1/admin/tiers", { credentials: "include" });
+  if (!res.ok) throw new Error("Failed to fetch billing tiers");
+  return res.json();
 }
 
 export async function fetchAdminStats(): Promise<AdminStats> {

@@ -13,6 +13,18 @@ from app.services.payments import CheckoutSession
 
 def _seed_org(db, *, org_id: int = 1) -> Organization:
     org = Organization(id=org_id, name=f"Org {org_id}", slug=f"org-{org_id}", tier="free")
+    org.billing_address_json = json.dumps(
+        {
+            "first_name": "Billing",
+            "last_name": "User",
+            "street": "Main Street",
+            "number": "1",
+            "postal_code": "8000",
+            "city": "Zurich",
+            "country": "CH",
+            "company_name": "",
+        }
+    )
     db.add(org)
     db.flush()
     db.add(OrgMember(org_id=org_id, user_id=1, role="owner"))
@@ -27,6 +39,18 @@ def _override_user(org_id: int):
         hashed_password="x",
         is_active=True,
         tier="free",
+        billing_address_json=json.dumps(
+            {
+                "first_name": "Billing",
+                "last_name": "User",
+                "street": "Main Street",
+                "number": "1",
+                "postal_code": "8000",
+                "city": "Zurich",
+                "country": "CH",
+                "company_name": "",
+            }
+        ),
         email_verified=True,
         is_superadmin=False,
         org_id=org_id,
@@ -104,6 +128,34 @@ def test_subscription_checkout_returns_service_unavailable_when_worldline_base_u
 
     assert resp.status_code == 503
     assert "WORLDLINE_API_BASE_URL" in resp.json()["detail"]
+
+
+def test_subscription_checkout_requires_org_admin_role(client, db):
+    org = _seed_org(db, org_id=113)
+    app.dependency_overrides[get_current_user] = lambda: User(
+        id=2,
+        email="member@example.com",
+        hashed_password="x",
+        is_active=True,
+        tier="free",
+        billing_address_json=None,
+        email_verified=True,
+        is_superadmin=False,
+        org_id=org.id,
+        org_role="member",
+    )
+
+    resp = client.post(
+        "/api/v1/billing/checkout/subscription",
+        json={
+            "tier": "simple",
+            "billing_cycle": "monthly",
+            "success_url": "https://example.com/success",
+            "cancel_url": "https://example.com/cancel",
+        },
+    )
+
+    assert resp.status_code == 403
 
 
 def test_stripe_webhook_updates_org_subscription(client, db, monkeypatch):

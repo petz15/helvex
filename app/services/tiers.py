@@ -11,8 +11,10 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from fastapi import Depends, HTTPException, status
+from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_org
+from app.models.billing_tier import BillingTier
 from app.models.organization import Organization
 from app.models.user import User
 
@@ -42,6 +44,153 @@ TIER_NAME_BY_ID: dict[int, str] = {
 
 #: Canonical tier name → DB integer (reverse of TIER_NAME_BY_ID).
 TIER_ID_BY_NAME: dict[str, int] = {v: k for k, v in TIER_NAME_BY_ID.items()}
+
+DEFAULT_BILLING_TIERS: list[dict[str, object]] = [
+    {
+        "id": 0,
+        "slug": "free",
+        "display_name": "Free",
+        "description": "Try the core search and export features at no cost.",
+        "monthly_price_chf": 0.0,
+        "yearly_multiplier": 10.0,
+        "topup_bonus_rate": 0.0,
+        "sort_order": 0,
+        "is_active": True,
+        "is_public": True,
+    },
+    {
+        "id": 1,
+        "slug": "simple",
+        "display_name": "Simple",
+        "description": "For individuals who need a clean workspace without ads.",
+        "monthly_price_chf": 6.0,
+        "yearly_multiplier": 10.0,
+        "topup_bonus_rate": 0.10,
+        "sort_order": 1,
+        "is_active": True,
+        "is_public": True,
+    },
+    {
+        "id": 2,
+        "slug": "explorer",
+        "display_name": "Explorer",
+        "description": "Immediate LLM scoring and automated flex rescoring.",
+        "monthly_price_chf": 12.0,
+        "yearly_multiplier": 10.0,
+        "topup_bonus_rate": 0.15,
+        "sort_order": 2,
+        "is_active": True,
+        "is_public": True,
+    },
+    {
+        "id": 3,
+        "slug": "researcher",
+        "display_name": "Researcher",
+        "description": "Full LLM auto-scoring and custom ML stopwords.",
+        "monthly_price_chf": 17.0,
+        "yearly_multiplier": 10.0,
+        "topup_bonus_rate": 0.20,
+        "sort_order": 3,
+        "is_active": True,
+        "is_public": True,
+    },
+    {
+        "id": 4,
+        "slug": "strategist",
+        "display_name": "Strategist",
+        "description": "Highest priority, BYO keys, and future API access.",
+        "monthly_price_chf": 37.0,
+        "yearly_multiplier": 10.0,
+        "topup_bonus_rate": 0.30,
+        "sort_order": 4,
+        "is_active": True,
+        "is_public": True,
+    },
+    {
+        "id": 5,
+        "slug": "custom",
+        "display_name": "Custom",
+        "description": "Build a modular plan with exactly the features you need.",
+        "monthly_price_chf": 1.0,
+        "yearly_multiplier": 10.0,
+        "topup_bonus_rate": 0.0,
+        "sort_order": 5,
+        "is_active": True,
+        "is_public": False,
+    },
+]
+
+
+def _default_billing_tier_map() -> dict[str, dict[str, object]]:
+    return {str(row["slug"]): row for row in DEFAULT_BILLING_TIERS}
+
+
+def ensure_default_billing_tiers(db: Session) -> None:
+    if db.query(BillingTier).count() > 0:
+        return
+    for row in DEFAULT_BILLING_TIERS:
+        db.add(BillingTier(**row))
+    db.commit()
+
+
+def get_billing_tiers(db: Session, *, include_inactive: bool = False) -> list[BillingTier]:
+    ensure_default_billing_tiers(db)
+    query = db.query(BillingTier)
+    if not include_inactive:
+        query = query.filter(BillingTier.is_active.is_(True))
+    return query.order_by(BillingTier.sort_order.asc(), BillingTier.id.asc()).all()
+
+
+def get_billing_tier_by_slug(db: Session, slug: str) -> BillingTier | None:
+    ensure_default_billing_tiers(db)
+    return db.query(BillingTier).filter(BillingTier.slug == slug).first()
+
+
+def get_billing_tier_names(db: Session, *, include_custom: bool = True) -> list[str]:
+    tiers = get_billing_tiers(db)
+    names = [tier.slug for tier in tiers if include_custom or tier.slug != "custom"]
+    return names
+
+
+def get_user_tier_names(db: Session) -> list[str]:
+    return get_billing_tier_names(db) + ["superadmin"]
+
+
+def get_tier_display_name(db: Session, slug: str) -> str:
+    tier = get_billing_tier_by_slug(db, slug)
+    if tier:
+        return tier.display_name
+    return _default_billing_tier_map().get(slug, {}).get("display_name", slug.title())  # type: ignore[return-value]
+
+
+def get_tier_price_chf(db: Session, slug: str) -> float:
+    tier = get_billing_tier_by_slug(db, slug)
+    if tier:
+        return float(tier.monthly_price_chf)
+    default = _default_billing_tier_map().get(slug)
+    if default:
+        return float(default.get("monthly_price_chf", 0.0))
+    return 0.0
+
+
+def get_tier_bonus_rate(db: Session, slug: str) -> float:
+    tier = get_billing_tier_by_slug(db, slug)
+    if tier:
+        return float(tier.topup_bonus_rate)
+    default = _default_billing_tier_map().get(slug)
+    if default:
+        return float(default.get("topup_bonus_rate", 0.0))
+    return 0.0
+
+
+def get_tier_yearly_price_chf(db: Session, slug: str) -> float:
+    tier = get_billing_tier_by_slug(db, slug)
+    if tier:
+        return round(float(tier.monthly_price_chf) * float(tier.yearly_multiplier), 2)
+    default = _default_billing_tier_map().get(slug)
+    if default:
+        return round(float(default.get("monthly_price_chf", 0.0)) * float(default.get("yearly_multiplier", 10.0)), 2)
+    return 0.0
 
 #: Legacy DB values → new names (for rows not yet data-migrated).
 _LEGACY_TIER_MAP: dict[str, str] = {

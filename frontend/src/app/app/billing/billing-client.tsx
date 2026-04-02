@@ -4,10 +4,13 @@ import useSWR from "swr";
 import { ChevronLeft, ChevronRight, CreditCard, Zap, TrendingUp, ArrowUpRight, Loader2 } from "lucide-react";
 import Link from "next/link";
 import {
+  fetchCurrentUser,
   fetchBillingSummary,
   fetchCreditTransactions,
   fetchPaymentHistory,
   createTopupCheckout,
+  parseBillingAddressJson,
+  type BillingAddressPayload,
   type CreditTransaction,
   type PaymentRecord,
 } from "@/lib/api";
@@ -107,30 +110,46 @@ function SummaryCards({ balance, tier, billingCycle, periodEnd }: {
   );
 }
 
-function TopupSection() {
+function TopupSection({ billingAddress }: { billingAddress: BillingAddressPayload | null }) {
   const [loading, setLoading] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [pendingCredits, setPendingCredits] = useState<number | null>(null);
 
   async function handleTopup(credits: number) {
-    setLoading(credits);
+    if (!billingAddress) {
+      setError("Add a billing address in Account before buying credits.");
+      return;
+    }
+    setPendingCredits(credits);
+    setError(null);
+  }
+
+  async function confirmTopup() {
+    if (!pendingCredits || !billingAddress) return;
+    setLoading(pendingCredits);
     setError(null);
     try {
       const origin = window.location.origin;
       const successUrl = new URL("/app/billing", origin);
-      successUrl.searchParams.set("topup", "success");
-      successUrl.searchParams.set("credits", String(credits));
+      successUrl.searchParams.set("checkout", "success");
+      successUrl.searchParams.set("kind", "topup");
+      successUrl.searchParams.set("credits", String(pendingCredits));
       const cancelUrl = new URL("/app/billing", origin);
-      cancelUrl.searchParams.set("topup", "cancel");
+      cancelUrl.searchParams.set("checkout", "cancel");
+      cancelUrl.searchParams.set("kind", "topup");
+      cancelUrl.searchParams.set("credits", String(pendingCredits));
       const session = await createTopupCheckout({
-        credits,
+        credits: pendingCredits,
         success_url: successUrl.toString(),
         cancel_url: cancelUrl.toString(),
+        billing_address: billingAddress,
       });
       window.location.assign(session.checkout_url);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to start checkout");
     } finally {
       setLoading(null);
+      setPendingCredits(null);
     }
   }
 
@@ -158,6 +177,24 @@ function TopupSection() {
           </button>
         ))}
       </div>
+      {pendingCredits && billingAddress && (
+        <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-4 space-y-3">
+          <div className="text-xs uppercase tracking-wide text-slate-400 font-semibold">Confirm billing address</div>
+          <div className="text-sm text-slate-700">
+            {billingAddress.first_name} {billingAddress.last_name}, {billingAddress.street} {billingAddress.number}, {billingAddress.postal_code} {billingAddress.city}, {billingAddress.country}
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={confirmTopup}
+              disabled={loading !== null}
+              className="rounded-lg bg-blue-600 px-3 py-2 text-xs font-medium text-white transition-colors hover:bg-blue-700 disabled:opacity-60"
+            >
+              {loading === pendingCredits ? "Starting…" : `Continue with ${pendingCredits.toLocaleString()} credits`}
+            </button>
+            <a href="/app/account" className="text-xs text-blue-600 hover:underline">Edit address</a>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -320,22 +357,48 @@ function PaymentHistory() {
 
 export function BillingClient() {
   const { data: summary, isLoading } = useSWR("billing-summary", fetchBillingSummary);
+  const { data: me } = useSWR("me", fetchCurrentUser);
   const [returnBanner, setReturnBanner] = useState<{ kind: "success" | "error"; message: string } | null>(null);
+  const billingAddress = parseBillingAddressJson(me?.billing_address_json);
 
   // Show banner when returning from payment provider
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
-    const topup = params.get("topup");
-    if (!topup) return;
+    const checkout = params.get("checkout");
+    const kind = params.get("kind");
+    const credits = params.get("credits");
+    const tier = params.get("tier");
+    const reason = params.get("reason");
+    const alreadyProcessed = params.get("already_processed") === "true";
 
-    if (topup === "success") {
-      const credits = params.get("credits");
-      setReturnBanner({
-        kind: "success",
-        message: `Top-up successful! ${credits ? `${Number(credits).toLocaleString()} credits` : "Credits"} added to your balance.`,
-      });
+    if (!checkout && !alreadyProcessed && !reason) return;
+
+    if (alreadyProcessed) {
+      setReturnBanner({ kind: "success", message: "This payment was already processed. No changes were applied twice." });
+    } else if (checkout === "success") {
+      if (kind === "topup") {
+        setReturnBanner({
+          kind: "success",
+          message: `Top-up successful! ${credits ? `${Number(credits).toLocaleString()} credits` : "Credits"} added to your balance.`,
+        });
+      } else if (kind === "subscription") {
+        setReturnBanner({
+          kind: "success",
+          message: `${tier ? `${tier} plan` : "Subscription"} activated successfully.`,
+        });
+      } else {
+        setReturnBanner({ kind: "success", message: "Payment completed successfully." });
+      }
     } else {
-      setReturnBanner({ kind: "error", message: "Payment cancelled or declined." });
+      setReturnBanner({
+        kind: "error",
+        message:
+          reason === "invalid_reference"
+            ? "Payment could not be matched to an organization."
+            : reason === "payment_declined"
+              ? "Payment was declined or cancelled."
+              : "Payment cancelled or declined.",
+      });
     }
 
     window.history.replaceState({}, "", window.location.pathname);
@@ -375,7 +438,7 @@ export function BillingClient() {
         />
       )}
 
-      <TopupSection />
+      <TopupSection billingAddress={billingAddress} />
       <CreditHistory />
       <PaymentHistory />
     </div>

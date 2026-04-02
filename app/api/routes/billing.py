@@ -13,26 +13,23 @@ from sqlalchemy import desc
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_org
+from app.api.deps import require_org_role
 from app.auth import get_current_user
 from app.database import get_db
 from app.models.org_credit_transaction import OrgCreditTransaction
 from app.models.organization import Organization
 from app.models.payment_transaction import PaymentTransaction
 from app.models.user import User
+from app.schemas.billing import BillingAddress, BillingTierRead
 from app.services import payment_transactions, payments
+from app.services.tiers import (
+    get_billing_tier_by_slug,
+    get_billing_tiers,
+    get_tier_price_chf,
+    get_tier_yearly_price_chf,
+)
 
 router = APIRouter(prefix="/billing", tags=["billing"])
-
-
-class BillingAddress(BaseModel):
-    first_name: str
-    last_name: str
-    street: str
-    number: str
-    postal_code: str
-    city: str
-    country: str  # ISO 3166-1 alpha-2, e.g. "CH"
-    company_name: str | None = None
 
 
 class SubscriptionCheckoutRequest(BaseModel):
@@ -81,34 +78,76 @@ def _append_query_params(url: str, params: dict[str, str]) -> str:
     return f"{url}{separator}{urlencode(params)}"
 
 
+def _resolve_billing_address(current_user: User, body_address: BillingAddress | None, db: Session) -> dict:
+    if body_address is not None:
+        managed_user = db.merge(current_user)
+        managed_user.billing_address_json = json.dumps(body_address.model_dump())
+        db.commit()
+        db.refresh(managed_user)
+        return body_address.model_dump()
+
+    managed_user = db.merge(current_user)
+    if managed_user.billing_address_json:
+        try:
+            parsed = json.loads(managed_user.billing_address_json)
+        except json.JSONDecodeError as exc:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Stored billing address is invalid") from exc
+        if isinstance(parsed, dict):
+            return parsed
+    raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Billing address required before checkout")
+
+
+def _resolve_tier_amount_chf(
+    db: Session,
+    *,
+    tier: str,
+    billing_cycle: str,
+    custom_features: dict | None,
+    verified_business: bool,
+) -> float:
+    if tier == "custom":
+        amount = payments.compute_subscription_price_chf(
+            tier=tier,
+            billing_cycle=billing_cycle,  # type: ignore[arg-type]
+            custom_features=custom_features,
+            verified_business=verified_business,
+        )
+        return amount
+    base = get_tier_price_chf(db, tier)
+    amount = base * (10.0 if billing_cycle == "yearly" else 1.0)
+    if verified_business:
+        amount *= 0.80
+    return round(amount, 2)
+
+
 @router.post("/checkout/subscription", response_model=CheckoutResponse)
 def create_subscription_checkout(
     body: SubscriptionCheckoutRequest,
-    user_org: tuple[User, object] = Depends(get_current_org),
+    user_org: tuple[User, object] = Depends(require_org_role("admin", "owner")),
     db: Session = Depends(get_db),
 ) -> CheckoutResponse:
     _user, org = user_org
 
-    # Store billing address on org if provided (persisted for transaction logging on return)
-    if body.billing_address:
-        org.billing_address_json = json.dumps(body.billing_address.model_dump())
-        db.commit()
+    billing_address = _resolve_billing_address(_user, body.billing_address, db)
+    amount_chf = _resolve_tier_amount_chf(
+        db,
+        tier=body.tier,
+        billing_cycle=body.billing_cycle,
+        custom_features=(getattr(org, "custom_features", None) if body.tier == "custom" else None),
+        verified_business=bool(getattr(org, "verified_business", False)),
+    )
 
     try:
-        amount_chf = payments.compute_subscription_price_chf(
-            tier=body.tier,
-            billing_cycle=body.billing_cycle,
-            custom_features=(getattr(org, "custom_features", None) if body.tier == "custom" else None),
-            verified_business=bool(getattr(org, "verified_business", False)),
-        )
         session = payments.create_subscription_checkout(
             org_id=org.id,
+            user_id=_user.id,
             tier=body.tier,
             billing_cycle=body.billing_cycle,
             success_url=body.success_url,
             cancel_url=body.cancel_url,
-            billing_address=(body.billing_address.model_dump() if body.billing_address else None),
+            billing_address=billing_address,
             preferred_provider=body.provider,
+            amount_chf=amount_chf,
         )
     except payments.PaymentConfigurationError as exc:
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
@@ -125,24 +164,23 @@ def create_subscription_checkout(
 @router.post("/checkout/topup", response_model=CheckoutResponse)
 def create_topup_checkout(
     body: TopupCheckoutRequest,
-    user_org: tuple[User, object] = Depends(get_current_org),
+    user_org: tuple[User, object] = Depends(require_org_role("admin", "owner")),
     db: Session = Depends(get_db),
 ) -> CheckoutResponse:
     _user, org = user_org
 
-    # Store billing address on org if provided (persisted for transaction logging on return)
-    if body.billing_address:
-        org.billing_address_json = json.dumps(body.billing_address.model_dump())
-        db.commit()
+    billing_address = _resolve_billing_address(_user, body.billing_address, db)
 
     try:
         session = payments.create_topup_checkout(
             org_id=org.id,
+            user_id=_user.id,
             credits=body.credits,
             success_url=body.success_url,
             cancel_url=body.cancel_url,
-            billing_address=(body.billing_address.model_dump() if body.billing_address else None),
+            billing_address=billing_address,
             preferred_provider=body.provider,
+            amount_chf=payments.credits_to_chf(body.credits),
         )
     except payments.PaymentConfigurationError as exc:
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
@@ -263,22 +301,37 @@ async def worldline_return(
         payment_method = payment_transactions._extract_payment_method_worldline(transaction)
         cardholder_name = payment_transactions._extract_cardholder_name_worldline(result)
 
+        # Log the transaction. The UNIQUE constraint on external_id is the DB-level
+        # idempotency safeguard against races; the SELECT above handles the common case.
+        # Retrieve billing address from the initiating user when available.
+        org = db.query(Organization).filter(Organization.id == int(parsed_ref["org_id"])).first()
         # Determine CHF amount from the order reference, not user-supplied params.
         # Fall back to a non-zero placeholder so logging never rejects the transaction.
         amount_chf: float = 0.01
         if kind == "subscription" and parsed_ref.get("tier"):
-            amount_chf = payments.compute_subscription_price_chf(
-                tier=parsed_ref["tier"],
-                billing_cycle=str(parsed_ref.get("billing_cycle") or "monthly"),
-            )
+            tier_name = str(parsed_ref["tier"])
+            billing_cycle = str(parsed_ref.get("billing_cycle") or "monthly")
+            if tier_name == "custom" and org is not None:
+                amount_chf = payments.compute_subscription_price_chf(
+                    tier=tier_name,
+                    billing_cycle=billing_cycle,  # type: ignore[arg-type]
+                    custom_features=getattr(org, "custom_features", None),
+                    verified_business=bool(getattr(org, "verified_business", False)),
+                )
+            else:
+                amount_chf = round(
+                    get_tier_price_chf(db, tier_name) * (10.0 if billing_cycle == "yearly" else 1.0) * (0.8 if org and org.verified_business else 1.0),
+                    2,
+                )
         elif kind == "topup" and parsed_ref.get("topup_credits"):
             amount_chf = payments.credits_to_chf(int(parsed_ref["topup_credits"]))
 
-        # Log the transaction. The UNIQUE constraint on external_id is the DB-level
-        # idempotency safeguard against races; the SELECT above handles the common case.
-        # Retrieve billing address from org (collected at checkout time)
-        org = db.query(Organization).filter(Organization.id == int(parsed_ref["org_id"])).first()
-        billing_address = org.billing_address_json if org else None
+        billing_address = None
+        if parsed_ref.get("user_id"):
+            user = db.get(User, int(parsed_ref["user_id"]))
+            billing_address = user.billing_address_json if user else None
+        if not billing_address and org is not None:
+            billing_address = getattr(org, "billing_address_json", None)
 
         payment_tx = payment_transactions.log_payment_transaction(
             db,
@@ -337,6 +390,27 @@ async def worldline_return(
 @router.get("/providers")
 def list_enabled_providers(_: User = Depends(get_current_user)) -> dict:
     return {"mode": payments.settings.payment_provider_mode, "enabled": payments.get_enabled_provider_order()}
+
+
+@router.get("/tiers", response_model=list[BillingTierRead])
+def list_billing_tiers(db: Session = Depends(get_db), _: User = Depends(get_current_user)) -> list[BillingTierRead]:
+    tiers = get_billing_tiers(db)
+    return [
+        BillingTierRead(
+            id=tier.id,
+            slug=tier.slug,
+            display_name=tier.display_name,
+            description=tier.description,
+            monthly_price_chf=float(tier.monthly_price_chf),
+            yearly_multiplier=float(tier.yearly_multiplier),
+            yearly_price_chf=float(tier.monthly_price_chf) * float(tier.yearly_multiplier),
+            topup_bonus_rate=float(tier.topup_bonus_rate),
+            sort_order=tier.sort_order,
+            is_active=tier.is_active,
+            is_public=tier.is_public,
+        )
+        for tier in tiers
+    ]
 
 
 # ── User-facing billing history (org-scoped) ───────────────────────────────────

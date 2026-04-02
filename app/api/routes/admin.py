@@ -11,12 +11,10 @@ from app.database import get_db
 from app.models.organization import Organization
 from app.models.payment_transaction import PaymentTransaction
 from app.models.user import User
-from app.services.tiers import TIER_ID_BY_NAME
+from app.schemas.billing import BillingTierRead
+from app.services.tiers import get_billing_tiers, get_user_tier_names
 
 router = APIRouter(prefix="/admin", tags=["admin"])
-
-_VALID_TIERS = {"free", "simple", "explorer", "researcher", "strategist", "custom", "superadmin"}
-
 
 def _require_superadmin(current_user: User = Depends(get_current_user)) -> User:
     if not current_user.is_superadmin:
@@ -112,9 +110,10 @@ def update_user(
     user = db.get(User, user_id)
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
+    valid_tiers = set(get_user_tier_names(db))
     if body.tier is not None:
-        if body.tier not in _VALID_TIERS:
-            raise HTTPException(status_code=400, detail=f"Invalid tier. Must be one of: {sorted(_VALID_TIERS)}")
+        if body.tier not in valid_tiers:
+            raise HTTPException(status_code=400, detail=f"Invalid tier. Must be one of: {sorted(valid_tiers)}")
         user.tier = body.tier
     if body.is_active is not None:
         user.is_active = body.is_active
@@ -179,11 +178,12 @@ def update_org(
     org = db.get(Organization, org_id)
     if not org:
         raise HTTPException(status_code=404, detail="Org not found")
+    valid_tiers = set(get_user_tier_names(db)) - {"superadmin"}
     if body.name is not None:
         org.name = body.name.strip()
     if body.tier is not None:
-        if body.tier not in _VALID_TIERS:
-            raise HTTPException(status_code=400, detail=f"Invalid tier. Must be one of: {sorted(_VALID_TIERS)}")
+        if body.tier not in valid_tiers:
+            raise HTTPException(status_code=400, detail=f"Invalid tier. Must be one of: {sorted(valid_tiers)}")
         org.tier = body.tier
     db.commit()
     db.refresh(org)
@@ -294,6 +294,30 @@ def get_payment_transaction(
     if not tx:
         raise HTTPException(status_code=404, detail="Payment transaction not found")
     return _payment_tx_dict(tx)
+
+
+@router.get("/tiers", response_model=list[BillingTierRead], summary="List billing tiers (superadmin)")
+def list_billing_tiers_admin(
+    db: Session = Depends(get_db),
+    _: User = Depends(_require_superadmin),
+) -> list[BillingTierRead]:
+    tiers = get_billing_tiers(db)
+    return [
+        BillingTierRead(
+            id=tier.id,
+            slug=tier.slug,
+            display_name=tier.display_name,
+            description=tier.description,
+            monthly_price_chf=float(tier.monthly_price_chf),
+            yearly_multiplier=float(tier.yearly_multiplier),
+            yearly_price_chf=float(tier.monthly_price_chf) * float(tier.yearly_multiplier),
+            topup_bonus_rate=float(tier.topup_bonus_rate),
+            sort_order=tier.sort_order,
+            is_active=tier.is_active,
+            is_public=tier.is_public,
+        )
+        for tier in tiers
+    ]
 
 
 @router.get("/orgs/{org_id}/payment-transactions", summary="List payment transactions for org (superadmin)")

@@ -1,6 +1,7 @@
 """Auth API routes — login, registration, email verification, password management."""
 
 import logging
+import json
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Request, status
@@ -37,6 +38,7 @@ from app.schemas.user import (
     TokenResponse,
     UserRead,
 )
+from app.schemas.billing import BillingAddress
 from app.services.email import (
     send_email_change_verification,
     send_password_reset_email,
@@ -356,6 +358,19 @@ def get_me(
         .first()
     )
     return UserRead.model_validate(current_user)
+
+
+@router.put("/me/billing-address", response_model=UserRead, summary="Update the current user's billing address")
+def update_my_billing_address(
+    body: BillingAddress,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> UserRead:
+    managed_user = db.merge(current_user)
+    managed_user.billing_address_json = json.dumps(body.model_dump())
+    db.commit()
+    db.refresh(managed_user)
+    return UserRead.model_validate(managed_user)
 
 
 # ---------------------------------------------------------------------------

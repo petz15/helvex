@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, String
+from sqlalchemy import Boolean, DateTime, ForeignKey, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
@@ -22,6 +22,7 @@ class User(Base):
     # Primary identifier — required, unique
     email: Mapped[str] = mapped_column(String(256), unique=True, nullable=False)
     tier: Mapped[str] = mapped_column(String(32), nullable=False, default="free")
+    billing_address_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     email_verified: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     is_superadmin: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 
