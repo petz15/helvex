@@ -10,6 +10,7 @@
     - History of removed companies (?)
     - People finder and graph of connections potentially with linkedin?
 
+
 - **Major features**: 
     - Webcrawler for company websites
     - Linkedin unoffical API or scraper for people finder/graph and get more information
