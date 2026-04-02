@@ -276,6 +276,41 @@ def test_worldline_return_persists_alias_from_checkout_authorize(client, db, mon
     assert saved_user.payment_customer_id == "alias_from_checkout_1"
 
 
+def test_worldline_return_persists_alias_from_registration_result(client, db, monkeypatch):
+    org = _seed_org(db, org_id=119)
+
+    def _fake_authorize(self, *, token):
+        assert token == "tok_119"
+        return {
+            "Transaction": {
+                "Status": "AUTHORIZED",
+                "Id": "tx_119",
+            },
+            "RegistrationResult": {
+                "Alias": {"Id": "alias_from_registration_result_1"},
+            },
+        }
+
+    monkeypatch.setattr("app.services.payments.WorldlineProvider.authorize_transaction", _fake_authorize)
+
+    resp = client.get(
+        "/api/v1/billing/webhooks/worldline/return/tok_119",
+        params={
+            "kind": "topup",
+            "order_reference": f"wl_topup_{org.id}_1_25000_deadbeef",
+            "success_url": "https://example.com/success",
+            "cancel_url": "https://example.com/cancel",
+            "source": "notify",
+        },
+        follow_redirects=False,
+    )
+
+    assert resp.status_code == 303
+    saved_user = db.get(User, 1)
+    assert saved_user is not None
+    assert saved_user.payment_customer_id == "alias_from_registration_result_1"
+
+
 def test_worldline_card_registration_saves_alias(client, db, monkeypatch):
     org = _seed_org(db, org_id=16)
     _override_user(org.id)
@@ -431,6 +466,22 @@ def test_topup_checkout_prefers_current_users_saved_alias_over_org_default(clien
     assert resp.status_code == 200
     assert captured["payment_alias_id"] == "alias_current_1"
     assert captured["save_payment_method"] is False
+
+
+def test_topup_checkout_rejects_amounts_below_100_credits(client, db):
+    org = _seed_org(db, org_id=191)
+    _override_user(org.id)
+
+    resp = client.post(
+        "/api/v1/billing/checkout/topup",
+        json={
+            "credits": 99,
+            "success_url": "https://example.com/success",
+            "cancel_url": "https://example.com/cancel",
+        },
+    )
+
+    assert resp.status_code == 422
 
 
 def test_cancel_pending_payment_marks_declined(client, db):

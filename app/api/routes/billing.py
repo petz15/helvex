@@ -55,7 +55,7 @@ class SubscriptionCheckoutRequest(BaseModel):
 
 
 class TopupCheckoutRequest(BaseModel):
-    credits: int = Field(..., gt=0)
+    credits: int = Field(..., ge=100)
     success_url: str
     cancel_url: str
     billing_address: BillingAddress | None = None
@@ -555,10 +555,19 @@ async def worldline_return(
         transaction_id = str(transaction.get("Id") or "") if isinstance(transaction, dict) else ""
 
         # Persist alias from successful checkout when Worldline returns it.
+        # Some responses place alias under PaymentMeans.Card.Alias while others
+        # return it under RegistrationResult.Alias.
         payment_means = result.get("PaymentMeans") if isinstance(result, dict) else {}
         card_obj = payment_means.get("Card") if isinstance(payment_means, dict) else {}
         alias_obj = card_obj.get("Alias") if isinstance(card_obj, dict) else {}
         alias_id = str(alias_obj.get("Id") or "") if isinstance(alias_obj, dict) else ""
+        if not alias_id and isinstance(result, dict):
+            registration_result = result.get("RegistrationResult")
+            registration_alias = registration_result.get("Alias") if isinstance(registration_result, dict) else {}
+            alias_id = str(registration_alias.get("Id") or "") if isinstance(registration_alias, dict) else ""
+        if not alias_id and isinstance(result, dict):
+            top_level_alias = result.get("Alias")
+            alias_id = str(top_level_alias.get("Id") or "") if isinstance(top_level_alias, dict) else ""
         if alias_id and parsed_ref.get("user_id"):
             alias_owner = db.get(User, int(parsed_ref["user_id"]))
             if alias_owner is not None:

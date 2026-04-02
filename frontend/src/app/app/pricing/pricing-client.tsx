@@ -350,6 +350,7 @@ export function PricingClient() {
         success_url: successUrl.toString(),
         cancel_url: cancelUrl.toString(),
         billing_address: billingAddress,
+        save_payment_method: true,
       });
       window.location.assign(session.checkout_url);
     } catch (err) {

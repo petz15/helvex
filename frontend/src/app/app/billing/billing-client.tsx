@@ -124,11 +124,11 @@ function SummaryCards({ balance, tier, billingCycle, periodEnd }: {
 function TopupSection({ billingAddress }: { billingAddress: BillingAddressPayload | null }) {
   const [loading, setLoading] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [savePaymentMethod, setSavePaymentMethod] = useState<boolean>(false);
+  const [savePaymentMethod, setSavePaymentMethod] = useState<boolean>(true);
   const [customCreditsInput, setCustomCreditsInput] = useState<string>("25000");
 
   const customCredits = Number.parseInt(customCreditsInput, 10);
-  const customCreditsValid = Number.isInteger(customCredits) && customCredits > 0;
+  const customCreditsValid = Number.isInteger(customCredits) && customCredits >= 100;
 
   async function handleTopup(credits: number) {
     if (!billingAddress) {
@@ -160,8 +160,8 @@ function TopupSection({ billingAddress }: { billingAddress: BillingAddressPayloa
   }, [billingAddress]);
 
   async function startTopupCheckout(credits: number) {
-    if (!Number.isInteger(credits) || credits <= 0) {
-      setError("Enter a valid top-up amount.");
+    if (!Number.isInteger(credits) || credits < 100) {
+      setError("Top-up amount must be at least 100 credits.");
       return;
     }
 
@@ -256,7 +256,7 @@ function TopupSection({ billingAddress }: { billingAddress: BillingAddressPayloa
             <span className="block text-xs uppercase tracking-wide text-slate-400 font-semibold">Custom amount</span>
             <input
               type="number"
-              min={1}
+              min={100}
               step={1}
               value={customCreditsInput}
               onChange={(e) => setCustomCreditsInput(e.target.value)}
@@ -265,7 +265,7 @@ function TopupSection({ billingAddress }: { billingAddress: BillingAddressPayloa
             />
           </label>
           <div className="text-xs text-slate-500 sm:min-w-40">
-            {customCreditsValid ? `≈ CHF ${creditsToChf(customCredits).toFixed(2)}` : "Enter a positive credit amount."}
+            {customCreditsValid ? `≈ CHF ${creditsToChf(customCredits).toFixed(2)}` : "Minimum is 100 credits."}
           </div>
           <button
             onClick={() => void startTopupCheckout(customCredits)}
