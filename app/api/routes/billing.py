@@ -292,6 +292,8 @@ async def worldline_return(
     params = request.query_params
     # Saferpay returns token as TOKEN query parameter, but accept variations
     token = str(token or params.get("TOKEN") or params.get("token") or params.get("Token") or "").strip()
+    if token in {"{TOKEN}", "%7BTOKEN%7D"}:
+        token = ""
     success_url = str(params.get("success_url") or "").strip()
     cancel_url = str(params.get("cancel_url") or "").strip()
     source = str(params.get("source") or "").strip().lower()

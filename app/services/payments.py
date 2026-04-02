@@ -124,6 +124,8 @@ def _worldline_callback_url(*, kind: str, order_reference: str, success_url: str
     return _query_url(
         "/api/v1/billing/webhooks/worldline/return",
         {
+            # Ask provider to inject the transaction token back into callback URL.
+            "TOKEN": "{TOKEN}",
             "kind": kind,
             "order_reference": order_reference,
             "success_url": success_url,
