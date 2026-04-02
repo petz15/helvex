@@ -214,7 +214,16 @@ export function CompanyDetailClient({ company: initial, readOnlyDemo = false }: 
   }
 
   return (
-    <div className="max-w-5xl mx-auto px-4 py-6 space-y-6">
+    <div className="flex w-full px-4 py-6 gap-4">
+      {/* Left ad column */}
+      <div className="hidden xl:flex flex-col items-center w-44 shrink-0 pt-10">
+        <div className="sticky top-6">
+          <BaloghAdCard className="w-44" />
+        </div>
+      </div>
+
+      {/* Main content */}
+      <div className="flex-1 min-w-0 max-w-5xl mx-auto space-y-6">
       {/* Breadcrumb */}
       <div className="flex items-center gap-2 text-sm text-slate-500">
         {readOnlyDemo ? (
@@ -602,9 +611,17 @@ export function CompanyDetailClient({ company: initial, readOnlyDemo = false }: 
         </div>
       </div>}
 
-      {/* Ad card */}
-      <div className="mt-6">
+      {/* Ad card — mobile/tablet only (xl shows side columns) */}
+      <div className="mt-6 xl:hidden">
         <BaloghAdCard />
+      </div>
+    </div>
+
+      {/* Right ad column */}
+      <div className="hidden xl:flex flex-col items-center w-44 shrink-0 pt-10">
+        <div className="sticky top-6">
+          <BaloghAdCard className="w-44" />
+        </div>
       </div>
     </div>
   );

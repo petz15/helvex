@@ -17,7 +17,8 @@ export function AdBanner() {
     <div className="mx-auto w-full max-w-7xl px-4 py-2">
       <div className="flex items-center justify-between rounded-lg border border-slate-200 bg-white px-4 py-2.5 text-xs">
         <div>
-          <span className="font-semibold text-slate-900">Balogh Consulting</span>
+          <span className="text-slate-400 text-xs uppercase tracking-wide font-medium">Powered by</span>
+          <span className="mx-2 font-semibold text-slate-900">Balogh Consulting</span>
           <span className="mx-2 text-slate-400">·</span>
           <span className="text-slate-600">Value first — you decide what it's worth.</span>
         </div>

@@ -21,7 +21,8 @@ export function BaloghAdCard({ className = "" }: BaloghAdCardProps) {
     <div className={`rounded-lg border border-slate-200 bg-white p-4 shadow-sm ${className}`}>
       <div className="flex flex-col gap-3">
         <div>
-          <h3 className="text-sm font-semibold text-slate-900">Balogh Consulting</h3>
+          <p className="text-xs text-slate-400 uppercase tracking-wide font-medium">Powered by</p>
+          <h3 className="text-sm font-semibold text-slate-900 mt-0.5">Balogh Consulting</h3>
           <p className="mt-1 text-xs text-slate-600">Value first — you decide what it's worth.</p>
         </div>
         <Link
