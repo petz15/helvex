@@ -30,6 +30,7 @@ export interface CurrentUser {
   id: number;
   email: string;
   billing_address_json: string | null;
+  payment_customer_id: string | null;
   org_role: string;
   is_active: boolean;
   email_verified: boolean;
@@ -74,6 +75,7 @@ export interface BillingSummary {
   subscription_period_end: string | null;
   credits_balance: number;
   credits_balance_chf: number;
+  has_saved_payment_method: boolean;
 }
 
 export interface CreditTransaction {
@@ -206,6 +208,12 @@ export interface BillingAddressBook {
   default_id: string | null;
 }
 
+export interface PaymentMethodRegistrationResponse {
+  provider: string;
+  checkout_url: string;
+  external_id: string | null;
+}
+
 export async function createSubscriptionCheckout(data: {
   tier: string;
   billing_cycle: "monthly" | "yearly";
@@ -257,6 +265,31 @@ export async function createTopupCheckout(data: {
       detail = raw.trim() || undefined;
     }
     throw new Error(detail ?? `Top-up checkout failed (HTTP ${res.status})`);
+  }
+  return res.json();
+}
+
+export async function createWorldlineCardRegistration(data: {
+  success_url: string;
+  cancel_url: string;
+  billing_address?: BillingAddressPayload | null;
+}): Promise<PaymentMethodRegistrationResponse> {
+  const res = await fetch("/api/v1/billing/payment-methods/worldline/register", {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  });
+  if (!res.ok) {
+    const raw = await res.text();
+    let detail: string | undefined;
+    try {
+      const parsed = JSON.parse(raw) as { detail?: string };
+      detail = parsed?.detail;
+    } catch {
+      detail = raw.trim() || undefined;
+    }
+    throw new Error(detail ?? `Card registration failed (HTTP ${res.status})`);
   }
   return res.json();
 }
@@ -701,6 +734,7 @@ export interface OrgDetail {
   verified_business: boolean;
   verified_domain: string | null;
   billing_address_json: string | null;
+  default_payment_user_id: number | null;
   custom_features: Record<string, unknown> | null;
   member_count: number;
 }
@@ -711,6 +745,7 @@ export interface OrgMember {
   org_role: string;
   is_active: boolean;
   created_at: string;
+  has_saved_payment_method: boolean;
 }
 
 export async function fetchOrg(orgId: number): Promise<OrgDetail> {
@@ -819,6 +854,20 @@ export async function updateOrg(orgId: number, data: { name?: string; billing_ad
     body: JSON.stringify(data),
   });
   if (!res.ok) throw new Error("Failed to update org");
+  return res.json();
+}
+
+export async function setOrgDefaultPaymentUser(orgId: number, userId: number | null): Promise<OrgDetail> {
+  const res = await fetch(orgPath(orgId, "/default-payment-user"), {
+    method: "PUT",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ user_id: userId }),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.detail ?? "Failed to update default payment method");
+  }
   return res.json();
 }
 

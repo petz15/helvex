@@ -31,6 +31,7 @@ from app.api.deps import require_org_role
 from app.auth import get_current_user
 from app.database import get_db
 from app.models.org_credit_transaction import OrgCreditTransaction
+from app.models.org_member import OrgMember
 from app.models.organization import Organization
 from app.models.payment_transaction import PaymentTransaction
 from app.models.user import User
@@ -64,6 +65,16 @@ class TopupCheckoutRequest(BaseModel):
     provider: Literal["worldline", "stripe"] | None = None
 
 
+class CardRegistrationRequest(BaseModel):
+    success_url: str
+    cancel_url: str
+    billing_address: BillingAddress | None = None
+
+
+class DefaultPaymentMethodRequest(BaseModel):
+    user_id: int
+
+
 class CheckoutResponse(BaseModel):
     provider: str
     checkout_url: str
@@ -71,9 +82,26 @@ class CheckoutResponse(BaseModel):
     amount_chf: float
 
 
+class PaymentMethodRegistrationResponse(BaseModel):
+    provider: str
+    checkout_url: str
+    external_id: str | None = None
+
+
 class WebhookResponse(BaseModel):
     ok: bool
     ignored: bool = False
+
+
+def _resolve_worldline_payment_alias(db: Session, org: Organization) -> str | None:
+    owner_id = getattr(org, "default_payment_user_id", None)
+    if not owner_id:
+        return None
+    owner = db.get(User, int(owner_id))
+    if owner is None:
+        return None
+    alias_id = str(owner.payment_customer_id or "").strip()
+    return alias_id or None
 
 
 def _safe_redirect_target(url: str | None) -> str:
@@ -162,6 +190,7 @@ def create_subscription_checkout(
         session = payments.create_subscription_checkout(
             org_id=org.id,
             user_id=_user.id,
+            payment_alias_id=(_resolve_worldline_payment_alias(db, org) if body.provider in {None, "worldline"} else None),
             tier=body.tier,
             billing_cycle=body.billing_cycle,
             success_url=body.success_url,
@@ -241,6 +270,7 @@ def create_topup_checkout(
         session = payments.create_topup_checkout(
             org_id=org.id,
             user_id=_user.id,
+            payment_alias_id=(_resolve_worldline_payment_alias(db, org) if body.provider in {None, "worldline"} else None),
             credits=body.credits,
             success_url=body.success_url,
             cancel_url=body.cancel_url,
@@ -643,6 +673,111 @@ async def worldline_return(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
 
+@router.post("/payment-methods/worldline/register", response_model=PaymentMethodRegistrationResponse)
+def create_worldline_card_registration(
+    body: CardRegistrationRequest,
+    user_org: tuple[User, object] = Depends(require_org_role("admin", "owner")),
+    db: Session = Depends(get_db),
+) -> PaymentMethodRegistrationResponse:
+    _user, org = user_org
+    billing_address = _resolve_billing_address(_user, body.billing_address, db)
+    try:
+        session = payments.WorldlineProvider().create_card_alias_registration(
+            org_id=org.id,
+            user_id=_user.id,
+            success_url=body.success_url,
+            cancel_url=body.cancel_url,
+            billing_address=billing_address,
+        )
+    except payments.PaymentConfigurationError as exc:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
+    return PaymentMethodRegistrationResponse(provider=session.provider, checkout_url=session.checkout_url, external_id=session.external_id)
+
+
+@router.get("/webhooks/worldline/card/return")
+@router.get("/webhooks/worldline/card/return/{token}")
+async def worldline_card_return(
+    request: Request,
+    db: Session = Depends(get_db),
+    token: str | None = None,
+) -> RedirectResponse:
+    params = request.query_params
+    callback_ctx = payments.decode_worldline_callback_context(str(params.get("ctx") or "").strip())
+    token = str(token or params.get("TOKEN") or params.get("token") or params.get("Token") or "").strip()
+    if token in {"{TOKEN}", "%7BTOKEN%7D", "{token}", "%7Btoken%7D", "{Token}", "%7BToken%7D", "{{{PAYMENTPAGETOKEN}}}", "%7B%7B%7BPAYMENTPAGETOKEN%7D%7D%7D"}:
+        token = ""
+
+    success_url = str(callback_ctx.get("success_url") or params.get("success_url") or "").strip()
+    cancel_url = str(callback_ctx.get("cancel_url") or params.get("cancel_url") or "").strip()
+    source = str(params.get("source") or "").strip().lower()
+    query_string = request.url.query or ""
+
+    _emit(
+        "info",
+        "billing.worldline_card_return_called source=%s token=%s ctx_valid=%s query_string=%s",
+        source,
+        token[:20] if token else "NONE",
+        "yes" if callback_ctx else "no",
+        query_string[:1000],
+    )
+
+    if not callback_ctx and not token:
+        target = _append_query_params(cancel_url, {"reason": "invalid_callback_context"})
+        if source == "notify":
+            return RedirectResponse(_safe_redirect_target(target), status_code=status.HTTP_303_SEE_OTHER)
+        return RedirectResponse(_safe_redirect_target(target), status_code=status.HTTP_303_SEE_OTHER)
+
+    if not token:
+        target = _append_query_params(cancel_url, {"reason": "missing_token"})
+        return RedirectResponse(_safe_redirect_target(target), status_code=status.HTTP_303_SEE_OTHER)
+
+    try:
+        org_id = int(callback_ctx.get("org_id") or 0)
+        user_id = int(callback_ctx.get("user_id") or 0)
+        if org_id <= 0:
+            raise RuntimeError("Worldline alias callback missing org_id")
+        if user_id <= 0:
+            raise RuntimeError("Worldline alias callback missing user_id")
+        owner = db.get(User, user_id)
+        if owner is None:
+            raise RuntimeError("User not found")
+        result = payments.WorldlineProvider().assert_alias_insert(token=token)
+        alias = result.get("Alias") if isinstance(result, dict) else {}
+        alias_id = str(alias.get("Id") or "") if isinstance(alias, dict) else ""
+        payment_means = result.get("PaymentMeans") if isinstance(result, dict) else {}
+        card = payment_means.get("Card") if isinstance(payment_means, dict) else {}
+        display_text = str(payment_means.get("DisplayText") or "") if isinstance(payment_means, dict) else ""
+
+        if not alias_id:
+            raise RuntimeError("Worldline alias assertion did not include an alias id")
+
+        owner.payment_customer_id = alias_id
+        db.commit()
+
+        _emit(
+            "info",
+            "billing.worldline_card_alias_saved org_id=%s alias_id=%s display_text=%s holder=%s",
+            org_id,
+            alias_id,
+            display_text[:40] if display_text else "NONE",
+            str(card.get("HolderName") or "")[:40] if isinstance(card, dict) else "NONE",
+        )
+
+        if source == "notify":
+            return RedirectResponse(_safe_redirect_target(success_url or payments.settings.app_base_url.rstrip("/")), status_code=status.HTTP_303_SEE_OTHER)
+
+        return RedirectResponse(
+            _safe_redirect_target(_append_query_params(success_url, {"payment_method": "saved"})),
+            status_code=status.HTTP_303_SEE_OTHER,
+        )
+    except payments.PaymentConfigurationError as exc:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+
 @router.get("/providers")
 def list_enabled_providers(_: User = Depends(get_current_user)) -> dict:
     return {"mode": payments.settings.payment_provider_mode, "enabled": payments.get_enabled_provider_order()}
@@ -678,7 +813,7 @@ def get_billing_summary(
     db: Session = Depends(get_db),
 ) -> dict:
     """Return billing summary for the current org: tier, balance, subscription info."""
-    _user, org = user_org
+    user, org = user_org
     return {
         "org_id": org.id,
         "tier": org.tier,
@@ -686,6 +821,7 @@ def get_billing_summary(
         "subscription_period_end": org.subscription_period_end.isoformat() if org.subscription_period_end else None,
         "credits_balance": org.credits_balance,
         "credits_balance_chf": round(org.credits_balance * 0.0001, 4),
+        "has_saved_payment_method": bool(user.payment_customer_id),
     }
 
 

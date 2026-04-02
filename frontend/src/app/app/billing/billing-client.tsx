@@ -8,7 +8,11 @@ import {
   fetchBillingSummary,
   fetchCreditTransactions,
   fetchPaymentHistory,
+  fetchOrg,
+  fetchOrgMembers,
+  setOrgDefaultPaymentUser,
   createTopupCheckout,
+  createWorldlineCardRegistration,
   parseBillingAddressJson,
   type BillingAddressPayload,
   type CreditTransaction,
@@ -228,6 +232,165 @@ function TopupSection({ billingAddress }: { billingAddress: BillingAddressPayloa
   );
 }
 
+function SavedCardSection({ billingAddress, hasSavedPaymentMethod }: { billingAddress: BillingAddressPayload | null; hasSavedPaymentMethod: boolean }) {
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function handleRegisterCard() {
+    if (!billingAddress) {
+      setError("Add a billing address first in Address Management before saving a card.");
+      return;
+    }
+    setLoading(true);
+    setError(null);
+    try {
+      const origin = window.location.origin;
+      const successUrl = new URL("/app/billing", origin);
+      successUrl.searchParams.set("checkout", "success");
+      successUrl.searchParams.set("kind", "card");
+      successUrl.searchParams.set("saved", "1");
+      const cancelUrl = new URL("/app/billing", origin);
+      cancelUrl.searchParams.set("checkout", "cancel");
+      cancelUrl.searchParams.set("kind", "card");
+      cancelUrl.searchParams.set("saved", "1");
+
+      const session = await createWorldlineCardRegistration({
+        success_url: successUrl.toString(),
+        cancel_url: cancelUrl.toString(),
+        billing_address: billingAddress,
+      });
+      window.location.assign(session.checkout_url);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to start card registration");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <div className="rounded-2xl border border-slate-200 bg-white p-5">
+      <h2 className="text-sm font-semibold text-slate-700">Saved card</h2>
+      <p className="mt-0.5 text-xs text-slate-400">
+        Save a Saferpay alias on your user account so admins can pick it as the org's default card later.
+      </p>
+      {error && (
+        <div className="mt-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">{error}</div>
+      )}
+      <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="text-sm text-slate-700">
+          {hasSavedPaymentMethod ? "Your account has a saved payment method." : "No saved payment method on your account yet."}
+        </div>
+        <button
+          onClick={handleRegisterCard}
+          disabled={loading}
+          className="rounded-lg bg-slate-900 px-3 py-2 text-xs font-medium text-white transition-colors hover:bg-slate-800 disabled:opacity-60"
+        >
+          {loading ? "Opening Saferpay…" : hasSavedPaymentMethod ? "Replace saved card" : "Save a card"}
+        </button>
+      </div>
+      {!billingAddress && (
+        <p className="mt-3 text-xs text-amber-600">Add a billing address first to continue.</p>
+      )}
+    </div>
+  );
+}
+
+function DefaultCardSection({
+  orgId,
+  currentUserId,
+  currentDefaultUserId,
+  members,
+  canManage,
+  onUpdated,
+}: {
+  orgId: number;
+  currentUserId: number;
+  currentDefaultUserId: number | null;
+  members: Array<{ id: number; email: string; has_saved_payment_method: boolean }>;
+  canManage: boolean;
+  onUpdated: () => void;
+}) {
+  const [savingUserId, setSavingUserId] = useState<number | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  if (!canManage) return null;
+
+  const eligibleMembers = members.filter((member) => member.has_saved_payment_method);
+
+  async function selectDefault(userId: number) {
+    setSavingUserId(userId);
+    setError(null);
+    try {
+      await setOrgDefaultPaymentUser(orgId, userId);
+      onUpdated();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to update default card");
+    } finally {
+      setSavingUserId(null);
+    }
+  }
+
+  async function clearDefault() {
+    setSavingUserId(0);
+    setError(null);
+    try {
+      await setOrgDefaultPaymentUser(orgId, null);
+      onUpdated();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to clear default card");
+    } finally {
+      setSavingUserId(null);
+    }
+  }
+
+  return (
+    <div className="rounded-2xl border border-slate-200 bg-white p-5">
+      <h2 className="text-sm font-semibold text-slate-700">Org default card</h2>
+      <p className="mt-0.5 text-xs text-slate-400">
+        Admins can choose which member's saved card should be charged by default.
+      </p>
+      {error && (
+        <div className="mt-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">{error}</div>
+      )}
+      <div className="mt-4 space-y-2">
+        {eligibleMembers.length === 0 ? (
+          <div className="text-sm text-slate-500">No members with a saved card yet.</div>
+        ) : (
+          eligibleMembers.map((member) => {
+            const active = member.id === currentDefaultUserId;
+            return (
+              <div key={member.id} className="flex items-center justify-between gap-3 rounded-xl border border-slate-200 px-3 py-2">
+                <div>
+                  <div className="text-sm font-medium text-slate-800">{member.email}</div>
+                  <div className="text-xs text-slate-400">{active ? "Current default" : member.id === currentUserId ? "You" : "Saved card available"}</div>
+                </div>
+                <button
+                  onClick={() => selectDefault(member.id)}
+                  disabled={savingUserId !== null}
+                  className={`rounded-lg px-3 py-2 text-xs font-medium transition-colors disabled:opacity-60 ${
+                    active ? "bg-emerald-600 text-white" : "bg-slate-900 text-white hover:bg-slate-800"
+                  }`}
+                >
+                  {savingUserId === member.id ? "Saving…" : active ? "Selected" : "Use by default"}
+                </button>
+              </div>
+            );
+          })
+        )}
+      </div>
+      {currentDefaultUserId !== null && (
+        <button
+          onClick={clearDefault}
+          disabled={savingUserId !== null}
+          className="mt-3 text-xs text-slate-500 hover:underline disabled:opacity-60"
+        >
+          Clear default card
+        </button>
+      )}
+    </div>
+  );
+}
+
 function CreditHistory() {
   const [page, setPage] = useState(1);
   const { data, isLoading } = useSWR(
@@ -387,6 +550,9 @@ function PaymentHistory() {
 export function BillingClient() {
   const { data: summary, isLoading } = useSWR("billing-summary", fetchBillingSummary);
   const { data: me } = useSWR("me", fetchCurrentUser);
+  const { data: org } = useSWR(summary ? `org-${summary.org_id}` : null, () => fetchOrg(summary!.org_id));
+  const { data: members, mutate: mutateMembers } = useSWR(summary ? `org-members-${summary.org_id}` : null, () => fetchOrgMembers(summary!.org_id));
+  const { mutate: mutateOrg } = useSWR(summary ? `org-${summary.org_id}` : null, () => fetchOrg(summary!.org_id));
   const [returnBanner, setReturnBanner] = useState<{ kind: "success" | "error"; message: string } | null>(null);
   const billingAddress = parseBillingAddressJson(me?.billing_address_json);
 
@@ -398,12 +564,15 @@ export function BillingClient() {
     const credits = params.get("credits");
     const tier = params.get("tier");
     const reason = params.get("reason");
+    const saved = params.get("saved") === "1";
     const alreadyProcessed = params.get("already_processed") === "true";
 
-    if (!checkout && !alreadyProcessed && !reason) return;
+    if (!checkout && !alreadyProcessed && !reason && !saved) return;
 
     if (alreadyProcessed) {
       setReturnBanner({ kind: "success", message: "This payment was already processed. No changes were applied twice." });
+    } else if (saved) {
+      setReturnBanner({ kind: "success", message: "Saved card registered successfully." });
     } else if (checkout === "success") {
       if (kind === "topup") {
         setReturnBanner({
@@ -468,6 +637,22 @@ export function BillingClient() {
       )}
 
       <TopupSection billingAddress={billingAddress} />
+      {summary && (
+        <SavedCardSection billingAddress={billingAddress} hasSavedPaymentMethod={summary.has_saved_payment_method} />
+      )}
+      {summary && me && org && members && (
+        <DefaultCardSection
+          orgId={summary.org_id}
+          currentUserId={me.id}
+          currentDefaultUserId={org.default_payment_user_id}
+          members={members}
+          canManage={me.org_role === "admin" || me.org_role === "owner"}
+          onUpdated={() => {
+            void mutateMembers();
+            void mutateOrg();
+          }}
+        />
+      )}
       <CreditHistory />
       <PaymentHistory />
     </div>

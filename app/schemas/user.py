@@ -18,6 +18,7 @@ class UserRead(BaseModel):
     id: int
     email: str
     billing_address_json: str | None = None
+    payment_customer_id: str | None = None
     org_role: str
     is_active: bool
     email_verified: bool

@@ -43,6 +43,15 @@
 - [X] **For search** - for search different default columns and filtering options. add web searched as a flag to it. potentially add more filterint for peopel or company type/history
 - [ ] **Improve colors** - improve some of the colors, look and feel for the website
 
+## Company Explore page
+- [ ] **Settings** - set up settings page for LLM, FLEX scoring, etc
+- [ ] **Remove default flex score and categories** - Remove my default flex scores and categories
+- [ ] **Jobs page** - Shows running jobs and possibility to start new jobs such as batch web search, LLM classification etc
+- [ ] **Categories page** - Needs to be fixed from the existing, first to use org data and to show NOGA classification better
+- [ ] **Browse page** - Pretty simple, maybe needs to be made nicer?
+- [ ] **More pages(?)** - (?)
+
+
 ## Company Data
 
 - [X] **Map: fix location clustering** — companies geocoded to PLZ centroid instead of address; increase map limit to 20 000; improve geocoding fallback logic -> already fixed but visualization could still be improved
@@ -53,7 +62,7 @@
 - [ ] **Web crawler** — crawl company websites to extract description, contact info, product/service keywords; store as structured fields; feed into scoring and classification; replace/supplement current Google scrape
 - [ ] **Google results & scoring** — Improve the selection and scoring of google results
 - [ ] **NOGA Data** — add NOGA data (or similar) which is something other sites have such as business-monitor.ch or moneyhouse.ch -> first implementation done via AI classification; needs improvement preferably without AI or optional with AI; displaying is not looking too good yet; only shows the level it is confident in but not the full hierarchy
-s
+- [ ] **Free tier**- show some limited or teaser data for free tier
 
 
 ## Company Profile
@@ -66,6 +75,7 @@ s
 - [ ] **Cross-company person graph** — normalize sogcPub organ changes into `persons` / `company_persons` tables via a pipeline job; build a graph UI showing where signers appear across multiple companies, what roles they held, and when — enabling network analysis of directors, beneficial owners, and corporate groups
 - [X] **Fix Zweck not showing up** — maybe add column for zweck at companies table but that would also require to import it for existing companies 
 - [ ] **Do not immediatly show scoring unless explore has been setup for org or user** —
+- [ ] **Free tier**- show some limited or teaser data for free tier
 
 ## Classification & Scoring
 

@@ -42,7 +42,7 @@ class Organization(Base):
         else:
             self.tier_id = TIER_ID_BY_NAME.get(str(value), 0)
 
-    # Payment
+    # Legacy provider customer reference used for subscription bookkeeping.
     payment_customer_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
 
     # Billing address (collected during checkout for chargeback evidence)
@@ -75,6 +75,8 @@ class Organization(Base):
     verified_domain: Mapped[str | None] = mapped_column(String(255), nullable=True)
     # Linked Zefix company UID for auto-verification
     zefix_uid: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    # User whose saved payment method is used by default for this org
+    default_payment_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
 
     # --- Custom tier feature bundle (null unless tier = 'custom') ---
     # Stores the selected modular features and their quantities, e.g.:
@@ -99,3 +101,4 @@ class Organization(Base):
     payment_transactions: Mapped[list[PaymentTransaction]] = relationship(
         "PaymentTransaction", back_populates="org", foreign_keys="PaymentTransaction.org_id", cascade="all, delete-orphan"
     )
+    default_payment_user: Mapped[User | None] = relationship("User", foreign_keys=[default_payment_user_id])

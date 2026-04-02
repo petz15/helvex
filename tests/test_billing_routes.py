@@ -27,6 +27,19 @@ def _seed_org(db, *, org_id: int = 1) -> Organization:
     )
     db.add(org)
     db.flush()
+    db.add(
+        User(
+            id=1,
+            email="billing@example.com",
+            hashed_password="x",
+            is_active=True,
+            billing_address_json=org.billing_address_json,
+            email_verified=True,
+            is_superadmin=False,
+            org_id=org_id,
+            org_role="owner",
+        )
+    )
     db.add(OrgMember(org_id=org_id, user_id=1, role="owner"))
     db.commit()
     return org
@@ -222,3 +235,111 @@ def test_worldline_return_authorizes_and_redirects(client, db, monkeypatch):
     assert resp.headers["location"] == "https://example.com/success"
     db.refresh(org)
     assert org.credits_balance == 25000
+
+
+def test_worldline_card_registration_saves_alias(client, db, monkeypatch):
+    org = _seed_org(db, org_id=16)
+    _override_user(org.id)
+
+    def _fake_register(self, *, org_id, user_id, success_url, cancel_url, billing_address):
+        assert org_id == org.id
+        assert user_id == 1
+        assert success_url == "https://example.com/success"
+        assert cancel_url == "https://example.com/cancel"
+        return CheckoutSession(provider="worldline", checkout_url="https://payment.preprod.worldline/alias_tok_1", external_id="alias_tok_1", order_reference="wl_alias_16_1_test")
+
+    def _fake_assert(self, *, token):
+        assert token == "alias_tok_1"
+        return {
+            "Alias": {"Id": "alias_123"},
+            "PaymentMeans": {"Card": {"HolderName": "Max Mustermann"}, "DisplayText": "**** 1234"},
+        }
+
+    monkeypatch.setattr("app.services.payments.WorldlineProvider.create_card_alias_registration", _fake_register)
+    monkeypatch.setattr("app.services.payments.WorldlineProvider.assert_alias_insert", _fake_assert)
+
+    resp = client.post(
+        "/api/v1/billing/payment-methods/worldline/register",
+        json={
+            "success_url": "https://example.com/success",
+            "cancel_url": "https://example.com/cancel",
+        },
+    )
+
+    assert resp.status_code == 200
+    assert resp.json()["external_id"] == "alias_tok_1"
+    db.refresh(org)
+    saved_user = db.get(User, 1)
+    assert saved_user is not None
+    assert saved_user.payment_customer_id is None
+
+
+def test_worldline_card_return_saves_alias(client, db, monkeypatch):
+    org = _seed_org(db, org_id=17)
+
+    def _fake_assert(self, *, token):
+        assert token == "alias_tok_1"
+        return {
+            "Alias": {"Id": "alias_123"},
+            "PaymentMeans": {"Card": {"HolderName": "Max Mustermann"}, "DisplayText": "**** 1234"},
+        }
+
+    monkeypatch.setattr("app.services.payments.WorldlineProvider.assert_alias_insert", _fake_assert)
+
+    from app.services import payments as payments_module
+
+    ctx = payments_module.create_worldline_callback_context(
+        org_id=org.id,
+        user_id=1,
+        kind="alias",
+        order_reference="wl_alias_17_1_test",
+        success_url="https://example.com/success",
+        cancel_url="https://example.com/cancel",
+    )
+
+    resp = client.get(
+        "/api/v1/billing/webhooks/worldline/card/return/alias_tok_1",
+        params={
+            "ctx": ctx,
+            "source": "return",
+        },
+        follow_redirects=False,
+    )
+
+    assert resp.status_code == 303
+    assert resp.headers["location"].startswith("https://example.com/success")
+    saved_user = db.get(User, 1)
+    assert saved_user is not None
+    assert saved_user.payment_customer_id == "alias_123"
+
+
+def test_update_default_payment_user_selects_saved_card_owner(client, db, monkeypatch):
+    org = _seed_org(db, org_id=18)
+    _override_user(org.id)
+
+    saved_user = User(
+        id=2,
+        email="saved@example.com",
+        hashed_password="x",
+        is_active=True,
+        billing_address_json=org.billing_address_json,
+        email_verified=True,
+        is_superadmin=False,
+        org_id=org.id,
+        org_role="admin",
+        payment_customer_id="alias_saved_1",
+    )
+    db.add(saved_user)
+    db.add(OrgMember(org_id=org.id, user_id=2, role="admin"))
+    db.commit()
+
+    resp = client.put(
+        f"/api/v1/orgs/{org.id}/default-payment-user",
+        json={"user_id": 2},
+    )
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["default_payment_user_id"] == 2
+    db.refresh(org)
+    assert org.default_payment_user_id == 2

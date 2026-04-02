@@ -146,6 +146,10 @@ class OrgWorkspaceSettingsBatch(BaseModel):
     scoring_weight_flex: str | None = None
 
 
+class DefaultPaymentUserUpdate(BaseModel):
+    user_id: int | None = None
+
+
 class OrgOut(BaseModel):
     id: int
     name: str
@@ -155,6 +159,7 @@ class OrgOut(BaseModel):
     verified_business: bool = False
     verified_domain: str | None = None
     billing_address_json: str | None = None
+    default_payment_user_id: int | None = None
     custom_features: dict | None = None
     member_count: int = 0
 
@@ -163,6 +168,7 @@ class OrgOut(BaseModel):
 
 class OrgUpdate(BaseModel):
     name: str | None = None
+    billing_address: BillingAddress | None = None
 
 
 class BillingAddress(BaseModel):
@@ -182,6 +188,7 @@ class MemberOut(BaseModel):
     org_role: str
     is_active: bool
     created_at: datetime
+    has_saved_payment_method: bool = False
 
     model_config = {"from_attributes": True}
 
@@ -235,6 +242,7 @@ def get_org(
         verified_business=org.verified_business,
         verified_domain=org.verified_domain,
         billing_address_json=org.billing_address_json,
+        default_payment_user_id=org.default_payment_user_id,
         custom_features=org.custom_features,
         member_count=member_count,
     )
@@ -269,6 +277,7 @@ def update_org(
         verified_business=org.verified_business,
         verified_domain=org.verified_domain,
         billing_address_json=org.billing_address_json,
+        default_payment_user_id=org.default_payment_user_id,
         custom_features=org.custom_features,
         member_count=member_count,
     )
@@ -300,6 +309,53 @@ def update_billing_address(
         verified_business=org.verified_business,
         verified_domain=org.verified_domain,
         billing_address_json=org.billing_address_json,
+        default_payment_user_id=org.default_payment_user_id,
+        custom_features=org.custom_features,
+        member_count=member_count,
+    )
+
+
+@router.put(
+    "/default-payment-user",
+    response_model=OrgOut,
+    summary="Set the org's default saved payment method owner",
+)
+def update_default_payment_user(
+    org_id: int,
+    body: DefaultPaymentUserUpdate,
+    db: Session = Depends(get_db),
+    user_org: tuple[User, Organization] = Depends(require_org_role("admin", "owner")),
+):
+    _validate_org_access(org_id, user_org)
+    _, org = user_org
+    if body.user_id is None:
+        org.default_payment_user_id = None
+    else:
+        member_row = (
+            db.query(OrgMember, User)
+            .join(User, OrgMember.user_id == User.id)
+            .filter(OrgMember.org_id == org.id, OrgMember.user_id == body.user_id)
+            .first()
+        )
+        if member_row is None:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Selected user is not a member of this org")
+        _member, selected_user = member_row
+        if not selected_user.payment_customer_id:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Selected user does not have a saved payment method")
+        org.default_payment_user_id = selected_user.id
+    db.commit()
+    db.refresh(org)
+    member_count = db.query(OrgMember).filter(OrgMember.org_id == org.id).count()
+    return OrgOut(
+        id=org.id,
+        name=org.name,
+        slug=org.slug,
+        tier=org.tier,
+        credits_balance=org.credits_balance,
+        verified_business=org.verified_business,
+        verified_domain=org.verified_domain,
+        billing_address_json=org.billing_address_json,
+        default_payment_user_id=org.default_payment_user_id,
         custom_features=org.custom_features,
         member_count=member_count,
     )
@@ -335,6 +391,7 @@ def list_members(
             org_role=member.role,
             is_active=user.is_active,
             created_at=user.created_at,
+            has_saved_payment_method=bool(user.payment_customer_id),
         ))
     return result
 
