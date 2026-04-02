@@ -94,6 +94,7 @@ export interface PaymentRecord {
   provider: string;
   kind: string;
   status: string;
+  decline_reason: string | null;
   amount_chf: number;
   payment_method: string | null;
   subscription_tier: string | null;
@@ -136,6 +137,17 @@ export async function fetchPaymentHistory(page = 1, page_size = 20): Promise<Pag
   const res = await fetch(`/api/v1/billing/payments?page=${page}&page_size=${page_size}`, { credentials: "include" });
   if (!res.ok) throw new Error("Failed to fetch payment history");
   return res.json();
+}
+
+export async function cancelPendingPayment(paymentId: number): Promise<void> {
+  const res = await fetch(`/api/v1/billing/payments/${paymentId}/cancel`, {
+    method: "POST",
+    credentials: "include",
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.detail ?? "Failed to cancel payment");
+  }
 }
 
 // ── Admin billing ──────────────────────────────────────────────────────────────

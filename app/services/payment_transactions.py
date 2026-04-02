@@ -10,7 +10,7 @@ Security guarantees:
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Literal
 
 from sqlalchemy.orm import Session
@@ -401,3 +401,49 @@ def apply_successful_payment(
         payment_tx.error_message = str(exc)
         db.commit()
         raise
+
+
+def expire_stale_pending_transactions(
+    db: Session,
+    *,
+    org_id: int | None = None,
+    max_age_minutes: int = 15,
+) -> int:
+    """Mark pending transactions older than max_age_minutes as declined.
+
+    Returns the number of expired transactions.
+    """
+    cutoff = datetime.now(tz=timezone.utc) - timedelta(minutes=max_age_minutes)
+    query = db.query(PaymentTransaction).filter(
+        PaymentTransaction.status == "pending",
+        PaymentTransaction.created_at <= cutoff,
+    )
+    if org_id is not None:
+        query = query.filter(PaymentTransaction.org_id == org_id)
+    rows = query.all()
+    if not rows:
+        return 0
+    for tx in rows:
+        tx.status = "declined"
+        tx.error_code = "PENDING_TIMEOUT"
+        tx.error_message = f"Payment expired after {max_age_minutes} minutes"
+        tx.webhook_processed_at = datetime.now(tz=timezone.utc)
+    db.commit()
+    return len(rows)
+
+
+def cancel_pending_transaction(
+    db: Session,
+    *,
+    tx: PaymentTransaction,
+) -> PaymentTransaction:
+    """Manually cancel a pending payment transaction."""
+    if tx.status != "pending":
+        raise PaymentValidationError(f"Only pending payments can be cancelled (status={tx.status})")
+    tx.status = "declined"
+    tx.error_code = "MANUAL_CANCELLED"
+    tx.error_message = "Cancelled by user"
+    tx.webhook_processed_at = datetime.now(tz=timezone.utc)
+    db.commit()
+    db.refresh(tx)
+    return tx

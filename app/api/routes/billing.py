@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+from datetime import datetime, timedelta, timezone
 from typing import Literal
 from urllib.parse import urlencode, urlparse
 
@@ -486,6 +487,14 @@ async def worldline_return(
     # Must happen before calling Saferpay to avoid paying twice on retries.
     existing_payment = payment_transactions.get_payment_transaction_by_external_id(db, token)
     if existing_payment:
+        if existing_payment.status == "pending" and existing_payment.created_at <= datetime.now(tz=timezone.utc) - timedelta(minutes=15):
+            existing_payment.status = "declined"
+            existing_payment.error_code = "PENDING_TIMEOUT"
+            existing_payment.error_message = "Payment expired after 15 minutes"
+            existing_payment.webhook_processed_at = datetime.now(tz=timezone.utc)
+            db.commit()
+            db.refresh(existing_payment)
+
         _emit(
             "info",
             "billing.worldline_existing_payment token=%s tx_id=%s status=%s kind=%s",
@@ -829,6 +838,7 @@ def get_billing_summary(
 ) -> dict:
     """Return billing summary for the current org: tier, balance, subscription info."""
     user, org = user_org
+    payment_transactions.expire_stale_pending_transactions(db, org_id=org.id, max_age_minutes=15)
     return {
         "org_id": org.id,
         "tier": org.tier,
@@ -889,6 +899,7 @@ def list_payment_history(
     Exposes only safe fields — no raw provider tokens or internal error codes.
     """
     _user, org = user_org
+    payment_transactions.expire_stale_pending_transactions(db, org_id=org.id, max_age_minutes=15)
     query = db.query(PaymentTransaction).filter(PaymentTransaction.org_id == org.id)
     total = query.count()
     rows = (
@@ -897,6 +908,16 @@ def list_payment_history(
         .limit(page_size)
         .all()
     )
+
+    def _decline_reason(tx: PaymentTransaction) -> str | None:
+        if tx.error_code == "PENDING_TIMEOUT":
+            return "Expired (15 min timeout)"
+        if tx.error_code == "MANUAL_CANCELLED":
+            return "Cancelled by user"
+        if tx.status == "declined":
+            return "Declined"
+        return None
+
     return {
         "total": total,
         "page": page,
@@ -907,6 +928,7 @@ def list_payment_history(
                 "provider": tx.provider,
                 "kind": tx.kind,
                 "status": tx.status,
+                "decline_reason": _decline_reason(tx),
                 "amount_chf": tx.amount_chf,
                 "payment_method": tx.payment_method,
                 "subscription_tier": tx.subscription_tier,
@@ -922,3 +944,25 @@ def list_payment_history(
             for tx in rows
         ],
     }
+
+
+@router.post("/payments/{payment_id}/cancel", response_model=WebhookResponse)
+def cancel_pending_payment(
+    payment_id: int,
+    user_org: tuple[User, object] = Depends(require_org_role("admin", "owner")),
+    db: Session = Depends(get_db),
+) -> WebhookResponse:
+    _user, org = user_org
+    tx = db.query(PaymentTransaction).filter(PaymentTransaction.id == payment_id, PaymentTransaction.org_id == org.id).first()
+    if tx is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Payment not found")
+
+    # Ensure stale pending payments are closed before manual action check.
+    payment_transactions.expire_stale_pending_transactions(db, org_id=org.id, max_age_minutes=15)
+    db.refresh(tx)
+
+    try:
+        payment_transactions.cancel_pending_transaction(db, tx=tx)
+    except payment_transactions.PaymentValidationError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    return WebhookResponse(ok=True)

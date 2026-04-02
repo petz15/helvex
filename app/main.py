@@ -16,11 +16,11 @@ _LOG_LEVEL_NAME = (os.getenv("LOG_LEVEL") or "INFO").upper().strip()
 _LOG_LEVEL = getattr(logging, _LOG_LEVEL_NAME, logging.INFO)
 
 _app_logger = logging.getLogger("app")
+_app_logger.handlers.clear()
 _app_logger.setLevel(_LOG_LEVEL)
-if not _app_logger.handlers:
-    _handler = logging.StreamHandler(sys.stdout)
-    _handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s - %(message)s"))
-    _app_logger.addHandler(_handler)
+_handler = logging.StreamHandler(sys.stdout)
+_handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s - %(message)s"))
+_app_logger.addHandler(_handler)
 _app_logger.propagate = False
 
 # ── Python 3.12 compatibility patch ───────────────────────────────────────────
@@ -224,11 +224,11 @@ async def lifespan(app: FastAPI):
             await loop.run_in_executor(None, _run_migrations, app.state)
             # Re-attach handler after _run_migrations, because alembic's fileConfig()
             # call in env.py resets existing loggers (disable_existing_loggers default).
+            _app_logger.handlers.clear()
             _app_logger.setLevel(_LOG_LEVEL)
-            if not _app_logger.handlers:
-                _h = logging.StreamHandler(sys.stdout)
-                _h.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s - %(message)s"))
-                _app_logger.addHandler(_h)
+            _h = logging.StreamHandler(sys.stdout)
+            _h.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s - %(message)s"))
+            _app_logger.addHandler(_h)
             _app_logger.propagate = False
             print(f"boot.post_migration handlers={_app_logger.handlers} level={logging.getLevelName(_app_logger.level)}", flush=True)
             _app_logger.info("boot.post_migration logger test")

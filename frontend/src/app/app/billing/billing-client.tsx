@@ -8,6 +8,7 @@ import {
   fetchBillingSummary,
   fetchCreditTransactions,
   fetchPaymentHistory,
+  cancelPendingPayment,
   fetchOrg,
   fetchOrgMembers,
   setOrgDefaultPaymentUser,
@@ -124,6 +125,7 @@ function TopupSection({ billingAddress }: { billingAddress: BillingAddressPayloa
   const [loading, setLoading] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [pendingCredits, setPendingCredits] = useState<number | null>(null);
+  const [savePaymentMethod, setSavePaymentMethod] = useState<boolean>(false);
 
   async function handleTopup(credits: number) {
     if (!billingAddress) {
@@ -176,6 +178,7 @@ function TopupSection({ billingAddress }: { billingAddress: BillingAddressPayloa
         success_url: successUrl.toString(),
         cancel_url: cancelUrl.toString(),
         billing_address: billingAddress,
+        save_payment_method: savePaymentMethod,
       });
       window.location.assign(session.checkout_url);
     } catch (e) {
@@ -216,6 +219,15 @@ function TopupSection({ billingAddress }: { billingAddress: BillingAddressPayloa
           <div className="text-sm text-slate-700">
             {billingAddress.first_name} {billingAddress.last_name}, {billingAddress.street} {billingAddress.number}, {billingAddress.postal_code} {billingAddress.city}, {billingAddress.country}
           </div>
+          <label className="flex items-center gap-2 text-xs text-slate-600">
+            <input
+              type="checkbox"
+              checked={savePaymentMethod}
+              onChange={(e) => setSavePaymentMethod(e.target.checked)}
+              className="h-4 w-4 rounded border-slate-300 text-blue-600"
+            />
+            Save this card for future charges
+          </label>
           <div className="flex items-center gap-2">
             <button
               onClick={confirmTopup}
@@ -252,7 +264,6 @@ function SavedCardSection({ billingAddress, hasSavedPaymentMethod }: { billingAd
       const cancelUrl = new URL("/app/billing", origin);
       cancelUrl.searchParams.set("checkout", "cancel");
       cancelUrl.searchParams.set("kind", "card");
-      cancelUrl.searchParams.set("saved", "1");
 
       const session = await createWorldlineCardRegistration({
         success_url: successUrl.toString(),
@@ -466,10 +477,21 @@ function CreditHistory() {
 
 function PaymentHistory() {
   const [page, setPage] = useState(1);
-  const { data, isLoading } = useSWR(
+  const { data, isLoading, mutate } = useSWR(
     `billing-payments-${page}`,
     () => fetchPaymentHistory(page, 20),
   );
+  const [cancelingId, setCancelingId] = useState<number | null>(null);
+
+  async function handleCancel(paymentId: number) {
+    setCancelingId(paymentId);
+    try {
+      await cancelPendingPayment(paymentId);
+      await mutate();
+    } finally {
+      setCancelingId(null);
+    }
+  }
 
   const totalPages = Math.max(1, Math.ceil((data?.total ?? 0) / 20));
 
@@ -489,11 +511,12 @@ function PaymentHistory() {
               <th className="text-left px-4 py-2.5 text-xs text-slate-400 font-medium">Method</th>
               <th className="text-left px-4 py-2.5 text-xs text-slate-400 font-medium">Status</th>
               <th className="text-right px-4 py-2.5 text-xs text-slate-400 font-medium">Amount</th>
+              <th className="text-right px-4 py-2.5 text-xs text-slate-400 font-medium">Actions</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-50">
             {isLoading && (
-              <tr><td colSpan={6} className="text-center py-8">
+              <tr><td colSpan={7} className="text-center py-8">
                 <Loader2 size={16} className="animate-spin mx-auto text-slate-300" />
               </td></tr>
             )}
@@ -513,6 +536,11 @@ function PaymentHistory() {
                 <td className={`px-4 py-2.5 text-xs font-medium capitalize ${STATUS_CLS[tx.status] ?? "text-slate-500"}`}>
                   {tx.status}
                   {tx.refunded_at && <span className="text-amber-500 ml-1">(refunded)</span>}
+                  {tx.decline_reason && (
+                    <div className="mt-1 inline-block rounded-md bg-amber-50 px-2 py-0.5 text-[11px] font-medium normal-case text-amber-700 border border-amber-200">
+                      {tx.decline_reason}
+                    </div>
+                  )}
                 </td>
                 <td className="px-4 py-2.5 text-right text-sm font-semibold text-slate-800 tabular-nums">
                   CHF {tx.amount_chf.toFixed(2)}
@@ -520,10 +548,21 @@ function PaymentHistory() {
                     <div className="text-xs text-amber-500 font-normal">−CHF {tx.refunded_amount_chf.toFixed(2)}</div>
                   )}
                 </td>
+                <td className="px-4 py-2.5 text-right">
+                  {tx.status === "pending" && (
+                    <button
+                      onClick={() => handleCancel(tx.id)}
+                      disabled={cancelingId !== null}
+                      className="rounded-lg border border-slate-200 px-2 py-1 text-xs text-slate-700 hover:bg-slate-100 disabled:opacity-60"
+                    >
+                      {cancelingId === tx.id ? "Cancelling..." : "Cancel"}
+                    </button>
+                  )}
+                </td>
               </tr>
             ))}
             {!isLoading && data?.items.length === 0 && (
-              <tr><td colSpan={6} className="text-center py-8 text-xs text-slate-400">No payments yet</td></tr>
+              <tr><td colSpan={7} className="text-center py-8 text-xs text-slate-400">No payments yet</td></tr>
             )}
           </tbody>
         </table>
@@ -571,7 +610,7 @@ export function BillingClient() {
 
     if (alreadyProcessed) {
       setReturnBanner({ kind: "success", message: "This payment was already processed. No changes were applied twice." });
-    } else if (saved) {
+    } else if (saved && checkout === "success") {
       setReturnBanner({ kind: "success", message: "Saved card registered successfully." });
     } else if (checkout === "success") {
       if (kind === "topup") {

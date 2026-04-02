@@ -7,8 +7,10 @@ from app.auth import get_current_user
 from app.main import app
 from app.models.org_member import OrgMember
 from app.models.organization import Organization
+from app.models.payment_transaction import PaymentTransaction
 from app.models.user import User
 from app.services.payments import CheckoutSession
+from datetime import datetime, timedelta, timezone
 
 
 def _seed_org(db, *, org_id: int = 1) -> Organization:
@@ -380,3 +382,59 @@ def test_update_default_payment_user_selects_saved_card_owner(client, db, monkey
     assert body["default_payment_user_id"] == 2
     db.refresh(org)
     assert org.default_payment_user_id == 2
+
+
+def test_cancel_pending_payment_marks_declined(client, db):
+    org = _seed_org(db, org_id=20)
+    _override_user(org.id)
+
+    tx = PaymentTransaction(
+        org_id=org.id,
+        provider="worldline",
+        external_id="tok_cancel_20",
+        order_reference="wl_topup_20_1_10000_deadbeef",
+        amount_chf=1.0,
+        currency="CHF",
+        kind="topup",
+        status="pending",
+    )
+    db.add(tx)
+    db.commit()
+
+    resp = client.post(f"/api/v1/billing/payments/{tx.id}/cancel")
+    assert resp.status_code == 200
+
+    history = client.get("/api/v1/billing/payments")
+    assert history.status_code == 200
+    first = history.json()["items"][0]
+    assert first["decline_reason"] == "Cancelled by user"
+
+    db.refresh(tx)
+    assert tx.status == "declined"
+    assert tx.error_code == "MANUAL_CANCELLED"
+
+
+def test_payment_history_expires_stale_pending_after_15_min(client, db):
+    org = _seed_org(db, org_id=21)
+    _override_user(org.id)
+
+    stale = PaymentTransaction(
+        org_id=org.id,
+        provider="worldline",
+        external_id="tok_stale_21",
+        order_reference="wl_topup_21_1_10000_deadbeef",
+        amount_chf=1.0,
+        currency="CHF",
+        kind="topup",
+        status="pending",
+        created_at=datetime.now(tz=timezone.utc) - timedelta(minutes=20),
+    )
+    db.add(stale)
+    db.commit()
+
+    resp = client.get("/api/v1/billing/payments")
+    assert resp.status_code == 200
+
+    db.refresh(stale)
+    assert stale.status == "declined"
+    assert stale.error_code == "PENDING_TIMEOUT"
