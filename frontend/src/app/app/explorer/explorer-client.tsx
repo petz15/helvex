@@ -6,6 +6,7 @@ import { Compass, Search, ChevronRight, X, Download, Settings, AlertTriangle, St
 import { CompanyTable } from "@/components/dashboard/company-table";
 import { CompanyPreview } from "@/components/dashboard/company-preview";
 import { FilterBar } from "@/components/dashboard/filter-bar";
+import { BaloghAdCard } from "@/components/balogh-ad-card";
 import { Pagination } from "@/components/dashboard/pagination";
 import {
   fetchCompanies, fetchStats, fetchCantons, fetchTaxonomy,
@@ -720,6 +721,11 @@ function BrowseView({ initialFilters, initialCantons, initialStats, initialTaxon
         onLoadView={(f) => setFilters({ ...BROWSE_DEFAULTS, ...f })}
         onDeleteView={async (id) => { await deleteView(id); mutateSavedViews(); }}
       />
+
+      {/* Ad card */}
+      <div className="px-4 py-2 bg-slate-50 border-b border-slate-100 shrink-0">
+        <BaloghAdCard className="max-w-xs" />
+      </div>
 
       {/* Table + preview */}
       <div className="flex flex-1 overflow-hidden">

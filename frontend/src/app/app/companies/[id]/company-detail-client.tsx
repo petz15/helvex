@@ -9,6 +9,7 @@ import { createNote, deleteNote, fetchCompany, runCompanyWebSearch, selectCompan
 import type { Company, Note, GoogleScoredResult } from "@/lib/types";
 import "leaflet/dist/leaflet.css";
 import { SogcTimeline, SignersPanel } from "@/components/sogc-history";
+import { BaloghAdCard } from "@/components/balogh-ad-card";
 
 interface Props {
   company: Company;
@@ -600,6 +601,11 @@ export function CompanyDetailClient({ company: initial, readOnlyDemo = false }: 
           ))}
         </div>
       </div>}
+
+      {/* Ad card */}
+      <div className="mt-6">
+        <BaloghAdCard />
+      </div>
     </div>
   );
 }

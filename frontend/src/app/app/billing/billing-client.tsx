@@ -124,8 +124,11 @@ function SummaryCards({ balance, tier, billingCycle, periodEnd }: {
 function TopupSection({ billingAddress }: { billingAddress: BillingAddressPayload | null }) {
   const [loading, setLoading] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [pendingCredits, setPendingCredits] = useState<number | null>(null);
   const [savePaymentMethod, setSavePaymentMethod] = useState<boolean>(false);
+  const [customCreditsInput, setCustomCreditsInput] = useState<string>("25000");
+
+  const customCredits = Number.parseInt(customCreditsInput, 10);
+  const customCreditsValid = Number.isInteger(customCredits) && customCredits > 0;
 
   async function handleTopup(credits: number) {
     if (!billingAddress) {
@@ -140,8 +143,7 @@ function TopupSection({ billingAddress }: { billingAddress: BillingAddressPayloa
       window.location.assign(buildAddressReturnUrl(sourcePath));
       return;
     }
-    setPendingCredits(credits);
-    setError(null);
+    void startTopupCheckout(credits);
   }
 
   useEffect(() => {
@@ -154,27 +156,43 @@ function TopupSection({ billingAddress }: { billingAddress: BillingAddressPayloa
     if (!intent.sourcePath.startsWith("/app/billing")) return;
 
     clearCheckoutIntent();
-    setPendingCredits(intent.credits);
-    setError(null);
+    void startTopupCheckout(intent.credits);
   }, [billingAddress]);
 
-  async function confirmTopup() {
-    if (!pendingCredits || !billingAddress) return;
-    setLoading(pendingCredits);
+  async function startTopupCheckout(credits: number) {
+    if (!Number.isInteger(credits) || credits <= 0) {
+      setError("Enter a valid top-up amount.");
+      return;
+    }
+
+    if (!billingAddress) {
+      const sourcePath = `${window.location.pathname}${window.location.search}`;
+      saveCheckoutIntent({
+        kind: "topup",
+        sourcePath,
+        credits,
+        success_path: "/app/billing",
+        cancel_path: "/app/billing",
+      });
+      window.location.assign(buildAddressReturnUrl(sourcePath));
+      return;
+    }
+
+    setLoading(credits);
     setError(null);
     try {
       const origin = window.location.origin;
       const successUrl = new URL("/app/billing", origin);
       successUrl.searchParams.set("checkout", "success");
       successUrl.searchParams.set("kind", "topup");
-      successUrl.searchParams.set("credits", String(pendingCredits));
+      successUrl.searchParams.set("credits", String(credits));
       const cancelUrl = new URL("/app/billing", origin);
       cancelUrl.searchParams.set("checkout", "cancel");
       cancelUrl.searchParams.set("kind", "topup");
-      cancelUrl.searchParams.set("credits", String(pendingCredits));
+      cancelUrl.searchParams.set("credits", String(credits));
 
       const session = await createTopupCheckout({
-        credits: pendingCredits,
+        credits,
         success_url: successUrl.toString(),
         cancel_url: cancelUrl.toString(),
         billing_address: billingAddress,
@@ -185,7 +203,6 @@ function TopupSection({ billingAddress }: { billingAddress: BillingAddressPayloa
       setError(e instanceof Error ? e.message : "Failed to start checkout");
     } finally {
       setLoading(null);
-      setPendingCredits(null);
     }
   }
 
@@ -195,6 +212,26 @@ function TopupSection({ billingAddress }: { billingAddress: BillingAddressPayloa
       <p className="text-xs text-slate-400 mt-0.5 mb-4">Credits never expire. Higher tiers receive bonus credits on every purchase.</p>
       {error && (
         <div className="mb-3 text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">{error}</div>
+      )}
+      {billingAddress && (
+        <div className="mb-4 rounded-xl border border-slate-200 bg-slate-50 p-4 space-y-3">
+          <div className="text-xs uppercase tracking-wide text-slate-400 font-semibold">Billing address</div>
+          <div className="text-sm text-slate-700">
+            {billingAddress.first_name} {billingAddress.last_name}, {billingAddress.street} {billingAddress.number}, {billingAddress.postal_code} {billingAddress.city}, {billingAddress.country}
+          </div>
+          <label className="flex items-center gap-2 text-xs text-slate-600">
+            <input
+              type="checkbox"
+              checked={savePaymentMethod}
+              onChange={(e) => setSavePaymentMethod(e.target.checked)}
+              className="h-4 w-4 rounded border-slate-300 text-blue-600"
+            />
+            Save this card for future charges
+          </label>
+          <div className="text-xs text-slate-500">
+            Top-up and plan buttons will go directly to payment using your saved alias when available.
+          </div>
+        </div>
       )}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
         {TOPUP_AMOUNTS.map(({ credits, label, chf }) => (
@@ -213,33 +250,38 @@ function TopupSection({ billingAddress }: { billingAddress: BillingAddressPayloa
           </button>
         ))}
       </div>
-      {pendingCredits && billingAddress && (
-        <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-4 space-y-3">
-          <div className="text-xs uppercase tracking-wide text-slate-400 font-semibold">Confirm billing address</div>
-          <div className="text-sm text-slate-700">
-            {billingAddress.first_name} {billingAddress.last_name}, {billingAddress.street} {billingAddress.number}, {billingAddress.postal_code} {billingAddress.city}, {billingAddress.country}
-          </div>
-          <label className="flex items-center gap-2 text-xs text-slate-600">
+      <div className="mt-4 rounded-xl border border-slate-200 bg-white p-4 space-y-3">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
+          <label className="flex-1 space-y-1">
+            <span className="block text-xs uppercase tracking-wide text-slate-400 font-semibold">Custom amount</span>
             <input
-              type="checkbox"
-              checked={savePaymentMethod}
-              onChange={(e) => setSavePaymentMethod(e.target.checked)}
-              className="h-4 w-4 rounded border-slate-300 text-blue-600"
+              type="number"
+              min={1}
+              step={1}
+              value={customCreditsInput}
+              onChange={(e) => setCustomCreditsInput(e.target.value)}
+              className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-800 outline-none transition-colors focus:border-blue-400"
+              placeholder="25000"
             />
-            Save this card for future charges
           </label>
-          <div className="flex items-center gap-2">
-            <button
-              onClick={confirmTopup}
-              disabled={loading !== null}
-              className="rounded-lg bg-blue-600 px-3 py-2 text-xs font-medium text-white transition-colors hover:bg-blue-700 disabled:opacity-60"
-            >
-              {loading === pendingCredits ? "Starting…" : `Continue with ${pendingCredits.toLocaleString()} credits`}
-            </button>
-            <a href="/app/addresses?return_to=/app/billing" className="text-xs text-blue-600 hover:underline">Manage addresses</a>
+          <div className="text-xs text-slate-500 sm:min-w-40">
+            {customCreditsValid ? `≈ CHF ${creditsToChf(customCredits).toFixed(2)}` : "Enter a positive credit amount."}
           </div>
+          <button
+            onClick={() => void startTopupCheckout(customCredits)}
+            disabled={loading !== null || !customCreditsValid}
+            className="rounded-lg bg-slate-900 px-3 py-2 text-xs font-medium text-white transition-colors hover:bg-slate-800 disabled:opacity-60"
+          >
+            {loading === customCredits ? "Starting…" : "Top up custom amount"}
+          </button>
         </div>
-      )}
+        {!billingAddress && (
+          <p className="text-xs text-amber-600">Add a billing address first to continue.</p>
+        )}
+        <a href="/app/addresses?return_to=/app/billing" className="text-xs text-blue-600 hover:underline">
+          Manage addresses
+        </a>
+      </div>
     </div>
   );
 }

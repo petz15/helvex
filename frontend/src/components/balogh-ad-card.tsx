@@ -5,7 +5,11 @@ import Link from "next/link";
 import { fetchCurrentUser, fetchOrg } from "@/lib/api";
 import { hasNoAds } from "@/lib/entitlements";
 
-export function AdBanner() {
+interface BaloghAdCardProps {
+  className?: string;
+}
+
+export function BaloghAdCard({ className = "" }: BaloghAdCardProps) {
   const { data: me } = useSWR("me", fetchCurrentUser);
   const orgId = me?.org?.id ?? null;
   const { data: org } = useSWR(orgId ? ["org-detail", orgId] : null, () => fetchOrg(orgId!));
@@ -14,18 +18,17 @@ export function AdBanner() {
   if (hasNoAds({ tier: org.tier, customFeatures: org.custom_features })) return null;
 
   return (
-    <div className="mx-auto w-full max-w-7xl px-4 py-2">
-      <div className="flex items-center justify-between rounded-lg border border-slate-200 bg-white px-4 py-2.5 text-xs">
+    <div className={`rounded-lg border border-slate-200 bg-white p-4 shadow-sm ${className}`}>
+      <div className="flex flex-col gap-3">
         <div>
-          <span className="font-semibold text-slate-900">Balogh Consulting</span>
-          <span className="mx-2 text-slate-400">·</span>
-          <span className="text-slate-600">Value first — you decide what it's worth.</span>
+          <h3 className="text-sm font-semibold text-slate-900">Balogh Consulting</h3>
+          <p className="mt-1 text-xs text-slate-600">Value first — you decide what it's worth.</p>
         </div>
         <Link
           href="https://balogh-consulting.ch"
           target="_blank"
           rel="noopener noreferrer"
-          className="ml-4 whitespace-nowrap text-blue-600 hover:text-blue-700 hover:underline"
+          className="inline-flex items-center gap-1 text-xs font-medium text-blue-600 hover:text-blue-700 hover:underline"
         >
           Learn more →
         </Link>

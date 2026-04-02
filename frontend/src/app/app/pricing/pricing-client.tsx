@@ -265,7 +265,6 @@ export function PricingClient() {
   const [yearly, setYearly] = useState(false);
   const [creditTier, setCreditTier] = useState<TierId>("explorer");
   const [checkoutLoading, setCheckoutLoading] = useState<string | null>(null);
-  const [pendingTier, setPendingTier] = useState<TierId | null>(null);
   const [checkoutMessage, setCheckoutMessage] = useState<{ kind: "success" | "error"; message: string } | null>(null);
   const { data: me } = useSWR("me", fetchCurrentUser);
   const billingAddress = parseBillingAddressJson(me?.billing_address_json);
@@ -327,8 +326,7 @@ export function PricingClient() {
       window.location.assign(buildAddressReturnUrl(sourcePath));
       return;
     }
-    setPendingTier(tier);
-    setCheckoutMessage(null);
+    void confirmPlanCheckout(tier);
   }
 
   async function confirmPlanCheckout(tier: TierId, cycleOverride?: "monthly" | "yearly") {
@@ -361,7 +359,6 @@ export function PricingClient() {
       });
     } finally {
       setCheckoutLoading(null);
-      setPendingTier(null);
     }
   }
 
@@ -478,25 +475,6 @@ export function PricingClient() {
             {checkoutMessage.message}
           </div>
         )}
-
-          {pendingTier && billingAddress && (
-            <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm space-y-3">
-              <div className="text-xs font-semibold uppercase tracking-wider text-slate-400">Confirm billing address</div>
-              <div className="text-sm text-slate-700">
-                {billingAddress.first_name} {billingAddress.last_name}, {billingAddress.street} {billingAddress.number}, {billingAddress.postal_code} {billingAddress.city}, {billingAddress.country}
-              </div>
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={() => confirmPlanCheckout(pendingTier)}
-                  disabled={checkoutLoading !== null}
-                  className="rounded-lg bg-blue-600 px-3 py-2 text-xs font-semibold text-white transition-colors hover:bg-blue-700 disabled:opacity-60"
-                >
-                  {checkoutLoading === pendingTier ? "Starting…" : `Continue with ${pendingTier}`}
-                </button>
-                <a href="/app/addresses?return_to=/app/pricing" className="text-xs text-blue-600 hover:underline">Manage addresses</a>
-              </div>
-            </div>
-          )}
 
         {/* ── Feature comparison table ── */}
         <div className="space-y-3">

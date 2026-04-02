@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import type { Map, LayerGroup } from "leaflet";
 import { fetchMapData, fetchMapClusters } from "@/lib/api";
 import type { MapFeature, MapCluster } from "@/lib/types";
+import { MapTurnstileGate } from "@/components/map-turnstile-gate";
 import "leaflet/dist/leaflet.css";
 
 // Below this zoom level show grid-aggregated cluster circles; at/above show individual points.
@@ -206,56 +207,59 @@ export function MapClient() {
   }
 
   return (
-    <div className="flex flex-col h-[calc(100vh-3rem)]">
-      <form onSubmit={handleFilter} className="flex items-center gap-3 px-4 py-2.5 border-b border-slate-200 bg-white flex-wrap">
-        <input
-          placeholder="Canton (e.g. BE)"
-          value={filters.canton}
-          onChange={e => setFilters(f => ({ ...f, canton: e.target.value.toUpperCase() }))}
-          className="px-2.5 py-1.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-300 w-24"
-        />
-        <select
-          value={filters.review_status}
-          onChange={e => setFilters(f => ({ ...f, review_status: e.target.value }))}
-          className="px-2.5 py-1.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-300"
-        >
-          <option value="">All statuses</option>
-          <option value="potential_proposal">Potential proposal</option>
-          <option value="confirmed_proposal">Confirmed proposal</option>
-          <option value="potential_generic">Potential generic</option>
-          <option value="confirmed_generic">Confirmed generic</option>
-          <option value="interesting">Interesting</option>
-          <option value="rejected">Rejected</option>
-        </select>
-        <input
-          type="number"
-          placeholder="Min combined score"
-          value={filters.min_combined_score}
-          onChange={e => setFilters(f => ({ ...f, min_combined_score: e.target.value }))}
-          className="px-2.5 py-1.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-300 w-40"
-        />
-        <label className="flex items-center gap-1.5 text-sm text-slate-600 cursor-pointer">
+    <>
+      <MapTurnstileGate />
+      <div className="flex flex-col h-[calc(100vh-3rem)]">
+        <form onSubmit={handleFilter} className="flex items-center gap-3 px-4 py-2.5 border-b border-slate-200 bg-white flex-wrap">
           <input
-            type="checkbox"
-            checked={filters.hide_cancelled}
-            onChange={e => setFilters(f => ({ ...f, hide_cancelled: e.target.checked }))}
-            className="rounded border-slate-300 text-blue-600"
+            placeholder="Canton (e.g. BE)"
+            value={filters.canton}
+            onChange={e => setFilters(f => ({ ...f, canton: e.target.value.toUpperCase() }))}
+            className="px-2.5 py-1.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-300 w-24"
           />
-          Hide cancelled
-        </label>
-        <button type="submit" className="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded-lg text-sm font-medium transition-colors">
-          {loading ? "Loading…" : "Apply"}
-        </button>
-        <span className="text-xs text-slate-400 ml-auto">
-          {count.toLocaleString()} companies
-          {clustered
-            ? " — zoom in for individual points"
-            : truncated
-            ? ` (capped at 5 000 — zoom in further)`
-            : " in view"}
-        </span>
-      </form>
-      <div ref={mapRef} className="flex-1" />
-    </div>
+          <select
+            value={filters.review_status}
+            onChange={e => setFilters(f => ({ ...f, review_status: e.target.value }))}
+            className="px-2.5 py-1.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-300"
+          >
+            <option value="">All statuses</option>
+            <option value="potential_proposal">Potential proposal</option>
+            <option value="confirmed_proposal">Confirmed proposal</option>
+            <option value="potential_generic">Potential generic</option>
+            <option value="confirmed_generic">Confirmed generic</option>
+            <option value="interesting">Interesting</option>
+            <option value="rejected">Rejected</option>
+          </select>
+          <input
+            type="number"
+            placeholder="Min combined score"
+            value={filters.min_combined_score}
+            onChange={e => setFilters(f => ({ ...f, min_combined_score: e.target.value }))}
+            className="px-2.5 py-1.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-300 w-40"
+          />
+          <label className="flex items-center gap-1.5 text-sm text-slate-600 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={filters.hide_cancelled}
+              onChange={e => setFilters(f => ({ ...f, hide_cancelled: e.target.checked }))}
+              className="rounded border-slate-300 text-blue-600"
+            />
+            Hide cancelled
+          </label>
+          <button type="submit" className="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded-lg text-sm font-medium transition-colors">
+            {loading ? "Loading…" : "Apply"}
+          </button>
+          <span className="text-xs text-slate-400 ml-auto">
+            {count.toLocaleString()} companies
+            {clustered
+              ? " — zoom in for individual points"
+              : truncated
+              ? ` (capped at 5 000 — zoom in further)`
+              : " in view"}
+          </span>
+        </form>
+        <div ref={mapRef} className="flex-1" />
+      </div>
+    </>
   );
 }

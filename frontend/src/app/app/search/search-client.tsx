@@ -7,6 +7,7 @@ import { FilterBar } from "@/components/dashboard/filter-bar";
 import { CompanyTable } from "@/components/dashboard/company-table";
 import { CompanyPreview } from "@/components/dashboard/company-preview";
 import { Pagination } from "@/components/dashboard/pagination";
+import { BaloghAdCard } from "@/components/balogh-ad-card";
 import { fetchCompanies, fetchStats, fetchCantons, fetchTaxonomy, fetchSavedViews, saveView, deleteView, enqueueCSVExport } from "@/lib/api";
 import type { Company, CompanyFilters, CompanyStats } from "@/lib/types";
 
@@ -123,6 +124,11 @@ export function SearchClient({ initialCantons, initialStats, initialFilters }: S
         onLoadView={handleLoadView}
         onDeleteView={handleDeleteView}
       />
+
+      {/* Ad card */}
+      <div className="px-4 py-2 bg-slate-50 border-b border-slate-100 shrink-0">
+        <BaloghAdCard className="max-w-xs" />
+      </div>
 
       {/* Table + preview (horizontal split) */}
       <div className="flex flex-1 overflow-hidden">
