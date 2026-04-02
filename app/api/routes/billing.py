@@ -174,6 +174,29 @@ def create_subscription_checkout(
             "billing.subscription_checkout_ok org_id=%s provider=%s checkout_url_prefix=%s",
             org.id, session.provider, session.checkout_url[:50] if session.checkout_url else "N/A",
         )
+        if session.external_id:
+            try:
+                payment_transactions.log_payment_transaction(
+                    db,
+                    org_id=org.id,
+                    provider=session.provider,  # type: ignore[arg-type]
+                    external_id=session.external_id,
+                    order_reference=session.order_reference or f"sub_{session.external_id[:24]}",
+                    amount_chf=amount_chf,
+                    kind="subscription",
+                    status="pending",
+                    subscription_tier=body.tier,
+                    subscription_billing_cycle=body.billing_cycle,
+                    billing_address=json.dumps(billing_address),
+                )
+            except payment_transactions.DuplicatePaymentError:
+                logger.warning(
+                    "billing.subscription_checkout_pending_duplicate org_id=%s token=%s",
+                    org.id,
+                    session.external_id[:20],
+                )
+            except payment_transactions.PaymentValidationError:
+                logger.exception("billing.subscription_checkout_pending_log_failed org_id=%s", org.id)
     except payments.PaymentConfigurationError as exc:
         logger.exception("billing.subscription_checkout_config_error org_id=%s", org.id)
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
@@ -229,6 +252,28 @@ def create_topup_checkout(
             "billing.topup_checkout_ok org_id=%s provider=%s checkout_url_prefix=%s",
             org.id, session.provider, session.checkout_url[:50] if session.checkout_url else "N/A",
         )
+        if session.external_id:
+            try:
+                payment_transactions.log_payment_transaction(
+                    db,
+                    org_id=org.id,
+                    provider=session.provider,  # type: ignore[arg-type]
+                    external_id=session.external_id,
+                    order_reference=session.order_reference or f"topup_{session.external_id[:24]}",
+                    amount_chf=amount_chf,
+                    kind="topup",
+                    status="pending",
+                    credits_purchased=body.credits,
+                    billing_address=json.dumps(billing_address),
+                )
+            except payment_transactions.DuplicatePaymentError:
+                logger.warning(
+                    "billing.topup_checkout_pending_duplicate org_id=%s token=%s",
+                    org.id,
+                    session.external_id[:20],
+                )
+            except payment_transactions.PaymentValidationError:
+                logger.exception("billing.topup_checkout_pending_log_failed org_id=%s", org.id)
     except payments.PaymentConfigurationError as exc:
         logger.exception("billing.topup_checkout_config_error org_id=%s", org.id)
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
@@ -303,7 +348,16 @@ async def worldline_return(
     params = request.query_params
     # Saferpay returns token as TOKEN query parameter, but accept variations
     token = str(token or params.get("TOKEN") or params.get("token") or params.get("Token") or "").strip()
-    if token in {"{TOKEN}", "%7BTOKEN%7D"}:
+    if token in {
+        "{TOKEN}",
+        "%7BTOKEN%7D",
+        "{token}",
+        "%7Btoken%7D",
+        "{Token}",
+        "%7BToken%7D",
+        "{{{PAYMENTPAGETOKEN}}}",
+        "%7B%7B%7BPAYMENTPAGETOKEN%7D%7D%7D",
+    }:
         token = ""
     success_url = str(params.get("success_url") or "").strip()
     cancel_url = str(params.get("cancel_url") or "").strip()
@@ -368,6 +422,7 @@ async def worldline_return(
     # SECURITY: Check for existing payment to prevent double-processing.
     # Must happen before calling Saferpay to avoid paying twice on retries.
     existing_payment = payment_transactions.get_payment_transaction_by_external_id(db, token)
+    pending_payment: PaymentTransaction | None = None
     if existing_payment:
         _emit(
             "info",
@@ -380,10 +435,12 @@ async def worldline_return(
         # Redirect based on the actual recorded outcome — never assume success.
         if existing_payment.status in {"authorized", "captured"}:
             return RedirectResponse(_safe_redirect_target(success_url), status_code=status.HTTP_303_SEE_OTHER)
-        return RedirectResponse(
-            _safe_redirect_target(_append_query_params(cancel_url, {"reason": "payment_declined"})),
-            status_code=status.HTTP_303_SEE_OTHER,
-        )
+        if existing_payment.status in {"declined", "error"}:
+            return RedirectResponse(
+                _safe_redirect_target(_append_query_params(cancel_url, {"reason": "payment_declined"})),
+                status_code=status.HTTP_303_SEE_OTHER,
+            )
+        pending_payment = existing_payment
 
     try:
         # Contact Saferpay to verify the token and get authoritative status.
@@ -441,23 +498,49 @@ async def worldline_return(
         if not billing_address and org is not None:
             billing_address = getattr(org, "billing_address_json", None)
 
-        payment_tx = payment_transactions.log_payment_transaction(
-            db,
-            org_id=int(parsed_ref["org_id"]),
-            provider="worldline",
-            external_id=token,
-            order_reference=order_reference,
-            amount_chf=amount_chf,
-            kind=kind,
-            status=normalized_status,
-            payment_method=payment_method,
-            provider_transaction_id=transaction_id or None,
-            cardholder_name=cardholder_name,
-            billing_address=billing_address,
-            subscription_tier=(str(parsed_ref["tier"]) if parsed_ref.get("tier") else None),
-            subscription_billing_cycle=(str(parsed_ref["billing_cycle"]) if parsed_ref.get("billing_cycle") else None),
-            credits_purchased=(int(parsed_ref["topup_credits"]) if parsed_ref.get("topup_credits") else None),
-        )
+        if pending_payment is not None:
+            pending_payment.order_reference = order_reference or pending_payment.order_reference
+            pending_payment.amount_chf = amount_chf
+            pending_payment.kind = kind or pending_payment.kind
+            pending_payment.status = normalized_status
+            pending_payment.payment_method = payment_method
+            pending_payment.provider_transaction_id = transaction_id or pending_payment.provider_transaction_id
+            pending_payment.cardholder_name = cardholder_name
+            pending_payment.billing_address = billing_address
+            pending_payment.subscription_tier = str(parsed_ref["tier"]) if parsed_ref.get("tier") else pending_payment.subscription_tier
+            pending_payment.subscription_billing_cycle = str(parsed_ref["billing_cycle"]) if parsed_ref.get("billing_cycle") else pending_payment.subscription_billing_cycle
+            pending_payment.credits_purchased = int(parsed_ref["topup_credits"]) if parsed_ref.get("topup_credits") else pending_payment.credits_purchased
+            db.commit()
+            db.refresh(pending_payment)
+            payment_tx = pending_payment
+            _emit(
+                "info",
+                "billing.worldline_tx_updated token=%s tx_id=%s org_id=%s status=%s kind=%s amount_chf=%s",
+                token[:20],
+                payment_tx.id,
+                payment_tx.org_id,
+                payment_tx.status,
+                payment_tx.kind,
+                payment_tx.amount_chf,
+            )
+        else:
+            payment_tx = payment_transactions.log_payment_transaction(
+                db,
+                org_id=int(parsed_ref["org_id"]),
+                provider="worldline",
+                external_id=token,
+                order_reference=order_reference,
+                amount_chf=amount_chf,
+                kind=kind,
+                status=normalized_status,
+                payment_method=payment_method,
+                provider_transaction_id=transaction_id or None,
+                cardholder_name=cardholder_name,
+                billing_address=billing_address,
+                subscription_tier=(str(parsed_ref["tier"]) if parsed_ref.get("tier") else None),
+                subscription_billing_cycle=(str(parsed_ref["billing_cycle"]) if parsed_ref.get("billing_cycle") else None),
+                credits_purchased=(int(parsed_ref["topup_credits"]) if parsed_ref.get("topup_credits") else None),
+            )
         _emit(
             "info",
             "billing.worldline_tx_logged token=%s tx_id=%s org_id=%s status=%s kind=%s amount_chf=%s",

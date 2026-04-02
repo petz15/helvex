@@ -41,6 +41,7 @@ class CheckoutSession:
     provider: ProviderName
     checkout_url: str
     external_id: str | None = None
+    order_reference: str | None = None
 
 
 _BASE_MONTHLY_CHF: dict[str, float] = {
@@ -121,10 +122,19 @@ def _worldline_spec_version() -> str:
 
 
 def _worldline_callback_url(*, kind: str, order_reference: str, success_url: str, cancel_url: str, source: str) -> str:
-    # Keep token placeholder in the path (not query) so providers can substitute it
-    # without URL-encoding braces into %7B...%7D.
-    base_path = "/api/v1/billing/webhooks/worldline/return/{TOKEN}"
-    return f"{_base_url()}{base_path}?{urlencode({'kind': kind, 'order_reference': order_reference, 'success_url': success_url, 'cancel_url': cancel_url, 'source': source})}"
+    # Use Saferpay documented token placeholder for callback substitution.
+    # Keep it in the path (raw, not URL-encoded) to ensure provider replacement.
+    base_path = "/api/v1/billing/webhooks/worldline/return/{{{PAYMENTPAGETOKEN}}}"
+    fixed = urlencode(
+        {
+            "kind": kind,
+            "order_reference": order_reference,
+            "success_url": success_url,
+            "cancel_url": cancel_url,
+            "source": source,
+        }
+    )
+    return f"{_base_url()}{base_path}?{fixed}"
 
 
 def compute_subscription_price_chf(
@@ -293,7 +303,13 @@ class WorldlineProvider:
             "worldline.initialize_success token=%s redirect_prefix=%s",
             token[:20], redirect[:50] if redirect else "N/A"
         )
-        return CheckoutSession(provider=self.name, checkout_url=str(redirect), external_id=token)
+        order_reference = str(payload.get("Payment", {}).get("OrderId") or "")
+        return CheckoutSession(
+            provider=self.name,
+            checkout_url=str(redirect),
+            external_id=token,
+            order_reference=order_reference or None,
+        )
 
     def _initialize_request(
         self,
@@ -491,7 +507,13 @@ class StripeProvider:
         checkout_url = data.get("url")
         if not checkout_url:
             raise RuntimeError("Stripe response did not include checkout URL")
-        return CheckoutSession(provider=self.name, checkout_url=str(checkout_url), external_id=str(data.get("id") or ""))
+        ext_id = str(data.get("id") or "")
+        return CheckoutSession(
+            provider=self.name,
+            checkout_url=str(checkout_url),
+            external_id=ext_id,
+            order_reference=(ext_id or None),
+        )
 
     def create_subscription_checkout(
         self,

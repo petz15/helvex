@@ -8,16 +8,20 @@ import time
 import traceback
 from contextlib import asynccontextmanager
 
-# Configure root logger early so app.* loggers emit at configured level.
-# Uvicorn configures its own named loggers; this ensures our module loggers are visible too.
+# Configure logging. We attach a stdout handler directly to the "app" logger
+# rather than the root logger, because uvicorn calls logging.config.dictConfig()
+# during server init which resets the root logger (level=WARNING, no handlers).
+# By owning the "app" logger explicitly we survive uvicorn's config pass.
 _LOG_LEVEL_NAME = (os.getenv("LOG_LEVEL") or "INFO").upper().strip()
 _LOG_LEVEL = getattr(logging, _LOG_LEVEL_NAME, logging.INFO)
-logging.basicConfig(
-    level=_LOG_LEVEL,
-    stream=sys.stdout,
-    format="%(asctime)s %(levelname)s %(name)s - %(message)s",
-    force=True,
-)
+
+_app_logger = logging.getLogger("app")
+_app_logger.setLevel(_LOG_LEVEL)
+if not _app_logger.handlers:
+    _handler = logging.StreamHandler(sys.stdout)
+    _handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s - %(message)s"))
+    _app_logger.addHandler(_handler)
+_app_logger.propagate = False
 
 # ── Python 3.12 compatibility patch ───────────────────────────────────────────
 # pydantic.v1 (bundled inside pydantic v2) calls ForwardRef._evaluate() without
@@ -206,13 +210,6 @@ def _recover_jobs_and_start_worker(app, app_state) -> None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Re-apply root logger config after uvicorn replaces it with its own dictConfig.
-    logging.basicConfig(
-        level=_LOG_LEVEL,
-        stream=sys.stdout,
-        format="%(asctime)s %(levelname)s %(name)s - %(message)s",
-        force=True,
-    )
     app.state.ready = False
     app.state.startup_message = "Initialising…"
     app.state.startup_error = None
