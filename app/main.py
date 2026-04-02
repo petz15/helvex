@@ -230,6 +230,7 @@ async def lifespan(app: FastAPI):
                 _h.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s - %(message)s"))
                 _app_logger.addHandler(_h)
             _app_logger.propagate = False
+            _app_logger.info("boot.post_migration handlers=%s level=%s", _app_logger.handlers, logging.getLevelName(_app_logger.level))
             await loop.run_in_executor(None, _seed_settings, app.state)
             await loop.run_in_executor(None, _recover_jobs_and_start_worker, app, app.state)
             await loop.run_in_executor(None, _maybe_enqueue_geocode_upgrade, app, app.state)
