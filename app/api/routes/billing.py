@@ -15,6 +15,17 @@ from sqlalchemy.orm import Session
 
 logger = logging.getLogger(__name__)
 
+
+def _emit(level: str, message: str, *args: object) -> None:
+    """Emit to logger and stdout so logs remain visible in container output."""
+    log_fn = getattr(logger, level, logger.info)
+    log_fn(message, *args)
+    try:
+        rendered = message % args if args else message
+    except Exception:
+        rendered = f"{message} | args={args!r}"
+    print(rendered, flush=True)
+
 from app.api.deps import get_current_org
 from app.api.deps import require_org_role
 from app.auth import get_current_user
@@ -301,7 +312,8 @@ async def worldline_return(
     kind = str(params.get("kind") or "").strip().lower()
     query_string = request.url.query or ""
 
-    logger.info(
+    _emit(
+        "info",
         "billing.worldline_return_called source=%s token=%s kind=%s order_ref=%s query_string=%s",
         source,
         token[:20] if token else "NONE",
@@ -312,7 +324,8 @@ async def worldline_return(
 
     # If no token, redirect based on source (return=user clicked back, notify=webhook)
     if not token:
-        logger.warning(
+        _emit(
+            "warning",
             "billing.worldline_return_no_token source=%s kind=%s order_ref=%s query=%s query_string=%s",
             source,
             kind,
@@ -325,7 +338,8 @@ async def worldline_return(
         return RedirectResponse(_safe_redirect_target(target), status_code=status.HTTP_303_SEE_OTHER)
 
     parsed_ref = payments.parse_worldline_merchant_reference(order_reference)
-    logger.info(
+    _emit(
+        "info",
         "billing.worldline_ref_parsed token=%s source=%s kind=%s org_id=%s user_id=%s tier=%s cycle=%s topup_credits=%s",
         token[:20],
         source,
@@ -340,7 +354,8 @@ async def worldline_return(
     # BUG-GUARD: If we cannot parse org_id, the reference is invalid — decline immediately.
     # This prevents a KeyError crash and rejects forged/malformed references.
     if not parsed_ref.get("org_id"):
-        logger.warning(
+        _emit(
+            "warning",
             "billing.worldline_invalid_reference token=%s order_ref=%s",
             token[:20],
             order_reference[:50] if order_reference else "NONE",
@@ -354,7 +369,8 @@ async def worldline_return(
     # Must happen before calling Saferpay to avoid paying twice on retries.
     existing_payment = payment_transactions.get_payment_transaction_by_external_id(db, token)
     if existing_payment:
-        logger.info(
+        _emit(
+            "info",
             "billing.worldline_existing_payment token=%s tx_id=%s status=%s kind=%s",
             token[:20],
             existing_payment.id,
@@ -379,7 +395,8 @@ async def worldline_return(
 
         # Normalize status from provider-specific values to our internal enum.
         normalized_status = payment_transactions.validate_transaction_status(transaction_status)
-        logger.info(
+        _emit(
+            "info",
             "billing.worldline_authorize_result token=%s provider_status=%s normalized_status=%s provider_tx_id=%s",
             token[:20],
             transaction_status or "NONE",
@@ -441,7 +458,8 @@ async def worldline_return(
             subscription_billing_cycle=(str(parsed_ref["billing_cycle"]) if parsed_ref.get("billing_cycle") else None),
             credits_purchased=(int(parsed_ref["topup_credits"]) if parsed_ref.get("topup_credits") else None),
         )
-        logger.info(
+        _emit(
+            "info",
             "billing.worldline_tx_logged token=%s tx_id=%s org_id=%s status=%s kind=%s amount_chf=%s",
             token[:20],
             payment_tx.id,
@@ -453,14 +471,16 @@ async def worldline_return(
 
         # Only apply business logic if payment succeeded.
         if normalized_status in {"authorized", "captured"}:
-            logger.info(
+            _emit(
+                "info",
                 "billing.worldline_apply_start token=%s tx_id=%s kind=%s",
                 token[:20],
                 payment_tx.id,
                 payment_tx.kind,
             )
             payment_transactions.apply_successful_payment(db, payment_tx)
-            logger.info(
+            _emit(
+                "info",
                 "billing.worldline_apply_success token=%s tx_id=%s webhook_processed_at=%s credits_total_granted=%s",
                 token[:20],
                 payment_tx.id,
@@ -470,7 +490,8 @@ async def worldline_return(
             return RedirectResponse(_safe_redirect_target(success_url), status_code=status.HTTP_303_SEE_OTHER)
 
         # Declined or unknown status — no credits granted.
-        logger.warning(
+        _emit(
+            "warning",
             "billing.worldline_not_success token=%s tx_id=%s normalized_status=%s redirect_reason=payment_declined",
             token[:20],
             payment_tx.id,
@@ -482,7 +503,7 @@ async def worldline_return(
         )
 
     except payment_transactions.DuplicatePaymentError:
-        logger.warning("billing.worldline_duplicate token=%s", token[:20])
+        _emit("warning", "billing.worldline_duplicate token=%s", token[:20])
         # Race condition: two identical requests arrived simultaneously.
         # Re-read the actual stored outcome to decide where to send the user.
         existing = payment_transactions.get_payment_transaction_by_external_id(db, token)
@@ -495,6 +516,7 @@ async def worldline_return(
 
     except RuntimeError as exc:
         message = str(exc)
+        _emit("error", "billing.worldline_runtime_error token=%s message=%s", token[:20], message)
         logger.exception("billing.worldline_runtime_error token=%s message=%s", token[:20], message)
         # Saferpay-specific errors indicating the token was already consumed.
         if "TOKEN_INVALID" in message or "TRANSACTION_IN_WRONG_STATE" in message:
@@ -505,6 +527,7 @@ async def worldline_return(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=message) from exc
 
     except payment_transactions.PaymentValidationError as exc:
+        _emit("error", "billing.worldline_validation_error token=%s message=%s", token[:20], str(exc))
         logger.exception("billing.worldline_validation_error token=%s message=%s", token[:20], str(exc))
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
