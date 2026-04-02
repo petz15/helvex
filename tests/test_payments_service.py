@@ -90,6 +90,34 @@ def test_worldline_topup_checkout_calls_api(monkeypatch):
     assert captured["auth"] == ("wl_key", "wl_pwd")
 
 
+def test_worldline_topup_checkout_registers_alias_when_requested(monkeypatch):
+    captured = {}
+
+    def _fake_post(self, url, headers=None, json=None, auth=None):
+        captured["url"] = url
+        captured["json"] = json
+        return _FakeResponse(200, {"Token": "tok_2", "RedirectUrl": "https://payment.preprod.worldline/tok_2"})
+
+    monkeypatch.setattr(payments.settings, "payment_provider_mode", "worldline")
+    monkeypatch.setattr(payments.settings, "worldline_customer_id", "customer_test")
+    monkeypatch.setattr(payments.settings, "worldline_terminal_id", "12345678")
+    monkeypatch.setattr(payments.settings, "worldline_api_username", "wl_key")
+    monkeypatch.setattr(payments.settings, "worldline_api_password", "wl_pwd")
+    monkeypatch.setattr(payments.httpx.Client, "post", _fake_post)
+
+    out = payments.create_topup_checkout(
+        org_id=7,
+        credits=15000,
+        success_url="https://example.com/success",
+        cancel_url="https://example.com/cancel",
+        save_payment_method=True,
+    )
+
+    assert out.external_id == "tok_2"
+    assert captured["url"].endswith("/Payment/v1/Transaction/Initialize")
+    assert captured["json"]["RegisterAlias"]["IdGenerator"] == "RANDOM"
+
+
 def test_worldline_card_alias_registration_calls_api(monkeypatch):
     captured = {}
 

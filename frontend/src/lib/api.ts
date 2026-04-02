@@ -220,6 +220,7 @@ export async function createSubscriptionCheckout(data: {
   success_url: string;
   cancel_url: string;
   billing_address?: BillingAddressPayload | null;
+  save_payment_method?: boolean;
   provider?: "worldline" | "stripe" | null;
 }): Promise<BillingCheckoutResponse> {
   const res = await fetch("/api/v1/billing/checkout/subscription", {
@@ -247,6 +248,7 @@ export async function createTopupCheckout(data: {
   success_url: string;
   cancel_url: string;
   billing_address?: BillingAddressPayload | null;
+  save_payment_method?: boolean;
   provider?: "worldline" | "stripe" | null;
 }): Promise<BillingCheckoutResponse> {
   const res = await fetch("/api/v1/billing/checkout/topup", {

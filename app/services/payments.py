@@ -66,6 +66,7 @@ class PaymentProvider(Protocol):
         success_url: str,
         cancel_url: str,
         billing_address: dict[str, str] | None = None,
+        save_payment_method: bool = False,
     ) -> CheckoutSession:
         ...
 
@@ -77,6 +78,7 @@ class PaymentProvider(Protocol):
         success_url: str,
         cancel_url: str,
         billing_address: dict[str, str] | None = None,
+        save_payment_method: bool = False,
     ) -> CheckoutSession:
         ...
 
@@ -373,6 +375,7 @@ class WorldlineProvider:
         *,
         org_id: int,
         payment_alias_id: str | None,
+        save_payment_method: bool,
         amount_chf: float,
         order_reference: str,
         description: str,
@@ -413,6 +416,8 @@ class WorldlineProvider:
         }
         if payment_alias_id:
             payload["PaymentMeans"] = {"Card": {"Alias": {"Id": payment_alias_id}}}
+        elif save_payment_method:
+            payload["RegisterAlias"] = {"IdGenerator": "RANDOM"}
         # Add billing address if provided (required by Worldline for chargeback evidence)
         if billing_address:
             payload["Payer"]["FirstName"] = billing_address.get("first_name", "")
@@ -504,12 +509,8 @@ class WorldlineProvider:
             },
             "LanguageCode": "en",
         }
-        if billing_address:
-            payload["PaymentMeans"] = {
-                "Card": {
-                    "HolderName": f"{billing_address.get('first_name', '')} {billing_address.get('last_name', '')}".strip()
-                }
-            }
+        # Do not prefill PaymentMeans.Card fields for hosted alias registration.
+        # Sending a partial Card object makes Worldline validate Number/Exp* as required.
         base = _worldline_api_base_url()
         url = f"{base}/Payment/v1/Alias/Insert"
         headers = {
@@ -572,6 +573,7 @@ class WorldlineProvider:
         org_id: int,
         user_id: int | None = None,
         payment_alias_id: str | None = None,
+        save_payment_method: bool = False,
         tier: str,
         billing_cycle: Literal["monthly", "yearly"],
         success_url: str,
@@ -606,6 +608,7 @@ class WorldlineProvider:
         return self._initialize_request(
             org_id=org_id,
             payment_alias_id=payment_alias_id,
+            save_payment_method=save_payment_method,
             amount_chf=price,
             order_reference=order_reference,
             description=f"Helvex {tier.title()} ({billing_cycle})",
@@ -622,6 +625,7 @@ class WorldlineProvider:
         org_id: int,
         user_id: int | None = None,
         payment_alias_id: str | None = None,
+        save_payment_method: bool = False,
         credits: int,
         success_url: str,
         cancel_url: str,
@@ -655,6 +659,7 @@ class WorldlineProvider:
         return self._initialize_request(
             org_id=org_id,
             payment_alias_id=payment_alias_id,
+            save_payment_method=save_payment_method,
             amount_chf=amount_chf,
             order_reference=order_reference,
             description=f"Helvex top-up {credits} credits",
@@ -703,6 +708,7 @@ class StripeProvider:
         org_id: int,
         user_id: int | None = None,
         payment_alias_id: str | None = None,
+        save_payment_method: bool = False,
         tier: str,
         billing_cycle: Literal["monthly", "yearly"],
         success_url: str,
@@ -739,6 +745,7 @@ class StripeProvider:
         org_id: int,
         user_id: int | None = None,
         payment_alias_id: str | None = None,
+        save_payment_method: bool = False,
         credits: int,
         success_url: str,
         cancel_url: str,
@@ -788,6 +795,7 @@ def create_subscription_checkout(
     org_id: int,
     user_id: int | None = None,
     payment_alias_id: str | None = None,
+    save_payment_method: bool = False,
     tier: str,
     billing_cycle: Literal["monthly", "yearly"],
     success_url: str,
@@ -801,6 +809,7 @@ def create_subscription_checkout(
         org_id=org_id,
         user_id=user_id,
         payment_alias_id=payment_alias_id,
+        save_payment_method=save_payment_method,
         tier=tier,
         billing_cycle=billing_cycle,
         success_url=success_url,
@@ -815,6 +824,7 @@ def create_topup_checkout(
     org_id: int,
     user_id: int | None = None,
     payment_alias_id: str | None = None,
+    save_payment_method: bool = False,
     credits: int,
     success_url: str,
     cancel_url: str,
@@ -827,6 +837,7 @@ def create_topup_checkout(
         org_id=org_id,
         user_id=user_id,
         payment_alias_id=payment_alias_id,
+        save_payment_method=save_payment_method,
         credits=credits,
         success_url=success_url,
         cancel_url=cancel_url,

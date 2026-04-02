@@ -237,6 +237,43 @@ def test_worldline_return_authorizes_and_redirects(client, db, monkeypatch):
     assert org.credits_balance == 25000
 
 
+def test_worldline_return_persists_alias_from_checkout_authorize(client, db, monkeypatch):
+    org = _seed_org(db, org_id=19)
+
+    def _fake_authorize(self, *, token):
+        assert token == "tok_19"
+        return {
+            "Transaction": {
+                "Status": "AUTHORIZED",
+                "Id": "tx_19",
+            },
+            "PaymentMeans": {
+                "Card": {
+                    "Alias": {"Id": "alias_from_checkout_1"},
+                }
+            },
+        }
+
+    monkeypatch.setattr("app.services.payments.WorldlineProvider.authorize_transaction", _fake_authorize)
+
+    resp = client.get(
+        "/api/v1/billing/webhooks/worldline/return/tok_19",
+        params={
+            "kind": "topup",
+            "order_reference": f"wl_topup_{org.id}_1_25000_deadbeef",
+            "success_url": "https://example.com/success",
+            "cancel_url": "https://example.com/cancel",
+            "source": "notify",
+        },
+        follow_redirects=False,
+    )
+
+    assert resp.status_code == 303
+    saved_user = db.get(User, 1)
+    assert saved_user is not None
+    assert saved_user.payment_customer_id == "alias_from_checkout_1"
+
+
 def test_worldline_card_registration_saves_alias(client, db, monkeypatch):
     org = _seed_org(db, org_id=16)
     _override_user(org.id)

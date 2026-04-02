@@ -54,6 +54,7 @@ class SubscriptionCheckoutRequest(BaseModel):
     success_url: str
     cancel_url: str
     billing_address: BillingAddress | None = None
+    save_payment_method: bool = False
     provider: Literal["worldline", "stripe"] | None = None
 
 
@@ -62,6 +63,7 @@ class TopupCheckoutRequest(BaseModel):
     success_url: str
     cancel_url: str
     billing_address: BillingAddress | None = None
+    save_payment_method: bool = False
     provider: Literal["worldline", "stripe"] | None = None
 
 
@@ -191,6 +193,7 @@ def create_subscription_checkout(
             org_id=org.id,
             user_id=_user.id,
             payment_alias_id=(_resolve_worldline_payment_alias(db, org) if body.provider in {None, "worldline"} else None),
+            save_payment_method=body.save_payment_method,
             tier=body.tier,
             billing_cycle=body.billing_cycle,
             success_url=body.success_url,
@@ -271,6 +274,7 @@ def create_topup_checkout(
             org_id=org.id,
             user_id=_user.id,
             payment_alias_id=(_resolve_worldline_payment_alias(db, org) if body.provider in {None, "worldline"} else None),
+            save_payment_method=body.save_payment_method,
             credits=body.credits,
             success_url=body.success_url,
             cancel_url=body.cancel_url,
@@ -507,6 +511,17 @@ async def worldline_return(
         transaction = result.get("Transaction") if isinstance(result, dict) else {}
         transaction_status = str(transaction.get("Status") or "").upper() if isinstance(transaction, dict) else ""
         transaction_id = str(transaction.get("Id") or "") if isinstance(transaction, dict) else ""
+
+        # Persist alias from successful checkout when Worldline returns it.
+        payment_means = result.get("PaymentMeans") if isinstance(result, dict) else {}
+        card_obj = payment_means.get("Card") if isinstance(payment_means, dict) else {}
+        alias_obj = card_obj.get("Alias") if isinstance(card_obj, dict) else {}
+        alias_id = str(alias_obj.get("Id") or "") if isinstance(alias_obj, dict) else ""
+        if alias_id and parsed_ref.get("user_id"):
+            alias_owner = db.get(User, int(parsed_ref["user_id"]))
+            if alias_owner is not None:
+                alias_owner.payment_customer_id = alias_id
+                db.flush()
 
         # Normalize status from provider-specific values to our internal enum.
         normalized_status = payment_transactions.validate_transaction_status(transaction_status)
