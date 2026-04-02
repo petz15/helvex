@@ -22,6 +22,7 @@ if not _app_logger.handlers:
     _handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s - %(message)s"))
     _app_logger.addHandler(_handler)
 _app_logger.propagate = False
+_app_logger.info("boot.app_logger level=%s handlers=%s", _LOG_LEVEL_NAME, _app_logger.handlers)
 
 # ── Python 3.12 compatibility patch ───────────────────────────────────────────
 # pydantic.v1 (bundled inside pydantic v2) calls ForwardRef._evaluate() without

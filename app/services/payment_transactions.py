@@ -281,6 +281,19 @@ def get_payment_transaction_by_provider_tx_id(
     )
 
 
+def get_payment_transaction_by_order_reference(
+    db: Session,
+    order_reference: str,
+) -> PaymentTransaction | None:
+    """Retrieve the most recent payment transaction by merchant order reference."""
+    return (
+        db.query(PaymentTransaction)
+        .filter(PaymentTransaction.order_reference == order_reference)
+        .order_by(PaymentTransaction.id.desc())
+        .first()
+    )
+
+
 def apply_successful_payment(
     db: Session,
     payment_tx: PaymentTransaction,

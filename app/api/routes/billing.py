@@ -346,6 +346,8 @@ async def worldline_return(
     token: str | None = None,
 ) -> RedirectResponse:
     params = request.query_params
+    callback_ctx = payments.decode_worldline_callback_context(str(params.get("ctx") or "").strip())
+
     # Saferpay returns token as TOKEN query parameter, but accept variations
     token = str(token or params.get("TOKEN") or params.get("token") or params.get("Token") or "").strip()
     if token in {
@@ -359,24 +361,51 @@ async def worldline_return(
         "%7B%7B%7BPAYMENTPAGETOKEN%7D%7D%7D",
     }:
         token = ""
-    success_url = str(params.get("success_url") or "").strip()
-    cancel_url = str(params.get("cancel_url") or "").strip()
+
+    success_url = str(callback_ctx.get("success_url") or params.get("success_url") or "").strip()
+    cancel_url = str(callback_ctx.get("cancel_url") or params.get("cancel_url") or "").strip()
     source = str(params.get("source") or "").strip().lower()
-    order_reference = str(params.get("order_reference") or "").strip()
-    kind = str(params.get("kind") or "").strip().lower()
+    order_reference = str(callback_ctx.get("order_reference") or params.get("order_reference") or "").strip()
+    kind = str(callback_ctx.get("kind") or params.get("kind") or "").strip().lower()
     query_string = request.url.query or ""
 
     _emit(
         "info",
-        "billing.worldline_return_called source=%s token=%s kind=%s order_ref=%s query_string=%s",
+        "billing.worldline_return_called source=%s token=%s kind=%s order_ref=%s ctx_valid=%s query_string=%s",
         source,
         token[:20] if token else "NONE",
         kind,
         order_reference[:30] if order_reference else "NONE",
+        "yes" if callback_ctx else "no",
         query_string[:1000],
     )
 
-    # If no token, redirect based on source (return=user clicked back, notify=webhook)
+    if not callback_ctx and not token:
+        _emit(
+            "warning",
+            "billing.worldline_return_invalid_context source=%s token=%s query=%s",
+            source,
+            "NONE",
+            str(request.query_params)[:300],
+        )
+        target = _append_query_params(cancel_url, {"reason": "invalid_callback_context"})
+        return RedirectResponse(_safe_redirect_target(target), status_code=status.HTTP_303_SEE_OTHER)
+
+    pending_payment: PaymentTransaction | None = None
+    if not token and callback_ctx and order_reference:
+        pending_payment = payment_transactions.get_payment_transaction_by_order_reference(db, order_reference)
+        if pending_payment is not None:
+            token = str(pending_payment.external_id or "").strip()
+            _emit(
+                "info",
+                "billing.worldline_token_from_pending source=%s order_ref=%s tx_id=%s token=%s",
+                source,
+                order_reference[:50],
+                pending_payment.id,
+                token[:20] if token else "NONE",
+            )
+
+    # If no token after recovery, we cannot verify with provider.
     if not token:
         _emit(
             "warning",
@@ -422,7 +451,6 @@ async def worldline_return(
     # SECURITY: Check for existing payment to prevent double-processing.
     # Must happen before calling Saferpay to avoid paying twice on retries.
     existing_payment = payment_transactions.get_payment_transaction_by_external_id(db, token)
-    pending_payment: PaymentTransaction | None = None
     if existing_payment:
         _emit(
             "info",

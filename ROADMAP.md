@@ -99,6 +99,7 @@ s
 - [ ] **Credit grant system** — admin interface to grant/refund credits with reason; used for migration credits, promotions, support refunds
 - [ ] **Credit expiry automation** — background job to expire grant-type credits after 1 year; topup credits never expire
 - [ ] **Usage dashboard** — org member view of credit balance (in CHF), transaction history, monthly spend, forecast
+- [ ] **automatic reocurring billing** on saferpay (worldline) I need to use the secure card data interface to save card data at saferpay which I can then utilize for later payments (reocurring payments like subscriptions or automatic topups). https://saferpay.github.io/jsonapi/#ChapterAliasStore
 
 
 

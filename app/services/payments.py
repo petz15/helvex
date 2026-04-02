@@ -20,6 +20,7 @@ from urllib.parse import urlencode
 from typing import Any, Literal, Protocol
 
 import httpx
+from itsdangerous import BadSignature, URLSafeSerializer
 from sqlalchemy.orm import Session
 
 from app.config import settings
@@ -121,16 +122,62 @@ def _worldline_spec_version() -> str:
     return (getattr(settings, "worldline_spec_version", "") or "1.51").strip() or "1.51"
 
 
+def _worldline_callback_serializer() -> URLSafeSerializer:
+    return URLSafeSerializer(settings.secret_key, salt="worldline-callback-v1")
+
+
+def create_worldline_callback_context(
+    *,
+    kind: str,
+    order_reference: str,
+    success_url: str,
+    cancel_url: str,
+) -> str:
+    payload = {
+        "kind": kind,
+        "order_reference": order_reference,
+        "success_url": success_url,
+        "cancel_url": cancel_url,
+    }
+    return str(_worldline_callback_serializer().dumps(payload))
+
+
+def decode_worldline_callback_context(ctx: str | None) -> dict[str, str]:
+    if not ctx:
+        return {}
+    try:
+        data = _worldline_callback_serializer().loads(ctx)
+    except BadSignature:
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    kind = str(data.get("kind") or "").strip().lower()
+    order_reference = str(data.get("order_reference") or "").strip()
+    success_url = str(data.get("success_url") or "").strip()
+    cancel_url = str(data.get("cancel_url") or "").strip()
+    if kind not in {"subscription", "topup"}:
+        return {}
+    if not order_reference or not success_url or not cancel_url:
+        return {}
+    return {
+        "kind": kind,
+        "order_reference": order_reference,
+        "success_url": success_url,
+        "cancel_url": cancel_url,
+    }
+
+
 def _worldline_callback_url(*, kind: str, order_reference: str, success_url: str, cancel_url: str, source: str) -> str:
-    # Use Saferpay documented token placeholder for callback substitution.
-    # Keep it in the path (raw, not URL-encoded) to ensure provider replacement.
-    base_path = "/api/v1/billing/webhooks/worldline/return/{{{PAYMENTPAGETOKEN}}}"
+    base_path = "/api/v1/billing/webhooks/worldline/return"
+    ctx = create_worldline_callback_context(
+        kind=kind,
+        order_reference=order_reference,
+        success_url=success_url,
+        cancel_url=cancel_url,
+    )
     fixed = urlencode(
         {
-            "kind": kind,
-            "order_reference": order_reference,
-            "success_url": success_url,
-            "cancel_url": cancel_url,
+            "ctx": ctx,
             "source": source,
         }
     )
@@ -349,8 +396,8 @@ class WorldlineProvider:
                 "Url": return_url,
             },
             "RedirectNotifyUrls": {
-                "Success": notify_url,
-                "Fail": notify_url,
+                "SuccessNotifyUrl": notify_url,
+                "FailNotifyUrl": notify_url,
             },
         }
         # Add billing address if provided (required by Worldline for chargeback evidence)
