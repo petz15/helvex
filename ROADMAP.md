@@ -19,8 +19,6 @@
 
 ### Todos
 - Check new CSV export
-- Implement Wordline integration next to stripe (or instead of stripe?)
-- Adjust sites for Superadmin and normal admin
 - Adjust sites for setup (seperate some features out from account page)
 - Continue on Explore page
 - More adjustments to pricing page: remove flex rescore from, some consumptions are not available for certain tiers and the question marks are not filled in. also for first time org accounts, give about 1k credits or even more
@@ -61,7 +59,7 @@
 - [X] **Company profile overhaul** — display TF-IDF cluster, purpose keywords, Claude classification prominently -> ongoing
 - [X] **Website correction flow** — "Report wrong website" button on company detail; shows all Google search results so user can pick the correct one; backend tallies user selections and auto-promotes a new URL if enough users agree; admins can override
 - [ ] **Company views for registered users** — full company detail accessible free with email registration (gated behind login, not tier)
-- [ ] **History overview** —  Old names and taken over is already visible but not SOGC publications, which needs to be custom handled in order to display changes such as people and other changes. -> nicer overview
+- [X] **History overview** —  Old names and taken over is already visible but not SOGC publications, which needs to be custom handled in order to display changes such as people and other changes. -> nicer overview
 - [ ] **Graph overview of relationships** — based on past SHAB changes and name changes, take overs etc -> create nicer visuals for timeline. evaluate js on the fly calculations vs backend/DB
 - [ ] **Cross-company person graph** — normalize sogcPub organ changes into `persons` / `company_persons` tables via a pipeline job; build a graph UI showing where signers appear across multiple companies, what roles they held, and when — enabling network analysis of directors, beneficial owners, and corporate groups
 - [X] **Fix Zweck not showing up** — maybe add column for zweck at companies table but that would also require to import it for existing companies 
@@ -110,7 +108,7 @@
 - [X] **Pricing page overhaul** — tier cards with visual hierarchy; full feature matrix table; consumption credits table with topup bonus preview; custom configurator with live pricing
 
 ### Still Open
-- [ ] **Payment processor integration** — Stripe product/price setup, subscription webhooks, credit top-up Checkout session handler; Worldline as alternative
+- [ ] **Payment processor integration** — Worldline product/price setup, subscription webhooks, credit top-up Checkout session handler
 - [ ] **Billing admin panel** — superadmin view of all orgs' tiers, subscription status, credit balance, transaction history; tier/credit adjustment UI
 - [ ] **Invoice & receipt generation** — PDF invoices for annual subscriptions; receipts for top-up purchases; email delivery
 - [ ] **Verified business discount** — 20% extra discount (on top of tier bonus) for verified business orgs; applied at Stripe price calculation

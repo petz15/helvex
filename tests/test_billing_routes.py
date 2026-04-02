@@ -38,7 +38,6 @@ def _override_user(org_id: int):
         email="billing@example.com",
         hashed_password="x",
         is_active=True,
-        tier="free",
         billing_address_json=json.dumps(
             {
                 "first_name": "Billing",
@@ -137,7 +136,6 @@ def test_subscription_checkout_requires_org_admin_role(client, db):
         email="member@example.com",
         hashed_password="x",
         is_active=True,
-        tier="free",
         billing_address_json=None,
         email_verified=True,
         is_superadmin=False,

@@ -233,6 +233,7 @@ export function AccountClient({ checkout, kind, tier, credits }: AccountClientPr
   const [billingBanner, setBillingBanner] = useState<{ kind: "success" | "error"; message: string } | null>(null);
 
   const billingAddress = parseBillingAddressJson(me?.billing_address_json);
+  const profileTier = me?.org?.tier ?? "free";
 
   const checkoutState = checkout;
   const checkoutKind = kind;
@@ -502,9 +503,9 @@ export function AccountClient({ checkout, kind, tier, credits }: AccountClientPr
 
         <div className="border-t border-slate-100 pt-3 flex items-center gap-3 text-xs text-slate-500">
           <span className={`inline-flex items-center px-2 py-0.5 rounded font-medium capitalize ${
-            me.tier === "enterprise" ? "bg-purple-100 text-purple-700" : "bg-slate-100 text-slate-600"
+            profileTier === "strategist" ? "bg-purple-100 text-purple-700" : "bg-slate-100 text-slate-600"
           }`}>
-            {me.tier}
+            {profileTier}
           </span>
           {me.email_verified ? (
             <span className="text-green-600 flex items-center gap-1"><Check size={11} /> Verified</span>

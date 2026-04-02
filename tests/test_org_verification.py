@@ -84,7 +84,6 @@ def test_request_verification_requires_admin_or_owner(client, db):
         email="testuser@example.com",
         hashed_password="x",
         is_active=True,
-        tier="free",
         email_verified=False,
         is_superadmin=False,
     )

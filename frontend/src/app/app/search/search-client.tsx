@@ -2,25 +2,13 @@
 import { useState, useCallback, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import useSWR from "swr";
-import { Download } from "lucide-react";
+import { Download, Loader2 } from "lucide-react";
 import { FilterBar } from "@/components/dashboard/filter-bar";
 import { CompanyTable } from "@/components/dashboard/company-table";
 import { CompanyPreview } from "@/components/dashboard/company-preview";
 import { Pagination } from "@/components/dashboard/pagination";
-import { fetchCompanies, fetchStats, fetchCantons, fetchTaxonomy, fetchSavedViews, saveView, deleteView, fetchCurrentUser, fetchOrg } from "@/lib/api";
-import { getExportLimit } from "@/lib/entitlements";
+import { fetchCompanies, fetchStats, fetchCantons, fetchTaxonomy, fetchSavedViews, saveView, deleteView, enqueueCSVExport } from "@/lib/api";
 import type { Company, CompanyFilters, CompanyStats } from "@/lib/types";
-
-function buildExportUrl(filters: CompanyFilters): string {
-  const params = new URLSearchParams();
-  const rest: Record<string, unknown> = { ...filters };
-  delete rest.page;
-  delete rest.page_size;
-  for (const [k, v] of Object.entries(rest)) {
-    if (v !== undefined && v !== null && v !== "") params.set(k, String(v));
-  }
-  return `/api/v1/companies/export.csv?${params.toString()}`;
-}
 
 interface SearchClientProps {
   initialCantons: string[];
@@ -43,6 +31,8 @@ function syncFiltersToUrl(filters: CompanyFilters, router: ReturnType<typeof use
 export function SearchClient({ initialCantons, initialStats, initialFilters }: SearchClientProps) {
   const router = useRouter();
   const [filters, setFiltersState] = useState<CompanyFilters>(initialFilters ?? DEFAULT_FILTERS);
+  const [queueingExport, setQueueingExport] = useState(false);
+  const [exportBanner, setExportBanner] = useState<{ kind: "success" | "error"; message: string } | null>(null);
 
   const setFilters = useCallback((update: CompanyFilters | ((f: CompanyFilters) => CompanyFilters)) => {
     setFiltersState(prev => {
@@ -64,8 +54,20 @@ export function SearchClient({ initialCantons, initialStats, initialFilters }: S
   const { data: cantons = initialCantons } = useSWR("cantons", fetchCantons, { fallbackData: initialCantons });
   const { data: taxonomy = {} } = useSWR("taxonomy", fetchTaxonomy);
   const { data: savedViews = [], mutate: mutateSavedViews } = useSWR("saved-views", fetchSavedViews);
-  const { data: me } = useSWR("me", fetchCurrentUser);
-  const { data: org } = useSWR(me?.org?.id ? ["org-detail", me.org.id] : null, () => fetchOrg(me!.org!.id));
+
+  async function handleQueueExport() {
+    setQueueingExport(true);
+    setExportBanner(null);
+    try {
+      await enqueueCSVExport(filters);
+      setExportBanner({ kind: "success", message: "Export queued — check Account page to download when ready." });
+    } catch (err) {
+      setExportBanner({ kind: "error", message: err instanceof Error ? err.message : "Failed to queue export" });
+    } finally {
+      setQueueingExport(false);
+      setTimeout(() => setExportBanner(null), 6000);
+    }
+  }
 
   const handleFilterChange = useCallback((newFilters: CompanyFilters) => {
     startTransition(() => setFilters(newFilters));
@@ -105,10 +107,6 @@ export function SearchClient({ initialCantons, initialStats, initialFilters }: S
     return { key: "", value: "" };
   })();
 
-  const exportLimit = org ? getExportLimit({ tier: org.tier, customFeatures: org.custom_features }) : 100;
-  const matchingCount = page?.total ?? 0;
-  const exportBlocked = matchingCount > exportLimit;
-
   return (
     <div className="flex flex-col h-[calc(100vh-3rem)] overflow-hidden">
 
@@ -130,25 +128,24 @@ export function SearchClient({ initialCantons, initialStats, initialFilters }: S
       <div className="flex flex-1 overflow-hidden">
         {/* Table + pagination */}
         <div className="flex-1 flex flex-col overflow-hidden bg-white">
-          <div className="flex items-center justify-end px-3 py-1 border-b border-slate-100 bg-slate-50">
-            <a
-              href={exportBlocked ? undefined : buildExportUrl(filters)}
-              download={exportBlocked ? undefined : true}
-              className={`flex items-center gap-1.5 text-xs px-2.5 py-1 rounded border transition-colors ${
-                exportBlocked
-                  ? "text-slate-300 border-slate-200 bg-slate-100 cursor-not-allowed pointer-events-none"
-                  : "text-slate-500 hover:text-slate-700 border-slate-200 hover:bg-white"
-              }`}
-              title={exportBlocked ? `Your current plan allows up to ${exportLimit.toLocaleString()} rows per CSV export.` : undefined}
+          <div className="flex items-center justify-between px-3 py-1 border-b border-slate-100 bg-slate-50">
+            {exportBanner ? (
+              <span className={`text-xs px-2 py-0.5 rounded ${
+                exportBanner.kind === "success" ? "text-green-700 bg-green-50" : "text-red-700 bg-red-50"
+              }`}>
+                {exportBanner.message}
+              </span>
+            ) : <span />}
+            <button
+              onClick={handleQueueExport}
+              disabled={queueingExport}
+              title="Queue an unlimited background export — download from Account page when ready"
+              className="flex items-center gap-1.5 text-xs text-slate-500 hover:text-slate-700 px-2.5 py-1 rounded border border-slate-200 hover:bg-white transition-colors disabled:opacity-50"
             >
-              <Download size={12} /> Export CSV ({page?.total ?? 0})
-            </a>
+              {queueingExport ? <Loader2 size={12} className="animate-spin" /> : <Download size={12} />}
+              Queue full export
+            </button>
           </div>
-          {exportBlocked && (
-            <div className="px-3 py-1 text-xs text-amber-700 bg-amber-50 border-b border-amber-100">
-              Export limited to {exportLimit.toLocaleString()} rows for your current plan.
-            </div>
-          )}
           <CompanyTable
             companies={page?.items ?? []}
             selectedId={selectedCompany?.id ?? null}

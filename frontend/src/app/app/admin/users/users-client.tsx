@@ -5,30 +5,10 @@ import { Search, Loader2, Shield, ShieldOff, CheckCircle2, XCircle, ChevronLeft,
 import {
   fetchAdminStats,
   fetchAdminUsers,
-  fetchAdminTiers,
   updateAdminUser,
-  type BillingTier,
   type AdminUser,
   type AdminStats,
 } from "@/lib/api";
-
-const FALLBACK_TIERS: BillingTier[] = [
-  { id: 0, slug: "free", display_name: "Free", description: "", monthly_price_chf: 0, yearly_multiplier: 10, yearly_price_chf: 0, topup_bonus_rate: 0, sort_order: 0, is_active: true, is_public: true },
-  { id: 1, slug: "simple", display_name: "Simple", description: "", monthly_price_chf: 6, yearly_multiplier: 10, yearly_price_chf: 60, topup_bonus_rate: 0.1, sort_order: 1, is_active: true, is_public: true },
-  { id: 2, slug: "explorer", display_name: "Explorer", description: "", monthly_price_chf: 12, yearly_multiplier: 10, yearly_price_chf: 120, topup_bonus_rate: 0.15, sort_order: 2, is_active: true, is_public: true },
-  { id: 3, slug: "researcher", display_name: "Researcher", description: "", monthly_price_chf: 17, yearly_multiplier: 10, yearly_price_chf: 170, topup_bonus_rate: 0.2, sort_order: 3, is_active: true, is_public: true },
-  { id: 4, slug: "strategist", display_name: "Strategist", description: "", monthly_price_chf: 37, yearly_multiplier: 10, yearly_price_chf: 370, topup_bonus_rate: 0.3, sort_order: 4, is_active: true, is_public: true },
-  { id: 5, slug: "custom", display_name: "Custom", description: "", monthly_price_chf: 1, yearly_multiplier: 10, yearly_price_chf: 10, topup_bonus_rate: 0, sort_order: 5, is_active: true, is_public: false },
-];
-
-const TIER_COLORS: Record<string, string> = {
-  free: "bg-slate-100 text-slate-600",
-  simple: "bg-slate-100 text-slate-700",
-  explorer: "bg-blue-100 text-blue-700",
-  researcher: "bg-violet-100 text-violet-700",
-  strategist: "bg-slate-800 text-white",
-  custom: "bg-amber-100 text-amber-800",
-};
 
 function StatCard({ label, value }: { label: string; value: number }) {
   return (
@@ -41,20 +21,17 @@ function StatCard({ label, value }: { label: string; value: number }) {
 
 export function UsersAdminClient() {
   const [q, setQ] = useState("");
-  const [tierFilter, setTierFilter] = useState("");
   const [page, setPage] = useState(1);
   const [saving, setSaving] = useState<number | null>(null);
   const [banner, setBanner] = useState<{ kind: "success" | "error"; msg: string } | null>(null);
 
   const PAGE_SIZE = 50;
-  const { data: tiers } = useSWR("admin-tiers", fetchAdminTiers);
-  const tierOptions = tiers ?? FALLBACK_TIERS;
 
   const { data: stats } = useSWR<AdminStats>("admin-stats", fetchAdminStats);
 
-  const swrKey = `admin-users-${q}-${tierFilter}-${page}`;
+  const swrKey = `admin-users-${q}-${page}`;
   const { data, mutate } = useSWR(swrKey, () =>
-    fetchAdminUsers({ q: q || undefined, tier: tierFilter || undefined, page, page_size: PAGE_SIZE })
+    fetchAdminUsers({ q: q || undefined, page, page_size: PAGE_SIZE })
   );
 
   const flash = useCallback((kind: "success" | "error", msg: string) => {
@@ -117,14 +94,6 @@ export function UsersAdminClient() {
             className="pl-8 pr-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-300 w-60"
           />
         </div>
-        <select
-          value={tierFilter}
-          onChange={(e) => { setTierFilter(e.target.value); setPage(1); }}
-          className="border border-slate-200 rounded-lg text-sm px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-300"
-        >
-          <option value="">All tiers</option>
-          {tierOptions.map((t) => <option key={t.slug} value={t.slug}>{t.display_name}</option>)}
-        </select>
       </div>
 
       {/* Table */}
@@ -133,7 +102,6 @@ export function UsersAdminClient() {
           <thead className="bg-slate-50 border-b border-slate-200">
             <tr>
               <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">Email</th>
-              <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">Tier</th>
               <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">Org</th>
               <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">Status</th>
               <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">Actions</th>
@@ -141,7 +109,7 @@ export function UsersAdminClient() {
           </thead>
           <tbody className="divide-y divide-slate-100">
             {!data && (
-              <tr><td colSpan={5} className="text-center py-8 text-slate-400">
+              <tr><td colSpan={4} className="text-center py-8 text-slate-400">
                 <Loader2 size={20} className="animate-spin mx-auto" />
               </td></tr>
             )}
@@ -160,17 +128,6 @@ export function UsersAdminClient() {
                     )}
                   </div>
                   <div className="text-xs text-slate-400 mt-0.5">id:{u.id} · {u.created_at.slice(0, 10)}</div>
-                </td>
-                <td className="px-4 py-3">
-                  <select
-                    value={u.tier}
-                    disabled={saving === u.id}
-                    onChange={(e) => patch(u.id, { tier: e.target.value })}
-                    className={`text-xs font-medium px-2 py-0.5 rounded border-0 cursor-pointer focus:outline-none focus:ring-2 focus:ring-blue-300 ${TIER_COLORS[u.tier] ?? "bg-slate-100 text-slate-600"}`}
-                  >
-                    {tierOptions.map((t) => <option key={t.slug} value={t.slug}>{t.display_name}</option>)}
-                    {!tierOptions.some((t) => t.slug === "superadmin") && <option value="superadmin">superadmin</option>}
-                  </select>
                 </td>
                 <td className="px-4 py-3 text-slate-600">
                   {u.org_name
@@ -214,7 +171,7 @@ export function UsersAdminClient() {
               </tr>
             ))}
             {data?.items.length === 0 && (
-              <tr><td colSpan={5} className="text-center py-8 text-slate-400 text-sm">No users found</td></tr>
+              <tr><td colSpan={4} className="text-center py-8 text-slate-400 text-sm">No users found</td></tr>
             )}
           </tbody>
         </table>

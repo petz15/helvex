@@ -112,14 +112,12 @@ def create_user(
     email: str,
     password: str,
     is_active: bool = True,
-    tier: str = "free",
     is_superadmin: bool = False,
 ) -> User:
     user = User(
         email=email,
         hashed_password=hash_password(password),
         is_active=is_active,
-        tier=tier,
         is_superadmin=is_superadmin,
     )
     db.add(user)

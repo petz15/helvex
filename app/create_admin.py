@@ -32,12 +32,6 @@ def _build_parser() -> argparse.ArgumentParser:
     create.add_argument("--email", required=True, help="Login email address.")
     create.add_argument("--password", required=True, help="Login password (min 8 chars recommended).")
     create.add_argument(
-        "--tier",
-        default="strategist",
-        choices=["free", "simple", "explorer", "researcher", "strategist"],
-        help="User tier (default: strategist).",
-    )
-    create.add_argument(
         "--no-superadmin",
         action="store_true",
         help="Create as a regular user without superadmin privileges.",
@@ -49,7 +43,7 @@ def _build_parser() -> argparse.ArgumentParser:
     setpw.add_argument("--password", required=True, help="New password.")
 
     # ── list ──────────────────────────────────────────────────────────────────
-    subparsers.add_parser("list", help="List all users with their tier and status.")
+    subparsers.add_parser("list", help="List all users with their status.")
 
     return parser
 
@@ -71,13 +65,11 @@ def main() -> int:
             existing = crud.get_user_by_email(db, args.email)
             if existing:
                 existing.hashed_password = crud.hash_password(args.password)
-                existing.tier = args.tier
                 existing.is_superadmin = not args.no_superadmin
                 db.commit()
                 db.refresh(existing)
                 print(f"Updated user (id={existing.id})")
                 print(f"  email        : {existing.email}")
-                print(f"  tier         : {existing.tier}")
                 print(f"  is_superadmin: {existing.is_superadmin}")
             else:
                 user = crud.create_user(
@@ -85,7 +77,6 @@ def main() -> int:
                     email=args.email,
                     password=args.password,
                     is_active=True,
-                    tier=args.tier,
                     is_superadmin=not args.no_superadmin,
                 )
                 # Admin-created users are considered verified
@@ -93,7 +84,6 @@ def main() -> int:
                 db.commit()
                 print(f"Created user (id={user.id})")
                 print(f"  email        : {user.email}")
-                print(f"  tier         : {user.tier}")
                 print(f"  is_superadmin: {user.is_superadmin}")
 
             print("\nDone. You can now log in at /login")
@@ -122,12 +112,12 @@ def main() -> int:
                 print("No users found.")
                 return 0
 
-            header = f"{'ID':<5} {'Email':<40} {'Tier':<14} {'Superadmin':<12} {'Active':<8} {'Org'}"
+            header = f"{'ID':<5} {'Email':<40} {'Superadmin':<12} {'Active':<8} {'Org'}"
             print(header)
             print("-" * len(header))
             for u in users:
                 print(
-                    f"{u.id:<5} {u.email:<40} {u.tier:<14} "
+                    f"{u.id:<5} {u.email:<40} "
                     f"{'yes' if u.is_superadmin else 'no':<12} "
                     f"{'yes' if u.is_active else 'no':<8} "
                     f"{u.org_id or '(none)'}"

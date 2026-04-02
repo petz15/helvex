@@ -21,7 +21,6 @@ class User(Base):
 
     # Primary identifier — required, unique
     email: Mapped[str] = mapped_column(String(256), unique=True, nullable=False)
-    tier: Mapped[str] = mapped_column(String(32), nullable=False, default="free")
     billing_address_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     email_verified: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     is_superadmin: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
@@ -44,3 +43,11 @@ class User(Base):
     org: Mapped["Organization | None"] = relationship("Organization", back_populates="users", foreign_keys=[org_id])
     oauth_accounts: Mapped[list["OAuthAccount"]] = relationship("OAuthAccount", back_populates="user", cascade="all, delete-orphan")
     org_memberships: Mapped[list["OrgMember"]] = relationship("OrgMember", back_populates="user", cascade="all, delete-orphan")
+
+    @property
+    def tier(self) -> str:
+        if self.is_superadmin:
+            return "superadmin"
+        if self.org is not None:
+            return self.org.tier
+        return "free"

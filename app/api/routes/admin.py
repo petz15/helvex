@@ -12,7 +12,7 @@ from app.models.organization import Organization
 from app.models.payment_transaction import PaymentTransaction
 from app.models.user import User
 from app.schemas.billing import BillingTierRead
-from app.services.tiers import get_billing_tiers, get_user_tier_names
+from app.services.tiers import TIER_ID_BY_NAME, get_billing_tier_names, get_billing_tiers
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
@@ -25,7 +25,6 @@ def _require_superadmin(current_user: User = Depends(get_current_user)) -> User:
 # ── Schemas ────────────────────────────────────────────────────────────────────
 
 class AdminUserUpdate(BaseModel):
-    tier: str | None = None
     is_active: bool | None = None
     is_superadmin: bool | None = None
 
@@ -62,7 +61,6 @@ def _user_dict(u: User) -> dict:
     return {
         "id": u.id,
         "email": u.email,
-        "tier": u.tier,
         "is_active": u.is_active,
         "email_verified": u.email_verified,
         "is_superadmin": u.is_superadmin,
@@ -76,7 +74,6 @@ def _user_dict(u: User) -> dict:
 @router.get("/users", summary="List all users (superadmin)")
 def list_users(
     q: str | None = Query(None),
-    tier: str | None = Query(None),
     is_active: bool | None = Query(None),
     page: int = Query(1, ge=1),
     page_size: int = Query(50, ge=1, le=200),
@@ -86,8 +83,6 @@ def list_users(
     query = db.query(User)
     if q:
         query = query.filter(User.email.ilike(f"%{q}%"))
-    if tier:
-        query = query.filter(User.tier == tier)
     if is_active is not None:
         query = query.filter(User.is_active.is_(is_active))
     total = query.count()
@@ -100,7 +95,7 @@ def list_users(
     return {"items": [_user_dict(u) for u in users], "total": total, "page": page, "page_size": page_size}
 
 
-@router.patch("/users/{user_id}", summary="Update user tier/status (superadmin)")
+@router.patch("/users/{user_id}", summary="Update user status (superadmin)")
 def update_user(
     user_id: int,
     body: AdminUserUpdate,
@@ -110,11 +105,6 @@ def update_user(
     user = db.get(User, user_id)
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
-    valid_tiers = set(get_user_tier_names(db))
-    if body.tier is not None:
-        if body.tier not in valid_tiers:
-            raise HTTPException(status_code=400, detail=f"Invalid tier. Must be one of: {sorted(valid_tiers)}")
-        user.tier = body.tier
     if body.is_active is not None:
         user.is_active = body.is_active
     if body.is_superadmin is not None:
@@ -178,7 +168,7 @@ def update_org(
     org = db.get(Organization, org_id)
     if not org:
         raise HTTPException(status_code=404, detail="Org not found")
-    valid_tiers = set(get_user_tier_names(db)) - {"superadmin"}
+    valid_tiers = set(get_billing_tier_names(db))
     if body.name is not None:
         org.name = body.name.strip()
     if body.tier is not None:

@@ -29,7 +29,6 @@ export interface OrgInfo {
 export interface CurrentUser {
   id: number;
   email: string;
-  tier: string;
   billing_address_json: string | null;
   org_role: string;
   is_active: boolean;
@@ -740,7 +739,36 @@ export function parseBillingAddressJson(value: string | null | undefined): Billi
         company_name: selected.company_name ? String(selected.company_name) : undefined,
       };
     }
-    return parsed as BillingAddressPayload;
+    const firstName = parsed.first_name;
+    const lastName = parsed.last_name;
+    const street = parsed.street;
+    const number = parsed.number;
+    const postalCode = parsed.postal_code;
+    const city = parsed.city;
+    const country = parsed.country;
+
+    if (
+      typeof firstName !== "string" ||
+      typeof lastName !== "string" ||
+      typeof street !== "string" ||
+      typeof number !== "string" ||
+      typeof postalCode !== "string" ||
+      typeof city !== "string" ||
+      typeof country !== "string"
+    ) {
+      return null;
+    }
+
+    return {
+      first_name: firstName,
+      last_name: lastName,
+      street,
+      number,
+      postal_code: postalCode,
+      city,
+      country,
+      company_name: typeof parsed.company_name === "string" ? parsed.company_name : undefined,
+    };
   } catch {
     return null;
   }
@@ -1012,7 +1040,6 @@ export interface AdminStats {
 export interface AdminUser {
   id: number;
   email: string;
-  tier: string;
   is_active: boolean;
   email_verified: boolean;
   is_superadmin: boolean;
@@ -1051,7 +1078,7 @@ export async function fetchAdminStats(): Promise<AdminStats> {
 }
 
 export async function fetchAdminUsers(params?: {
-  q?: string; tier?: string; is_active?: boolean; page?: number; page_size?: number;
+  q?: string; is_active?: boolean; page?: number; page_size?: number;
 }): Promise<AdminPage<AdminUser>> {
   const url = buildUrl("/api/v1/admin/users", params as Record<string, string | number | undefined | null>);
   const res = await fetch(url, { credentials: "include" });
@@ -1060,7 +1087,7 @@ export async function fetchAdminUsers(params?: {
 }
 
 export async function updateAdminUser(userId: number, data: {
-  tier?: string; is_active?: boolean; is_superadmin?: boolean;
+  is_active?: boolean; is_superadmin?: boolean;
 }): Promise<AdminUser> {
   const res = await fetch(`/api/v1/admin/users/${userId}`, {
     method: "PATCH",
