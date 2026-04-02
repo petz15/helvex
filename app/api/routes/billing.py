@@ -299,20 +299,26 @@ async def worldline_return(
     source = str(params.get("source") or "").strip().lower()
     order_reference = str(params.get("order_reference") or "").strip()
     kind = str(params.get("kind") or "").strip().lower()
+    query_string = request.url.query or ""
 
     logger.info(
-        "billing.worldline_return_called source=%s token=%s kind=%s order_ref=%s",
-        source, token[:20] if token else "NONE", kind, order_reference[:30] if order_reference else "NONE",
+        "billing.worldline_return_called source=%s token=%s kind=%s order_ref=%s query_string=%s",
+        source,
+        token[:20] if token else "NONE",
+        kind,
+        order_reference[:30] if order_reference else "NONE",
+        query_string[:1000],
     )
 
     # If no token, redirect based on source (return=user clicked back, notify=webhook)
     if not token:
         logger.warning(
-            "billing.worldline_return_no_token source=%s kind=%s order_ref=%s query=%s",
+            "billing.worldline_return_no_token source=%s kind=%s order_ref=%s query=%s query_string=%s",
             source,
             kind,
             order_reference[:50] if order_reference else "NONE",
             str(request.query_params)[:300],
+            query_string[:1000],
         )
         # Missing token means we cannot verify with provider, so treat as cancel/invalid.
         target = _append_query_params(cancel_url, {"reason": "missing_token"})
