@@ -7,6 +7,7 @@ from app.auth import get_current_user
 from app.main import app
 from app.models.org_member import OrgMember
 from app.models.organization import Organization
+from app.models.job_run import JobRun
 from app.models.payment_transaction import PaymentTransaction
 from app.models.user import User
 from app.services.payments import CheckoutSession
@@ -421,6 +422,18 @@ def test_update_default_payment_user_selects_saved_card_owner(client, db, monkey
 
 def test_topup_checkout_prefers_current_users_saved_alias_over_org_default(client, db, monkeypatch):
     org = _seed_org(db, org_id=19)
+    app.dependency_overrides[get_current_user] = lambda: User(
+        id=1,
+        email="billing@example.com",
+        hashed_password="x",
+        is_active=True,
+        billing_address_json=org.billing_address_json,
+        email_verified=True,
+        is_superadmin=False,
+        org_id=org.id,
+        org_role="owner",
+        payment_customer_id="alias_current_1",
+    )
 
     current_user = db.get(User, 1)
     assert current_user is not None
@@ -482,6 +495,43 @@ def test_topup_checkout_rejects_amounts_below_100_credits(client, db):
     )
 
     assert resp.status_code == 422
+
+
+def test_jobs_list_scoped_to_current_org_and_user(client, db):
+    org = _seed_org(db, org_id=24)
+    _override_user(org.id)
+
+    visible_org_job = JobRun(job_type="bulk", label="Org job", status="queued", org_id=org.id, user_id=1)
+    visible_user_job = JobRun(job_type="csv_export", label="User-only export", status="completed", org_id=None, user_id=1)
+    hidden_other_org_job = JobRun(job_type="bulk", label="Other org job", status="queued", org_id=999, user_id=2)
+    hidden_unscoped_job = JobRun(job_type="catalog", label="Superadmin catalog", status="completed", org_id=None, user_id=None)
+
+    db.add(visible_org_job)
+    db.add(visible_user_job)
+    db.add(hidden_other_org_job)
+    db.add(hidden_unscoped_job)
+    db.commit()
+
+    resp = client.get("/api/v1/jobs")
+    assert resp.status_code == 200
+    labels = [item["label"] for item in resp.json()]
+
+    assert "Org job" in labels
+    assert "User-only export" in labels
+    assert "Other org job" not in labels
+    assert "Superadmin catalog" not in labels
+
+
+def test_job_detail_returns_404_for_job_outside_scope(client, db):
+    org = _seed_org(db, org_id=25)
+    _override_user(org.id)
+
+    hidden_job = JobRun(job_type="bulk", label="Hidden job", status="queued", org_id=999, user_id=2)
+    db.add(hidden_job)
+    db.commit()
+
+    resp = client.get(f"/api/v1/jobs/{hidden_job.id}")
+    assert resp.status_code == 404
 
 
 def test_cancel_pending_payment_marks_declined(client, db):

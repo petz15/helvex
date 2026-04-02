@@ -112,7 +112,7 @@ export function DashboardClient({ initialCantons, initialStats, initialFilters }
     setExportBanner(null);
     try {
       await enqueueCSVExport(filters);
-      setExportBanner({ kind: "success", message: "Export queued — check Account page to download when ready." });
+      setExportBanner({ kind: "success", message: "Export queued — check Jobs page to download when ready." });
     } catch (err) {
       setExportBanner({ kind: "error", message: err instanceof Error ? err.message : "Failed to queue export" });
     } finally {
@@ -163,7 +163,7 @@ export function DashboardClient({ initialCantons, initialStats, initialFilters }
               <button
                 onClick={handleQueueExport}
                 disabled={queueingExport}
-                title="Queue an unlimited background export — download from Account page when ready"
+                title="Queue an unlimited background export — download from Jobs page when ready"
                 className="flex items-center gap-1.5 text-xs text-slate-500 hover:text-slate-700 px-2.5 py-1 rounded border border-slate-200 hover:bg-white transition-colors disabled:opacity-50"
               >
                 {queueingExport ? <Loader2 size={12} className="animate-spin" /> : <Download size={12} />}

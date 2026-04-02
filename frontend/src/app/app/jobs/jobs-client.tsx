@@ -1,9 +1,9 @@
 "use client";
 import { useState } from "react";
 import useSWR, { mutate } from "swr";
-import { CheckCircle2, XCircle, Clock, Loader2, PauseCircle, Play, Square, ChevronDown, ChevronUp, RefreshCw } from "lucide-react";
+import { CheckCircle2, XCircle, Clock, Loader2, PauseCircle, Play, Square, ChevronDown, ChevronUp, RefreshCw, Download, FileText } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { cancelJob, fetchJobEvents, fetchJobs, pauseJob, resumeJob } from "@/lib/api";
+import { cancelJob, fetchCSVExportStatus, fetchJobEvents, fetchJobs, pauseJob, resumeJob } from "@/lib/api";
 import type { Job, JobEvent } from "@/lib/types";
 
 function statusIcon(status: Job["status"]) {
@@ -153,9 +153,20 @@ function JobRow({ job, onAction }: { job: Job; onAction: () => void }) {
 
 export function JobsClient() {
   const { data: jobs = [], mutate: reloadJobs, isLoading } = useSWR<Job[]>("jobs", fetchJobs, { refreshInterval: 3000 });
+  const { data: exportStatus, mutate: reloadExportStatus, isLoading: loadingExportStatus } = useSWR(
+    "csv-export-status",
+    fetchCSVExportStatus,
+    { refreshInterval: 5000 },
+  );
 
   const active = jobs.filter(j => ["running", "queued", "paused", "waiting_external"].includes(j.status));
   const finished = jobs.filter(j => !["running", "queued", "paused", "waiting_external"].includes(j.status));
+  const csvJob = exportStatus?.job;
+
+  function formatExpiry(iso: string) {
+    const d = new Date(iso);
+    return d.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
+  }
 
   return (
     <div className="p-6 max-w-4xl mx-auto space-y-6">
@@ -173,6 +184,63 @@ export function JobsClient() {
       </div>
 
       {isLoading && <p className="text-slate-400 text-sm">Loading…</p>}
+
+      <section className="rounded-xl border border-slate-200 bg-white p-4 space-y-3">
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <p className="text-sm font-medium text-slate-800 flex items-center gap-1.5">
+              <FileText size={14} className="text-slate-400" /> CSV exports
+            </p>
+            <p className="text-xs text-slate-500 mt-0.5">
+              Queue exports from Search/Explorer/Dashboard and download them here.
+            </p>
+          </div>
+          <button
+            onClick={() => reloadExportStatus()}
+            disabled={loadingExportStatus}
+            className="text-xs text-slate-400 hover:text-slate-600 transition-colors shrink-0"
+          >
+            {loadingExportStatus ? <Loader2 size={12} className="animate-spin" /> : "Refresh"}
+          </button>
+        </div>
+
+        {!csvJob && (
+          <p className="text-xs text-slate-400">No export queued yet.</p>
+        )}
+
+        {csvJob && (
+          <div className="border-t border-slate-100 pt-3 space-y-2">
+            <div className="flex items-center gap-2 text-xs flex-wrap">
+              {statusBadge(csvJob.status)}
+              {csvJob.progress_done != null && csvJob.progress_total != null && csvJob.status === "running" && (
+                <span className="text-slate-500">{csvJob.progress_done.toLocaleString()} / {csvJob.progress_total.toLocaleString()} rows</span>
+              )}
+              {exportStatus?.row_count != null && csvJob.status === "completed" && (
+                <span className="text-slate-500">{exportStatus.row_count.toLocaleString()} rows</span>
+              )}
+              {exportStatus?.expires_at && (
+                <span className="text-slate-400">expires {formatExpiry(exportStatus.expires_at)}</span>
+              )}
+            </div>
+
+            {csvJob.message && <p className="text-xs text-slate-500">{csvJob.message}</p>}
+
+            {exportStatus?.download_url && (
+              <a
+                href={exportStatus.download_url}
+                download="helvex_export.csv"
+                className="inline-flex items-center gap-1.5 text-xs bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded-lg font-medium transition-colors"
+              >
+                <Download size={12} /> Download CSV
+              </a>
+            )}
+
+            {csvJob.status === "failed" && csvJob.error && (
+              <p className="text-xs text-red-600 font-mono truncate">{csvJob.error}</p>
+            )}
+          </div>
+        )}
+      </section>
 
       {active.length > 0 && (
         <section>

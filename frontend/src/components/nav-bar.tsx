@@ -12,11 +12,11 @@ const NAV_MAIN = [
   { href: "/app/explorer", label: "Explorer", icon: Compass },
   { href: "/app/categories", label: "Categories", icon: LayoutGrid },
   { href: "/app/map", label: "Map", icon: Map },
+  { href: "/app/jobs", label: "Jobs", icon: Activity },
 ];
 
 const NAV_ADMIN = [
   { href: "/app/collection", label: "Collection", icon: Database },
-  { href: "/app/jobs", label: "Jobs", icon: Activity },
   { href: "/app/settings", label: "Settings", icon: Cog },
 ];
 

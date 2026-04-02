@@ -18,6 +18,16 @@ from app.services.job_worker import enqueue_job
 router = APIRouter(tags=["jobs"])
 
 
+def _assert_job_visible_to_user(job, current_user: User) -> None:
+    if current_user.is_superadmin:
+        return
+    if job.user_id == current_user.id:
+        return
+    if current_user.org_id is not None and job.org_id == current_user.org_id:
+        return
+    raise HTTPException(status_code=404, detail="Job not found")
+
+
 def _enqueue_or_http_error(
     request: Request,
     *,
@@ -91,11 +101,15 @@ class EventOut(BaseModel):
 # ── Job CRUD ───────────────────────────────────────────────────────────────────
 
 @router.get("/jobs", response_model=list[JobOut])
-def list_jobs(limit: int = 100, db: Session = Depends(get_db), _: User = Depends(get_current_user)):
+def list_jobs(limit: int = 100, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     # Always include active jobs so the UI never "loses" a recovered job due
     # to history limit cutoffs after a restart/redeploy.
-    recent = crud.list_jobs(db, limit=limit)
-    active = crud.list_active_jobs(db)
+    if current_user.is_superadmin:
+        recent = crud.list_jobs(db, limit=limit)
+        active = crud.list_active_jobs(db)
+    else:
+        recent = crud.list_jobs_for_user(db, user_id=current_user.id, org_id=current_user.org_id, limit=limit)
+        active = crud.list_active_jobs_for_user(db, user_id=current_user.id, org_id=current_user.org_id)
 
     by_id = {j.id: j for j in recent}
     for j in active:
@@ -110,23 +124,29 @@ def list_jobs(limit: int = 100, db: Session = Depends(get_db), _: User = Depends
 
 
 @router.get("/jobs/{job_id}", response_model=JobOut)
-def get_job(job_id: int, db: Session = Depends(get_db), _: User = Depends(get_current_user)):
+def get_job(job_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     job = crud.get_job(db, job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
+    _assert_job_visible_to_user(job, current_user)
     return JobOut.from_orm_obj(job)
 
 
 @router.get("/jobs/{job_id}/events", response_model=list[EventOut])
-def get_job_events(job_id: int, db: Session = Depends(get_db), _: User = Depends(get_current_user)):
+def get_job_events(job_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    job = crud.get_job(db, job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    _assert_job_visible_to_user(job, current_user)
     return [EventOut.from_orm_obj(e) for e in crud.list_events(db, job_id=job_id, limit=200, exclude_debug=False)]
 
 
 @router.post("/jobs/{job_id}/cancel", response_model=JobOut)
-def cancel_job(job_id: int, request: Request, db: Session = Depends(get_db), _: User = Depends(get_current_user)):
+def cancel_job(job_id: int, request: Request, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     job = crud.get_job(db, job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
+    _assert_job_visible_to_user(job, current_user)
     if job.status in ("queued", "paused"):
         crud.mark_cancelled(db, job, message="Cancelled before execution")
         crud.create_event(db, job_id=job.id, level="warn", message="Job cancelled")
@@ -139,10 +159,11 @@ def cancel_job(job_id: int, request: Request, db: Session = Depends(get_db), _: 
 
 
 @router.post("/jobs/{job_id}/pause", response_model=JobOut)
-def pause_job(job_id: int, db: Session = Depends(get_db), _: User = Depends(get_current_user)):
+def pause_job(job_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     job = crud.get_job(db, job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
+    _assert_job_visible_to_user(job, current_user)
     if job.status != "running":
         raise HTTPException(status_code=400, detail="Only running jobs can be paused")
     crud.mark_pause_requested(db, job)
@@ -151,10 +172,11 @@ def pause_job(job_id: int, db: Session = Depends(get_db), _: User = Depends(get_
 
 
 @router.post("/jobs/{job_id}/resume", response_model=JobOut)
-def resume_job(job_id: int, request: Request, db: Session = Depends(get_db), _: User = Depends(get_current_user)):
+def resume_job(job_id: int, request: Request, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     job = crud.get_job(db, job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
+    _assert_job_visible_to_user(job, current_user)
     if job.status != "paused":
         raise HTTPException(status_code=400, detail="Only paused jobs can be resumed")
     crud.resume_paused_job(db, job)
@@ -165,11 +187,14 @@ def resume_job(job_id: int, request: Request, db: Session = Depends(get_db), _: 
 
 
 @router.get("/jobs/stream/active")
-def stream_active_jobs(db: Session = Depends(get_db), _: User = Depends(get_current_user)):
+def stream_active_jobs(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     """SSE stream that sends 'update' while active jobs exist, 'done' when all finish."""
     def event_generator():
         while True:
-            active = crud.list_active_jobs(db)
+            if current_user.is_superadmin:
+                active = crud.list_active_jobs(db)
+            else:
+                active = crud.list_active_jobs_for_user(db, user_id=current_user.id, org_id=current_user.org_id)
             if not active:
                 yield "data: done\n\n"
                 return

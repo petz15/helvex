@@ -2,6 +2,7 @@ import json
 from datetime import datetime, timezone
 from typing import Any
 
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from app.models.job_run_event import JobRunEvent
@@ -43,6 +44,15 @@ def list_jobs(db: Session, limit: int = 50) -> list[JobRun]:
     return db.query(JobRun).order_by(JobRun.queued_at.desc()).limit(limit).all()
 
 
+def list_jobs_for_user(db: Session, *, user_id: int, org_id: int | None, limit: int = 100) -> list[JobRun]:
+    q = db.query(JobRun)
+    if org_id is not None:
+        q = q.filter(or_(JobRun.user_id == user_id, JobRun.org_id == org_id))
+    else:
+        q = q.filter(JobRun.user_id == user_id)
+    return q.order_by(JobRun.queued_at.desc()).limit(limit).all()
+
+
 def list_org_jobs(db: Session, org_id: int, limit: int = 100) -> list[JobRun]:
     """List jobs scoped to a specific org (excludes catalog/superadmin jobs with org_id=None)."""
     return (
@@ -61,6 +71,15 @@ def list_active_jobs(db: Session) -> list[JobRun]:
         .order_by(JobRun.queued_at.asc())
         .all()
     )
+
+
+def list_active_jobs_for_user(db: Session, *, user_id: int, org_id: int | None) -> list[JobRun]:
+    q = db.query(JobRun).filter(JobRun.status.in_(["queued", "running", "paused", "waiting_external"]))
+    if org_id is not None:
+        q = q.filter(or_(JobRun.user_id == user_id, JobRun.org_id == org_id))
+    else:
+        q = q.filter(JobRun.user_id == user_id)
+    return q.order_by(JobRun.queued_at.asc()).all()
 
 
 def get_next_queued_job(db: Session) -> JobRun | None:
