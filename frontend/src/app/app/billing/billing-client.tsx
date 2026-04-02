@@ -121,8 +121,15 @@ function TopupSection({ billingAddress }: { billingAddress: BillingAddressPayloa
   const [error, setError] = useState<string | null>(null);
   const [pendingCredits, setPendingCredits] = useState<number | null>(null);
 
+  // Log state changes for debugging
+  useEffect(() => {
+    console.log("[PAYMENT] TopupSection state:", { billingAddress: !!billingAddress, pendingCredits, loading });
+  }, [billingAddress, pendingCredits, loading]);
+
   async function handleTopup(credits: number) {
+    console.log("[PAYMENT] handleTopup() called with credits:", credits, "billingAddress:", billingAddress ? "YES" : "NO");
     if (!billingAddress) {
+      console.log("[PAYMENT] No billing address, redirecting to address page...");
       const sourcePath = `${window.location.pathname}${window.location.search}`;
       saveCheckoutIntent({
         kind: "topup",
@@ -134,6 +141,7 @@ function TopupSection({ billingAddress }: { billingAddress: BillingAddressPayloa
       window.location.assign(buildAddressReturnUrl(sourcePath));
       return;
     }
+    console.log("[PAYMENT] Billing address exists, setting pendingCredits:", credits);
     setPendingCredits(credits);
     setError(null);
   }
@@ -166,14 +174,23 @@ function TopupSection({ billingAddress }: { billingAddress: BillingAddressPayloa
       cancelUrl.searchParams.set("checkout", "cancel");
       cancelUrl.searchParams.set("kind", "topup");
       cancelUrl.searchParams.set("credits", String(pendingCredits));
+      
+      console.log("[PAYMENT] confirmTopup() called", { pendingCredits, billingAddress });
+      console.log("[PAYMENT] successUrl:", successUrl.toString());
+      console.log("[PAYMENT] cancelUrl:", cancelUrl.toString());
+      
       const session = await createTopupCheckout({
         credits: pendingCredits,
         success_url: successUrl.toString(),
         cancel_url: cancelUrl.toString(),
         billing_address: billingAddress,
       });
+      console.log("[PAYMENT] createTopupCheckout() returned:", session);
+      console.log("[PAYMENT] checkout_url:", session.checkout_url);
+      console.log("[PAYMENT] Redirecting to Saferpay...");
       window.location.assign(session.checkout_url);
     } catch (e) {
+      console.error("[PAYMENT] confirmTopup() ERROR:", e);
       setError(e instanceof Error ? e.message : "Failed to start checkout");
     } finally {
       setLoading(null);
