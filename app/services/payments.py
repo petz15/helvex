@@ -295,8 +295,8 @@ class WorldlineProvider:
                 "Url": return_url,
             },
             "RedirectNotifyUrls": {
-                "SuccessNotifyUrl": notify_url,
-                "FailNotifyUrl": notify_url,
+                "Success": notify_url,
+                "Fail": notify_url,
             },
         }
         session = self._create_transaction_initialize(payload)
