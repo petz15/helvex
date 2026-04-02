@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from typing import Literal
 from urllib.parse import urlencode, urlparse
 
@@ -11,6 +12,8 @@ from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import desc
 from sqlalchemy.orm import Session
+
+logger = logging.getLogger(__name__)
 
 from app.api.deps import get_current_org
 from app.api.deps import require_org_role
@@ -120,8 +123,17 @@ def create_subscription_checkout(
     db: Session = Depends(get_db),
 ) -> CheckoutResponse:
     _user, org = user_org
+    logger.info(
+        "billing.subscription_checkout_start user_id=%s org_id=%s tier=%s cycle=%s provider=%s",
+        _user.id, org.id, body.tier, body.billing_cycle, body.provider,
+    )
 
     billing_address = _resolve_billing_address(_user, body.billing_address, db)
+    logger.debug(
+        "billing.subscription_checkout address_resolved user_id=%s country=%s",
+        _user.id, billing_address.get("country", "N/A"),
+    )
+    
     amount_chf = _resolve_tier_amount_chf(
         db,
         tier=body.tier,
@@ -129,8 +141,13 @@ def create_subscription_checkout(
         custom_features=(getattr(org, "custom_features", None) if body.tier == "custom" else None),
         verified_business=bool(getattr(org, "verified_business", False)),
     )
+    logger.debug("billing.subscription_checkout amount_resolved amount_chf=%s", amount_chf)
 
     try:
+        logger.info(
+            "billing.subscription_checkout calling_provider provider=%s org_id=%s",
+            body.provider or "default", org.id,
+        )
         session = payments.create_subscription_checkout(
             org_id=org.id,
             user_id=_user.id,
@@ -142,10 +159,17 @@ def create_subscription_checkout(
             preferred_provider=body.provider,
             amount_chf=amount_chf,
         )
+        logger.info(
+            "billing.subscription_checkout_ok org_id=%s provider=%s checkout_url_prefix=%s",
+            org.id, session.provider, session.checkout_url[:50] if session.checkout_url else "N/A",
+        )
     except payments.PaymentConfigurationError as exc:
+        logger.exception("billing.subscription_checkout_config_error org_id=%s", org.id)
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
     except RuntimeError as exc:
+        logger.exception("billing.subscription_checkout_runtime_error org_id=%s", org.id)
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
+    
     return CheckoutResponse(
         provider=session.provider,
         checkout_url=session.checkout_url,
@@ -161,10 +185,25 @@ def create_topup_checkout(
     db: Session = Depends(get_db),
 ) -> CheckoutResponse:
     _user, org = user_org
+    logger.info(
+        "billing.topup_checkout_start user_id=%s org_id=%s credits=%s provider=%s",
+        _user.id, org.id, body.credits, body.provider,
+    )
 
     billing_address = _resolve_billing_address(_user, body.billing_address, db)
+    logger.debug(
+        "billing.topup_checkout address_resolved user_id=%s country=%s",
+        _user.id, billing_address.get("country", "N/A"),
+    )
+    
+    amount_chf = payments.credits_to_chf(body.credits)
+    logger.debug("billing.topup_checkout amount_resolved amount_chf=%s credits=%s", amount_chf, body.credits)
 
     try:
+        logger.info(
+            "billing.topup_checkout calling_provider provider=%s org_id=%s",
+            body.provider or "default", org.id,
+        )
         session = payments.create_topup_checkout(
             org_id=org.id,
             user_id=_user.id,
@@ -173,17 +212,24 @@ def create_topup_checkout(
             cancel_url=body.cancel_url,
             billing_address=billing_address,
             preferred_provider=body.provider,
-            amount_chf=payments.credits_to_chf(body.credits),
+            amount_chf=amount_chf,
+        )
+        logger.info(
+            "billing.topup_checkout_ok org_id=%s provider=%s checkout_url_prefix=%s",
+            org.id, session.provider, session.checkout_url[:50] if session.checkout_url else "N/A",
         )
     except payments.PaymentConfigurationError as exc:
+        logger.exception("billing.topup_checkout_config_error org_id=%s", org.id)
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
     except RuntimeError as exc:
+        logger.exception("billing.topup_checkout_runtime_error org_id=%s", org.id)
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
+    
     return CheckoutResponse(
         provider=session.provider,
         checkout_url=session.checkout_url,
         external_id=session.external_id,
-        amount_chf=payments.credits_to_chf(body.credits),
+        amount_chf=amount_chf,
     )
 
 
@@ -252,8 +298,14 @@ async def worldline_return(
     order_reference = str(params.get("order_reference") or "").strip()
     kind = str(params.get("kind") or "").strip().lower()
 
+    logger.info(
+        "billing.worldline_return_called source=%s token=%s kind=%s order_ref=%s",
+        source, token[:20] if token else "NONE", kind, order_reference[:30] if order_reference else "NONE",
+    )
+
     # If no token, redirect based on source (return=user clicked back, notify=webhook)
     if not token:
+        logger.warning("billing.worldline_return_no_token source=%s", source)
         target = success_url if source == "return" else cancel_url
         return RedirectResponse(_safe_redirect_target(target), status_code=status.HTTP_303_SEE_OTHER)
 

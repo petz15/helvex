@@ -11,6 +11,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
+import logging
 import secrets
 import time
 from dataclasses import dataclass
@@ -25,6 +26,8 @@ from app.config import settings
 from app.models.organization import Organization
 from app.services import credits, payment_transactions
 from app.services.tiers import calculate_custom_tier_price
+
+logger = logging.getLogger(__name__)
 
 ProviderName = Literal["worldline", "stripe"]
 
@@ -249,6 +252,13 @@ class WorldlineProvider:
             "Content-Type": "application/json",
         }
 
+        logger.info(
+            "worldline.initialize_request url=%s username=%s amount_chf=%s order_ref=%s",
+            url, api_username, payload.get("Payment", {}).get("Amount", {}).get("Value"), 
+            payload.get("Payment", {}).get("OrderId")
+        )
+        logger.debug("worldline.initialize_payload payload_keys=%s", list(payload.keys()))
+
         with httpx.Client(timeout=100.0) as client:
             try:
                 resp = client.post(
@@ -258,8 +268,19 @@ class WorldlineProvider:
                     auth=(api_username, settings.worldline_api_password),
                 )
             except httpx.HTTPError as exc:
+                logger.exception("worldline.initialize_http_error url=%s", url)
                 raise RuntimeError(f"Worldline checkout request failed: {exc}") from exc
+            
+            logger.info(
+                "worldline.initialize_response status=%s has_token=%s has_redirect=%s",
+                resp.status_code, "Token" in resp.text, "RedirectUrl" in resp.text
+            )
+            
             if resp.status_code >= 400:
+                logger.error(
+                    "worldline.initialize_error status=%s body=%s",
+                    resp.status_code, resp.text[:200]
+                )
                 raise RuntimeError(f"Worldline checkout creation failed: {resp.status_code} {resp.text}")
             data = resp.json()
 
@@ -268,9 +289,16 @@ class WorldlineProvider:
         if not redirect:
             redirect = ((data.get("Redirect") or {}).get("RedirectUrl") if isinstance(data.get("Redirect"), dict) else None)
         if not redirect:
+            logger.error("worldline.initialize_no_redirect response=%s", json.dumps(data)[:200])
             raise RuntimeError("Worldline response did not include a redirect URL")
         if not token:
+            logger.error("worldline.initialize_no_token response=%s", json.dumps(data)[:200])
             raise RuntimeError("Worldline response did not include a transaction token")
+        
+        logger.info(
+            "worldline.initialize_success token=%s redirect_prefix=%s",
+            token[:20], redirect[:50] if redirect else "N/A"
+        )
         return CheckoutSession(provider=self.name, checkout_url=str(redirect), external_id=token)
 
     def _initialize_request(

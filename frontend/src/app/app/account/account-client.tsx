@@ -2,35 +2,19 @@
 import { useEffect, useState } from "react";
 import useSWR from "swr";
 import {
-  KeyRound, Mail, Building2, Loader2, Check, Plus, Download, FileText,
+  Mail, Building2, Loader2, Check, Plus, Download, FileText,
 } from "lucide-react";
 import {
   fetchCurrentUser,
-  createSubscriptionCheckout,
-  createTopupCheckout,
   requestEmailChange,
   createOrg,
   leaveOrg,
   fetchCSVExportStatus,
   fetchOrg,
-  parseBillingAddressJson,
 } from "@/lib/api";
-import {
-  buildAddressReturnUrl,
-  clearCheckoutIntent,
-  readCheckoutIntent,
-  saveCheckoutIntent,
-} from "@/lib/checkout-resume";
-import { creditsToChf } from "@/lib/entitlements";
 import { OrgClient } from "@/app/app/org/org-client";
-import { AddressBookManager } from "@/components/billing/address-book-manager";
 
-type AccountClientProps = {
-  checkout?: string;
-  kind?: string;
-  tier?: string;
-  credits?: string;
-};
+type AccountClientProps = Record<string, never>;
 
 const inputCls =
   "w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-300 focus:border-transparent bg-white";
@@ -123,7 +107,7 @@ function ChangePasswordForm() {
         disabled={saving}
         className="flex items-center gap-2 bg-slate-100 hover:bg-slate-200 disabled:opacity-60 text-slate-700 px-4 py-2 rounded-lg text-sm font-medium transition-colors"
       >
-        {saving ? <Loader2 size={14} className="animate-spin" /> : <KeyRound size={14} />}
+        {saving ? <Loader2 size={14} className="animate-spin" /> : <Check size={14} />}
         Change password
       </button>
     </form>
@@ -210,7 +194,7 @@ function CSVExportSection() {
   );
 }
 
-export function AccountClient({ checkout, kind, tier, credits }: AccountClientProps) {
+export function AccountClient({}: AccountClientProps) {
   const { data: me, mutate: reloadMe } = useSWR("me", fetchCurrentUser);
   const { data: orgDetail, mutate: reloadOrgDetail } = useSWR(me?.org?.id ? ["org-detail", me.org.id] : null, () => fetchOrg(me!.org!.id));
 
@@ -229,48 +213,7 @@ export function AccountClient({ checkout, kind, tier, credits }: AccountClientPr
 
   // Leave org
   const [leavingOrg, setLeavingOrg] = useState(false);
-  const [billingLoading, setBillingLoading] = useState<string | null>(null);
-  const [billingBanner, setBillingBanner] = useState<{ kind: "success" | "error"; message: string } | null>(null);
-
-  const billingAddress = parseBillingAddressJson(me?.billing_address_json);
   const profileTier = me?.org?.tier ?? "free";
-
-  const checkoutState = checkout;
-  const checkoutKind = kind;
-  const checkoutTier = tier;
-  const checkoutCredits = credits;
-  const checkoutLabel = checkoutKind === "topup"
-    ? checkoutCredits
-      ? `${Number(checkoutCredits).toLocaleString()} credits`
-      : "top-up"
-    : checkoutTier
-    ? `${checkoutTier} plan`
-    : "checkout";
-  const checkoutIndicator = checkoutState === "success" || checkoutState === "cancel"
-    ? {
-        kind: checkoutState,
-        message:
-          checkoutState === "success"
-            ? `Checkout returned successfully for ${checkoutLabel}.`
-            : `Checkout was cancelled for ${checkoutLabel}.`,
-      }
-    : null;
-
-  useEffect(() => {
-    if (!billingAddress) return;
-    const params = new URLSearchParams(window.location.search);
-    if (params.get("resume_checkout") !== "1") return;
-
-    const intent = readCheckoutIntent();
-    if (!intent || !intent.sourcePath.startsWith("/app/account")) return;
-
-    clearCheckoutIntent();
-    if (intent.kind === "subscription") {
-      void handleStartSubscriptionCheckout(intent.tier, intent.billing_cycle);
-    } else {
-      void handleStartTopupCheckout(intent.credits);
-    }
-  }, [billingAddress]);
 
   function flash(
     setter: React.Dispatch<React.SetStateAction<{ kind: "success" | "error"; message: string } | null>>,
@@ -330,94 +273,7 @@ export function AccountClient({ checkout, kind, tier, credits }: AccountClientPr
     }
   }
 
-  async function handleStartSubscriptionCheckout(
-    tierOverride: string = "explorer",
-    cycleOverride: "monthly" | "yearly" = "monthly",
-  ) {
-    if (!me?.org_id) return;
-    if (!billingAddress) {
-      const sourcePath = `${window.location.pathname}${window.location.search}`;
-      saveCheckoutIntent({
-        kind: "subscription",
-        sourcePath,
-        tier: tierOverride,
-        billing_cycle: cycleOverride,
-        success_path: "/app/account",
-        cancel_path: "/app/account",
-      });
-      window.location.assign(buildAddressReturnUrl(sourcePath));
-      return;
-    }
-    setBillingLoading("subscription");
-    setBillingBanner(null);
-    try {
-      const origin = window.location.origin;
-      const successUrl = new URL("/app/account", origin);
-      successUrl.searchParams.set("checkout", "success");
-      successUrl.searchParams.set("kind", "subscription");
-      const cancelUrl = new URL("/app/account", origin);
-      cancelUrl.searchParams.set("checkout", "cancel");
-      cancelUrl.searchParams.set("kind", "subscription");
-      const session = await createSubscriptionCheckout({
-        tier: tierOverride,
-        billing_cycle: cycleOverride,
-        success_url: successUrl.toString(),
-        cancel_url: cancelUrl.toString(),
-        billing_address: billingAddress,
-      });
-      window.location.assign(session.checkout_url);
-    } catch (err) {
-      setBillingBanner({
-        kind: "error",
-        message: err instanceof Error ? err.message : "Failed to start subscription checkout",
-      });
-    } finally {
-      setBillingLoading(null);
-    }
-  }
 
-  async function handleStartTopupCheckout(credits: number) {
-    if (!me?.org_id) return;
-    if (!billingAddress) {
-      const sourcePath = `${window.location.pathname}${window.location.search}`;
-      saveCheckoutIntent({
-        kind: "topup",
-        sourcePath,
-        credits,
-        success_path: "/app/account",
-        cancel_path: "/app/account",
-      });
-      window.location.assign(buildAddressReturnUrl(sourcePath));
-      return;
-    }
-    setBillingLoading(`topup-${credits}`);
-    setBillingBanner(null);
-    try {
-      const origin = window.location.origin;
-      const successUrl = new URL("/app/account", origin);
-      successUrl.searchParams.set("checkout", "success");
-      successUrl.searchParams.set("kind", "topup");
-      successUrl.searchParams.set("credits", String(credits));
-      const cancelUrl = new URL("/app/account", origin);
-      cancelUrl.searchParams.set("checkout", "cancel");
-      cancelUrl.searchParams.set("kind", "topup");
-      cancelUrl.searchParams.set("credits", String(credits));
-      const session = await createTopupCheckout({
-        credits,
-        success_url: successUrl.toString(),
-        cancel_url: cancelUrl.toString(),
-        billing_address: billingAddress,
-      });
-      window.location.assign(session.checkout_url);
-    } catch (err) {
-      setBillingBanner({
-        kind: "error",
-        message: err instanceof Error ? err.message : "Failed to start top-up checkout",
-      });
-    } finally {
-      setBillingLoading(null);
-    }
-  }
 
   if (!me) return <div className="p-6 text-slate-400 text-sm">Loading…</div>;
 
@@ -602,77 +458,6 @@ export function AccountClient({ checkout, kind, tier, credits }: AccountClientPr
       <SectionTitle title="Team" />
       <div id="team" className="rounded-xl border border-slate-200 bg-white p-4">
         <OrgClient embedded />
-      </div>
-
-      {/* Billing */}
-      <SectionTitle title="Credits & Billing" />
-      {checkoutIndicator && (
-        <div
-          role="status"
-          className={`rounded-xl border px-4 py-3 text-xs ${
-            checkoutIndicator.kind === "success"
-              ? "border-emerald-200 bg-emerald-50 text-emerald-800"
-              : "border-amber-200 bg-amber-50 text-amber-800"
-          }`}
-        >
-          {checkoutIndicator.message}
-        </div>
-      )}
-      {billingBanner && <Banner {...billingBanner} />}
-      <div className="rounded-xl border border-slate-200 bg-white p-5 space-y-3">
-        <div className="flex items-center justify-between gap-3">
-          <div>
-            <p className="text-sm font-semibold text-slate-800">Credit balance</p>
-            <p className="text-xs text-slate-500 mt-0.5">1 credit = CHF 0.0001</p>
-          </div>
-          <div className="text-right">
-            <p className="text-sm font-semibold text-slate-900">
-              {(orgDetail?.credits_balance ?? 0).toLocaleString()} credits
-            </p>
-            <p className="text-xs text-slate-500">
-              CHF {creditsToChf(orgDetail?.credits_balance ?? 0).toFixed(2)}
-            </p>
-          </div>
-        </div>
-        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-          <button
-            onClick={() => handleStartSubscriptionCheckout()}
-            disabled={!me.org_id || billingLoading !== null}
-            className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-slate-900 px-3 py-2 text-xs font-medium text-white transition-colors hover:bg-slate-800 disabled:opacity-60"
-          >
-            {billingLoading === "subscription" ? "Starting…" : "Start Explorer checkout"}
-          </button>
-          <button
-            onClick={() => handleStartTopupCheckout(10_000)}
-            disabled={!me.org_id || billingLoading !== null}
-            className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-xs font-medium text-blue-700 transition-colors hover:bg-blue-100 disabled:opacity-60"
-          >
-            {billingLoading === "topup-10000" ? "Starting…" : "Buy 10,000 credits"}
-          </button>
-          <button
-            onClick={() => handleStartTopupCheckout(50_000)}
-            disabled={!me.org_id || billingLoading !== null}
-            className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-slate-700 transition-colors hover:bg-slate-50 disabled:opacity-60"
-          >
-            {billingLoading === "topup-50000" ? "Starting…" : "Buy 50,000 credits"}
-          </button>
-          <a
-            href="/app/pricing"
-            className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-slate-800 px-3 py-2 text-xs font-medium text-white transition-colors hover:bg-slate-900"
-          >
-            View pricing
-          </a>
-        </div>
-        <AddressBookManager />
-        {!billingAddress && <span className="text-xs text-amber-600">Missing address blocks billing.</span>}
-        {process.env.NODE_ENV !== "production" && (
-          <a
-            href="/app/dev/billing"
-            className="inline-flex items-center gap-1.5 text-xs text-slate-500 hover:text-slate-700 transition-colors"
-          >
-            Open dev billing test page
-          </a>
-        )}
       </div>
 
       {/* CSV Export */}

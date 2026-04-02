@@ -9,6 +9,7 @@ Security guarantees:
 
 from __future__ import annotations
 
+import logging
 from datetime import datetime, timezone
 from typing import Any, Literal
 
@@ -17,6 +18,8 @@ from sqlalchemy.orm import Session
 from app.models.organization import Organization
 from app.models.payment_transaction import PaymentTransaction
 from app.services import credits
+
+logger = logging.getLogger(__name__)
 
 
 ProviderName = Literal["worldline", "stripe"]
@@ -154,23 +157,36 @@ def log_payment_transaction(
     Returns the created PaymentTransaction.
     Raises DuplicatePaymentError if external_id already exists.
     """
+    logger.info(
+        "payment_tx.log_start org_id=%s kind=%s status=%s amount_chf=%s tier=%s",
+        org_id, kind, status, amount_chf, subscription_tier or "N/A",
+    )
+
     if amount_chf <= 0:
+        logger.error("payment_tx.invalid_amount org_id=%s amount_chf=%s", org_id, amount_chf)
         raise PaymentValidationError(f"amount_chf must be positive, got {amount_chf}")
 
     if kind not in {"subscription", "topup"}:
+        logger.error("payment_tx.invalid_kind org_id=%s kind=%s", org_id, kind)
         raise PaymentValidationError(f"Invalid kind: {kind}")
 
     if status not in {"pending", "authorized", "captured", "declined", "error"}:
+        logger.error("payment_tx.invalid_status org_id=%s status=%s", org_id, status)
         raise PaymentValidationError(f"Invalid status: {status}")
 
     # Verify org exists
     org = db.query(Organization).filter(Organization.id == org_id).first()
     if org is None:
+        logger.error("payment_tx.org_not_found org_id=%s", org_id)
         raise PaymentValidationError(f"Organization {org_id} not found")
 
     # SECURITY: Check for duplicate external_id (prevents double-processing)
     existing = db.query(PaymentTransaction).filter(PaymentTransaction.external_id == external_id).first()
     if existing:
+        logger.warning(
+            "payment_tx.duplicate_external_id org_id=%s existing_tx_id=%s ext_id=%s",
+            org_id, existing.id, external_id[:20],
+        )
         raise DuplicatePaymentError(
             f"Payment with external_id '{external_id}' already exists (tx_id={existing.id}). "
             "This is a security check to prevent duplicate processing."
@@ -203,6 +219,11 @@ def log_payment_transaction(
     db.flush()  # Ensure ID is generated before commit
     db.commit()
     db.refresh(tx)
+
+    logger.info(
+        "payment_tx.logged tx_id=%s org_id=%s kind=%s status=%s",
+        tx.id, org_id, kind, status,
+    )
 
     return tx
 
@@ -273,7 +294,16 @@ def apply_successful_payment(
 
     Raises PaymentValidationError if data is invalid.
     """
+    logger.info(
+        "payment_tx.apply_start tx_id=%s org_id=%s kind=%s status=%s",
+        payment_tx.id, payment_tx.org_id, payment_tx.kind, payment_tx.status,
+    )
+
     if payment_tx.status not in {"authorized", "captured"}:
+        logger.error(
+            "payment_tx.apply_invalid_status tx_id=%s status=%s",
+            payment_tx.id, payment_tx.status,
+        )
         raise PaymentValidationError(
             f"Cannot apply payment {payment_tx.id}: status is {payment_tx.status}, "
             "not authorized/captured"
@@ -281,20 +311,30 @@ def apply_successful_payment(
 
     # SECURITY: Idempotency check - if already processed, skip
     if payment_tx.webhook_processed_at is not None:
+        logger.info(
+            "payment_tx.apply_already_processed tx_id=%s org_id=%s",
+            payment_tx.id, payment_tx.org_id,
+        )
         return
 
     # Verify org still exists
     org = db.query(Organization).filter(Organization.id == payment_tx.org_id).first()
     if org is None:
+        logger.error("payment_tx.apply_org_not_found tx_id=%s org_id=%s", payment_tx.id, payment_tx.org_id)
         raise PaymentValidationError(f"Organization {payment_tx.org_id} no longer exists")
 
     try:
         if payment_tx.kind == "subscription":
             # Update tier
             if not payment_tx.subscription_tier:
+                logger.error("payment_tx.apply_missing_tier tx_id=%s org_id=%s", payment_tx.id, payment_tx.org_id)
                 raise PaymentValidationError(
                     f"Subscription payment {payment_tx.id} missing subscription_tier"
                 )
+            logger.info(
+                "payment_tx.apply_subscription tx_id=%s org_id=%s old_tier=%s new_tier=%s",
+                payment_tx.id, payment_tx.org_id, org.tier, payment_tx.subscription_tier,
+            )
             org.tier = payment_tx.subscription_tier
             if payment_tx.subscription_billing_cycle:
                 org.subscription_billing_cycle = payment_tx.subscription_billing_cycle
@@ -302,10 +342,18 @@ def apply_successful_payment(
         elif payment_tx.kind == "topup":
             # Grant credits
             if not payment_tx.credits_purchased or payment_tx.credits_purchased <= 0:
+                logger.error(
+                    "payment_tx.apply_invalid_credits tx_id=%s org_id=%s credits=%s",
+                    payment_tx.id, payment_tx.org_id, payment_tx.credits_purchased,
+                )
                 raise PaymentValidationError(
                     f"Topup payment {payment_tx.id} missing or invalid credits_purchased"
                 )
 
+            logger.info(
+                "payment_tx.apply_topup tx_id=%s org_id=%s credits_before=%s credits_to_add=%s",
+                payment_tx.id, payment_tx.org_id, org.credits_balance, payment_tx.credits_purchased,
+            )
             # Use topup_credits service for automatic bonus application
             total_granted = credits.topup_credits(
                 db,
@@ -316,13 +364,25 @@ def apply_successful_payment(
 
             # Update transaction with actual granted amount
             payment_tx.credits_total_granted = total_granted
+            logger.info(
+                "payment_tx.apply_topup_done tx_id=%s org_id=%s total_granted=%s",
+                payment_tx.id, payment_tx.org_id, total_granted,
+            )
 
         # Mark as processed
         payment_tx.webhook_processed_at = datetime.now(tz=timezone.utc)
         db.commit()
+        logger.info(
+            "payment_tx.apply_success tx_id=%s org_id=%s",
+            payment_tx.id, payment_tx.org_id,
+        )
 
     except Exception as exc:
         # Don't let credit service errors prevent transaction logging
+        logger.exception(
+            "payment_tx.apply_failed tx_id=%s org_id=%s error=%s",
+            payment_tx.id, payment_tx.org_id, str(exc),
+        )
         payment_tx.status = "error"
         payment_tx.error_code = "CREDIT_GRANT_FAILED"
         payment_tx.error_message = str(exc)
