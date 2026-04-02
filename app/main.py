@@ -91,6 +91,10 @@ def _read_version_info() -> tuple[str, str, str]:
 APP_VERSION, BUILD_DATE, BUILD_GIT_SHA = _read_version_info()
 
 logger = logging.getLogger(__name__)
+print(
+    f"boot.logging level={_LOG_LEVEL_NAME} api_request_logging_enabled={getattr(settings, 'api_request_logging_enabled', True)}",
+    flush=True,
+)
 
 
 # ── Startup helpers ───────────────────────────────────────────────────────────
@@ -392,6 +396,10 @@ async def api_request_logger(request: Request, call_next):
             client_host,
             elapsed_ms,
         )
+        print(
+            f"http.request_error method={request.method} path={path} client={client_host} duration_ms={elapsed_ms:.1f}",
+            flush=True,
+        )
         raise
 
     elapsed_ms = (time.perf_counter() - started) * 1000.0
@@ -402,6 +410,10 @@ async def api_request_logger(request: Request, call_next):
         response.status_code,
         client_host,
         elapsed_ms,
+    )
+    print(
+        f"http.request method={request.method} path={path} status={response.status_code} client={client_host} duration_ms={elapsed_ms:.1f}",
+        flush=True,
     )
     return response
 
