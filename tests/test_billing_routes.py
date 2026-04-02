@@ -414,6 +414,45 @@ def test_cancel_pending_payment_marks_declined(client, db):
     assert tx.error_code == "MANUAL_CANCELLED"
 
 
+def test_cancel_pending_payment_triggers_worldline_cancel_when_provider_tx_id_present(client, db, monkeypatch):
+    org = _seed_org(db, org_id=22)
+    _override_user(org.id)
+
+    called = {}
+
+    def _fake_cancel(self, *, transaction_id):
+        called["transaction_id"] = transaction_id
+        return {
+            "ResponseHeader": {"RequestId": "wl_cancel_test_22"},
+            "TransactionId": transaction_id,
+            "Date": "2026-04-02T12:00:00.000+01:00",
+        }
+
+    monkeypatch.setattr("app.services.payments.WorldlineProvider.cancel_transaction", _fake_cancel)
+
+    tx = PaymentTransaction(
+        org_id=org.id,
+        provider="worldline",
+        external_id="tok_cancel_22",
+        order_reference="wl_topup_22_1_10000_deadbeef",
+        amount_chf=1.0,
+        currency="CHF",
+        kind="topup",
+        status="pending",
+        provider_transaction_id="wl_provider_tx_22",
+    )
+    db.add(tx)
+    db.commit()
+
+    resp = client.post(f"/api/v1/billing/payments/{tx.id}/cancel")
+    assert resp.status_code == 200
+    assert called["transaction_id"] == "wl_provider_tx_22"
+
+    db.refresh(tx)
+    assert tx.status == "declined"
+    assert tx.error_code == "MANUAL_CANCELLED"
+
+
 def test_payment_history_expires_stale_pending_after_15_min(client, db):
     org = _seed_org(db, org_id=21)
     _override_user(org.id)
@@ -434,6 +473,46 @@ def test_payment_history_expires_stale_pending_after_15_min(client, db):
 
     resp = client.get("/api/v1/billing/payments")
     assert resp.status_code == 200
+
+    db.refresh(stale)
+    assert stale.status == "declined"
+    assert stale.error_code == "PENDING_TIMEOUT"
+
+
+def test_payment_history_expiration_triggers_worldline_cancel_when_provider_tx_id_present(client, db, monkeypatch):
+    org = _seed_org(db, org_id=23)
+    _override_user(org.id)
+
+    called = {}
+
+    def _fake_cancel(self, *, transaction_id):
+        called["transaction_id"] = transaction_id
+        return {
+            "ResponseHeader": {"RequestId": "wl_cancel_test_23"},
+            "TransactionId": transaction_id,
+            "Date": "2026-04-02T12:00:00.000+01:00",
+        }
+
+    monkeypatch.setattr("app.services.payments.WorldlineProvider.cancel_transaction", _fake_cancel)
+
+    stale = PaymentTransaction(
+        org_id=org.id,
+        provider="worldline",
+        external_id="tok_stale_23",
+        order_reference="wl_topup_23_1_10000_deadbeef",
+        amount_chf=1.0,
+        currency="CHF",
+        kind="topup",
+        status="pending",
+        provider_transaction_id="wl_provider_tx_23",
+        created_at=datetime.now(tz=timezone.utc) - timedelta(minutes=20),
+    )
+    db.add(stale)
+    db.commit()
+
+    resp = client.get("/api/v1/billing/payments")
+    assert resp.status_code == 200
+    assert called["transaction_id"] == "wl_provider_tx_23"
 
     db.refresh(stale)
     assert stale.status == "declined"

@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime, timedelta, timezone
-from typing import Any, Literal
+from typing import Any, Callable, Literal
 
 from sqlalchemy.orm import Session
 
@@ -408,6 +408,7 @@ def expire_stale_pending_transactions(
     *,
     org_id: int | None = None,
     max_age_minutes: int = 15,
+    on_expire: Callable[[PaymentTransaction], None] | None = None,
 ) -> int:
     """Mark pending transactions older than max_age_minutes as declined.
 
@@ -424,6 +425,8 @@ def expire_stale_pending_transactions(
     if not rows:
         return 0
     for tx in rows:
+        if on_expire is not None:
+            on_expire(tx)
         tx.status = "declined"
         tx.error_code = "PENDING_TIMEOUT"
         tx.error_message = f"Payment expired after {max_age_minutes} minutes"
@@ -436,10 +439,13 @@ def cancel_pending_transaction(
     db: Session,
     *,
     tx: PaymentTransaction,
+    on_cancel: Callable[[PaymentTransaction], None] | None = None,
 ) -> PaymentTransaction:
     """Manually cancel a pending payment transaction."""
     if tx.status != "pending":
         raise PaymentValidationError(f"Only pending payments can be cancelled (status={tx.status})")
+    if on_cancel is not None:
+        on_cancel(tx)
     tx.status = "declined"
     tx.error_code = "MANUAL_CANCELLED"
     tx.error_message = "Cancelled by user"

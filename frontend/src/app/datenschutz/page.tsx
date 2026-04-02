@@ -43,33 +43,52 @@ export default function DatenschutzPage() {
       <section className="rounded-xl border border-slate-200 bg-white p-6 space-y-3 text-sm text-slate-700">
         <h2 className="font-semibold text-slate-900">4. Cookies</h2>
         <p>
-          Wir verwenden notwendige Cookies für Login und Sicherheit. Optionale Analyse-Cookies werden nur nach
-          ausdrücklicher Zustimmung gesetzt.
+          Wir verwenden notwendige Cookies für Login und Sicherheit. Optionale Cookies für Analyse (Google Tag Manager)
+          und Werbung (Google AdSense) werden nur nach ausdrücklicher Zustimmung gesetzt.
         </p>
+        <ul className="list-disc pl-5 space-y-1">
+          <li>Notwendig: Session/Authentifizierung und technische Sicherheit.</li>
+          <li>Analyse: Reichweiten- und Nutzungsanalyse über Google Tag Manager.</li>
+          <li>Werbung: Auslieferung und Messung von Anzeigen über Google AdSense.</li>
+        </ul>
         <p>
           Ihre Auswahl kann jederzeit über den Link "Cookie-Einstellungen" im Footer geändert werden.
         </p>
       </section>
 
       <section className="rounded-xl border border-slate-200 bg-white p-6 space-y-3 text-sm text-slate-700">
-        <h2 className="font-semibold text-slate-900">5. Empfänger und Auftragsbearbeiter</h2>
+        <h2 className="font-semibold text-slate-900">5. Tracking und Werbung (Google-Dienste)</h2>
+        <p>
+          Sofern Sie zustimmen, setzen wir Google Tag Manager (Analyse) sowie Google AdSense (Werbung) ein.
+          Dabei können technische Kennungen, Geräte-/Browserdaten, Nutzungsereignisse und ungefähre Standortdaten
+          verarbeitet werden.
+        </p>
+        <p>
+          Rechtsgrundlage ist Ihre Einwilligung. Sie können diese jederzeit mit Wirkung für die Zukunft über
+          "Cookie-Einstellungen" widerrufen.
+        </p>
+      </section>
+
+      <section className="rounded-xl border border-slate-200 bg-white p-6 space-y-3 text-sm text-slate-700">
+        <h2 className="font-semibold text-slate-900">6. Empfänger und Auftragsbearbeiter</h2>
         <p>
           Wir setzen technische Dienstleister ein, insbesondere für Hosting, E-Mail-Zustellung,
-          OAuth-Authentifizierung und externe Daten-/KI-Dienste. Mit Auftragsbearbeitern werden erforderliche
+          OAuth-Authentifizierung, externe Daten-/KI-Dienste sowie Analyse-/Werbedienste. Mit Auftragsbearbeitern werden erforderliche
           vertragliche Datenschutzvereinbarungen abgeschlossen.
         </p>
       </section>
 
       <section className="rounded-xl border border-slate-200 bg-white p-6 space-y-3 text-sm text-slate-700">
-        <h2 className="font-semibold text-slate-900">6. Bekanntgabe ins Ausland</h2>
+        <h2 className="font-semibold text-slate-900">7. Bekanntgabe ins Ausland</h2>
         <p>
           Eine Bearbeitung kann durch eingesetzte Dienstleister auch ausserhalb der Schweiz erfolgen.
+          Dies kann insbesondere bei Google-Diensten (Tag Manager, AdSense) der Fall sein.
           Falls erforderlich, erfolgen geeignete Garantien (z. B. Standardvertragsklauseln).
         </p>
       </section>
 
       <section className="rounded-xl border border-slate-200 bg-white p-6 space-y-3 text-sm text-slate-700">
-        <h2 className="font-semibold text-slate-900">7. Aufbewahrung</h2>
+        <h2 className="font-semibold text-slate-900">8. Aufbewahrung</h2>
         <p>
           Wir speichern Personendaten nur so lange, wie es für die genannten Zwecke erforderlich ist oder
           gesetzliche Pflichten es verlangen.
@@ -77,7 +96,7 @@ export default function DatenschutzPage() {
       </section>
 
       <section className="rounded-xl border border-slate-200 bg-white p-6 space-y-3 text-sm text-slate-700">
-        <h2 className="font-semibold text-slate-900">8. Rechte betroffener Personen</h2>
+        <h2 className="font-semibold text-slate-900">9. Rechte betroffener Personen</h2>
         <p>
           Sie haben im Rahmen des anwendbaren Rechts Anspruch auf Auskunft, Berichtigung, Löschung,
           Herausgabe/Übertragung und Widerspruch.
@@ -85,12 +104,12 @@ export default function DatenschutzPage() {
       </section>
 
       <section className="rounded-xl border border-slate-200 bg-white p-6 space-y-3 text-sm text-slate-700">
-        <h2 className="font-semibold text-slate-900">9. Kontakt und Aufsicht</h2>
+        <h2 className="font-semibold text-slate-900">10. Kontakt und Aufsicht</h2>
         <p>Datenschutzanfragen: kontakt@balogh-consulting.ch</p>
         <p>In der Schweiz zuständige Aufsichtsbehörde: EDÖB.</p>
       </section>
 
-      <p className="text-xs text-slate-400">Stand: 29.03.2026</p>
+      <p className="text-xs text-slate-400">Stand: 02.04.2026</p>
     </div>
   );
 }

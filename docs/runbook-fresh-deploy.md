@@ -27,6 +27,8 @@ Go to **github.com/petz15/helvex → Settings → Secrets and variables → Acti
 | `SMTP_USER` | SMTP login username |
 | `SMTP_PASSWORD` | SMTP login password |
 | `SMTP_FROM` | Sender address, e.g. `Helvex <noreply@helvex.dicy.ch>` |
+| NEXT_PUBLIC_GTM_ID | Google Tag Manager container ID for frontend build, e.g. `GTM-XXXXXXX` |
+| NEXT_PUBLIC_ADSENSE_CLIENT_ID | Google AdSense publisher client ID for frontend build, e.g. `ca-pub-XXXXXXXXXXXXXXXX` |
 | `ARC_APP_ID` | GitHub App ID (from App settings page) |
 | `ARC_APP_INSTALLATION_ID` | Installation ID (from App → Install → URL contains the ID) |
 | `ARC_APP_PRIVATE_KEY` | Contents of the `.pem` file (paste the full multiline value) |

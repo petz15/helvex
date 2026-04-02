@@ -461,6 +461,38 @@ class WorldlineProvider:
                 raise RuntimeError(f"Worldline authorization failed: {resp.status_code} {resp.text}")
             return resp.json()
 
+    def cancel_transaction(self, *, transaction_id: str) -> dict[str, Any]:
+        """Cancel a previously authorized Worldline/Saferpay transaction."""
+        tx_id = str(transaction_id or "").strip()
+        if not tx_id:
+            raise RuntimeError("Worldline transaction cancellation failed: missing transaction_id")
+
+        base = _worldline_api_base_url()
+        url = f"{base}/Payment/v1/Transaction/Cancel"
+        payload = {
+            "RequestHeader": {
+                "SpecVersion": _worldline_spec_version(),
+                "CustomerId": _worldline_customer_id(),
+                "RequestId": f"wl_cancel_{secrets.token_hex(8)}",
+                "RetryIndicator": 0,
+            },
+            "TransactionReference": {
+                "TransactionId": tx_id,
+            },
+        }
+        headers = {
+            "Accept": "application/json",
+            "Content-Type": "application/json",
+        }
+        with httpx.Client(timeout=100.0) as client:
+            try:
+                resp = client.post(url, headers=headers, json=payload, auth=(_worldline_api_username(), settings.worldline_api_password))
+            except httpx.HTTPError as exc:
+                raise RuntimeError(f"Worldline transaction cancellation failed: {exc}") from exc
+            if resp.status_code >= 400:
+                raise RuntimeError(f"Worldline transaction cancellation failed: {resp.status_code} {resp.text}")
+            return resp.json()
+
     def create_card_alias_registration(
         self,
         *,

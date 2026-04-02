@@ -69,6 +69,8 @@ jobs:
             ghcr.io/${{ github.repository }}-frontend:${{ github.sha }}
           build-args: |
             FASTAPI_URL=http://helvex:8000
+            NEXT_PUBLIC_GTM_ID=${{ secrets.NEXT_PUBLIC_GTM_ID }}
+            NEXT_PUBLIC_ADSENSE_CLIENT_ID=${{ secrets.NEXT_PUBLIC_ADSENSE_CLIENT_ID }}
           cache-from: type=gha,scope=frontend
           cache-to: type=gha,mode=max,scope=frontend
 

@@ -107,6 +107,39 @@ def _resolve_worldline_payment_alias(db: Session, org: Organization) -> str | No
     return alias_id or None
 
 
+def _cancel_provider_transaction(tx: PaymentTransaction) -> None:
+    """Best-effort provider-side cancellation for pending transactions."""
+    if tx.provider != "worldline":
+        return
+    provider_tx_id = str(tx.provider_transaction_id or "").strip()
+    if not provider_tx_id:
+        _emit(
+            "info",
+            "billing.provider_cancel_skip tx_id=%s provider=%s reason=missing_provider_transaction_id",
+            tx.id,
+            tx.provider,
+        )
+        return
+    try:
+        payments.WorldlineProvider().cancel_transaction(transaction_id=provider_tx_id)
+        _emit(
+            "info",
+            "billing.provider_cancel_ok tx_id=%s provider=%s provider_tx_id=%s",
+            tx.id,
+            tx.provider,
+            provider_tx_id[:30],
+        )
+    except (payments.PaymentConfigurationError, RuntimeError) as exc:
+        _emit(
+            "warning",
+            "billing.provider_cancel_failed tx_id=%s provider=%s provider_tx_id=%s error=%s",
+            tx.id,
+            tx.provider,
+            provider_tx_id[:30],
+            str(exc),
+        )
+
+
 def _safe_redirect_target(url: str | None) -> str:
     if not url:
         return payments.settings.app_base_url.rstrip("/")
@@ -838,7 +871,12 @@ def get_billing_summary(
 ) -> dict:
     """Return billing summary for the current org: tier, balance, subscription info."""
     user, org = user_org
-    payment_transactions.expire_stale_pending_transactions(db, org_id=org.id, max_age_minutes=15)
+    payment_transactions.expire_stale_pending_transactions(
+        db,
+        org_id=org.id,
+        max_age_minutes=15,
+        on_expire=_cancel_provider_transaction,
+    )
     return {
         "org_id": org.id,
         "tier": org.tier,
@@ -899,7 +937,12 @@ def list_payment_history(
     Exposes only safe fields — no raw provider tokens or internal error codes.
     """
     _user, org = user_org
-    payment_transactions.expire_stale_pending_transactions(db, org_id=org.id, max_age_minutes=15)
+    payment_transactions.expire_stale_pending_transactions(
+        db,
+        org_id=org.id,
+        max_age_minutes=15,
+        on_expire=_cancel_provider_transaction,
+    )
     query = db.query(PaymentTransaction).filter(PaymentTransaction.org_id == org.id)
     total = query.count()
     rows = (
@@ -958,11 +1001,20 @@ def cancel_pending_payment(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Payment not found")
 
     # Ensure stale pending payments are closed before manual action check.
-    payment_transactions.expire_stale_pending_transactions(db, org_id=org.id, max_age_minutes=15)
+    payment_transactions.expire_stale_pending_transactions(
+        db,
+        org_id=org.id,
+        max_age_minutes=15,
+        on_expire=_cancel_provider_transaction,
+    )
     db.refresh(tx)
 
     try:
-        payment_transactions.cancel_pending_transaction(db, tx=tx)
+        payment_transactions.cancel_pending_transaction(
+            db,
+            tx=tx,
+            on_cancel=_cancel_provider_transaction,
+        )
     except payment_transactions.PaymentValidationError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     return WebhookResponse(ok=True)

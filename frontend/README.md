@@ -20,6 +20,27 @@ You can start editing the page by modifying `app/page.tsx`. The page auto-update
 
 This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
 
+## GTM and AdSense configuration
+
+Set the following public environment variables for the Next.js frontend:
+
+```bash
+NEXT_PUBLIC_GTM_ID=GTM-XXXXXXX
+NEXT_PUBLIC_ADSENSE_CLIENT_ID=ca-pub-XXXXXXXXXXXXXXXX
+```
+
+Where to add them:
+
+- Local development: create `frontend/.env.local`
+- GitHub Actions deployments: store them as repository secrets (`NEXT_PUBLIC_GTM_ID`, `NEXT_PUBLIC_ADSENSE_CLIENT_ID`); deploy workflows pass them as frontend Docker build args
+- Platform hosting (e.g. Vercel): add them in project environment settings
+
+Notes:
+
+- Scripts are only loaded after user consent in the cookie banner.
+- GTM uses the "Analyse" consent toggle.
+- AdSense uses the "Werbe-Cookies" consent toggle.
+
 ## Learn More
 
 To learn more about Next.js, take a look at the following resources:

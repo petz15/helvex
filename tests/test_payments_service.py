@@ -177,6 +177,37 @@ def test_worldline_alias_assertion_calls_api(monkeypatch):
     assert captured["json"]["Token"] == "alias_tok_1"
 
 
+def test_worldline_transaction_cancel_calls_api(monkeypatch):
+    captured = {}
+
+    def _fake_post(self, url, headers=None, json=None, auth=None):
+        captured["url"] = url
+        captured["headers"] = headers
+        captured["json"] = json
+        captured["auth"] = auth
+        return _FakeResponse(
+            200,
+            {
+                "ResponseHeader": {"RequestId": "wl_cancel_test_1"},
+                "TransactionId": "tx_123",
+                "Date": "2026-04-02T12:00:00.000+01:00",
+            },
+        )
+
+    monkeypatch.setattr(payments.settings, "payment_provider_mode", "worldline")
+    monkeypatch.setattr(payments.settings, "worldline_customer_id", "customer_test")
+    monkeypatch.setattr(payments.settings, "worldline_terminal_id", "12345678")
+    monkeypatch.setattr(payments.settings, "worldline_api_username", "wl_key")
+    monkeypatch.setattr(payments.settings, "worldline_api_password", "wl_pwd")
+    monkeypatch.setattr(payments.httpx.Client, "post", _fake_post)
+
+    out = payments.WorldlineProvider().cancel_transaction(transaction_id="tx_123")
+
+    assert out["TransactionId"] == "tx_123"
+    assert captured["url"].endswith("/Payment/v1/Transaction/Cancel")
+    assert captured["json"]["TransactionReference"]["TransactionId"] == "tx_123"
+
+
 def test_parse_worldline_merchant_reference_subscription():
     parsed = payments.parse_worldline_merchant_reference("wl_sub_42_researcher_yearly_deadbeef")
     assert parsed["kind"] == "sub"

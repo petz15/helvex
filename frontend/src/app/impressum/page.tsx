@@ -45,6 +45,14 @@ export default function ImpressumPage() {
       </section>
 
       <section className="rounded-xl border border-slate-200 bg-white p-6 space-y-3 text-sm text-slate-700">
+        <h2 className="font-semibold text-slate-900">Analyse und Werbung</h2>
+        <p>
+          Diese Website nutzt - nur mit entsprechender Einwilligung - Google Tag Manager (Analyse) und
+          Google AdSense (Werbeanzeigen). Details zur Datenbearbeitung finden Sie in der Datenschutzerklärung.
+        </p>
+      </section>
+
+      <section className="rounded-xl border border-slate-200 bg-white p-6 space-y-3 text-sm text-slate-700">
         <h2 className="font-semibold text-slate-900">Haftungsausschluss</h2>
         <p>
           Trotz sorgfältiger inhaltlicher Kontrolle übernehmen wir keine Gewähr für Richtigkeit, Vollständigkeit
@@ -64,7 +72,7 @@ export default function ImpressumPage() {
         </p>
       </section>
 
-      <p className="text-xs text-slate-400">Stand: 29.03.2026</p>
+      <p className="text-xs text-slate-400">Stand: 02.04.2026</p>
     </div>
   );
 }
