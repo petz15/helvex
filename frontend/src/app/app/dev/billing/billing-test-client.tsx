@@ -1,7 +1,15 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { createSubscriptionCheckout, createTopupCheckout } from "@/lib/api";
+import useSWR from "swr";
+import {
+  createSubscriptionCheckout,
+  createTopupCheckout,
+  fetchBillingSummary,
+  fetchCurrentUser,
+  fetchPaymentHistory,
+  parseBillingAddressJson,
+} from "@/lib/api";
 
 const PLAN_TIERS = ["simple", "explorer", "researcher", "strategist"] as const;
 const TOPUP_AMOUNTS = [10_000, 50_000, 100_000] as const;
@@ -53,9 +61,13 @@ function getCheckoutStatus(): {
 }
 
 export function BillingTestClient() {
+  const { data: me } = useSWR("me", fetchCurrentUser);
+  const { data: summary, mutate: reloadSummary } = useSWR("billing-summary", fetchBillingSummary);
+  const { data: payments, mutate: reloadPayments } = useSWR("billing-payments-1", () => fetchPaymentHistory(1, 5));
   const [yearly, setYearly] = useState(false);
   const [loading, setLoading] = useState<CheckoutKind | null>(null);
   const [banner, setBanner] = useState<{ kind: "success" | "error"; message: string } | null>(null);
+  const billingAddress = parseBillingAddressJson(me?.billing_address_json);
 
   // Check for return status from payment provider
   useEffect(() => {
@@ -84,12 +96,17 @@ export function BillingTestClient() {
 
     // Clean up URL
     window.history.replaceState({}, "", window.location.pathname);
+    void reloadSummary();
+    void reloadPayments();
   }, []);
 
   async function startPlanCheckout(tier: (typeof PLAN_TIERS)[number]) {
     setLoading({ kind: "subscription", value: tier });
     setBanner(null);
     try {
+      if (!billingAddress) {
+        throw new Error("No default billing address found. Add one in /app/addresses first.");
+      }
       const session = await createSubscriptionCheckout({
         tier,
         billing_cycle: yearly ? "yearly" : "monthly",
@@ -103,6 +120,7 @@ export function BillingTestClient() {
           tier,
           cycle: yearly ? "yearly" : "monthly",
         }),
+        billing_address: billingAddress,
       });
       window.location.assign(session.checkout_url);
     } catch (err) {
@@ -119,6 +137,9 @@ export function BillingTestClient() {
     setLoading({ kind: "topup", value: credits });
     setBanner(null);
     try {
+      if (!billingAddress) {
+        throw new Error("No default billing address found. Add one in /app/addresses first.");
+      }
       const session = await createTopupCheckout({
         credits,
         success_url: buildReturnUrl("/app/dev/billing", {
@@ -129,6 +150,7 @@ export function BillingTestClient() {
           checkout: "cancel",
           credits: String(credits),
         }),
+        billing_address: billingAddress,
       });
       window.location.assign(session.checkout_url);
     } catch (err) {
@@ -177,6 +199,21 @@ export function BillingTestClient() {
             {banner.message}
           </div>
         )}
+
+        <div className="mt-5 grid grid-cols-1 gap-3 rounded-2xl border border-white/10 bg-white/5 p-4 text-xs text-slate-200 sm:grid-cols-3">
+          <div>
+            <p className="text-[11px] uppercase tracking-[0.15em] text-slate-400">Current tier</p>
+            <p className="mt-1 text-sm font-semibold text-white capitalize">{summary?.tier ?? "-"}</p>
+          </div>
+          <div>
+            <p className="text-[11px] uppercase tracking-[0.15em] text-slate-400">Credits balance</p>
+            <p className="mt-1 text-sm font-semibold text-white">{summary?.credits_balance?.toLocaleString() ?? "-"}</p>
+          </div>
+          <div>
+            <p className="text-[11px] uppercase tracking-[0.15em] text-slate-400">Address status</p>
+            <p className="mt-1 text-sm font-semibold text-white">{billingAddress ? "Default address set" : "Missing default address"}</p>
+          </div>
+        </div>
 
         <div className="mt-8 grid grid-cols-1 gap-4 lg:grid-cols-2">
           <section className="rounded-3xl border border-white/10 bg-white/5 p-5 shadow-2xl shadow-slate-950/30 backdrop-blur">
@@ -240,6 +277,18 @@ export function BillingTestClient() {
 
         <div className="mt-8 rounded-2xl border border-white/10 bg-black/20 p-4 text-xs leading-6 text-slate-300">
           This page is intentionally unlinked in production. It exists to test the end-to-end checkout redirect and browser return path from a stable internal route.
+        </div>
+
+        <div className="mt-4 rounded-2xl border border-white/10 bg-black/20 p-4 text-xs leading-6 text-slate-300">
+          <p className="font-semibold text-slate-100">Latest payment records</p>
+          <div className="mt-2 space-y-1">
+            {payments?.items?.slice(0, 3).map((tx) => (
+              <p key={tx.id}>
+                {tx.kind} | {tx.status} | CHF {tx.amount_chf.toFixed(2)}
+              </p>
+            ))}
+            {(!payments || !payments.items.length) && <p>No payment records yet.</p>}
+          </div>
         </div>
       </div>
     </div>

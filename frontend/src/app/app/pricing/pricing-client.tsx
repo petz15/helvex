@@ -7,6 +7,12 @@ import {
   fetchCurrentUser,
   parseBillingAddressJson,
 } from "@/lib/api";
+import {
+  buildAddressReturnUrl,
+  clearCheckoutIntent,
+  readCheckoutIntent,
+  saveCheckoutIntent,
+} from "@/lib/checkout-resume";
 
 // ── Data ──────────────────────────────────────────────────────────────────────
 
@@ -284,6 +290,19 @@ export function PricingClient() {
     window.history.replaceState({}, "", window.location.pathname);
   }, []);
 
+  useEffect(() => {
+    if (!billingAddress) return;
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("resume_checkout") !== "1") return;
+
+    const intent = readCheckoutIntent();
+    if (!intent || intent.kind !== "subscription") return;
+    if (!intent.sourcePath.startsWith("/app/pricing")) return;
+
+    clearCheckoutIntent();
+    void confirmPlanCheckout(intent.tier as TierId, intent.billing_cycle);
+  }, [billingAddress]);
+
   // Custom configurator state
   const [webMonths, setWebMonths] = useState(0);
   const [export100k, setExport100k] = useState(false);
@@ -296,16 +315,25 @@ export function PricingClient() {
 
   async function handlePlanCheckout(tier: TierId) {
     if (!billingAddress) {
-      setCheckoutMessage({ kind: "error", message: "Add a billing address in Account before starting checkout." });
+      const sourcePath = `${window.location.pathname}${window.location.search}`;
+      saveCheckoutIntent({
+        kind: "subscription",
+        sourcePath,
+        tier,
+        billing_cycle: yearly ? "yearly" : "monthly",
+        success_path: "/app/account",
+        cancel_path: "/app/pricing",
+      });
+      window.location.assign(buildAddressReturnUrl(sourcePath));
       return;
     }
     setPendingTier(tier);
     setCheckoutMessage(null);
   }
 
-  async function confirmPlanCheckout(tier: TierId) {
+  async function confirmPlanCheckout(tier: TierId, cycleOverride?: "monthly" | "yearly") {
     if (!billingAddress) {
-      setCheckoutMessage({ kind: "error", message: "Add a billing address in Account before starting checkout." });
+      setCheckoutMessage({ kind: "error", message: "Add a billing address first in Address Management before starting checkout." });
       return;
     }
     setCheckoutLoading(tier);
@@ -320,7 +348,7 @@ export function PricingClient() {
       cancelUrl.searchParams.set("tier", tier);
       const session = await createSubscriptionCheckout({
         tier,
-        billing_cycle: yearly ? "yearly" : "monthly",
+        billing_cycle: cycleOverride ?? (yearly ? "yearly" : "monthly"),
         success_url: successUrl.toString(),
         cancel_url: cancelUrl.toString(),
         billing_address: billingAddress,
@@ -465,7 +493,7 @@ export function PricingClient() {
                 >
                   {checkoutLoading === pendingTier ? "Starting…" : `Continue with ${pendingTier}`}
                 </button>
-                <a href="/app/account" className="text-xs text-blue-600 hover:underline">Edit address</a>
+                <a href="/app/addresses?return_to=/app/pricing" className="text-xs text-blue-600 hover:underline">Manage addresses</a>
               </div>
             </div>
           )}

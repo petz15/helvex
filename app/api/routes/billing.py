@@ -21,6 +21,7 @@ from app.models.organization import Organization
 from app.models.payment_transaction import PaymentTransaction
 from app.models.user import User
 from app.schemas.billing import BillingAddress, BillingTierRead
+from app.services.billing_addresses import get_default_billing_address
 from app.services import payment_transactions, payments
 from app.services.tiers import (
     get_billing_tier_by_slug,
@@ -80,20 +81,12 @@ def _append_query_params(url: str, params: dict[str, str]) -> str:
 
 def _resolve_billing_address(current_user: User, body_address: BillingAddress | None, db: Session) -> dict:
     if body_address is not None:
-        managed_user = db.merge(current_user)
-        managed_user.billing_address_json = json.dumps(body_address.model_dump())
-        db.commit()
-        db.refresh(managed_user)
         return body_address.model_dump()
 
     managed_user = db.merge(current_user)
-    if managed_user.billing_address_json:
-        try:
-            parsed = json.loads(managed_user.billing_address_json)
-        except json.JSONDecodeError as exc:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Stored billing address is invalid") from exc
-        if isinstance(parsed, dict):
-            return parsed
+    default_address = get_default_billing_address(managed_user.billing_address_json)
+    if default_address:
+        return default_address
     raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Billing address required before checkout")
 
 
@@ -329,7 +322,8 @@ async def worldline_return(
         billing_address = None
         if parsed_ref.get("user_id"):
             user = db.get(User, int(parsed_ref["user_id"]))
-            billing_address = user.billing_address_json if user else None
+            default_address = get_default_billing_address(user.billing_address_json) if user else None
+            billing_address = json.dumps(default_address) if default_address else None
         if not billing_address and org is not None:
             billing_address = getattr(org, "billing_address_json", None)
 

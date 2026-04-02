@@ -197,6 +197,16 @@ export interface BillingAddressPayload {
   company_name?: string;
 }
 
+export interface BillingAddressItem extends BillingAddressPayload {
+  id: string;
+  label?: string | null;
+}
+
+export interface BillingAddressBook {
+  addresses: BillingAddressItem[];
+  default_id: string | null;
+}
+
 export async function createSubscriptionCheckout(data: {
   tier: string;
   billing_cycle: "monthly" | "yearly";
@@ -713,12 +723,64 @@ export async function fetchOrg(orgId: number): Promise<OrgDetail> {
 export function parseBillingAddressJson(value: string | null | undefined): BillingAddressPayload | null {
   if (!value) return null;
   try {
-    const parsed = JSON.parse(value) as BillingAddressPayload;
+    const parsed = JSON.parse(value) as Record<string, unknown>;
     if (!parsed || typeof parsed !== "object") return null;
-    return parsed;
+    if (Array.isArray((parsed as { addresses?: unknown }).addresses)) {
+      const list = parsed as { addresses: Array<Record<string, unknown>>; default_id?: string };
+      if (!list.addresses.length) return null;
+      const selected = list.addresses.find((a) => String(a.id ?? "") === String(list.default_id ?? "")) ?? list.addresses[0];
+      return {
+        first_name: String(selected.first_name ?? ""),
+        last_name: String(selected.last_name ?? ""),
+        street: String(selected.street ?? ""),
+        number: String(selected.number ?? ""),
+        postal_code: String(selected.postal_code ?? ""),
+        city: String(selected.city ?? ""),
+        country: String(selected.country ?? "CH"),
+        company_name: selected.company_name ? String(selected.company_name) : undefined,
+      };
+    }
+    return parsed as BillingAddressPayload;
   } catch {
     return null;
   }
+}
+
+export async function fetchCurrentUserBillingAddresses(): Promise<BillingAddressBook> {
+  const res = await fetch("/api/v1/auth/me/billing-addresses", { credentials: "include" });
+  if (!res.ok) throw new Error("Failed to load billing addresses");
+  return res.json();
+}
+
+export async function addCurrentUserBillingAddress(
+  address: BillingAddressPayload & { label?: string; make_default?: boolean },
+): Promise<BillingAddressBook> {
+  const res = await fetch("/api/v1/auth/me/billing-addresses", {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(address),
+  });
+  if (!res.ok) throw new Error("Failed to save billing address");
+  return res.json();
+}
+
+export async function setCurrentUserDefaultBillingAddress(addressId: string): Promise<BillingAddressBook> {
+  const res = await fetch(`/api/v1/auth/me/billing-addresses/${encodeURIComponent(addressId)}/default`, {
+    method: "PUT",
+    credentials: "include",
+  });
+  if (!res.ok) throw new Error("Failed to set default billing address");
+  return res.json();
+}
+
+export async function deleteCurrentUserBillingAddress(addressId: string): Promise<BillingAddressBook> {
+  const res = await fetch(`/api/v1/auth/me/billing-addresses/${encodeURIComponent(addressId)}`, {
+    method: "DELETE",
+    credentials: "include",
+  });
+  if (!res.ok) throw new Error("Failed to delete billing address");
+  return res.json();
 }
 
 export async function updateOrg(orgId: number, data: { name?: string; billing_address?: BillingAddressPayload | null }): Promise<OrgDetail> {

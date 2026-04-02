@@ -14,6 +14,21 @@ class BillingAddress(BaseModel):
     company_name: str | None = None
 
 
+class BillingAddressItem(BillingAddress):
+    id: str
+    label: str | None = None
+
+
+class BillingAddressCreate(BillingAddress):
+    label: str | None = None
+    make_default: bool = True
+
+
+class BillingAddressBookRead(BaseModel):
+    addresses: list[BillingAddressItem]
+    default_id: str | None = None
+
+
 class BillingTierRead(BaseModel):
     id: int
     slug: str

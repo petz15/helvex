@@ -2,6 +2,7 @@
 
 import logging
 import json
+import uuid
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Request, status
@@ -38,7 +39,8 @@ from app.schemas.user import (
     TokenResponse,
     UserRead,
 )
-from app.schemas.billing import BillingAddress
+from app.schemas.billing import BillingAddress, BillingAddressBookRead, BillingAddressCreate, BillingAddressItem
+from app.services.billing_addresses import parse_billing_address_book, serialize_billing_address_book
 from app.services.email import (
     send_email_change_verification,
     send_password_reset_email,
@@ -49,6 +51,14 @@ from app.services.email import (
 router = APIRouter(prefix="/auth", tags=["auth"])
 
 _RESEND_COOLDOWN_SECONDS = 60
+
+
+def _managed_current_user(db: Session, current_user: User) -> User:
+    user = db.query(User).filter(User.id == current_user.id).first()
+    if user is None:
+        user = db.merge(current_user)
+        db.flush()
+    return user
 
 
 # ---------------------------------------------------------------------------
@@ -366,11 +376,91 @@ def update_my_billing_address(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> UserRead:
-    managed_user = db.merge(current_user)
+    managed_user = _managed_current_user(db, current_user)
     managed_user.billing_address_json = json.dumps(body.model_dump())
     db.commit()
     db.refresh(managed_user)
     return UserRead.model_validate(managed_user)
+
+
+@router.get("/me/billing-addresses", response_model=BillingAddressBookRead, summary="List the current user's billing addresses")
+def list_my_billing_addresses(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> BillingAddressBookRead:
+    managed_user = _managed_current_user(db, current_user)
+    addresses, default_id = parse_billing_address_book(managed_user.billing_address_json)
+    return BillingAddressBookRead(addresses=[BillingAddressItem.model_validate(a) for a in addresses], default_id=default_id)
+
+
+@router.post("/me/billing-addresses", response_model=BillingAddressBookRead, summary="Add a billing address")
+def add_my_billing_address(
+    body: BillingAddressCreate,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> BillingAddressBookRead:
+    managed_user = _managed_current_user(db, current_user)
+    addresses, default_id = parse_billing_address_book(managed_user.billing_address_json)
+
+    new_item = {
+        "id": uuid.uuid4().hex,
+        "label": (body.label or "").strip() or None,
+        **body.model_dump(exclude={"label", "make_default"}),
+    }
+    addresses.append(new_item)
+    if body.make_default or not default_id:
+        default_id = str(new_item["id"])
+
+    managed_user.billing_address_json = serialize_billing_address_book(addresses, default_id)
+    db.commit()
+    db.refresh(managed_user)
+    return BillingAddressBookRead(addresses=[BillingAddressItem.model_validate(a) for a in addresses], default_id=default_id)
+
+
+@router.put("/me/billing-addresses/{address_id}/default", response_model=BillingAddressBookRead, summary="Set default billing address")
+def set_default_my_billing_address(
+    address_id: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> BillingAddressBookRead:
+    managed_user = _managed_current_user(db, current_user)
+    addresses, _default_id = parse_billing_address_book(managed_user.billing_address_json)
+    if not addresses:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No billing addresses found")
+    if not any(str(a.get("id")) == address_id for a in addresses):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Billing address not found")
+
+    managed_user.billing_address_json = serialize_billing_address_book(addresses, address_id)
+    db.commit()
+    db.refresh(managed_user)
+    return BillingAddressBookRead(addresses=[BillingAddressItem.model_validate(a) for a in addresses], default_id=address_id)
+
+
+@router.delete("/me/billing-addresses/{address_id}", response_model=BillingAddressBookRead, summary="Delete a billing address")
+def delete_my_billing_address(
+    address_id: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> BillingAddressBookRead:
+    managed_user = _managed_current_user(db, current_user)
+    addresses, default_id = parse_billing_address_book(managed_user.billing_address_json)
+    kept = [a for a in addresses if str(a.get("id")) != address_id]
+    if len(kept) == len(addresses):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Billing address not found")
+
+    if not kept:
+        managed_user.billing_address_json = None
+        db.commit()
+        db.refresh(managed_user)
+        return BillingAddressBookRead(addresses=[], default_id=None)
+
+    if default_id == address_id or not any(str(a.get("id")) == default_id for a in kept):
+        default_id = str(kept[0]["id"])
+
+    managed_user.billing_address_json = serialize_billing_address_book(kept, default_id)
+    db.commit()
+    db.refresh(managed_user)
+    return BillingAddressBookRead(addresses=[BillingAddressItem.model_validate(a) for a in kept], default_id=default_id)
 
 
 # ---------------------------------------------------------------------------

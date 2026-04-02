@@ -14,10 +14,16 @@ import {
   fetchCSVExportStatus,
   fetchOrg,
   parseBillingAddressJson,
-  updateCurrentUserBillingAddress,
 } from "@/lib/api";
+import {
+  buildAddressReturnUrl,
+  clearCheckoutIntent,
+  readCheckoutIntent,
+  saveCheckoutIntent,
+} from "@/lib/checkout-resume";
 import { creditsToChf } from "@/lib/entitlements";
 import { OrgClient } from "@/app/app/org/org-client";
+import { AddressBookManager } from "@/components/billing/address-book-manager";
 
 type AccountClientProps = {
   checkout?: string;
@@ -28,17 +34,6 @@ type AccountClientProps = {
 
 const inputCls =
   "w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-300 focus:border-transparent bg-white";
-
-const emptyBillingAddress = {
-  first_name: "",
-  last_name: "",
-  street: "",
-  number: "",
-  postal_code: "",
-  city: "",
-  country: "CH",
-  company_name: "",
-};
 
 function SectionTitle({ title }: { title: string }) {
   return (
@@ -236,24 +231,6 @@ export function AccountClient({ checkout, kind, tier, credits }: AccountClientPr
   const [leavingOrg, setLeavingOrg] = useState(false);
   const [billingLoading, setBillingLoading] = useState<string | null>(null);
   const [billingBanner, setBillingBanner] = useState<{ kind: "success" | "error"; message: string } | null>(null);
-  const [billingForm, setBillingForm] = useState(emptyBillingAddress);
-  const [billingConfirmed, setBillingConfirmed] = useState(false);
-
-  useEffect(() => {
-    const saved = parseBillingAddressJson(me?.billing_address_json);
-    if (!saved) return;
-    setBillingForm({
-      first_name: saved.first_name ?? "",
-      last_name: saved.last_name ?? "",
-      street: saved.street ?? "",
-      number: saved.number ?? "",
-      postal_code: saved.postal_code ?? "",
-      city: saved.city ?? "",
-      country: saved.country ?? "CH",
-      company_name: saved.company_name ?? "",
-    });
-    setBillingConfirmed(false);
-  }, [me?.billing_address_json]);
 
   const billingAddress = parseBillingAddressJson(me?.billing_address_json);
 
@@ -277,6 +254,22 @@ export function AccountClient({ checkout, kind, tier, credits }: AccountClientPr
             : `Checkout was cancelled for ${checkoutLabel}.`,
       }
     : null;
+
+  useEffect(() => {
+    if (!billingAddress) return;
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("resume_checkout") !== "1") return;
+
+    const intent = readCheckoutIntent();
+    if (!intent || !intent.sourcePath.startsWith("/app/account")) return;
+
+    clearCheckoutIntent();
+    if (intent.kind === "subscription") {
+      void handleStartSubscriptionCheckout(intent.tier, intent.billing_cycle);
+    } else {
+      void handleStartTopupCheckout(intent.credits);
+    }
+  }, [billingAddress]);
 
   function flash(
     setter: React.Dispatch<React.SetStateAction<{ kind: "success" | "error"; message: string } | null>>,
@@ -336,14 +329,22 @@ export function AccountClient({ checkout, kind, tier, credits }: AccountClientPr
     }
   }
 
-  async function handleStartSubscriptionCheckout() {
+  async function handleStartSubscriptionCheckout(
+    tierOverride: string = "explorer",
+    cycleOverride: "monthly" | "yearly" = "monthly",
+  ) {
     if (!me?.org_id) return;
     if (!billingAddress) {
-      setBillingBanner({ kind: "error", message: "Add a billing address before starting checkout." });
-      return;
-    }
-    if (!billingConfirmed) {
-      setBillingBanner({ kind: "error", message: "Save the billing address first to confirm it before checkout." });
+      const sourcePath = `${window.location.pathname}${window.location.search}`;
+      saveCheckoutIntent({
+        kind: "subscription",
+        sourcePath,
+        tier: tierOverride,
+        billing_cycle: cycleOverride,
+        success_path: "/app/account",
+        cancel_path: "/app/account",
+      });
+      window.location.assign(buildAddressReturnUrl(sourcePath));
       return;
     }
     setBillingLoading("subscription");
@@ -357,8 +358,8 @@ export function AccountClient({ checkout, kind, tier, credits }: AccountClientPr
       cancelUrl.searchParams.set("checkout", "cancel");
       cancelUrl.searchParams.set("kind", "subscription");
       const session = await createSubscriptionCheckout({
-        tier: "explorer",
-        billing_cycle: "monthly",
+        tier: tierOverride,
+        billing_cycle: cycleOverride,
         success_url: successUrl.toString(),
         cancel_url: cancelUrl.toString(),
         billing_address: billingAddress,
@@ -377,11 +378,15 @@ export function AccountClient({ checkout, kind, tier, credits }: AccountClientPr
   async function handleStartTopupCheckout(credits: number) {
     if (!me?.org_id) return;
     if (!billingAddress) {
-      setBillingBanner({ kind: "error", message: "Add a billing address before buying credits." });
-      return;
-    }
-    if (!billingConfirmed) {
-      setBillingBanner({ kind: "error", message: "Save the billing address first to confirm it before checkout." });
+      const sourcePath = `${window.location.pathname}${window.location.search}`;
+      saveCheckoutIntent({
+        kind: "topup",
+        sourcePath,
+        credits,
+        success_path: "/app/account",
+        cancel_path: "/app/account",
+      });
+      window.location.assign(buildAddressReturnUrl(sourcePath));
       return;
     }
     setBillingLoading(`topup-${credits}`);
@@ -410,29 +415,6 @@ export function AccountClient({ checkout, kind, tier, credits }: AccountClientPr
       });
     } finally {
       setBillingLoading(null);
-    }
-  }
-
-  async function handleSaveBillingAddress(e: React.FormEvent) {
-    e.preventDefault();
-    if (!me?.id) return;
-    setBillingBanner(null);
-    try {
-      await updateCurrentUserBillingAddress({
-        first_name: billingForm.first_name.trim(),
-        last_name: billingForm.last_name.trim(),
-        street: billingForm.street.trim(),
-        number: billingForm.number.trim(),
-        postal_code: billingForm.postal_code.trim(),
-        city: billingForm.city.trim(),
-        country: billingForm.country.trim().toUpperCase(),
-        company_name: billingForm.company_name.trim() || undefined,
-      });
-      await reloadMe();
-      setBillingConfirmed(true);
-      setBillingBanner({ kind: "success", message: "Billing address saved." });
-    } catch (err) {
-      setBillingBanner({ kind: "error", message: err instanceof Error ? err.message : "Failed to save billing address" });
     }
   }
 
@@ -653,7 +635,7 @@ export function AccountClient({ checkout, kind, tier, credits }: AccountClientPr
         </div>
         <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
           <button
-            onClick={handleStartSubscriptionCheckout}
+            onClick={() => handleStartSubscriptionCheckout()}
             disabled={!me.org_id || billingLoading !== null}
             className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-slate-900 px-3 py-2 text-xs font-medium text-white transition-colors hover:bg-slate-800 disabled:opacity-60"
           >
@@ -680,78 +662,8 @@ export function AccountClient({ checkout, kind, tier, credits }: AccountClientPr
             View pricing
           </a>
         </div>
-        <form onSubmit={handleSaveBillingAddress} className="rounded-lg border border-slate-100 bg-slate-50 p-4 space-y-3">
-          <div>
-            <p className="text-sm font-semibold text-slate-800">Billing address</p>
-            <p className="text-xs text-slate-500 mt-0.5">This is required before any checkout can be started.</p>
-          </div>
-          <div className="grid grid-cols-2 gap-3">
-            <input
-              className={inputCls}
-              value={billingForm.first_name}
-              onChange={(e) => setBillingForm((f) => ({ ...f, first_name: e.target.value }))}
-              placeholder="First name"
-              required
-            />
-            <input
-              className={inputCls}
-              value={billingForm.last_name}
-              onChange={(e) => setBillingForm((f) => ({ ...f, last_name: e.target.value }))}
-              placeholder="Last name"
-              required
-            />
-            <input
-              className={inputCls + " col-span-2"}
-              value={billingForm.company_name}
-              onChange={(e) => setBillingForm((f) => ({ ...f, company_name: e.target.value }))}
-              placeholder="Company name (optional)"
-            />
-            <input
-              className={inputCls + " col-span-2"}
-              value={billingForm.street}
-              onChange={(e) => setBillingForm((f) => ({ ...f, street: e.target.value }))}
-              placeholder="Street"
-              required
-            />
-            <input
-              className={inputCls}
-              value={billingForm.number}
-              onChange={(e) => setBillingForm((f) => ({ ...f, number: e.target.value }))}
-              placeholder="Number"
-              required
-            />
-            <input
-              className={inputCls}
-              value={billingForm.postal_code}
-              onChange={(e) => setBillingForm((f) => ({ ...f, postal_code: e.target.value }))}
-              placeholder="Postal code"
-              required
-            />
-            <input
-              className={inputCls}
-              value={billingForm.city}
-              onChange={(e) => setBillingForm((f) => ({ ...f, city: e.target.value }))}
-              placeholder="City"
-              required
-            />
-            <input
-              className={inputCls}
-              value={billingForm.country}
-              onChange={(e) => setBillingForm((f) => ({ ...f, country: e.target.value }))}
-              placeholder="Country code"
-              required
-            />
-          </div>
-          <div className="flex items-center gap-2">
-            <button
-              type="submit"
-              className="rounded-lg bg-blue-600 px-3 py-2 text-xs font-medium text-white transition-colors hover:bg-blue-700"
-            >
-              Save billing address
-            </button>
-            {!billingAddress && <span className="text-xs text-amber-600">Missing address blocks billing.</span>}
-          </div>
-        </form>
+        <AddressBookManager />
+        {!billingAddress && <span className="text-xs text-amber-600">Missing address blocks billing.</span>}
         {process.env.NODE_ENV !== "production" && (
           <a
             href="/app/dev/billing"

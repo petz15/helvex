@@ -14,6 +14,12 @@ import {
   type CreditTransaction,
   type PaymentRecord,
 } from "@/lib/api";
+import {
+  buildAddressReturnUrl,
+  clearCheckoutIntent,
+  readCheckoutIntent,
+  saveCheckoutIntent,
+} from "@/lib/checkout-resume";
 import { creditsToChf } from "@/lib/entitlements";
 
 // ── helpers ───────────────────────────────────────────────────────────────────
@@ -117,12 +123,34 @@ function TopupSection({ billingAddress }: { billingAddress: BillingAddressPayloa
 
   async function handleTopup(credits: number) {
     if (!billingAddress) {
-      setError("Add a billing address in Account before buying credits.");
+      const sourcePath = `${window.location.pathname}${window.location.search}`;
+      saveCheckoutIntent({
+        kind: "topup",
+        sourcePath,
+        credits,
+        success_path: "/app/billing",
+        cancel_path: "/app/billing",
+      });
+      window.location.assign(buildAddressReturnUrl(sourcePath));
       return;
     }
     setPendingCredits(credits);
     setError(null);
   }
+
+  useEffect(() => {
+    if (!billingAddress) return;
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("resume_checkout") !== "1") return;
+
+    const intent = readCheckoutIntent();
+    if (!intent || intent.kind !== "topup") return;
+    if (!intent.sourcePath.startsWith("/app/billing")) return;
+
+    clearCheckoutIntent();
+    setPendingCredits(intent.credits);
+    setError(null);
+  }, [billingAddress]);
 
   async function confirmTopup() {
     if (!pendingCredits || !billingAddress) return;
@@ -191,7 +219,7 @@ function TopupSection({ billingAddress }: { billingAddress: BillingAddressPayloa
             >
               {loading === pendingCredits ? "Starting…" : `Continue with ${pendingCredits.toLocaleString()} credits`}
             </button>
-            <a href="/app/account" className="text-xs text-blue-600 hover:underline">Edit address</a>
+            <a href="/app/addresses?return_to=/app/billing" className="text-xs text-blue-600 hover:underline">Manage addresses</a>
           </div>
         </div>
       )}
