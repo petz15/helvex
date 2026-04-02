@@ -29,7 +29,6 @@ export function CookieAwareTracking() {
   }, []);
 
   const gtmId = (process.env.NEXT_PUBLIC_GTM_ID || "").trim();
-  const adsenseClientId = (process.env.NEXT_PUBLIC_ADSENSE_CLIENT_ID || "").trim();
 
   return (
     <>
@@ -44,16 +43,6 @@ export function CookieAwareTracking() {
             src={`https://www.googletagmanager.com/gtm.js?id=${encodeURIComponent(gtmId)}`}
           />
         </>
-      )}
-
-      {consent?.ads && adsenseClientId && (
-        <Script
-          id="adsense-loader"
-          strategy="afterInteractive"
-          async
-          crossOrigin="anonymous"
-          src={`https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=${encodeURIComponent(adsenseClientId)}`}
-        />
       )}
     </>
   );

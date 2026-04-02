@@ -230,8 +230,6 @@ async def lifespan(app: FastAPI):
             _h.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s - %(message)s"))
             _app_logger.addHandler(_h)
             _app_logger.propagate = False
-            print(f"boot.post_migration handlers={_app_logger.handlers} level={logging.getLevelName(_app_logger.level)}", flush=True)
-            _app_logger.info("boot.post_migration logger test")
             await loop.run_in_executor(None, _seed_settings, app.state)
             await loop.run_in_executor(None, _recover_jobs_and_start_worker, app, app.state)
             await loop.run_in_executor(None, _maybe_enqueue_geocode_upgrade, app, app.state)
@@ -411,10 +409,6 @@ async def api_request_logger(request: Request, call_next):
             client_host,
             elapsed_ms,
         )
-        print(
-            f"http.request_error method={request.method} path={path} client={client_host} duration_ms={elapsed_ms:.1f}",
-            flush=True,
-        )
         raise
 
     elapsed_ms = (time.perf_counter() - started) * 1000.0
@@ -425,10 +419,6 @@ async def api_request_logger(request: Request, call_next):
         response.status_code,
         client_host,
         elapsed_ms,
-    )
-    print(
-        f"http.request method={request.method} path={path} status={response.status_code} client={client_host} duration_ms={elapsed_ms:.1f}",
-        flush=True,
     )
     return response
 

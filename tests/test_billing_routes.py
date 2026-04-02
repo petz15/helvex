@@ -384,6 +384,55 @@ def test_update_default_payment_user_selects_saved_card_owner(client, db, monkey
     assert org.default_payment_user_id == 2
 
 
+def test_topup_checkout_prefers_current_users_saved_alias_over_org_default(client, db, monkeypatch):
+    org = _seed_org(db, org_id=19)
+
+    current_user = db.get(User, 1)
+    assert current_user is not None
+    current_user.payment_customer_id = "alias_current_1"
+
+    saved_user = User(
+        id=2,
+        email="saved@example.com",
+        hashed_password="x",
+        is_active=True,
+        billing_address_json=org.billing_address_json,
+        email_verified=True,
+        is_superadmin=False,
+        org_id=org.id,
+        org_role="admin",
+        payment_customer_id="alias_org_default_1",
+    )
+    db.add(saved_user)
+    db.add(OrgMember(org_id=org.id, user_id=2, role="admin"))
+    org.default_payment_user_id = 2
+    db.commit()
+
+    captured = {}
+
+    def _fake_create_topup_checkout(*, org_id, user_id, payment_alias_id, save_payment_method, credits, success_url, cancel_url, billing_address, preferred_provider=None, amount_chf=None):
+        captured["org_id"] = org_id
+        captured["user_id"] = user_id
+        captured["payment_alias_id"] = payment_alias_id
+        captured["save_payment_method"] = save_payment_method
+        return CheckoutSession(provider="worldline", checkout_url="https://payment.preprod.worldline/tok_19", external_id="tok_19", order_reference="wl_topup_19_1_10000_deadbeef")
+
+    monkeypatch.setattr("app.services.payments.create_topup_checkout", _fake_create_topup_checkout)
+
+    resp = client.post(
+        "/api/v1/billing/checkout/topup",
+        json={
+            "credits": 10000,
+            "success_url": "https://example.com/success",
+            "cancel_url": "https://example.com/cancel",
+        },
+    )
+
+    assert resp.status_code == 200
+    assert captured["payment_alias_id"] == "alias_current_1"
+    assert captured["save_payment_method"] is False
+
+
 def test_cancel_pending_payment_marks_declined(client, db):
     org = _seed_org(db, org_id=20)
     _override_user(org.id)

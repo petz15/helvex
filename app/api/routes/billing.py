@@ -18,14 +18,9 @@ logger = logging.getLogger(__name__)
 
 
 def _emit(level: str, message: str, *args: object) -> None:
-    """Emit to logger and stdout so logs remain visible in container output."""
+    """Emit to logger."""
     log_fn = getattr(logger, level, logger.info)
     log_fn(message, *args)
-    try:
-        rendered = message % args if args else message
-    except Exception:
-        rendered = f"{message} | args={args!r}"
-    print(rendered, flush=True)
 
 from app.api.deps import get_current_org
 from app.api.deps import require_org_role
@@ -96,7 +91,12 @@ class WebhookResponse(BaseModel):
     ignored: bool = False
 
 
-def _resolve_worldline_payment_alias(db: Session, org: Organization) -> str | None:
+def _resolve_worldline_payment_alias(db: Session, org: Organization, current_user: User | None = None) -> str | None:
+    if current_user is not None:
+        current_user_alias = str(current_user.payment_customer_id or "").strip()
+        if current_user_alias:
+            return current_user_alias
+
     owner_id = getattr(org, "default_payment_user_id", None)
     if not owner_id:
         return None
@@ -226,7 +226,7 @@ def create_subscription_checkout(
         session = payments.create_subscription_checkout(
             org_id=org.id,
             user_id=_user.id,
-            payment_alias_id=(_resolve_worldline_payment_alias(db, org) if body.provider in {None, "worldline"} else None),
+            payment_alias_id=(_resolve_worldline_payment_alias(db, org, _user) if body.provider in {None, "worldline"} else None),
             save_payment_method=body.save_payment_method,
             tier=body.tier,
             billing_cycle=body.billing_cycle,
@@ -307,7 +307,7 @@ def create_topup_checkout(
         session = payments.create_topup_checkout(
             org_id=org.id,
             user_id=_user.id,
-            payment_alias_id=(_resolve_worldline_payment_alias(db, org) if body.provider in {None, "worldline"} else None),
+            payment_alias_id=(_resolve_worldline_payment_alias(db, org, _user) if body.provider in {None, "worldline"} else None),
             save_payment_method=body.save_payment_method,
             credits=body.credits,
             success_url=body.success_url,

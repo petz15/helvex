@@ -18,6 +18,7 @@ General fixes, recovery procedures, and operational checklists.
 10. [Useful kubectl Commands](#10-useful-kubectl-commands)
 11. [Logs: Where to Find Them](#11-logs-where-to-find-them)
 12. [Debug: Temporarily Enable Verbose Logging](#12-debug-temporarily-enable-verbose-logging)
+12b. [Logging: App Loggers Not Emitting](#12b-logging-app-loggers-not-emitting-to-stdout)
 13. [Deploy: Node Disk Full Quick Cleanup](#13-deploy-node-disk-full-quick-cleanup)
 14. [Node: High CPU Load / k3s API Unresponsive](#14-node-high-cpu-load--k3s-api-unresponsive)
 
@@ -653,6 +654,30 @@ Same options apply to the worker Deployment (`deployment/helvex-worker`):
 kubectl set env deployment/helvex-worker UVICORN_LOG_LEVEL=debug -n helvex-prod
 # Revert:
 kubectl set env deployment/helvex-worker UVICORN_LOG_LEVEL- -n helvex-prod
+```
+
+---
+
+## 12b. Logging: App Loggers Not Emitting to Stdout
+
+**Symptom:** Uvicorn startup logs visible, HTTP access logs visible via `print()` fallbacks, but app-level `logger.info()` calls (e.g. from payments, billing services) produce no output.
+
+**Root cause:** Alembic's `fileConfig()` call during migrations defaults to `disable_existing_loggers=True`, which sets `logger.disabled = True` on all loggers not listed in `alembic.ini`. This persists after migrations complete, silencing all `app.*` loggers even if handlers are attached.
+
+**Fix:** In `alembic/env.py`, line 14, add `disable_existing_loggers=False`:
+
+```python
+if config.config_file_name is not None:
+    fileConfig(config.config_file_name, disable_existing_loggers=False)
+```
+
+**Why:** This prevents `fileConfig` from disabling loggers it doesn't know about (i.e. `app`, `app.services.payments`, etc.), even though those loggers aren't defined in `alembic.ini`. With this flag, the `app` logger can attach its own handler and emit normally.
+
+**Verification:**
+```bash
+# After redeploy, check that app-level logs appear:
+kubectl logs -n helvex-prod -l app.kubernetes.io/component=app | grep -E "^202[0-9]-.*INFO.*app\."
+# Should see entries like: "2026-04-02 14:30:15,123 INFO app.services.payments - ..."
 ```
 
 ---

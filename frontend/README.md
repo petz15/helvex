@@ -27,6 +27,7 @@ Set the following public environment variables for the Next.js frontend:
 ```bash
 NEXT_PUBLIC_GTM_ID=GTM-XXXXXXX
 NEXT_PUBLIC_ADSENSE_CLIENT_ID=ca-pub-XXXXXXXXXXXXXXXX
+NEXT_PUBLIC_GOOGLE_SITE_VERIFICATION=google-site-verification-token
 ```
 
 Where to add them:
@@ -37,9 +38,10 @@ Where to add them:
 
 Notes:
 
-- Scripts are only loaded after user consent in the cookie banner.
 - GTM uses the "Analyse" consent toggle.
-- AdSense uses the "Werbe-Cookies" consent toggle.
+- AdSense loads from the root layout when the publisher ID is configured.
+- The frontend serves `/ads.txt` automatically from `NEXT_PUBLIC_ADSENSE_CLIENT_ID`.
+- If Google Search Console verification is needed, set `NEXT_PUBLIC_GOOGLE_SITE_VERIFICATION` and the root layout will emit the verification meta tag.
 
 ## Learn More
 
