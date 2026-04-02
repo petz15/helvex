@@ -1,7 +1,7 @@
 """Add billing tiers table and user billing address.
 
-Revision ID: 0044_add_billing_tiers_and_user_billing_address
-Revises: 0043_add_payment_transactions
+Revision ID: 0045_add_billing_tiers_and_user_billing_address
+Revises: 0044
 Create Date: 2026-04-02
 """
 
@@ -14,8 +14,8 @@ import sqlalchemy as sa
 
 
 # revision identifiers, used by Alembic.
-revision = "0044_add_billing_tiers_and_user_billing_address"
-down_revision = "0043_add_payment_transactions"
+revision = "0045_add_billing_tiers_and_user_billing_address"
+down_revision = "0044"
 branch_labels = None
 depends_on = None
 

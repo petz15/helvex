@@ -24,8 +24,6 @@
 - Adjust sites for setup (seperate some features out from account page)
 - Continue on Explore page
 - More adjustments to pricing page: remove flex rescore from, some consumptions are not available for certain tiers and the question marks are not filled in. also for first time org accounts, give about 1k credits or even more
-- major code review at some point cause I think AIs have not been working very well for the past couple of days
-- Adjust superadmin site for the correct tiers
 
 ## PROD CHANGES
 - wordline notification url
