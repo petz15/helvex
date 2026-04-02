@@ -99,6 +99,7 @@
 - [ ] **Flow for account deletion** - GDPR compliant flow for account deletion
 
 
+
 ## Monetisation & Tiers
 - [ ] **Adress flow** - improve the adress flow, use default choosing one etc
 - [ ] **Adjustments to pricing** - More adjustments to pricing page: remove flex rescore from, some consumptions are not available for certain tiers and the question marks are not filled in. also for first time org accounts, give about 1k credits or even more
