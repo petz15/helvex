@@ -51,6 +51,118 @@ export interface BillingCheckoutResponse {
   amount_chf: number;
 }
 
+// ── Billing history (user-facing) ─────────────────────────────────────────────
+
+export interface BillingSummary {
+  org_id: number;
+  tier: string;
+  billing_cycle: string;
+  subscription_period_end: string | null;
+  credits_balance: number;
+  credits_balance_chf: number;
+}
+
+export interface CreditTransaction {
+  id: number;
+  amount: number;
+  type: string;
+  action_type: string | null;
+  reference_id: string | null;
+  credits_before: number;
+  credits_after: number;
+  created_at: string;
+}
+
+export interface PaymentRecord {
+  id: number;
+  provider: string;
+  kind: string;
+  status: string;
+  amount_chf: number;
+  payment_method: string | null;
+  subscription_tier: string | null;
+  subscription_billing_cycle: string | null;
+  credits_purchased: number | null;
+  credits_bonus: number | null;
+  credits_total_granted: number | null;
+  created_at: string;
+  authorized_at: string | null;
+  refunded_at: string | null;
+  refunded_amount_chf: number | null;
+}
+
+export interface PaginatedResult<T> {
+  total: number;
+  page: number;
+  page_size: number;
+  items: T[];
+}
+
+export async function fetchBillingSummary(): Promise<BillingSummary> {
+  const res = await fetch("/api/v1/billing/summary", { credentials: "include" });
+  if (!res.ok) throw new Error("Failed to fetch billing summary");
+  return res.json();
+}
+
+export async function fetchCreditTransactions(page = 1, page_size = 20): Promise<PaginatedResult<CreditTransaction>> {
+  const res = await fetch(`/api/v1/billing/credits?page=${page}&page_size=${page_size}`, { credentials: "include" });
+  if (!res.ok) throw new Error("Failed to fetch credit history");
+  return res.json();
+}
+
+export async function fetchPaymentHistory(page = 1, page_size = 20): Promise<PaginatedResult<PaymentRecord>> {
+  const res = await fetch(`/api/v1/billing/payments?page=${page}&page_size=${page_size}`, { credentials: "include" });
+  if (!res.ok) throw new Error("Failed to fetch payment history");
+  return res.json();
+}
+
+// ── Admin billing ──────────────────────────────────────────────────────────────
+
+export interface AdminPaymentTransaction {
+  id: number;
+  org_id: number;
+  provider: string;
+  external_id: string;
+  order_reference: string;
+  amount_chf: number;
+  kind: string;
+  status: string;
+  payment_method: string | null;
+  provider_transaction_id: string | null;
+  subscription_tier: string | null;
+  subscription_billing_cycle: string | null;
+  credits_purchased: number | null;
+  credits_bonus: number | null;
+  credits_total_granted: number | null;
+  error_code: string | null;
+  error_message: string | null;
+  refunded_amount_chf: number | null;
+  webhook_processed_at: string | null;
+  created_at: string;
+  authorized_at: string | null;
+  refunded_at: string | null;
+}
+
+export async function fetchAdminPaymentTransactions(params?: {
+  org_id?: number; provider?: string; status?: string; kind?: string;
+  page?: number; page_size?: number;
+}): Promise<AdminPage<AdminPaymentTransaction>> {
+  const url = buildUrl("/api/v1/admin/payment-transactions", params as Record<string, string | number | undefined | null>);
+  const res = await fetch(url, { credentials: "include" });
+  if (!res.ok) throw new Error("Failed to fetch payment transactions");
+  return res.json();
+}
+
+export async function fetchAdminOrgPaymentTransactions(
+  orgId: number,
+  params?: { page?: number; page_size?: number },
+): Promise<AdminPage<AdminPaymentTransaction>> {
+  const url = buildUrl(`/api/v1/admin/orgs/${orgId}/payment-transactions`, params as Record<string, string | number | undefined | null>);
+  const res = await fetch(url, { credentials: "include" });
+  if (!res.ok) throw new Error("Failed to fetch org payment transactions");
+  return res.json();
+}
+
 export async function createSubscriptionCheckout(data: {
   tier: string;
   billing_cycle: "monthly" | "yearly";

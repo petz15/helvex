@@ -99,9 +99,14 @@ const FEATURE_GROUPS: FeatureGroup[] = [
     heading: "Workspace",
     rows: [
       { label: "No ads", values: ["no", "yes", "yes", "yes", "yes"] },
-      { label: "Multi-user org", values: ["no", "yes", "yes", "yes", "yes"] },
+      {
+        label: "Multi-user org",
+        tip: "Invite teammates to share the same workspace, collection, and credit balance.",
+        values: ["no", "yes", "yes", "yes", "yes"],
+      },
       {
         label: "Daily digest notifications",
+        tip: "Receive a daily email summary of newly discovered companies matching your criteria.",
         values: ["no", "yes", "yes", "yes", "yes"],
       },
     ],
@@ -111,29 +116,32 @@ const FEATURE_GROUPS: FeatureGroup[] = [
     rows: [
       {
         label: "Flex rescore",
-        tip: "Simple gets 1 free rescore per month; Explorer+ unlimited at no credit cost.",
-        values: ["no", "1 / month", "Unlimited", "Unlimited", "Unlimited"],
+        tip: "Explorer+ tiers get unlimited flex rescores at no credit cost. Free and Simple tiers pay per rescore from their credit balance.",
+        values: ["no", "no", "Unlimited", "Unlimited", "Unlimited"],
       },
       {
         label: "Flex auto-score new companies",
+        tip: "Automatically rescores newly discovered companies against your Flex criteria.",
         values: ["no", "no", "yes", "yes", "yes"],
       },
       {
         label: "Immediate LLM scoring",
-        tip: "Uses the standard Anthropic API synchronously instead of the batch queue.",
+        tip: "Uses the Anthropic API synchronously instead of the batch queue — results appear instantly.",
         values: ["no", "no", "yes", "yes", "yes"],
       },
       {
         label: "LLM auto-score new companies",
-        tip: "Uses credits from your balance.",
+        tip: "Automatically runs LLM scoring on newly discovered companies. Uses credits from your balance.",
         values: ["no", "no", "no", "yes", "yes"],
       },
       {
         label: "Custom ML stopwords",
+        tip: "Define words to exclude from ML-based company name clustering and matching.",
         values: ["no", "no", "no", "yes", "yes"],
       },
       {
         label: "Bring your own LLM keys",
+        tip: "Use your own Anthropic API key so LLM scoring costs go directly to your account.",
         values: ["no", "no", "no", "no", "yes"],
       },
     ],

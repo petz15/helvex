@@ -27,10 +27,14 @@ def _unique_slug(db: Session, base: str) -> str:
     return slug
 
 
+_WELCOME_CREDITS = 1_000
+
+
 def ensure_personal_org(db: Session, user: User) -> None:
     """Create and assign a personal workspace org if the user has none.
 
     Also creates the OrgMember row so the new org_members table stays in sync.
+    New orgs receive 1,000 welcome credits.
     Safe to call multiple times — no-ops if user already has an org.
     """
     if user.org_id is not None:
@@ -53,6 +57,22 @@ def ensure_personal_org(db: Session, user: User) -> None:
         db.add(OrgMember(org_id=org.id, user_id=user.id, role="owner"))
     db.commit()
     db.refresh(user)
+    # Grant welcome credits (skip for unlimited orgs — they don't need a balance)
+    if not user.is_superadmin:
+        try:
+            from app.services.credits import grant_credits
+            grant_credits(
+                db,
+                org_id=org.id,
+                amount=_WELCOME_CREDITS,
+                tx_type="grant",
+                reference_id="welcome_bonus",
+            )
+        except Exception:
+            import logging as _logging
+            _logging.getLogger(__name__).exception(
+                "ensure_personal_org: failed to grant welcome credits org_id=%s", org.id
+            )
 
 
 def _prehash(plain: str) -> bytes:

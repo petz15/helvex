@@ -103,24 +103,6 @@ def check_and_deduct(
     if action == "flex_rescore" and get_tier_rank(org) >= 2:
         return True
 
-    # Entitlement: simple tier gets one free flex rescore job per billing month.
-    if action == "flex_rescore" and normalize_tier(org.tier) == "simple" and not org.monthly_rescore_used:
-        before = int(org.credits_balance or 0)
-        org.monthly_rescore_used = True
-        org.monthly_rescore_reset_at = datetime.now(tz=timezone.utc)
-        _create_ledger_row(
-            db,
-            org_id=org_id,
-            amount=0,
-            tx_type="deduction",
-            action_type=action,
-            reference_id=reference_id,
-            credits_before=before,
-            credits_after=before,
-        )
-        db.commit()
-        return True
-
     cost = compute_cost(action, count)
     before = int(org.credits_balance or 0)
     after = before - cost
@@ -259,17 +241,6 @@ def grant_credits(
 
 def grant_monthly_entitlements(db: Session, org_id: int) -> None:
     """Reset monthly entitlement flags at billing cycle rollover."""
-    org = (
-        db.query(Organization)
-        .filter(Organization.id == org_id)
-        .with_for_update()
-        .first()
-    )
-    if org is None:
-        raise ValueError("Organization not found")
-
-    if normalize_tier(org.tier) == "simple":
-        org.monthly_rescore_used = False
-        org.monthly_rescore_reset_at = datetime.now(tz=timezone.utc)
-
-    db.commit()
+    # Simple tier monthly free rescore has been removed from the product.
+    # This function is kept as a hook for future monthly entitlements.
+    pass

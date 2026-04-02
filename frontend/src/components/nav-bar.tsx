@@ -3,7 +3,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import useSWR, { useSWRConfig } from "swr";
 import { cn } from "@/lib/utils";
-import { Search, Compass, Map, Cog, Database, Activity, UserCircle, Shield, LayoutGrid } from "lucide-react";
+import { Search, Compass, Map, Cog, Database, Activity, UserCircle, Shield, LayoutGrid, CreditCard } from "lucide-react";
 import { fetchCurrentUser, fetchMyOrgs, switchOrg } from "@/lib/api";
 import { HelvexMark } from "@/components/helvex-logo";
 
@@ -175,6 +175,18 @@ export function NavBar() {
                 ))}
               </select>
             )}
+            <Link
+              href="/app/billing"
+              className={cn(
+                "flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-sm transition-colors",
+                pathname.startsWith("/app/billing")
+                  ? "bg-blue-600 text-white font-medium"
+                  : "text-slate-600 hover:bg-slate-100 hover:text-slate-900"
+              )}
+            >
+              <CreditCard size={14} />
+              Billing
+            </Link>
             <Link
               href="/app/account"
               className={cn(

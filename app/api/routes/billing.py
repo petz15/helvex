@@ -10,9 +10,14 @@ from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
+from fastapi import Query
+from sqlalchemy import desc
+
 from app.api.deps import get_current_org
 from app.auth import get_current_user
 from app.database import get_db
+from app.models.org_credit_transaction import OrgCreditTransaction
+from app.models.payment_transaction import PaymentTransaction
 from app.models.user import User
 from app.services import payment_transactions, payments
 
@@ -296,3 +301,107 @@ async def worldline_return(
 @router.get("/providers")
 def list_enabled_providers(_: User = Depends(get_current_user)) -> dict:
     return {"mode": payments.settings.payment_provider_mode, "enabled": payments.get_enabled_provider_order()}
+
+
+# ── User-facing billing history (org-scoped) ───────────────────────────────────
+
+
+@router.get("/summary")
+def get_billing_summary(
+    user_org: tuple[User, object] = Depends(get_current_org),
+    db: Session = Depends(get_db),
+) -> dict:
+    """Return billing summary for the current org: tier, balance, subscription info."""
+    _user, org = user_org
+    return {
+        "org_id": org.id,
+        "tier": org.tier,
+        "billing_cycle": org.subscription_billing_cycle,
+        "subscription_period_end": org.subscription_period_end.isoformat() if org.subscription_period_end else None,
+        "credits_balance": org.credits_balance,
+        "credits_balance_chf": round(org.credits_balance * 0.0001, 4),
+    }
+
+
+@router.get("/credits")
+def list_credit_transactions(
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    user_org: tuple[User, object] = Depends(get_current_org),
+    db: Session = Depends(get_db),
+) -> dict:
+    """Return paginated credit ledger for the current org (grants, topups, deductions, bonuses)."""
+    _user, org = user_org
+    query = db.query(OrgCreditTransaction).filter(OrgCreditTransaction.org_id == org.id)
+    total = query.count()
+    rows = (
+        query.order_by(desc(OrgCreditTransaction.created_at))
+        .offset((page - 1) * page_size)
+        .limit(page_size)
+        .all()
+    )
+    return {
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+        "items": [
+            {
+                "id": tx.id,
+                "amount": tx.amount,
+                "type": tx.type,
+                "action_type": tx.action_type,
+                "reference_id": tx.reference_id,
+                "credits_before": tx.credits_before,
+                "credits_after": tx.credits_after,
+                "created_at": tx.created_at.isoformat(),
+            }
+            for tx in rows
+        ],
+    }
+
+
+@router.get("/payments")
+def list_payment_history(
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    user_org: tuple[User, object] = Depends(get_current_org),
+    db: Session = Depends(get_db),
+) -> dict:
+    """Return paginated payment transaction history for the current org.
+
+    Exposes only safe fields — no raw provider tokens or internal error codes.
+    """
+    _user, org = user_org
+    query = db.query(PaymentTransaction).filter(PaymentTransaction.org_id == org.id)
+    total = query.count()
+    rows = (
+        query.order_by(desc(PaymentTransaction.created_at))
+        .offset((page - 1) * page_size)
+        .limit(page_size)
+        .all()
+    )
+    return {
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+        "items": [
+            {
+                "id": tx.id,
+                "provider": tx.provider,
+                "kind": tx.kind,
+                "status": tx.status,
+                "amount_chf": tx.amount_chf,
+                "payment_method": tx.payment_method,
+                "subscription_tier": tx.subscription_tier,
+                "subscription_billing_cycle": tx.subscription_billing_cycle,
+                "credits_purchased": tx.credits_purchased,
+                "credits_bonus": tx.credits_bonus,
+                "credits_total_granted": tx.credits_total_granted,
+                "created_at": tx.created_at.isoformat(),
+                "authorized_at": tx.authorized_at.isoformat() if tx.authorized_at else None,
+                "refunded_at": tx.refunded_at.isoformat() if tx.refunded_at else None,
+                "refunded_amount_chf": tx.refunded_amount_chf,
+            }
+            for tx in rows
+        ],
+    }
