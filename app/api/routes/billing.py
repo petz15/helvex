@@ -305,8 +305,15 @@ async def worldline_return(
 
     # If no token, redirect based on source (return=user clicked back, notify=webhook)
     if not token:
-        logger.warning("billing.worldline_return_no_token source=%s", source)
-        target = success_url if source == "return" else cancel_url
+        logger.warning(
+            "billing.worldline_return_no_token source=%s kind=%s order_ref=%s query=%s",
+            source,
+            kind,
+            order_reference[:50] if order_reference else "NONE",
+            str(request.query_params)[:300],
+        )
+        # Missing token means we cannot verify with provider, so treat as cancel/invalid.
+        target = _append_query_params(cancel_url, {"reason": "missing_token"})
         return RedirectResponse(_safe_redirect_target(target), status_code=status.HTTP_303_SEE_OTHER)
 
     parsed_ref = payments.parse_worldline_merchant_reference(order_reference)
