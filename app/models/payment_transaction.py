@@ -83,4 +83,4 @@ class PaymentTransaction(Base):
     authorized_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     refunded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
-    org: Mapped[Organization] = relationship("Organization", foreign_keys=[org_id])
+    org: Mapped[Organization] = relationship("Organization", back_populates="payment_transactions", foreign_keys=[org_id])
