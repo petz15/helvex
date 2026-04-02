@@ -18,6 +18,7 @@
     - Integrations with other products such as appollo etc?
     - other industry specific directories
 
+
 ### Todos
 - Check new CSV export
 - Adjust sites for setup (seperate some features out from account page)
