@@ -10,6 +10,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 if TYPE_CHECKING:
     from app.models.org_credit_transaction import OrgCreditTransaction
     from app.models.org_member import OrgMember
+    from app.models.payment_transaction import PaymentTransaction
     from app.models.user import User
 
 from app.database import Base
@@ -89,4 +90,7 @@ class Organization(Base):
     members: Mapped[list[OrgMember]] = relationship("OrgMember", back_populates="org", cascade="all, delete-orphan")
     credit_transactions: Mapped[list[OrgCreditTransaction]] = relationship(
         "OrgCreditTransaction", back_populates="org", cascade="all, delete-orphan"
+    )
+    payment_transactions: Mapped[list[PaymentTransaction]] = relationship(
+        "PaymentTransaction", foreign_keys="PaymentTransaction.org_id", cascade="all, delete-orphan"
     )

@@ -23,7 +23,7 @@ from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.models.organization import Organization
-from app.services import credits
+from app.services import credits, payment_transactions
 from app.services.tiers import calculate_custom_tier_price
 
 ProviderName = Literal["worldline", "stripe"]
@@ -290,6 +290,9 @@ class WorldlineProvider:
                 },
                 "OrderId": order_reference,
                 "Description": description,
+            },
+            "Payer": {
+                "Language": "en",
             },
             "ReturnUrl": {
                 "Url": return_url,

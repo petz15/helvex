@@ -81,7 +81,7 @@
 - [X] **LLM Batch API two-phase flow** — `claude_classify` with `use_batch_api=True` submits to Anthropic Batch API and immediately exits the RQ job (status `waiting_external`); api-worker background thread polls every 5 minutes and processes results; no queue blocking, no Redis TTL risk
 - [X] **ML worker KEDA scale-to-zero** — `ScaledObject` + `TriggerAuthentication` in Helm chart; ML pod scales 0→1 when `rq:queue:helvex-ml` has jobs; 5-minute cooldown; `helvex-ml-worker` priority class (value 50); nodeSelector/tolerations scaffolded for dedicated Hetzner node pool
 - [ ] **Cluster autoscaler (node-level)** — KEDA handles pod-level; Hetzner Cluster Autoscaler handles node provisioning for ML workload node pool; requires `hcloud-cloud-controller-manager` + CA Helm chart + node group config mapping `workload=ml` label to specific server type (cx41 or cx51); Terraform manages control-plane + DB nodes only; CA manages ML worker node pool separately
-- [ ] **Tiered job queues** — two RQ queues: `helvex-priority` (starter/professional/enterprise + orgs) and `helvex-free` (free tier); `enqueue_job()` routes based on org/user tier; two separate K8s worker Deployments with different resource allocations; org creation alone does not move user to priority queue — requires a tier upgrade
+- [X] **Tiered job queues** — two RQ queues: `helvex-priority` (starter/professional/enterprise + orgs) and `helvex-free` (free tier); `enqueue_job()` routes based on org/user tier; two separate K8s worker Deployments with different resource allocations; org creation alone does not move user to priority queue — requires a tier upgrade
 - [X] **Email verification** — user signup flow with email verification; mutation/account changes require re-verification
 - [ ] **Monitoring & Logging stack** — deploy Prometheus + Grafana on K3s; scrape app metrics (request rate, job queue depth, error rate), Kubernetes node/pod metrics, and Redis/PostgreSQL exporters; alert on pod restarts, high memory, queue stalls -> started but not fully done yet
 - [ ] **Web analytics** — integrate Google Tag Manager + GA4 (or privacy-first alternative like Plausible/Umami); track page views, funnel steps (signup, first job, first export), feature usage; cookie consent banner for GDPR compliance
@@ -116,7 +116,7 @@
 - [ ] **Invoice & receipt generation** — PDF invoices for annual subscriptions; receipts for top-up purchases; email delivery
 - [ ] **Verified business discount** — 20% extra discount (on top of tier bonus) for verified business orgs; applied at Stripe price calculation
 - [ ] **Free tier limitations enforcement** — export limit enforcement in CSV export endpoint; API rate limits (once API access is gated)
-- [ ] **Ad banner integration** — EthicalAds embed for free tier; currently renders placeholder div
+- [ ] **Ad banner integration** — Ads embed for free tier; currently renders placeholder div
 - [ ] **Credit grant system** — admin interface to grant/refund credits with reason; used for migration credits, promotions, support refunds
 - [ ] **Credit expiry automation** — background job to expire grant-type credits after 1 year; topup credits never expire
 - [ ] **Usage dashboard** — org member view of credit balance (in CHF), transaction history, monthly spend, forecast

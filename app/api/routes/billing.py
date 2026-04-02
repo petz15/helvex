@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from typing import Literal
-from urllib.parse import urlparse
+from urllib.parse import urlencode, urlparse
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
 from fastapi.responses import RedirectResponse
@@ -14,7 +14,7 @@ from app.api.deps import get_current_org
 from app.auth import get_current_user
 from app.database import get_db
 from app.models.user import User
-from app.services import payments
+from app.services import payment_transactions, payments
 
 router = APIRouter(prefix="/billing", tags=["billing"])
 
@@ -53,6 +53,14 @@ def _safe_redirect_target(url: str | None) -> str:
     if parsed.scheme not in {"http", "https"} or not parsed.netloc:
         return payments.settings.app_base_url.rstrip("/")
     return url
+
+
+def _append_query_params(url: str, params: dict[str, str]) -> str:
+    """Append query params to a URL that may or may not already have a query string."""
+    if not params:
+        return url
+    separator = "&" if "?" in url else "?"
+    return f"{url}{separator}{urlencode(params)}"
 
 
 @router.post("/checkout/subscription", response_model=CheckoutResponse)
@@ -171,48 +179,118 @@ async def worldline_return(
     token: str | None = None,
 ) -> RedirectResponse:
     params = request.query_params
-    token = str(token or params.get("token") or params.get("Token") or params.get("transaction_token") or "").strip()
+    # Saferpay returns token as TOKEN query parameter, but accept variations
+    token = str(token or params.get("TOKEN") or params.get("token") or params.get("Token") or "").strip()
     success_url = str(params.get("success_url") or "").strip()
     cancel_url = str(params.get("cancel_url") or "").strip()
     source = str(params.get("source") or "").strip().lower()
     order_reference = str(params.get("order_reference") or "").strip()
     kind = str(params.get("kind") or "").strip().lower()
 
+    # If no token, redirect based on source (return=user clicked back, notify=webhook)
     if not token:
         target = success_url if source == "return" else cancel_url
         return RedirectResponse(_safe_redirect_target(target), status_code=status.HTTP_303_SEE_OTHER)
 
     parsed_ref = payments.parse_worldline_merchant_reference(order_reference)
+
+    # BUG-GUARD: If we cannot parse org_id, the reference is invalid — decline immediately.
+    # This prevents a KeyError crash and rejects forged/malformed references.
+    if not parsed_ref.get("org_id"):
+        return RedirectResponse(
+            _safe_redirect_target(_append_query_params(cancel_url, {"reason": "invalid_reference"})),
+            status_code=status.HTTP_303_SEE_OTHER,
+        )
+
+    # SECURITY: Check for existing payment to prevent double-processing.
+    # Must happen before calling Saferpay to avoid paying twice on retries.
+    existing_payment = payment_transactions.get_payment_transaction_by_external_id(db, token)
+    if existing_payment:
+        # Redirect based on the actual recorded outcome — never assume success.
+        if existing_payment.status in {"authorized", "captured"}:
+            return RedirectResponse(_safe_redirect_target(success_url), status_code=status.HTTP_303_SEE_OTHER)
+        return RedirectResponse(
+            _safe_redirect_target(_append_query_params(cancel_url, {"reason": "payment_declined"})),
+            status_code=status.HTTP_303_SEE_OTHER,
+        )
+
     try:
+        # Contact Saferpay to verify the token and get authoritative status.
+        # This is the key security check — tokens not in Saferpay are rejected here.
         result = payments.WorldlineProvider().authorize_transaction(token=token)
         transaction = result.get("Transaction") if isinstance(result, dict) else {}
         transaction_status = str(transaction.get("Status") or "").upper() if isinstance(transaction, dict) else ""
+        transaction_id = str(transaction.get("Id") or "") if isinstance(transaction, dict) else ""
 
-        if kind == "subscription" and parsed_ref.get("org_id") and parsed_ref.get("tier"):
-            payments.apply_subscription_update(
-                db,
-                org_id=int(parsed_ref["org_id"]),
-                tier=str(parsed_ref["tier"]),
-                billing_cycle=(str(parsed_ref.get("billing_cycle")) if parsed_ref.get("billing_cycle") else None),
-                customer_id=None,
-                period_end_ts=None,
-            )
-        elif kind == "topup" and parsed_ref.get("org_id") and parsed_ref.get("topup_credits"):
-            payments.apply_credit_topup(
-                db,
-                org_id=int(parsed_ref["org_id"]),
-                credits_amount=int(parsed_ref["topup_credits"]),
-                reference_id=(str(transaction.get("Id")) if isinstance(transaction, dict) and transaction.get("Id") else token),
-            )
+        # Normalize status from provider-specific values to our internal enum.
+        normalized_status = payment_transactions.validate_transaction_status(transaction_status)
 
-        if transaction_status in {"AUTHORIZED", "CAPTURED"}:
+        # Extract payment method (card, twint, bank_transfer, etc.)
+        payment_method = payment_transactions._extract_payment_method_worldline(transaction)
+
+        # Determine CHF amount from the order reference, not user-supplied params.
+        # Fall back to a non-zero placeholder so logging never rejects the transaction.
+        amount_chf: float = 0.01
+        if kind == "subscription" and parsed_ref.get("tier"):
+            amount_chf = payments.compute_subscription_price_chf(
+                tier=parsed_ref["tier"],
+                billing_cycle=str(parsed_ref.get("billing_cycle") or "monthly"),
+            )
+        elif kind == "topup" and parsed_ref.get("topup_credits"):
+            amount_chf = payments.credits_to_chf(int(parsed_ref["topup_credits"]))
+
+        # Log the transaction. The UNIQUE constraint on external_id is the DB-level
+        # idempotency safeguard against races; the SELECT above handles the common case.
+        payment_tx = payment_transactions.log_payment_transaction(
+            db,
+            org_id=int(parsed_ref["org_id"]),
+            provider="worldline",
+            external_id=token,
+            order_reference=order_reference,
+            amount_chf=amount_chf,
+            kind=kind,
+            status=normalized_status,
+            payment_method=payment_method,
+            provider_transaction_id=transaction_id or None,
+            subscription_tier=(str(parsed_ref["tier"]) if parsed_ref.get("tier") else None),
+            subscription_billing_cycle=(str(parsed_ref["billing_cycle"]) if parsed_ref.get("billing_cycle") else None),
+            credits_purchased=(int(parsed_ref["topup_credits"]) if parsed_ref.get("topup_credits") else None),
+        )
+
+        # Only apply business logic if payment succeeded.
+        if normalized_status in {"authorized", "captured"}:
+            payment_transactions.apply_successful_payment(db, payment_tx)
             return RedirectResponse(_safe_redirect_target(success_url), status_code=status.HTTP_303_SEE_OTHER)
-        return RedirectResponse(_safe_redirect_target(cancel_url), status_code=status.HTTP_303_SEE_OTHER)
+
+        # Declined or unknown status — no credits granted.
+        return RedirectResponse(
+            _safe_redirect_target(_append_query_params(cancel_url, {"reason": "payment_declined"})),
+            status_code=status.HTTP_303_SEE_OTHER,
+        )
+
+    except payment_transactions.DuplicatePaymentError:
+        # Race condition: two identical requests arrived simultaneously.
+        # Re-read the actual stored outcome to decide where to send the user.
+        existing = payment_transactions.get_payment_transaction_by_external_id(db, token)
+        if existing and existing.status in {"authorized", "captured"}:
+            return RedirectResponse(_safe_redirect_target(success_url), status_code=status.HTTP_303_SEE_OTHER)
+        return RedirectResponse(
+            _safe_redirect_target(_append_query_params(cancel_url, {"reason": "payment_declined"})),
+            status_code=status.HTTP_303_SEE_OTHER,
+        )
+
     except RuntimeError as exc:
         message = str(exc)
+        # Saferpay-specific errors indicating the token was already consumed.
         if "TOKEN_INVALID" in message or "TRANSACTION_IN_WRONG_STATE" in message:
-            return RedirectResponse(_safe_redirect_target(success_url), status_code=status.HTTP_303_SEE_OTHER)
+            return RedirectResponse(
+                _safe_redirect_target(_append_query_params(success_url, {"already_processed": "true"})),
+                status_code=status.HTTP_303_SEE_OTHER,
+            )
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=message) from exc
+
+    except payment_transactions.PaymentValidationError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
 
 @router.get("/providers")

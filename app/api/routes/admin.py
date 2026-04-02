@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 from app.auth import get_current_user
 from app.database import get_db
 from app.models.organization import Organization
+from app.models.payment_transaction import PaymentTransaction
 from app.models.user import User
 from app.services.tiers import TIER_ID_BY_NAME
 
@@ -204,3 +205,122 @@ def delete_org_admin(
     )
     db.delete(org)
     db.commit()
+
+
+# ── Payment Transactions ────────────────────────────────────────────────────────
+
+
+def _payment_tx_dict(tx: PaymentTransaction) -> dict:
+    return {
+        "id": tx.id,
+        "org_id": tx.org_id,
+        "provider": tx.provider,
+        "external_id": tx.external_id,
+        "order_reference": tx.order_reference,
+        "amount_chf": tx.amount_chf,
+        "kind": tx.kind,
+        "status": tx.status,
+        "payment_method": tx.payment_method,
+        "provider_transaction_id": tx.provider_transaction_id,
+        "subscription_tier": tx.subscription_tier,
+        "subscription_billing_cycle": tx.subscription_billing_cycle,
+        "credits_purchased": tx.credits_purchased,
+        "credits_bonus": tx.credits_bonus,
+        "credits_total_granted": tx.credits_total_granted,
+        "error_code": tx.error_code,
+        "error_message": tx.error_message,
+        "refunded_amount_chf": tx.refunded_amount_chf,
+        "webhook_processed_at": tx.webhook_processed_at.isoformat() if tx.webhook_processed_at else None,
+        "created_at": tx.created_at.isoformat(),
+        "authorized_at": tx.authorized_at.isoformat() if tx.authorized_at else None,
+        "refunded_at": tx.refunded_at.isoformat() if tx.refunded_at else None,
+    }
+
+
+@router.get("/payment-transactions", summary="List payment transactions (superadmin)")
+def list_payment_transactions(
+    org_id: int | None = Query(None),
+    provider: str | None = Query(None),
+    status: str | None = Query(None),
+    kind: str | None = Query(None),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(50, ge=1, le=200),
+    db: Session = Depends(get_db),
+    _: User = Depends(_require_superadmin),
+):
+    """List all payment transactions with optional filtering.
+
+    Filters:
+    - org_id: filter by organization
+    - provider: filter by payment provider (worldline, stripe)
+    - status: filter by status (pending, authorized, captured, declined, error)
+    - kind: filter by kind (subscription, topup)
+    """
+    query = db.query(PaymentTransaction)
+
+    if org_id is not None:
+        query = query.filter(PaymentTransaction.org_id == org_id)
+    if provider:
+        query = query.filter(PaymentTransaction.provider == provider.lower())
+    if status:
+        query = query.filter(PaymentTransaction.status == status.lower())
+    if kind:
+        query = query.filter(PaymentTransaction.kind == kind.lower())
+
+    total = query.count()
+    transactions = (
+        query.order_by(PaymentTransaction.created_at.desc())
+        .offset((page - 1) * page_size)
+        .limit(page_size)
+        .all()
+    )
+
+    return {
+        "items": [_payment_tx_dict(tx) for tx in transactions],
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+    }
+
+
+@router.get("/payment-transactions/{tx_id}", summary="Get payment transaction details (superadmin)")
+def get_payment_transaction(
+    tx_id: int,
+    db: Session = Depends(get_db),
+    _: User = Depends(_require_superadmin),
+):
+    """Retrieve detailed information about a specific payment transaction."""
+    tx = db.get(PaymentTransaction, tx_id)
+    if not tx:
+        raise HTTPException(status_code=404, detail="Payment transaction not found")
+    return _payment_tx_dict(tx)
+
+
+@router.get("/orgs/{org_id}/payment-transactions", summary="List payment transactions for org (superadmin)")
+def list_org_payment_transactions(
+    org_id: int,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(50, ge=1, le=200),
+    db: Session = Depends(get_db),
+    _: User = Depends(_require_superadmin),
+):
+    """List all payment transactions for a specific organization."""
+    org = db.get(Organization, org_id)
+    if not org:
+        raise HTTPException(status_code=404, detail="Org not found")
+
+    query = db.query(PaymentTransaction).filter(PaymentTransaction.org_id == org_id)
+    total = query.count()
+    transactions = (
+        query.order_by(PaymentTransaction.created_at.desc())
+        .offset((page - 1) * page_size)
+        .limit(page_size)
+        .all()
+    )
+
+    return {
+        "items": [_payment_tx_dict(tx) for tx in transactions],
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+    }

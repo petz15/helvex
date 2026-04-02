@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { createSubscriptionCheckout, createTopupCheckout } from "@/lib/api";
 
 const PLAN_TIERS = ["simple", "explorer", "researcher", "strategist"] as const;
@@ -18,10 +18,73 @@ function buildReturnUrl(pathname: string, params: Record<string, string>): strin
   return url.toString();
 }
 
+function getCheckoutStatus(): {
+  kind: "success" | "cancel";
+  tier?: string;
+  credits?: string;
+  reason?: string;
+  alreadyProcessed?: boolean;
+} | null {
+  if (typeof window === "undefined") return null;
+  const params = new URLSearchParams(window.location.search);
+  const checkout = params.get("checkout");
+  if (!checkout) return null;
+
+  if (checkout === "success") {
+    return {
+      kind: "success",
+      tier: params.get("tier") || undefined,
+      credits: params.get("credits") || undefined,
+      alreadyProcessed: params.get("already_processed") === "true",
+    };
+  }
+
+  if (checkout === "cancel") {
+    return {
+      kind: "cancel",
+      tier: params.get("tier") || undefined,
+      credits: params.get("credits") || undefined,
+      reason: params.get("reason") || "User cancelled",
+      alreadyProcessed: params.get("already_processed") === "true",
+    };
+  }
+
+  return null;
+}
+
 export function BillingTestClient() {
   const [yearly, setYearly] = useState(false);
   const [loading, setLoading] = useState<CheckoutKind | null>(null);
   const [banner, setBanner] = useState<{ kind: "success" | "error"; message: string } | null>(null);
+
+  // Check for return status from payment provider
+  useEffect(() => {
+    const status = getCheckoutStatus();
+    if (!status) return;
+
+    if (status.kind === "success") {
+      const item = status.tier ? `${status.tier} plan` : `${status.credits} credits`;
+      const msg = status.alreadyProcessed
+        ? `✓ Payment already processed. ${item} was activated.`
+        : `✓ Payment successful! ${item} activated.`;
+      setBanner({
+        kind: "success",
+        message: msg,
+      });
+    } else {
+      const reason = status.reason || "Unknown error";
+      const msg = status.alreadyProcessed
+        ? `✗ Payment was previously declined: ${reason}`
+        : `✗ Payment failed: ${reason}`;
+      setBanner({
+        kind: "error",
+        message: msg,
+      });
+    }
+
+    // Clean up URL
+    window.history.replaceState({}, "", window.location.pathname);
+  }, []);
 
   async function startPlanCheckout(tier: (typeof PLAN_TIERS)[number]) {
     setLoading({ kind: "subscription", value: tier });

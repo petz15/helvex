@@ -167,7 +167,8 @@
       "Bash(grep -E \".py$\")",
       "Bash(grep -l \"org_id\" /c/D/coding_projects/zefix_analyzer/alembic/versions/*.py)",
       "Bash(find /c/D/coding_projects/zefix_analyzer/frontend/src -name *org* -o -name *switch*)",
-      "Bash(grep -rn \"class UserRead\\\\|org.*OrgInfo\\\\|org_info\\\\|org\" /c/D/coding_projects/zefix_analyzer/app/ --include=*.py)"
+      "Bash(grep -rn \"class UserRead\\\\|org.*OrgInfo\\\\|org_info\\\\|org\" /c/D/coding_projects/zefix_analyzer/app/ --include=*.py)",
+      "Bash(\"c:/D/coding_projects/zefix_analyzer/PAYMENT_CHANGES_SUMMARY.txt\":*)"
     ]
   }
 }
