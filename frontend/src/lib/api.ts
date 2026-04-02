@@ -241,14 +241,12 @@ export async function createTopupCheckout(data: {
   billing_address?: BillingAddressPayload | null;
   provider?: "worldline" | "stripe" | null;
 }): Promise<BillingCheckoutResponse> {
-  console.log("[PAYMENT] createTopupCheckout() calling API", data);
   const res = await fetch("/api/v1/billing/checkout/topup", {
     method: "POST",
     credentials: "include",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(data),
   });
-  console.log("[PAYMENT] API Response status:", res.status, res.statusText);
   if (!res.ok) {
     const raw = await res.text();
     let detail: string | undefined;
@@ -258,12 +256,9 @@ export async function createTopupCheckout(data: {
     } catch {
       detail = raw.trim() || undefined;
     }
-    console.error("[PAYMENT] API Error:", detail);
     throw new Error(detail ?? `Top-up checkout failed (HTTP ${res.status})`);
   }
-  const result = await res.json();
-  console.log("[PAYMENT] API Success Response:", result);
-  return result;
+  return res.json();
 }
 
 /**

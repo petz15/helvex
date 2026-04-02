@@ -8,10 +8,16 @@ import time
 import traceback
 from contextlib import asynccontextmanager
 
-# Configure root logger so all app.* loggers emit at INFO.
-# Uvicorn only configures its own named loggers and leaves root at WARNING.
-logging.basicConfig(level=logging.INFO, stream=sys.stdout,
-                    format="%(levelname)s:%(name)s:%(message)s")
+# Configure root logger early so app.* loggers emit at configured level.
+# Uvicorn configures its own named loggers; this ensures our module loggers are visible too.
+_LOG_LEVEL_NAME = (os.getenv("LOG_LEVEL") or "INFO").upper().strip()
+_LOG_LEVEL = getattr(logging, _LOG_LEVEL_NAME, logging.INFO)
+logging.basicConfig(
+    level=_LOG_LEVEL,
+    stream=sys.stdout,
+    format="%(asctime)s %(levelname)s %(name)s - %(message)s",
+    force=True,
+)
 
 # ── Python 3.12 compatibility patch ───────────────────────────────────────────
 # pydantic.v1 (bundled inside pydantic v2) calls ForwardRef._evaluate() without
@@ -360,6 +366,44 @@ async def auth_gate(request: Request, call_next):
     from urllib.parse import quote
     next_url = quote(path, safe="")
     return RedirectResponse(url=f"/login?next={next_url}", status_code=302)
+
+
+@app.middleware("http")
+async def api_request_logger(request: Request, call_next):
+    """Emit concise request logs for API and diagnostics endpoints."""
+    if not settings.api_request_logging_enabled:
+        return await call_next(request)
+
+    path = request.url.path
+    should_log = path.startswith("/api/") or path in {"/health", "/metadata", "/docs"}
+    if not should_log:
+        return await call_next(request)
+
+    started = time.perf_counter()
+    client_host = request.client.host if request.client else "unknown"
+    try:
+        response = await call_next(request)
+    except Exception:
+        elapsed_ms = (time.perf_counter() - started) * 1000.0
+        logger.exception(
+            "http.request_error method=%s path=%s client=%s duration_ms=%.1f",
+            request.method,
+            path,
+            client_host,
+            elapsed_ms,
+        )
+        raise
+
+    elapsed_ms = (time.perf_counter() - started) * 1000.0
+    logger.info(
+        "http.request method=%s path=%s status=%s client=%s duration_ms=%.1f",
+        request.method,
+        path,
+        response.status_code,
+        client_host,
+        elapsed_ms,
+    )
+    return response
 
 
 @app.middleware("http")

@@ -9,6 +9,8 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
     app_env: str = "dev"
+    log_level: str = "INFO"
+    api_request_logging_enabled: bool = True
 
     # PostgreSQL — set individual fields OR override with a full DATABASE_URL
     postgres_host: str = "localhost"
