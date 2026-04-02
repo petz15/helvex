@@ -60,6 +60,7 @@ class PaymentProvider(Protocol):
         billing_cycle: Literal["monthly", "yearly"],
         success_url: str,
         cancel_url: str,
+        billing_address: dict[str, str] | None = None,
     ) -> CheckoutSession:
         ...
 
@@ -70,6 +71,7 @@ class PaymentProvider(Protocol):
         credits: int,
         success_url: str,
         cancel_url: str,
+        billing_address: dict[str, str] | None = None,
     ) -> CheckoutSession:
         ...
 
@@ -272,6 +274,7 @@ class WorldlineProvider:
         notify_url: str,
         success_url: str,
         cancel_url: str,
+        billing_address: dict[str, str] | None = None,
     ) -> CheckoutSession:
         customer_id = _worldline_customer_id()
         terminal_id = _worldline_terminal_id()
@@ -302,6 +305,19 @@ class WorldlineProvider:
                 "Fail": notify_url,
             },
         }
+        # Add billing address if provided (required by Worldline for chargeback evidence)
+        if billing_address:
+            payload["Payer"]["FirstName"] = billing_address.get("first_name", "")
+            payload["Payer"]["LastName"] = billing_address.get("last_name", "")
+            payload["Payer"]["Address"] = {
+                "Street": billing_address.get("street", ""),
+                "HouseNumber": billing_address.get("number", ""),
+                "PostCode": billing_address.get("postal_code", ""),
+                "City": billing_address.get("city", ""),
+                "CountryCode": billing_address.get("country", ""),
+            }
+            if billing_address.get("company_name"):
+                payload["Payer"]["CompanyName"] = billing_address["company_name"]
         session = self._create_transaction_initialize(payload)
         return session
 
@@ -340,6 +356,7 @@ class WorldlineProvider:
         billing_cycle: Literal["monthly", "yearly"],
         success_url: str,
         cancel_url: str,
+        billing_address: dict[str, str] | None = None,
     ) -> CheckoutSession:
         self._assert_configured()
         price = compute_subscription_price_chf(tier=tier, billing_cycle=billing_cycle)
@@ -367,6 +384,7 @@ class WorldlineProvider:
             notify_url=notify_url,
             success_url=success_url,
             cancel_url=cancel_url,
+            billing_address=billing_address,
         )
 
     def create_topup_checkout(
@@ -376,6 +394,7 @@ class WorldlineProvider:
         credits: int,
         success_url: str,
         cancel_url: str,
+        billing_address: dict[str, str] | None = None,
     ) -> CheckoutSession:
         self._assert_configured()
         amount_chf = credits_to_chf(credits)
@@ -403,6 +422,7 @@ class WorldlineProvider:
             notify_url=notify_url,
             success_url=success_url,
             cancel_url=cancel_url,
+            billing_address=billing_address,
         )
 
 
@@ -439,6 +459,7 @@ class StripeProvider:
         billing_cycle: Literal["monthly", "yearly"],
         success_url: str,
         cancel_url: str,
+        billing_address: dict[str, str] | None = None,
     ) -> CheckoutSession:
         self._assert_configured()
         price = compute_subscription_price_chf(tier=tier, billing_cycle=billing_cycle)
@@ -469,6 +490,7 @@ class StripeProvider:
         credits: int,
         success_url: str,
         cancel_url: str,
+        billing_address: dict[str, str] | None = None,
     ) -> CheckoutSession:
         self._assert_configured()
         amount_cents = int(round(credits_to_chf(credits) * 100))
@@ -513,6 +535,7 @@ def create_subscription_checkout(
     billing_cycle: Literal["monthly", "yearly"],
     success_url: str,
     cancel_url: str,
+    billing_address: dict[str, str] | None = None,
     preferred_provider: ProviderName | None = None,
 ) -> CheckoutSession:
     provider = _pick_provider(preferred_provider)
@@ -522,6 +545,7 @@ def create_subscription_checkout(
         billing_cycle=billing_cycle,
         success_url=success_url,
         cancel_url=cancel_url,
+        billing_address=billing_address,
     )
 
 
@@ -531,6 +555,7 @@ def create_topup_checkout(
     credits: int,
     success_url: str,
     cancel_url: str,
+    billing_address: dict[str, str] | None = None,
     preferred_provider: ProviderName | None = None,
 ) -> CheckoutSession:
     provider = _pick_provider(preferred_provider)
@@ -539,6 +564,7 @@ def create_topup_checkout(
         credits=credits,
         success_url=success_url,
         cancel_url=cancel_url,
+        billing_address=billing_address,
     )
 
 

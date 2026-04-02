@@ -129,6 +129,8 @@ export interface AdminPaymentTransaction {
   status: string;
   payment_method: string | null;
   provider_transaction_id: string | null;
+  cardholder_name: string | null;
+  billing_address: string | null;  // JSON string
   subscription_tier: string | null;
   subscription_billing_cycle: string | null;
   credits_purchased: number | null;
@@ -163,11 +165,23 @@ export async function fetchAdminOrgPaymentTransactions(
   return res.json();
 }
 
+export interface BillingAddressPayload {
+  first_name: string;
+  last_name: string;
+  street: string;
+  number: string;
+  postal_code: string;
+  city: string;
+  country: string;
+  company_name?: string;
+}
+
 export async function createSubscriptionCheckout(data: {
   tier: string;
   billing_cycle: "monthly" | "yearly";
   success_url: string;
   cancel_url: string;
+  billing_address?: BillingAddressPayload | null;
   provider?: "worldline" | "stripe" | null;
 }): Promise<BillingCheckoutResponse> {
   const res = await fetch("/api/v1/billing/checkout/subscription", {
@@ -194,6 +208,7 @@ export async function createTopupCheckout(data: {
   credits: number;
   success_url: string;
   cancel_url: string;
+  billing_address?: BillingAddressPayload | null;
   provider?: "worldline" | "stripe" | null;
 }): Promise<BillingCheckoutResponse> {
   const res = await fetch("/api/v1/billing/checkout/topup", {

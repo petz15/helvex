@@ -36,6 +36,33 @@ class PaymentValidationError(RuntimeError):
     pass
 
 
+def _extract_cardholder_name_worldline(authorize_response: dict[str, Any]) -> str | None:
+    """Extract cardholder name from a Saferpay Transaction/Authorize response.
+
+    Checks both Transaction.PaymentMeans.Card.HolderName and
+    the top-level PaymentMeans.Card.HolderName fields.
+    """
+    if not isinstance(authorize_response, dict):
+        return None
+    # Try Transaction.PaymentMeans.Card.HolderName first
+    transaction = authorize_response.get("Transaction")
+    if isinstance(transaction, dict):
+        pm = transaction.get("PaymentMeans")
+        if isinstance(pm, dict):
+            card = pm.get("Card")
+            if isinstance(card, dict) and card.get("HolderName"):
+                return str(card["HolderName"]).strip() or None
+    # Fall back to top-level PaymentMeans
+    pm = authorize_response.get("PaymentMeans")
+    if isinstance(pm, dict):
+        card = pm.get("Card")
+        if isinstance(card, dict) and card.get("HolderName"):
+            return str(card["HolderName"]).strip() or None
+    return None
+
+
+
+
 def _extract_payment_method_worldline(transaction: dict[str, Any]) -> str | None:
     """Extract payment method from Saferpay Transaction object.
 
@@ -106,6 +133,8 @@ def log_payment_transaction(
     status: PaymentStatus,
     payment_method: str | None = None,
     provider_transaction_id: str | None = None,
+    cardholder_name: str | None = None,
+    billing_address: str | None = None,
     subscription_tier: str | None = None,
     subscription_billing_cycle: str | None = None,
     credits_purchased: int | None = None,
@@ -159,6 +188,8 @@ def log_payment_transaction(
         status=status,
         payment_method=payment_method,
         provider_transaction_id=provider_transaction_id,
+        cardholder_name=cardholder_name,
+        billing_address=billing_address,
         subscription_tier=subscription_tier,
         subscription_billing_cycle=subscription_billing_cycle,
         credits_purchased=credits_purchased,

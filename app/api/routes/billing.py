@@ -2,21 +2,21 @@
 
 from __future__ import annotations
 
+import json
 from typing import Literal
 from urllib.parse import urlencode, urlparse
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, status
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, Field
-from sqlalchemy.orm import Session
-
-from fastapi import Query
 from sqlalchemy import desc
+from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_org
 from app.auth import get_current_user
 from app.database import get_db
 from app.models.org_credit_transaction import OrgCreditTransaction
+from app.models.organization import Organization
 from app.models.payment_transaction import PaymentTransaction
 from app.models.user import User
 from app.services import payment_transactions, payments
@@ -24,11 +24,23 @@ from app.services import payment_transactions, payments
 router = APIRouter(prefix="/billing", tags=["billing"])
 
 
+class BillingAddress(BaseModel):
+    first_name: str
+    last_name: str
+    street: str
+    number: str
+    postal_code: str
+    city: str
+    country: str  # ISO 3166-1 alpha-2, e.g. "CH"
+    company_name: str | None = None
+
+
 class SubscriptionCheckoutRequest(BaseModel):
     tier: str
     billing_cycle: Literal["monthly", "yearly"] = "monthly"
     success_url: str
     cancel_url: str
+    billing_address: BillingAddress | None = None
     provider: Literal["worldline", "stripe"] | None = None
 
 
@@ -36,6 +48,7 @@ class TopupCheckoutRequest(BaseModel):
     credits: int = Field(..., gt=0)
     success_url: str
     cancel_url: str
+    billing_address: BillingAddress | None = None
     provider: Literal["worldline", "stripe"] | None = None
 
 
@@ -72,8 +85,15 @@ def _append_query_params(url: str, params: dict[str, str]) -> str:
 def create_subscription_checkout(
     body: SubscriptionCheckoutRequest,
     user_org: tuple[User, object] = Depends(get_current_org),
+    db: Session = Depends(get_db),
 ) -> CheckoutResponse:
     _user, org = user_org
+
+    # Store billing address on org if provided (persisted for transaction logging on return)
+    if body.billing_address:
+        org.billing_address_json = json.dumps(body.billing_address.model_dump())
+        db.commit()
+
     try:
         amount_chf = payments.compute_subscription_price_chf(
             tier=body.tier,
@@ -87,6 +107,7 @@ def create_subscription_checkout(
             billing_cycle=body.billing_cycle,
             success_url=body.success_url,
             cancel_url=body.cancel_url,
+            billing_address=(body.billing_address.model_dump() if body.billing_address else None),
             preferred_provider=body.provider,
         )
     except payments.PaymentConfigurationError as exc:
@@ -105,14 +126,22 @@ def create_subscription_checkout(
 def create_topup_checkout(
     body: TopupCheckoutRequest,
     user_org: tuple[User, object] = Depends(get_current_org),
+    db: Session = Depends(get_db),
 ) -> CheckoutResponse:
     _user, org = user_org
+
+    # Store billing address on org if provided (persisted for transaction logging on return)
+    if body.billing_address:
+        org.billing_address_json = json.dumps(body.billing_address.model_dump())
+        db.commit()
+
     try:
         session = payments.create_topup_checkout(
             org_id=org.id,
             credits=body.credits,
             success_url=body.success_url,
             cancel_url=body.cancel_url,
+            billing_address=(body.billing_address.model_dump() if body.billing_address else None),
             preferred_provider=body.provider,
         )
     except payments.PaymentConfigurationError as exc:
@@ -230,8 +259,9 @@ async def worldline_return(
         # Normalize status from provider-specific values to our internal enum.
         normalized_status = payment_transactions.validate_transaction_status(transaction_status)
 
-        # Extract payment method (card, twint, bank_transfer, etc.)
+        # Extract payment method and cardholder identity (for chargeback evidence)
         payment_method = payment_transactions._extract_payment_method_worldline(transaction)
+        cardholder_name = payment_transactions._extract_cardholder_name_worldline(result)
 
         # Determine CHF amount from the order reference, not user-supplied params.
         # Fall back to a non-zero placeholder so logging never rejects the transaction.
@@ -246,6 +276,10 @@ async def worldline_return(
 
         # Log the transaction. The UNIQUE constraint on external_id is the DB-level
         # idempotency safeguard against races; the SELECT above handles the common case.
+        # Retrieve billing address from org (collected at checkout time)
+        org = db.query(Organization).filter(Organization.id == int(parsed_ref["org_id"])).first()
+        billing_address = org.billing_address_json if org else None
+
         payment_tx = payment_transactions.log_payment_transaction(
             db,
             org_id=int(parsed_ref["org_id"]),
@@ -257,6 +291,8 @@ async def worldline_return(
             status=normalized_status,
             payment_method=payment_method,
             provider_transaction_id=transaction_id or None,
+            cardholder_name=cardholder_name,
+            billing_address=billing_address,
             subscription_tier=(str(parsed_ref["tier"]) if parsed_ref.get("tier") else None),
             subscription_billing_cycle=(str(parsed_ref["billing_cycle"]) if parsed_ref.get("billing_cycle") else None),
             credits_purchased=(int(parsed_ref["topup_credits"]) if parsed_ref.get("topup_credits") else None),

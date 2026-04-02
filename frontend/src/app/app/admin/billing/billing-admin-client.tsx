@@ -59,6 +59,20 @@ function DetailDrawer({ tx, onClose }: { tx: AdminPaymentTransaction; onClose: (
     ["Kind",            <KindBadge kind={tx.kind} />],
     ["Status",          <StatusBadge status={tx.status} />],
     ["Payment method",  tx.payment_method ?? "—"],
+    ["Cardholder name", tx.cardholder_name ?? "—"],
+    [
+      "Billing address",
+      tx.billing_address
+        ? (() => {
+            try {
+              const addr = JSON.parse(tx.billing_address);
+              return `${addr.street} ${addr.number}, ${addr.postal_code} ${addr.city}, ${addr.country}`;
+            } catch {
+              return tx.billing_address;
+            }
+          })()
+        : "—"
+    ],
     ["Tier",            tx.subscription_tier ?? "—"],
     ["Billing cycle",   tx.subscription_billing_cycle ?? "—"],
     ["Credits purchased", tx.credits_purchased?.toLocaleString() ?? "—"],

@@ -44,6 +44,10 @@ class Organization(Base):
     # Payment
     payment_customer_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
 
+    # Billing address (collected during checkout for chargeback evidence)
+    # JSON: {street, number, postal_code, city, country, company_name (optional)}
+    billing_address_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+
     # --- Billing / subscription ---
     subscription_billing_cycle: Mapped[str] = mapped_column(String(10), nullable=False, default="monthly")
     subscription_period_end: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

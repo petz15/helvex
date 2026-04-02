@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING
 
-from sqlalchemy import BigInteger, DateTime, Float, ForeignKey, String
+from sqlalchemy import BigInteger, DateTime, Float, ForeignKey, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 if TYPE_CHECKING:
@@ -44,6 +44,10 @@ class PaymentTransaction(Base):
 
     # Payment method (extracted from provider response)
     payment_method: Mapped[str | None] = mapped_column(String(50), nullable=True)  # "card", "twint", "bank_transfer", etc.
+
+    # Cardholder identity (for chargeback evidence)
+    cardholder_name: Mapped[str | None] = mapped_column(String(255), nullable=True)  # From PaymentMeans.Card.HolderName
+    billing_address: Mapped[str | None] = mapped_column(Text, nullable=True)  # JSON: {street, number, postal_code, city, country}
 
     # Provider transaction ID (for dispute resolution and provider lookups)
     provider_transaction_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
