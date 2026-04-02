@@ -206,6 +206,13 @@ def _recover_jobs_and_start_worker(app, app_state) -> None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Re-apply root logger config after uvicorn replaces it with its own dictConfig.
+    logging.basicConfig(
+        level=_LOG_LEVEL,
+        stream=sys.stdout,
+        format="%(asctime)s %(levelname)s %(name)s - %(message)s",
+        force=True,
+    )
     app.state.ready = False
     app.state.startup_message = "Initialising…"
     app.state.startup_error = None

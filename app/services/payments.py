@@ -121,18 +121,10 @@ def _worldline_spec_version() -> str:
 
 
 def _worldline_callback_url(*, kind: str, order_reference: str, success_url: str, cancel_url: str, source: str) -> str:
-    return _query_url(
-        "/api/v1/billing/webhooks/worldline/return",
-        {
-            # Ask provider to inject the transaction token back into callback URL.
-            "TOKEN": "{TOKEN}",
-            "kind": kind,
-            "order_reference": order_reference,
-            "success_url": success_url,
-            "cancel_url": cancel_url,
-            "source": source,
-        },
-    )
+    # Keep token placeholder in the path (not query) so providers can substitute it
+    # without URL-encoding braces into %7B...%7D.
+    base_path = "/api/v1/billing/webhooks/worldline/return/{TOKEN}"
+    return f"{_base_url()}{base_path}?{urlencode({'kind': kind, 'order_reference': order_reference, 'success_url': success_url, 'cancel_url': cancel_url, 'source': source})}"
 
 
 def compute_subscription_price_chf(
