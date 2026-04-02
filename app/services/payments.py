@@ -396,8 +396,8 @@ class WorldlineProvider:
                 "Url": return_url,
             },
             "RedirectNotifyUrls": {
-                "SuccessNotifyUrl": notify_url,
-                "FailNotifyUrl": notify_url,
+                "Success": notify_url,
+                "Fail": notify_url,
             },
         }
         # Add billing address if provided (required by Worldline for chargeback evidence)

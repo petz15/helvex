@@ -84,7 +84,7 @@ def test_worldline_topup_checkout_calls_api(monkeypatch):
     assert captured["json"]["RequestHeader"]["CustomerId"] == "customer_test"
     assert captured["json"]["TerminalId"] == "12345678"
     assert captured["json"]["Payment"]["OrderId"].startswith("wl_topup_7_25000_")
-    assert captured["json"]["RedirectNotifyUrls"]["SuccessNotifyUrl"].endswith("source=notify")
+    assert captured["json"]["RedirectNotifyUrls"]["Success"].endswith("source=notify")
     assert captured["auth"] == ("wl_key", "wl_pwd")
 
 

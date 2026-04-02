@@ -22,7 +22,6 @@ if not _app_logger.handlers:
     _handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s - %(message)s"))
     _app_logger.addHandler(_handler)
 _app_logger.propagate = False
-_app_logger.info("boot.app_logger level=%s handlers=%s", _LOG_LEVEL_NAME, _app_logger.handlers)
 
 # ── Python 3.12 compatibility patch ───────────────────────────────────────────
 # pydantic.v1 (bundled inside pydantic v2) calls ForwardRef._evaluate() without
@@ -223,6 +222,14 @@ async def lifespan(app: FastAPI):
         try:
             loop = asyncio.get_running_loop()
             await loop.run_in_executor(None, _run_migrations, app.state)
+            # Re-attach handler after _run_migrations, because alembic's fileConfig()
+            # call in env.py resets existing loggers (disable_existing_loggers default).
+            _app_logger.setLevel(_LOG_LEVEL)
+            if not _app_logger.handlers:
+                _h = logging.StreamHandler(sys.stdout)
+                _h.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s - %(message)s"))
+                _app_logger.addHandler(_h)
+            _app_logger.propagate = False
             await loop.run_in_executor(None, _seed_settings, app.state)
             await loop.run_in_executor(None, _recover_jobs_and_start_worker, app, app.state)
             await loop.run_in_executor(None, _maybe_enqueue_geocode_upgrade, app, app.state)
