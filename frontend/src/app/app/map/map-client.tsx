@@ -7,7 +7,7 @@ import { MapTurnstileGate } from "@/components/map-turnstile-gate";
 import "leaflet/dist/leaflet.css";
 
 // Below this zoom level show grid-aggregated cluster circles; at/above show individual points.
-const DETAIL_ZOOM = 12;
+const DETAIL_ZOOM = 16;
 
 type WindowWithLeaflet = typeof window & { _L?: typeof import("leaflet") };
 
@@ -21,6 +21,7 @@ function scoreColor(score: number | null): string {
 
 /** Cluster bubble color — count-based blue scale for a natural, non-alarming look. */
 function clusterColor(count: number): string {
+  if (count >= 2000) return "#072179";
   if (count >= 500) return "#1e40af";
   if (count >= 100) return "#1d4ed8";
   if (count >= 20)  return "#3b82f6";
@@ -186,7 +187,7 @@ export function MapClient() {
       const map = L.map(mapRef.current!).setView([46.8, 8.2], 8);
       L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
         attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
-        maxZoom: 19,
+        maxZoom: 21,
       }).addTo(map);
       mapInstanceRef.current = map;
 
