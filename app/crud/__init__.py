@@ -74,6 +74,7 @@ from app.crud.job_run import (
     create_event,
     create_job,
     delete_old_finished_jobs,
+    find_active_by_dedup_key,
     get_job,
     get_latest_csv_export,
     get_next_queued_job,
@@ -96,6 +97,7 @@ from app.crud.job_run import (
     requeue_interrupted_jobs,
     resume_all_paused_jobs,
     resume_paused_job,
+    update_heartbeat,
     update_progress,
 )
 from app.crud.user import (
@@ -149,6 +151,7 @@ __all__ = [
     "cancel_active_csv_exports",
     "get_latest_csv_export",
     "create_job",
+    "find_active_by_dedup_key",
     "get_job",
     "get_next_queued_job",
     "list_active_jobs",
@@ -167,6 +170,7 @@ __all__ = [
     "mark_pause_requested",
     "mark_paused",
     "resume_paused_job",
+    "update_heartbeat",
     "update_progress",
     "mark_completed",
     "mark_failed",

@@ -243,6 +243,17 @@ def test_batch_trigger_missing_serper_disables_google(client, db):
     assert any(e.level == "warn" and "Preflight:" in e.message for e in events)
 
 
+def test_detail_trigger_returns_202_job(client):
+    resp = client.post(
+        "/api/v1/collection/detail",
+        json={"cantons": ["ZH"], "only_missing_details": True},
+    )
+    assert resp.status_code == 202
+    data = resp.json()
+    assert data["job_type"] == "detail"
+    assert data["status"] == "queued"
+
+
 def test_claude_trigger_missing_key_returns_400(client):
     resp = client.post("/api/v1/scoring/claude", json={})
     assert resp.status_code == 400

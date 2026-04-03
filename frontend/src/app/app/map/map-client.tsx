@@ -7,7 +7,7 @@ import { MapTurnstileGate } from "@/components/map-turnstile-gate";
 import "leaflet/dist/leaflet.css";
 
 // Below this zoom level show grid-aggregated cluster circles; at/above show individual points.
-const DETAIL_ZOOM = 16;
+const DETAIL_ZOOM = 15;
 
 type WindowWithLeaflet = typeof window & { _L?: typeof import("leaflet") };
 

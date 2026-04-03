@@ -115,11 +115,13 @@
 
 - [ ] **Cloudflare evaluation** — assess Cloudflare for DDoS protection, CDN/caching of static assets, bot management, and WAF rules; compare cost vs current Hetzner LB + cert-manager setup; consider Workers for edge auth or rate limiting
 - [ ] **CAPTCHA evaluation** — evaluate CAPTCHA (hCaptcha / Cloudflare Turnstile / reCAPTCHA v3) for signup, login, and scraping-triggering actions; weigh friction cost against bot/abuse risk at current and projected traffic
+- [ ] **Mobile optimization** - Optimize the website for mobile traffic (maybe limit some features)
 
 
 ## Bug Fixes & Known Issues
 
 - [ ] **Node autoscaling**: cluster-autoscaler with Hetzner Cloud provider. Split responsibility: Terraform manages control plane + DB node; autoscaler manages worker node pool (CX32, minSize 0, maxSize ~5). Requires `hcloud-cloud-controller-manager`, worker cloud-init bootstrap template (derived from existing Terraform cloud-init), and removing worker nodes from Terraform state. Add PodDisruptionBudget for Redis before enabling scale-down. Trigger: when worker CPU regularly exceeds 70% or ml-worker jobs queue up.
+- [ ] **Generally Classifications** - in general the classifications are not working great. Might need a major overhaul
 -[ ] **Google Tag Manager**: single `<Script>` in Next.js root layout (`app/layout.tsx`); GTM container manages GA4 + Google Ads conversion tracking. Cookie consent banner (IAB TCF v2) required  covers GTM, GA4, Ads, and reCAPTCHA under one consent flow.
   - GA4: user behavior, funnels, retention
   - Google Ads: conversion tracking for paid acquisition
