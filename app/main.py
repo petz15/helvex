@@ -194,6 +194,7 @@ def _recover_jobs_and_start_worker(app, app_state) -> None:
         delete_old_finished_jobs,
         list_active_jobs,
         requeue_interrupted_jobs,
+        requeue_recent_abandoned_jobs,
         resume_all_paused_jobs,
     )
     from app.database import SessionLocal
@@ -202,12 +203,14 @@ def _recover_jobs_and_start_worker(app, app_state) -> None:
     try:
         with SessionLocal() as db:
             recovered = requeue_interrupted_jobs(db)
+            recovered_abandoned = requeue_recent_abandoned_jobs(db)
             resumed = resume_all_paused_jobs(db)
             active_count = len(list_active_jobs(db))
             pruned = delete_old_finished_jobs(db, keep_days=30)
         kick_job_worker(app)
         app_state.startup_message = (
-            f"Background jobs ready — recovered {recovered}, resumed {resumed}, "
+            f"Background jobs ready — recovered {recovered} interrupted, "
+            f"{recovered_abandoned} abandoned, resumed {resumed}, "
             f"active {active_count}, pruned {pruned} old"
         )
     except Exception as exc:

@@ -184,6 +184,55 @@ def requeue_interrupted_jobs(
     return len(jobs)
 
 
+def requeue_recent_abandoned_jobs(
+    db: Session,
+    *,
+    message: str = "Recovered after worker restart (RQ abandoned job)",
+    lookback_seconds: int = 1800,
+) -> int:
+    """Re-queue jobs recently failed with RQ AbandonedJobError.
+
+    During a full deploy restart, RQ can mark in-flight work as abandoned and
+    fail it with AbandonedJobError before our in-process runner can pause it.
+    This helper converts those recent, infrastructure-induced failures back to
+    queued so they can resume from their existing progress checkpoint.
+    """
+    import json as _json
+    from datetime import timedelta
+
+    cutoff = datetime.now(tz=timezone.utc) - timedelta(seconds=lookback_seconds)
+    jobs = (
+        db.query(JobRun)
+        .filter(
+            JobRun.status == "failed",
+            JobRun.completed_at.is_not(None),
+            JobRun.completed_at >= cutoff,
+            JobRun.error.is_not(None),
+            JobRun.error.ilike("%AbandonedJobError%"),
+        )
+        .all()
+    )
+    for job in jobs:
+        job.status = "queued"
+        job.cancel_requested = False
+        job.pause_requested = False
+        job.started_at = None
+        job.completed_at = None
+        job.message = message
+        job.error = None
+        # For bulk jobs force checkpoint resume semantics on restart recovery.
+        if job.job_type == "bulk":
+            try:
+                p = _json.loads(job.params_json or "{}")
+            except Exception:
+                p = {}
+            p["resume"] = True
+            job.params_json = _json.dumps(p)
+    if jobs:
+        db.commit()
+    return len(jobs)
+
+
 def mark_running(db: Session, job: JobRun, *, message: str) -> JobRun:
     job.status = "running"
     job.cancel_requested = False
