@@ -191,47 +191,86 @@ export default function LandingPage() {
       </section>
 
       {/* ── Features ── */}
-      <section id="features" className="bg-slate-50 border-t border-slate-100 py-20">
-        <div className="max-w-5xl mx-auto px-6">
-          <h2 className="text-2xl font-bold text-slate-900 text-center mb-12">
-            Everything you need to work the Swiss register
-          </h2>
-          <div className="overflow-x-auto pb-2">
-            <div className="grid min-w-[960px] grid-cols-5 gap-3">
-              {LANDING_FEATURE_CARDS.map((feature, index) => {
-                const isWhite = isWhiteCrossCell(index);
-                return (
-                  <article
-                    key={feature.title}
-                    tabIndex={0}
-                    className={`group relative h-36 rounded-xl border p-4 shadow-sm outline-none transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md focus-visible:ring-2 focus-visible:ring-blue-500 ${
-                      isWhite
-                        ? "border-blue-200 bg-white"
-                        : "border-blue-500/40 bg-blue-600"
-                    }`}
-                  >
-                    <p
-                      className={`text-sm font-semibold leading-snug transition-opacity duration-200 group-hover:opacity-0 group-focus-visible:opacity-0 ${
-                        isWhite ? "text-blue-700" : "text-white"
+      <section
+        id="features"
+        className="relative overflow-hidden border-t border-slate-200 bg-[radial-gradient(circle_at_top,_rgba(59,130,246,0.08),_transparent_42%),linear-gradient(180deg,#f8fafc_0%,#eff6ff_100%)] py-24"
+      >
+        <div className="absolute left-1/2 top-0 h-56 w-56 -translate-x-1/2 rounded-full bg-blue-300/20 blur-3xl" />
+        <div className="max-w-6xl mx-auto px-6 relative">
+          <div className="mx-auto max-w-3xl text-center mb-10">
+            <span className="inline-flex items-center rounded-full border border-blue-200 bg-white/90 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.25em] text-blue-700 shadow-sm">
+              Feature board
+            </span>
+            <h2 className="mt-4 text-3xl sm:text-4xl font-black tracking-tight text-slate-900">
+              A visual map of what Helvex does
+            </h2>
+            <p className="mt-4 text-sm sm:text-base text-slate-600 leading-relaxed">
+              The blue tiles are the product surface. The white cross highlights the core areas where the platform is most differentiated.
+            </p>
+          </div>
+
+          <div className="rounded-[2rem] border border-white/70 bg-white/75 p-4 sm:p-5 shadow-[0_20px_60px_rgba(15,23,42,0.08)] backdrop-blur">
+            <div className="mb-4 flex flex-wrap items-center justify-between gap-3 px-1 text-[11px] font-medium text-slate-500">
+              <span>Hover a tile to reveal details</span>
+              <span>Use keyboard focus too</span>
+            </div>
+
+            <div className="overflow-x-auto pb-2">
+              <div className="grid min-w-[920px] grid-cols-5 gap-4">
+                {LANDING_FEATURE_CARDS.map((feature, index) => {
+                  const isWhite = isWhiteCrossCell(index);
+                  return (
+                    <article
+                      key={feature.title}
+                      tabIndex={0}
+                      className={`group relative aspect-square overflow-hidden rounded-2xl border p-4 outline-none transition-all duration-300 hover:-translate-y-1 hover:shadow-xl focus-visible:ring-2 focus-visible:ring-blue-500 ${
+                        isWhite
+                          ? "border-blue-200 bg-white text-blue-700 shadow-[0_10px_30px_rgba(37,99,235,0.08)]"
+                          : "border-blue-400/20 bg-gradient-to-br from-blue-600 via-blue-600 to-blue-700 text-white shadow-[0_14px_40px_rgba(37,99,235,0.26)]"
                       }`}
                     >
-                      {feature.title}
-                    </p>
-                    <p
-                      className={`absolute inset-0 flex items-center px-4 text-sm leading-relaxed transition-opacity duration-200 opacity-0 group-hover:opacity-100 group-focus-visible:opacity-100 ${
-                        isWhite ? "text-blue-700" : "text-white"
-                      }`}
-                    >
-                      {feature.detail}
-                    </p>
-                  </article>
-                );
-              })}
+                      <div className={`absolute inset-0 transition-opacity duration-300 ${isWhite ? "opacity-0" : "bg-[radial-gradient(circle_at_top_right,rgba(255,255,255,0.18),transparent_45%)] opacity-100 group-hover:opacity-70"}`} />
+                      <div className="relative z-10 flex h-full flex-col">
+                        <div className="flex items-start justify-between gap-3">
+                          <span
+                            className={`inline-flex h-7 items-center rounded-full px-2.5 text-[10px] font-semibold tracking-[0.24em] uppercase ${
+                              isWhite ? "bg-blue-50 text-blue-600" : "bg-white/15 text-white/80"
+                            }`}
+                          >
+                            {String(index + 1).padStart(2, "0")}
+                          </span>
+                          <span className={`mt-1 h-2.5 w-2.5 rounded-full ${isWhite ? "bg-blue-500" : "bg-white/70"}`} />
+                        </div>
+
+                        <div className="mt-4 flex-1">
+                          <h3 className="text-[1.05rem] font-semibold leading-tight">
+                            {feature.title}
+                          </h3>
+                        </div>
+
+                        <div className="mt-3">
+                          <p
+                            className={`text-[11px] font-medium uppercase tracking-[0.2em] transition-opacity duration-300 group-hover:opacity-0 group-focus-visible:opacity-0 ${
+                              isWhite ? "text-blue-500/70" : "text-white/70"
+                            }`}
+                          >
+                            Hover for detail
+                          </p>
+                          <p
+                            className={`mt-2 text-sm leading-relaxed transition-all duration-300 opacity-0 translate-y-2 group-hover:opacity-100 group-hover:translate-y-0 group-focus-visible:opacity-100 group-focus-visible:translate-y-0 ${
+                              isWhite ? "text-slate-600" : "text-white/90"
+                            }`}
+                          >
+                            {feature.detail}
+                          </p>
+                        </div>
+                      </div>
+                    </article>
+                  );
+                })}
+              </div>
             </div>
           </div>
-          <p className="mt-4 text-center text-xs text-slate-500">
-            Hover or focus a card to reveal details.
-          </p>
         </div>
       </section>
 
@@ -243,7 +282,7 @@ export default function LandingPage() {
           </div>
           <h2 className="text-2xl font-bold text-slate-900 mb-3 text-center">Current plans and pricing</h2>
           <p className="text-slate-500 mb-8 text-sm text-center max-w-2xl mx-auto">
-            Pricing below is shared with the app pricing page, so updates stay consistent everywhere.
+            Start for free, then scale up as your needs grow. No hidden fees — only pay for what you use.
           </p>
 
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-5">

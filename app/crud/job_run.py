@@ -160,7 +160,6 @@ def requeue_interrupted_jobs(
         )
         .all()
     )
-    now = datetime.now(tz=timezone.utc)
     for job in jobs:
         job.status = "queued"
         # Clear control flags so a recovered job doesn't instantly cancel/pause.
@@ -168,8 +167,7 @@ def requeue_interrupted_jobs(
         job.pause_requested = False
         job.started_at = None
         job.completed_at = None
-        # Bubble recovered jobs to the top of job history/UI lists.
-        job.queued_at = now
+        # Preserve original queued_at so API created_at remains immutable.
         job.message = message
         job.error = None
         # For bulk jobs mark resume=True so the worker knows to continue the
@@ -325,13 +323,12 @@ def resume_all_paused_jobs(db: Session) -> int:
     want a job to stay paused should cancel it instead).
     """
     jobs = db.query(JobRun).filter(JobRun.status == "paused").all()
-    now = datetime.now(tz=timezone.utc)
     for job in jobs:
         job.status = "queued"
         job.pause_requested = False
         job.started_at = None
         job.completed_at = None
-        job.queued_at = now  # bubble to top of queue history
+        # Preserve original queued_at so API created_at remains immutable.
         job.message = f"Auto-resumed from {job.progress_done or 0} after restart"
     if jobs:
         db.commit()
