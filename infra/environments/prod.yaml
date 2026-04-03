@@ -47,7 +47,9 @@ apiWorker:
 
 mlWorker:
   enabled: true
-  # keda.enabled: true  — uncomment after KEDA + Hetzner Cluster Autoscaler are installed
+  replicaCount: 1  # Runs continuously; Option B (KEDA autoscaling) will replace this
+  keda:
+    enabled: false  # Set to true after KEDA + Hetzner Cluster Autoscaler are installed
   # Home-only mode for now: no cloud fallback.
   nodeSelector: {workload: ml}
   tolerations:

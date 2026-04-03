@@ -23,7 +23,7 @@
 - Set up AI classification per org
 - filters should show the entire list when searched for (and check how chrome shows these lists)
 - Change the UX/UI for certain settings (such as seperate from account, put into explorer settings or other settings?)
-- 
+- zefix detail cant fetch detail for some companies which then loops it to do it every single time I start zefix detail collection
 - Continue on Explore page
 
 ### Blockers before real PROD
@@ -94,6 +94,7 @@
 ## Jobs & Infrastructure
 
 
+- [ ] **ML Worker autoscaling with KEDA** — install KEDA; configure ScaledObject to scale ml-worker pods (0 → N) based on Redis queue depth; requires KEDA + Hetzner Cluster Autoscaler for node-level scaling; enables true "cost to zero" idle state and efficient burst capacity (replaces current fixed replicas: 1 approach)
 - [ ] **Monitoring & Logging stack** — deploy Prometheus + Grafana on K3s; scrape app metrics (request rate, job queue depth, error rate), Kubernetes node/pod metrics, and Redis/PostgreSQL exporters; alert on pod restarts, high memory, queue stalls -> started but not fully done yet probably not going to continue with prometheus or grafana for a while
 - [ ] **Web analytics** — integrate Google Tag Manager + GA4 (or privacy-first alternative like Plausible/Umami); track page views, funnel steps (signup, first job, first export), feature usage; cookie consent banner for GDPR compliance
 - [ ] **Cluster autoscaler (node-level)** — KEDA handles pod-level; Hetzner Cluster Autoscaler handles node provisioning for ML workload node pool; requires `hcloud-cloud-controller-manager` + CA Helm chart + node group config mapping `workload=ml` label to specific server type (cx41 or cx51); Terraform manages control-plane + DB nodes only; CA manages ML worker node pool separately
