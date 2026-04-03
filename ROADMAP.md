@@ -40,6 +40,7 @@
 - [ ] **Improve colors** - improve some of the colors, look and feel for the website
 - [ ] **Cookie banner settings** - adjust the cookie banner so users by default choose all
 - [ ] **Add dark mode** — add dark mode
+- [ ] **Mobile optimization** - Optimize the website for mobile traffic (maybe limit some features)
 
 
 ## Company Explore page
@@ -66,7 +67,6 @@
 ## Company Profile
 
 
-- [ ] **Company views for registered users** — full company detail accessible free with email registration (gated behind login, not tier)
 - [X] **History overview** —  Old names and taken over is already visible but not SOGC publications, which needs to be custom handled in order to display changes such as people and other changes. -> nicer overview
 - [ ] **Graph overview of relationships** — based on past SHAB changes and name changes, take overs etc -> create nicer visuals for timeline. evaluate js on the fly calculations vs backend/DB
 - [ ] **Cross-company person graph** — normalize sogcPub organ changes into `persons` / `company_persons` tables via a pipeline job; build a graph UI showing where signers appear across multiple companies, what roles they held, and when — enabling network analysis of directors, beneficial owners, and corporate groups
@@ -87,6 +87,8 @@
 - [ ] **Monitoring & Logging stack** — deploy Prometheus + Grafana on K3s; scrape app metrics (request rate, job queue depth, error rate), Kubernetes node/pod metrics, and Redis/PostgreSQL exporters; alert on pod restarts, high memory, queue stalls -> started but not fully done yet probably not going to continue with prometheus or grafana for a while
 - [ ] **Web analytics** — integrate Google Tag Manager + GA4 (or privacy-first alternative like Plausible/Umami); track page views, funnel steps (signup, first job, first export), feature usage; cookie consent banner for GDPR compliance
 - [ ] **Cluster autoscaler (node-level)** — KEDA handles pod-level; Hetzner Cluster Autoscaler handles node provisioning for ML workload node pool; requires `hcloud-cloud-controller-manager` + CA Helm chart + node group config mapping `workload=ml` label to specific server type (cx41 or cx51); Terraform manages control-plane + DB nodes only; CA manages ML worker node pool separately
+- [ ] **home ML node** - a plan for adding a home server as occaisonal ML node for my own ML uses in order to avoid pricy hetzner nodes for ML worker while I am testing and configuring some stuff see plan home-ml-node-plan.md
+- [ ] **Improve classifications** - improvements to the classification NOGA and tf-idf/HBD-SCan see claude plan: dazzling-seeking-harp.md
 
 
 ## Org-/Usermanagement

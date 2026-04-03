@@ -13,7 +13,7 @@ import {
   readCheckoutIntent,
   saveCheckoutIntent,
 } from "@/lib/checkout-resume";
-import { PRICING_TIERS } from "@/lib/marketing-data";
+import { CREDIT_ACTIONS, PRICING_TIERS, creditsToChf } from "@/lib/marketing-data";
 
 // ── Data ──────────────────────────────────────────────────────────────────────
 
@@ -35,7 +35,21 @@ interface FeatureGroup {
   rows: FeatureRow[];
 }
 
+const CREDIT_RATE_LABEL = `CHF ${creditsToChf(1)} / credit`;
+
+const CONSUMPTION_GROUP: FeatureGroup = {
+  heading: "Consumption pricing",
+  rows: [
+    {
+      label: "Credit rate",
+      tip: "Consumption actions use the same credit rate across every plan.",
+      values: [CREDIT_RATE_LABEL, CREDIT_RATE_LABEL, CREDIT_RATE_LABEL, CREDIT_RATE_LABEL, CREDIT_RATE_LABEL],
+    },
+  ],
+};
+
 const FEATURE_GROUPS: FeatureGroup[] = [
+  CONSUMPTION_GROUP,
   {
     heading: "Usage limits",
     rows: [
@@ -123,45 +137,6 @@ const FEATURE_GROUPS: FeatureGroup[] = [
   },
 ];
 
-// Credit cost table
-const CREDIT_ACTIONS = [
-  {
-    label: "Batch LLM classify",
-    unit: "per company",
-    base: 8,
-  },
-  {
-    label: "Immediate LLM classify",
-    unit: "per company",
-    base: 12,
-  },
-  {
-    label: "Web search",
-    unit: "per company",
-    base: 20,
-  },
-  {
-    label: "Flex rescore",
-    unit: "per company",
-    base: 1,
-  },
-  {
-    label: "Full reclustering",
-    unit: "flat",
-    base: 100_000,
-  },
-  {
-    label: "Bulk export – basic (UID/Name/Canton)",
-    unit: "per 10k rows",
-    base: 6_000,
-  },
-  {
-    label: "Bulk export – detailed",
-    unit: "per 10k rows",
-    base: 13_000,
-  },
-];
-
 const TIER_BONUS_RATE: Record<TierId, number> = {
   free: 0,
   simple: 0.1,
@@ -169,10 +144,6 @@ const TIER_BONUS_RATE: Record<TierId, number> = {
   researcher: 0.2,
   strategist: 0.3,
 };
-
-function creditsToChf(credits: number) {
-  return (credits * 0.0001).toFixed(credits >= 1000 ? 2 : 4);
-}
 
 // ── Sub-components ─────────────────────────────────────────────────────────────
 
@@ -430,6 +401,36 @@ export function PricingClient() {
             {checkoutMessage.message}
           </div>
         )}
+
+        {/* ── Consumption pricing ── */}
+        <div className="space-y-3">
+          <h2 className="text-xl font-semibold text-slate-900">Consumption pricing</h2>
+          <p className="text-sm text-slate-500 max-w-3xl">
+            Consumption actions use the same credit rates across every plan. Higher tiers only change what is included and how much bonus credit you receive on top-ups.
+          </p>
+          <div className="overflow-x-auto rounded-xl border border-slate-200 shadow-sm">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-slate-200 bg-slate-100">
+                  <th className="px-4 py-3 text-left font-semibold text-slate-600">Action</th>
+                  <th className="px-4 py-3 text-center font-semibold text-slate-600">Unit</th>
+                  <th className="px-4 py-3 text-center font-semibold text-slate-600">Credits</th>
+                  <th className="px-4 py-3 text-center font-semibold text-slate-600">CHF</th>
+                </tr>
+              </thead>
+              <tbody>
+                {CREDIT_ACTIONS.map((action, i) => (
+                  <tr key={action.label} className={`border-b border-slate-100 ${i % 2 === 0 ? "bg-white" : "bg-slate-50/50"}`}>
+                    <td className="px-4 py-3 text-slate-700 font-medium">{action.label}</td>
+                    <td className="px-4 py-3 text-center text-slate-500 text-xs">{action.unit}</td>
+                    <td className="px-4 py-3 text-center text-slate-700 font-semibold">{action.base.toLocaleString()}</td>
+                    <td className="px-4 py-3 text-center text-slate-600">{creditsToChf(action.base)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
 
         {/* ── Feature comparison table ── */}
         <div className="space-y-3">

@@ -58,6 +58,54 @@ export const PRICING_TIERS: readonly PricingTier[] = [
   },
 ] as const;
 
+export type CreditAction = {
+  label: string;
+  unit: string;
+  base: number;
+};
+
+export const CREDIT_ACTIONS: readonly CreditAction[] = [
+  {
+    label: "Batch LLM classify",
+    unit: "per company",
+    base: 8,
+  },
+  {
+    label: "Immediate LLM classify",
+    unit: "per company",
+    base: 12,
+  },
+  {
+    label: "Web search",
+    unit: "per company",
+    base: 20,
+  },
+  {
+    label: "Flex rescore",
+    unit: "per company",
+    base: 1,
+  },
+  {
+    label: "Full reclustering",
+    unit: "flat",
+    base: 100_000,
+  },
+  {
+    label: "Bulk export – basic (UID/Name/Canton)",
+    unit: "per 10k rows",
+    base: 6_000,
+  },
+  {
+    label: "Bulk export – detailed",
+    unit: "per 10k rows",
+    base: 13_000,
+  },
+] as const;
+
+export function creditsToChf(credits: number): string {
+  return (credits * 0.0001).toFixed(credits >= 1000 ? 2 : 4);
+}
+
 export type LandingFeatureCard = {
   title: string;
   detail: string;

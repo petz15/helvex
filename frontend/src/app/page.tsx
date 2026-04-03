@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { HelvexMark } from "@/components/helvex-logo";
 import { CookieSettingsButton } from "../components/cookie-settings-button";
-import { LANDING_FEATURE_CARDS, PRICING_TIERS } from "@/lib/marketing-data";
+import { CREDIT_ACTIONS, LANDING_FEATURE_CARDS, PRICING_TIERS, creditsToChf } from "@/lib/marketing-data";
 
 // ─── Post CH AG mock data ─────────────────────────────────────────────────────
 
@@ -315,6 +315,40 @@ export default function LandingPage() {
                 </article>
               );
             })}
+          </div>
+
+          <div className="mt-10 space-y-3">
+            <div className="flex items-end justify-between gap-4 flex-wrap">
+              <div>
+                <h3 className="text-lg font-semibold text-slate-900">Consumption pricing</h3>
+                <p className="mt-1 text-sm text-slate-500 max-w-3xl">
+                  Usage actions share the same credit rates across every plan. The shared data source keeps this in sync with the pricing page.
+                </p>
+              </div>
+              <p className="text-xs font-medium text-slate-500">1 credit = CHF {creditsToChf(1)}</p>
+            </div>
+            <div className="overflow-x-auto rounded-2xl border border-slate-200 bg-white shadow-sm">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-slate-200 bg-slate-50">
+                    <th className="px-4 py-3 text-left font-semibold text-slate-600">Action</th>
+                    <th className="px-4 py-3 text-center font-semibold text-slate-600">Unit</th>
+                    <th className="px-4 py-3 text-center font-semibold text-slate-600">Credits</th>
+                    <th className="px-4 py-3 text-center font-semibold text-slate-600">CHF</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {CREDIT_ACTIONS.map((action, index) => (
+                    <tr key={action.label} className={`border-b border-slate-100 ${index % 2 === 0 ? "bg-white" : "bg-slate-50/50"}`}>
+                      <td className="px-4 py-3 text-slate-700 font-medium">{action.label}</td>
+                      <td className="px-4 py-3 text-center text-slate-500 text-xs">{action.unit}</td>
+                      <td className="px-4 py-3 text-center text-slate-700 font-semibold">{action.base.toLocaleString()}</td>
+                      <td className="px-4 py-3 text-center text-slate-600">{creditsToChf(action.base)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </div>
 
           <div className="mt-10 text-center">
