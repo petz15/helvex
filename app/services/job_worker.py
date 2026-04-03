@@ -72,6 +72,7 @@ _QUEUE_FOR_JOB_TYPE: dict[str, str] = {
     "reclassify_noga":           "helvex-ml",
     "claude_classify":           "helvex-api",
     "csv_export":                "helvex-api",
+    "tfidf_kmeans_cluster":      "helvex-ml",
     "hdbscan_cluster":           "helvex-ml",
     "recompute_keywords":        "helvex-ml",
     "reextract_keywords":        "helvex-ml",
@@ -93,7 +94,8 @@ def _compute_dedup_key(job_type: str, org_id: int | None, params: dict) -> str |
         "recalculate_scores", "recalculate_google_scores",
         "reextract_purpose", "reclassify_noga",
         "re_geocode",
-        "hdbscan_cluster", "recompute_keywords", "reextract_keywords",
+        "tfidf_kmeans_cluster", "hdbscan_cluster",
+        "recompute_keywords", "reextract_keywords",
         "cluster_analysis", "cluster_drift_check",
     }
     # No dedup: every trigger creates a fresh independent job.
@@ -233,7 +235,7 @@ def _resolve_credit_action_and_count(db: Session, *, job_type: str, params: dict
     if job_type == "recalculate_scores":
         return "flex_rescore", max(1, int(crud.count_companies(db)))
 
-    if job_type == "hdbscan_cluster":
+    if job_type in {"tfidf_kmeans_cluster", "hdbscan_cluster"}:
         return "recluster", 1
 
     if job_type == "csv_export":
@@ -646,7 +648,7 @@ def _run_job(app, job_id: int) -> None:  # noqa: C901
                 if resume_from:
                     done_msg += f" (resumed from {resume_from})"
 
-            elif job.job_type == "hdbscan_cluster":
+            elif job.job_type == "tfidf_kmeans_cluster":
                 from app.services.cluster_pipeline import PipelineConfig, run_pipeline
 
                 def _progress(done: int, total: int, stats: dict) -> None:
@@ -679,6 +681,12 @@ def _run_job(app, job_id: int) -> None:  # noqa: C901
                 classified = stats.get("classified", 0)
                 noise = stats.get("noise", 0)
                 done_msg = f"Done — {n_c} clusters, {classified} companies labelled, {noise} noise"
+
+            elif job.job_type == "hdbscan_cluster":
+                raise RuntimeError(
+                    "HDBSCAN pipeline is wired separately but not implemented yet. "
+                    "Use the TF-IDF + KMeans pipeline for production runs."
+                )
 
             elif job.job_type == "recompute_keywords":
                 from app.services.cluster_pipeline import PipelineConfig, recompute_keywords
@@ -723,7 +731,7 @@ def _run_job(app, job_id: int) -> None:  # noqa: C901
                     progress_cb=_progress,
                 )
                 if stats.get("skipped_no_artifacts") == -1:
-                    done_msg = "Aborted — no S3 artifacts found. Run a full hdbscan_cluster job first."
+                    done_msg = "Aborted — no S3 artifacts found. Run a full tfidf_kmeans_cluster job first."
                 else:
                     done_msg = (
                         f"Done — {stats['updated']} updated, "
@@ -778,7 +786,7 @@ def _run_job(app, job_id: int) -> None:  # noqa: C901
                         f"DRIFT DETECTED: {unclassified_recent}/{total_recent} "
                         f"({fraction:.1%}) of companies from the last {days} days "
                         f"have no cluster (threshold {threshold:.0%}). "
-                        f"Consider triggering a full hdbscan_cluster run."
+                        f"Consider triggering a full tfidf_kmeans_cluster run."
                     )
                     logger.warning(msg)
                     crud.create_event(db, job_id=job.id, level="warning", message=msg)

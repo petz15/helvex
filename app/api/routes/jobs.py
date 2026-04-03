@@ -394,6 +394,20 @@ class ClusterPipelineBody(BaseModel):
     use_keywords: bool = False
 
 
+class HdbscanClusterBody(BaseModel):
+    min_cluster_size: int = 30
+    min_samples: int | None = None
+    cluster_selection_epsilon: float = 0.0
+    n_components: int = 50
+    top_terms: int = 5
+    top_keywords_per_company: int = 10
+    canton: str | None = None
+    min_zefix_score: int | None = None
+    max_zefix_score: int | None = None
+    limit: int | None = None
+    use_keywords: bool = False
+
+
 class ReextractKeywordsBody(BaseModel):
     only_missing: bool = False
     canton: str | None = None
@@ -567,8 +581,20 @@ def trigger_claude_classify(body: ClaudeClassifyBody, request: Request, db: Sess
 def trigger_cluster_pipeline(body: ClusterPipelineBody, request: Request, db: Session = Depends(get_db), _: User = Depends(require_superadmin)):
     job = _enqueue_or_http_error(
         request,
+        job_type="tfidf_kmeans_cluster",
+        label="TF-IDF + KMeans cluster pipeline",
+        params=body.model_dump(),
+        db=db,
+    )
+    return JobOut.from_orm_obj(job)
+
+
+@router.post("/scoring/hdbscan", response_model=JobOut, status_code=status.HTTP_202_ACCEPTED)
+def trigger_hdbscan_cluster(body: HdbscanClusterBody, request: Request, db: Session = Depends(get_db), _: User = Depends(require_superadmin)):
+    job = _enqueue_or_http_error(
+        request,
         job_type="hdbscan_cluster",
-        label="Cluster pipeline",
+        label="HDBSCAN cluster pipeline",
         params=body.model_dump(),
         db=db,
     )

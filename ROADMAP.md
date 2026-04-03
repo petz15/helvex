@@ -26,6 +26,13 @@
 - 
 - Continue on Explore page
 
+### Blockers before real PROD
+- Save cards happens automatically
+- Billing QOL
+- Tiers are enforced
+- Daily SHAB
+- Multilang (?)
+- Mobile optimized (enough for quick uses not full set of features)
 
 ## PROD CHANGES
 - wordline notification url

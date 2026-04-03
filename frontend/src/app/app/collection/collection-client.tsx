@@ -135,8 +135,8 @@ export function CollectionClient() {
             });
           }} className="space-y-4">
             <div>
-              <h2 className="text-sm font-semibold text-slate-800">Cluster pipeline</h2>
-              <p className="mt-1 text-xs text-slate-500">Run TF-IDF clustering and write both cluster labels and per-company keywords.</p>
+              <h2 className="text-sm font-semibold text-slate-800">TF-IDF + KMeans pipeline</h2>
+              <p className="mt-1 text-xs text-slate-500">Production clustering job: TF-IDF, SVD, MiniBatchKMeans, then keyword/label writes.</p>
             </div>
             <div className="grid grid-cols-2 gap-4">
               <Field label="Clusters">
@@ -183,6 +183,76 @@ export function CollectionClient() {
               Use existing purpose keywords during clustering
             </label>
             <SubmitBtn loading={loading === "scoring/cluster"} />
+          </form>
+
+          <div className="border-t border-slate-100" />
+
+          <form onSubmit={async e => {
+            e.preventDefault();
+            const fd = new FormData(e.currentTarget);
+            await submit("scoring/hdbscan", {
+              min_cluster_size: parseInt(fd.get("hdbscan_min_cluster_size") as string) || 30,
+              min_samples: parseInt(fd.get("hdbscan_min_samples") as string) || null,
+              cluster_selection_epsilon: parseFloat(fd.get("hdbscan_epsilon") as string) || 0,
+              n_components: parseInt(fd.get("hdbscan_n_components") as string) || 50,
+              top_terms: parseInt(fd.get("hdbscan_top_terms") as string) || 5,
+              top_keywords_per_company: parseInt(fd.get("hdbscan_top_keywords") as string) || 10,
+              canton: (fd.get("hdbscan_canton") as string)?.trim().toUpperCase() || null,
+              min_zefix_score: parseInt(fd.get("hdbscan_min_zefix_score") as string) || null,
+              max_zefix_score: parseInt(fd.get("hdbscan_max_zefix_score") as string) || null,
+              limit: parseInt(fd.get("hdbscan_limit") as string) || null,
+              use_keywords: fd.get("hdbscan_use_keywords") === "on",
+            });
+          }} className="space-y-4">
+            <div>
+              <h2 className="text-sm font-semibold text-slate-800">HDBSCAN pipeline (separate wire)</h2>
+              <p className="mt-1 text-xs text-slate-500">Separate endpoint and job type for density-based clustering experimentation.</p>
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <Field label="Min cluster size">
+                <input name="hdbscan_min_cluster_size" type="number" min="2" defaultValue="30" className={inputCls} />
+              </Field>
+              <Field label="Min samples">
+                <input name="hdbscan_min_samples" type="number" min="1" className={inputCls} placeholder="Auto" />
+              </Field>
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <Field label="Selection epsilon">
+                <input name="hdbscan_epsilon" type="number" min="0" step="0.01" defaultValue="0" className={inputCls} />
+              </Field>
+              <Field label="Components">
+                <input name="hdbscan_n_components" type="number" min="2" defaultValue="50" className={inputCls} />
+              </Field>
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <Field label="Top cluster terms">
+                <input name="hdbscan_top_terms" type="number" min="1" defaultValue="5" className={inputCls} />
+              </Field>
+              <Field label="Top keywords/company">
+                <input name="hdbscan_top_keywords" type="number" min="1" defaultValue="10" className={inputCls} />
+              </Field>
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <Field label="Canton">
+                <input name="hdbscan_canton" className={inputCls} placeholder="Any" />
+              </Field>
+              <Field label="Limit">
+                <input name="hdbscan_limit" type="number" min="1" className={inputCls} placeholder="All" />
+              </Field>
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <Field label="Min Zefix score">
+                <input name="hdbscan_min_zefix_score" type="number" min="0" max="100" className={inputCls} placeholder="—" />
+              </Field>
+              <Field label="Max Zefix score">
+                <input name="hdbscan_max_zefix_score" type="number" min="0" max="100" className={inputCls} placeholder="—" />
+              </Field>
+            </div>
+            <label className="flex items-center gap-2 text-sm text-slate-700">
+              <input type="checkbox" name="hdbscan_use_keywords" className={checkCls} />
+              Use existing purpose keywords
+            </label>
+            <SubmitBtn loading={loading === "scoring/hdbscan"} />
           </form>
 
           <div className="border-t border-slate-100" />
