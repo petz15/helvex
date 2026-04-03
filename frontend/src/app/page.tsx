@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { HelvexMark } from "@/components/helvex-logo";
 import { CookieSettingsButton } from "../components/cookie-settings-button";
+import { LANDING_FEATURE_CARDS, PRICING_TIERS } from "@/lib/marketing-data";
 
 // ─── Post CH AG mock data ─────────────────────────────────────────────────────
 
@@ -74,7 +75,7 @@ function CompanyMock() {
           <div className="relative shrink-0">
             <ScoreRing value={POST_CH.fitScore} />
             <span className="absolute inset-0 flex items-center justify-center text-[11px] font-bold text-blue-600 rotate-90">
-              {POST_CH.fitScore}
+              <p className="text-[11px] font-bold text-blue-600 transform -rotate-90">{POST_CH.fitScore}</p>
             </span>
           </div>
         </div>
@@ -130,23 +131,11 @@ function CompanyMock() {
 
 // ─── Features ─────────────────────────────────────────────────────────────────
 
-const FEATURES = [
-  {
-    icon: "◆",
-    title: "Live register data",
-    body: "Every Swiss company from the commercial register, with automated SHAB updates keeping records current.",
-  },
-  {
-    icon: "◇",
-    title: "AI classification",
-    body: "Claude-powered categorisation and fit scoring to filter thousands of companies down to your short list.",
-  },
-  {
-    icon: "◆",
-    title: "Full company history",
-    body: "Name changes, ownership shifts, signer changes — replayed from SHAB publications into a structured timeline.",
-  },
-];
+function isWhiteCrossCell(index: number): boolean {
+  const row = Math.floor(index / 5);
+  const col = index % 5;
+  return row === 2 || col === 2;
+}
 
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
@@ -181,7 +170,7 @@ export default function LandingPage() {
               Sign up free →
             </Link>
             <Link
-              href="/demo"
+              href="/demo/company"
               className="px-5 py-2.5 rounded-lg border border-slate-200 text-slate-700 font-medium text-sm hover:bg-slate-50 transition-colors"
             >
               View live demo
@@ -207,34 +196,96 @@ export default function LandingPage() {
           <h2 className="text-2xl font-bold text-slate-900 text-center mb-12">
             Everything you need to work the Swiss register
           </h2>
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
-            {FEATURES.map((f) => (
-              <div key={f.title} className="bg-white rounded-xl border border-slate-200 p-6 shadow-sm">
-                <span className="text-2xl text-blue-500 mb-3 block">{f.icon}</span>
-                <h3 className="font-semibold text-slate-800 mb-2 text-sm">{f.title}</h3>
-                <p className="text-sm text-slate-500 leading-relaxed">{f.body}</p>
-              </div>
-            ))}
+          <div className="overflow-x-auto pb-2">
+            <div className="grid min-w-[960px] grid-cols-5 gap-3">
+              {LANDING_FEATURE_CARDS.map((feature, index) => {
+                const isWhite = isWhiteCrossCell(index);
+                return (
+                  <article
+                    key={feature.title}
+                    tabIndex={0}
+                    className={`group relative h-36 rounded-xl border p-4 shadow-sm outline-none transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md focus-visible:ring-2 focus-visible:ring-blue-500 ${
+                      isWhite
+                        ? "border-blue-200 bg-white"
+                        : "border-blue-500/40 bg-blue-600"
+                    }`}
+                  >
+                    <p
+                      className={`text-sm font-semibold leading-snug transition-opacity duration-200 group-hover:opacity-0 group-focus-visible:opacity-0 ${
+                        isWhite ? "text-blue-700" : "text-white"
+                      }`}
+                    >
+                      {feature.title}
+                    </p>
+                    <p
+                      className={`absolute inset-0 flex items-center px-4 text-sm leading-relaxed transition-opacity duration-200 opacity-0 group-hover:opacity-100 group-focus-visible:opacity-100 ${
+                        isWhite ? "text-blue-700" : "text-white"
+                      }`}
+                    >
+                      {feature.detail}
+                    </p>
+                  </article>
+                );
+              })}
+            </div>
           </div>
+          <p className="mt-4 text-center text-xs text-slate-500">
+            Hover or focus a card to reveal details.
+          </p>
         </div>
       </section>
 
       {/* ── Bottom CTA ── */}
-      <section id="pricing" className="py-20 text-center px-6">
-        <div className="max-w-lg mx-auto">
+      <section id="pricing" className="py-20 px-6">
+        <div className="max-w-6xl mx-auto">
           <div className="flex justify-center mb-4 text-blue-600">
             <HelvexMark size={30} />
           </div>
-          <h2 className="text-2xl font-bold text-slate-900 mb-3">Start for free</h2>
-          <p className="text-slate-500 mb-6 text-sm">
-            Access the full Swiss company register. Upgrade when you need more.
+          <h2 className="text-2xl font-bold text-slate-900 mb-3 text-center">Current plans and pricing</h2>
+          <p className="text-slate-500 mb-8 text-sm text-center max-w-2xl mx-auto">
+            Pricing below is shared with the app pricing page, so updates stay consistent everywhere.
           </p>
-          <Link
-            href="/register"
-            className="inline-block px-6 py-3 rounded-lg bg-blue-600 text-white font-semibold text-sm hover:bg-blue-700 transition-colors shadow-sm"
-          >
-            Create your free account →
-          </Link>
+
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-5">
+            {PRICING_TIERS.map((tier) => {
+              const isDark = Boolean(tier.dark);
+              return (
+                <article
+                  key={tier.id}
+                  className={`rounded-2xl border p-5 shadow-sm ${
+                    isDark
+                      ? "border-slate-800 bg-slate-900 text-white"
+                      : tier.popular
+                      ? "border-blue-400 bg-blue-50 ring-2 ring-blue-300"
+                      : "border-slate-200 bg-white"
+                  }`}
+                >
+                  <p className={`text-xs font-semibold uppercase tracking-widest ${isDark ? "text-slate-300" : "text-slate-500"}`}>
+                    {tier.name}
+                  </p>
+                  <div className="mt-2">
+                    <p className={`text-2xl font-bold ${isDark ? "text-white" : "text-slate-900"}`}>
+                      {tier.monthly === 0 ? "Free" : `CHF ${tier.monthly}/mo`}
+                    </p>
+                    {tier.monthly > 0 && (
+                      <p className={`text-xs mt-1 ${isDark ? "text-slate-300" : "text-slate-500"}`}>
+                        CHF {tier.yearly}/yr billed yearly
+                      </p>
+                    )}
+                  </div>
+                </article>
+              );
+            })}
+          </div>
+
+          <div className="mt-10 text-center">
+            <Link
+              href="/register"
+              className="inline-block px-6 py-3 rounded-lg bg-blue-600 text-white font-semibold text-sm hover:bg-blue-700 transition-colors shadow-sm"
+            >
+              Create your free account →
+            </Link>
+          </div>
         </div>
       </section>
 

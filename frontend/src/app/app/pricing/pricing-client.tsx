@@ -13,57 +13,11 @@ import {
   readCheckoutIntent,
   saveCheckoutIntent,
 } from "@/lib/checkout-resume";
+import { PRICING_TIERS } from "@/lib/marketing-data";
 
 // ── Data ──────────────────────────────────────────────────────────────────────
 
-const TIERS = [
-  {
-    id: "free",
-    name: "Free",
-    monthly: 0,
-    yearly: 0,
-    description: "Try the core search and export features at no cost.",
-    color: "slate",
-    popular: false,
-  },
-  {
-    id: "simple",
-    name: "Simple",
-    monthly: 6,
-    yearly: 60,
-    description: "For individuals who need a clean workspace without ads.",
-    color: "slate",
-    popular: false,
-  },
-  {
-    id: "explorer",
-    name: "Explorer",
-    monthly: 12,
-    yearly: 120,
-    description: "Immediate LLM scoring and automated flex rescoring.",
-    color: "blue",
-    popular: true,
-  },
-  {
-    id: "researcher",
-    name: "Researcher",
-    monthly: 17,
-    yearly: 170,
-    description: "Full LLM auto-scoring and custom ML stopwords.",
-    color: "violet",
-    popular: false,
-  },
-  {
-    id: "strategist",
-    name: "Strategist",
-    monthly: 37,
-    yearly: 370,
-    description: "Highest priority, BYO keys, and future API access.",
-    color: "slate",
-    popular: false,
-    dark: true,
-  },
-] as const;
+const TIERS = PRICING_TIERS;
 
 type TierId = typeof TIERS[number]["id"];
 

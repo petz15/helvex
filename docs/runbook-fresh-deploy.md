@@ -29,6 +29,10 @@ Go to **github.com/petz15/helvex → Settings → Secrets and variables → Acti
 | `SMTP_FROM` | Sender address, e.g. `Helvex <noreply@helvex.dicy.ch>` |
 | NEXT_PUBLIC_GTM_ID | Google Tag Manager container ID for frontend build, e.g. `GTM-XXXXXXX` |
 | NEXT_PUBLIC_ADSENSE_CLIENT_ID | Google AdSense publisher client ID for frontend build, e.g. `ca-pub-XXXXXXXXXXXXXXXX` |
+| NEXT_PUBLIC_POSTHOG_KEY | PostHog project API key for frontend build, e.g. `phc_xxx...` |
+| NEXT_PUBLIC_POSTHOG_HOST | PostHog ingest host for frontend build, e.g. `https://eu.i.posthog.com` |
+| NEXT_PUBLIC_UMAMI_WEBSITE_ID | Umami website ID for frontend build |
+| NEXT_PUBLIC_UMAMI_SCRIPT_URL | Umami script URL for frontend build, e.g. `https://cloud.umami.is/script.js` |
 | `ARC_APP_ID` | GitHub App ID (from App settings page) |
 | `ARC_APP_INSTALLATION_ID` | Installation ID (from App → Install → URL contains the ID) |
 | `ARC_APP_PRIVATE_KEY` | Contents of the `.pem` file (paste the full multiline value) |

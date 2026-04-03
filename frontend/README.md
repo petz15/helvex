@@ -27,13 +27,17 @@ Set the following public environment variables for the Next.js frontend:
 ```bash
 NEXT_PUBLIC_GTM_ID=GTM-XXXXXXX
 NEXT_PUBLIC_ADSENSE_CLIENT_ID=ca-pub-XXXXXXXXXXXXXXXX
+NEXT_PUBLIC_POSTHOG_KEY=phc_XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+NEXT_PUBLIC_POSTHOG_HOST=https://eu.i.posthog.com
+NEXT_PUBLIC_UMAMI_WEBSITE_ID=xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
+NEXT_PUBLIC_UMAMI_SCRIPT_URL=https://cloud.umami.is/script.js
 NEXT_PUBLIC_GOOGLE_SITE_VERIFICATION=google-site-verification-token
 ```
 
 Where to add them:
 
 - Local development: create `frontend/.env.local`
-- GitHub Actions deployments: store them as repository secrets (`NEXT_PUBLIC_GTM_ID`, `NEXT_PUBLIC_ADSENSE_CLIENT_ID`); deploy workflows pass them as frontend Docker build args
+- GitHub Actions deployments: store them as repository secrets (`NEXT_PUBLIC_GTM_ID`, `NEXT_PUBLIC_ADSENSE_CLIENT_ID`, `NEXT_PUBLIC_POSTHOG_KEY`, `NEXT_PUBLIC_POSTHOG_HOST`, `NEXT_PUBLIC_UMAMI_WEBSITE_ID`, `NEXT_PUBLIC_UMAMI_SCRIPT_URL`); deploy workflows pass them as frontend Docker build args
 - Platform hosting (e.g. Vercel): add them in project environment settings
 
 Notes:
