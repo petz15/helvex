@@ -15,7 +15,9 @@
 5. [Authentication & Security](#5-authentication--security)
 6. [Background Job System](#6-background-job-system)
 7. [External Integrations](#7-external-integrations)
-8. [Scoring Logic](#8-scoring-logic)
+8. [Scoring & Classification Logic](#8-scoring-logic)
+   - [Scoring Logic](#scoring-logic)
+   - [Classification Pipelines](#classification-pipelines-clustering-keywords-noga)
 9. [Frontend](#9-frontend)
 10. [Configuration & Secrets](#10-configuration--secrets)
 11. [Docker Build](#11-docker-build)
@@ -547,6 +549,95 @@ Returned directly by Claude API. User provides the scoring rubric via system pro
 
 ### Configuring scoring
 All weights and the keyword taxonomy are stored in `app_settings` and editable live via `PATCH /api/v1/settings` or the Settings UI panel.
+
+### Classification Pipelines (Clustering, Keywords, NOGA)
+
+**Files:** `app/services/cluster_pipeline.py`, `app/services/noga.py`, `app/services/collection.py`
+
+Three complementary ML pipelines enrich company classification:
+
+#### TF-IDF Clustering + Keyword Extraction (`hdbscan_cluster` job)
+
+**Purpose:** Find hidden business domain clusters and extract high-value keywords for each company.
+
+**Pipeline:**
+1. **Boilerplate stripping** — removes generic legal sentences (e.g. "Die Gesellschaft bezweckt...") using DB patterns
+2. **Lemmatization** — spaCy de_core_news_md reduces words to roots; stopwords filtered
+3. **TF-IDF vectorization** — corpus-wide term frequencies, max 15,000 features
+4. **Dimensionality reduction** — TruncatedSVD 50 components (for numerical stability and speed)
+5. **K-Means clustering** — fit ~150 clusters via MiniBatchKMeans
+6. **Cluster labeling** — c-TF-IDF extracts top-5 terms per cluster with bigram deduplication
+7. **Quality filtering** — clusters with low specificity (generic terms) are suppressed (`min_cluster_specificity` threshold)
+8. **Cluster registry** — canonical names stored in DB to prevent label churn across runs; registry matching via Jaccard similarity on top terms
+9. **Multi-label assignment** — each company assigned to 1–3 clusters via soft cosine similarity
+10. **Keyword extraction** — per-company top-10 TF-IDF terms (same bigram-dedup logic as cluster labels)
+
+**Outputs to DB:**
+- `tfidf_cluster` — pipe-separated canonical cluster names (stable across pipeline re-runs)
+- `purpose_keywords` — comma-separated keywords per company
+
+**Outputs to S3 (`models/` prefix):**
+- `tfidf_vectorizer.pkl` — fitted sklearn TfidfVectorizer
+- `svd_transformer.pkl` — fitted TruncatedSVD reducer
+- `kmeans_centroids.npy` — K-Means centroid matrix (normalised, float32)
+- `centroid_registry_map.json` — centroid index → canonical cluster name mapping + shape metadata
+
+**Incremental keyword extraction** (`reextract_keywords` job, or automatic during detail import):
+- Uses S3-cached TF-IDF vectorizer (no refit needed)
+- Single-document keyword extraction without re-running full pipeline
+- Automatically triggered when new companies receive purpose text during detail enrichment
+- Non-fatal if S3 artifacts unavailable (gracefully skipped)
+
+**Incremental cluster assignment** (automatic during detail import if S3 available):
+- Single-document projection: TF-IDF → SVD → L2-normalise → cosine to centroids
+- Nearest centroid above `min_similarity` threshold assigns the company to one canonical cluster
+- Works in parallel with detail enrichment, no full re-clustering needed
+
+#### NOGA Taxonomy Classification (`reclassify_noga` job)
+
+**Purpose:** Map each company to the official Swiss NOGA industry classification + full hierarchy breadcrumb.
+
+**Data files (repo-resident):**
+- `noga_lookup.json` — flat dict: NOGA code → node (name, annotations, parent link)
+- `noga_tree.json` — full hierarchy tree: root sections → divisions → groups → classes → types
+- NOGA embeddings — uploaded to S3 by `scripts/build_noga_embeddings.py` (one-time setup)
+
+**Classification method:**
+1. **Token matching** — company name + purpose + keywords + cluster are split into terms, matched against all NOGA node descriptions
+2. **Hybrid re-rank** (if S3 embeddings available):
+   - Embed company `purpose_keywords` with `paraphrase-multilingual-MiniLM-L12-v2`
+   - Top-50 NOGA candidates from token matching are re-ranked by embedding similarity
+   - Final score = 60% embedding cosine + 40% token score
+3. **Preference for specificity** — 6-digit codes (types) preferred over shorter codes when scores are close
+4. **Hierarchy path** — walk `noga_lookup.json` via `parentCode` links to build full ancestry (section → division → group → class → type)
+
+**Outputs to DB per company:**
+- `noga_code` — best-matching code (e.g. "263001")
+- `noga_label` — German description
+- `noga_level` — level name ("Art", "Klasse", etc.)
+- `noga_confidence` — embedding similarity of top result (0–1, interpretable)
+- `noga_path` — pipe-separated codes root→leaf (e.g. "C|26|263|2630|263001")
+- `noga_path_labels` — corresponding German labels, pipe-separated
+
+**S3 artifacts** (produced once by `scripts/build_noga_embeddings.py`):
+- `models/noga_embeddings.npy` — float32 array, shape (N_codes, 384)
+- `models/noga_embedding_ids.json` — list of NOGA codes in embedding row order + shape metadata
+
+**Graceful degradation:**
+- If S3 embeddings unavailable → falls back to token-only matching
+- If `purpose_keywords` empty → uses raw tokens from name + purpose
+- If purpose text missing → returns no classification
+
+#### Keyword Quality
+
+Keywords influence both clustering assignment and NOGA embedding similarity. Quality depends on:
+
+1. **Boilerplate stripping** — removes generic legal language before TF-IDF
+2. **Stopword filtering** — ~30 hardcoded German legal stopwords + DB `tfidf_stopwords` table
+3. **IDF reweighting** — bigram terms penalised 15% to prevent inflated scores from rare compound words
+4. **Corpus dependency** — keywords are relative to the company population; retraining shifts keyword rankings
+
+**Monitoring:** `cluster_analysis` job identifies cross-cluster terms (appearing in 20%+ of top clusters) as candidates for stopword addition. Review and activate in DB to filter future pipeline runs.
 
 ---
 

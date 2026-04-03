@@ -67,6 +67,207 @@ export function CollectionClient() {
   return (
     <div className="p-6 max-w-3xl mx-auto space-y-4">
       <div>
+
+      <Section title="Purpose, NOGA, and clustering">
+        <div className="space-y-5">
+          <form onSubmit={async e => {
+            e.preventDefault();
+            const fd = new FormData(e.currentTarget);
+            await submit("scoring/reextract-purpose", {
+              only_missing_purpose: fd.get("only_missing_purpose") === "on",
+            });
+          }} className="space-y-4">
+            <div>
+              <h2 className="text-sm font-semibold text-slate-800">Re-extract purpose</h2>
+              <p className="mt-1 text-xs text-slate-500">Refresh company purpose text from detailed Zefix raw data.</p>
+            </div>
+            <label className="flex items-center gap-2 text-sm text-slate-700">
+              <input type="checkbox" name="only_missing_purpose" defaultChecked className={checkCls} />
+              Only companies missing purpose text
+            </label>
+            <SubmitBtn loading={loading === "scoring/reextract-purpose"} />
+          </form>
+
+          <div className="border-t border-slate-100" />
+
+          <form onSubmit={async e => {
+            e.preventDefault();
+            const fd = new FormData(e.currentTarget);
+            await submit("scoring/reclassify-noga", {
+              only_missing_noga: fd.get("only_missing_noga") === "on",
+              only_detailed_raw: fd.get("only_detailed_raw") === "on",
+            });
+          }} className="space-y-4">
+            <div>
+              <h2 className="text-sm font-semibold text-slate-800">Reclassify NOGA</h2>
+              <p className="mt-1 text-xs text-slate-500">Recompute NOGA labels and hierarchy paths from the local taxonomy.</p>
+            </div>
+            <div className="flex gap-6 flex-wrap">
+              <label className="flex items-center gap-2 text-sm text-slate-700">
+                <input type="checkbox" name="only_missing_noga" className={checkCls} />
+                Only companies missing NOGA data
+              </label>
+              <label className="flex items-center gap-2 text-sm text-slate-700">
+                <input type="checkbox" name="only_detailed_raw" defaultChecked className={checkCls} />
+                Only companies with detailed raw Zefix data
+              </label>
+            </div>
+            <SubmitBtn loading={loading === "scoring/reclassify-noga"} />
+          </form>
+
+          <div className="border-t border-slate-100" />
+
+          <form onSubmit={async e => {
+            e.preventDefault();
+            const fd = new FormData(e.currentTarget);
+            await submit("scoring/cluster", {
+              n_clusters: parseInt(fd.get("n_clusters") as string) || 150,
+              max_clusters_per_company: parseInt(fd.get("max_clusters_per_company") as string) || 7,
+              min_similarity: parseFloat(fd.get("min_similarity") as string) || 0.1,
+              n_components: parseInt(fd.get("n_components") as string) || 50,
+              top_terms: parseInt(fd.get("top_terms") as string) || 5,
+              top_keywords_per_company: parseInt(fd.get("top_keywords_per_company") as string) || 10,
+              canton: (fd.get("canton") as string)?.trim().toUpperCase() || null,
+              min_zefix_score: parseInt(fd.get("min_zefix_score") as string) || null,
+              max_zefix_score: parseInt(fd.get("max_zefix_score") as string) || null,
+              limit: parseInt(fd.get("limit") as string) || null,
+              use_keywords: fd.get("use_keywords") === "on",
+            });
+          }} className="space-y-4">
+            <div>
+              <h2 className="text-sm font-semibold text-slate-800">Cluster pipeline</h2>
+              <p className="mt-1 text-xs text-slate-500">Run TF-IDF clustering and write both cluster labels and per-company keywords.</p>
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <Field label="Clusters">
+                <input name="n_clusters" type="number" min="1" defaultValue="150" className={inputCls} />
+              </Field>
+              <Field label="Max clusters/company">
+                <input name="max_clusters_per_company" type="number" min="1" defaultValue="7" className={inputCls} />
+              </Field>
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <Field label="Min similarity">
+                <input name="min_similarity" type="number" min="0" max="1" step="0.01" defaultValue="0.1" className={inputCls} />
+              </Field>
+              <Field label="Components">
+                <input name="n_components" type="number" min="2" defaultValue="50" className={inputCls} />
+              </Field>
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <Field label="Top cluster terms">
+                <input name="top_terms" type="number" min="1" defaultValue="5" className={inputCls} />
+              </Field>
+              <Field label="Top keywords/company">
+                <input name="top_keywords_per_company" type="number" min="1" defaultValue="10" className={inputCls} />
+              </Field>
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <Field label="Canton">
+                <input name="canton" className={inputCls} placeholder="Any" />
+              </Field>
+              <Field label="Limit">
+                <input name="limit" type="number" min="1" className={inputCls} placeholder="All" />
+              </Field>
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <Field label="Min Zefix score">
+                <input name="min_zefix_score" type="number" min="0" max="100" className={inputCls} placeholder="—" />
+              </Field>
+              <Field label="Max Zefix score">
+                <input name="max_zefix_score" type="number" min="0" max="100" className={inputCls} placeholder="—" />
+              </Field>
+            </div>
+            <label className="flex items-center gap-2 text-sm text-slate-700">
+              <input type="checkbox" name="use_keywords" className={checkCls} />
+              Use existing purpose keywords during clustering
+            </label>
+            <SubmitBtn loading={loading === "scoring/cluster"} />
+          </form>
+
+          <div className="border-t border-slate-100" />
+
+          <form onSubmit={async e => {
+            e.preventDefault();
+            const fd = new FormData(e.currentTarget);
+            await submit("scoring/reextract-keywords", {
+              only_missing: fd.get("only_missing_keywords") === "on",
+              canton: (fd.get("keywords_canton") as string)?.trim().toUpperCase() || null,
+              limit: parseInt(fd.get("keywords_limit") as string) || null,
+            });
+          }} className="space-y-4">
+            <div>
+              <h2 className="text-sm font-semibold text-slate-800">Re-extract keywords</h2>
+              <p className="mt-1 text-xs text-slate-500">Refresh purpose keywords from the cached TF-IDF vectorizer and cluster artifacts.</p>
+            </div>
+            <div className="flex gap-6 flex-wrap">
+              <label className="flex items-center gap-2 text-sm text-slate-700">
+                <input type="checkbox" name="only_missing_keywords" className={checkCls} />
+                Only companies missing keywords
+              </label>
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <Field label="Canton">
+                <input name="keywords_canton" className={inputCls} placeholder="Any" />
+              </Field>
+              <Field label="Limit">
+                <input name="keywords_limit" type="number" min="1" className={inputCls} placeholder="All" />
+              </Field>
+            </div>
+            <SubmitBtn loading={loading === "scoring/reextract-keywords"} />
+          </form>
+
+          <div className="border-t border-slate-100" />
+
+          <form onSubmit={async e => {
+            e.preventDefault();
+            const fd = new FormData(e.currentTarget);
+            await submit("scoring/cluster-analysis", {
+              top_n_clusters: parseInt(fd.get("analysis_top_n_clusters") as string) || 20,
+              top_n_terms: parseInt(fd.get("analysis_top_n_terms") as string) || 10,
+            });
+          }} className="space-y-4">
+            <div>
+              <h2 className="text-sm font-semibold text-slate-800">Cross-cluster analysis</h2>
+              <p className="mt-1 text-xs text-slate-500">Generate a summary of terms shared across cluster labels.</p>
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <Field label="Top clusters">
+                <input name="analysis_top_n_clusters" type="number" min="1" defaultValue="20" className={inputCls} />
+              </Field>
+              <Field label="Top terms">
+                <input name="analysis_top_n_terms" type="number" min="1" defaultValue="10" className={inputCls} />
+              </Field>
+            </div>
+            <SubmitBtn loading={loading === "scoring/cluster-analysis"} />
+          </form>
+
+          <div className="border-t border-slate-100" />
+
+          <form onSubmit={async e => {
+            e.preventDefault();
+            const fd = new FormData(e.currentTarget);
+            await submit("scoring/cluster-drift-check", {
+              days: parseInt(fd.get("drift_days") as string) || 7,
+              warn_threshold: parseFloat(fd.get("drift_threshold") as string) || 0.3,
+            });
+          }} className="space-y-4">
+            <div>
+              <h2 className="text-sm font-semibold text-slate-800">Cluster drift check</h2>
+              <p className="mt-1 text-xs text-slate-500">Check whether recent companies are falling through without cluster labels.</p>
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <Field label="Days">
+                <input name="drift_days" type="number" min="1" defaultValue="7" className={inputCls} />
+              </Field>
+              <Field label="Warn threshold">
+                <input name="drift_threshold" type="number" min="0" max="1" step="0.01" defaultValue="0.3" className={inputCls} />
+              </Field>
+            </div>
+            <SubmitBtn loading={loading === "scoring/cluster-drift-check"} />
+          </form>
+        </div>
+      </Section>
         <h1 className="text-xl font-semibold text-slate-900">Collection</h1>
         <p className="text-sm text-slate-500 mt-0.5">Trigger data collection and enrichment jobs</p>
       </div>

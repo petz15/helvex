@@ -394,6 +394,22 @@ class ClusterPipelineBody(BaseModel):
     use_keywords: bool = False
 
 
+class ReextractKeywordsBody(BaseModel):
+    only_missing: bool = False
+    canton: str | None = None
+    limit: int | None = None
+
+
+class ClusterAnalysisBody(BaseModel):
+    top_n_clusters: int = 20
+    top_n_terms: int = 10
+
+
+class ClusterDriftCheckBody(BaseModel):
+    days: int = 7
+    warn_threshold: float = 0.30
+
+
 @router.post("/collection/bulk", response_model=JobOut, status_code=status.HTTP_202_ACCEPTED)
 def trigger_bulk(body: BulkImportBody, request: Request, db: Session = Depends(get_db), _: User = Depends(require_superadmin)):
     canton_list = [c.upper() for c in body.cantons] if body.cantons else None
@@ -553,6 +569,49 @@ def trigger_cluster_pipeline(body: ClusterPipelineBody, request: Request, db: Se
         request,
         job_type="hdbscan_cluster",
         label="Cluster pipeline",
+        params=body.model_dump(),
+        db=db,
+    )
+    return JobOut.from_orm_obj(job)
+
+
+@router.post("/scoring/reextract-keywords", response_model=JobOut, status_code=status.HTTP_202_ACCEPTED)
+def trigger_reextract_keywords(body: ReextractKeywordsBody, request: Request, db: Session = Depends(get_db), _: User = Depends(require_superadmin)):
+    label = "Re-extract keywords from cached cluster artifacts"
+    if body.only_missing:
+        label += " (missing only)"
+    if body.canton:
+        label += f" — canton {body.canton.upper()}"
+    if body.limit:
+        label += f" — limit {body.limit}"
+    job = _enqueue_or_http_error(
+        request,
+        job_type="reextract_keywords",
+        label=label,
+        params=body.model_dump(),
+        db=db,
+    )
+    return JobOut.from_orm_obj(job)
+
+
+@router.post("/scoring/cluster-analysis", response_model=JobOut, status_code=status.HTTP_202_ACCEPTED)
+def trigger_cluster_analysis(body: ClusterAnalysisBody, request: Request, db: Session = Depends(get_db), _: User = Depends(require_superadmin)):
+    job = _enqueue_or_http_error(
+        request,
+        job_type="cluster_analysis",
+        label=f"Cross-cluster analysis — top {body.top_n_clusters} clusters",
+        params=body.model_dump(),
+        db=db,
+    )
+    return JobOut.from_orm_obj(job)
+
+
+@router.post("/scoring/cluster-drift-check", response_model=JobOut, status_code=status.HTTP_202_ACCEPTED)
+def trigger_cluster_drift_check(body: ClusterDriftCheckBody, request: Request, db: Session = Depends(get_db), _: User = Depends(require_superadmin)):
+    job = _enqueue_or_http_error(
+        request,
+        job_type="cluster_drift_check",
+        label=f"Cluster drift check — last {body.days} day(s)",
         params=body.model_dump(),
         db=db,
     )

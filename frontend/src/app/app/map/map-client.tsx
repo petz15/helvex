@@ -1,13 +1,18 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
 import type { Map, LayerGroup } from "leaflet";
-import { fetchMapData, fetchMapClusters } from "@/lib/api";
-import type { MapFeature, MapCluster } from "@/lib/types";
+import useSWR from "swr";
+import { fetchCantons, fetchMapData, fetchMapClusters, fetchTaxonomy, geocodeMapAddress } from "@/lib/api";
+import type { CompanyFilters, MapFeature, MapCluster } from "@/lib/types";
+import { FilterBar } from "@/components/dashboard/filter-bar";
 import { MapTurnstileGate } from "@/components/map-turnstile-gate";
+import { Loader2, MapPin, Search } from "lucide-react";
 import "leaflet/dist/leaflet.css";
 
 // Below this zoom level show grid-aggregated cluster circles; at/above show individual points.
 const DETAIL_ZOOM = 15;
+
+const DEFAULT_FILTERS: CompanyFilters = { sort: "-combined_score", page: 1, page_size: 50, status: "ACTIVE" };
 
 type WindowWithLeaflet = typeof window & { _L?: typeof import("leaflet") };
 
@@ -40,29 +45,27 @@ function buildPopup(f: MapFeature): string {
   return parts.join("<br>");
 }
 
-interface Filters {
-  canton: string;
-  review_status: string;
-  min_combined_score: string;
-  hide_cancelled: boolean;
-}
-
-const DEFAULT_FILTERS: Filters = { canton: "", review_status: "", min_combined_score: "", hide_cancelled: false };
-
 export function MapClient() {
   const mapRef = useRef<HTMLDivElement>(null);
   const mapInstanceRef = useRef<Map | null>(null);
   const layerRef = useRef<LayerGroup | null>(null);
   // Ref mirrors state so Leaflet event handlers always read the latest filters
-  const filtersRef = useRef<Filters>(DEFAULT_FILTERS);
+  const filtersRef = useRef<CompanyFilters>(DEFAULT_FILTERS);
   // Ref to the latest loadViewport so Leaflet event handlers call the current closure
-  const loadViewportRef = useRef<((f: Filters) => Promise<void>) | null>(null);
+  const loadViewportRef = useRef<((f: CompanyFilters) => Promise<void>) | null>(null);
 
   const [loading, setLoading] = useState(false);
   const [count, setCount] = useState(0);
   const [truncated, setTruncated] = useState(false);
   const [clustered, setClustered] = useState(true);
-  const [filters, setFilters] = useState<Filters>(DEFAULT_FILTERS);
+  const [filters, setFilters] = useState<CompanyFilters>(DEFAULT_FILTERS);
+  const [addressQuery, setAddressQuery] = useState("");
+  const [addressLabel, setAddressLabel] = useState<string | null>(null);
+  const [addressError, setAddressError] = useState<string | null>(null);
+  const [addressLoading, setAddressLoading] = useState(false);
+  const pendingJumpRef = useRef<{ lat: number; lon: number } | null>(null);
+  const { data: cantons = [] } = useSWR("map-cantons", fetchCantons);
+  const { data: taxonomy = {} } = useSWR("map-taxonomy", fetchTaxonomy);
 
   // Keep filtersRef in sync
   useEffect(() => { filtersRef.current = filters; }, [filters]);
@@ -135,17 +138,23 @@ export function MapClient() {
     layerRef.current = layer;
   }
 
-  async function loadViewport(f: Filters) {
+  function buildMapParams(f: CompanyFilters): Record<string, string> {
+    const params: Record<string, string> = {};
+    for (const [key, value] of Object.entries(f)) {
+      if (["page", "page_size", "sort"].includes(key)) continue;
+      if (value === undefined || value === null || value === "") continue;
+      params[key] = String(value);
+    }
+    return params;
+  }
+
+  async function loadViewport(f: CompanyFilters) {
     const map = mapInstanceRef.current;
     if (!map) return;
     const zoom = Math.round(map.getZoom());
     const bounds = map.getBounds();
 
-    const params: Record<string, string> = {};
-    if (f.canton) params.canton = f.canton;
-    if (f.review_status) params.review_status = f.review_status;
-    if (f.min_combined_score) params.min_combined_score = f.min_combined_score;
-    if (f.hide_cancelled) params.hide_cancelled = "true";
+    const params = buildMapParams(f);
     params.min_lat = String(bounds.getSouth());
     params.max_lat = String(bounds.getNorth());
     params.min_lon = String(bounds.getWest());
@@ -196,69 +205,97 @@ export function MapClient() {
         loadViewportRef.current?.(filtersRef.current);
       });
 
+      if (pendingJumpRef.current) {
+        map.setView([pendingJumpRef.current.lat, pendingJumpRef.current.lon], 18);
+        pendingJumpRef.current = null;
+      }
+
       await loadViewportRef.current?.(filtersRef.current);
     })();
     return () => { mounted = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  function handleFilter(e: React.FormEvent) {
+  async function handleGoToAddress(e: React.FormEvent) {
     e.preventDefault();
-    loadViewport(filters);
+    const query = addressQuery.trim();
+    if (!query) return;
+
+    setAddressLoading(true);
+    setAddressError(null);
+    try {
+      const result = await geocodeMapAddress(query);
+      setAddressLabel(result.address);
+      const map = mapInstanceRef.current;
+      if (map) {
+        map.setView([result.lat, result.lon], 18);
+      } else {
+        pendingJumpRef.current = { lat: result.lat, lon: result.lon };
+      }
+    } catch (error) {
+      setAddressError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setAddressLoading(false);
+    }
+  }
+
+  function handleFiltersChange(next: CompanyFilters) {
+    setFilters(next);
+    void loadViewport(next);
   }
 
   return (
     <>
       <MapTurnstileGate />
-      <div className="flex flex-col h-[calc(100vh-3rem)]">
-        <form onSubmit={handleFilter} className="flex items-center gap-3 px-4 py-2.5 border-b border-slate-200 bg-white flex-wrap">
-          <input
-            placeholder="Canton (e.g. BE)"
-            value={filters.canton}
-            onChange={e => setFilters(f => ({ ...f, canton: e.target.value.toUpperCase() }))}
-            className="px-2.5 py-1.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-300 w-24"
-          />
-          <select
-            value={filters.review_status}
-            onChange={e => setFilters(f => ({ ...f, review_status: e.target.value }))}
-            className="px-2.5 py-1.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-300"
-          >
-            <option value="">All statuses</option>
-            <option value="potential_proposal">Potential proposal</option>
-            <option value="confirmed_proposal">Confirmed proposal</option>
-            <option value="potential_generic">Potential generic</option>
-            <option value="confirmed_generic">Confirmed generic</option>
-            <option value="interesting">Interesting</option>
-            <option value="rejected">Rejected</option>
-          </select>
-          <input
-            type="number"
-            placeholder="Min combined score"
-            value={filters.min_combined_score}
-            onChange={e => setFilters(f => ({ ...f, min_combined_score: e.target.value }))}
-            className="px-2.5 py-1.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-300 w-40"
-          />
-          <label className="flex items-center gap-1.5 text-sm text-slate-600 cursor-pointer">
-            <input
-              type="checkbox"
-              checked={filters.hide_cancelled}
-              onChange={e => setFilters(f => ({ ...f, hide_cancelled: e.target.checked }))}
-              className="rounded border-slate-300 text-blue-600"
-            />
-            Hide cancelled
-          </label>
-          <button type="submit" className="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded-lg text-sm font-medium transition-colors">
-            {loading ? "Loading…" : "Apply"}
-          </button>
-          <span className="text-xs text-slate-400 ml-auto">
-            {count.toLocaleString()} companies
-            {clustered
-              ? " — zoom in for individual points"
-              : truncated
-              ? ` (capped at 5 000 — zoom in further)`
-              : " in view"}
-          </span>
-        </form>
+      <div className="flex flex-col h-[calc(100vh-3rem)] overflow-hidden bg-slate-50">
+        <div className="border-b border-slate-200 bg-white px-4 py-3 shadow-sm">
+          <form onSubmit={handleGoToAddress} className="flex flex-wrap items-center gap-3">
+            <div className="flex-1 min-w-[240px]">
+              <label className="mb-1.5 block text-xs font-semibold uppercase tracking-widest text-slate-400">Go to address</label>
+              <div className="flex items-center gap-2">
+                <MapPin size={16} className="shrink-0 text-slate-400" />
+                <input
+                  value={addressQuery}
+                  onChange={(e) => setAddressQuery(e.target.value)}
+                  placeholder="Street, ZIP city, canton"
+                  className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-400"
+                />
+                <button
+                  type="submit"
+                  disabled={addressLoading}
+                  className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-700 disabled:opacity-60"
+                >
+                  {addressLoading ? <Loader2 size={14} className="animate-spin" /> : <Search size={14} />}
+                  Go
+                </button>
+              </div>
+            </div>
+            <div className="flex min-w-[220px] flex-1 items-center justify-between gap-3 text-xs text-slate-500">
+              <span>
+                {addressLabel ? `Centered on ${addressLabel}` : "Search for an address to jump to zoom 18."}
+              </span>
+              <span>
+                {count.toLocaleString()} companies
+                {clustered
+                  ? " · zoom in for individual points"
+                  : truncated
+                  ? " · capped at 5 000"
+                  : " · in view"}
+              </span>
+            </div>
+          </form>
+          {addressError && <p className="mt-2 text-xs text-red-600">{addressError}</p>}
+        </div>
+
+        <FilterBar
+          filters={filters}
+          cantons={cantons}
+          taxonomy={taxonomy}
+          onChange={handleFiltersChange}
+          onClear={() => handleFiltersChange(DEFAULT_FILTERS)}
+          resultCount={count}
+        />
+
         <div ref={mapRef} className="flex-1" />
       </div>
     </>

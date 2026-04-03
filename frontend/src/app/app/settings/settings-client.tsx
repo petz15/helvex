@@ -2,7 +2,7 @@
 import { useEffect, useState } from "react";
 import useSWR from "swr";
 import { useRouter } from "next/navigation";
-import { Save, Plus, Trash2, ToggleLeft, ToggleRight, Loader2, Landmark, Search, MapPin, FileText } from "lucide-react";
+import { ChevronDown, ChevronUp, Save, Plus, Trash2, ToggleLeft, ToggleRight, Loader2, Landmark, Search, MapPin, FileText } from "lucide-react";
 import {
   createTfidfStopword,
   createBoilerplate,
@@ -42,6 +42,44 @@ function Field({ label, hint, children }: { label: string; hint?: string; childr
 
 function SectionTitle({ title }: { title: string }) {
   return <h2 className="text-sm font-semibold text-slate-500 uppercase tracking-wider pt-4 pb-2 border-b border-slate-100">{title}</h2>;
+}
+
+function CollapsibleSection({
+  title,
+  description,
+  count,
+  defaultOpen = false,
+  children,
+}: {
+  title: string;
+  description?: string;
+  count?: number;
+  defaultOpen?: boolean;
+  children: React.ReactNode;
+}) {
+  const [open, setOpen] = useState(defaultOpen);
+
+  return (
+    <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+      <button
+        type="button"
+        onClick={() => setOpen(value => !value)}
+        className="flex w-full items-center justify-between gap-4 px-4 py-3 text-left transition-colors hover:bg-slate-50"
+      >
+        <div>
+          <div className="flex items-center gap-2">
+            <h3 className="text-sm font-semibold text-slate-800">{title}</h3>
+            {typeof count === "number" && <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-medium text-slate-500">{count}</span>}
+          </div>
+          {description && <p className="mt-1 text-xs text-slate-500">{description}</p>}
+        </div>
+        <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-slate-200 text-slate-500">
+          {open ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+        </span>
+      </button>
+      {open && <div className="border-t border-slate-200 p-4">{children}</div>}
+    </div>
+  );
 }
 
 export function SettingsClient() {
@@ -277,145 +315,147 @@ export function SettingsClient() {
           Seed defaults
         </button>
       </div>
-      <div className="space-y-5">
-        <Field
-          label="Stop words"
-          hint="Stop words used when extracting purpose keywords for Google match scoring. Use 'Seed defaults' to load the built-in list."
+      <div className="space-y-4">
+        <CollapsibleSection
+          title="Google stop words"
+          description="Stop words used when extracting purpose keywords for Google match scoring."
+          count={stopwords.length}
         >
           <div className="space-y-2">
-            <div className="flex gap-2">
-              <input
-                value={newStopword}
-                onChange={e => setNewStopword(e.target.value)}
-                onKeyDown={e => {
-                  if (e.key === "Enter") {
-                    e.preventDefault();
-                    addStopword();
-                  }
-                }}
-                placeholder="Add stop word"
-                className={cn(inputCls, "flex-1")}
-              />
-              <button
-                type="button"
-                onClick={addStopword}
-                disabled={addingStopword}
-                className="flex items-center gap-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 px-3 py-2 rounded-lg text-sm font-medium transition-colors"
-              >
-                {addingStopword ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} />}
-                Add
-              </button>
-            </div>
-            <div className="overflow-x-auto border border-slate-200 rounded-lg bg-white">
-              <table className="w-full text-sm">
-                <thead className="bg-slate-50 text-slate-600">
-                  <tr>
-                    <th className="text-left px-3 py-2 font-medium">Word</th>
-                    <th className="text-right px-3 py-2 font-medium w-20">Action</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {stopwords.map((row) => (
-                    <tr key={row.id} className="border-t border-slate-100">
-                      <td className="px-3 py-2 text-slate-800">
-                        <div className="flex items-center gap-2">
-                          <button type="button" onClick={() => toggleStopword(row.id)} className="shrink-0 text-slate-400 hover:text-slate-700 transition-colors">
-                            {row.active ? <ToggleRight size={18} className="text-blue-500" /> : <ToggleLeft size={18} />}
-                          </button>
-                          <span className={row.active ? "text-slate-800" : "text-slate-400 line-through"}>{row.value}</span>
-                        </div>
-                      </td>
-                      <td className="px-3 py-2 text-right">
-                        <button type="button" onClick={() => removeStopword(row.id)} className="text-slate-400 hover:text-red-500 transition-colors">
-                          <Trash2 size={14} />
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                  {stopwords.length === 0 && (
+              <div className="flex gap-2">
+                <input
+                  value={newStopword}
+                  onChange={e => setNewStopword(e.target.value)}
+                  onKeyDown={e => {
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      addStopword();
+                    }
+                  }}
+                  placeholder="Add stop word"
+                  className={cn(inputCls, "flex-1")}
+                />
+                <button
+                  type="button"
+                  onClick={addStopword}
+                  disabled={addingStopword}
+                  className="flex items-center gap-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 px-3 py-2 rounded-lg text-sm font-medium transition-colors"
+                >
+                  {addingStopword ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} />}
+                  Add
+                </button>
+              </div>
+              <div className="overflow-x-auto border border-slate-200 rounded-lg bg-white">
+                <table className="w-full text-sm">
+                  <thead className="bg-slate-50 text-slate-600">
                     <tr>
-                      <td colSpan={2} className="px-3 py-3 text-slate-400">No stop words configured. Click &ldquo;Seed defaults&rdquo; to load built-ins.</td>
+                      <th className="text-left px-3 py-2 font-medium">Word</th>
+                      <th className="text-right px-3 py-2 font-medium w-20">Action</th>
                     </tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
+                  </thead>
+                  <tbody>
+                    {stopwords.map((row) => (
+                      <tr key={row.id} className="border-t border-slate-100">
+                        <td className="px-3 py-2 text-slate-800">
+                          <div className="flex items-center gap-2">
+                            <button type="button" onClick={() => toggleStopword(row.id)} className="shrink-0 text-slate-400 hover:text-slate-700 transition-colors">
+                              {row.active ? <ToggleRight size={18} className="text-blue-500" /> : <ToggleLeft size={18} />}
+                            </button>
+                            <span className={row.active ? "text-slate-800" : "text-slate-400 line-through"}>{row.value}</span>
+                          </div>
+                        </td>
+                        <td className="px-3 py-2 text-right">
+                          <button type="button" onClick={() => removeStopword(row.id)} className="text-slate-400 hover:text-red-500 transition-colors">
+                            <Trash2 size={14} />
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                    {stopwords.length === 0 && (
+                      <tr>
+                        <td colSpan={2} className="px-3 py-3 text-slate-400">No stop words configured. Click &ldquo;Seed defaults&rdquo; to load built-ins.</td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
           </div>
-        </Field>
+        </CollapsibleSection>
 
-        <Field
-          label="Directory domains"
-          hint="Domains in this table are always treated as directories and excluded from Google website matching."
+        <CollapsibleSection
+          title="Directory domains"
+          description="Domains in this table are always treated as directories and excluded from Google website matching."
+          count={directoryDomains.length}
         >
           <div className="space-y-2">
-            <div className="flex gap-2">
-              <input
-                value={newDirectoryDomain}
-                onChange={e => setNewDirectoryDomain(e.target.value)}
-                onKeyDown={e => {
-                  if (e.key === "Enter") {
-                    e.preventDefault();
-                    addDirectoryDomain();
-                  }
-                }}
-                placeholder="Add directory domain (example.ch)"
-                className={cn(inputCls, "flex-1")}
-              />
-              <button
-                type="button"
-                onClick={addDirectoryDomain}
-                disabled={addingDirectoryDomain}
-                className="flex items-center gap-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 px-3 py-2 rounded-lg text-sm font-medium transition-colors"
-              >
-                {addingDirectoryDomain ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} />}
-                Add
-              </button>
-            </div>
-            <div className="overflow-x-auto border border-slate-200 rounded-lg bg-white">
-              <table className="w-full text-sm">
-                <thead className="bg-slate-50 text-slate-600">
-                  <tr>
-                    <th className="text-left px-3 py-2 font-medium">Domain</th>
-                    <th className="text-right px-3 py-2 font-medium w-20">Action</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {directoryDomains.map((row) => (
-                    <tr key={row.id} className="border-t border-slate-100">
-                      <td className="px-3 py-2 text-slate-800">
-                        <div className="flex items-center gap-2">
-                          <button type="button" onClick={() => toggleDirectoryDomain(row.id)} className="shrink-0 text-slate-400 hover:text-slate-700 transition-colors">
-                            {row.active ? <ToggleRight size={18} className="text-blue-500" /> : <ToggleLeft size={18} />}
-                          </button>
-                          <span className={row.active ? "text-slate-800" : "text-slate-400 line-through"}>{row.value}</span>
-                        </div>
-                      </td>
-                      <td className="px-3 py-2 text-right">
-                        <button type="button" onClick={() => removeDirectoryDomain(row.id)} className="text-slate-400 hover:text-red-500 transition-colors">
-                          <Trash2 size={14} />
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                  {directoryDomains.length === 0 && (
+              <div className="flex gap-2">
+                <input
+                  value={newDirectoryDomain}
+                  onChange={e => setNewDirectoryDomain(e.target.value)}
+                  onKeyDown={e => {
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      addDirectoryDomain();
+                    }
+                  }}
+                  placeholder="Add directory domain (example.ch)"
+                  className={cn(inputCls, "flex-1")}
+                />
+                <button
+                  type="button"
+                  onClick={addDirectoryDomain}
+                  disabled={addingDirectoryDomain}
+                  className="flex items-center gap-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 px-3 py-2 rounded-lg text-sm font-medium transition-colors"
+                >
+                  {addingDirectoryDomain ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} />}
+                  Add
+                </button>
+              </div>
+              <div className="overflow-x-auto border border-slate-200 rounded-lg bg-white">
+                <table className="w-full text-sm">
+                  <thead className="bg-slate-50 text-slate-600">
                     <tr>
-                      <td colSpan={2} className="px-3 py-3 text-slate-400">No directory domains configured. Click &ldquo;Seed defaults&rdquo; to load built-ins.</td>
+                      <th className="text-left px-3 py-2 font-medium">Domain</th>
+                      <th className="text-right px-3 py-2 font-medium w-20">Action</th>
                     </tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
+                  </thead>
+                  <tbody>
+                    {directoryDomains.map((row) => (
+                      <tr key={row.id} className="border-t border-slate-100">
+                        <td className="px-3 py-2 text-slate-800">
+                          <div className="flex items-center gap-2">
+                            <button type="button" onClick={() => toggleDirectoryDomain(row.id)} className="shrink-0 text-slate-400 hover:text-slate-700 transition-colors">
+                              {row.active ? <ToggleRight size={18} className="text-blue-500" /> : <ToggleLeft size={18} />}
+                            </button>
+                            <span className={row.active ? "text-slate-800" : "text-slate-400 line-through"}>{row.value}</span>
+                          </div>
+                        </td>
+                        <td className="px-3 py-2 text-right">
+                          <button type="button" onClick={() => removeDirectoryDomain(row.id)} className="text-slate-400 hover:text-red-500 transition-colors">
+                            <Trash2 size={14} />
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                    {directoryDomains.length === 0 && (
+                      <tr>
+                        <td colSpan={2} className="px-3 py-3 text-slate-400">No directory domains configured. Click &ldquo;Seed defaults&rdquo; to load built-ins.</td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
           </div>
-        </Field>
+        </CollapsibleSection>
       </div>
 
       <SectionTitle title="TF-IDF and purpose extraction" />
-      <div className="space-y-5">
-        <Field
-          label="Stop words"
-          hint="Stop words used by TF-IDF clustering and purpose keyword extraction. Use 'Seed defaults' to load the built-in list."
-        >
-          <div className="space-y-2">
+      <CollapsibleSection
+        title="TF-IDF stop words"
+        description="Stop words used by TF-IDF clustering and purpose keyword extraction."
+        count={tfidfStopwords.length}
+      >
+        <div className="space-y-2">
             <div className="flex gap-2">
               <input
                 value={newTfidfStopword}
@@ -473,9 +513,8 @@ export function SettingsClient() {
                 </tbody>
               </table>
             </div>
-          </div>
-        </Field>
-      </div>
+        </div>
+      </CollapsibleSection>
 
       {/* Cluster scoring */}
       <SectionTitle title="Cluster scoring" />
@@ -650,51 +689,53 @@ export function SettingsClient() {
         </button>
       </div>
 
-      {/* Boilerplate */}
-      <SectionTitle title="Boilerplate patterns" />
-      <div className="space-y-2">
-        {boilerplate.map(bp => (
-          <div key={bp.id} className="flex items-center gap-3 px-3 py-2.5 border border-slate-200 rounded-lg bg-white">
-            <button type="button" onClick={() => handleToggle(bp.id)} className="shrink-0 text-slate-400 hover:text-slate-700 transition-colors">
-              {bp.active ? <ToggleRight size={20} className="text-blue-500" /> : <ToggleLeft size={20} />}
-            </button>
-            <div className="flex-1 min-w-0">
-              <p className="text-sm font-mono text-slate-700 truncate">{bp.pattern}</p>
-              {bp.description && <p className="text-xs text-slate-400">{bp.description}</p>}
-            </div>
-            <button type="button" onClick={() => handleDelete(bp.id)} className="shrink-0 p-1 text-slate-300 hover:text-red-500 transition-colors">
-              <Trash2 size={14} />
-            </button>
+      </form>
+
+      <CollapsibleSection title="Boilerplate patterns" description="Regex templates used to filter boilerplate language from company text." count={boilerplate.length}>
+        <div className="space-y-4">
+          <div className="space-y-2">
+            {boilerplate.map(bp => (
+              <div key={bp.id} className="flex items-center gap-3 px-3 py-2.5 border border-slate-200 rounded-lg bg-white">
+                <button type="button" onClick={() => handleToggle(bp.id)} className="shrink-0 text-slate-400 hover:text-slate-700 transition-colors">
+                  {bp.active ? <ToggleRight size={20} className="text-blue-500" /> : <ToggleLeft size={20} />}
+                </button>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-mono text-slate-700 truncate">{bp.pattern}</p>
+                  {bp.description && <p className="text-xs text-slate-400">{bp.description}</p>}
+                </div>
+                <button type="button" onClick={() => handleDelete(bp.id)} className="shrink-0 p-1 text-slate-300 hover:text-red-500 transition-colors">
+                  <Trash2 size={14} />
+                </button>
+              </div>
+            ))}
           </div>
-        ))}
-      </div>
 
-      </form>
-
-      {/* Boilerplate add form (separate form to avoid nested forms) */}
-      <form onSubmit={handleAddPattern} className="flex gap-2">
-        <input
-          value={newPattern.pattern}
-          onChange={e => setNewPattern(p => ({ ...p, pattern: e.target.value }))}
-          placeholder="Regex pattern"
-          className={cn(inputCls, "flex-1")}
-          required
-        />
-        <input
-          value={newPattern.description}
-          onChange={e => setNewPattern(p => ({ ...p, description: e.target.value }))}
-          placeholder="Description (optional)"
-          className={cn(inputCls, "w-48")}
-        />
-        <button
-          type="submit"
-          disabled={addingPattern}
-          className="flex items-center gap-1.5 bg-slate-100 hover:bg-slate-200 disabled:opacity-60 text-slate-700 px-3 py-2 rounded-lg text-sm font-medium transition-colors shrink-0"
-        >
-          {addingPattern ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} />}
-          Add
-        </button>
-      </form>
+          {/* Boilerplate add form */}
+          <form onSubmit={handleAddPattern} className="flex gap-2">
+            <input
+              value={newPattern.pattern}
+              onChange={e => setNewPattern(p => ({ ...p, pattern: e.target.value }))}
+              placeholder="Regex pattern"
+              className={cn(inputCls, "flex-1")}
+              required
+            />
+            <input
+              value={newPattern.description}
+              onChange={e => setNewPattern(p => ({ ...p, description: e.target.value }))}
+              placeholder="Description (optional)"
+              className={cn(inputCls, "w-48")}
+            />
+            <button
+              type="submit"
+              disabled={addingPattern}
+              className="flex items-center gap-1.5 bg-slate-100 hover:bg-slate-200 disabled:opacity-60 text-slate-700 px-3 py-2 rounded-lg text-sm font-medium transition-colors shrink-0"
+            >
+              {addingPattern ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} />}
+              Add
+            </button>
+          </form>
+        </div>
+      </CollapsibleSection>
     </div>
   );
 }

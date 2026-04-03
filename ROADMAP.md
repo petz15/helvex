@@ -20,8 +20,10 @@
 
 
 ### Todos
-- Check new CSV export
-- Adjust sites for setup (seperate some features out from account page)
+- Set up AI classification per org
+- filters should show the entire list when searched for (and check how chrome shows these lists)
+- Change the UX/UI for certain settings (such as seperate from account, put into explorer settings or other settings?)
+- 
 - Continue on Explore page
 
 
@@ -37,6 +39,7 @@
 ## Dashboard & UI
 
 - [ ] **Fix Branding** — potentially change the icon to have a red cross in the middle (change google and linkedin app connection icons)
+- [ ] **Map** - add adress search in order to jump to a specific place
 - [ ] **Improve colors** - improve some of the colors, look and feel for the website
 - [ ] **Cookie banner settings** - adjust the cookie banner so users by default choose all
 - [ ] **Add dark mode** — add dark mode

@@ -605,6 +605,13 @@ export async function fetchMapClusters(params?: Record<string, string>): Promise
   return res.json();
 }
 
+export async function geocodeMapAddress(address: string): Promise<{ lat: number; lon: number; address: string }> {
+  const url = buildUrl("/api/v1/map/geocode", { address });
+  const res = await fetch(url, { credentials: "include" });
+  if (!res.ok) throw new Error("Failed to geocode address");
+  return res.json();
+}
+
 // ── Workspace (org-scoped overlay) ────────────────────────────────────────────
 
 export interface OrgCompanyState {

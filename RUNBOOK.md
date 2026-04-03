@@ -22,7 +22,8 @@ General fixes, recovery procedures, and operational checklists.
 13. [Deploy: Node Disk Full Quick Cleanup](#13-deploy-node-disk-full-quick-cleanup)
 14. [Node: High CPU Load / k3s API Unresponsive](#14-node-high-cpu-load--k3s-api-unresponsive)
 15. [Monetization Ops Checks (Phase 4 and Phase 5)](#15-monetization-ops-checks-phase-4-and-phase-5)
-16. [Home ML Node Rollout (Phases A-C)](#16-home-ml-node-rollout-phases-a-c)
+16. [Classification Workflow: Job Sequencing](#16-classification-workflow-job-sequencing)
+17. [Home ML Node Rollout (Phases A-C)](#17-home-ml-node-rollout-phases-a-c)
 
 ---
 
@@ -939,7 +940,109 @@ Expected:
 
 ---
 
-## 16. Home ML Node Rollout (Phases A-C)
+## 16. Classification Workflow: Job Sequencing
+
+The classification pipeline consists of three independent ML jobs that improve company enrichment. Run them in order to achieve best quality.
+
+### Overview
+
+| Job | Purpose | Duration | Depends On | S3 Artifacts |
+|-----|---------|----------|------------|---|
+| `hdbscan_cluster` | Train TF-IDF + K-Means, assign clusters, extract keywords | 10–30 min | — | ✅ Uploads SVD, vectorizer, centroids |
+| `reextract_keywords` | Re-extract keywords for all companies using cached vectorizer | 1–5 min | `hdbscan_cluster` S3 artifacts | — |
+| `reclassify_noga` | Classify companies with NOGA taxonomy + embedding similarity | 2–10 min | — | ✅ Uses NOGA embeddings |
+
+### Recommended Sequence (Initial Setup)
+
+**Step 1: Full clustering run**
+```bash
+POST /api/v1/jobs
+{
+  "job_type": "hdbscan_cluster",
+  "params": {
+    "n_clusters": 150,
+    "only_missing_noga": false
+  }
+}
+```
+This trains the ML models and uploads artifacts to S3. Monitor progress via the Jobs UI. **Duration: 10–30 min**
+
+**Step 2: Extract keywords with cached vectorizer** (optional but recommended)
+```bash
+POST /api/v1/jobs
+{
+  "job_type": "reextract_keywords",
+  "params": {
+    "only_missing": false
+  }
+}
+```
+Ensures all companies have corpus-relative keywords. **Duration: 1–5 min**
+
+**Step 3: Classify with NOGA**
+```bash
+POST /api/v1/jobs
+{
+  "job_type": "reclassify_noga",
+  "params": {
+    "only_missing_noga": false
+  }
+}
+```
+Now keywords are available for embedding similarity. **Duration: 2–10 min**
+
+### Ongoing Workflow
+
+**For new companies (detail import):**
+- Detail enrichment runs (fetches Zefix full data)
+- Keywords are auto-extracted if S3 artifacts exist (non-fatal fallback if not)
+- NOGA classification runs immediately
+
+**Periodic retraining:**
+- Run `hdbscan_cluster` weekly/monthly to refresh clusters + S3 models
+- New S3 artifacts enable better incremental extraction for future companies
+
+**Just recalculate keywords:**
+- If stopwords or lemmatization changed, run `reextract_keywords` alone to refresh all companies
+
+### What Each Job Does
+
+#### `hdbscan_cluster`
+
+1. Load all companies with purpose text
+2. Strip boilerplate sentences (DB patterns)
+3. Lemmatize with spaCy German model
+4. TF-IDF vectorization (corpus-wide)
+5. Dimensionality reduction (SVD)
+6. K-Means clustering
+7. Extract keywords per company (same TF-IDF)
+8. Assign clusters (multi-label soft assignment)
+9. **Save to S3:** TF-IDF vectorizer, SVD transformer, K-Means centroids, cluster registry mapping
+10. Filter low-quality clusters (specificity < threshold)
+11. Store `tfidf_cluster` + `purpose_keywords` in DB
+
+#### `reextract_keywords`
+
+1. Load S3 artifacts (TF-IDF vectorizer, SVD transformer)
+2. For each company with purpose text:
+   - Extract keywords using cached vectorizer
+   - Apply bigram penalty + deduplication
+   - Store in DB
+3. **Non-fatal:** if S3 unavailable, skip silently
+
+#### `reclassify_noga`
+
+1. Load NOGA taxonomy + S3 embedding artifacts (sentence-transformers)
+2. For each company (optionally filtered):
+   - Embed `purpose_keywords` (or fallback to tokens)
+   - Similarity-rank against NOGA entries
+   - Hybrid re-rank: 60% embedding sim + 40% token match
+   - Store code, label, level, confidence, full hierarchy path
+3. **Non-fatal:** if S3 embeddings unavailable, use token-only matching
+
+---
+
+## 17. Home ML Node Rollout (Phases A-C)
 
 This chapter is the step-by-step implementation tracker for home-first ML scheduling with cloud fallback.
 
@@ -1100,3 +1203,6 @@ Phase C acceptance checks:
 
 - 2026-04-03: Phase A completed; Phase B/C tasks documented.
 - 2026-04-03: Decision recorded to defer Phase B/C and continue in home-only ML mode.
+
+
+
