@@ -63,6 +63,8 @@ class CompanyBase(BaseModel):
     noga_level: str | None = None
     noga_confidence: float | None = None
     noga_classified_at: datetime | None = None
+    noga_path: str | None = None
+    noga_path_labels: str | None = None
 
     @field_validator("legal_form", "status", "municipality", "canton", "purpose", mode="before")
     @classmethod
@@ -132,6 +134,8 @@ class CompanyUpdate(BaseModel):
     noga_level: str | None = None
     noga_confidence: float | None = None
     noga_classified_at: datetime | None = None
+    noga_path: str | None = None
+    noga_path_labels: str | None = None
     ai_scored_at: datetime | None = None
     flex_scored_at: datetime | None = None
 

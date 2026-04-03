@@ -86,6 +86,9 @@ class Company(Base):
     noga_level: Mapped[str | None] = mapped_column(String(32), nullable=True)
     noga_confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
     noga_classified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Full ancestry path, pipe-separated root→leaf, e.g. "C|26|263|2630|263001"
+    noga_path: Mapped[str | None] = mapped_column(Text, nullable=True)
+    noga_path_labels: Mapped[str | None] = mapped_column(Text, nullable=True)
     ai_scored_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     flex_scored_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     # Raw JSON from Zefix API stored for reference

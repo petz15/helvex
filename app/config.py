@@ -61,6 +61,7 @@ class Settings(BaseSettings):
     s3_secret_key: str = ""
     s3_endpoint_url: str = ""          # e.g. "https://nbg1.your-objectstorage.com"
     s3_bucket_exports: str = ""        # "helvex-exports"
+    s3_bucket_models: str = ""         # bucket for ML model artifacts (embeddings, vectorizers)
 
     # OAuth — Google and LinkedIn sign-in
     # In dev: set APP_BASE_URL=http://localhost:3000 and register

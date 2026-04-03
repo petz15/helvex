@@ -57,3 +57,30 @@ def generate_presigned_url(s3_key: str, expires_in: int = 7 * 24 * 3600) -> str:
 def export_s3_key(user_id: int) -> str:
     """Canonical S3 key for a user's CSV export (one per user, overwrites on re-run)."""
     return f"{user_id}/export.csv"
+
+
+# ---------------------------------------------------------------------------
+# Model artifact helpers (NOGA embeddings, TF-IDF vectorizers, K-Means, etc.)
+# ---------------------------------------------------------------------------
+
+def is_models_bucket_configured() -> bool:
+    from app.config import settings
+    return bool(settings.s3_access_key and settings.s3_secret_key and settings.s3_bucket_models)
+
+
+def upload_model_bytes(data: bytes, s3_key: str) -> None:
+    """Upload raw bytes to the models bucket at the given key."""
+    import io
+    from app.config import settings
+    client = _client()
+    client.upload_fileobj(io.BytesIO(data), settings.s3_bucket_models, s3_key)
+    logger.info("Uploaded model artifact → s3://%s/%s (%d bytes)", settings.s3_bucket_models, s3_key, len(data))
+
+
+def download_model_bytes(s3_key: str) -> bytes:
+    """Download raw bytes from the models bucket. Raises if key doesn't exist."""
+    import io
+    from app.config import settings
+    buf = io.BytesIO()
+    _client().download_fileobj(settings.s3_bucket_models, s3_key, buf)
+    return buf.getvalue()
