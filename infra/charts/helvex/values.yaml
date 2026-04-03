@@ -76,6 +76,7 @@ apiWorker:
 
 mlWorker:
   enabled: false   # set to true in prod
+  replicaCount: 1
   keda:
     enabled: false   # set to true after KEDA + Hetzner Cluster Autoscaler are installed
   # nodeSelector and tolerations for a dedicated ML node pool (set in prod.yaml after CA setup)

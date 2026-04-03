@@ -8,9 +8,9 @@ metadata:
     {{- include "helvex.labels" . | nindent 4 }}
     app.kubernetes.io/component: ml-worker
 spec:
-  # KEDA manages replicas (0 → 1) when mlWorker.keda.enabled=true.
-  # Set to 0 so the pod doesn't run without KEDA.
-  replicas: 0
+  # With KEDA enabled we start at 0 and let ScaledObject drive 0→1.
+  # Without KEDA we keep one always-on ML worker.
+  replicas: {{ ternary 0 (.Values.mlWorker.replicaCount | default 1) .Values.mlWorker.keda.enabled }}
   strategy:
     type: Recreate
   selector:
