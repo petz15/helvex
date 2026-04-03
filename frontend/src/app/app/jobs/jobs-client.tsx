@@ -1,10 +1,43 @@
 "use client";
-import { useState } from "react";
-import useSWR, { mutate } from "swr";
+import { useState, useEffect, useRef } from "react";
+import useSWR from "swr"; // still used for CSV export status
 import { CheckCircle2, XCircle, Clock, Loader2, PauseCircle, Play, Square, ChevronDown, ChevronUp, RefreshCw, Download, FileText } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { cancelJob, fetchCSVExportStatus, fetchJobEvents, fetchJobs, pauseJob, resumeJob } from "@/lib/api";
 import type { Job, JobEvent } from "@/lib/types";
+
+function useJobsSSE(): { jobs: Job[]; setJobs: (j: Job[]) => void; isLoading: boolean; reload: () => void } {
+  const [jobs, setJobs] = useState<Job[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const esRef = useRef<EventSource | null>(null);
+
+  function connect() {
+    esRef.current?.close();
+    const es = new EventSource("/api/v1/jobs/stream/active", { withCredentials: true });
+    es.onmessage = (event) => {
+      try {
+        setJobs(JSON.parse(event.data) as Job[]);
+        setIsLoading(false);
+      } catch {
+        // SSE heartbeat comments (": heartbeat") are never dispatched here;
+        // only guard against malformed data.
+      }
+    };
+    es.onerror = () => {
+      setIsLoading(false);
+      // Browser auto-reconnects EventSource after ~3 s — no manual retry needed.
+    };
+    esRef.current = es;
+  }
+
+  useEffect(() => {
+    connect();
+    return () => { esRef.current?.close(); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  return { jobs, setJobs, isLoading, reload: connect };
+}
 
 function statusIcon(status: Job["status"]) {
   switch (status) {
@@ -72,21 +105,22 @@ function JobEvents({ jobId }: { jobId: number }) {
   );
 }
 
-function JobRow({ job, onAction }: { job: Job; onAction: () => void }) {
+function JobRow({ job, onAction }: { job: Job; onAction: (updated?: Job[]) => void }) {
   const [expanded, setExpanded] = useState(false);
   const active = job.status === "running" || job.status === "queued" || job.status === "paused" || job.status === "waiting_external";
 
   async function doCancel() {
     await cancelJob(job.id);
-    onAction();
+    // Optimistic refresh so the UI updates before the next SSE push
+    onAction(await fetchJobs());
   }
   async function doPause() {
     await pauseJob(job.id);
-    onAction();
+    onAction(await fetchJobs());
   }
   async function doResume() {
     await resumeJob(job.id);
-    onAction();
+    onAction(await fetchJobs());
   }
 
   return (
@@ -152,7 +186,7 @@ function JobRow({ job, onAction }: { job: Job; onAction: () => void }) {
 }
 
 export function JobsClient() {
-  const { data: jobs = [], mutate: reloadJobs, isLoading } = useSWR<Job[]>("jobs", fetchJobs, { refreshInterval: 3000 });
+  const { jobs, setJobs, isLoading, reload: reloadJobs } = useJobsSSE();
   const { data: exportStatus, mutate: reloadExportStatus, isLoading: loadingExportStatus } = useSWR(
     "csv-export-status",
     fetchCSVExportStatus,
@@ -246,7 +280,7 @@ export function JobsClient() {
         <section>
           <h2 className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-3">Active</h2>
           <div className="space-y-3">
-            {active.map(j => <JobRow key={j.id} job={j} onAction={() => reloadJobs()} />)}
+            {active.map(j => <JobRow key={j.id} job={j} onAction={(updated) => { if (updated) setJobs(updated); }} />)}
           </div>
         </section>
       )}
@@ -255,7 +289,7 @@ export function JobsClient() {
         <section>
           <h2 className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-3">History</h2>
           <div className="space-y-2">
-            {finished.map(j => <JobRow key={j.id} job={j} onAction={() => reloadJobs()} />)}
+            {finished.map(j => <JobRow key={j.id} job={j} onAction={(updated) => { if (updated) setJobs(updated); }} />)}
           </div>
         </section>
       )}

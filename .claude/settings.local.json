@@ -170,7 +170,11 @@
       "Bash(grep -rn \"class UserRead\\\\|org.*OrgInfo\\\\|org_info\\\\|org\" /c/D/coding_projects/zefix_analyzer/app/ --include=*.py)",
       "Bash(\"c:/D/coding_projects/zefix_analyzer/PAYMENT_CHANGES_SUMMARY.txt\":*)",
       "Bash(grep -r \"LOG_LEVEL\\\\|log_level\" . --include=*.py --include=*.sh --include=*.env*)",
-      "Bash(ls -la c:/D/coding_projects/zefix_analyzer/frontend/.env*)"
+      "Bash(ls -la c:/D/coding_projects/zefix_analyzer/frontend/.env*)",
+      "Read(//d/coding_projects/**)",
+      "Read(//mnt/d/coding_projects/**)",
+      "Bash(find c:Dcoding_projectszefix_analyzer -type f \\\\\\(-name *.tsx -o -name *.ts -o -name *.jsx -o -name *.js \\\\\\) ! -path */node_modules/* ! -path */.next/* ! -path */.git/*)",
+      "Bash(find c:/D/coding_projects/zefix_analyzer -type f \\\\\\(-name *.config.* -o -name next.config.* -o -name .env* \\\\\\))"
     ]
   }
 }

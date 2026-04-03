@@ -25,6 +25,22 @@ from sqlalchemy.orm import Session
 
 logger = logging.getLogger(__name__)
 
+# ── Graceful shutdown ──────────────────────────────────────────────────────────
+
+_shutdown_requested: bool = False
+
+
+def request_shutdown() -> None:
+    """Signal all running jobs to pause at their next progress checkpoint.
+
+    Called from:
+    - worker_entrypoint._SafeWorker.handle_warm_shutdown_request() on SIGTERM (RQ mode)
+    - app/main.py lifespan shutdown (thread mode)
+    """
+    global _shutdown_requested
+    _shutdown_requested = True
+    logger.info("Graceful shutdown requested — running jobs will pause at next checkpoint")
+
 
 class JobCancelledError(Exception):
     """Raised when a running job receives a cancellation request."""
@@ -60,6 +76,86 @@ _QUEUE_FOR_JOB_TYPE: dict[str, str] = {
     "recompute_keywords":        "helvex-ml",
     "cluster_analysis":          "helvex-ml",
 }
+
+
+def _compute_dedup_key(job_type: str, org_id: int | None, params: dict) -> str | None:
+    """Return a dedup key for this job, or None if dedup is not enforced.
+
+    At most one *active* job (queued/running/paused/waiting_external) with the
+    same key is allowed per org.  Attempting to enqueue a duplicate returns the
+    existing job without charging credits.
+    """
+    # These types allow at most one active job per org at a time.
+    ONE_PER_ORG = {
+        "bulk", "detail", "initial",
+        "recalculate_scores", "recalculate_google_scores",
+        "reextract_purpose", "reclassify_noga",
+        "re_geocode",
+        "hdbscan_cluster", "recompute_keywords", "cluster_analysis",
+    }
+    # No dedup: every trigger creates a fresh independent job.
+    NO_DEDUP = {"batch", "csv_export"}
+
+    if job_type in NO_DEDUP:
+        return None
+    if job_type in ONE_PER_ORG:
+        return f"{job_type}:{org_id}"
+    if job_type == "claude_classify":
+        import hashlib as _hashlib
+        relevant = {
+            k: params.get(k)
+            for k in (
+                "use_fixed_categories", "system_prompt", "canton",
+                "min_zefix_score", "max_zefix_score", "min_google_score",
+                "purpose_keywords",
+            )
+        }
+        h = _hashlib.sha256(
+            json.dumps(relevant, sort_keys=True).encode()
+        ).hexdigest()[:16]
+        return f"claude_classify:{org_id}:{h}"
+    return None
+
+
+_redis_pub_pool: "redis.ConnectionPool | None" = None  # type: ignore[name-defined]
+
+
+def _get_redis_pub_conn():
+    """Return a Redis client backed by a module-level connection pool.
+
+    Creating a new TCP connection per publish call was wasteful when
+    _publish_job_update() fires on every job status change.  The pool
+    (max_connections=5) reuses connections across publish calls.
+    """
+    global _redis_pub_pool
+    from app.config import settings as _s
+    import redis as _redis_mod
+    if _redis_pub_pool is None:
+        _redis_pub_pool = _redis_mod.ConnectionPool.from_url(
+            _s.redis_url,
+            max_connections=5,
+            socket_connect_timeout=0.5,
+            socket_timeout=0.5,
+        )
+    return _redis_mod.Redis(connection_pool=_redis_pub_pool)
+
+
+def _publish_job_update(org_id: int | None) -> None:
+    """Publish a lightweight notification to the SSE pub/sub channel.
+
+    The SSE endpoint subscribes to this channel and re-fetches the full
+    job list from the DB when a message arrives.  Best-effort: never
+    raises, never blocks the job.
+    """
+    try:
+        from app.config import settings as _s
+        if not (_s.use_rq and _s.redis_url):
+            return
+        r = _get_redis_pub_conn()
+        channel = f"jobs:{org_id}" if org_id is not None else "jobs:superadmin"
+        r.publish(channel, "update")
+    except Exception:  # noqa: BLE001
+        pass
 
 
 def _heartbeat() -> None:
@@ -239,6 +335,24 @@ def _run_job(app, job_id: int) -> None:  # noqa: C901
 
         crud.mark_running(db, job, message="Starting…")
         crud.create_event(db, job_id=job.id, level="info", message="Job started")
+        _publish_job_update(job.org_id)
+
+        # Heartbeat daemon: stamps last_heartbeat_at every 30 s so that
+        # requeue_interrupted_jobs() can tell this job is still alive and
+        # must NOT be re-queued when the web pod restarts.
+        _hb_stop = threading.Event()
+
+        def _hb_daemon() -> None:
+            while not _hb_stop.wait(30):
+                try:
+                    with SessionLocal() as _hb_db:
+                        crud.update_heartbeat(_hb_db, job_id)
+                except Exception:  # noqa: BLE001
+                    pass
+
+        _hb_thread = threading.Thread(target=_hb_daemon, daemon=True, name=f"hb-job-{job_id}")
+        _hb_thread.start()
+
         if app is not None:
             _sync_active_task(
                 app.state,
@@ -259,6 +373,8 @@ def _run_job(app, job_id: int) -> None:  # noqa: C901
                 raise JobCancelledError("Cancellation requested")
             if job.pause_requested:
                 raise JobPausedError("Pause requested")
+            if _shutdown_requested:
+                raise JobPausedError("Worker shutdown — job paused for restart")
 
         try:
             if job.job_type == "re_geocode":
@@ -706,9 +822,11 @@ def _run_job(app, job_id: int) -> None:  # noqa: C901
             for _err in (stats.get("errors") or [])[:50]:
                 crud.create_event(db, job_id=job.id, level="warn", message=str(_err))
             _maybe_sync(app, job_type=job.job_type, label=job.label, message=done_msg, stats=dict(stats), error=None, done=True)
+            _publish_job_update(job.org_id)
 
         except _JobWaitingExternalSignal:
             # Job transitioned to waiting_external — already committed above; nothing else needed.
+            _publish_job_update(job.org_id)
             return
 
         except JobPausedError:
@@ -719,12 +837,14 @@ def _run_job(app, job_id: int) -> None:  # noqa: C901
             crud.mark_paused(db, job, message=pause_msg, stats=current_stats)
             crud.create_event(db, job_id=job.id, level="info", message=pause_msg)
             _maybe_sync(app, job_type=job.job_type, label=job.label, message=pause_msg, stats=current_stats, error=None, done=True)
+            _publish_job_update(job.org_id)
 
         except JobCancelledError:
             msg = "Cancelled by user"
             crud.mark_cancelled(db, job, message=msg)
             crud.create_event(db, job_id=job.id, level="warn", message=msg)
             _maybe_sync(app, job_type=job.job_type, label=job.label, message=msg, stats={}, error=None, done=True)
+            _publish_job_update(job.org_id)
 
         except Exception as exc:  # noqa: BLE001
             err = traceback.format_exc()
@@ -738,6 +858,10 @@ def _run_job(app, job_id: int) -> None:  # noqa: C901
             crud.create_event(db, job_id=job.id, level="error", message=summary)
             crud.create_event(db, job_id=job.id, level="debug", message=err)
             _maybe_sync(app, job_type=job.job_type, label=job.label, message="Failed", stats={}, error=summary, done=True)
+            _publish_job_update(job.org_id)
+
+        finally:
+            _hb_stop.set()
 
 
 # ── Worker loop ────────────────────────────────────────────────────────────────
@@ -798,6 +922,20 @@ def _enqueue_job_in_session(
     org_id: int | None = None,
     user_id: int | None = None,
 ) -> object:
+    # ── Dedup check ──────────────────────────────────────────────────────────
+    # If an active job of the same type+org already exists, return it without
+    # charging credits or creating a duplicate.
+    dedup_key = _compute_dedup_key(job_type, org_id, params)
+    if dedup_key is not None:
+        existing = crud.find_active_by_dedup_key(db, dedup_key)
+        if existing is not None:
+            logger.info(
+                "Dedup hit: returning existing job %s (type=%s key=%s status=%s)",
+                existing.id, job_type, dedup_key, existing.status,
+            )
+            db.expunge(existing)
+            return existing
+    # ── Normal enqueue path ──────────────────────────────────────────────────
     preflight_params, warnings = _preflight_job(db, job_type=job_type, params=params)
     _apply_credit_deduction_if_needed(
         db,
@@ -806,7 +944,7 @@ def _enqueue_job_in_session(
         org_id=org_id,
         user_id=user_id,
     )
-    job = crud.create_job(db, job_type=job_type, label=label, params=preflight_params, org_id=org_id, user_id=user_id)
+    job = crud.create_job(db, job_type=job_type, label=label, params=preflight_params, org_id=org_id, user_id=user_id, dedup_key=dedup_key)
     crud.create_event(db, job_id=job.id, level="info", message="Job queued")
     if warnings:
         for w in warnings:
@@ -994,10 +1132,12 @@ def poll_llm_batches() -> None:
                     for err in (stats.get("errors") or [])[:50]:
                         _crud.create_event(db, job_id=job.id, level="warn", message=str(err))
                     logger.info("poll_llm_batches: job %s completed (%s)", job.id, done_msg)
+                    _publish_job_update(job.org_id)
                 elif status == "error":
                     err_msg = stats.get("error", "Unknown Anthropic API error")
                     _crud.mark_failed(db, job, error=err_msg, message=err_msg)
                     _crud.create_event(db, job_id=job.id, level="error", message=err_msg)
+                    _publish_job_update(job.org_id)
                 # else: still processing — do nothing, retry next poll cycle
 
     except Exception as exc:  # noqa: BLE001

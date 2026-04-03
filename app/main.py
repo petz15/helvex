@@ -190,17 +190,25 @@ def _maybe_enqueue_geocode_upgrade(app, app_state) -> None:
 
 
 def _recover_jobs_and_start_worker(app, app_state) -> None:
-    from app.crud import list_active_jobs, requeue_interrupted_jobs
+    from app.crud import (
+        delete_old_finished_jobs,
+        list_active_jobs,
+        requeue_interrupted_jobs,
+        resume_all_paused_jobs,
+    )
     from app.database import SessionLocal
 
     app_state.startup_message = "Recovering background jobs…"
     try:
         with SessionLocal() as db:
             recovered = requeue_interrupted_jobs(db)
+            resumed = resume_all_paused_jobs(db)
             active_count = len(list_active_jobs(db))
+            pruned = delete_old_finished_jobs(db, keep_days=30)
         kick_job_worker(app)
         app_state.startup_message = (
-            f"Background jobs ready — recovered {recovered}, active {active_count}"
+            f"Background jobs ready — recovered {recovered}, resumed {resumed}, "
+            f"active {active_count}, pruned {pruned} old"
         )
     except Exception as exc:
         raise RuntimeError(f"Failed to recover background jobs: {exc}") from exc
@@ -241,6 +249,11 @@ async def lifespan(app: FastAPI):
 
     asyncio.create_task(_startup())
     yield
+
+    # Graceful shutdown: ask any in-process jobs to pause at their next
+    # progress checkpoint so they are not left stuck as "running".
+    from app.services.job_worker import request_shutdown
+    request_shutdown()
 
 
 # ── Application ───────────────────────────────────────────────────────────────

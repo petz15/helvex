@@ -61,6 +61,13 @@ class ResilientWorker:  # Thin wrapper to avoid importing rq at module import ti
                 except AbandonedJobError as exc:
                     logger.warning("Ignored RQ abandoned job during maintenance cleanup: %s", exc)
 
+            def handle_warm_shutdown_request(self):
+                """On SIGTERM: pause running jobs cleanly before the pod is killed."""
+                from app.services.job_worker import request_shutdown
+                logger.info("SIGTERM received — requesting graceful job shutdown")
+                request_shutdown()
+                super().handle_warm_shutdown_request()
+
         return _SafeWorker(queues, connection=connection)
 
 

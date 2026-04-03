@@ -29,3 +29,10 @@ class JobRun(Base):
     # Org/user context: NULL for superadmin catalog jobs, set for org-triggered jobs
     org_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("organizations.id", ondelete="SET NULL"), nullable=True, index=True)
     user_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
+    # Dedup: prevents enqueueing duplicate active jobs (same type + org).
+    # NULL means no dedup enforced for this job type (e.g. batch, csv_export).
+    dedup_key: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    # Heartbeat: updated every ~30 s by the worker while the job is running.
+    # requeue_interrupted_jobs() skips jobs with a recent heartbeat so that
+    # live worker-pod jobs are never double-executed after a web-pod restart.
+    last_heartbeat_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)

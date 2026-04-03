@@ -188,22 +188,123 @@ def resume_job(job_id: int, request: Request, db: Session = Depends(get_db), cur
 
 @router.get("/jobs/stream/active")
 def stream_active_jobs(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
-    """SSE stream that sends 'update' while active jobs exist, 'done' when all finish."""
+    """SSE stream that pushes the full job list as JSON on every change.
+
+    Two modes:
+    - Redis pub/sub (USE_RQ=true + REDIS_URL set): workers publish a lightweight
+      notification on status transitions (complete/fail/pause/cancel); the SSE
+      endpoint also polls DB every 2 s to forward progress-bar updates (workers
+      don't publish on every tick to avoid Redis churn).  Pub/sub events cause
+      an immediate DB re-fetch in addition to the periodic poll.
+    - DB poll fallback (thread mode / no Redis): polls DB every second and sends
+      an update only when the serialised result changes.  Still much better than
+      N clients each polling at 3 s intervals.
+
+    A heartbeat comment is emitted every 30 s to keep the TCP connection alive
+    through proxies.  SSE comments are never dispatched as 'message' events by
+    the browser, so the frontend onmessage handler is never called for them.
+    """
+    import json as _json
+    from app.config import settings as _s
+
+    HEARTBEAT_INTERVAL = 30
+    PROGRESS_POLL_INTERVAL = 2  # periodic DB poll in Redis mode for progress updates
+
+    def _fetch_jobs() -> list[dict]:
+        db.expire_all()
+        if current_user.is_superadmin:
+            recent = crud.list_jobs(db, limit=100)
+            active = crud.list_active_jobs(db)
+        else:
+            recent = crud.list_jobs_for_user(
+                db, user_id=current_user.id, org_id=current_user.org_id, limit=100
+            )
+            active = crud.list_active_jobs_for_user(
+                db, user_id=current_user.id, org_id=current_user.org_id
+            )
+        by_id = {j.id: j for j in recent}
+        for j in active:
+            by_id[j.id] = j
+        merged = sorted(
+            by_id.values(),
+            key=lambda j: j.queued_at or j.started_at,
+            reverse=True,
+        )
+        return [JobOut.from_orm_obj(j).model_dump() for j in merged]
+
     def event_generator():
-        while True:
-            if current_user.is_superadmin:
-                active = crud.list_active_jobs(db)
-            else:
-                active = crud.list_active_jobs_for_user(db, user_id=current_user.id, org_id=current_user.org_id)
-            if not active:
-                yield "data: done\n\n"
-                return
-            yield "data: update\n\n"
-            time.sleep(2)
+        if _s.use_rq and _s.redis_url:
+            # ── Redis pub/sub mode ──────────────────────────────────────────
+            # Pub/sub fires immediately on status transitions.
+            # A periodic 2 s DB poll forwards progress-bar updates that workers
+            # do not publish (publishing on every tick would flood Redis).
+            from redis import Redis
+            r = Redis.from_url(_s.redis_url)
+            channel = (
+                f"jobs:{current_user.org_id}"
+                if current_user.org_id is not None
+                else "jobs:superadmin"
+            )
+            pubsub = r.pubsub()
+            pubsub.subscribe(channel)
+            try:
+                last_sent: str | None = None
+                last_hb = time.time()
+                last_poll = time.time()
+
+                # Initial snapshot
+                initial = _json.dumps(_fetch_jobs())
+                yield f"data: {initial}\n\n"
+                last_sent = initial
+
+                while True:
+                    msg = pubsub.get_message(timeout=1.0)
+                    now = time.time()
+                    should_send = (msg and msg["type"] == "message") or (
+                        now - last_poll >= PROGRESS_POLL_INTERVAL
+                    )
+                    if should_send:
+                        last_poll = now
+                        current = _json.dumps(_fetch_jobs())
+                        if current != last_sent:
+                            yield f"data: {current}\n\n"
+                            last_sent = current
+                    if now - last_hb >= HEARTBEAT_INTERVAL:
+                        yield ": heartbeat\n\n"
+                        last_hb = now
+            finally:
+                try:
+                    pubsub.unsubscribe(channel)
+                    pubsub.close()
+                except Exception:  # noqa: BLE001
+                    pass
+        else:
+            # ── DB-poll fallback (thread / no-Redis mode) ───────────────────
+            last_sent: str | None = None
+            last_hb = time.time()
+            # Initial snapshot (always send, even if empty)
+            initial = _json.dumps(_fetch_jobs())
+            yield f"data: {initial}\n\n"
+            last_sent = initial
+            while True:
+                time.sleep(1)
+                current = _json.dumps(_fetch_jobs())
+                if current != last_sent:
+                    yield f"data: {current}\n\n"
+                    last_sent = current
+                now = time.time()
+                if now - last_hb >= HEARTBEAT_INTERVAL:
+                    yield ": heartbeat\n\n"
+                    last_hb = now
+
     return StreamingResponse(
         event_generator(),
         media_type="text/event-stream",
-        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+            "Connection": "keep-alive",
+        },
     )
 
 

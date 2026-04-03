@@ -24,6 +24,7 @@
 14. [Terraform / Hetzner](#14-terraform--hetzner)
 15. [Local Development](#15-local-development)
 16. [Common Bug-Fixing Cheatsheet](#16-common-bug-fixing-cheatsheet)
+17. [Background Job System — Design Evolution](#17-background-job-system--design-evolution)
 
 ---
 
@@ -320,6 +321,8 @@ Persistent record of every background job. Org-scoped: each job stores the org_i
 | `progress_done` / `progress_total` | Resume pointer + UI progress bar |
 | `params_json` | Input params as JSON |
 | `stats_json` | Output stats as JSON |
+| `dedup_key` | Prevents duplicate active jobs — see §17 |
+| `last_heartbeat_at` | Updated every 30 s by worker; guards against double-execution on restart — see §17 |
 
 #### Other models
 
@@ -830,9 +833,11 @@ alembic upgrade head
 - The `/api/v1/auth/verify-email` endpoint returns JSON; the browser-facing `/verify-email` returns HTML
 
 ### Job stuck in `running` state
-- Indicates the worker pod crashed mid-job (no graceful shutdown)
-- `crud.requeue_interrupted_jobs(db)` is called on startup and resets these to `queued`
+- Worker pod crashed mid-job before heartbeat went stale (within 120 s window)
+- Wait 2 minutes, then restart the web pod — `requeue_interrupted_jobs()` will now re-queue it
+- Or manually: `UPDATE job_runs SET status='queued', started_at=NULL WHERE id=<id>;`
 - Check `job_run_events` table for the last log entry before the crash
+- Under normal operation (SIGTERM → graceful shutdown), jobs transition to `paused`, not `running`
 
 ### Google Search quota exhausted
 - Quota tracked in `app_settings` table, key `google_searches_today` (resets daily)
@@ -879,3 +884,123 @@ kubectl exec -n helvex-prod -it helvex-postgres-1 -- psql -U zefix -d zefix_anal
 ```
 
 Or via the CloudNativePG pooler if enabled.
+
+### Job stuck in `paused` state after restart
+
+Paused jobs are now **auto-resumed on startup** via `crud.resume_all_paused_jobs()`.
+If a job remains paused, it was either cancelled mid-run or there is a preflight
+failure (missing API key, insufficient credits) — check the job event log.
+
+---
+
+## 17. Background Job System — Design Evolution
+
+This section records the architectural changes made to the job system and the
+rationale behind each decision.
+
+### Overview of changes (migration 0048)
+
+Two columns were added to `job_runs`:
+
+| Column | Type | Purpose |
+|---|---|---|
+| `dedup_key` | `VARCHAR(64)` nullable | Prevents duplicate active jobs per org/type |
+| `last_heartbeat_at` | `TIMESTAMPTZ` nullable | Lets startup skip live worker-pod jobs |
+
+---
+
+### Real-time job status via SSE (replaces 3 s SWR polling)
+
+**Before:** The Jobs page called `GET /api/v1/jobs` every 3 seconds per browser tab using SWR `refreshInterval`. With N users each having the jobs page open, the server received N×20 requests/minute of pure overhead — most returning unchanged data.
+
+**After:** A single persistent `EventSource` connection per browser tab to `GET /api/v1/jobs/stream/active`. The server pushes updates; the client is silent.
+
+**Two backend modes:**
+
+| Mode | Trigger | Latency | Use case |
+|---|---|---|---|
+| **Redis pub/sub** | Workers publish to `jobs:{org_id}` channel on status transitions | <1 s for transitions | RQ mode (production) |
+| **DB poll** | SSE endpoint polls DB every 1 s | ~1 s | Thread mode (dev / no Redis) |
+
+In Redis mode a **2 s periodic DB poll** runs alongside pub/sub to deliver progress-bar updates. Workers do not publish on every progress tick (which would flood Redis with dozens of messages per second for fast jobs); the periodic poll closes this gap with a 2 s lag that is invisible to users.
+
+**Trade-offs:**
+- **Advantage:** Near-zero polling overhead; status transitions (complete/fail/pause) reach the browser in <1 s in production.
+- **Disadvantage:** Each open SSE connection holds one synchronous uvicorn worker thread (blocking I/O). At current scale (<50 concurrent users) this is fine; at higher scale the endpoint should be rewritten as `async def` with `anyio.sleep` and an async Redis client.
+
+---
+
+### Job deduplication (idempotent enqueue)
+
+**Before:** Clicking "Run" twice created two identical jobs, charged credits twice, and ran redundant work.
+
+**After:** `_compute_dedup_key()` in `job_worker.py` produces a key per (job_type, org_id, relevant params). Before inserting a new job, `find_active_by_dedup_key()` checks for an existing active job with the same key. If found, the existing job is returned and no credits are charged.
+
+**Dedup semantics by job type:**
+
+| Behaviour | Job types |
+|---|---|
+| One active per org | `bulk`, `detail`, `initial`, `recalculate_scores`, `recalculate_google_scores`, `reextract_purpose`, `reclassify_noga`, `re_geocode`, `hdbscan_cluster`, `recompute_keywords`, `cluster_analysis` |
+| One active per org + param hash | `claude_classify` (keyed on category/canton/prompt params) |
+| No dedup | `batch`, `csv_export` (cancel-before-enqueue used for csv_export instead) |
+
+**Trade-offs:**
+- **Advantage:** Safe to click triggers multiple times; no wasted credits or duplicate DB writes.
+- **Disadvantage:** A paused job with a dedup key blocks re-enqueue until it is resumed or cancelled. Users who want a fresh run must cancel first.
+
+---
+
+### Worker heartbeat + safe job recovery
+
+**Problem:** `requeue_interrupted_jobs()` on web-pod startup re-queued ALL `running` jobs. In RQ mode (separate worker pods), this re-queued jobs that were still alive, causing double-execution.
+
+**After:**
+1. A per-job **heartbeat daemon thread** updates `job_runs.last_heartbeat_at` every 30 s while the job executes.
+2. `requeue_interrupted_jobs()` now skips jobs whose `last_heartbeat_at` is younger than 120 s — these are alive on a worker pod and must not be touched.
+3. Only jobs with a stale or absent heartbeat (truly crashed) are re-queued.
+
+**Trade-offs:**
+- **Advantage:** Eliminates double-execution after web-pod restarts; safe for rolling updates.
+- **Disadvantage:** Adds one extra DB thread per running job. The thread is a daemon, writes are single-row UPDATEs every 30 s — negligible load. A crashed worker leaves a stale heartbeat; the 2-minute stale window means the job will not be recovered until the next startup after that window expires.
+
+---
+
+### Graceful shutdown (pause instead of SIGKILL)
+
+**Before:** SIGKILL from K8s left jobs stuck as `running`. On restart they were re-queued from scratch.
+
+**After:**
+1. SIGTERM → `_SafeWorker.handle_warm_shutdown_request()` sets `_shutdown_requested = True`.
+2. At the next `_assert_not_cancelled()` call inside the job, a `JobPausedError` is raised.
+3. The job is saved as `paused` with `progress_done` checkpointed — no work is lost.
+4. On next startup, `resume_all_paused_jobs()` re-queues these jobs automatically.
+5. `terminationGracePeriodSeconds: 90` on all worker pods gives the job enough time to reach the next checkpoint before K8s sends SIGKILL.
+
+**Trade-offs:**
+- **Advantage:** Zero lost progress across rolling updates; users never see a job reset to 0.
+- **Disadvantage:** `terminationGracePeriodSeconds: 90` delays K8s rolling updates by up to 90 s per pod. Jobs with very coarse checkpoints (e.g., one checkpoint per canton in `bulk`) may not save progress if the canton takes >90 s to process.
+- **Note:** Auto-resume on startup re-queues all paused jobs, including those paused by user action before a restart. Users who want a job to stay paused across a restart should cancel it instead.
+
+---
+
+### Redis connection pool for pub/sub publish
+
+**Before:** `_publish_job_update()` created a new `Redis(...)` TCP connection on every call — up to dozens of times per second for a fast-progressing job.
+
+**After:** A module-level `ConnectionPool` (max 5 connections) is shared across all `_publish_job_update()` calls in the worker process.
+
+**Trade-offs:**
+- **Advantage:** Eliminates per-call TCP handshake overhead; pool connections are reused.
+- **Disadvantage:** The pool is process-scoped. In RQ mode each work-horse subprocess is a fork of the worker process. The forked pool state is safe for Redis (connections are closed+reopened on fork by the redis-py library), so there are no cross-process connection leaks.
+
+---
+
+### Job history retention
+
+**Before:** `job_runs` grew indefinitely — every completed, failed, or cancelled job remained in the table forever.
+
+**After:** `delete_old_finished_jobs(keep_days=30)` runs on every startup and deletes terminal jobs older than 30 days. Active jobs are never deleted.
+
+**Trade-offs:**
+- **Advantage:** Prevents unbounded table growth; keeps query performance stable.
+- **Disadvantage:** Job history older than 30 days is permanently lost. If longer retention is needed, adjust `keep_days` or move old rows to a separate archive table instead of deleting.

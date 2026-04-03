@@ -21,6 +21,9 @@ spec:
         {{- include "helvex.labels" . | nindent 8 }}
         app.kubernetes.io/component: api-worker
     spec:
+      # Allow enough time for the running job to reach its next checkpoint
+      # and write status=paused before K8s sends SIGKILL.
+      terminationGracePeriodSeconds: 90
       priorityClassName: helvex-worker
       securityContext:
         runAsNonRoot: true

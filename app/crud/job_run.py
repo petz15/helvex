@@ -20,6 +20,7 @@ def create_job(
     params: dict[str, Any] | None = None,
     org_id: int | None = None,
     user_id: int | None = None,
+    dedup_key: str | None = None,
 ) -> JobRun:
     job = JobRun(
         job_type=job_type,
@@ -29,11 +30,44 @@ def create_job(
         params_json=json.dumps(params or {}),
         org_id=org_id,
         user_id=user_id,
+        dedup_key=dedup_key,
     )
     db.add(job)
     db.commit()
     db.refresh(job)
     return job
+
+
+def find_active_by_dedup_key(db: Session, dedup_key: str) -> "JobRun | None":
+    """Return the first active job with this dedup key, or None.
+
+    'Active' means not yet in a terminal state.  Callers use this to avoid
+    creating a duplicate job when one is already queued/running/paused.
+    """
+    return (
+        db.query(JobRun)
+        .filter(
+            JobRun.dedup_key == dedup_key,
+            JobRun.status.in_(["queued", "running", "paused", "waiting_external"]),
+        )
+        .order_by(JobRun.queued_at.asc())
+        .first()
+    )
+
+
+def update_heartbeat(db: Session, job_id: int) -> None:
+    """Stamp last_heartbeat_at = now() for the given job.
+
+    Called by the per-job heartbeat daemon thread every ~30 s while the
+    job is running.  Used by requeue_interrupted_jobs() to distinguish
+    live jobs from truly interrupted ones.
+    """
+    now = datetime.now(tz=timezone.utc)
+    db.query(JobRun).filter(JobRun.id == job_id).update(
+        {"last_heartbeat_at": now},
+        synchronize_session=False,
+    )
+    db.commit()
 
 
 def get_job(db: Session, job_id: int) -> JobRun | None:
@@ -104,10 +138,28 @@ def requeue_interrupted_jobs(
     db: Session,
     *,
     message: str = "Recovered after application restart",
+    stale_after_seconds: int = 120,
 ) -> int:
-    """Move interrupted running jobs back to queued so they can resume."""
+    """Move interrupted running jobs back to queued so they can resume.
+
+    Only re-queues jobs whose heartbeat is stale (older than *stale_after_seconds*)
+    or missing entirely.  Jobs with a recent heartbeat are still alive on a worker
+    pod and must not be double-executed.
+    """
     import json as _json
-    jobs = db.query(JobRun).filter(JobRun.status == "running").all()
+    from datetime import timedelta
+    stale_cutoff = datetime.now(tz=timezone.utc) - timedelta(seconds=stale_after_seconds)
+    jobs = (
+        db.query(JobRun)
+        .filter(
+            JobRun.status == "running",
+            or_(
+                JobRun.last_heartbeat_at.is_(None),
+                JobRun.last_heartbeat_at < stale_cutoff,
+            ),
+        )
+        .all()
+    )
     now = datetime.now(tz=timezone.utc)
     for job in jobs:
         job.status = "queued"
@@ -264,6 +316,28 @@ def resume_paused_job(db: Session, job: JobRun) -> JobRun:
     return job
 
 
+def resume_all_paused_jobs(db: Session) -> int:
+    """Re-queue all paused jobs after a restart so they resume automatically.
+
+    Called on startup after requeue_interrupted_jobs().  Jobs paused by the
+    graceful shutdown handler are re-queued here; jobs paused by user action
+    before the restart are also re-queued (documented behaviour — users who
+    want a job to stay paused should cancel it instead).
+    """
+    jobs = db.query(JobRun).filter(JobRun.status == "paused").all()
+    now = datetime.now(tz=timezone.utc)
+    for job in jobs:
+        job.status = "queued"
+        job.pause_requested = False
+        job.started_at = None
+        job.completed_at = None
+        job.queued_at = now  # bubble to top of queue history
+        job.message = f"Auto-resumed from {job.progress_done or 0} after restart"
+    if jobs:
+        db.commit()
+    return len(jobs)
+
+
 def mark_waiting_external(
     db: Session,
     job: JobRun,
@@ -309,6 +383,28 @@ def cancel_active_csv_exports(db: Session, user_id: int) -> None:
         job.completed_at = now
     if active:
         db.commit()
+
+
+def delete_old_finished_jobs(db: Session, *, keep_days: int = 30) -> int:
+    """Delete completed/failed/cancelled jobs older than *keep_days*.
+
+    Keeps the most recent history (default 30 days) to prevent unbounded
+    table growth.  Active jobs (queued/running/paused/waiting_external) and
+    jobs without a completion timestamp are never deleted.
+    """
+    from datetime import timedelta
+    cutoff = datetime.now(tz=timezone.utc) - timedelta(days=keep_days)
+    deleted = (
+        db.query(JobRun)
+        .filter(
+            JobRun.status.in_(["completed", "failed", "cancelled"]),
+            JobRun.completed_at < cutoff,
+        )
+        .delete(synchronize_session=False)
+    )
+    if deleted:
+        db.commit()
+    return deleted
 
 
 def list_waiting_llm_batches(db: Session) -> list[JobRun]:

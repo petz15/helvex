@@ -21,6 +21,11 @@ spec:
         {{- include "helvex.labels" . | nindent 8 }}
         app.kubernetes.io/component: zefix-worker
     spec:
+      # Allow enough time for the running job to reach its next checkpoint
+      # and write status=paused before K8s sends SIGKILL.
+      # The graceful-shutdown handler sets the _shutdown_requested flag on
+      # SIGTERM; jobs pause within one progress tick (typically <30 s).
+      terminationGracePeriodSeconds: 90
       priorityClassName: helvex-worker
       securityContext:
         runAsNonRoot: true

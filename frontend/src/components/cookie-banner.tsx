@@ -14,16 +14,14 @@ export function CookieBanner() {
   const [ready, setReady] = useState(false);
   const [visible, setVisible] = useState(false);
   const [analytics, setAnalytics] = useState(false);
-  const [ads, setAds] = useState(false);
 
   const consent = useMemo<CookieConsent>(
     () => ({
       essential: true,
       analytics,
-      ads,
       updatedAt: new Date().toISOString(),
     }),
-    [analytics, ads],
+    [analytics],
   );
 
   useEffect(() => {
@@ -31,7 +29,6 @@ export function CookieBanner() {
       const existing = readCookieConsent();
       if (existing) {
         setAnalytics(existing.analytics);
-        setAds(existing.ads);
       }
       setVisible(!existing);
     } catch {
@@ -43,7 +40,6 @@ export function CookieBanner() {
     const onOpen = () => {
       const existing = readCookieConsent() ?? defaultCookieConsent();
       setAnalytics(existing.analytics);
-      setAds(existing.ads);
       setVisible(true);
     };
     window.addEventListener("helvex-open-cookie-banner", onOpen);
@@ -69,7 +65,7 @@ export function CookieBanner() {
             <h2 className="text-sm font-semibold text-slate-900">Cookie-Hinweis</h2>
             <p className="text-xs sm:text-sm text-slate-600 max-w-2xl">
               Wir verwenden notwendige Cookies fuer Login, Sicherheit und den technischen Betrieb der Website.
-              Optionale Analyse- und Werbe-Cookies setzen wir nur mit Ihrer Zustimmung.
+              Optionale Analyse-Cookies setzen wir nur mit Ihrer Zustimmung.
               Details finden Sie in unserem <Link href="/datenschutz" className="text-blue-700 hover:text-blue-900 underline">Datenschutz</Link>.
             </p>
             <div className="space-y-1">
@@ -81,24 +77,14 @@ export function CookieBanner() {
                   onChange={(e) => setAnalytics(e.target.checked)}
                   className="h-3.5 w-3.5 rounded border-slate-300"
                 />
-                <label htmlFor="analytics-consent">Optionale Analyse-Cookies (Google Tag Manager) erlauben</label>
-              </div>
-              <div className="flex items-center gap-2 text-xs text-slate-600">
-                <input
-                  id="ads-consent"
-                  type="checkbox"
-                  checked={ads}
-                  onChange={(e) => setAds(e.target.checked)}
-                  className="h-3.5 w-3.5 rounded border-slate-300"
-                />
-                <label htmlFor="ads-consent">Optionale Werbe-Cookies (Google AdSense) erlauben</label>
+                <label htmlFor="analytics-consent">Optionale Analyse-Cookies (PostHog, Umami) erlauben</label>
               </div>
             </div>
           </div>
           <div className="flex flex-wrap gap-2 sm:justify-end">
             <button
               type="button"
-              onClick={() => saveAndClose({ essential: true, analytics: false, ads: false, updatedAt: new Date().toISOString() })}
+              onClick={() => saveAndClose({ essential: true, analytics: false, updatedAt: new Date().toISOString() })}
               className="px-3 py-1.5 rounded-lg border border-slate-200 text-xs sm:text-sm text-slate-700 hover:bg-slate-50 transition-colors"
             >
               Nur notwendige
@@ -112,7 +98,7 @@ export function CookieBanner() {
             </button>
             <button
               type="button"
-              onClick={() => saveAndClose({ essential: true, analytics: true, ads: true, updatedAt: new Date().toISOString() })}
+              onClick={() => saveAndClose({ essential: true, analytics: true, updatedAt: new Date().toISOString() })}
               className="px-3 py-1.5 rounded-lg bg-slate-900 text-white text-xs sm:text-sm hover:bg-slate-800 transition-colors"
             >
               Alle akzeptieren

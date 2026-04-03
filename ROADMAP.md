@@ -31,19 +31,16 @@
 - email validator? 
 - SMTP for emails?
 - DNS eintrag auf balogh consulting bei hostpoint
-- adsense?
+- umami (also keys probably) potentially posthog?
+- 
 
 ## Dashboard & UI
 
-- [X] **General QOL** — Impressum, Datenschutz pages, user settings page, general polish;
-- [X] **Save views** — serialize active filters/sort/columns as JSON, stored per user, quickly re-applied from a dropdown
-- [X] **Switch Index page** — change the entry page to something more welcoming to first time visitors
-- [ ] **Separate Search/Hunting page → Company Explorer (Unternehmens-Explorer)** — dedicated explorer page with guided onboarding flow; separate default columns and filter presets; batch actions (score selected, classify, add to list); legal form filter; date founded/deleted range filters; NOGA category filter; map toggle integrated into explorer; smoother flow for first-time users
-- [ ] **Add dark mode** — add dark mode
-- [X] **Demo on real pages instead of mock** — Find a way to demo the real webapp no use mock pages. seems weird. alternatively let users in without sign in but severly restrict access?
+
 - [ ] **Fix Branding** — potentially change the icon to have a red cross in the middle (change google and linkedin app connection icons)
-- [X] **For search** - for search different default columns and filtering options. add web searched as a flag to it. potentially add more filterint for peopel or company type/history
 - [ ] **Improve colors** - improve some of the colors, look and feel for the website
+- [ ] **Cookie banner settings** - adjust the cookie banner so users by default choose all
+- [ ] **Add dark mode** — add dark mode
 
 ## Company Explore page
 - [ ] **Settings** - set up settings page for LLM, FLEX scoring, etc
@@ -52,6 +49,7 @@
 - [ ] **Categories page** - Needs to be fixed from the existing, first to use org data and to show NOGA classification better
 - [ ] **Browse page** - Pretty simple, maybe needs to be made nicer?
 - [ ] **More pages(?)** - (?)
+
 
 
 ## Company Data
@@ -103,17 +101,14 @@
 ## Monetisation & Tiers
 - [ ] **Adress flow** - improve the adress flow, use default choosing one etc
 - [ ] **Adjustments to pricing** - More adjustments to pricing page: remove flex rescore from, some consumptions are not available for certain tiers and the question marks are not filled in. also for first time org accounts, give about 1k credits or even more
-- [ ] **Payment processor integration** — Worldline product/price setup, subscription webhooks, credit top-up Checkout session handler - ongoing
 - [ ] **Billing admin panel** — superadmin view of all orgs' tiers, subscription status, credit balance, transaction history; tier/credit adjustment UI
 - [ ] **Invoice & receipt generation** — PDF invoices for annual subscriptions; receipts for top-up purchases; email delivery
 - [ ] **Verified business discount** — 20% extra discount (on top of tier bonus) for verified business orgs; applied at Stripe price calculation
 - [ ] **Check Free tier limitations enforcement** — export limit enforcement in CSV export endpoint; API rate limits (once API access is gated)
-- [ ] **Ad banner integration** — Ads embed for free tier; currently renders placeholder div
+- [ ] **Ad banner integration** — Ads embed for free tier; currently renders fake ads -> get real ad agency once I have users
 - [ ] **Credit grant system** — admin interface to grant/refund credits with reason; used for migration credits, promotions, support refunds
 - [ ] **Credit expiry automation** — background job to expire grant-type credits after 1 year; topup credits never expire
-- [ ] **Usage dashboard** — org member view of credit balance (in CHF), transaction history, monthly spend, forecast
 - [ ] **automatic reocurring billing** on saferpay (worldline) I need to use the secure card data interface to save card data at saferpay which I can then utilize for later payments (reocurring payments like subscriptions or automatic topups). https://saferpay.github.io/jsonapi/#ChapterAliasStore
-- [ ] **Custom credit amount** — custom credit amount
 - [ ] **refund and other admin function** - check QOL of billing such as refunds and other methods. What happens when an automatic payment fails?
 
 
@@ -138,11 +133,11 @@
 
 ## Architecture & Refactoring
 
-- [ ] **Message-based job status** — replace polling with server-sent events (SSE) or WebSocket for real-time job status in UI
-- [ ] **Idempotent job retries** — ensure all job types can be safely re-run without duplicating work; implement job deduplication via hash/signature
+
 - [ ] **Org member audit log** — track all role changes, additions, removals with user/timestamp
 - [ ] **Rename users.tier → deprecated_user_tier** — `users.tier` is legacy (pre-org migration); once all routes use `org.tier`, rename the column and add a deprecation comment
 - [ ] **API key management** — token creation/revocation UI for org admins to manage their API credentials; currently only available via admin panel
+- [ ] **uvicorn async** - Each open SSE connection holds one synchronous uvicorn worker thread (blocking I/O). At current scale (<50 concurrent users) this is fine; at higher scale the endpoint should be rewritten as `async def` with `anyio.sleep` and an async Redis client.
 
 
 ## Other
@@ -190,3 +185,14 @@
 - [X] **Tiered job queues** — two RQ queues: `helvex-priority` (starter/professional/enterprise + orgs) and `helvex-free` (free tier); `enqueue_job()` routes based on org/user tier; two separate K8s worker Deployments with different resource allocations; org creation alone does not move user to priority queue — requires a tier upgrade
 - [X] **Email verification** — user signup flow with email verification; mutation/account changes require re-verification
 - [X] **Fix Zefix down** — on 28.03.2026 the zefix API seemed unreachable with status code 500; improved error detection and retry strategy; now distinguishes rate limiting from outage
+- [X] **Message-based job status** — replace polling with server-sent events (SSE) or WebSocket for real-time job status in UI
+- [X] **Idempotent job retries** — ensure all job types can be safely re-run without duplicating work; implement job deduplication via hash/signature
+- [X] **Usage dashboard** — org member view of credit balance (in CHF), transaction history, monthly spend, forecast
+- [X] **Custom credit amount** — custom credit amount
+- [X] **Payment processor integration** — Worldline product/price setup, subscription webhooks, credit top-up Checkout session handler - ongoing
+- [X] **General QOL** — Impressum, Datenschutz pages, user settings page, general polish;
+- [X] **Save views** — serialize active filters/sort/columns as JSON, stored per user, quickly re-applied from a dropdown
+- [X] **Switch Index page** — change the entry page to something more welcoming to first time visitors
+- [X] **Separate Search/Hunting page → Company Explorer (Unternehmens-Explorer)** — dedicated explorer page with guided onboarding flow; separate default columns and filter presets; batch actions (score selected, classify, add to list); legal form filter; date founded/deleted range filters; NOGA category filter; map toggle integrated into explorer; smoother flow for first-time users
+- [X] **Demo on real pages instead of mock** — Find a way to demo the real webapp no use mock pages. seems weird. alternatively let users in without sign in but severly restrict access?
+- [X] **For search** - for search different default columns and filtering options. add web searched as a flag to it. potentially add more filterint for peopel or company type/history
