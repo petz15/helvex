@@ -56,7 +56,7 @@
 ## Company Data
 
 - [ ] **Import all companies + full detail** — bulk import entire Zefix register including detailed fields (purpose, capital, offices, etc.) in one run
-- [ ] **Daily SHAB imports** — automated daily job pulling new/changed/deleted companies from SHAB to keep DB current without full re-import -> also means that those listed in the SHAB need a full detail import?
+- [ ] **Daily SHAB imports** — automated daily job pulling new/changed/deleted companies from SHAB to keep DB current without full re-import -> also means that those listed in the SHAB need a full detail import? (-> with the dazzling-seeking-harp it should work but not tested)
 - [ ] **CSV export** — export current filtered/sorted dashboard view as CSV; include all visible columns; respect active filters and column selection -> somewhat exists but not fully operational yet. No way to set which columns the CSV exports currently!
 - [ ] **Web crawler** — crawl company websites to extract description, contact info, product/service keywords; store as structured fields; feed into scoring and classification; replace/supplement current Google scrape
 - [ ] **Google results & scoring** — Improve the selection and scoring of google results
@@ -91,7 +91,7 @@
 - [ ] **home ML node phase B (deferred)** - add cloud fallback ML node class with labels `workload=ml`, `location=cloud` and matching taints/tolerations
 - [ ] **home ML node phase C (deferred)** - implement Helm affinity policy: required `workload=ml`, preferred `location=home`, cloud fallback when home unavailable
 - [ ] **home ML node mode policy** - keep home-only ML mode active for now (no cloud fallback); if home node is unavailable, ML jobs queue until node recovery
-- [ ] **Improve classifications** - improvements to the classification NOGA and tf-idf/HBD-SCan see claude plan: dazzling-seeking-harp.md
+
 
 
 ## Org-/Usermanagement
@@ -126,14 +126,6 @@
 ## Bug Fixes & Known Issues
 
 - [ ] **Node autoscaling**: cluster-autoscaler with Hetzner Cloud provider. Split responsibility: Terraform manages control plane + DB node; autoscaler manages worker node pool (CX32, minSize 0, maxSize ~5). Requires `hcloud-cloud-controller-manager`, worker cloud-init bootstrap template (derived from existing Terraform cloud-init), and removing worker nodes from Terraform state. Add PodDisruptionBudget for Redis before enabling scale-down. Trigger: when worker CPU regularly exceeds 70% or ml-worker jobs queue up.
-- [ ] **Generally Classifications** - in general the classifications are not working great. Might need a major overhaul
--[ ] **Google Tag Manager**: single `<Script>` in Next.js root layout (`app/layout.tsx`); GTM container manages GA4 + Google Ads conversion tracking. Cookie consent banner (IAB TCF v2) required  covers GTM, GA4, Ads, and reCAPTCHA under one consent flow.
-  - GA4: user behavior, funnels, retention
-  - Google Ads: conversion tracking for paid acquisition
-  - reCAPTCHA: auth/form protection (v3 recommended — invisible, no UX friction)
-  - All three load via GTM; one consent banner covers all Google tags
-- [ ] **How are new companies added to clusters?**: Find a logic how new companies are added to tf-idf/HBDscan clusters without recomputing all of them
-
 
 
 ## Architecture & Refactoring
@@ -206,3 +198,6 @@
 - [X] **Company profile overhaul** — display TF-IDF cluster, purpose keywords, Claude classification prominently -> ongoing
 - [X] **Website correction flow** — "Report wrong website" button on company detail; shows all Google search results so user can pick the correct one; backend tallies user selections and auto-promotes a new URL if enough users agree; admins can override
 - [X] **Fix Zweck not showing up** — maybe add column for zweck at companies table but that would also require to import it for existing companies 
+- [X] **How are new companies added to clusters?**: Find a logic how new companies are added to tf-idf/HBDscan clusters without recomputing all of them -> should be done through dazzling-seeking-harp.md untested for now
+- [X] **Generally Classifications** - in general the classifications are not working great. Might need a major overhaul -> dazzling-seeking-harp.md and look at git
+- [X] **Improve classifications** - improvements to the classification NOGA and tf-idf/HBD-SCan see claude plan: dazzling-seeking-harp.md -> should be done. untested for now and not run yet. 

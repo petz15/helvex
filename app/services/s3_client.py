@@ -1,7 +1,5 @@
 """Thin boto3 wrapper for S3-compatible object storage.
-
-Used exclusively for async CSV export files.  Configure via env vars:
-  S3_ACCESS_KEY, S3_SECRET_KEY, S3_ENDPOINT_URL, S3_BUCKET, S3_EXPORT_PREFIX
+For CSV exports and for storing trained model artifacts (TF-IDF vectorizers, K-Means models, etc.).
 """
 from __future__ import annotations
 

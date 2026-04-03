@@ -101,6 +101,11 @@ from app.crud.job_run import (
     update_heartbeat,
     update_progress,
 )
+from app.crud.cluster_registry import (
+    deactivate_missing_clusters,
+    get_or_create_registry_entry,
+    list_active_clusters,
+)
 from app.crud.user import (
     authenticate,
     count_users,
@@ -219,6 +224,10 @@ __all__ = [
     "create_tfidf_stopword",
     "update_tfidf_stopword",
     "delete_tfidf_stopword",
+    # cluster registry
+    "get_or_create_registry_entry",
+    "deactivate_missing_clusters",
+    "list_active_clusters",
     # audit log
     "create_audit_entry",
     "record_company_changes",

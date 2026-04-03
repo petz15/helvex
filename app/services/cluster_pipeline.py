@@ -72,6 +72,12 @@ class PipelineConfig:
     # ── DB write ──
     db_batch_size: int = 200
 
+    # ── Cluster quality filter (Phase 2a) ──
+    # Clusters whose mean IDF of top terms falls below this threshold are considered
+    # generic/boilerplate (e.g. "gesellschaft verwaltung holding") and suppressed.
+    # Companies assigned only to low-quality clusters get tfidf_cluster = None.
+    min_cluster_specificity: float = 0.3
+
     # ── Extra stopwords merged with DB tfidf_stopwords ──
     extra_stopwords: list[str] = field(default_factory=lambda: [
         "gesellschaft", "zweck", "unternehmen", "dienstleistungen", "kunden",
@@ -81,7 +87,34 @@ class PipelineConfig:
     ])
 
 
-# ── Stopword helper ───────────────────────────────────────────────────────────
+# ── Boilerplate + stopword helpers ────────────────────────────────────────────
+
+def _load_boilerplate_patterns():
+    """Return active boilerplate regex patterns from DB (empty list if unavailable)."""
+    try:
+        from app import crud
+        from app.database import SessionLocal
+        db = SessionLocal()
+        try:
+            return crud.get_active_boilerplate_patterns(db)
+        finally:
+            db.close()
+    except Exception:
+        return []
+
+
+def strip_boilerplate(texts: list[str]) -> list[str]:
+    """Strip boilerplate sentences from each purpose text using DB patterns.
+
+    Applied before TF-IDF vectorization so generic legal boilerplate doesn't
+    inflate IDF of terms like 'gesellschaft', 'bezweckt', 'insbesondere'.
+    """
+    from app.services.noga import _strip_purpose_boilerplate
+    patterns = _load_boilerplate_patterns()
+    if not patterns:
+        return texts
+    return [_strip_purpose_boilerplate(t, patterns) for t in texts]
+
 
 def get_stopwords(cfg: PipelineConfig) -> set[str]:
     """Return the stopword set from DB (active tfidf_stopwords rows)."""
@@ -166,14 +199,17 @@ def vectorize(texts: list[str], cfg: PipelineConfig):
 # ── Step 3: Dimensionality Reduction ──────────────────────────────────────────
 
 def reduce_dimensions(X, cfg: PipelineConfig):
-    """TruncatedSVD + L2 normalisation (euclidean distance ≈ cosine similarity)."""
+    """TruncatedSVD + L2 normalisation (euclidean distance ≈ cosine similarity).
+
+    Returns (svd, X_reduced) so the fitted SVD can be persisted for incremental use.
+    """
     from sklearn.decomposition import TruncatedSVD
     from sklearn.preprocessing import normalize
 
     n = min(cfg.n_components, X.shape[1] - 1)
     svd = TruncatedSVD(n_components=n, random_state=cfg.svd_random_state)
     X_svd = svd.fit_transform(X)
-    return normalize(X_svd)
+    return svd, normalize(X_svd)
 
 
 # ── Step 4: K-Means Clustering ────────────────────────────────────────────────
@@ -291,6 +327,39 @@ def label_clusters(
     return labels_map
 
 
+# ── Step 6a: Cluster quality filter (Phase 2a) ────────────────────────────────
+
+def score_cluster_specificity(
+    labels_map: dict[int, str],
+    vectorizer,
+) -> dict[int, float]:
+    """Return {cluster_id: mean_idf_of_top_terms} using the fitted TF-IDF vectorizer.
+
+    High IDF = rare across corpus = specific/domain term.
+    Low IDF  = common across corpus = generic/boilerplate term.
+    """
+    import numpy as np
+
+    idf_values: dict[str, float] = dict(
+        zip(vectorizer.get_feature_names_out(), vectorizer.idf_)
+    )
+    scores: dict[int, float] = {}
+    for cid, label in labels_map.items():
+        terms = [t.strip() for t in label.split(",") if t.strip()]
+        if not terms:
+            scores[cid] = 0.0
+            continue
+        idfs = [idf_values.get(t, 0.0) for t in terms]
+        scores[cid] = float(np.mean(idfs))
+
+    # Normalise to [0, 1] so threshold is scale-independent
+    if scores:
+        max_score = max(scores.values()) or 1.0
+        scores = {cid: s / max_score for cid, s in scores.items()}
+
+    return scores
+
+
 # ── Step 6b: Per-document keyword extraction ──────────────────────────────────
 
 def extract_company_keywords(
@@ -369,26 +438,30 @@ def save_results(
     company_keywords: list[str | None],
     cfg: PipelineConfig,
     progress_cb: Callable[[int, int, dict], None] | None = None,
+    cluster_specificity: dict[int, float] | None = None,
 ) -> dict[str, Any]:
     """Write tfidf_cluster (pipe-separated cluster labels) and purpose_keywords to DB.
 
     tfidf_cluster format: "label_a|label_b|label_c" where each label is the
     comma-separated c-TF-IDF terms for that cluster.
-    Companies with no cluster above the similarity threshold get "Undefined".
+    Companies with no cluster above the similarity threshold get tfidf_cluster=None.
+    Companies assigned only to low-quality clusters (specificity < threshold) also
+    get tfidf_cluster=None (Phase 2a).
 
     Uses bulk_update_mappings for a single commit instead of one commit per
     batch of 200 ORM objects, avoiding SQLAlchemy change-tracking overhead.
     """
     from app.models.company import Company
 
-    stats: dict[str, Any] = {"classified": 0, "undefined": 0, "skipped": 0, "errors": []}
+    stats: dict[str, Any] = {"classified": 0, "undefined": 0, "low_quality": 0, "skipped": 0, "errors": []}
     total = len(companies)
     mappings: list[dict] = []
+    specificity_threshold = cfg.min_cluster_specificity
 
     for idx, (company, cluster_ids, kw) in enumerate(zip(companies, assignments, company_keywords)):
         try:
             if not cluster_ids:
-                tfidf_cluster = "Undefined"
+                tfidf_cluster = None
                 stats["undefined"] += 1
             else:
                 parts: list[str] = []
@@ -396,6 +469,9 @@ def save_results(
                 threshold = cfg.label_dedup_threshold
                 for cid in cluster_ids:
                     if cid not in labels_map:
+                        continue
+                    # Phase 2a: skip low-quality clusters
+                    if cluster_specificity and cluster_specificity.get(cid, 1.0) < specificity_threshold:
                         continue
                     label = labels_map[cid]
                     label_terms = {t.strip() for t in label.split(",")}
@@ -405,8 +481,12 @@ def save_results(
                             continue
                     parts.append(label)
                     covered_terms |= label_terms
-                tfidf_cluster = "|".join(parts) if parts else "Undefined"
-                stats["classified"] += 1
+                if parts:
+                    tfidf_cluster = "|".join(parts)
+                    stats["classified"] += 1
+                else:
+                    tfidf_cluster = None
+                    stats["low_quality"] += 1
             mappings.append({"id": company.id, "tfidf_cluster": tfidf_cluster, "purpose_keywords": kw})
         except Exception as exc:  # noqa: BLE001
             stats["errors"].append(f"{company.uid}: {exc}")
@@ -549,6 +629,7 @@ def recompute_keywords(
     t2 = time.time()
     if progress_cb:
         progress_cb(0, len(companies), {**stats, "step": "keywords"})
+    cleaned = strip_boilerplate(cleaned)
     vectorizer, X_tfidf = vectorize(cleaned, cfg)
     feature_names = vectorizer.get_feature_names_out()
 
@@ -671,13 +752,14 @@ def run_pipeline(
 
     # ── Step 2: TF-IDF ──
     t2 = time.time()
+    cleaned = strip_boilerplate(cleaned)
     vectorizer, X_tfidf = vectorize(cleaned, cfg)
     feature_names = vectorizer.get_feature_names_out()
     logger.info(f"[3/7] TF-IDF done in {time.time()-t2:.1f}s — shape: {X_tfidf.shape}")
 
     # ── Step 3: Dimensionality reduction ──
     t3 = time.time()
-    X_reduced = reduce_dimensions(X_tfidf, cfg)
+    svd, X_reduced = reduce_dimensions(X_tfidf, cfg)
     logger.info(f"[4/7] SVD done in {time.time()-t3:.1f}s — shape: {X_reduced.shape}")
 
     # ── Step 4: K-Means ──
@@ -692,7 +774,21 @@ def run_pipeline(
     # ── Step 5: Label clusters ──
     t5 = time.time()
     labels_map = label_clusters(km.labels_, X_tfidf, feature_names, actual_k, cfg)
-    logger.info(f"[6/7] Labeling done in {time.time()-t5:.1f}s")
+    cluster_specificity = score_cluster_specificity(labels_map, vectorizer)
+    n_low = sum(1 for s in cluster_specificity.values() if s < cfg.min_cluster_specificity)
+    logger.info(f"[6/7] Labeling done in {time.time()-t5:.1f}s — {n_low}/{actual_k} low-quality clusters")
+
+    # ── Step 5d: Registry matching — replace raw labels with stable canonical names ──
+    from app.crud.cluster_registry import deactivate_missing_clusters, get_or_create_registry_entry
+    canonical_labels_map: dict[int, str] = {}
+    seen_canonical: set[str] = set()
+    for cid, label in labels_map.items():
+        entry = get_or_create_registry_entry(db, label)
+        canonical_labels_map[cid] = entry.canonical_name
+        seen_canonical.add(entry.canonical_name)
+    deactivate_missing_clusters(db, seen_canonical)
+    db.commit()
+    logger.info(f"[6d/7] Registry sync done — {len(seen_canonical)} active canonical clusters")
 
     # ── Step 5b: Multi-label assignment ──
     t5b = time.time()
@@ -724,7 +820,7 @@ def run_pipeline(
     label_counter: Counter = Counter()
     for cluster_ids in assignments:
         for cid in cluster_ids:
-            label_counter[labels_map[cid]] += 1
+            label_counter[canonical_labels_map[cid]] += 1
     stats["summary"] = [
         {"label": label, "company_count": count}
         for label, count in label_counter.most_common(50)
@@ -738,9 +834,15 @@ def run_pipeline(
         if progress_cb:
             progress_cb(done, total, s)
 
-    save_stats = save_results(db, companies, assignments, labels_map, company_keywords, cfg, _save_cb)
+    save_stats = save_results(db, companies, assignments, canonical_labels_map, company_keywords, cfg, _save_cb, cluster_specificity=cluster_specificity)
     stats.update(save_stats)
     logger.info(f"[7/7] DB save done in {time.time()-t6:.1f}s")
+
+    # ── Persist trained artifacts to S3 (Phase 2c) ──
+    try:
+        _save_pipeline_artifacts(vectorizer, svd, km, canonical_labels_map)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("S3 artifact upload failed (incremental assignment unavailable): %s", exc)
 
     # ── Cross-cluster analysis ──
     try:
@@ -751,4 +853,293 @@ def run_pipeline(
         stats["analysis_file"] = None
 
     logger.info(f"Total pipeline time: {time.time()-t_total:.1f}s")
+    return stats
+
+
+# ── Phase 2c: S3 artifact persistence ─────────────────────────────────────────
+
+_S3_TFIDF_KEY = "models/tfidf_vectorizer.pkl"
+_S3_SVD_KEY = "models/svd_transformer.pkl"
+_S3_CENTROIDS_KEY = "models/kmeans_centroids.npy"
+_S3_CENTROID_MAP_KEY = "models/centroid_registry_map.json"
+
+
+def _save_pipeline_artifacts(vectorizer, svd, km, canonical_labels_map: dict[int, str]) -> None:
+    """Pickle and upload TF-IDF vectorizer, SVD transformer, K-Means centroids and
+    centroid→label map to S3."""
+    import io
+    import json
+    import pickle
+
+    from app.services import s3_client
+
+    if not s3_client.is_models_bucket_configured():
+        logger.debug("S3_BUCKET_MODELS not configured — skipping artifact upload")
+        return
+
+    for obj, key in ((vectorizer, _S3_TFIDF_KEY), (svd, _S3_SVD_KEY)):
+        buf = io.BytesIO()
+        pickle.dump(obj, buf)
+        s3_client.upload_model_bytes(buf.getvalue(), key)
+
+    # Centroids (normalised, float32)
+    from sklearn.preprocessing import normalize
+    centers_norm = normalize(km.cluster_centers_).astype("float32")
+    s3_client.upload_model_bytes(centers_norm.tobytes(), _S3_CENTROIDS_KEY)
+
+    # centroid index → canonical name mapping + shape metadata
+    centroid_map = {str(k): v for k, v in canonical_labels_map.items()}
+    shape_info = {"rows": centers_norm.shape[0], "cols": centers_norm.shape[1]}
+    payload = {"shape": shape_info, "centroid_map": centroid_map}
+    s3_client.upload_model_bytes(json.dumps(payload).encode("utf-8"), _S3_CENTROID_MAP_KEY)
+
+    logger.info("Pipeline artifacts uploaded to S3 (%d centroids)", centers_norm.shape[0])
+
+
+@dataclass
+class _PipelineArtifacts:
+    vectorizer: Any
+    svd: Any             # TruncatedSVD fitted transformer
+    centroids: Any       # np.ndarray (K, D) normalised float32 in SVD space
+    centroid_map: dict[str, str]  # str(centroid_idx) → canonical_name
+
+
+from functools import lru_cache
+
+@lru_cache(maxsize=1)
+def _load_pipeline_artifacts() -> _PipelineArtifacts | None:
+    """Download and cache pipeline artifacts from S3. Returns None if unavailable."""
+    import io
+    import json
+    import pickle
+
+    import numpy as np
+
+    from app.services import s3_client
+
+    if not s3_client.is_models_bucket_configured():
+        return None
+    try:
+        vec_bytes = s3_client.download_model_bytes(_S3_TFIDF_KEY)
+        vectorizer = pickle.loads(vec_bytes)
+
+        svd_bytes = s3_client.download_model_bytes(_S3_SVD_KEY)
+        svd = pickle.loads(svd_bytes)
+
+        map_bytes = s3_client.download_model_bytes(_S3_CENTROID_MAP_KEY)
+        payload = json.loads(map_bytes.decode("utf-8"))
+        shape = payload["shape"]
+        centroid_map: dict[str, str] = payload["centroid_map"]
+
+        cen_bytes = s3_client.download_model_bytes(_S3_CENTROIDS_KEY)
+        centroids = np.frombuffer(cen_bytes, dtype="float32").reshape(shape["rows"], shape["cols"])
+
+        logger.info("Pipeline artifacts loaded from S3 (%d centroids)", centroids.shape[0])
+        return _PipelineArtifacts(vectorizer=vectorizer, svd=svd, centroids=centroids, centroid_map=centroid_map)
+    except Exception as exc:
+        logger.warning("Could not load pipeline artifacts from S3: %s", exc)
+        return None
+
+
+def _prepare_text_for_artifacts(company, cfg: PipelineConfig, stopwords: set[str]) -> str:
+    """Return a clean, stopword-filtered text string ready for vectorizer.transform()."""
+    text = (
+        company.purpose_keywords.replace(",", " ")
+        if company.purpose_keywords
+        else (company.purpose or "")
+    )
+    tokens = [
+        t for t in text.lower().split()
+        if t not in stopwords and len(t) > cfg.min_token_length
+    ]
+    return " ".join(tokens)
+
+
+def assign_cluster_incremental(db, company, cfg: PipelineConfig | None = None) -> bool:
+    """Assign tfidf_cluster to a single company without running the full pipeline.
+
+    Uses S3-cached TF-IDF vectorizer + SVD transformer + K-Means centroids from
+    the last full run. Projects the document through the same pipeline the full
+    run used (TF-IDF → SVD → L2 normalise → cosine to centroids).
+    Returns True if a cluster was assigned, False if skipped/unavailable.
+    """
+    if cfg is None:
+        cfg = PipelineConfig()
+
+    if not company.purpose_keywords and not company.purpose:
+        return False
+
+    artifacts = _load_pipeline_artifacts()
+    if artifacts is None:
+        return False
+
+    try:
+        import numpy as np
+        from sklearn.preprocessing import normalize
+
+        stopwords = get_stopwords(cfg)
+        clean_text = _prepare_text_for_artifacts(company, cfg, stopwords)
+        if not clean_text.strip():
+            return False
+
+        X_tfidf = artifacts.vectorizer.transform([clean_text])
+        X_svd = artifacts.svd.transform(X_tfidf)
+        X_norm = normalize(X_svd, norm="l2")   # shape (1, D)
+
+        # Cosine similarity to all centroids (centroids already normalised)
+        sims = (X_norm @ artifacts.centroids.T)[0]  # shape (K,)
+        best_idx = int(np.argmax(sims))
+        best_sim = float(sims[best_idx])
+
+        if best_sim < cfg.min_similarity:
+            return False
+
+        best_label = artifacts.centroid_map.get(str(best_idx))
+        if not best_label:
+            return False
+
+        from app.models.company import Company as CompanyModel
+        db.query(CompanyModel).filter(CompanyModel.id == company.id).update(
+            {"tfidf_cluster": best_label}
+        )
+        db.commit()
+        return True
+
+    except Exception as exc:
+        logger.warning("assign_cluster_incremental failed for company %s: %s", getattr(company, "uid", "?"), exc)
+        return False
+
+
+def extract_keywords_incremental(company, cfg: PipelineConfig | None = None) -> str | None:
+    """Extract purpose_keywords for a single company using the S3-cached TF-IDF vectorizer.
+
+    Applies the same IDF weights and bigram-deduplication logic as the full pipeline,
+    but without refitting — uses the vectorizer from the last full run.
+    Returns a comma-separated keyword string or None if unavailable/empty.
+    """
+    if cfg is None:
+        cfg = PipelineConfig()
+
+    if not company.purpose and not company.purpose_keywords:
+        return None
+
+    artifacts = _load_pipeline_artifacts()
+    if artifacts is None:
+        return None
+
+    try:
+        import numpy as np
+
+        stopwords = get_stopwords(cfg)
+        clean_text = _prepare_text_for_artifacts(company, cfg, stopwords)
+        if not clean_text.strip():
+            return None
+
+        X = artifacts.vectorizer.transform([clean_text])
+        X_csr = X.tocsr()
+        feature_names = artifacts.vectorizer.get_feature_names_out()
+
+        start, end = int(X_csr.indptr[0]), int(X_csr.indptr[1])
+        if start == end:
+            return None
+
+        col_indices = X_csr.indices[start:end]
+        values = X_csr.data[start:end].copy()
+
+        # Apply bigram penalty (same as full pipeline)
+        for k, ci in enumerate(col_indices):
+            if " " in feature_names[ci]:
+                values[k] *= cfg.bigram_penalty
+
+        candidates = cfg.top_keywords_per_company * 4
+        order = np.argsort(values)[::-1][:candidates]
+        selected: list[str] = []
+        covered: set[str] = set()
+
+        for j in order:
+            if len(selected) == cfg.top_keywords_per_company:
+                break
+            if values[j] < cfg.min_keyword_score:
+                break
+            term = feature_names[col_indices[j]]
+            words = set(term.split())
+            if words.issubset(covered):
+                continue
+            selected.append(term)
+            covered.update(words)
+
+        return ",".join(selected) if selected else None
+
+    except Exception as exc:
+        logger.warning("extract_keywords_incremental failed for company %s: %s", getattr(company, "uid", "?"), exc)
+        return None
+
+
+# ── Bulk incremental keyword re-extraction ─────────────────────────────────────
+
+def reextract_keywords_all(
+    db,
+    cfg: PipelineConfig | None = None,
+    *,
+    only_missing: bool = False,
+    canton: str | None = None,
+    limit: int | None = None,
+    progress_cb: Callable[[int, int, dict], None] | None = None,
+) -> dict[str, Any]:
+    """Re-extract purpose_keywords for all companies using the S3-cached TF-IDF vectorizer.
+
+    Lighter than recompute_keywords: no corpus refit, no spaCy, no SVD.
+    Uses the vectorizer from the last full hdbscan_cluster run.
+
+    only_missing: if True, skip companies that already have purpose_keywords.
+    """
+    from app.models.company import Company as CompanyModel
+
+    if cfg is None:
+        cfg = PipelineConfig()
+
+    stats: dict[str, Any] = {"updated": 0, "skipped_no_artifacts": 0, "skipped_no_purpose": 0, "errors": []}
+
+    artifacts = _load_pipeline_artifacts()
+    if artifacts is None:
+        logger.warning("reextract_keywords_all: S3 artifacts not available — aborting")
+        stats["skipped_no_artifacts"] = -1
+        return stats
+
+    q = db.query(CompanyModel).filter(CompanyModel.purpose.isnot(None))
+    if only_missing:
+        q = q.filter(CompanyModel.purpose_keywords.is_(None))
+    if canton:
+        q = q.filter(CompanyModel.canton == canton.upper())
+    q = q.order_by(CompanyModel.id.asc())
+    if limit:
+        q = q.limit(limit)
+
+    total = q.count()
+    mappings: list[dict] = []
+
+    for i, company in enumerate(q.yield_per(cfg.db_batch_size), start=1):
+        try:
+            kw = extract_keywords_incremental(company, cfg)
+            if kw is None:
+                stats["skipped_no_purpose"] += 1
+            else:
+                mappings.append({"id": company.id, "purpose_keywords": kw})
+                stats["updated"] += 1
+        except Exception as exc:  # noqa: BLE001
+            stats["errors"].append(f"{company.uid}: {exc}")
+
+        if len(mappings) >= cfg.db_batch_size:
+            db.bulk_update_mappings(CompanyModel, mappings)
+            db.commit()
+            mappings.clear()
+            if progress_cb:
+                progress_cb(i, total, stats)
+
+    if mappings:
+        db.bulk_update_mappings(CompanyModel, mappings)
+        db.commit()
+        if progress_cb:
+            progress_cb(total, total, stats)
+
     return stats

@@ -74,7 +74,9 @@ _QUEUE_FOR_JOB_TYPE: dict[str, str] = {
     "csv_export":                "helvex-api",
     "hdbscan_cluster":           "helvex-ml",
     "recompute_keywords":        "helvex-ml",
+    "reextract_keywords":        "helvex-ml",
     "cluster_analysis":          "helvex-ml",
+    "cluster_drift_check":       "helvex-ml",
 }
 
 
@@ -91,7 +93,8 @@ def _compute_dedup_key(job_type: str, org_id: int | None, params: dict) -> str |
         "recalculate_scores", "recalculate_google_scores",
         "reextract_purpose", "reclassify_noga",
         "re_geocode",
-        "hdbscan_cluster", "recompute_keywords", "cluster_analysis",
+        "hdbscan_cluster", "recompute_keywords", "reextract_keywords",
+        "cluster_analysis", "cluster_drift_check",
     }
     # No dedup: every trigger creates a fresh independent job.
     NO_DEDUP = {"batch", "csv_export"}
@@ -698,6 +701,36 @@ def _run_job(app, job_id: int) -> None:  # noqa: C901
                 )
                 done_msg = f"Done — {stats['updated']} keywords updated, {stats['skipped']} skipped"
 
+            elif job.job_type == "reextract_keywords":
+                from app.services.cluster_pipeline import PipelineConfig, reextract_keywords_all
+
+                def _progress(done: int, total: int, stats: dict) -> None:
+                    _assert_not_cancelled()
+                    msg = f"[keywords] {done}/{total} — {stats.get('updated', 0)} updated, {stats.get('skipped_no_purpose', 0)} skipped"
+                    crud.update_progress(db, job, message=msg, done=done, total=total, stats=stats)
+                    crud.create_event(db, job_id=job.id, level="debug", message=msg)
+                    _maybe_sync(app, job_type=job.job_type, label=job.label, message=msg, stats=dict(stats), error=None, done=False)
+                    _heartbeat()
+
+                cfg = PipelineConfig(
+                    top_keywords_per_company=int(params.get("top_keywords_per_company", 10)),
+                )
+                stats = reextract_keywords_all(
+                    db, cfg,
+                    only_missing=bool(params.get("only_missing", False)),
+                    canton=params.get("canton") or None,
+                    limit=int(params["limit"]) if params.get("limit") else None,
+                    progress_cb=_progress,
+                )
+                if stats.get("skipped_no_artifacts") == -1:
+                    done_msg = "Aborted — no S3 artifacts found. Run a full hdbscan_cluster job first."
+                else:
+                    done_msg = (
+                        f"Done — {stats['updated']} updated, "
+                        f"{stats['skipped_no_purpose']} skipped (no purpose), "
+                        f"{len(stats['errors'])} errors"
+                    )
+
             elif job.job_type == "cluster_analysis":
                 from app.services.cluster_pipeline import PipelineConfig, analyze_cross_cluster_terms
 
@@ -708,6 +741,52 @@ def _run_job(app, job_id: int) -> None:  # noqa: C901
                 analyze_cross_cluster_terms(db, cfg)
                 stats = {"errors": []}
                 done_msg = "Cross-cluster analysis written — download at /static/cluster_analysis.txt"
+
+            elif job.job_type == "cluster_drift_check":
+                # Check what fraction of companies created in the last N days have
+                # tfidf_cluster = NULL; warn if above threshold (Phase 2c).
+                from datetime import datetime, timedelta, timezone
+                from app.models.company import Company as _Company
+
+                days = int(params.get("days", 7))
+                threshold = float(params.get("warn_threshold", 0.30))
+                cutoff = datetime.now(tz=timezone.utc) - timedelta(days=days)
+
+                total_recent = (
+                    db.query(_Company)
+                    .filter(_Company.created_at >= cutoff)
+                    .count()
+                )
+                unclassified_recent = (
+                    db.query(_Company)
+                    .filter(_Company.created_at >= cutoff)
+                    .filter(_Company.tfidf_cluster.is_(None))
+                    .count()
+                )
+                fraction = unclassified_recent / total_recent if total_recent > 0 else 0.0
+                stats = {
+                    "days": days,
+                    "total_recent": total_recent,
+                    "unclassified_recent": unclassified_recent,
+                    "fraction_unclassified": round(fraction, 4),
+                    "threshold": threshold,
+                    "drift_detected": fraction > threshold,
+                    "errors": [],
+                }
+                if fraction > threshold:
+                    msg = (
+                        f"DRIFT DETECTED: {unclassified_recent}/{total_recent} "
+                        f"({fraction:.1%}) of companies from the last {days} days "
+                        f"have no cluster (threshold {threshold:.0%}). "
+                        f"Consider triggering a full hdbscan_cluster run."
+                    )
+                    logger.warning(msg)
+                    crud.create_event(db, job_id=job.id, level="warning", message=msg)
+                done_msg = (
+                    f"Drift check: {unclassified_recent}/{total_recent} unclassified "
+                    f"({fraction:.1%}) in last {days} days — "
+                    f"{'DRIFT DETECTED' if fraction > threshold else 'OK'}"
+                )
 
             elif job.job_type == "claude_classify":
                 from app.config import settings as app_settings

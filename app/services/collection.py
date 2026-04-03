@@ -1656,6 +1656,17 @@ def run_zefix_detail_collect(
                 if rescore_from_stored_results(db, updated):
                     stats["scored"] += 1
 
+            # Extract purpose_keywords incrementally if purpose changed or keywords missing
+            if updated.purpose and not updated.purpose_keywords:
+                try:
+                    from app.services.cluster_pipeline import extract_keywords_incremental
+                    kw = extract_keywords_incremental(updated)
+                    if kw:
+                        crud.update_company(db, updated, CompanyUpdate(purpose_keywords=kw))
+                        updated.purpose_keywords = kw  # keep in-memory for NOGA below
+                except Exception:
+                    pass  # S3 artifacts may not exist yet; non-fatal
+
             if noga_enabled:
                 try:
                     noga_update = apply_noga_classification(db, updated)
