@@ -84,11 +84,11 @@ mlWorker:
   tolerations: []
   resources:
     requests:
-      cpu: 500m
-      memory: 1Gi
+      cpu: "4"
+      memory: 20Gi
     limits:
-      cpu: "2"
-      memory: 2Gi
+      cpu: "6"
+      memory: 25Gi
 
 # CloudNativePG PostgreSQL cluster
 postgres:

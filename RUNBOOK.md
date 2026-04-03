@@ -17,6 +17,7 @@ General fixes, recovery procedures, and operational checklists.
 9. [Deploy: Migration Fails on Startup](#9-deploy-migration-fails-on-startup)
 10. [Useful kubectl Commands](#10-useful-kubectl-commands)
 11. [Logs: Where to Find Them](#11-logs-where-to-find-them)
+11b. [Logs: ML Worker on Home Node](#11b-logs-ml-worker-on-home-node)
 12. [Debug: Temporarily Enable Verbose Logging](#12-debug-temporarily-enable-verbose-logging)
 12b. [Logging: App Loggers Not Emitting](#12b-logging-app-loggers-not-emitting-to-stdout)
 13. [Deploy: Node Disk Full Quick Cleanup](#13-deploy-node-disk-full-quick-cleanup)
@@ -536,6 +537,69 @@ kubectl logs -n helvex-prod -l app.kubernetes.io/component=app -p
 ```
 
 Log format is `LEVEL:logger_name:message` (e.g. `INFO:app.api.routes.auth:auth.login_ok user_id=3`).
+
+## 11b. Logs: ML Worker on Home Node
+
+If `kubectl logs` fails only for `helvex-ml-worker-*` pods while other pods work, the control-plane usually cannot reach the home node kubelet (`10250/tcp`).
+
+### Fast path: read logs directly on the home node
+
+From the control-plane server:
+
+```bash
+# 1) Find current ml-worker pod name
+kubectl get pods -n helvex-prod -l app.kubernetes.io/component=ml-worker -o wide
+
+# 2) SSH to the home node (replace host if needed)
+ssh ubuntu@ubuntuserverhome
+
+# 3) On home node: find container and tail logs via CRI
+sudo crictl ps --name ml-worker
+sudo crictl logs -f <CONTAINER_ID>
+
+# Optional fallback if crictl output is empty
+sudo journalctl -u k3s-agent -f
+```
+
+### Make `kubectl logs` work from control-plane (recommended fix)
+
+Run these checks in order:
+
+```bash
+# 1) Confirm ml-worker pod is on the home node
+kubectl get pod -n helvex-prod -l app.kubernetes.io/component=ml-worker -o wide
+
+# 2) Get the node InternalIP used by the API server for kubelet calls
+kubectl get node ubuntuserverhome -o jsonpath='{.status.addresses[?(@.type=="InternalIP")].address}'
+echo
+
+# 3) From control-plane, verify kubelet port reachability
+nc -vz <HOME_NODE_INTERNAL_IP> 10250
+```
+
+If step 3 fails, fix networking/firewall/NAT so control-plane can reach home node `10250/tcp`.
+
+Then ensure the home node advertises a routable address to the cluster:
+
+```bash
+# On home node
+sudo grep -E 'node-ip|node-external-ip' /etc/rancher/k3s/config.yaml
+
+# If missing/wrong, set node-ip to an address reachable from control-plane,
+# then restart the agent:
+sudo systemctl restart k3s-agent
+```
+
+Re-check:
+
+```bash
+kubectl get node ubuntuserverhome -o wide
+kubectl logs -n helvex-prod -l app.kubernetes.io/component=ml-worker --tail=200
+```
+
+Notes:
+- `kubectl logs` is proxied API server -> kubelet on the node hosting the pod.
+- If only home-node pods fail, this is almost always reachability to that node's kubelet, not an app logging issue.
 
 ### Grafana (metrics + dashboards)
 
