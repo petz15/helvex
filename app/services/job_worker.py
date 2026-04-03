@@ -69,7 +69,7 @@ _QUEUE_FOR_JOB_TYPE: dict[str, str] = {
     "recalculate_scores":        "helvex-api",
     "recalculate_google_scores": "helvex-api",
     "reextract_purpose":         "helvex-api",
-    "reclassify_noga":           "helvex-api",
+    "reclassify_noga":           "helvex-ml",
     "claude_classify":           "helvex-api",
     "csv_export":                "helvex-api",
     "hdbscan_cluster":           "helvex-ml",

@@ -48,12 +48,13 @@ apiWorker:
 mlWorker:
   enabled: true
   # keda.enabled: true  — uncomment after KEDA + Hetzner Cluster Autoscaler are installed
-  # nodeSelector: {workload: ml}
-  # tolerations:
-  #   - key: workload
-  #     operator: Equal
-  #     value: ml
-  #     effect: NoSchedule
+  # Home-only mode for now: no cloud fallback.
+  nodeSelector: {workload: ml}
+  tolerations:
+    - key: workload
+      operator: Equal
+      value: ml
+      effect: NoSchedule
 
 postgres:
   enabled: true

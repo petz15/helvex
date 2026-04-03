@@ -10,8 +10,8 @@ Requires REDIS_URL and USE_RQ=true in the environment.
 
 WORKER_TYPE controls which queue(s) this worker listens to:
     zefix  — helvex-zefix-p4 ... helvex-zefix-p0 (bulk/detail/initial)
-    api    — helvex-api-p4   ... helvex-api-p0   (scoring, geocode, NOGA, Claude classify)
-    ml     — helvex-ml                             (HDBSCAN clustering, keyword extraction)
+    api    — helvex-api-p4   ... helvex-api-p0   (scoring, geocode, Claude classify)
+    ml     — helvex-ml                             (HDBSCAN clustering, keyword extraction, NOGA reclassification)
 
 Defaults to "api" when WORKER_TYPE is not set (backward-compatible).
 

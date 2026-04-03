@@ -21,6 +21,8 @@ General fixes, recovery procedures, and operational checklists.
 12b. [Logging: App Loggers Not Emitting](#12b-logging-app-loggers-not-emitting-to-stdout)
 13. [Deploy: Node Disk Full Quick Cleanup](#13-deploy-node-disk-full-quick-cleanup)
 14. [Node: High CPU Load / k3s API Unresponsive](#14-node-high-cpu-load--k3s-api-unresponsive)
+15. [Monetization Ops Checks (Phase 4 and Phase 5)](#15-monetization-ops-checks-phase-4-and-phase-5)
+16. [Home ML Node Rollout (Phases A-C)](#16-home-ml-node-rollout-phases-a-c)
 
 ---
 
@@ -934,3 +936,167 @@ Expected:
 
 - Jobs enqueued by a superadmin should bypass credit checks.
 - No deduction row is required for bypassed jobs.
+
+---
+
+## 16. Home ML Node Rollout (Phases A-C)
+
+This chapter is the step-by-step implementation tracker for home-first ML scheduling with cloud fallback.
+
+Current decision: run in home-only mode for now. Cloud fallback (Phase B/C) is deferred.
+
+### Status tracker
+
+- Phase A (add home node): completed
+- Phase B (cloud fallback node class): deferred
+- Phase C (scheduling policy in Helm): deferred
+
+### Current operating mode (active)
+
+- ML runs on home node only
+- No cloud fallback node class is configured
+- If home node is down, ML jobs remain queued until home node returns
+
+Operational note:
+- Keep KEDA behavior unchanged if desired, but expect Pending pods or queued jobs when no schedulable home ML node is available.
+
+### Home-only ops checklist (small)
+
+Daily checks:
+- Verify home node is Ready
+- Verify ML labels/taint are still present
+- Verify no long-running Pending ML pod
+
+```bash
+kubectl get node ubuntuserverhome
+kubectl describe node ubuntuserverhome | grep -E "Taints|workload=|location="
+kubectl get pods -n helvex-prod -l app.kubernetes.io/component=ml-worker -o wide
+```
+
+Planned home shutdown:
+
+```bash
+kubectl cordon ubuntuserverhome
+kubectl drain ubuntuserverhome --ignore-daemonsets --delete-emptydir-data
+```
+
+Expected during shutdown:
+- ML jobs stay queued
+- No cloud fallback scheduling in current mode
+
+Resume home node:
+
+```bash
+kubectl uncordon ubuntuserverhome
+kubectl get node ubuntuserverhome
+kubectl get pods -n helvex-prod -l app.kubernetes.io/component=ml-worker -o wide
+```
+
+### Phase A completion record
+
+Completed and verified:
+- Home node `ubuntuserverhome` joined as k3s agent
+- Control plane is reachable via Tailscale (`100.95.141.34:6443`)
+- Home node labeled: `workload=ml`, `location=home`
+- Home node tainted: `workload=ml:NoSchedule`
+
+Post-completion hardening:
+- Rotate k3s node token (it was exposed during troubleshooting)
+
+### Phase B next steps (cloud fallback node class, deferred)
+
+Goal: ensure cloud fallback nodes are also ML-capable and satisfy the same required scheduling key.
+
+1) Pick at least one cloud node (or autoscaled node template/group) for ML fallback.
+
+2) Apply labels on cloud fallback nodes:
+
+```bash
+kubectl label node <cloud-ml-node> workload=ml location=cloud --overwrite
+```
+
+3) If using taints for dedicated ML nodes, apply the same taint model:
+
+```bash
+kubectl taint node <cloud-ml-node> workload=ml:NoSchedule --overwrite
+```
+
+4) Validate labels and taints:
+
+```bash
+kubectl get nodes --show-labels | grep -E "workload=ml|location=cloud|location=home"
+kubectl describe node <cloud-ml-node> | grep -E "Taints|workload=|location="
+kubectl describe node ubuntuserverhome | grep -E "Taints|workload=|location="
+```
+
+Phase B acceptance checks:
+- At least one cloud node has `workload=ml` and `location=cloud`
+- Home node remains `workload=ml` and `location=home`
+- Taint/toleration model is consistent across ML nodes
+
+### Phase C next steps (home preferred, cloud fallback scheduling, deferred)
+
+Goal: configure ML worker to require ML nodes, prefer home, and tolerate ML taints.
+
+1) Update Helm chart to support `mlWorker.affinity` in the ML worker Deployment template.
+
+2) Configure prod values for ML worker scheduling:
+
+```yaml
+mlWorker:
+  enabled: true
+  # keda.enabled should be true once KEDA is installed and active
+  nodeSelector:
+    workload: ml
+  tolerations:
+    - key: workload
+      operator: Equal
+      value: ml
+      effect: NoSchedule
+  affinity:
+    nodeAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        nodeSelectorTerms:
+          - matchExpressions:
+              - key: workload
+                operator: In
+                values: ["ml"]
+      preferredDuringSchedulingIgnoredDuringExecution:
+        - weight: 100
+          preference:
+            matchExpressions:
+              - key: location
+                operator: In
+                values: ["home"]
+```
+
+3) Deploy and verify scheduling behavior:
+
+```bash
+# Trigger one ML job so worker scales from 0 to 1
+kubectl get pods -n helvex-prod -l app.kubernetes.io/component=ml-worker -o wide -w
+
+# Confirm pod lands on home node when available
+kubectl get pod -n helvex-prod -l app.kubernetes.io/component=ml-worker -o wide
+
+# Simulate planned home downtime
+kubectl cordon ubuntuserverhome
+kubectl drain ubuntuserverhome --ignore-daemonsets --delete-emptydir-data
+
+# Trigger ML job again and verify fallback to cloud node
+kubectl get pods -n helvex-prod -l app.kubernetes.io/component=ml-worker -o wide -w
+
+# Recover home node
+kubectl uncordon ubuntuserverhome
+```
+
+Phase C acceptance checks:
+- ML worker scales from 0 when queue has jobs
+- With home node healthy, ML pod schedules to `ubuntuserverhome`
+- With home node unavailable, ML pod schedules to cloud `workload=ml` node
+- ML worker does not land on non-ML nodes
+
+### Update log
+
+- 2026-04-03: Phase A completed; Phase B/C tasks documented.
+- 2026-04-03: Decision recorded to defer Phase B/C and continue in home-only ML mode.

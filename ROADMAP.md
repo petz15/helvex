@@ -87,7 +87,10 @@
 - [ ] **Monitoring & Logging stack** — deploy Prometheus + Grafana on K3s; scrape app metrics (request rate, job queue depth, error rate), Kubernetes node/pod metrics, and Redis/PostgreSQL exporters; alert on pod restarts, high memory, queue stalls -> started but not fully done yet probably not going to continue with prometheus or grafana for a while
 - [ ] **Web analytics** — integrate Google Tag Manager + GA4 (or privacy-first alternative like Plausible/Umami); track page views, funnel steps (signup, first job, first export), feature usage; cookie consent banner for GDPR compliance
 - [ ] **Cluster autoscaler (node-level)** — KEDA handles pod-level; Hetzner Cluster Autoscaler handles node provisioning for ML workload node pool; requires `hcloud-cloud-controller-manager` + CA Helm chart + node group config mapping `workload=ml` label to specific server type (cx41 or cx51); Terraform manages control-plane + DB nodes only; CA manages ML worker node pool separately
-- [ ] **home ML node** - a plan for adding a home server as occaisonal ML node for my own ML uses in order to avoid pricy hetzner nodes for ML worker while I am testing and configuring some stuff see plan home-ml-node-plan.md
+- [x] **home ML node phase A** - home server added as k3s ML node (`ubuntuserverhome`) with `workload=ml`, `location=home`, and ML taint model
+- [ ] **home ML node phase B (deferred)** - add cloud fallback ML node class with labels `workload=ml`, `location=cloud` and matching taints/tolerations
+- [ ] **home ML node phase C (deferred)** - implement Helm affinity policy: required `workload=ml`, preferred `location=home`, cloud fallback when home unavailable
+- [ ] **home ML node mode policy** - keep home-only ML mode active for now (no cloud fallback); if home node is unavailable, ML jobs queue until node recovery
 - [ ] **Improve classifications** - improvements to the classification NOGA and tf-idf/HBD-SCan see claude plan: dazzling-seeking-harp.md
 
 
