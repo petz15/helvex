@@ -15,10 +15,10 @@ on:
           - app
           - frontend
           - backend
-      restore_source:
+      restore_source: 
         description: Optional restore source (helvex-pg-YYYYMMDDTHHMMSSZ); leave empty to use restore-point file
         required: false
-        default: ""
+        default: "helvex-pg-20260404T042945Z"
         type: string
 
 jobs:
