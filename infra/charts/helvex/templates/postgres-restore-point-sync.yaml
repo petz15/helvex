@@ -96,10 +96,14 @@ spec:
                   cpu: 200m
                   memory: 128Mi
               volumeMounts:
+                - name: tmp
+                  mountPath: /tmp
                 - name: meta
                   mountPath: /meta
                   readOnly: true
           volumes:
+            - name: tmp
+              emptyDir: {}
             - name: meta
               configMap:
                 name: pg-backup-meta
