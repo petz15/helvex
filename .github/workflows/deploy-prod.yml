@@ -259,12 +259,15 @@ jobs:
           fi
 
           # --- restoreSourceServerName (where to restore FROM) ---
+          # IMPORTANT: This is the *stable* server name where the original backups live in S3 (e.g., 'helvex-pg').
+          # This is NOT the timestamped value. The timestamp in restore-point.json is for reference only.
           # Selection order:
           # 1) S3 restore-point file (restore-point.json)
           # 2) Manual override (workflow_dispatch input restore_source)
           # 3) Repo variable POSTGRES_RESTORE_SOURCE
           # 4) Repository file restore-point.json (tracked in git)
           # 5) Existing ConfigMap value pg-backup-meta.data.restoreSource
+          # 6) Default: 'helvex-pg' (the original stable server name)
 
           install_awscli() {
             if command -v aws >/dev/null 2>&1; then
@@ -311,6 +314,7 @@ jobs:
           POINTER_URI="${S3_BACKUP_PREFIX}restore-point.json"
           POINTER_SOURCE=""
           RESTORE_SOURCE=""
+          RESTORE_SOURCE_ORIGIN=""
 
           install_awscli
           aws --version
@@ -321,6 +325,7 @@ jobs:
             if [ -n "$POINTER_SOURCE" ]; then
               echo "Using restore source from pointer file: $POINTER_SOURCE"
               RESTORE_SOURCE="$POINTER_SOURCE"
+              RESTORE_SOURCE_ORIGIN="s3_restore_point"
             else
               echo "Pointer file found but restoreSource is empty; falling back"
             fi
@@ -331,11 +336,13 @@ jobs:
 
           if [ -z "$RESTORE_SOURCE" ] && [ -n "${MANUAL_RESTORE_SOURCE:-}" ]; then
             RESTORE_SOURCE="$MANUAL_RESTORE_SOURCE"
+            RESTORE_SOURCE_ORIGIN="workflow_input"
             echo "Using manual restore source from workflow input: $RESTORE_SOURCE"
           fi
 
           if [ -z "$RESTORE_SOURCE" ] && [ -n "${POSTGRES_RESTORE_SOURCE:-}" ]; then
             RESTORE_SOURCE="$POSTGRES_RESTORE_SOURCE"
+            RESTORE_SOURCE_ORIGIN="repo_variable"
             echo "Using restore source from repo variable: $RESTORE_SOURCE"
           fi
 
@@ -343,6 +350,7 @@ jobs:
             FILE_SOURCE=$(python3 -c "import json,sys; d=json.load(open(sys.argv[1])); print(d.get('restoreSource',''))" "restore-point.json" 2>/dev/null || true)
             if [ -n "$FILE_SOURCE" ]; then
               RESTORE_SOURCE="$FILE_SOURCE"
+              RESTORE_SOURCE_ORIGIN="repo_file"
               echo "Using restore source from repository file restore-point.json: $RESTORE_SOURCE"
             else
               echo "Repository restore-point.json exists but restoreSource is empty"
@@ -353,19 +361,20 @@ jobs:
             RESTORE_SOURCE=$(kubectl get configmap pg-backup-meta -n helvex-prod \
               -o jsonpath='{.data.restoreSource}' 2>/dev/null || echo "")
             if [ -n "$RESTORE_SOURCE" ]; then
+              RESTORE_SOURCE_ORIGIN="configmap"
               echo "Reusing restore source from ConfigMap: $RESTORE_SOURCE"
             fi
           fi
 
           if [ -z "$RESTORE_SOURCE" ]; then
-            echo "ERROR: restore source is not set." >&2
-            echo "Set one of: S3 restore-point file, workflow input restore_source, repo variable POSTGRES_RESTORE_SOURCE, or repository restore-point.json." >&2
-            exit 1
+            echo "WARNING: restore source not explicitly set; defaulting to stable server name 'helvex-pg'" >&2
+            RESTORE_SOURCE="helvex-pg"
+            RESTORE_SOURCE_ORIGIN="default_stable_name"
           fi
 
-          if ! echo "$RESTORE_SOURCE" | grep -Eq '^helvex-pg-[0-9]{8}T[0-9]{6}Z$'; then
+          if ! echo "$RESTORE_SOURCE" | grep -Eq '^[a-z0-9][a-z0-9-]*[a-z0-9]$'; then
             echo "ERROR: invalid restore source format: $RESTORE_SOURCE" >&2
-            echo "Expected: helvex-pg-YYYYMMDDTHHMMSSZ" >&2
+            echo "Expected: valid DNS-like server name (e.g., 'helvex-pg' or 'helvex-pg-20260404T042945Z')" >&2
             exit 1
           fi
 
@@ -387,7 +396,31 @@ jobs:
           rm -f "$pointer_write_tmp"
 
           echo "restore_source=$RESTORE_SOURCE" >> "$GITHUB_OUTPUT"
+          echo "restore_source_origin=${RESTORE_SOURCE_ORIGIN:-unknown}" >> "$GITHUB_OUTPUT"
           echo "Will restore from backup prefix: ${RESTORE_SOURCE}"
+
+      - name: Preflight restore summary
+        if: |
+          (github.event_name != 'workflow_dispatch' && (
+            contains(github.event.head_commit.message, '[deploy-prod]') ||
+            contains(github.event.head_commit.message, '[deploy-app]')
+          )) ||
+          (github.event_name == 'workflow_dispatch' && (
+            github.event.inputs.deploy_mode == 'prod' ||
+            github.event.inputs.deploy_mode == 'app'
+          ))
+        run: |
+          echo "Restore source preflight"
+          echo "  Restoring FROM server: ${{ steps.pg-meta.outputs.restore_source }}"
+          echo "  New cluster server name: ${{ steps.pg-meta.outputs.server_name }}"
+          echo "  Restore source origin: ${{ steps.pg-meta.outputs.restore_source_origin }}"
+
+          {
+            echo "## Restore Source Preflight"
+            echo "- restore_from_server_name: \`${{ steps.pg-meta.outputs.restore_source }}\` (stable backups in S3)"
+            echo "- new_backup_server_name: \`${{ steps.pg-meta.outputs.server_name }}\` (new cluster's backups)"
+            echo "- origin: \`${{ steps.pg-meta.outputs.restore_source_origin }}\`"
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Apply Helmfile (full deploy)
         if: |

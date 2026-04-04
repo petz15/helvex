@@ -25,6 +25,7 @@
 - Change the UX/UI for certain settings (such as seperate from account, put into explorer settings or other settings?)
 - zefix detail cant fetch detail for some companies which then loops it to do it every single time I start zefix detail collection
 - Continue on Explore page
+- Change backup methodology. currently its a mess and high chances that it takes the wrong backup i.e. older
 
 ### Blockers before real PROD
 - Save cards happens automatically
@@ -133,6 +134,7 @@
 - [ ] **Cloudflare evaluation** — assess Cloudflare for DDoS protection, CDN/caching of static assets, bot management, and WAF rules; compare cost vs current Hetzner LB + cert-manager setup; consider Workers for edge auth or rate limiting
 - [ ] **CAPTCHA evaluation** — evaluate CAPTCHA (hCaptcha / Cloudflare Turnstile / reCAPTCHA v3) for signup, login, and scraping-triggering actions; weigh friction cost against bot/abuse risk at current and projected traffic
 - [ ] **Mobile optimization** - Optimize the website for mobile traffic (maybe limit some features)
+- [ ] **verify api security** - Test and verify the security of the API  which is pretty open (how is it secured against attackers, bots and crawlers/unofficial APIs). 
 
 
 ## Bug Fixes & Known Issues

@@ -1,6 +1,4 @@
 {
-  "restoreSource": "helvex-pg-20260404T042945Z",
-  "backupServerName": "helvex-pg-20260404T042945Z",
-  "updatedAt": "2026-04-04T04:29:45Z",
-  "backupPrefix": "s3://helvex-backups/pg-prod/"
+  "restoreSource": "helvex-pg-20260331T152743Z",
+  "description": "Stable server name where original backups live in S3. CNPG will perform point-in-time recovery from this server's backups."
 }

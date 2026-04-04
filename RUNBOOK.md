@@ -59,13 +59,24 @@ kubectl get secret helvex-env -n helvex-prod -o jsonpath='{.data}' | \
 
 If they're missing, add them to the GitHub Actions secrets (`S3_ACCESS_KEY`, `S3_SECRET_KEY`) and re-run the deploy workflow to recreate the secret.
 
-**4. Set `restoreFromBackup: true` in `infra/environments/prod.yaml`**
+**4. Ensure restore source is set correctly**
+
+The deploy workflow automatically resolves the restore source in priority order:
+1. S3 pointer file `s3://helvex-backups/pg-prod/restore-point.json` (persisted by cronjob)
+2. Manual workflow_dispatch input
+3. Repo variable or file `restore-point.json`
+4. Existing ConfigMap
+5. Default: `helvex-pg` (the stable server name)
+
+The restore source should be the **stable server name** where original backups live in S3 (e.g., `helvex-pg`), NOT a timestamped value. CNPG uses WAL replay to reach point-in-time.
+
+**5. Set `restoreFromBackup: true` in `infra/environments/prod.yaml`**
 ```yaml
 postgres:
   restoreFromBackup: true   # ← add this line
 ```
 
-**5. Deploy the app**
+**6. Deploy the app**
 ```bash
 git add infra/environments/prod.yaml
 git commit -m "restore db from backup [deploy-app]"
@@ -73,12 +84,13 @@ git push
 ```
 
 CloudNativePG will:
-- Find the latest base backup in `s3://helvex-backups/pg/`
-- Restore it into a fresh 20 Gi PVC
+- Use the resolved restore source (stable server name, e.g., `helvex-pg`)
+- Find the latest base backup under that server name in S3
+- Restore it into a fresh PVC
 - Replay all WAL segments up to the latest available
 - Promote to primary
 
-**6. Watch recovery progress**
+**7. Watch recovery progress**
 ```bash
 kubectl get cluster helvex-pg -n helvex-prod -w
 # Status moves: Restoring → Running
@@ -87,7 +99,7 @@ kubectl logs -n helvex-prod helvex-pg-1 -f
 # Look for "database system is ready to accept connections"
 ```
 
-**7. Flip `restoreFromBackup` back to `false` immediately**
+**8. Flip `restoreFromBackup` back to `false` immediately**
 
 Leaving it as `true` means the next `helmfile apply` will try to re-recover and conflict with the running cluster.
 

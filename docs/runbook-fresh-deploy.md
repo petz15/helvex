@@ -37,11 +37,11 @@ Go to **github.com/petz15/helvex → Settings → Secrets and variables → Acti
 | `ARC_APP_INSTALLATION_ID` | Installation ID (from App → Install → URL contains the ID) |
 | `ARC_APP_PRIVATE_KEY` | Contents of the `.pem` file (paste the full multiline value) |
 
-GitHub repository variable required for restore selection:
+GitHub repository variable (optional, used as fallback in restore selection):
 
 | Variable | Value |
 |---|---|
-| `POSTGRES_RESTORE_SOURCE` | Backup prefix to restore from, e.g. `helvex-pg-20260404T042945Z` |
+| `POSTGRES_RESTORE_SOURCE` | Stable server name where original backups live in S3, e.g. `helvex-pg` (NOT timestamped) |
 
 > **`DB_URL` hostname:** Always use `helvex-db` (the Helm-managed ExternalName service), never `helvex-pg-rw` directly. The chart routes `helvex-db` → `helvex-pg-rw` when the connection pooler is disabled, and → `helvex-pg-pooler` when it is enabled. This means enabling/disabling the pooler is a Helm values change only — no secret rotation needed.
 
@@ -211,14 +211,16 @@ The `deploy` job will run on the `helvex-prod` ARC runner (the pod you started i
 
 1. Create the `helvex-env` K8s secret (with S3 credentials, DB password, etc.)
 2. **Resolve backup names + restore source**:
-  - `backupServerName`: generates a unique timestamped name (e.g. `helvex-pg-20260331T150000Z`) and stores it in the `pg-backup-meta` ConfigMap. Subsequent deploys reuse the same name.
-  - `restoreSourceServerName`: selected in this order:
+  - `backupServerName`: generates a unique timestamped name (e.g. `helvex-pg-20260331T150000Z`) and stores it in the `pg-backup-meta` ConfigMap. This isolates the new cluster's backup lineage. Subsequent deploys reuse the same name.
+  - `restoreSourceServerName` (CNPG reads backups FROM this server): selected in this order:
     1. S3 restore-point file `s3://helvex-backups/pg-prod/restore-point.json`
     2. Manual workflow input `restore_source` (when using `workflow_dispatch`)
     3. Repo variable `POSTGRES_RESTORE_SOURCE`
-    4. Existing ConfigMap `pg-backup-meta.data.restoreSource`
-  - The selected value must match `helvex-pg-YYYYMMDDTHHMMSSZ`.
-  - Workflow writes/updates `restore-point.json` after selection.
+    4. Repo file `restore-point.json` (tracked in git)
+    5. Existing ConfigMap `pg-backup-meta.data.restoreSource`
+    6. Default: `helvex-pg` (the stable original server name)
+  - The selected value should be the **stable server name** (e.g., `helvex-pg`), **not** a timestamped value. CNPG will use WAL replay to reach the point-in-time you want.
+  - Workflow writes/updates `restore-point.json` after selection for next deploy.
 3. Deploy the helvex chart via helmfile (PostgreSQL, Redis, app, workers)
 4. Wait for PostgreSQL to become healthy (up to 10 minutes — restore from S3 backup)
 5. Wait for app rollout
