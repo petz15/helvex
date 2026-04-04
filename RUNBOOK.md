@@ -1150,6 +1150,7 @@ tailscale ip -4
 3) On home server, join as k3s agent through the control-plane Tailscale address:
 
 ```bash
+sudo cat /var/lib/rancher/k3s/server/node-token
 curl -sfL https://get.k3s.io | K3S_URL=https://<app1-tailscale-ip>:6443 K3S_TOKEN=<node-token> sh -
 ```
 

@@ -263,7 +263,8 @@ jobs:
           # 1) S3 restore-point file (restore-point.json)
           # 2) Manual override (workflow_dispatch input restore_source)
           # 3) Repo variable POSTGRES_RESTORE_SOURCE
-          # 4) Existing ConfigMap value pg-backup-meta.data.restoreSource
+          # 4) Repository file restore-point.json (tracked in git)
+          # 5) Existing ConfigMap value pg-backup-meta.data.restoreSource
 
           install_awscli() {
             if command -v aws >/dev/null 2>&1; then
@@ -338,6 +339,16 @@ jobs:
             echo "Using restore source from repo variable: $RESTORE_SOURCE"
           fi
 
+          if [ -z "$RESTORE_SOURCE" ] && [ -f "restore-point.json" ]; then
+            FILE_SOURCE=$(python3 -c "import json,sys; d=json.load(open(sys.argv[1])); print(d.get('restoreSource',''))" "restore-point.json" 2>/dev/null || true)
+            if [ -n "$FILE_SOURCE" ]; then
+              RESTORE_SOURCE="$FILE_SOURCE"
+              echo "Using restore source from repository file restore-point.json: $RESTORE_SOURCE"
+            else
+              echo "Repository restore-point.json exists but restoreSource is empty"
+            fi
+          fi
+
           if [ -z "$RESTORE_SOURCE" ]; then
             RESTORE_SOURCE=$(kubectl get configmap pg-backup-meta -n helvex-prod \
               -o jsonpath='{.data.restoreSource}' 2>/dev/null || echo "")
@@ -348,7 +359,7 @@ jobs:
 
           if [ -z "$RESTORE_SOURCE" ]; then
             echo "ERROR: restore source is not set." >&2
-            echo "Set workflow input restore_source or repo variable POSTGRES_RESTORE_SOURCE." >&2
+            echo "Set one of: S3 restore-point file, workflow input restore_source, repo variable POSTGRES_RESTORE_SOURCE, or repository restore-point.json." >&2
             exit 1
           fi
 
