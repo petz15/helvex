@@ -247,7 +247,7 @@ jobs:
           echo "Discovered timestamped backup prefixes:"
           printf '%s\n' "$dirs" | sed 's/^/- /'
 
-          while IFS= read -r dir; do
+          for dir in $dirs; do
             [ -n "$dir" ] || continue
             # Check if this dir has a base backup catalogue
             if aws s3 ls "${BUCKET_PATH}${dir}/base/" --endpoint-url "$S3_ENDPOINT" >/dev/null 2>&1 && \
@@ -257,9 +257,7 @@ jobs:
               break
             fi
             echo "Skipping ${dir}: missing base or wal content"
-          done <<EOF
-$dirs
-EOF
+          done
 
           if [ -z "$RESTORE_SOURCE" ]; then
             echo "ERROR: no valid backup prefix with both base and wal content found in ${BUCKET_PATH}" >&2
