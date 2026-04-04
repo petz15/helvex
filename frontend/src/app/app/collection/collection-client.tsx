@@ -68,28 +68,40 @@ export function CollectionClient() {
     <div className="p-6 max-w-3xl mx-auto space-y-4">
       <div>
 
-      <Section title="Purpose, NOGA, and clustering">
-        <div className="space-y-5">
-          <form onSubmit={async e => {
-            e.preventDefault();
-            const fd = new FormData(e.currentTarget);
-            await submit("scoring/reextract-purpose", {
-              only_missing_purpose: fd.get("only_missing_purpose") === "on",
-            });
-          }} className="space-y-4">
-            <div>
-              <h2 className="text-sm font-semibold text-slate-800">Re-extract purpose</h2>
-              <p className="mt-1 text-xs text-slate-500">Refresh company purpose text from detailed Zefix raw data.</p>
-            </div>
-            <label className="flex items-center gap-2 text-sm text-slate-700">
-              <input type="checkbox" name="only_missing_purpose" defaultChecked className={checkCls} />
-              Only companies missing purpose text
-            </label>
-            <SubmitBtn loading={loading === "scoring/reextract-purpose"} />
-          </form>
+      
+        <h1 className="text-xl font-semibold text-slate-900">Collection</h1>
+        <p className="text-sm text-slate-500 mt-0.5">Trigger data collection and enrichment jobs</p>
+      </div>
 
-          <div className="border-t border-slate-100" />
+      {error && (
+        <div className="sticky top-2 z-20 bg-red-50 border border-red-300 text-red-800 rounded-lg px-4 py-3 text-sm flex items-start gap-2 shadow-sm">
+          <span className="font-semibold shrink-0">Error:</span>
+          <span>{error}</span>
+          <button onClick={() => setError(null)} className="ml-auto shrink-0 text-red-400 hover:text-red-600">✕</button>
+        </div>
+      )}
 
+      <Section title="Re-extract Purpose">
+        <form onSubmit={async e => {
+          e.preventDefault();
+          const fd = new FormData(e.currentTarget);
+          await submit("scoring/reextract-purpose", {
+            only_missing_purpose: fd.get("only_missing_purpose") === "on",
+          });
+        }} className="space-y-4">
+          <div>
+            <h2 className="text-sm font-semibold text-slate-800">Re-extract purpose</h2>
+            <p className="mt-1 text-xs text-slate-500">Refresh company purpose text from detailed Zefix raw data.</p>
+          </div>
+          <label className="flex items-center gap-2 text-sm text-slate-700">
+            <input type="checkbox" name="only_missing_purpose" defaultChecked className={checkCls} />
+            Only companies missing purpose text
+          </label>
+          <SubmitBtn loading={loading === "scoring/reextract-purpose"} />
+        </form>
+      </Section>
+
+      <Section title="Reclassify NOGA">
           <form onSubmit={async e => {
             e.preventDefault();
             const fd = new FormData(e.currentTarget);
@@ -114,9 +126,9 @@ export function CollectionClient() {
             </div>
             <SubmitBtn loading={loading === "scoring/reclassify-noga"} />
           </form>
-
-          <div className="border-t border-slate-100" />
-
+      </Section>
+        
+      <Section title="TF-IDF + KMeans pipeline">
           <form onSubmit={async e => {
             e.preventDefault();
             const fd = new FormData(e.currentTarget);
@@ -185,172 +197,169 @@ export function CollectionClient() {
             <SubmitBtn loading={loading === "scoring/cluster"} />
           </form>
 
-          <div className="border-t border-slate-100" />
-
-          <form onSubmit={async e => {
-            e.preventDefault();
-            const fd = new FormData(e.currentTarget);
-            await submit("scoring/hdbscan", {
-              min_cluster_size: parseInt(fd.get("hdbscan_min_cluster_size") as string) || 30,
-              min_samples: parseInt(fd.get("hdbscan_min_samples") as string) || null,
-              cluster_selection_epsilon: parseFloat(fd.get("hdbscan_epsilon") as string) || 0,
-              n_components: parseInt(fd.get("hdbscan_n_components") as string) || 50,
-              top_terms: parseInt(fd.get("hdbscan_top_terms") as string) || 5,
-              top_keywords_per_company: parseInt(fd.get("hdbscan_top_keywords") as string) || 10,
-              canton: (fd.get("hdbscan_canton") as string)?.trim().toUpperCase() || null,
-              min_zefix_score: parseInt(fd.get("hdbscan_min_zefix_score") as string) || null,
-              max_zefix_score: parseInt(fd.get("hdbscan_max_zefix_score") as string) || null,
-              limit: parseInt(fd.get("hdbscan_limit") as string) || null,
-              use_keywords: fd.get("hdbscan_use_keywords") === "on",
-            });
-          }} className="space-y-4">
-            <div>
-              <h2 className="text-sm font-semibold text-slate-800">HDBSCAN pipeline (separate wire)</h2>
-              <p className="mt-1 text-xs text-slate-500">Separate endpoint and job type for density-based clustering experimentation.</p>
-            </div>
-            <div className="grid grid-cols-2 gap-4">
-              <Field label="Min cluster size">
-                <input name="hdbscan_min_cluster_size" type="number" min="2" defaultValue="30" className={inputCls} />
-              </Field>
-              <Field label="Min samples">
-                <input name="hdbscan_min_samples" type="number" min="1" className={inputCls} placeholder="Auto" />
-              </Field>
-            </div>
-            <div className="grid grid-cols-2 gap-4">
-              <Field label="Selection epsilon">
-                <input name="hdbscan_epsilon" type="number" min="0" step="0.01" defaultValue="0" className={inputCls} />
-              </Field>
-              <Field label="Components">
-                <input name="hdbscan_n_components" type="number" min="2" defaultValue="50" className={inputCls} />
-              </Field>
-            </div>
-            <div className="grid grid-cols-2 gap-4">
-              <Field label="Top cluster terms">
-                <input name="hdbscan_top_terms" type="number" min="1" defaultValue="5" className={inputCls} />
-              </Field>
-              <Field label="Top keywords/company">
-                <input name="hdbscan_top_keywords" type="number" min="1" defaultValue="10" className={inputCls} />
-              </Field>
-            </div>
-            <div className="grid grid-cols-2 gap-4">
-              <Field label="Canton">
-                <input name="hdbscan_canton" className={inputCls} placeholder="Any" />
-              </Field>
-              <Field label="Limit">
-                <input name="hdbscan_limit" type="number" min="1" className={inputCls} placeholder="All" />
-              </Field>
-            </div>
-            <div className="grid grid-cols-2 gap-4">
-              <Field label="Min Zefix score">
-                <input name="hdbscan_min_zefix_score" type="number" min="0" max="100" className={inputCls} placeholder="—" />
-              </Field>
-              <Field label="Max Zefix score">
-                <input name="hdbscan_max_zefix_score" type="number" min="0" max="100" className={inputCls} placeholder="—" />
-              </Field>
-            </div>
-            <label className="flex items-center gap-2 text-sm text-slate-700">
-              <input type="checkbox" name="hdbscan_use_keywords" className={checkCls} />
-              Use existing purpose keywords
-            </label>
-            <SubmitBtn loading={loading === "scoring/hdbscan"} />
-          </form>
-
-          <div className="border-t border-slate-100" />
-
-          <form onSubmit={async e => {
-            e.preventDefault();
-            const fd = new FormData(e.currentTarget);
-            await submit("scoring/reextract-keywords", {
-              only_missing: fd.get("only_missing_keywords") === "on",
-              canton: (fd.get("keywords_canton") as string)?.trim().toUpperCase() || null,
-              limit: parseInt(fd.get("keywords_limit") as string) || null,
-            });
-          }} className="space-y-4">
-            <div>
-              <h2 className="text-sm font-semibold text-slate-800">Re-extract keywords</h2>
-              <p className="mt-1 text-xs text-slate-500">Refresh purpose keywords from the cached TF-IDF vectorizer and cluster artifacts.</p>
-            </div>
-            <div className="flex gap-6 flex-wrap">
-              <label className="flex items-center gap-2 text-sm text-slate-700">
-                <input type="checkbox" name="only_missing_keywords" className={checkCls} />
-                Only companies missing keywords
-              </label>
-            </div>
-            <div className="grid grid-cols-2 gap-4">
-              <Field label="Canton">
-                <input name="keywords_canton" className={inputCls} placeholder="Any" />
-              </Field>
-              <Field label="Limit">
-                <input name="keywords_limit" type="number" min="1" className={inputCls} placeholder="All" />
-              </Field>
-            </div>
-            <SubmitBtn loading={loading === "scoring/reextract-keywords"} />
-          </form>
-
-          <div className="border-t border-slate-100" />
-
-          <form onSubmit={async e => {
-            e.preventDefault();
-            const fd = new FormData(e.currentTarget);
-            await submit("scoring/cluster-analysis", {
-              top_n_clusters: parseInt(fd.get("analysis_top_n_clusters") as string) || 20,
-              top_n_terms: parseInt(fd.get("analysis_top_n_terms") as string) || 10,
-            });
-          }} className="space-y-4">
-            <div>
-              <h2 className="text-sm font-semibold text-slate-800">Cross-cluster analysis</h2>
-              <p className="mt-1 text-xs text-slate-500">Generate a summary of terms shared across cluster labels.</p>
-            </div>
-            <div className="grid grid-cols-2 gap-4">
-              <Field label="Top clusters">
-                <input name="analysis_top_n_clusters" type="number" min="1" defaultValue="20" className={inputCls} />
-              </Field>
-              <Field label="Top terms">
-                <input name="analysis_top_n_terms" type="number" min="1" defaultValue="10" className={inputCls} />
-              </Field>
-            </div>
-            <SubmitBtn loading={loading === "scoring/cluster-analysis"} />
-          </form>
-
-          <div className="border-t border-slate-100" />
-
-          <form onSubmit={async e => {
-            e.preventDefault();
-            const fd = new FormData(e.currentTarget);
-            await submit("scoring/cluster-drift-check", {
-              days: parseInt(fd.get("drift_days") as string) || 7,
-              warn_threshold: parseFloat(fd.get("drift_threshold") as string) || 0.3,
-            });
-          }} className="space-y-4">
-            <div>
-              <h2 className="text-sm font-semibold text-slate-800">Cluster drift check</h2>
-              <p className="mt-1 text-xs text-slate-500">Check whether recent companies are falling through without cluster labels.</p>
-            </div>
-            <div className="grid grid-cols-2 gap-4">
-              <Field label="Days">
-                <input name="drift_days" type="number" min="1" defaultValue="7" className={inputCls} />
-              </Field>
-              <Field label="Warn threshold">
-                <input name="drift_threshold" type="number" min="0" max="1" step="0.01" defaultValue="0.3" className={inputCls} />
-              </Field>
-            </div>
-            <SubmitBtn loading={loading === "scoring/cluster-drift-check"} />
-          </form>
-        </div>
       </Section>
-        <h1 className="text-xl font-semibold text-slate-900">Collection</h1>
-        <p className="text-sm text-slate-500 mt-0.5">Trigger data collection and enrichment jobs</p>
-      </div>
 
-      {error && (
-        <div className="sticky top-2 z-20 bg-red-50 border border-red-300 text-red-800 rounded-lg px-4 py-3 text-sm flex items-start gap-2 shadow-sm">
-          <span className="font-semibold shrink-0">Error:</span>
-          <span>{error}</span>
-          <button onClick={() => setError(null)} className="ml-auto shrink-0 text-red-400 hover:text-red-600">✕</button>
-        </div>
-      )}
+      <Section title="HDBSCAN pipeline">
 
-      <Section title="Bulk import from Zefix" defaultOpen>
+        <form onSubmit={async e => {
+          e.preventDefault();
+          const fd = new FormData(e.currentTarget);
+          await submit("scoring/hdbscan", {
+            min_cluster_size: parseInt(fd.get("hdbscan_min_cluster_size") as string) || 30,
+            min_samples: parseInt(fd.get("hdbscan_min_samples") as string) || null,
+            cluster_selection_epsilon: parseFloat(fd.get("hdbscan_epsilon") as string) || 0,
+            n_components: parseInt(fd.get("hdbscan_n_components") as string) || 50,
+            top_terms: parseInt(fd.get("hdbscan_top_terms") as string) || 5,
+            top_keywords_per_company: parseInt(fd.get("hdbscan_top_keywords") as string) || 10,
+            canton: (fd.get("hdbscan_canton") as string)?.trim().toUpperCase() || null,
+            min_zefix_score: parseInt(fd.get("hdbscan_min_zefix_score") as string) || null,
+            max_zefix_score: parseInt(fd.get("hdbscan_max_zefix_score") as string) || null,
+            limit: parseInt(fd.get("hdbscan_limit") as string) || null,
+            use_keywords: fd.get("hdbscan_use_keywords") === "on",
+          });
+        }} className="space-y-4">
+          <div>
+            <h2 className="text-sm font-semibold text-slate-800">HDBSCAN pipeline (separate wire)</h2>
+            <p className="mt-1 text-xs text-slate-500">Separate endpoint and job type for density-based clustering experimentation.</p>
+          </div>
+          <div className="grid grid-cols-2 gap-4">
+            <Field label="Min cluster size">
+              <input name="hdbscan_min_cluster_size" type="number" min="2" defaultValue="30" className={inputCls} />
+            </Field>
+            <Field label="Min samples">
+              <input name="hdbscan_min_samples" type="number" min="1" className={inputCls} placeholder="Auto" />
+            </Field>
+          </div>
+          <div className="grid grid-cols-2 gap-4">
+            <Field label="Selection epsilon">
+              <input name="hdbscan_epsilon" type="number" min="0" step="0.01" defaultValue="0" className={inputCls} />
+            </Field>
+            <Field label="Components">
+              <input name="hdbscan_n_components" type="number" min="2" defaultValue="50" className={inputCls} />
+            </Field>
+          </div>
+          <div className="grid grid-cols-2 gap-4">
+            <Field label="Top cluster terms">
+              <input name="hdbscan_top_terms" type="number" min="1" defaultValue="5" className={inputCls} />
+            </Field>
+            <Field label="Top keywords/company">
+              <input name="hdbscan_top_keywords" type="number" min="1" defaultValue="10" className={inputCls} />
+            </Field>
+          </div>
+          <div className="grid grid-cols-2 gap-4">
+            <Field label="Canton">
+              <input name="hdbscan_canton" className={inputCls} placeholder="Any" />
+            </Field>
+            <Field label="Limit">
+              <input name="hdbscan_limit" type="number" min="1" className={inputCls} placeholder="All" />
+            </Field>
+          </div>
+          <div className="grid grid-cols-2 gap-4">
+            <Field label="Min Zefix score">
+              <input name="hdbscan_min_zefix_score" type="number" min="0" max="100" className={inputCls} placeholder="—" />
+            </Field>
+            <Field label="Max Zefix score">
+              <input name="hdbscan_max_zefix_score" type="number" min="0" max="100" className={inputCls} placeholder="—" />
+            </Field>
+          </div>
+          <label className="flex items-center gap-2 text-sm text-slate-700">
+            <input type="checkbox" name="hdbscan_use_keywords" className={checkCls} />
+            Use existing purpose keywords
+          </label>
+          <SubmitBtn loading={loading === "scoring/hdbscan"} />
+        </form>
+
+      </Section>
+
+      <Section title="Re-extract keywords">
+
+        <form onSubmit={async e => {
+          e.preventDefault();
+          const fd = new FormData(e.currentTarget);
+          await submit("scoring/reextract-keywords", {
+            only_missing: fd.get("only_missing_keywords") === "on",
+            canton: (fd.get("keywords_canton") as string)?.trim().toUpperCase() || null,
+            limit: parseInt(fd.get("keywords_limit") as string) || null,
+          });
+        }} className="space-y-4">
+          <div>
+            <h2 className="text-sm font-semibold text-slate-800">Re-extract keywords</h2>
+            <p className="mt-1 text-xs text-slate-500">Refresh purpose keywords from the cached TF-IDF vectorizer and cluster artifacts.</p>
+          </div>
+          <div className="flex gap-6 flex-wrap">
+            <label className="flex items-center gap-2 text-sm text-slate-700">
+              <input type="checkbox" name="only_missing_keywords" className={checkCls} />
+              Only companies missing keywords
+            </label>
+          </div>
+          <div className="grid grid-cols-2 gap-4">
+            <Field label="Canton">
+              <input name="keywords_canton" className={inputCls} placeholder="Any" />
+            </Field>
+            <Field label="Limit">
+              <input name="keywords_limit" type="number" min="1" className={inputCls} placeholder="All" />
+            </Field>
+          </div>
+          <SubmitBtn loading={loading === "scoring/reextract-keywords"} />
+        </form>
+
+      </Section>
+
+      <Section title="Cluster analysis">
+
+        <form onSubmit={async e => {
+          e.preventDefault();
+          const fd = new FormData(e.currentTarget);
+          await submit("scoring/cluster-analysis", {
+            top_n_clusters: parseInt(fd.get("analysis_top_n_clusters") as string) || 20,
+            top_n_terms: parseInt(fd.get("analysis_top_n_terms") as string) || 10,
+          });
+        }} className="space-y-4">
+          <div>
+            <h2 className="text-sm font-semibold text-slate-800">Cross-cluster analysis</h2>
+            <p className="mt-1 text-xs text-slate-500">Generate a summary of terms shared across cluster labels.</p>
+          </div>
+          <div className="grid grid-cols-2 gap-4">
+            <Field label="Top clusters">
+              <input name="analysis_top_n_clusters" type="number" min="1" defaultValue="20" className={inputCls} />
+            </Field>
+            <Field label="Top terms">
+              <input name="analysis_top_n_terms" type="number" min="1" defaultValue="10" className={inputCls} />
+            </Field>
+          </div>
+          <SubmitBtn loading={loading === "scoring/cluster-analysis"} />
+        </form>
+
+      </Section>
+
+      <Section title="Cluster drift check">
+
+        <form onSubmit={async e => {
+          e.preventDefault();
+          const fd = new FormData(e.currentTarget);
+          await submit("scoring/cluster-drift-check", {
+            days: parseInt(fd.get("drift_days") as string) || 7,
+            warn_threshold: parseFloat(fd.get("drift_threshold") as string) || 0.3,
+          });
+        }} className="space-y-4">
+          <div>
+            <h2 className="text-sm font-semibold text-slate-800">Cluster drift check</h2>
+            <p className="mt-1 text-xs text-slate-500">Check whether recent companies are falling through without cluster labels.</p>
+          </div>
+          <div className="grid grid-cols-2 gap-4">
+            <Field label="Days">
+              <input name="drift_days" type="number" min="1" defaultValue="7" className={inputCls} />
+            </Field>
+            <Field label="Warn threshold">
+              <input name="drift_threshold" type="number" min="0" max="1" step="0.01" defaultValue="0.3" className={inputCls} />
+            </Field>
+          </div>
+          <SubmitBtn loading={loading === "scoring/cluster-drift-check"} />
+        </form>
+      
+      </Section>  
+
+      <Section title="Bulk import from Zefix">
         <form onSubmit={async e => {
           e.preventDefault();
           const fd = new FormData(e.currentTarget);
