@@ -1,0 +1,105 @@
+{{- if and .Values.postgres.enabled .Values.postgres.backupEnabled .Values.postgres.restorePointSync.enabled }}
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ include "helvex.fullname" . }}-pg-restore-point-sync
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "helvex.labels" . | nindent 4 }}
+    app.kubernetes.io/component: db-restore-point-sync
+spec:
+  schedule: {{ .Values.postgres.restorePointSync.schedule | quote }}
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 2
+  failedJobsHistoryLimit: 2
+  startingDeadlineSeconds: 1800
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      ttlSecondsAfterFinished: 86400
+      template:
+        metadata:
+          labels:
+            {{- include "helvex.labels" . | nindent 12 }}
+            app.kubernetes.io/component: db-restore-point-sync
+        spec:
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            runAsGroup: 1000
+          restartPolicy: Never
+          containers:
+            - name: sync
+              image: {{ .Values.postgres.restorePointSync.image | quote }}
+              imagePullPolicy: IfNotPresent
+              envFrom:
+                - secretRef:
+                    name: {{ .Values.envSecretName }}
+              env:
+                - name: DEST_PATH
+                  value: {{ .Values.postgres.s3BucketPath | quote }}
+                - name: ENDPOINT_URL
+                  value: {{ .Values.postgres.s3EndpointUrl | quote }}
+              command: ["sh", "-ec"]
+              args:
+                - |
+                  set -euo pipefail
+
+                  export AWS_ACCESS_KEY_ID="$S3_ACCESS_KEY"
+                  export AWS_SECRET_ACCESS_KEY="$S3_SECRET_KEY"
+
+                  SERVER_NAME=""
+                  RESTORE_SOURCE=""
+
+                  if [ -f /meta/serverName ]; then
+                    SERVER_NAME=$(cat /meta/serverName)
+                  fi
+                  if [ -f /meta/restoreSource ]; then
+                    RESTORE_SOURCE=$(cat /meta/restoreSource)
+                  fi
+
+                  if [ -z "$RESTORE_SOURCE" ]; then
+                    RESTORE_SOURCE="$SERVER_NAME"
+                  fi
+
+                  if [ -z "$RESTORE_SOURCE" ]; then
+                    echo "No restore source found in pg-backup-meta yet; skipping sync"
+                    exit 0
+                  fi
+
+                  if ! echo "$RESTORE_SOURCE" | grep -Eq '^helvex-pg-[0-9]{8}T[0-9]{6}Z$'; then
+                    echo "Invalid restore source format in pg-backup-meta: $RESTORE_SOURCE"
+                    exit 1
+                  fi
+
+                  POINTER_URI="${DEST_PATH%/}/restore-point.json"
+                  tmp=$(mktemp)
+                  cat > "$tmp" <<JSON
+                  {"restoreSource":"$RESTORE_SOURCE","backupServerName":"$SERVER_NAME","updatedAt":"$(date -u +%Y-%m-%dT%H:%M:%SZ)","backupPrefix":"${DEST_PATH%/}/"}
+                  JSON
+
+                  aws s3 cp "$tmp" "$POINTER_URI" --endpoint-url "$ENDPOINT_URL"
+                  rm -f "$tmp"
+                  echo "Updated restore-point file at $POINTER_URI"
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: ["ALL"]
+              resources:
+                requests:
+                  cpu: 50m
+                  memory: 64Mi
+                limits:
+                  cpu: 200m
+                  memory: 128Mi
+              volumeMounts:
+                - name: meta
+                  mountPath: /meta
+                  readOnly: true
+          volumes:
+            - name: meta
+              configMap:
+                name: pg-backup-meta
+                optional: true
+{{- end }}

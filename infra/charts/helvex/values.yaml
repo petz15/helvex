@@ -110,6 +110,10 @@ postgres:
     schedule: "0 4 * * 0"        # weekly Sunday 04:00 UTC
     retentionDays: 14             # delete orphaned backup dirs older than this
     image: "amazon/aws-cli:2.17.0"
+  restorePointSync:
+    enabled: false
+    schedule: "*/30 * * * *"     # refresh restore-point file frequently
+    image: "amazon/aws-cli:2.17.0"
   backupDataCompression: ""    # optional: "gzip" to compress base backups
   backupWalCompression: ""     # optional: "gzip" to compress archived WAL
   weeklyExport:

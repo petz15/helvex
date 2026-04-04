@@ -72,6 +72,9 @@ postgres:
     enabled: true
     schedule: "0 4 * * 0"     # weekly Sunday 04:00 UTC
     retentionDays: 14
+  restorePointSync:
+    enabled: true
+    schedule: "*/30 * * * *"
   backupDataCompression: "gzip"
   backupWalCompression: "gzip"
   weeklyExport:
