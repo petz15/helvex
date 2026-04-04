@@ -259,15 +259,15 @@ jobs:
           fi
 
           # --- restoreSourceServerName (where to restore FROM) ---
-          # IMPORTANT: This is the *stable* server name where the original backups live in S3 (e.g., 'helvex-pg').
-          # This is NOT the timestamped value. The timestamp in restore-point.json is for reference only.
+          # IMPORTANT: This is the server name where the *existing* backups live in S3.
+          # In this repo it is typically a timestamped name like: helvex-pg-YYYYmmddTHHMMSSZ.
           # Selection order:
-          # 1) S3 restore-point file (restore-point.json)
-          # 2) Manual override (workflow_dispatch input restore_source)
-          # 3) Repo variable POSTGRES_RESTORE_SOURCE
+          # 1) Manual override (workflow_dispatch input restore_source)
+          # 2) Repo variable POSTGRES_RESTORE_SOURCE
+          # 3) S3 restore-point file (restore-point.json)
           # 4) Repository file restore-point.json (tracked in git)
           # 5) Existing ConfigMap value pg-backup-meta.data.restoreSource
-          # 6) Default: 'helvex-pg' (the original stable server name)
+          # 6) Default: 'helvex-pg'
 
           install_awscli() {
             if command -v aws >/dev/null 2>&1; then
@@ -316,25 +316,18 @@ jobs:
           RESTORE_SOURCE=""
           RESTORE_SOURCE_ORIGIN=""
 
+          # Allow either the historic stable name (helvex-pg) or the common timestamped name.
+          # Keep this intentionally strict (no slashes/spaces) since it will be used in S3 paths.
+          is_valid_restore_source() {
+            local s="$1"
+            echo "$s" | grep -Eq '^[A-Za-z0-9][A-Za-z0-9-]*[A-Za-z0-9]$'
+          }
+
           install_awscli
           aws --version
 
-          pointer_tmp=$(mktemp)
-          if aws s3 cp "$POINTER_URI" "$pointer_tmp" --endpoint-url "$S3_ENDPOINT" >/dev/null 2>&1; then
-            POINTER_SOURCE=$(python3 -c "import json,sys; d=json.load(open(sys.argv[1])); print(d.get('restoreSource',''))" "$pointer_tmp" 2>/dev/null || true)
-            if [ -n "$POINTER_SOURCE" ]; then
-              echo "Using restore source from pointer file: $POINTER_SOURCE"
-              RESTORE_SOURCE="$POINTER_SOURCE"
-              RESTORE_SOURCE_ORIGIN="s3_restore_point"
-            else
-              echo "Pointer file found but restoreSource is empty; falling back"
-            fi
-          else
-            echo "No restore-point file found at ${POINTER_URI}; falling back"
-          fi
-          rm -f "$pointer_tmp"
-
-          if [ -z "$RESTORE_SOURCE" ] && [ -n "${MANUAL_RESTORE_SOURCE:-}" ]; then
+          # Manual override should always win (one-off recovery).
+          if [ -n "${MANUAL_RESTORE_SOURCE:-}" ]; then
             RESTORE_SOURCE="$MANUAL_RESTORE_SOURCE"
             RESTORE_SOURCE_ORIGIN="workflow_input"
             echo "Using manual restore source from workflow input: $RESTORE_SOURCE"
@@ -344,6 +337,27 @@ jobs:
             RESTORE_SOURCE="$POSTGRES_RESTORE_SOURCE"
             RESTORE_SOURCE_ORIGIN="repo_variable"
             echo "Using restore source from repo variable: $RESTORE_SOURCE"
+          fi
+
+          if [ -z "$RESTORE_SOURCE" ]; then
+            pointer_tmp=$(mktemp)
+            if aws s3 cp "$POINTER_URI" "$pointer_tmp" --endpoint-url "$S3_ENDPOINT" >/dev/null 2>&1; then
+              POINTER_SOURCE=$(python3 -c "import json,sys; d=json.load(open(sys.argv[1])); print(d.get('restoreSource',''))" "$pointer_tmp" 2>/dev/null || true)
+              if [ -n "$POINTER_SOURCE" ]; then
+                if is_valid_restore_source "$POINTER_SOURCE"; then
+                  echo "Using restore source from pointer file: $POINTER_SOURCE"
+                  RESTORE_SOURCE="$POINTER_SOURCE"
+                  RESTORE_SOURCE_ORIGIN="s3_restore_point"
+                else
+                  echo "WARNING: pointer file restoreSource is invalid; ignoring: $POINTER_SOURCE" >&2
+                fi
+              else
+                echo "Pointer file found but restoreSource is empty; falling back"
+              fi
+            else
+              echo "No restore-point file found at ${POINTER_URI}; falling back"
+            fi
+            rm -f "$pointer_tmp"
           fi
 
           if [ -z "$RESTORE_SOURCE" ] && [ -f "restore-point.json" ]; then
@@ -372,9 +386,9 @@ jobs:
             RESTORE_SOURCE_ORIGIN="default_stable_name"
           fi
 
-          if ! echo "$RESTORE_SOURCE" | grep -Eq '^[a-z0-9][a-z0-9-]*[a-z0-9]$'; then
+          if ! is_valid_restore_source "$RESTORE_SOURCE"; then
             echo "ERROR: invalid restore source format: $RESTORE_SOURCE" >&2
-            echo "Expected: valid DNS-like server name (e.g., 'helvex-pg' or 'helvex-pg-20260404T042945Z')" >&2
+            echo "Expected: letters/digits/hyphens only (e.g., 'helvex-pg' or 'helvex-pg-20260404T042945Z')" >&2
             exit 1
           fi
 
@@ -417,7 +431,7 @@ jobs:
 
           {
             echo "## Restore Source Preflight"
-            echo "- restore_from_server_name: \`${{ steps.pg-meta.outputs.restore_source }}\` (stable backups in S3)"
+            echo "- restore_from_server_name: \`${{ steps.pg-meta.outputs.restore_source }}\` (backups in S3)"
             echo "- new_backup_server_name: \`${{ steps.pg-meta.outputs.server_name }}\` (new cluster's backups)"
             echo "- origin: \`${{ steps.pg-meta.outputs.restore_source_origin }}\`"
           } >> "$GITHUB_STEP_SUMMARY"

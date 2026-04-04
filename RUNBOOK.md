@@ -62,13 +62,14 @@ If they're missing, add them to the GitHub Actions secrets (`S3_ACCESS_KEY`, `S3
 **4. Ensure restore source is set correctly**
 
 The deploy workflow automatically resolves the restore source in priority order:
-1. S3 pointer file `s3://helvex-backups/pg-prod/restore-point.json` (persisted by cronjob)
-2. Manual workflow_dispatch input
-3. Repo variable or file `restore-point.json`
-4. Existing ConfigMap
-5. Default: `helvex-pg` (the stable server name)
+1. Manual `workflow_dispatch` input (`restore_source`) — overrides everything
+2. Repo variable `POSTGRES_RESTORE_SOURCE`
+3. S3 pointer file `s3://helvex-backups/pg-prod/restore-point.json` (persisted by cronjob)
+4. Repo file `restore-point.json`
+5. Existing ConfigMap
+6. Default: `helvex-pg`
 
-The restore source should be the **stable server name** where original backups live in S3 (e.g., `helvex-pg`), NOT a timestamped value. CNPG uses WAL replay to reach point-in-time.
+The restore source must match the **CNPG/Barman `serverName`** used when the backups were written. In this repo that is often timestamped (e.g., `helvex-pg-20260331T150000Z`).
 
 **5. Set `restoreFromBackup: true` in `infra/environments/prod.yaml`**
 ```yaml
@@ -84,7 +85,7 @@ git push
 ```
 
 CloudNativePG will:
-- Use the resolved restore source (stable server name, e.g., `helvex-pg`)
+- Use the resolved restore source server name
 - Find the latest base backup under that server name in S3
 - Restore it into a fresh PVC
 - Replay all WAL segments up to the latest available
