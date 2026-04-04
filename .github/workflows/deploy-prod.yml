@@ -225,7 +225,20 @@ jobs:
           # back to an older or default cluster name.
           if ! command -v aws >/dev/null 2>&1; then
             echo "awscli not found; installing it for backup discovery"
-            python3 -m pip install --quiet --user awscli
+            if command -v pip3 >/dev/null 2>&1; then
+              pip3 install --quiet --user awscli
+            elif python3 -m ensurepip --user >/dev/null 2>&1; then
+              python3 -m pip install --quiet --user awscli
+            elif command -v sudo >/dev/null 2>&1 && command -v apt-get >/dev/null 2>&1; then
+              sudo apt-get update -y
+              sudo apt-get install -y awscli
+            elif command -v apt-get >/dev/null 2>&1; then
+              apt-get update -y
+              apt-get install -y awscli
+            else
+              echo "ERROR: unable to install awscli (no pip3/ensurepip/apt-get available)" >&2
+              exit 1
+            fi
             export PATH="$HOME/.local/bin:$PATH"
           fi
 
