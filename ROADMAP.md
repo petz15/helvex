@@ -102,6 +102,7 @@
 - [ ] **home ML node phase B (deferred)** - add cloud fallback ML node class with labels `workload=ml`, `location=cloud` and matching taints/tolerations
 - [ ] **home ML node phase C (deferred)** - implement Helm affinity policy: required `workload=ml`, preferred `location=home`, cloud fallback when home unavailable
 - [ ] **home ML node mode policy** - keep home-only ML mode active for now (no cloud fallback); if home node is unavailable, ML jobs queue until node recovery
+- [ ] **Change postgres backup/recovery** - 1) Maintain an explicit latest backup pointer After each successful backup, write a small object like latest.json in the same bucket/prefix. 2) Manual restore source override as first-class input Add a workflow dispatch input or repo variable like POSTGRES_RESTORE_SOURCE. If set, workflow uses it exactly. If not set, then run auto-discovery.
 
 
 

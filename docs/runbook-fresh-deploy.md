@@ -37,6 +37,12 @@ Go to **github.com/petz15/helvex → Settings → Secrets and variables → Acti
 | `ARC_APP_INSTALLATION_ID` | Installation ID (from App → Install → URL contains the ID) |
 | `ARC_APP_PRIVATE_KEY` | Contents of the `.pem` file (paste the full multiline value) |
 
+GitHub repository variable required for restore selection:
+
+| Variable | Value |
+|---|---|
+| `POSTGRES_RESTORE_SOURCE` | Backup prefix to restore from, e.g. `helvex-pg-20260404T042945Z` |
+
 > **`DB_URL` hostname:** Always use `helvex-db` (the Helm-managed ExternalName service), never `helvex-pg-rw` directly. The chart routes `helvex-db` → `helvex-pg-rw` when the connection pooler is disabled, and → `helvex-pg-pooler` when it is enabled. This means enabling/disabling the pooler is a Helm values change only — no secret rotation needed.
 
 ### GitHub App for ARC
@@ -204,13 +210,23 @@ Watch the workflow run at **github.com/petz15/helvex → Actions**.
 The `deploy` job will run on the `helvex-prod` ARC runner (the pod you started in step 5). It will:
 
 1. Create the `helvex-env` K8s secret (with S3 credentials, DB password, etc.)
-2. **Auto-detect backup names** — no manual configuration needed:
-  - `restoreSourceServerName`: scans `s3://helvex-backups/pg-prod/` for the most recent timestamped subdirectory matching `helvex-pg-YYYYMMDDTHHMMSSZ` that contains both base and wal backup content; if no valid prefix is found, the deploy fails instead of silently restoring from an older default name
-   - `backupServerName`: generates a unique timestamped name (e.g. `helvex-pg-20260331T150000Z`) and stores it in the `pg-backup-meta` ConfigMap. Subsequent deploys reuse the same name.
-   - This ensures the new cluster restores from the old backup but writes new backups to a separate path, avoiding WAL archive collisions.
+2. **Resolve backup names + restore source**:
+  - `backupServerName`: generates a unique timestamped name (e.g. `helvex-pg-20260331T150000Z`) and stores it in the `pg-backup-meta` ConfigMap. Subsequent deploys reuse the same name.
+  - `restoreSourceServerName`: selected in this order:
+    1. S3 restore-point file `s3://helvex-backups/pg-prod/restore-point.json`
+    2. Manual workflow input `restore_source` (when using `workflow_dispatch`)
+    3. Repo variable `POSTGRES_RESTORE_SOURCE`
+    4. Existing ConfigMap `pg-backup-meta.data.restoreSource`
+  - The selected value must match `helvex-pg-YYYYMMDDTHHMMSSZ`.
+  - Workflow writes/updates `restore-point.json` after selection.
 3. Deploy the helvex chart via helmfile (PostgreSQL, Redis, app, workers)
 4. Wait for PostgreSQL to become healthy (up to 10 minutes — restore from S3 backup)
 5. Wait for app rollout
+
+Optional manual run from GitHub Actions UI:
+- Open **Actions → Deploy Prod → Run workflow**
+- Set `deploy_mode` (`prod`, `app`, `frontend`, `backend`)
+- Leave `restore_source` empty to use restore-point file, or set it explicitly for one-off recovery
 
 > **Database restore:** `prod.yaml` has `restoreFromBackup: true`, so the PostgreSQL
 > cluster bootstraps by restoring from the auto-detected S3 backup. This only applies

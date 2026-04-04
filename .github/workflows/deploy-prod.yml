@@ -3,10 +3,28 @@ name: Deploy Prod
 on:
   push:
     branches: ['**']
+  workflow_dispatch:
+    inputs:
+      deploy_mode:
+        description: Deployment mode
+        required: false
+        default: prod
+        type: choice
+        options:
+          - prod
+          - app
+          - frontend
+          - backend
+      restore_source:
+        description: Optional restore source (helvex-pg-YYYYMMDDTHHMMSSZ); leave empty to use restore-point file
+        required: false
+        default: ""
+        type: string
 
 jobs:
   build:
     if: |
+      github.event_name == 'workflow_dispatch' ||
       contains(github.event.head_commit.message, '[deploy-prod]') ||
       contains(github.event.head_commit.message, '[deploy-app]') ||
       contains(github.event.head_commit.message, '[deploy-frontend]') ||
@@ -31,7 +49,9 @@ jobs:
 
       - name: Build and push backend
         id: build
-        if: "!contains(github.event.head_commit.message, '[deploy-frontend]')"
+        if: |
+          (github.event_name != 'workflow_dispatch' && !contains(github.event.head_commit.message, '[deploy-frontend]')) ||
+          (github.event_name == 'workflow_dispatch' && github.event.inputs.deploy_mode != 'frontend')
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -47,18 +67,24 @@ jobs:
           cache-to: type=gha,mode=max,scope=backend
 
       - name: Install cosign
-        if: "!contains(github.event.head_commit.message, '[deploy-frontend]')"
+        if: |
+          (github.event_name != 'workflow_dispatch' && !contains(github.event.head_commit.message, '[deploy-frontend]')) ||
+          (github.event_name == 'workflow_dispatch' && github.event.inputs.deploy_mode != 'frontend')
         uses: sigstore/cosign-installer@v3
 
       - name: Sign image
-        if: "!contains(github.event.head_commit.message, '[deploy-frontend]')"
+        if: |
+          (github.event_name != 'workflow_dispatch' && !contains(github.event.head_commit.message, '[deploy-frontend]')) ||
+          (github.event_name == 'workflow_dispatch' && github.event.inputs.deploy_mode != 'frontend')
         continue-on-error: true
         run: |
           cosign sign --yes \
             ghcr.io/${{ github.repository }}@${{ steps.build.outputs.digest }}
 
       - name: Build and push frontend
-        if: "!contains(github.event.head_commit.message, '[deploy-backend]')"
+        if: |
+          (github.event_name != 'workflow_dispatch' && !contains(github.event.head_commit.message, '[deploy-backend]')) ||
+          (github.event_name == 'workflow_dispatch' && github.event.inputs.deploy_mode != 'backend')
         uses: docker/build-push-action@v6
         with:
           context: ./frontend
@@ -81,6 +107,7 @@ jobs:
   deploy:
     needs: build
     if: |
+      github.event_name == 'workflow_dispatch' ||
       contains(github.event.head_commit.message, '[deploy-prod]') ||
       contains(github.event.head_commit.message, '[deploy-app]') ||
       contains(github.event.head_commit.message, '[deploy-frontend]') ||
@@ -180,7 +207,9 @@ jobs:
           fi
 
       - name: Bootstrap CRDs (cert-manager + CloudNativePG)
-        if: contains(github.event.head_commit.message, '[deploy-prod]')
+        if: |
+          (github.event_name != 'workflow_dispatch' && contains(github.event.head_commit.message, '[deploy-prod]')) ||
+          (github.event_name == 'workflow_dispatch' && github.event.inputs.deploy_mode == 'prod')
         working-directory: infra
         run: |
           helmfile -e prod apply --selector name=cert-manager --suppress-diff
@@ -190,13 +219,22 @@ jobs:
 
       - name: Resolve backup server names
         if: |
-          contains(github.event.head_commit.message, '[deploy-prod]') ||
-          contains(github.event.head_commit.message, '[deploy-app]')
+          (github.event_name != 'workflow_dispatch' && (
+            contains(github.event.head_commit.message, '[deploy-prod]') ||
+            contains(github.event.head_commit.message, '[deploy-app]')
+          )) ||
+          (github.event_name == 'workflow_dispatch' && (
+            github.event.inputs.deploy_mode == 'prod' ||
+            github.event.inputs.deploy_mode == 'app'
+          ))
         id: pg-meta
         env:
+          MANUAL_RESTORE_SOURCE: ${{ github.event.inputs.restore_source || '' }}
+          POSTGRES_RESTORE_SOURCE: ${{ vars.POSTGRES_RESTORE_SOURCE }}
           AWS_ACCESS_KEY_ID: ${{ secrets.S3_ACCESS_KEY }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.S3_SECRET_KEY }}
-          S3_ENDPOINT: ${{ vars.S3_ENDPOINT_URL || 'https://nbg1.your-objectstorage.com' }}
+          S3_ENDPOINT: ${{ vars.S3_ENDPOINT_URL || secrets.S3_ENDPOINT_URL || 'https://nbg1.your-objectstorage.com' }}
+          S3_BACKUP_PREFIX: s3://helvex-backups/pg-prod/
         run: |
           set -euo pipefail
 
@@ -207,10 +245,12 @@ jobs:
 
           if [ -n "$EXISTING" ]; then
             echo "Reusing existing backupServerName: $EXISTING"
+            SERVER_NAME="$EXISTING"
             echo "server_name=$EXISTING" >> "$GITHUB_OUTPUT"
           else
             NEW_NAME="helvex-pg-$(date -u +%Y%m%dT%H%M%SZ)"
             echo "Generated new backupServerName: $NEW_NAME"
+            SERVER_NAME="$NEW_NAME"
             kubectl create configmap pg-backup-meta \
               -n helvex-prod \
               --from-literal=serverName="$NEW_NAME" \
@@ -219,99 +259,144 @@ jobs:
           fi
 
           # --- restoreSourceServerName (where to restore FROM) ---
-          # Auto-detect the most recent backup directory in S3 by finding the
-          # subdirectory that contains a base_backup/ catalogue.
-          # If auto-detection fails, stop the deploy rather than silently falling
-          # back to an older or default cluster name.
-          if ! command -v aws >/dev/null 2>&1; then
-            echo "awscli not found; installing it for backup discovery"
-            if command -v pip3 >/dev/null 2>&1; then
-              pip3 install --quiet --user awscli
-            elif python3 -m ensurepip --user >/dev/null 2>&1; then
-              python3 -m pip install --quiet --user awscli
-            elif command -v apt-get >/dev/null 2>&1; then
-              if command -v sudo >/dev/null 2>&1; then
-                sudo apt-get update -y
-                if sudo apt-cache show awscli >/dev/null 2>&1; then
-                  sudo apt-get install -y awscli
-                else
-                  echo "apt package awscli unavailable; installing AWS CLI v2 from official bundle"
-                  sudo apt-get install -y curl unzip
-                  tmpdir=$(mktemp -d)
-                  trap 'rm -rf "$tmpdir"' EXIT
-                  curl -fsSL "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "$tmpdir/awscliv2.zip"
-                  (cd "$tmpdir" && unzip -q awscliv2.zip)
-                  sudo "$tmpdir/aws/install" --update
-                fi
-              else
-                apt-get update -y
-                if apt-cache show awscli >/dev/null 2>&1; then
-                  apt-get install -y awscli
-                else
-                  echo "ERROR: apt package awscli unavailable and sudo is required for AWS CLI v2 install" >&2
-                  exit 1
-                fi
-              fi
+          # Selection order:
+          # 1) S3 restore-point file (restore-point.json)
+          # 2) Manual override (workflow_dispatch input restore_source)
+          # 3) Repo variable POSTGRES_RESTORE_SOURCE
+          # 4) Existing ConfigMap value pg-backup-meta.data.restoreSource
+
+          install_awscli() {
+            if command -v aws >/dev/null 2>&1; then
+              return 0
+            fi
+
+            echo "awscli not found; installing from official AWS CLI v2 bundle"
+
+            if command -v sudo >/dev/null 2>&1; then
+              sudo apt-get update -y
+              sudo apt-get install -y curl unzip
             else
-              echo "ERROR: unable to install awscli (no pip3/ensurepip/apt-get available)" >&2
+              apt-get update -y
+              apt-get install -y curl unzip
+            fi
+
+            arch=$(uname -m)
+            case "$arch" in
+              x86_64) aws_arch="x86_64" ;;
+              aarch64|arm64) aws_arch="aarch64" ;;
+              *)
+                echo "ERROR: unsupported architecture for AWS CLI bundle: $arch" >&2
+                exit 1
+                ;;
+            esac
+
+            tmpdir=$(mktemp -d)
+            trap 'rm -rf "$tmpdir"' EXIT
+            curl -fsSL "https://awscli.amazonaws.com/awscli-exe-linux-${aws_arch}.zip" -o "$tmpdir/awscliv2.zip"
+            (cd "$tmpdir" && unzip -q awscliv2.zip)
+
+            if command -v sudo >/dev/null 2>&1; then
+              sudo "$tmpdir/aws/install" --update
+            else
+              "$tmpdir/aws/install" --update
+            fi
+
+            if ! command -v aws >/dev/null 2>&1; then
+              echo "ERROR: awscli installation failed" >&2
               exit 1
             fi
-            export PATH="$HOME/.local/bin:$PATH"
-          fi
+          }
 
-          if ! command -v aws >/dev/null 2>&1; then
-            echo "ERROR: awscli installation did not produce an 'aws' executable" >&2
-            exit 1
-          fi
-
-          aws --version
-
-          BUCKET_PATH="s3://helvex-backups/pg-prod/"
+          POINTER_URI="${S3_BACKUP_PREFIX}restore-point.json"
+          POINTER_SOURCE=""
           RESTORE_SOURCE=""
 
-          echo "Listing timestamped backup prefixes in ${BUCKET_PATH}"
-          dirs=$(aws s3 ls "$BUCKET_PATH" --endpoint-url "$S3_ENDPOINT" \
-            | awk '$1 == "PRE" {gsub("/", "", $2); if ($2 ~ /^helvex-pg-[0-9]{8}T[0-9]{6}Z$/) print $2}' \
-            | sort -r)
+          install_awscli
+          aws --version
 
-          if [ -z "$dirs" ]; then
-            echo "ERROR: no timestamped backup prefixes found in ${BUCKET_PATH}" >&2
-            exit 1
+          pointer_tmp=$(mktemp)
+          if aws s3 cp "$POINTER_URI" "$pointer_tmp" --endpoint-url "$S3_ENDPOINT" >/dev/null 2>&1; then
+            POINTER_SOURCE=$(python3 -c "import json,sys; d=json.load(open(sys.argv[1])); print(d.get('restoreSource',''))" "$pointer_tmp" 2>/dev/null || true)
+            if [ -n "$POINTER_SOURCE" ]; then
+              echo "Using restore source from pointer file: $POINTER_SOURCE"
+              RESTORE_SOURCE="$POINTER_SOURCE"
+            else
+              echo "Pointer file found but restoreSource is empty; falling back"
+            fi
+          else
+            echo "No restore-point file found at ${POINTER_URI}; falling back"
+          fi
+          rm -f "$pointer_tmp"
+
+          if [ -z "$RESTORE_SOURCE" ] && [ -n "${MANUAL_RESTORE_SOURCE:-}" ]; then
+            RESTORE_SOURCE="$MANUAL_RESTORE_SOURCE"
+            echo "Using manual restore source from workflow input: $RESTORE_SOURCE"
           fi
 
-          echo "Discovered timestamped backup prefixes:"
-          printf '%s\n' "$dirs" | sed 's/^/- /'
-
-          for dir in $dirs; do
-            [ -n "$dir" ] || continue
-            # Check if this dir has a base backup catalogue
-            if aws s3 ls "${BUCKET_PATH}${dir}/base/" --endpoint-url "$S3_ENDPOINT" >/dev/null 2>&1 && \
-               aws s3 ls "${BUCKET_PATH}${dir}/wal/" --endpoint-url "$S3_ENDPOINT" >/dev/null 2>&1; then
-              RESTORE_SOURCE="$dir"
-              echo "Auto-detected restore source: $RESTORE_SOURCE"
-              break
-            fi
-            echo "Skipping ${dir}: missing base or wal content"
-          done
+          if [ -z "$RESTORE_SOURCE" ] && [ -n "${POSTGRES_RESTORE_SOURCE:-}" ]; then
+            RESTORE_SOURCE="$POSTGRES_RESTORE_SOURCE"
+            echo "Using restore source from repo variable: $RESTORE_SOURCE"
+          fi
 
           if [ -z "$RESTORE_SOURCE" ]; then
-            echo "ERROR: no valid backup prefix with both base and wal content found in ${BUCKET_PATH}" >&2
+            RESTORE_SOURCE=$(kubectl get configmap pg-backup-meta -n helvex-prod \
+              -o jsonpath='{.data.restoreSource}' 2>/dev/null || echo "")
+            if [ -n "$RESTORE_SOURCE" ]; then
+              echo "Reusing restore source from ConfigMap: $RESTORE_SOURCE"
+            fi
+          fi
+
+          if [ -z "$RESTORE_SOURCE" ]; then
+            echo "ERROR: restore source is not set." >&2
+            echo "Set workflow input restore_source or repo variable POSTGRES_RESTORE_SOURCE." >&2
             exit 1
           fi
 
+          if ! echo "$RESTORE_SOURCE" | grep -Eq '^helvex-pg-[0-9]{8}T[0-9]{6}Z$'; then
+            echo "ERROR: invalid restore source format: $RESTORE_SOURCE" >&2
+            echo "Expected: helvex-pg-YYYYMMDDTHHMMSSZ" >&2
+            exit 1
+          fi
+
+          kubectl create configmap pg-backup-meta \
+            -n helvex-prod \
+            --from-literal=serverName="$SERVER_NAME" \
+            --from-literal=restoreSource="$RESTORE_SOURCE" \
+            --dry-run=client -o yaml | kubectl apply -f -
+
+          # Write/update restore-point file in S3 so future restores can resolve
+          # without S3 prefix scanning.
+          pointer_write_tmp=$(mktemp)
+          cat > "$pointer_write_tmp" <<JSON
+{"restoreSource":"$RESTORE_SOURCE","backupServerName":"$SERVER_NAME","updatedAt":"$(date -u +%Y-%m-%dT%H:%M:%SZ)","backupPrefix":"$S3_BACKUP_PREFIX"}
+JSON
+          aws s3 cp "$pointer_write_tmp" "$POINTER_URI" --endpoint-url "$S3_ENDPOINT"
+          rm -f "$pointer_write_tmp"
+
           echo "restore_source=$RESTORE_SOURCE" >> "$GITHUB_OUTPUT"
-          echo "Will restore from: ${BUCKET_PATH}${RESTORE_SOURCE}/"
+          echo "Will restore from backup prefix: ${RESTORE_SOURCE}"
 
       - name: Apply Helmfile (full deploy)
         if: |
-          contains(github.event.head_commit.message, '[deploy-prod]') ||
-          contains(github.event.head_commit.message, '[deploy-app]')
+          (github.event_name != 'workflow_dispatch' && (
+            contains(github.event.head_commit.message, '[deploy-prod]') ||
+            contains(github.event.head_commit.message, '[deploy-app]')
+          )) ||
+          (github.event_name == 'workflow_dispatch' && (
+            github.event.inputs.deploy_mode == 'prod' ||
+            github.event.inputs.deploy_mode == 'app'
+          ))
         working-directory: infra
         env:
           COMMIT_MSG: ${{ github.event.head_commit.message }}
+          DEPLOY_MODE: ${{ github.event.inputs.deploy_mode }}
         run: |
           SELECTOR=""
-          if echo "$COMMIT_MSG" | grep -qF '[deploy-app]'; then
+          if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then
+            if [ "${DEPLOY_MODE}" = "app" ]; then
+              SELECTOR="--selector name=helvex"
+            fi
+          elif echo "$COMMIT_MSG" | grep -qF '[deploy-app]'; then
             SELECTOR="--selector name=helvex"
           fi
           helmfile -e prod apply $SELECTOR \
@@ -322,21 +407,27 @@ jobs:
             --suppress-diff
 
       - name: Deploy frontend only
-        if: contains(github.event.head_commit.message, '[deploy-frontend]')
+        if: |
+          (github.event_name != 'workflow_dispatch' && contains(github.event.head_commit.message, '[deploy-frontend]')) ||
+          (github.event_name == 'workflow_dispatch' && github.event.inputs.deploy_mode == 'frontend')
         run: |
           kubectl set image deployment/helvex-frontend \
             frontend=ghcr.io/${{ github.repository }}-frontend:${{ github.sha }} \
             -n helvex-prod
 
       - name: Deploy backend only
-        if: contains(github.event.head_commit.message, '[deploy-backend]')
+        if: |
+          (github.event_name != 'workflow_dispatch' && contains(github.event.head_commit.message, '[deploy-backend]')) ||
+          (github.event_name == 'workflow_dispatch' && github.event.inputs.deploy_mode == 'backend')
         run: |
           kubectl set image deployment/helvex \
             app=ghcr.io/${{ github.repository }}:${{ github.sha }} \
             -n helvex-prod
 
       - name: Wait for PostgreSQL to be healthy
-        if: contains(github.event.head_commit.message, '[deploy-prod]')
+        if: |
+          (github.event_name != 'workflow_dispatch' && contains(github.event.head_commit.message, '[deploy-prod]')) ||
+          (github.event_name == 'workflow_dispatch' && github.event.inputs.deploy_mode == 'prod')
         run: |
           echo "Waiting for PostgreSQL cluster to become healthy..."
           for i in $(seq 1 60); do
@@ -357,9 +448,20 @@ jobs:
           done
 
       - name: Wait for rollout
+        env:
+          DEPLOY_MODE: ${{ github.event.inputs.deploy_mode }}
         run: |
           COMMIT_MSG="${{ github.event.head_commit.message }}"
-          if echo "$COMMIT_MSG" | grep -qF '[deploy-frontend]'; then
+          if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then
+            if [ "${DEPLOY_MODE}" = "frontend" ]; then
+              kubectl rollout status deployment/helvex-frontend -n helvex-prod --timeout=180s
+            elif [ "${DEPLOY_MODE}" = "backend" ]; then
+              kubectl rollout status deployment/helvex -n helvex-prod --timeout=360s
+            else
+              kubectl rollout status deployment/helvex -n helvex-prod --timeout=360s
+              kubectl rollout status deployment/helvex-frontend -n helvex-prod --timeout=180s
+            fi
+          elif echo "$COMMIT_MSG" | grep -qF '[deploy-frontend]'; then
             kubectl rollout status deployment/helvex-frontend -n helvex-prod --timeout=180s
           elif echo "$COMMIT_MSG" | grep -qF '[deploy-backend]'; then
             kubectl rollout status deployment/helvex -n helvex-prod --timeout=360s
