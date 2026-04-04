@@ -84,6 +84,8 @@ If the load balancer IP changed, update your DNS A record:
 |---|---|---|
 | `helvex.dicy.ch` | A | `<lb_ipv4>` |
 
+Usually: 162.55.153.183
+
 DNS TTL is usually 300s (5 min). Wait before testing TLS.
 
 ### Step 3 — Wait for cloud-init to finish
