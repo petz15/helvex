@@ -1127,6 +1127,55 @@ Current decision: run in home-only mode for now. Cloud fallback (Phase B/C) is d
 Operational note:
 - Keep KEDA behavior unchanged if desired, but expect Pending pods or queued jobs when no schedulable home ML node is available.
 
+### Phase A replay procedure (fresh control plane + home node)
+
+Use this if the cluster was freshly rebuilt and you need to re-attach the home node.
+
+1) On control-plane node `app1`, collect join inputs:
+
+```bash
+sudo cat /var/lib/rancher/k3s/server/node-token
+tailscale ip -4
+kubectl get nodes -o wide
+```
+
+2) On home server, ensure private connectivity first (Tailscale):
+
+```bash
+curl -fsSL https://tailscale.com/install.sh | sh
+sudo tailscale up --authkey <TAILSCALE_AUTH_KEY> --hostname ubuntuserverhome
+tailscale ip -4
+```
+
+3) On home server, join as k3s agent through the control-plane Tailscale address:
+
+```bash
+curl -sfL https://get.k3s.io | K3S_URL=https://<app1-tailscale-ip>:6443 K3S_TOKEN=<node-token> sh -
+```
+
+4) Back on control-plane, verify both nodes and apply ML placement metadata:
+
+```bash
+kubectl get nodes -o wide
+kubectl label node ubuntuserverhome workload=ml location=home --overwrite
+kubectl taint node ubuntuserverhome workload=ml:NoSchedule --overwrite
+kubectl describe node ubuntuserverhome | grep -E "Taints|workload=|location="
+```
+
+Acceptance checks (both nodes):
+- `app1` is `Ready`
+- `ubuntuserverhome` is `Ready`
+- Home node has labels `workload=ml`, `location=home`
+- Home node has taint `workload=ml:NoSchedule`
+
+Post-step hardening:
+
+```bash
+sudo k3s token rotate
+```
+
+Run on the control-plane after successful home-node onboarding.
+
 ### Home-only ops checklist (small)
 
 Daily checks:

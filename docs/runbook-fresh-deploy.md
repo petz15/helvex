@@ -76,7 +76,24 @@ Note:
 - `lb_ipv4` — load balancer public IP (for DNS)
 - `server_public_ips["app1"]` — control-plane public IP (for SSH)
 
-### Step 2 — Update DNS
+### Step 2 — Install and join Tailscale (recommended)
+
+Set up private connectivity before cluster operations. Run on both `app1` and `db1`.
+
+```bash
+ssh ubuntu@<server-public-ip>
+curl -fsSL https://tailscale.com/install.sh | sh
+sudo tailscale up --authkey <TAILSCALE_AUTH_KEY> --hostname <node-name>
+tailscale ip -4
+```
+
+Expected result:
+- Each server receives a stable Tailscale IP
+- `app1` and `db1` can reach each other over Tailscale
+
+Use the Tailscale IP for internal/admin traffic where possible.
+
+### Step 3 — Update DNS
 
 If the load balancer IP changed, update your DNS A record:
 
@@ -88,9 +105,9 @@ Usually: 162.55.153.183
 
 DNS TTL is usually 300s (5 min). Wait before testing TLS.
 
-### Step 3 — Wait for cloud-init to finish
+### Step 4 — Wait for cloud-init to finish
 
-Cloud-init installs K3s, Helm, Helmfile, the helm-diff plugin, sets up the ubuntu user, and clones the repo. It does **not** run helmfile — that happens in steps 4 and 5. This takes **3–5 minutes**.
+Cloud-init installs K3s, Helm, Helmfile, the helm-diff plugin, sets up the ubuntu user, and clones the repo. It does **not** run helmfile — that happens in steps 5 and 6. This takes **3–5 minutes**.
 
 SSH in and tail the log:
 
@@ -116,7 +133,7 @@ kubectl get nodes
 
 Both `app1` (control-plane) and `db1` (worker) should show `Ready`. No `sudo`, no `export KUBECONFIG` needed.
 
-### Step 4 — Create the ARC GitHub App secret
+### Step 5 — Create the ARC GitHub App secret
 
 ARC needs this secret to authenticate with GitHub. It must exist before helmfile runs.
 
@@ -140,7 +157,7 @@ rm /tmp/arc-key.pem
 kubectl get secret arc-github-app -n arc-systems
 ```
 
-### Step 5 — Deploy operators and ARC only
+### Step 6 — Deploy operators and ARC only
 
 > **Important:** Do **not** deploy the `helvex` chart manually. The `helvex-env` secret
 > (which holds S3 credentials for PG backup restore, DB passwords, etc.) is created by the
@@ -173,7 +190,7 @@ kubectl get pods -n arc-systems -w
 
 You should see `arc-controller-*` and `arc-runner-set-*` pods reach `Running`.
 
-### Step 6 — Trigger the first deploy
+### Step 7 — Trigger the first deploy
 
 Exit the SSH session. On your local machine:
 
@@ -188,7 +205,7 @@ The `deploy` job will run on the `helvex-prod` ARC runner (the pod you started i
 
 1. Create the `helvex-env` K8s secret (with S3 credentials, DB password, etc.)
 2. **Auto-detect backup names** — no manual configuration needed:
-   - `restoreSourceServerName`: scans `s3://helvex-backups/pg-prod/` for the most recent subdirectory containing a base backup (falls back to `helvex-pg`)
+  - `restoreSourceServerName`: scans `s3://helvex-backups/pg-prod/` for the most recent timestamped subdirectory matching `helvex-pg-YYYYMMDDTHHMMSSZ` that contains both base and wal backup content; if no valid prefix is found, the deploy fails instead of silently restoring from an older default name
    - `backupServerName`: generates a unique timestamped name (e.g. `helvex-pg-20260331T150000Z`) and stores it in the `pg-backup-meta` ConfigMap. Subsequent deploys reuse the same name.
    - This ensures the new cluster restores from the old backup but writes new backups to a separate path, avoiding WAL archive collisions.
 3. Deploy the helvex chart via helmfile (PostgreSQL, Redis, app, workers)
@@ -205,7 +222,7 @@ The `deploy` job will run on the `helvex-prod` ARC runner (the pod you started i
 > directories older than 14 days, keeping only the active backup path. This prevents S3
 > storage from growing unbounded across rebuilds.
 
-### Step 7 — Verify
+### Step 8 — Verify
 
 ```bash
 ssh ubuntu@<app1-public-ip>
@@ -228,6 +245,55 @@ helvex-db-2                   1/1   Running   # CloudNativePG standby
 > **ml-worker**: Not listed above — KEDA scales it to 0 replicas by default. It will appear as `helvex-ml-worker-XXXXX` only when an ML job (`hdbscan_cluster`, `recompute_keywords`, `cluster_analysis`) is queued. After the job completes and the 5-minute cooldown elapses, the pod terminates automatically.
 
 Then open https://helvex.dicy.ch in a browser. TLS should be valid (cert-manager issues the Let's Encrypt cert on first request — allow up to 60s).
+
+### Step 9 — Add home node to a fresh control plane (Phase A)
+
+Use this after a fresh deploy when `app1` is healthy and you want ML jobs to run on your home server.
+
+1. On `app1`, get the k3s agent join token and the control-plane Tailscale IP:
+
+```bash
+ssh ubuntu@<app1-public-ip>
+sudo cat /var/lib/rancher/k3s/server/node-token
+tailscale ip -4
+```
+
+2. On the home server, install and join Tailscale:
+
+```bash
+curl -fsSL https://tailscale.com/install.sh | sh
+sudo tailscale up --authkey <TAILSCALE_AUTH_KEY> --hostname ubuntuserverhome
+tailscale ip -4
+```
+
+3. On the home server, join k3s as agent via the control-plane Tailscale IP:
+
+```bash
+curl -sfL https://get.k3s.io | K3S_URL=https://<app1-tailscale-ip>:6443 K3S_TOKEN=<node-token> sh -
+```
+
+4. On `app1`, verify both nodes are Ready and label/taint the home node for ML:
+
+```bash
+kubectl get nodes -o wide
+kubectl label node ubuntuserverhome workload=ml location=home --overwrite
+kubectl taint node ubuntuserverhome workload=ml:NoSchedule --overwrite
+kubectl describe node ubuntuserverhome | grep -E "Taints|workload=|location="
+```
+
+Expected result:
+- `app1` is `Ready` (control-plane)
+- `ubuntuserverhome` is `Ready` (agent)
+- Home node has labels `workload=ml`, `location=home`
+- Home node has taint `workload=ml:NoSchedule`
+
+5. Hardening after successful join:
+
+```bash
+sudo k3s token rotate
+```
+
+Run this on `app1` to rotate the node join token after onboarding.
 
 ---
 

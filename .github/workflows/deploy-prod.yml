@@ -198,6 +198,8 @@ jobs:
           AWS_SECRET_ACCESS_KEY: ${{ secrets.S3_SECRET_KEY }}
           S3_ENDPOINT: ${{ vars.S3_ENDPOINT_URL || 'https://nbg1.your-objectstorage.com' }}
         run: |
+          set -euo pipefail
+
           # --- backupServerName (where the NEW cluster writes backups) ---
           # Reuse from ConfigMap if it exists, otherwise generate a unique name.
           EXISTING=$(kubectl get configmap pg-backup-meta -n helvex-prod \
@@ -219,25 +221,53 @@ jobs:
           # --- restoreSourceServerName (where to restore FROM) ---
           # Auto-detect the most recent backup directory in S3 by finding the
           # subdirectory that contains a base_backup/ catalogue.
-          # Falls back to "helvex-pg" (the default CNPG cluster name).
-          pip install -q awscli 2>/dev/null || true
+          # If auto-detection fails, stop the deploy rather than silently falling
+          # back to an older or default cluster name.
+          if ! command -v aws >/dev/null 2>&1; then
+            echo "awscli not found; installing it for backup discovery"
+            python3 -m pip install --quiet --user awscli
+            export PATH="$HOME/.local/bin:$PATH"
+          fi
+
+          aws --version
+
           BUCKET_PATH="s3://helvex-backups/pg-prod/"
           RESTORE_SOURCE=""
-          dirs=$(aws s3 ls "$BUCKET_PATH" --endpoint-url "$S3_ENDPOINT" \
-            2>/dev/null | awk '/PRE/{print $2}' | tr -d '/' | sort -r) || true
 
-          for dir in $dirs; do
+          echo "Listing timestamped backup prefixes in ${BUCKET_PATH}"
+          dirs=$(aws s3 ls "$BUCKET_PATH" --endpoint-url "$S3_ENDPOINT" \
+            | awk '$1 == "PRE" {gsub("/", "", $2); if ($2 ~ /^helvex-pg-[0-9]{8}T[0-9]{6}Z$/) print $2}' \
+            | sort -r)
+
+          if [ -z "$dirs" ]; then
+            echo "ERROR: no timestamped backup prefixes found in ${BUCKET_PATH}" >&2
+            exit 1
+          fi
+
+          echo "Discovered timestamped backup prefixes:"
+          printf '%s\n' "$dirs" | sed 's/^/- /'
+
+          while IFS= read -r dir; do
+            [ -n "$dir" ] || continue
             # Check if this dir has a base backup catalogue
-            has_base=$(aws s3 ls "${BUCKET_PATH}${dir}/base/" --endpoint-url "$S3_ENDPOINT" \
-              2>/dev/null | head -1) || true
-            if [ -n "$has_base" ]; then
+            has_base=$(aws s3 ls "${BUCKET_PATH}${dir}/base/" --endpoint-url "$S3_ENDPOINT")
+            has_wal=$(aws s3 ls "${BUCKET_PATH}${dir}/wal/" --endpoint-url "$S3_ENDPOINT")
+
+            if [ -n "$has_base" ] && [ -n "$has_wal" ]; then
               RESTORE_SOURCE="$dir"
               echo "Auto-detected restore source: $RESTORE_SOURCE"
               break
             fi
-          done
+            echo "Skipping ${dir}: missing base or wal content"
+          done <<EOF
+$dirs
+EOF
 
-          RESTORE_SOURCE="${RESTORE_SOURCE:-helvex-pg}"
+          if [ -z "$RESTORE_SOURCE" ]; then
+            echo "ERROR: no valid backup prefix with both base and wal content found in ${BUCKET_PATH}" >&2
+            exit 1
+          fi
+
           echo "restore_source=$RESTORE_SOURCE" >> "$GITHUB_OUTPUT"
           echo "Will restore from: ${BUCKET_PATH}${RESTORE_SOURCE}/"
 

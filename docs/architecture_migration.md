@@ -250,14 +250,25 @@ Deploy the existing monolith to K3s — no microservices split yet.
 
 2. **Run `terraform apply`** — provisions static primary IP for app1, updates server
 
-3. **Run helmfile** (deploys cert-manager, CloudNativePG, Redis, ARC, app):
+3. **Install and join Tailscale on `app1` and `db1`**:
+   ```bash
+   ssh ubuntu@<app1-public-ip>
+   curl -fsSL https://tailscale.com/install.sh | sh
+   sudo tailscale up --authkey <TAILSCALE_AUTH_KEY> --hostname app1
+
+   ssh ubuntu@<db1-public-ip>
+   curl -fsSL https://tailscale.com/install.sh | sh
+   sudo tailscale up --authkey <TAILSCALE_AUTH_KEY> --hostname db1
+   ```
+
+4. **Run helmfile** (deploys cert-manager, CloudNativePG, Redis, ARC, app):
    ```bash
    helmfile -e prod apply
    ```
 
-4. **Data migration** — `pg_dump` local → `pg_restore` into CloudNativePG
+5. **Data migration** — `pg_dump` local → `pg_restore` into CloudNativePG
 
-5. **Smoke test** — login, dashboard, run one job
+6. **Smoke test** — login, dashboard, run one job
 
 **Dev→prod promotion gate:**
 - `/health` returns ok for 1 hour in dev
