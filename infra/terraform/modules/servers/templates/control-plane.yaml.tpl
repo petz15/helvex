@@ -5,30 +5,36 @@ packages:
   - git
 
 runcmd:
-  # Install and join Tailscale first (before k3s) so we can include the Tailscale IP in k3s TLS SAN
   - |
+    # Install Tailscale, join, then install k3s with Tailscale IP in TLS SAN.
+    # Tailscale is non-fatal: if it fails or takes too long, k3s still installs normally.
     curl -fsSL https://tailscale.com/install.sh | sh
-  - |
-    tailscale up --authkey="${tailscale_auth_key}" --hostname="${node_name}" --accept-routes
-  - |
-    # Get the Tailscale IP and write k3s config with both public and Tailscale IPs in TLS SAN
-    TAILSCALE_IP=$(tailscale ip -4)
+    tailscale up --authkey="${tailscale_auth_key}" --hostname="${node_name}" || true
+
+    # Wait up to 30 s for Tailscale to assign an IP
+    TAILSCALE_IP=""
+    for i in $(seq 1 6); do
+      TAILSCALE_IP=$(tailscale ip -4 2>/dev/null || true)
+      [ -n "$TAILSCALE_IP" ] && break
+      sleep 5
+    done
+
+    # Write k3s config.yaml with Tailscale IP in TLS SAN (only if IP is available)
     mkdir -p /etc/rancher/k3s
-    cat > /etc/rancher/k3s/config.yaml <<EOF
-    tls-san:
-      - ${public_ip}
-      - $TAILSCALE_IP
-    EOF
-  - |
-    # Now install k3s with Tailscale IP in TLS SAN (matches config.yaml above)
-    TAILSCALE_IP=$(tailscale ip -4)
+    if [ -n "$TAILSCALE_IP" ]; then
+      printf 'tls-san:\n  - %s\n  - %s\n' "${public_ip}" "$TAILSCALE_IP" > /etc/rancher/k3s/config.yaml
+    fi
+
+    # Install k3s — add Tailscale TLS SAN flag only if IP is available
+    TLS_SAN_FLAGS="--tls-san=${public_ip}"
+    [ -n "$TAILSCALE_IP" ] && TLS_SAN_FLAGS="$TLS_SAN_FLAGS --tls-san=$TAILSCALE_IP"
+
     curl -sfL https://get.k3s.io | K3S_TOKEN="${token}" sh -s - server \
       --disable=servicelb \
       --node-ip=${private_ip} \
       --advertise-address=${private_ip} \
       --flannel-iface=enp7s0 \
-      --tls-san=${public_ip} \
-      --tls-san=$TAILSCALE_IP \
+      $TLS_SAN_FLAGS \
       --cluster-cidr=10.244.0.0/16 \
       --service-cidr=10.96.0.0/12 \
       --write-kubeconfig-mode=640 \
