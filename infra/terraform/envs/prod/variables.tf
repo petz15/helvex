@@ -79,3 +79,9 @@ variable "k3s_token" {
   sensitive = true
   description = "Shared secret for K3s cluster — generate with: openssl rand -hex 32"
 }
+
+variable "tailscale_auth_key" {
+  type        = string
+  sensitive   = true
+  description = "Reusable Tailscale auth key. Generate at tailscale.com/admin/settings/keys — use 'Reusable, non-ephemeral' so it survives server rebuilds."
+}

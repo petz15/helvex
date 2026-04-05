@@ -33,16 +33,20 @@ locals {
     for k, v in var.servers : k => (
       v.role == "k3s-control-plane"
       ? templatefile("${path.module}/templates/control-plane.yaml.tpl", {
-          token      = var.k3s_token
-          private_ip = v.private_ip
-          public_ip  = hcloud_primary_ip.cp[k].ip_address
+          token                 = var.k3s_token
+          private_ip            = v.private_ip
+          public_ip             = hcloud_primary_ip.cp[k].ip_address
+          tailscale_auth_key    = var.tailscale_auth_key
+          node_name             = "${var.name_prefix}-${k}"
         })
       : templatefile("${path.module}/templates/worker.yaml.tpl", {
-          token       = var.k3s_token
-          private_ip  = v.private_ip
-          cp_ip       = local.cp_ip
-          node_labels = v.node_labels
-          node_taints = v.node_taints
+          token                 = var.k3s_token
+          private_ip            = v.private_ip
+          cp_ip                 = local.cp_ip
+          node_labels           = v.node_labels
+          node_taints           = v.node_taints
+          tailscale_auth_key    = var.tailscale_auth_key
+          node_name             = "${var.name_prefix}-${k}"
         })
     )
   }

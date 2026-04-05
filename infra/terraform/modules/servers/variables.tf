@@ -62,3 +62,9 @@ variable "db_volume_size_gb" {
   default     = 80
   description = "Size (GiB) of the persistent data volume attached to database-role nodes. Set to 0 to skip."
 }
+
+variable "tailscale_auth_key" {
+  type        = string
+  sensitive   = true
+  description = "Reusable Tailscale auth key. Generate at tailscale.com/admin/settings/keys — use 'Reusable, non-ephemeral' so it survives server rebuilds."
+}

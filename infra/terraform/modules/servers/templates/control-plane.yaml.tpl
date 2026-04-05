@@ -5,13 +5,30 @@ packages:
   - git
 
 runcmd:
+  # Install and join Tailscale first (before k3s) so we can include the Tailscale IP in k3s TLS SAN
   - |
+    curl -fsSL https://tailscale.com/install.sh | sh
+  - |
+    tailscale up --authkey="${tailscale_auth_key}" --hostname="${node_name}" --accept-routes
+  - |
+    # Get the Tailscale IP and write k3s config with both public and Tailscale IPs in TLS SAN
+    TAILSCALE_IP=$(tailscale ip -4)
+    mkdir -p /etc/rancher/k3s
+    cat > /etc/rancher/k3s/config.yaml <<EOF
+    tls-san:
+      - ${public_ip}
+      - $TAILSCALE_IP
+    EOF
+  - |
+    # Now install k3s with Tailscale IP in TLS SAN (matches config.yaml above)
+    TAILSCALE_IP=$(tailscale ip -4)
     curl -sfL https://get.k3s.io | K3S_TOKEN="${token}" sh -s - server \
       --disable=servicelb \
       --node-ip=${private_ip} \
       --advertise-address=${private_ip} \
       --flannel-iface=enp7s0 \
       --tls-san=${public_ip} \
+      --tls-san=$TAILSCALE_IP \
       --cluster-cidr=10.244.0.0/16 \
       --service-cidr=10.96.0.0/12 \
       --write-kubeconfig-mode=640 \

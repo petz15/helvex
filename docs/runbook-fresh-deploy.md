@@ -63,6 +63,8 @@ If the GitHub App does not exist yet:
 
 Make sure all local changes are **pushed to GitHub** before running terraform. Cloud-init clones the repo from GitHub on boot — if your changes are only local, the server will get stale code.
 
+If tailscale is necessary, set up the tailscale_auth_key in the terafrom.tfvars
+
 ```bash
 git push
 ```
@@ -82,22 +84,23 @@ Note:
 - `lb_ipv4` — load balancer public IP (for DNS)
 - `server_public_ips["app1"]` — control-plane public IP (for SSH)
 
-### Step 2 — Install and join Tailscale (recommended)
+### Step 2 — Tailscale is pre-installed and joined automatically
 
-Set up private connectivity before cluster operations. Run on both `app1` and `db1`.
+Both `app1` and `db1` automatically install and join your Tailscale network during cloud-init (from the reusable auth key in `terraform.tfvars`). They are assigned stable Tailscale hostnames (`helvex-app1`, `helvex-db1`) for consistent identification.
+
+You do **not** need to run any manual Tailscale setup on `app1` or `db1` — it's done at boot.
+
+To verify:
 
 ```bash
-ssh ubuntu@<server-public-ip>
-curl -fsSL https://tailscale.com/install.sh | sh
-sudo tailscale up --authkey <TAILSCALE_AUTH_KEY> --hostname <node-name>
+ssh ubuntu@<app1-public-ip>
 tailscale ip -4
+# Should show app1's Tailscale IP immediately
+tailscale status
+# Should list both app1 and db1 as connected peers
 ```
 
-Expected result:
-- Each server receives a stable Tailscale IP
-- `app1` and `db1` can reach each other over Tailscale
-
-Use the Tailscale IP for internal/admin traffic where possible.
+**Note:** Tailscale is only installed on cluster servers (app1, db1). To add additional compute nodes later (e.g., your home server), you manually install Tailscale on those nodes and join them to the cluster using k3s agent — see Step 9.
 
 ### Step 3 — Update DNS
 
@@ -196,7 +199,7 @@ kubectl get pods -n arc-systems -w
 
 You should see `arc-controller-*` and `arc-runner-set-*` pods reach `Running`.
 
-### Step 7 — Trigger the first deploy
+### Step 7 — Trigger the first deploy (make sure it gets the right backup)
 
 Exit the SSH session. On your local machine:
 
@@ -268,7 +271,9 @@ Then open https://helvex.dicy.ch in a browser. TLS should be valid (cert-manager
 
 Use this after a fresh deploy when `app1` is healthy and you want ML jobs to run on your home server.
 
-1. On `app1`, get the k3s agent join token and the control-plane Tailscale IP:
+The control-plane (`app1`) now automatically advertises its Tailscale IP in its k3s TLS SAN during cloud-init setup. No manual k3s configuration is needed on the server side.
+
+1. On `app1`, retrieve the k3s agent join token and control-plane Tailscale IP:
 
 ```bash
 ssh ubuntu@<app1-public-ip>
@@ -276,7 +281,9 @@ sudo cat /var/lib/rancher/k3s/server/node-token
 tailscale ip -4
 ```
 
-2. On the home server, install and join Tailscale:
+Save both values.
+
+2. On the home server, install and join Tailscale (if not already done):
 
 ```bash
 curl -fsSL https://tailscale.com/install.sh | sh
@@ -284,13 +291,27 @@ sudo tailscale up --authkey <TAILSCALE_AUTH_KEY> --hostname ubuntuserverhome
 tailscale ip -4
 ```
 
-3. On the home server, join k3s as agent via the control-plane Tailscale IP:
+Verify the home server and `app1` can ping each other over Tailscale:
 
 ```bash
-curl -sfL https://get.k3s.io | K3S_URL=https://<app1-tailscale-ip>:6443 K3S_TOKEN=<node-token> sh -
+tailscale ping helvex-app1
 ```
 
-4. On `app1`, verify both nodes are Ready and label/taint the home node for ML:
+3. On the home server, join k3s as an agent via the control-plane Tailscale IP:
+
+If k3s agent is already installed from a previous cluster, uninstall it first:
+
+```bash
+/usr/local/bin/k3s-agent-uninstall.sh
+```
+
+Then install the k3s agent:
+
+```bash
+curl -sfL https://get.k3s.io | K3S_URL=https://<SERVER_TAILSCALE_IP>:6443 K3S_TOKEN=<K3S_TOKEN-from-step-1> sh -s - agent
+```
+
+4. On `app1`, verify both nodes are Ready and label/taint the home node for ML workloads:
 
 ```bash
 kubectl get nodes -o wide
@@ -305,13 +326,14 @@ Expected result:
 - Home node has labels `workload=ml`, `location=home`
 - Home node has taint `workload=ml:NoSchedule`
 
-5. Hardening after successful join:
+5. Rotate the node join token after successful onboarding (hardening):
 
 ```bash
+ssh ubuntu@<app1-public-ip>
 sudo k3s token rotate
 ```
 
-Run this on `app1` to rotate the node join token after onboarding.
+This prevents the token from being used to join additional unauthorized nodes.
 
 ---
 
