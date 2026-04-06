@@ -35,6 +35,15 @@ resource "hcloud_firewall" "this" {
     source_ips = ["0.0.0.0/0", "::/0"]
   }
 
+  # Tailscale direct peer connections (WireGuard UDP).
+  # Without this, Tailscale falls back to DERP relays — higher latency for home-node traffic.
+  rule {
+    direction  = "in"
+    protocol   = "udp"
+    port       = "41641"
+    source_ips = ["0.0.0.0/0", "::/0"]
+  }
+
   rule {
     direction       = "out"
     protocol        = "tcp"

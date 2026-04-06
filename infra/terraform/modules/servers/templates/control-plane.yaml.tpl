@@ -19,13 +19,20 @@ runcmd:
       sleep 5
     done
 
+    # Advertise the Hetzner private subnet so home nodes can reach cluster IPs via Tailscale.
+    # Requires one-time approval in admin.tailscale.com → Machines → Edit route settings.
+    [ -n "$TAILSCALE_IP" ] && tailscale set --advertise-routes=${subnet_cidr} || true
+
     # Write k3s config.yaml with Tailscale IP in TLS SAN (only if IP is available)
     mkdir -p /etc/rancher/k3s
     if [ -n "$TAILSCALE_IP" ]; then
       printf 'tls-san:\n  - %s\n  - %s\n' "${public_ip}" "$TAILSCALE_IP" > /etc/rancher/k3s/config.yaml
     fi
 
-    # Install k3s — add Tailscale TLS SAN flag only if IP is available
+    # Install k3s — add Tailscale TLS SAN flag only if IP is available.
+    # Always use private IP as advertise-address so flannel binds to the Hetzner private NIC.
+    # This keeps app1↔db1 flannel VXLAN on the Hetzner private network (no Tailscale dependency).
+    # The home node connects to the API server via the Tailscale TLS SAN, not advertise-address.
     TLS_SAN_FLAGS="--tls-san=${public_ip}"
     [ -n "$TAILSCALE_IP" ] && TLS_SAN_FLAGS="$TLS_SAN_FLAGS --tls-san=$TAILSCALE_IP"
 

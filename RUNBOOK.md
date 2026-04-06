@@ -1140,6 +1140,53 @@ Current decision: run in home-only mode for now. Cloud fallback (Phase B/C) is d
 Operational note:
 - Keep KEDA behavior unchanged if desired, but expect Pending pods or queued jobs when no schedulable home ML node is available.
 
+### Networking architecture
+
+```
+app1 (10.0.1.10, TS: 100.x.x.x) ←─ enp7s0 ──→ db1 (10.0.1.11, TS: 100.x.x.x)
+       │ tailscale0                                      │ tailscale0
+       └─────────────── Tailscale ─────────────────────┘
+                              │
+                    ubuntuserverhome (TS: 100.x.x.x)
+```
+
+- **Hetzner ↔ Hetzner**: Flannel VXLAN stays on `enp7s0` (private network). No Tailscale.
+- **Home ↔ Hetzner**: Flannel VXLAN via Tailscale. The home node accepts route `10.0.1.0/24`
+  via Tailscale subnet routing, so it can send VXLAN to `10.0.1.10/11` through Tailscale.
+  **Do NOT annotate app1's flannel public-ip with the Tailscale IP** — that routes db1→app1
+  VXLAN through Tailscale and creates a dependency that breaks Hetzner-to-Hetzner comms.
+
+### Repair: current cluster broken (app1↔db1 unreachable after subnet change)
+
+If db1 can no longer reach app1 (or vice versa), the likely cause is either:
+- `--accept-routes` was inadvertently set on a Hetzner node, causing it to route `10.0.1.x`
+  traffic via Tailscale instead of directly over enp7s0
+- The flannel public-ip annotation on app1 is set to the Tailscale IP, forcing db1 VXLAN
+  through Tailscale which then broke when subnet settings changed
+
+**On app1 and db1 (run both):**
+```bash
+# Remove accept-routes so Hetzner nodes route 10.0.1.x locally, not via Tailscale
+sudo tailscale set --accept-routes=false
+
+# Remove the flannel annotation if present (it forces VXLAN through Tailscale)
+kubectl annotate node helvex-prod-app1 \
+  flannel.alpha.coreos.com/public-ip- \
+  flannel.alpha.coreos.com/public-ip-overwrite- 2>/dev/null || true
+
+# Restart to flush flannel state
+sudo systemctl restart k3s        # on app1
+# sudo systemctl restart k3s-agent  # on db1
+```
+
+Verify:
+```bash
+kubectl get nodes -o wide
+# Both app1 and db1 should be Ready
+# app1's flannel public-ip should show 10.0.1.10 (private IP), not a Tailscale IP
+kubectl get node helvex-prod-app1 -o jsonpath='{.metadata.annotations}' | python3 -m json.tool | grep flannel
+```
+
 ### Phase A replay procedure (fresh control plane + home node)
 
 Use this if the cluster was freshly rebuilt and you need to re-attach the home node.
@@ -1147,27 +1194,38 @@ Use this if the cluster was freshly rebuilt and you need to re-attach the home n
 1) On control-plane node `app1`, collect join inputs:
 
 ```bash
-sudo cat /var/lib/rancher/k3s/server/node-token
-tailscale ip -4
-kubectl get nodes -o wide
+ssh ubuntu@<app1-public-ip>
+sudo cat /var/lib/rancher/k3s/server/node-token   # K3S_TOKEN
+tailscale ip -4                                   # CP_TAILSCALE_IP
 ```
 
-2) On home server, ensure private connectivity first (Tailscale):
+2) Copy the join script to the home server and run it:
 
 ```bash
-curl -fsSL https://tailscale.com/install.sh | sh
-sudo tailscale up --authkey <TAILSCALE_AUTH_KEY> --hostname ubuntuserverhome
-tailscale ip -4
+# On your local machine — copy the script
+scp scripts/join-home-node.sh ubuntu@ubuntuserverhome:/tmp/
+
+# On the home server
+ssh ubuntu@ubuntuserverhome
+sudo bash /tmp/join-home-node.sh \
+  <CP_TAILSCALE_IP> \
+  <K3S_TOKEN> \
+  <TAILSCALE_AUTH_KEY>
 ```
 
-3) On home server, join as k3s agent through the control-plane Tailscale address:
+The script installs Tailscale (if absent), joins with `--accept-routes` (so the home node
+can reach Hetzner private IPs via Tailscale subnet routing), removes any old k3s agent,
+and installs a fresh agent using the Tailscale IP for the API connection.
 
-```bash
-sudo cat /var/lib/rancher/k3s/server/node-token
-curl -sfL https://get.k3s.io | K3S_URL=https://<app1-tailscale-ip>:6443 K3S_TOKEN=<node-token> sh -
-```
+3) **One-time Tailscale admin step** (needed once per Terraform rebuild, not per join):
 
-4) Back on control-plane, verify both nodes and apply ML placement metadata:
+Cloud-init already runs `tailscale set --advertise-routes=10.0.1.0/24` on both Hetzner
+nodes. You only need to approve the routes in the admin console:
+
+- **admin.tailscale.com → Machines → app1** → Edit route settings → approve `10.0.1.0/24`
+- **admin.tailscale.com → Machines → db1**  → Edit route settings → approve `10.0.1.0/24`
+
+4) Back on control-plane, verify both nodes and confirm labels/taints:
 
 ```bash
 kubectl get nodes -o wide
@@ -1176,11 +1234,22 @@ kubectl taint node ubuntuserverhome workload=ml:NoSchedule --overwrite
 kubectl describe node ubuntuserverhome | grep -E "Taints|workload=|location="
 ```
 
+5) Verify pod DNS works from the home node:
+
+```bash
+kubectl run dns-test --image=busybox:1.36 --restart=Never \
+  --overrides='{"spec":{"nodeSelector":{"workload":"ml"},"tolerations":[{"key":"workload","operator":"Equal","value":"ml","effect":"NoSchedule"}]}}' \
+  -- sleep 60
+kubectl exec dns-test -- nslookup kubernetes.default.svc.cluster.local
+kubectl delete pod dns-test
+```
+
 Acceptance checks (both nodes):
 - `app1` is `Ready`
 - `ubuntuserverhome` is `Ready`
 - Home node has labels `workload=ml`, `location=home`
 - Home node has taint `workload=ml:NoSchedule`
+- DNS test resolves `kubernetes.default.svc.cluster.local`
 
 Post-step hardening:
 
@@ -1257,6 +1326,20 @@ kubectl taint node <cloud-ml-node> workload=ml:NoSchedule --overwrite
 kubectl get nodes --show-labels | grep -E "workload=ml|location=cloud|location=home"
 kubectl describe node <cloud-ml-node> | grep -E "Taints|workload=|location="
 kubectl describe node ubuntuserverhome | grep -E "Taints|workload=|location="
+```
+
+5) if logs dont show up on control plae
+
+```bash
+The systemctl edit approach with k3s is tricky because k3s rewrites its own service file on restart. Instead, edit the service file directly:
+
+
+sudo nano /etc/systemd/system/k3s.service
+# Change: '--advertise-address=10.0.1.10'
+# To:     '--advertise-address=100.102.98.50'
+
+sudo systemctl daemon-reload
+sudo systemctl restart k3s
 ```
 
 Phase B acceptance checks:

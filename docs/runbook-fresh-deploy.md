@@ -271,47 +271,46 @@ Then open https://helvex.dicy.ch in a browser. TLS should be valid (cert-manager
 
 Use this after a fresh deploy when `app1` is healthy and you want ML jobs to run on your home server.
 
-The control-plane (`app1`) now automatically advertises its Tailscale IP in its k3s TLS SAN during cloud-init setup. No manual k3s configuration is needed on the server side.
+**Networking design** (Hetzner nodes never route through Tailscale for mutual traffic):
+- `app1 ↔ db1`: Flannel VXLAN on `enp7s0` (10.0.1.x) — direct, no Tailscale
+- `home ↔ Hetzner`: Flannel VXLAN via Tailscale. Home node accepts subnet route `10.0.1.0/24`
+  so it can reach `10.0.1.10/11` through Tailscale. Do NOT add a flannel public-ip annotation
+  to app1 — that breaks db1→app1 VXLAN by routing it through Tailscale.
 
-1. On `app1`, retrieve the k3s agent join token and control-plane Tailscale IP:
+Cloud-init already runs `tailscale set --advertise-routes=10.0.1.0/24` on app1 and db1.
+You only need to **approve the route** in the Tailscale admin console (once per Terraform rebuild).
+
+1. On `app1`, collect join inputs:
 
 ```bash
 ssh ubuntu@<app1-public-ip>
-sudo cat /var/lib/rancher/k3s/server/node-token
-tailscale ip -4
+sudo cat /var/lib/rancher/k3s/server/node-token   # K3S_TOKEN
+tailscale ip -4                                   # CP_TAILSCALE_IP
 ```
 
-Save both values.
-
-2. On the home server, install and join Tailscale (if not already done):
+2. Copy and run the automated join script on the home server:
 
 ```bash
-curl -fsSL https://tailscale.com/install.sh | sh
-sudo tailscale up --authkey <TAILSCALE_AUTH_KEY> --hostname ubuntuserverhome
-tailscale ip -4
+# From your local machine
+scp scripts/join-home-node.sh ubuntu@ubuntuserverhome:/tmp/
+
+ssh ubuntu@ubuntuserverhome
+sudo bash /tmp/join-home-node.sh \
+  <CP_TAILSCALE_IP> \
+  <K3S_TOKEN> \
+  <TAILSCALE_AUTH_KEY>
 ```
 
-Verify the home server and `app1` can ping each other over Tailscale:
+The script handles: Tailscale join (with `--accept-routes`), old agent removal, correct
+flannel flags (`--flannel-iface=tailscale0`, `--node-ip=<TS_IP>`), and agent installation.
 
-```bash
-tailscale ping helvex-app1
-```
+3. **One-time Tailscale route approval** (required once per Terraform rebuild):
 
-3. On the home server, join k3s as an agent via the control-plane Tailscale IP:
+Go to **admin.tailscale.com → Machines**:
+- `app1` → Edit route settings → approve `10.0.1.0/24`
+- `db1`  → Edit route settings → approve `10.0.1.0/24`
 
-If k3s agent is already installed from a previous cluster, uninstall it first:
-
-```bash
-/usr/local/bin/k3s-agent-uninstall.sh
-```
-
-Then install the k3s agent:
-
-```bash
-curl -sfL https://get.k3s.io | K3S_URL=https://<SERVER_TAILSCALE_IP>:6443 K3S_TOKEN=<K3S_TOKEN-from-step-1> sh -s - agent
-```
-
-4. On `app1`, verify both nodes are Ready and label/taint the home node for ML workloads:
+4. On `app1`, verify and label the home node:
 
 ```bash
 kubectl get nodes -o wide
@@ -320,20 +319,27 @@ kubectl taint node ubuntuserverhome workload=ml:NoSchedule --overwrite
 kubectl describe node ubuntuserverhome | grep -E "Taints|workload=|location="
 ```
 
-Expected result:
-- `app1` is `Ready` (control-plane)
-- `ubuntuserverhome` is `Ready` (agent)
-- Home node has labels `workload=ml`, `location=home`
-- Home node has taint `workload=ml:NoSchedule`
+Expected:
+- `app1` Ready (control-plane)
+- `ubuntuserverhome` Ready (agent)
+- Labels `workload=ml`, `location=home` and taint `workload=ml:NoSchedule`
 
-5. Rotate the node join token after successful onboarding (hardening):
+5. Verify pod DNS works from the home node:
+
+```bash
+kubectl run dns-test --image=busybox:1.36 --restart=Never \
+  --overrides='{"spec":{"nodeSelector":{"workload":"ml"},"tolerations":[{"key":"workload","operator":"Equal","value":"ml","effect":"NoSchedule"}]}}' \
+  -- sleep 60
+kubectl exec dns-test -- nslookup kubernetes.default.svc.cluster.local
+kubectl delete pod dns-test
+```
+
+6. Rotate the node join token after successful onboarding (hardening):
 
 ```bash
 ssh ubuntu@<app1-public-ip>
 sudo k3s token rotate
 ```
-
-This prevents the token from being used to join additional unauthorized nodes.
 
 ---
 

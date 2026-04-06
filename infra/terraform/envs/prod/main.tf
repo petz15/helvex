@@ -28,6 +28,7 @@ module "servers" {
   db_volume_size_gb     = 0
   k3s_token             = var.k3s_token
   tailscale_auth_key    = var.tailscale_auth_key
+  subnet_cidr           = var.subnet_cidr
 }
 
 # Load balancer — targets only k3s nodes (not the DB node)
