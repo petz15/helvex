@@ -263,9 +263,9 @@ jobs:
           # In this repo it is typically a timestamped name like: helvex-pg-YYYYmmddTHHMMSSZ.
           # Selection order:
           # 1) Manual override (workflow_dispatch input restore_source)
-          # 2) Repo variable POSTGRES_RESTORE_SOURCE
-          # 3) S3 restore-point file (restore-point.json)
-          # 4) Repository file restore-point.json (tracked in git)
+          # 2) S3 restore-point file (restore-point.json)
+          # 3) Repository file restore-point.json (tracked in git)
+          # 4) Repo variable POSTGRES_RESTORE_SOURCE
           # 5) Existing ConfigMap value pg-backup-meta.data.restoreSource
           # 6) Default: 'helvex-pg'
 
@@ -333,12 +333,6 @@ jobs:
             echo "Using manual restore source from workflow input: $RESTORE_SOURCE"
           fi
 
-          if [ -z "$RESTORE_SOURCE" ] && [ -n "${POSTGRES_RESTORE_SOURCE:-}" ]; then
-            RESTORE_SOURCE="$POSTGRES_RESTORE_SOURCE"
-            RESTORE_SOURCE_ORIGIN="repo_variable"
-            echo "Using restore source from repo variable: $RESTORE_SOURCE"
-          fi
-
           if [ -z "$RESTORE_SOURCE" ]; then
             pointer_tmp=$(mktemp)
             if aws s3 cp "$POINTER_URI" "$pointer_tmp" --endpoint-url "$S3_ENDPOINT" >/dev/null 2>&1; then
@@ -369,6 +363,12 @@ jobs:
             else
               echo "Repository restore-point.json exists but restoreSource is empty"
             fi
+          fi
+
+          if [ -z "$RESTORE_SOURCE" ] && [ -n "${POSTGRES_RESTORE_SOURCE:-}" ]; then
+            RESTORE_SOURCE="$POSTGRES_RESTORE_SOURCE"
+            RESTORE_SOURCE_ORIGIN="repo_variable"
+            echo "Using restore source from repo variable: $RESTORE_SOURCE"
           fi
 
           if [ -z "$RESTORE_SOURCE" ]; then

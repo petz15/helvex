@@ -97,7 +97,7 @@ tailscale ip -4
 # Should show app1's Tailscale IP immediately
 tailscale status
 # Should list both app1 and db1 as connected peers
-ssh ubuntu@<app1-tailscale-ip>
+ssh ubuntu@<app1-ip>w
 ```
 
 **Note:** Tailscale is only installed on cluster servers (app1, db1). To add additional compute nodes later (e.g., your home server), you manually install Tailscale on those nodes and join them to the cluster using k3s agent — see Step 9.
@@ -217,9 +217,9 @@ The `deploy` job will run on the `helvex-prod` ARC runner (the pod you started i
   - `backupServerName`: generates a unique timestamped name (e.g. `helvex-pg-20260331T150000Z`) and stores it in the `pg-backup-meta` ConfigMap. This isolates the new cluster's backup lineage. Subsequent deploys reuse the same name.
   - `restoreSourceServerName` (CNPG reads backups FROM this server): selected in this order:
     1. Manual workflow input `restore_source` (when using `workflow_dispatch`)
-    2. Repo variable `POSTGRES_RESTORE_SOURCE`
-    3. S3 restore-point file `s3://helvex-backups/pg-prod/restore-point.json`
-    4. Repo file `restore-point.json` (tracked in git)
+    2. S3 restore-point file `s3://helvex-backups/pg-prod/restore-point.json`
+    3. Repo file `restore-point.json` (tracked in git)
+    4. Repo variable `POSTGRES_RESTORE_SOURCE`
     5. Existing ConfigMap `pg-backup-meta.data.restoreSource`
     6. Default: `helvex-pg`
   - The selected value should match the **CNPG/Barman `serverName`** used when the backups were written. In this repo that is often timestamped (e.g., `helvex-pg-20260331T150000Z`).

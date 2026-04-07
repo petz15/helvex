@@ -1,4 +1,4 @@
 {
-  "restoreSource": "helvex-pg-20260331T152743Z",
+  "restoreSource": "helvex-pg-20260405T113918Z/",
   "description": "Stable server name where original backups live in S3. CNPG will perform point-in-time recovery from this server's backups."
 }
