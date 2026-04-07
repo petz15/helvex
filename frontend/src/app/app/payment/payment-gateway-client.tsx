@@ -66,6 +66,7 @@ export function PaymentGatewayClient() {
   const [loading, setLoading] = useState(false);
   const [cardLoading, setCardLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [iframeUrl, setIframeUrl] = useState<string | null>(null);
 
   // If no valid checkout intent, redirect away.
   useEffect(() => {
@@ -110,7 +111,7 @@ export function PaymentGatewayClient() {
           billing_address: billingAddress,
           save_payment_method: willUseSavedCard ? false : saveCard,
         });
-        window.location.assign(session.checkout_url);
+        setIframeUrl(session.checkout_url);
       } else if (kind === "topup") {
         const session = await createTopupCheckout({
           credits,
@@ -120,7 +121,7 @@ export function PaymentGatewayClient() {
           save_payment_method: willUseSavedCard ? false : saveCard,
           use_new_card: useNewCard,
         });
-        window.location.assign(session.checkout_url);
+        setIframeUrl(session.checkout_url);
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : "Checkout failed");
@@ -148,7 +149,7 @@ export function PaymentGatewayClient() {
         cancel_url: cancelUrl.toString(),
         billing_address: billingAddress,
       });
-      window.location.assign(session.checkout_url);
+      setIframeUrl(session.checkout_url);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Card registration failed");
     } finally {
@@ -166,6 +167,35 @@ export function PaymentGatewayClient() {
   }, [cardSaved, mutateMe, mutateSummary]);
 
   if (!kind) return null;
+
+  // Saferpay iframe overlay: shown after checkout session is created.
+  // The return URL handler (backend) breaks out of the iframe via JavaScript,
+  // so the top-level page navigates to success_url / cancel_url automatically.
+  if (iframeUrl) {
+    return (
+      <div className="fixed inset-0 z-50 flex flex-col bg-white">
+        {/* Header bar — your own CSS surrounding the Saferpay iframe */}
+        <div className="flex items-center justify-between px-5 py-3 border-b border-slate-200 bg-white shrink-0">
+          <div className="flex items-center gap-2 text-sm font-semibold text-slate-800">
+            <ShieldCheck size={15} className="text-blue-500 shrink-0" />
+            Secure payment — Worldline Saferpay
+          </div>
+          <button
+            onClick={() => { setIframeUrl(null); setLoading(false); }}
+            className="text-xs text-slate-500 hover:text-slate-700 underline"
+          >
+            Cancel
+          </button>
+        </div>
+        <iframe
+          src={iframeUrl}
+          className="flex-1 w-full border-none"
+          title="Saferpay secure payment"
+          sandbox="allow-forms allow-scripts allow-same-origin allow-top-navigation allow-popups"
+        />
+      </div>
+    );
+  }
 
   return (
     <div className="mx-auto max-w-2xl px-4 py-10 space-y-6">

@@ -189,6 +189,70 @@ def _maybe_enqueue_geocode_upgrade(app, app_state) -> None:
     app_state.startup_message = "Queued one-time geocoding upgrade"
 
 
+def _start_nightly_billing_scheduler(app) -> None:
+    """Start a background daemon thread that runs the billing_renewal job each night.
+
+    Wakes up every 10 minutes.  Once the clock enters the 01:00–01:59 window
+    in Europe/Zurich time, enqueues a billing_renewal job if one has not already
+    run today (checked via the job history).
+    """
+    import threading
+    import time
+
+    def _scheduler_loop():
+        while True:
+            time.sleep(600)
+            try:
+                _maybe_enqueue_billing_renewal(app)
+            except Exception:  # noqa: BLE001
+                pass
+
+    t = threading.Thread(target=_scheduler_loop, daemon=True, name="billing-renewal-scheduler")
+    t.start()
+
+
+def _maybe_enqueue_billing_renewal(app) -> None:
+    """Enqueue billing_renewal at 01:00–01:59 Zurich time if not already run today."""
+    from datetime import datetime, timedelta, timezone
+
+    try:
+        from zoneinfo import ZoneInfo
+        tz_zurich = ZoneInfo("Europe/Zurich")
+    except Exception:  # noqa: BLE001
+        tz_zurich = timezone(timedelta(hours=1))
+
+    now_local = datetime.now(tz=tz_zurich)
+    if now_local.hour != 1:
+        return  # only run during the 01:00–01:59 window
+
+    from app.crud import create_event, create_job, list_jobs
+    from app.database import SessionLocal
+    from app.services.job_worker import kick_job_worker
+
+    with SessionLocal() as db:
+        # Check if a billing_renewal job has already run or is queued today.
+        today_start = datetime.now(tz=timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+        recent = [
+            j for j in list_jobs(db, limit=20)
+            if j.job_type == "billing_renewal"
+            and j.queued_at
+            and j.queued_at >= today_start
+        ]
+        if recent:
+            return
+
+        job = create_job(
+            db,
+            job_type="billing_renewal",
+            label="Nightly subscription billing renewal (auto)",
+            params={},
+        )
+        create_event(db, job_id=job.id, level="info", message="Auto-queued by billing renewal scheduler")
+
+    kick_job_worker(app)
+    logger.info("billing_renewal_scheduler: enqueued billing_renewal")
+
+
 def _start_nightly_shab_scheduler(app) -> None:
     """Start a background daemon thread that auto-enqueues a shab_daily job each night.
 
@@ -305,6 +369,7 @@ async def lifespan(app: FastAPI):
             await loop.run_in_executor(None, _recover_jobs_and_start_worker, app, app.state)
             await loop.run_in_executor(None, _maybe_enqueue_geocode_upgrade, app, app.state)
             _start_nightly_shab_scheduler(app)
+            _start_nightly_billing_scheduler(app)
             app.state.ready = True
             app.state.startup_message = "Ready"
         except Exception as exc:  # noqa: BLE001

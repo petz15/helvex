@@ -389,10 +389,21 @@ class WorldlineProvider:
         success_url: str,
         cancel_url: str,
         billing_address: dict[str, str] | None = None,
+        is_initial_recurring: bool = False,
     ) -> CheckoutSession:
         customer_id = _worldline_customer_id()
         terminal_id = _worldline_terminal_id()
-        payload = {
+        payment_block: dict[str, Any] = {
+            "Amount": {
+                "Value": str(int(round(amount_chf * 100))),
+                "CurrencyCode": "CHF",
+            },
+            "OrderId": order_reference,
+            "Description": description,
+        }
+        if is_initial_recurring:
+            payment_block["Recurring"] = {"Initial": True}
+        payload: dict[str, Any] = {
             "RequestHeader": {
                 "SpecVersion": _worldline_spec_version(),
                 "CustomerId": customer_id,
@@ -400,14 +411,7 @@ class WorldlineProvider:
                 "RetryIndicator": 0,
             },
             "TerminalId": terminal_id,
-            "Payment": {
-                "Amount": {
-                    "Value": str(int(round(amount_chf * 100))),
-                    "CurrencyCode": "CHF",
-                },
-                "OrderId": order_reference,
-                "Description": description,
-            },
+            "Payment": payment_block,
             "Payer": {
                 "Language": "en",
             },
@@ -419,6 +423,10 @@ class WorldlineProvider:
                 "Fail": notify_url,
             },
         }
+        # Embed Saferpay form in an iframe — merchant can surround it with own CSS.
+        css_url = (getattr(settings, "worldline_css_url", "") or "").strip()
+        if css_url:
+            payload["Styling"] = {"CssUrl": css_url}
         if payment_alias_id:
             payload["PaymentMeans"] = {"Card": {"Alias": {"Id": payment_alias_id}}}
         elif save_payment_method:
@@ -497,6 +505,104 @@ class WorldlineProvider:
             if resp.status_code >= 400:
                 raise RuntimeError(f"Worldline transaction cancellation failed: {resp.status_code} {resp.text}")
             return resp.json()
+
+    def capture_transaction(self, *, transaction_id: str) -> dict[str, Any]:
+        """Capture a previously authorized Saferpay transaction."""
+        tx_id = str(transaction_id or "").strip()
+        if not tx_id:
+            raise RuntimeError("Saferpay capture failed: missing transaction_id")
+        base = _worldline_api_base_url()
+        url = f"{base}/Payment/v1/Transaction/Capture"
+        payload = {
+            "RequestHeader": {
+                "SpecVersion": _worldline_spec_version(),
+                "CustomerId": _worldline_customer_id(),
+                "RequestId": f"wl_cap_{secrets.token_hex(8)}",
+                "RetryIndicator": 0,
+            },
+            "TransactionReference": {
+                "TransactionId": tx_id,
+            },
+        }
+        headers = {"Accept": "application/json", "Content-Type": "application/json"}
+        with httpx.Client(timeout=100.0) as client:
+            try:
+                resp = client.post(url, headers=headers, json=payload, auth=(_worldline_api_username(), settings.worldline_api_password))
+            except httpx.HTTPError as exc:
+                raise RuntimeError(f"Saferpay capture request failed: {exc}") from exc
+            if resp.status_code >= 400:
+                raise RuntimeError(f"Saferpay capture failed: {resp.status_code} {resp.text}")
+            return resp.json()
+
+    def authorize_referenced_transaction(
+        self,
+        *,
+        org_id: int,
+        transaction_id: str,
+        amount_chf: float,
+        order_reference: str,
+        description: str,
+    ) -> dict[str, Any]:
+        """Charge a recurring subscription using a previous transaction as reference.
+
+        Uses Transaction/AuthorizeReferenced — no customer interaction required.
+        The referenced transaction must have been initialized with Payment.Recurring.Initial.
+        Automatically captures the transaction on success.
+        """
+        tx_id = str(transaction_id or "").strip()
+        if not tx_id:
+            raise RuntimeError("AuthorizeReferenced failed: missing transaction_id reference")
+        base = _worldline_api_base_url()
+        url = f"{base}/Payment/v1/Transaction/AuthorizeReferenced"
+        payload = {
+            "RequestHeader": {
+                "SpecVersion": _worldline_spec_version(),
+                "CustomerId": _worldline_customer_id(),
+                "RequestId": f"wl_recur_{org_id}_{secrets.token_hex(8)}",
+                "RetryIndicator": 0,
+            },
+            "TerminalId": _worldline_terminal_id(),
+            "Payment": {
+                "Amount": {
+                    "Value": str(int(round(amount_chf * 100))),
+                    "CurrencyCode": "CHF",
+                },
+                "OrderId": order_reference,
+                "Description": description,
+            },
+            "TransactionReference": {
+                "TransactionId": tx_id,
+            },
+        }
+        headers = {"Accept": "application/json", "Content-Type": "application/json"}
+        logger.info(
+            "saferpay.authorize_referenced org_id=%s ref_tx=%s amount_chf=%s order_ref=%s",
+            org_id, tx_id[:20], amount_chf, order_reference,
+        )
+        with httpx.Client(timeout=100.0) as client:
+            try:
+                resp = client.post(url, headers=headers, json=payload, auth=(_worldline_api_username(), settings.worldline_api_password))
+            except httpx.HTTPError as exc:
+                raise RuntimeError(f"AuthorizeReferenced request failed: {exc}") from exc
+            if resp.status_code >= 400:
+                raise RuntimeError(f"AuthorizeReferenced failed: {resp.status_code} {resp.text}")
+            data = resp.json()
+
+        new_tx_id = str((data.get("Transaction") or {}).get("Id") or "")
+        tx_status = str((data.get("Transaction") or {}).get("Status") or "").upper()
+        logger.info(
+            "saferpay.authorize_referenced_result org_id=%s new_tx_id=%s status=%s",
+            org_id, new_tx_id[:20] if new_tx_id else "NONE", tx_status,
+        )
+
+        if tx_status == "AUTHORIZED" and new_tx_id:
+            try:
+                self.capture_transaction(transaction_id=new_tx_id)
+                logger.info("saferpay.capture_ok org_id=%s new_tx_id=%s", org_id, new_tx_id[:20])
+            except RuntimeError as exc:
+                logger.warning("saferpay.capture_failed org_id=%s new_tx_id=%s error=%s", org_id, new_tx_id[:20], exc)
+
+        return data
 
     def create_card_alias_registration(
         self,
@@ -654,6 +760,7 @@ class WorldlineProvider:
             success_url=success_url,
             cancel_url=cancel_url,
             billing_address=billing_address,
+            is_initial_recurring=True,
         )
 
     def create_topup_checkout(

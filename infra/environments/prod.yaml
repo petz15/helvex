@@ -52,10 +52,10 @@ mlWorker:
     enabled: false  # Set to true after KEDA + Hetzner Cluster Autoscaler are installed
   resources:
     requests:
-      cpu: "1000m"
+      cpu: "2"
       memory: 4Gi
     limits:
-      cpu: "2000m"
+      cpu: "3"
       memory: 6Gi
   # Dedicated ML nodes only; enable fallback once autoscaler node group is ready.
   nodeSelector: {workload: ml}

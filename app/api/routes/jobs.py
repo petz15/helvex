@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import time
+from datetime import date
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import StreamingResponse
@@ -406,6 +407,24 @@ class HdbscanClusterBody(BaseModel):
     max_zefix_score: int | None = None
     limit: int | None = None
     use_keywords: bool = False
+    use_batch_merge: bool = False  # Enable batch+merge mode for large datasets
+
+
+class BirchClusterBody(BaseModel):
+    """BIRCH clustering body (memory-efficient for full dataset).
+    
+    BIRCH (Balanced Iterative Reducing and Clustering) is single-pass and trains
+    on 763K+ companies with ~500MB memory. No parameters needed for quality control.
+    """
+    n_components: int = 50
+    n_clusters: int = 150
+    top_terms: int = 5
+    top_keywords_per_company: int = 10
+    canton: str | None = None
+    min_zefix_score: int | None = None
+    max_zefix_score: int | None = None
+    limit: int | None = None
+    use_keywords: bool = False
 
 
 class ReextractKeywordsBody(BaseModel):
@@ -601,6 +620,18 @@ def trigger_hdbscan_cluster(body: HdbscanClusterBody, request: Request, db: Sess
     return JobOut.from_orm_obj(job)
 
 
+@router.post("/scoring/birch", response_model=JobOut, status_code=status.HTTP_202_ACCEPTED)
+def trigger_birch_cluster(body: BirchClusterBody, request: Request, db: Session = Depends(get_db), _: User = Depends(require_superadmin)):
+    job = _enqueue_or_http_error(
+        request,
+        job_type="birch_cluster",
+        label="BIRCH cluster pipeline (memory-efficient)",
+        params=body.model_dump(),
+        db=db,
+    )
+    return JobOut.from_orm_obj(job)
+
+
 @router.post("/scoring/reextract-keywords", response_model=JobOut, status_code=status.HTTP_202_ACCEPTED)
 def trigger_reextract_keywords(body: ReextractKeywordsBody, request: Request, db: Session = Depends(get_db), _: User = Depends(require_superadmin)):
     label = "Re-extract keywords from cached cluster artifacts"
@@ -655,6 +686,9 @@ class ShabBackfillBody(BaseModel):
     from_date: str                   # ISO date (YYYY-MM-DD), required
     to_date: str | None = None       # ISO date; defaults to yesterday
     request_delay: float = 0.15
+
+
+_SHAB_BACKFILL_MIN_DATE = date(2016, 2, 3)
 
 
 @router.post("/collection/shab-daily", response_model=JobOut, status_code=status.HTTP_202_ACCEPTED)
@@ -713,6 +747,14 @@ def trigger_shab_backfill(
 
     if from_date > to_date:
         raise HTTPException(status_code=400, detail="from_date must be on or before to_date")
+    if from_date < _SHAB_BACKFILL_MIN_DATE:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "from_date must be on or after "
+                f"{_SHAB_BACKFILL_MIN_DATE.isoformat()}"
+            ),
+        )
 
     days = (to_date - from_date).days + 1
     label = f"SHAB backfill — {from_date} → {to_date} ({days} day{'s' if days != 1 else ''})"

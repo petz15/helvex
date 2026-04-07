@@ -258,3 +258,23 @@ def test_claude_trigger_missing_key_returns_400(client):
     resp = client.post("/api/v1/scoring/claude", json={})
     assert resp.status_code == 400
     assert "Anthropic API key missing" in resp.json()["detail"]
+
+
+def test_shab_backfill_rejects_date_before_supported_window(client):
+    resp = client.post(
+        "/api/v1/collection/shab-backfill",
+        json={"from_date": "2016-02-02", "to_date": "2016-02-03"},
+    )
+    assert resp.status_code == 400
+    assert "from_date must be on or after 2016-02-03" == resp.json()["detail"]
+
+
+def test_shab_backfill_accepts_earliest_supported_date(client):
+    resp = client.post(
+        "/api/v1/collection/shab-backfill",
+        json={"from_date": "2016-02-03", "to_date": "2016-02-03"},
+    )
+    assert resp.status_code == 202
+    body = resp.json()
+    assert body["job_type"] == "shab_backfill"
+    assert body["status"] == "queued"

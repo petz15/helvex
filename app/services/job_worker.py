@@ -76,10 +76,12 @@ _QUEUE_FOR_JOB_TYPE: dict[str, str] = {
     "csv_export":                "helvex-api",
     "tfidf_kmeans_cluster":      "helvex-ml",
     "hdbscan_cluster":           "helvex-ml",
+    "birch_cluster":             "helvex-ml",
     "recompute_keywords":        "helvex-ml",
     "reextract_keywords":        "helvex-ml",
     "cluster_analysis":          "helvex-ml",
     "cluster_drift_check":       "helvex-ml",
+    "billing_renewal":           "helvex-api",
 }
 
 
@@ -97,7 +99,7 @@ def _compute_dedup_key(job_type: str, org_id: int | None, params: dict) -> str |
         "recalculate_scores", "recalculate_google_scores",
         "reextract_purpose", "reclassify_noga",
         "re_geocode",
-        "tfidf_kmeans_cluster", "hdbscan_cluster",
+        "tfidf_kmeans_cluster", "hdbscan_cluster", "birch_cluster",
         "recompute_keywords", "reextract_keywords",
         "cluster_analysis", "cluster_drift_check",
     }
@@ -238,7 +240,7 @@ def _resolve_credit_action_and_count(db: Session, *, job_type: str, params: dict
     if job_type == "recalculate_scores":
         return "flex_rescore", max(1, int(crud.count_companies(db)))
 
-    if job_type in {"tfidf_kmeans_cluster", "hdbscan_cluster"}:
+    if job_type in {"tfidf_kmeans_cluster", "hdbscan_cluster", "birch_cluster"}:
         return "recluster", 1
 
     if job_type == "csv_export":
@@ -686,12 +688,36 @@ def _run_job(app, job_id: int) -> None:  # noqa: C901
                 done_msg = f"Done — {n_c} clusters, {classified} companies labelled, {noise} noise"
 
             elif job.job_type == "hdbscan_cluster":
-                from app.services.cluster_pipeline import PipelineConfig, run_hdbscan_pipeline
+                from app.services.cluster_pipeline import PipelineConfig, run_hdbscan_pipeline, run_batch_merge_hdbscan_pipeline
+                from sqlalchemy import func
+
+                # Check dataset size and auto-warn if batch merge recommended
+                from app.models.company import Company
+                count_q = db.query(func.count(Company.id)).filter(Company.purpose.isnot(None))
+                if params.get("canton"):
+                    count_q = count_q.filter(Company.canton == params["canton"].upper())
+                if params.get("min_zefix_score"):
+                    count_q = count_q.filter(Company.zefix_score >= params["min_zefix_score"])
+                if params.get("max_zefix_score"):
+                    count_q = count_q.filter(Company.zefix_score <= params["max_zefix_score"])
+                if params.get("limit"):
+                    predicted_size = min(params["limit"], count_q.scalar() or 0)
+                else:
+                    predicted_size = count_q.scalar() or 0
+
+                use_batch_merge = bool(params.get("use_batch_merge", False))
+                if predicted_size > 50000 and not use_batch_merge:
+                    # Auto-suggest batch merge but don't force it
+                    msg = f"Dataset size: ~{predicted_size:,} companies. Consider enabling 'Batch+Merge' option for better memory efficiency."
+                    logger.warning(f"[job {job.id}] {msg}")
+                    crud.create_event(db, job_id=job.id, level="warn", message=msg)
 
                 def _progress(done: int, total: int, stats: dict) -> None:
                     _assert_not_cancelled()
                     step = stats.get("step", "clustering")
-                    msg = f"[{step}] {done}/{total} — {stats.get('classified', 0)} clustered, {stats.get('noise', 0)} noise"
+                    n_batches = stats.get("n_batches", 0)
+                    batch_str = f" [{stats.get('n_batches', 0)}/{stats.get('n_batches', 1)} batches]" if n_batches > 1 else ""
+                    msg = f"[{step}] {done}/{total} — {stats.get('classified', 0)} clustered, {stats.get('noise', 0)} noise{batch_str}"
                     crud.update_progress(db, job, message=msg, done=done, total=total, stats=stats)
                     crud.create_event(db, job_id=job.id, level="debug", message=msg)
                     _maybe_sync(app, job_type=job.job_type, label=job.label, message=msg, stats=dict(stats), error=None, done=False)
@@ -709,7 +735,54 @@ def _run_job(app, job_id: int) -> None:  # noqa: C901
                     top_terms_per_cluster=int(params.get("top_terms", 5)),
                     top_keywords_per_company=int(params.get("top_keywords_per_company", 10)),
                 )
-                stats = run_hdbscan_pipeline(
+
+                if use_batch_merge:
+                    logger.info(f"[job {job.id}] Using batch+merge HDBSCAN (~5-8 min per 100K batch)")
+                    stats = run_batch_merge_hdbscan_pipeline(
+                        db, cfg,
+                        canton=params.get("canton") or None,
+                        min_zefix_score=int(params["min_zefix_score"]) if params.get("min_zefix_score") else None,
+                        max_zefix_score=int(params["max_zefix_score"]) if params.get("max_zefix_score") else None,
+                        limit=int(params["limit"]) if params.get("limit") else None,
+                        use_keywords=bool(params.get("use_keywords", False)),
+                        progress_cb=_progress,
+                    )
+                else:
+                    stats = run_hdbscan_pipeline(
+                        db, cfg,
+                        canton=params.get("canton") or None,
+                        min_zefix_score=int(params["min_zefix_score"]) if params.get("min_zefix_score") else None,
+                        max_zefix_score=int(params["max_zefix_score"]) if params.get("max_zefix_score") else None,
+                        limit=int(params["limit"]) if params.get("limit") else None,
+                        use_keywords=bool(params.get("use_keywords", False)),
+                        progress_cb=_progress,
+                    )
+                n_c = stats.get("n_clusters", 0)
+                classified = stats.get("classified", 0)
+                noise = stats.get("noise", 0)
+                n_batches = stats.get("n_batches", 0)
+                batch_info = f", {n_batches} batches merged" if n_batches > 1 else ""
+                done_msg = f"Done — {n_c} clusters, {classified} companies labelled, {noise} noise{batch_info}"
+
+            elif job.job_type == "birch_cluster":
+                from app.services.cluster_pipeline import PipelineConfig, run_birch_pipeline
+
+                def _progress(done: int, total: int, stats: dict) -> None:
+                    _assert_not_cancelled()
+                    step = stats.get("step", "clustering")
+                    msg = f"[{step}] {done}/{total} — {stats.get('classified', 0)} clustered"
+                    crud.update_progress(db, job, message=msg, done=done, total=total, stats=stats)
+                    crud.create_event(db, job_id=job.id, level="debug", message=msg)
+                    _maybe_sync(app, job_type=job.job_type, label=job.label, message=msg, stats=dict(stats), error=None, done=False)
+                    _heartbeat()
+
+                cfg = PipelineConfig(
+                    n_components=int(params.get("n_components", 50)),
+                    n_clusters=int(params.get("n_clusters", 150)),
+                    top_terms_per_cluster=int(params.get("top_terms", 5)),
+                    top_keywords_per_company=int(params.get("top_keywords_per_company", 10)),
+                )
+                stats = run_birch_pipeline(
                     db, cfg,
                     canton=params.get("canton") or None,
                     min_zefix_score=int(params["min_zefix_score"]) if params.get("min_zefix_score") else None,
@@ -720,8 +793,7 @@ def _run_job(app, job_id: int) -> None:  # noqa: C901
                 )
                 n_c = stats.get("n_clusters", 0)
                 classified = stats.get("classified", 0)
-                noise = stats.get("noise", 0)
-                done_msg = f"Done — {n_c} clusters, {classified} companies labelled, {noise} noise"
+                done_msg = f"Done — {n_c} clusters, {classified} companies labelled"
 
             elif job.job_type == "recompute_keywords":
                 from app.services.cluster_pipeline import PipelineConfig, recompute_keywords
@@ -990,6 +1062,18 @@ def _run_job(app, job_id: int) -> None:  # noqa: C901
                     progress_cb=_progress,
                 )
                 done_msg = f"Done — {stats['row_count']:,} rows exported to S3"
+
+            elif job.job_type == "billing_renewal":
+                from app.services.billing_renewal import run_billing_renewal
+
+                crud.update_progress(db, job, message="Running subscription billing renewal…")
+                stats = run_billing_renewal(db)
+                done_msg = (
+                    f"Done — {stats['renewed']} renewed, "
+                    f"{stats['cancelled']} cancelled, "
+                    f"{stats['failed']} failed, "
+                    f"{stats['skipped']} skipped"
+                )
 
             else:
                 raise RuntimeError(f"Unsupported job type: {job.job_type}")

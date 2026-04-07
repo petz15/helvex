@@ -233,7 +233,7 @@ export default function LandingPage() {
           </h1>
           <p className="text-lg text-slate-500 leading-relaxed mb-8">
             Search, qualify, and track companies from the Swiss commercial register.
-            Powered by live SHAB data and AI classification — so your pipeline stays relevant.
+            Powered by live SHAB data, Machine Learning and AI classification — so your pipeline stays relevant.
           </p>
 
           <div className="flex flex-wrap items-center gap-3">
@@ -241,7 +241,7 @@ export default function LandingPage() {
               href="/register"
               className="px-5 py-2.5 rounded-lg bg-blue-600 text-white font-semibold text-sm hover:bg-blue-700 transition-colors shadow-sm"
             >
-              Sign up free →
+              Start right now! →
             </Link>
             <Link
               href="/demo/company"
@@ -250,7 +250,7 @@ export default function LandingPage() {
               View live demo
             </Link>
           </div>
-          <p className="mt-3 text-xs text-slate-400">No credit card required.</p>
+          <p className="mt-3 text-xs text-slate-400 font-bold">No credit card required.</p>
         </div>
 
         {/* Product preview */}
@@ -279,7 +279,7 @@ export default function LandingPage() {
               Everything for Swiss market research
             </h2>
             <p className="mt-3 text-base text-slate-500 leading-relaxed">
-              From live register data to AI scoring — Helvex covers every step of finding and qualifying Swiss companies.
+              From live register data to finding undiscovered leads — Helvex covers every step of finding and qualifying Swiss companies.
             </p>
           </div>
 
@@ -318,9 +318,9 @@ export default function LandingPage() {
           <div className="mt-10 text-center">
             <Link
               href="/register"
-              className="inline-flex items-center gap-1.5 text-sm font-semibold text-blue-600 hover:text-blue-700 transition-colors"
+              className="inline-block px-6 py-3 rounded-lg bg-blue-600 text-white font-semibold text-sm hover:bg-blue-700 transition-colors shadow-sm"
             >
-              Start for free <ArrowRight size={15} />
+              Start for free →
             </Link>
           </div>
         </div>
@@ -374,7 +374,7 @@ export default function LandingPage() {
               <div>
                 <h3 className="text-lg font-semibold text-slate-900">Consumption pricing</h3>
                 <p className="mt-1 text-sm text-slate-500 max-w-3xl">
-                  Usage actions share the same credit rates across every plan. The shared data source keeps this in sync with the pricing page.
+                  Usage actions share the same credit rates across every plan.
                 </p>
               </div>
               <p className="text-xs font-medium text-slate-500">1 credit = CHF {creditsToChf(1)}</p>

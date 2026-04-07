@@ -9,7 +9,7 @@ from typing import Literal
 from urllib.parse import urlencode, urlparse
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, status
-from fastapi.responses import RedirectResponse
+from fastapi.responses import HTMLResponse, RedirectResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import desc
 from sqlalchemy.orm import Session
@@ -156,6 +156,27 @@ def _append_query_params(url: str, params: dict[str, str]) -> str:
         return url
     separator = "&" if "?" in url else "?"
     return f"{url}{separator}{urlencode(params)}"
+
+
+def _iframe_redirect(url: str) -> HTMLResponse:
+    """Return an HTML page that navigates both iframe and top-level frames to url.
+
+    When Saferpay is embedded in an iframe, RedirectResponse only redirects
+    the iframe itself.  This page uses JavaScript to break out to the top frame,
+    with a <noscript> meta-refresh fallback.
+    """
+    safe = url.replace('"', "%22").replace("'", "%27").replace("<", "%3C").replace(">", "%3E")
+    content = (
+        "<!DOCTYPE html><html><head>"
+        f'<meta http-equiv="refresh" content="0;url={safe}">'
+        "</head><body>"
+        "<script>"
+        f"var t={repr(url)};"
+        "if(window.top!==window.self){window.top.location.href=t;}else{window.location.href=t;}"
+        "</script>"
+        "</body></html>"
+    )
+    return HTMLResponse(content=content, status_code=200)
 
 
 def _resolve_billing_address(current_user: User, body_address: BillingAddress | None, db: Session) -> dict:
@@ -417,7 +438,7 @@ async def worldline_return(
     request: Request,
     db: Session = Depends(get_db),
     token: str | None = None,
-) -> RedirectResponse:
+) -> HTMLResponse | RedirectResponse:
     params = request.query_params
     callback_ctx = payments.decode_worldline_callback_context(str(params.get("ctx") or "").strip())
 
@@ -462,7 +483,7 @@ async def worldline_return(
             str(request.query_params)[:300],
         )
         target = _append_query_params(cancel_url, {"reason": "invalid_callback_context"})
-        return RedirectResponse(_safe_redirect_target(target), status_code=status.HTTP_303_SEE_OTHER)
+        return _iframe_redirect(_safe_redirect_target(target))
 
     pending_payment: PaymentTransaction | None = None
     if not token and callback_ctx and order_reference:
@@ -491,7 +512,7 @@ async def worldline_return(
         )
         # Missing token means we cannot verify with provider, so treat as cancel/invalid.
         target = _append_query_params(cancel_url, {"reason": "missing_token"})
-        return RedirectResponse(_safe_redirect_target(target), status_code=status.HTTP_303_SEE_OTHER)
+        return _iframe_redirect(_safe_redirect_target(target))
 
     parsed_ref = payments.parse_worldline_merchant_reference(order_reference)
     _emit(
@@ -516,9 +537,8 @@ async def worldline_return(
             token[:20],
             order_reference[:50] if order_reference else "NONE",
         )
-        return RedirectResponse(
-            _safe_redirect_target(_append_query_params(cancel_url, {"reason": "invalid_reference"})),
-            status_code=status.HTTP_303_SEE_OTHER,
+        return _iframe_redirect(
+            _safe_redirect_target(_append_query_params(cancel_url, {"reason": "invalid_reference"}))
         )
 
     # SECURITY: Check for existing payment to prevent double-processing.
@@ -543,11 +563,10 @@ async def worldline_return(
         )
         # Redirect based on the actual recorded outcome — never assume success.
         if existing_payment.status in {"authorized", "captured"}:
-            return RedirectResponse(_safe_redirect_target(success_url), status_code=status.HTTP_303_SEE_OTHER)
+            return _iframe_redirect(_safe_redirect_target(success_url))
         if existing_payment.status in {"declined", "error"}:
-            return RedirectResponse(
-                _safe_redirect_target(_append_query_params(cancel_url, {"reason": "payment_declined"})),
-                status_code=status.HTTP_303_SEE_OTHER,
+            return _iframe_redirect(
+                _safe_redirect_target(_append_query_params(cancel_url, {"reason": "payment_declined"}))
             )
         pending_payment = existing_payment
 
@@ -691,6 +710,17 @@ async def worldline_return(
                 payment_tx.kind,
             )
             payment_transactions.apply_successful_payment(db, payment_tx)
+            # Store recurring reference for subscription payments so the nightly
+            # billing_renewal job can charge via AuthorizeReferenced.
+            if kind == "subscription" and transaction_id and org is not None:
+                org.recurring_transaction_id = transaction_id
+                org.subscription_cancel_at_period_end = False
+                db.commit()
+                _emit(
+                    "info",
+                    "billing.recurring_tx_stored org_id=%s tx_id=%s",
+                    org.id, transaction_id[:20],
+                )
             _emit(
                 "info",
                 "billing.worldline_apply_success token=%s tx_id=%s webhook_processed_at=%s credits_total_granted=%s",
@@ -699,7 +729,7 @@ async def worldline_return(
                 payment_tx.webhook_processed_at,
                 payment_tx.credits_total_granted,
             )
-            return RedirectResponse(_safe_redirect_target(success_url), status_code=status.HTTP_303_SEE_OTHER)
+            return _iframe_redirect(_safe_redirect_target(success_url))
 
         # Declined or unknown status — no credits granted.
         _emit(
@@ -709,9 +739,8 @@ async def worldline_return(
             payment_tx.id,
             normalized_status,
         )
-        return RedirectResponse(
-            _safe_redirect_target(_append_query_params(cancel_url, {"reason": "payment_declined"})),
-            status_code=status.HTTP_303_SEE_OTHER,
+        return _iframe_redirect(
+            _safe_redirect_target(_append_query_params(cancel_url, {"reason": "payment_declined"}))
         )
 
     except payment_transactions.DuplicatePaymentError:
@@ -720,10 +749,9 @@ async def worldline_return(
         # Re-read the actual stored outcome to decide where to send the user.
         existing = payment_transactions.get_payment_transaction_by_external_id(db, token)
         if existing and existing.status in {"authorized", "captured"}:
-            return RedirectResponse(_safe_redirect_target(success_url), status_code=status.HTTP_303_SEE_OTHER)
-        return RedirectResponse(
-            _safe_redirect_target(_append_query_params(cancel_url, {"reason": "payment_declined"})),
-            status_code=status.HTTP_303_SEE_OTHER,
+            return _iframe_redirect(_safe_redirect_target(success_url))
+        return _iframe_redirect(
+            _safe_redirect_target(_append_query_params(cancel_url, {"reason": "payment_declined"}))
         )
 
     except RuntimeError as exc:
@@ -732,9 +760,8 @@ async def worldline_return(
         logger.exception("billing.worldline_runtime_error token=%s message=%s", token[:20], message)
         # Saferpay-specific errors indicating the token was already consumed.
         if "TOKEN_INVALID" in message or "TRANSACTION_IN_WRONG_STATE" in message:
-            return RedirectResponse(
-                _safe_redirect_target(_append_query_params(success_url, {"already_processed": "true"})),
-                status_code=status.HTTP_303_SEE_OTHER,
+            return _iframe_redirect(
+                _safe_redirect_target(_append_query_params(success_url, {"already_processed": "true"}))
             )
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=message) from exc
 
@@ -747,7 +774,7 @@ async def worldline_return(
 @router.post("/payment-methods/worldline/register", response_model=PaymentMethodRegistrationResponse)
 def create_worldline_card_registration(
     body: CardRegistrationRequest,
-    user_org: tuple[User, object] = Depends(require_org_role("admin", "owner")),
+    user_org: tuple[User, object] = Depends(get_current_org),
     db: Session = Depends(get_db),
 ) -> PaymentMethodRegistrationResponse:
     _user, org = user_org
@@ -773,7 +800,7 @@ async def worldline_card_return(
     request: Request,
     db: Session = Depends(get_db),
     token: str | None = None,
-) -> RedirectResponse:
+) -> HTMLResponse | RedirectResponse:
     params = request.query_params
     callback_ctx = payments.decode_worldline_callback_context(str(params.get("ctx") or "").strip())
     token = str(token or params.get("TOKEN") or params.get("token") or params.get("Token") or "").strip()
@@ -796,13 +823,11 @@ async def worldline_card_return(
 
     if not callback_ctx and not token:
         target = _append_query_params(cancel_url, {"reason": "invalid_callback_context"})
-        if source == "notify":
-            return RedirectResponse(_safe_redirect_target(target), status_code=status.HTTP_303_SEE_OTHER)
-        return RedirectResponse(_safe_redirect_target(target), status_code=status.HTTP_303_SEE_OTHER)
+        return _iframe_redirect(_safe_redirect_target(target))
 
     if not token:
         target = _append_query_params(cancel_url, {"reason": "missing_token"})
-        return RedirectResponse(_safe_redirect_target(target), status_code=status.HTTP_303_SEE_OTHER)
+        return _iframe_redirect(_safe_redirect_target(target))
 
     try:
         org_id = int(callback_ctx.get("org_id") or 0)
@@ -836,12 +861,8 @@ async def worldline_card_return(
             str(card.get("HolderName") or "")[:40] if isinstance(card, dict) else "NONE",
         )
 
-        if source == "notify":
-            return RedirectResponse(_safe_redirect_target(success_url or payments.settings.app_base_url.rstrip("/")), status_code=status.HTTP_303_SEE_OTHER)
-
-        return RedirectResponse(
-            _safe_redirect_target(_append_query_params(success_url, {"payment_method": "saved"})),
-            status_code=status.HTTP_303_SEE_OTHER,
+        return _iframe_redirect(
+            _safe_redirect_target(_append_query_params(success_url, {"payment_method": "saved"}))
         )
     except payments.PaymentConfigurationError as exc:
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
@@ -896,6 +917,7 @@ def get_billing_summary(
         "tier": org.tier,
         "billing_cycle": org.subscription_billing_cycle,
         "subscription_period_end": org.subscription_period_end.isoformat() if org.subscription_period_end else None,
+        "subscription_cancel_at_period_end": bool(getattr(org, "subscription_cancel_at_period_end", False)),
         "credits_balance": org.credits_balance,
         "credits_balance_chf": round(org.credits_balance * 0.0001, 4),
         "has_saved_payment_method": bool(user.payment_customer_id),
@@ -1008,24 +1030,39 @@ def cancel_subscription(
     user_org: tuple[User, object] = Depends(require_org_role("admin", "owner")),
     db: Session = Depends(get_db),
 ) -> WebhookResponse:
-    """Immediately downgrade the org to the free tier (cancel subscription).
+    """Schedule subscription cancellation at the end of the current billing period.
 
-    This is a self-service cancellation — no refund is issued.  The org keeps any
-    credits already in the balance.  Billing cycle and period-end are cleared.
+    The org keeps its current tier and access until subscription_period_end.
+    The nightly billing_renewal job will downgrade to free when the period ends.
+    If no period_end is set, downgrade immediately.
+    Credits in the balance are kept. No refund is issued.
     """
     _user, org = user_org
     logger.info(
-        "billing.subscription_cancel user_id=%s org_id=%s current_tier=%s",
+        "billing.subscription_cancel user_id=%s org_id=%s current_tier=%s period_end=%s",
         _user.id, org.id, org.tier,
+        org.subscription_period_end.isoformat() if org.subscription_period_end else "None",
     )
     if getattr(org, "tier", "free") == "free":
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Organization is already on the free tier")
 
-    org.tier = "free"
-    org.subscription_billing_cycle = None
-    org.subscription_period_end = None
-    db.commit()
-    logger.info("billing.subscription_cancelled org_id=%s", org.id)
+    if org.subscription_period_end:
+        # Soft cancel: keep tier until period end, let nightly job handle downgrade.
+        org.subscription_cancel_at_period_end = True
+        db.commit()
+        logger.info(
+            "billing.subscription_cancel_scheduled org_id=%s period_end=%s",
+            org.id, org.subscription_period_end.isoformat(),
+        )
+    else:
+        # No period end on record — downgrade immediately.
+        org.tier = "free"
+        org.subscription_billing_cycle = "monthly"
+        org.subscription_period_end = None
+        org.subscription_cancel_at_period_end = False
+        db.commit()
+        logger.info("billing.subscription_cancelled_immediate org_id=%s", org.id)
+
     return WebhookResponse(ok=True)
 
 

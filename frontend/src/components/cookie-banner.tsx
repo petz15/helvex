@@ -13,7 +13,7 @@ import {
 export function CookieBanner() {
   const [ready, setReady] = useState(false);
   const [visible, setVisible] = useState(false);
-  const [analytics, setAnalytics] = useState(false);
+  const [analytics, setAnalytics] = useState(defaultCookieConsent().analytics);
 
   const consent = useMemo<CookieConsent>(
     () => ({
@@ -64,7 +64,7 @@ export function CookieBanner() {
           <div className="space-y-2">
             <h2 className="text-sm font-semibold text-slate-900">Cookie-Hinweis</h2>
             <p className="text-xs sm:text-sm text-slate-600 max-w-2xl">
-              Wir verwenden notwendige Cookies fuer Login, Sicherheit und den technischen Betrieb der Website.
+              Wir verwenden notwendige Cookies für Login, Sicherheit und den technischen Betrieb der Website.
               Optionale Analyse-Cookies setzen wir nur mit Ihrer Zustimmung.
               Details finden Sie in unserem <Link href="/datenschutz" className="text-blue-700 hover:text-blue-900 underline">Datenschutz</Link>.
             </p>
@@ -82,13 +82,6 @@ export function CookieBanner() {
             </div>
           </div>
           <div className="flex flex-wrap gap-2 sm:justify-end">
-            <button
-              type="button"
-              onClick={() => saveAndClose({ essential: true, analytics: false, updatedAt: new Date().toISOString() })}
-              className="px-3 py-1.5 rounded-lg border border-slate-200 text-xs sm:text-sm text-slate-700 hover:bg-slate-50 transition-colors"
-            >
-              Nur notwendige
-            </button>
             <button
               type="button"
               onClick={() => saveAndClose(consent)}

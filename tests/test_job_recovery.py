@@ -63,3 +63,18 @@ def test_requeue_recent_abandoned_jobs_skips_old_failures(db):
     refreshed = crud.get_job(db, job.id)
     assert refreshed is not None
     assert refreshed.status == "failed"
+
+
+def test_mark_failed_truncates_oversized_message(db):
+    job = crud.create_job(db, job_type="shab_backfill", label="SHAB", params={})
+    crud.mark_running(db, job, message="Running")
+
+    long_message = "InternalError: " + ("x" * 2000)
+    crud.mark_failed(db, job, message=long_message, error="traceback")
+
+    refreshed = crud.get_job(db, job.id)
+    assert refreshed is not None
+    assert refreshed.status == "failed"
+    assert refreshed.message is not None
+    assert len(refreshed.message) <= 512
+    assert refreshed.message.endswith("...")

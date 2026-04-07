@@ -165,6 +165,12 @@ def import_shab_publications(
         except Exception as exc:  # noqa: BLE001
             if exc.__class__.__name__ in {"JobPausedError", "JobCancelledError"}:
                 raise
+            # A DB error during one publication leaves the session in failed
+            # transaction state until rollback; clear it so the import can continue.
+            try:
+                db.rollback()
+            except Exception:  # noqa: BLE001
+                pass
             stats["errors"].append(f"[{uid}] {type(exc).__name__}: {exc}")
 
         if progress_cb:

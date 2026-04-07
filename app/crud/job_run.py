@@ -10,6 +10,15 @@ from app.models.job_run import JobRun
 
 
 FINAL_STATUSES = {"completed", "failed", "cancelled"}
+JOB_MESSAGE_MAX_LEN = 512
+
+
+def _job_message(value: str | None) -> str | None:
+    if value is None:
+        return None
+    if len(value) <= JOB_MESSAGE_MAX_LEN:
+        return value
+    return value[: JOB_MESSAGE_MAX_LEN - 3] + "..."
 
 
 def create_job(
@@ -26,7 +35,7 @@ def create_job(
         job_type=job_type,
         label=label,
         status="queued",
-        message="Queued",
+        message=_job_message("Queued"),
         params_json=json.dumps(params or {}),
         org_id=org_id,
         user_id=user_id,
@@ -168,7 +177,7 @@ def requeue_interrupted_jobs(
         job.started_at = None
         job.completed_at = None
         # Preserve original queued_at so API created_at remains immutable.
-        job.message = message
+        job.message = _job_message(message)
         job.error = None
         # For bulk jobs mark resume=True so the worker knows to continue the
         # existing CollectionRun checkpoint rather than starting a fresh sweep.
@@ -218,7 +227,7 @@ def requeue_recent_abandoned_jobs(
         job.pause_requested = False
         job.started_at = None
         job.completed_at = None
-        job.message = message
+        job.message = _job_message(message)
         job.error = None
         # For bulk jobs force checkpoint resume semantics on restart recovery.
         if job.job_type == "bulk":
@@ -237,7 +246,7 @@ def mark_running(db: Session, job: JobRun, *, message: str) -> JobRun:
     job.status = "running"
     job.cancel_requested = False
     job.started_at = datetime.now(tz=timezone.utc)
-    job.message = message
+    job.message = _job_message(message)
     db.commit()
     db.refresh(job)
     return job
@@ -252,7 +261,7 @@ def mark_cancel_requested(db: Session, job: JobRun) -> JobRun:
 
 def mark_cancelled(db: Session, job: JobRun, *, message: str) -> JobRun:
     job.status = "cancelled"
-    job.message = message
+    job.message = _job_message(message)
     job.completed_at = datetime.now(tz=timezone.utc)
     db.commit()
     db.refresh(job)
@@ -290,7 +299,7 @@ def update_progress(
     stats: dict[str, Any] | None = None,
 ) -> JobRun:
     if message is not None:
-        job.message = message
+        job.message = _job_message(message)
     if done is not None:
         job.progress_done = done
     if total is not None:
@@ -304,7 +313,7 @@ def update_progress(
 
 def mark_completed(db: Session, job: JobRun, *, message: str, stats: dict[str, Any] | None = None) -> JobRun:
     job.status = "completed"
-    job.message = message
+    job.message = _job_message(message)
     job.completed_at = datetime.now(tz=timezone.utc)
     if stats is not None:
         job.stats_json = json.dumps(stats)
@@ -322,7 +331,7 @@ def mark_failed(
     stats: dict[str, Any] | None = None,
 ) -> JobRun:
     job.status = "failed"
-    job.message = message
+    job.message = _job_message(message)
     job.error = error
     job.completed_at = datetime.now(tz=timezone.utc)
     if stats is not None:
@@ -343,7 +352,7 @@ def mark_paused(db: Session, job: JobRun, *, message: str, stats: dict[str, Any]
     """Set job status to 'paused', preserving progress_done as the resume point."""
     job.status = "paused"
     job.pause_requested = False
-    job.message = message
+    job.message = _job_message(message)
     if stats is not None:
         job.stats_json = json.dumps(stats)
     db.commit()
@@ -357,7 +366,7 @@ def resume_paused_job(db: Session, job: JobRun) -> JobRun:
     job.pause_requested = False
     job.started_at = None
     job.completed_at = None
-    job.message = f"Resuming from {job.progress_done or 0}…"
+    job.message = _job_message(f"Resuming from {job.progress_done or 0}…")
     db.commit()
     db.refresh(job)
     return job
@@ -378,7 +387,7 @@ def resume_all_paused_jobs(db: Session) -> int:
         job.started_at = None
         job.completed_at = None
         # Preserve original queued_at so API created_at remains immutable.
-        job.message = f"Auto-resumed from {job.progress_done or 0} after restart"
+        job.message = _job_message(f"Auto-resumed from {job.progress_done or 0} after restart")
     if jobs:
         db.commit()
     return len(jobs)
@@ -393,7 +402,7 @@ def mark_waiting_external(
 ) -> JobRun:
     """Set job status to 'waiting_external' (e.g. Anthropic Batch API submitted, awaiting results)."""
     job.status = "waiting_external"
-    job.message = message
+    job.message = _job_message(message)
     if params is not None:
         job.params_json = json.dumps(params)
     db.commit()
@@ -425,7 +434,7 @@ def cancel_active_csv_exports(db: Session, user_id: int) -> None:
     now = datetime.now(tz=timezone.utc)
     for job in active:
         job.status = "cancelled"
-        job.message = "Superseded by new export"
+        job.message = _job_message("Superseded by new export")
         job.completed_at = now
     if active:
         db.commit()

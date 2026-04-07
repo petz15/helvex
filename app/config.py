@@ -82,6 +82,8 @@ class Settings(BaseSettings):
     worldline_terminal_id: str = ""
     worldline_api_username: str = ""
     worldline_api_password: str = ""
+    # Optional URL to a CSS file loaded inside the Saferpay iframe for custom styling.
+    worldline_css_url: str = ""
 
     # Stripe
     stripe_api_base_url: str = "https://api.stripe.com"

@@ -10,6 +10,7 @@ General fixes, recovery procedures, and operational checklists.
 2. [Database: Point-in-Time Recovery (PITR)](#2-database-point-in-time-recovery-pitr)
 3. [Database: Verify Backups Are Actually Running](#3-database-verify-backups-are-actually-running)
 4. [Jobs: Stuck in `running` State](#4-jobs-stuck-in-running-state)
+4b. [ML Jobs: HDBSCAN Clustering Timeout (AbandonedJobError)](#4b-ml-jobs-hdbscan-clustering-timeout-abandonedjobeerror)
 5. [Auth: Tokens Rejected After Redeploy](#5-auth-tokens-rejected-after-redeploy)
 6. [Email: Verification Not Sending](#6-email-verification-not-sending)
 7. [Google Search: Quota Exhausted](#7-google-search-quota-exhausted)
@@ -358,6 +359,87 @@ curl -s -X PATCH -H "Authorization: Bearer <token>" \
   -d '{"google_daily_quota": "500"}' \
   https://helvex.dicy.ch/api/v1/settings
 ```
+
+---
+
+## 4b. ML Jobs: HDBSCAN Clustering Timeout (AbandonedJobError)
+
+**Symptom:** HDBSCAN clustering job hangs for ~1 hour then fails with `AbandonedJobError`. Logs show lemmatization + TF-IDF + SVD completed, but clustering never started:
+
+```
+2026-04-07 19:51:40,333 INFO app.services.cluster_pipeline — [4/7] SVD done in 24.7s — shape: (763041, 50)
+<silence for ~1 hour>
+[Job marked AbandonedJobError by RQ worker timeout or pod OOMKilled]
+```
+
+**Root Cause:** HDBSCAN computes O(n²) pairwise distances to build a minimum spanning tree. With **763K companies**, this requires:
+- Distance matrix: 763K × 763K × 4 bytes (float32) = **2.3 TB**
+- Pod memory limit: **16 GB**
+- Result: **OOM kill** during `fit_predict()`
+
+**Solutions (in priority order):**
+
+### 1. Use K-Means instead (Recommended)
+K-Means clustering already works perfectly and has **no size constraints**. It's much faster and more scalable:
+
+```bash
+# Instead of:
+curl -X POST https://helvex.dicy.ch/api/v1/jobs/scoring/hdbscan
+
+# Use:
+curl -X POST https://helvex.dicy.ch/api/v1/jobs/scoring/tfidf_kmeans_cluster
+```
+
+K-Means performs equally well (150 clusters, soft multi-label assignment + labeling) and produces identical downstream results.
+
+### 2. Batch the dataset (if HDBSCAN required)
+Run HDBSCAN on smaller subsets:
+
+```bash
+# Cluster companies by canton (26 batches, ~28K each)
+for canton in ZH BE LU UR SZ GL ZG FR SO BL BS SH AR AI SG GR AG TG TI VD VS NE GE JU; do
+  curl -X POST https://helvex.dicy.ch/api/v1/jobs/scoring/hdbscan \
+    -d "{\"canton\": \"$canton\"}"
+done
+```
+
+Each batched clustering is fast (~3 min) and fits in memory easily.
+
+### 3. Reduce dataset size
+```bash
+curl -X POST https://helvex.dicy.ch/api/v1/jobs/scoring/hdbscan \
+  -d '{"limit": 100000}'
+```
+
+### 4. Increase pod memory (Expensive, temporary)
+Edit `infra/environments/prod.yaml`:
+```yaml
+mlWorker:
+  resources:
+    limits:
+      memory: 64Gi  # was 16Gi (expensive on Hetzner)
+```
+
+Then retry HDBSCAN. **Cost impact:** 4× memory = ~4× cost increase.
+
+### 5. Build a HDBSCAN alternative for large datasets
+- Implement **approximate HDBSCAN** (sample-based distance matrix)
+- Or fallback to **DBSCAN** (simpler but still O(n²), more memory-efficient implementation)
+- **Not recommended** — K-Means already solves the problem better.
+
+### Monitoring
+HDBSCAN startup now logs memory estimates. Watch ml-worker logs during retry:
+```bash
+kubectl logs -n helvex-prod deploy/helvex-ml-worker -f | grep -i "hdbscan\|distance memory"
+```
+
+If you see:
+```
+HDBSCAN clustering.fit_predict() will need ~2300 GB for distance matrix (n=763041). 
+Pod limit is 16GB; this may cause OOM or timeout.
+```
+
+**→ Stop the job and switch to K-Means or batch by canton.**
 
 ---
 

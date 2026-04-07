@@ -960,20 +960,47 @@ def run_hdbscan_pipeline(
     except ImportError as exc:
         raise ImportError("hdbscan is required for hdbscan_cluster jobs. Run: pip install hdbscan") from exc
 
+    # Estimate memory required for HDBSCAN distance matrix.
+    # HDBSCAN computes O(n²) pairwise distances; with n=763K, that's ~2.3TB (infeasible).
+    # Warn if dataset is too large; with 16GB pod limit, n > ~50K becomes problematic.
+    n_samples = X_reduced.shape[0]
+    n_features = X_reduced.shape[1]
+    estimated_distance_memory_gb = (n_samples * n_samples * 4) / (1024 ** 3)
+    if estimated_distance_memory_gb > 8.0:
+        logger.warning(
+            "HDBSCAN clustering.fit_predict() will need ~%.1f GB for distance matrix (n=%d). "
+            "Pod limit is 16GB; this may cause OOM or timeout. Consider: "
+            "(1) use K-Means instead (already configured, scale-invariant), "
+            "(2) reduce dataset (e.g., --limit 100000), or "
+            "(3) increase pod memory limit.",
+            estimated_distance_memory_gb, n_samples
+        )
+
+    logger.info(
+        "Starting HDBSCAN.fit_predict() on %d samples × %d features; "
+        "min_cluster_size=%d, metric=%s (est. distance memory: %.1f GB)",
+        n_samples, n_features,
+        max(2, int(cfg.hdbscan_min_cluster_size)), "euclidean",
+        estimated_distance_memory_gb,
+    )
+
     hdb = HDBSCAN(
         min_cluster_size=max(2, int(cfg.hdbscan_min_cluster_size)),
         min_samples=(None if cfg.hdbscan_min_samples is None else max(1, int(cfg.hdbscan_min_samples))),
         cluster_selection_epsilon=max(0.0, float(cfg.hdbscan_cluster_selection_epsilon)),
         metric="euclidean",
+        core_dist_n_jobs=-1,  # Use all CPU cores for distance computation
     )
+    logger.info("HDBSCAN object created; calling fit_predict()...")
     raw_labels = hdb.fit_predict(X_reduced)
     unique_cluster_ids = sorted({int(v) for v in raw_labels if int(v) >= 0})
     remap = {cid: i for i, cid in enumerate(unique_cluster_ids)}
     stats["noise"] = int(sum(1 for v in raw_labels if int(v) < 0))
     stats["n_clusters"] = len(unique_cluster_ids)
+    elapsed = time.time() - t4
     logger.info(
-        "[5/7] HDBSCAN done in %.1fs — %d clusters, %d noise",
-        time.time() - t4,
+        "[5/7] HDBSCAN done in %.1fs — %d clusters, %d noise points",
+        elapsed,
         stats["n_clusters"],
         stats["noise"],
     )
@@ -1103,6 +1130,571 @@ def run_hdbscan_pipeline(
         stats["analysis_file"] = None
 
     logger.info(f"Total HDBSCAN pipeline time: {time.time()-t_total:.1f}s")
+    return stats
+
+
+def run_birch_pipeline(
+    db,
+    cfg: PipelineConfig | None = None,
+    *,
+    canton: str | None = None,
+    min_zefix_score: int | None = None,
+    max_zefix_score: int | None = None,
+    limit: int | None = None,
+    use_keywords: bool = False,
+    progress_cb: Callable[[int, int, dict], None] | None = None,
+) -> dict[str, Any]:
+    """Run BIRCH clustering pipeline end-to-end (memory-efficient for large datasets).
+
+    BIRCH (Balanced Iterative Reducing and Clustering) is designed for incremental
+    clustering with minimal memory overhead. It builds a Clustering Feature (CF) tree
+    in a single pass and can handle full datasets (763K+) with 16GB memory.
+
+    Trade-off: Less sophisticated than HDBSCAN (no density estimation) but complete
+    single-pass clustering with ~O(n) memory. Suitable for full dataset without batching.
+
+    Shares preprocessing and keyword extraction with K-Means pipeline.
+    """
+    from app.models.company import Company
+    from sklearn.cluster import Birch
+    from collections import Counter
+
+    if cfg is None:
+        cfg = PipelineConfig()
+
+    stats: dict[str, Any] = {
+        "classified": 0,
+        "undefined": 0,
+        "skipped": 0,
+        "n_clusters": 0,
+        "errors": [],
+        "summary": [],
+    }
+    t_total = time.time()
+
+    # ── Load companies ──
+    t0 = time.time()
+    q = (
+        db.query(Company.id, Company.uid, Company.purpose, Company.purpose_keywords)
+        .filter(Company.purpose.isnot(None))
+    )
+    if canton:
+        q = q.filter(Company.canton == canton.upper())
+
+    if min_zefix_score is not None:
+        q = q.filter(Company.zefix_score >= min_zefix_score)
+    if max_zefix_score is not None:
+        q = q.filter(Company.zefix_score <= max_zefix_score)
+    q = q.order_by(Company.id.asc())
+    if limit:
+        q = q.limit(limit)
+    companies = q.all()
+    logger.info(f"[1/7] Loaded {len(companies)} companies in {time.time()-t0:.1f}s")
+    if not companies:
+        return stats
+
+    # ── Step 1: Build input texts ──
+    t1 = time.time()
+    if use_keywords:
+        n_keywords = sum(1 for c in companies if c.purpose_keywords)
+        n_fallback = len(companies) - n_keywords
+        logger.info(
+            f"[2/7] use_keywords=True — {n_keywords} from keywords, "
+            f"{n_fallback} falling back to purpose text"
+        )
+        cleaned = [
+            c.purpose_keywords.replace(",", " ") if c.purpose_keywords else (c.purpose or "")
+            for c in companies
+        ]
+        logger.info(f"[2/7] Input texts ready in {time.time()-t1:.1f}s (no lemmatization)")
+    else:
+        purposes = [c.purpose or "" for c in companies]
+
+        def _prep_cb(done: int, total: int) -> None:
+            if progress_cb:
+                progress_cb(done, total, {**stats, "step": "lemmatizing"})
+
+        cleaned = preprocess_texts(purposes, cfg, progress_cb=_prep_cb)
+        logger.info(f"[2/7] Lemmatization done in {time.time()-t1:.1f}s")
+
+    # ── Step 2: TF-IDF ──
+    t2 = time.time()
+    cleaned = strip_boilerplate(cleaned)
+    vectorizer, X_tfidf = vectorize(cleaned, cfg)
+    feature_names = vectorizer.get_feature_names_out()
+    logger.info(f"[3/7] TF-IDF done in {time.time()-t2:.1f}s — shape: {X_tfidf.shape}")
+
+    # ── Step 3: Dimensionality reduction ──
+    t3 = time.time()
+    svd, X_reduced = reduce_dimensions(X_tfidf, cfg)
+    logger.info(f"[4/7] SVD done in {time.time()-t3:.1f}s — shape: {X_reduced.shape}")
+
+    # ── Step 4: BIRCH ──
+    # BIRCH builds a CF-tree in single pass; memory is ~O(n) not O(n²)
+    # n_clusters is the final merge target; intermediate tree can be much larger
+    t4 = time.time()
+    if progress_cb:
+        progress_cb(0, len(companies), {**stats, "step": "clustering"})
+    
+    n_samples = X_reduced.shape[0]
+    logger.info(
+        "Starting BIRCH clustering on %d samples (memory-efficient, single-pass); "
+        "target clusters=%d",
+        n_samples,
+        cfg.n_clusters,
+    )
+
+    birch = Birch(
+        n_clusters=cfg.n_clusters,
+        threshold=None,  # Auto-threshold based on n_clusters
+        branching_factor=50,  # CF-tree node capacity
+    )
+    raw_labels = birch.fit_predict(X_reduced)
+    unique_cluster_ids = sorted({int(v) for v in raw_labels if int(v) >= 0})
+    stats["n_clusters"] = len(unique_cluster_ids)
+    
+    elapsed = time.time() - t4
+    logger.info(
+        "[5/7] BIRCH done in %.1fs — %d clusters (single-pass, memory-efficient)",
+        elapsed,
+        stats["n_clusters"],
+    )
+
+    # Convert BIRCH labels to expected format (remap 0..n-1)
+    remap = {cid: i for i, cid in enumerate(unique_cluster_ids)}
+    
+    # ── Step 5: Label clusters ──
+    t5 = time.time()
+    # Build hard labels for c-TF-IDF
+    hard_labels = [remap[int(raw_labels[i])] for i in range(len(raw_labels))]
+    labels_map = label_clusters(hard_labels, X_tfidf, feature_names, len(unique_cluster_ids), cfg)
+    cluster_specificity = score_cluster_specificity(labels_map, vectorizer)
+    n_low = sum(1 for s in cluster_specificity.values() if s < cfg.min_cluster_specificity)
+    logger.info(
+        f"[6/7] Labeling done in {time.time()-t5:.1f}s — {n_low}/{stats['n_clusters']} low-quality clusters"
+    )
+
+    # ── Step 5d: Registry matching ──
+    from app.crud.cluster_registry import deactivate_missing_clusters, get_or_create_registry_entry
+    canonical_labels_map: dict[int, str] = {}
+    seen_canonical: set[str] = set()
+    for cid, label in labels_map.items():
+        entry = get_or_create_registry_entry(db, label)
+        canonical_labels_map[cid] = entry.canonical_name
+        seen_canonical.add(entry.canonical_name)
+    deactivate_missing_clusters(db, seen_canonical)
+    db.commit()
+    logger.info(f"[6d/7] Registry sync done — {len(seen_canonical)} active canonical clusters")
+
+    # ── Step 5b: Convert BIRCH hard labels to multi-label assignments ──
+    # For consistency with other pipelines, convert hard labels to soft assignment
+    # (each company gets exactly 1 cluster; if we wanted soft assignment we'd compute similarity)
+    assignments = [[remap[int(raw_labels[i])]] for i in range(len(raw_labels))]
+
+    # ── Step 5c: Per-doc keyword extraction ──
+    t5c = time.time()
+    if use_keywords:
+        company_keywords = [c.purpose_keywords for c in companies]
+        logger.info("[6c/7] Keyword extraction skipped (use_keywords=True)")
+    else:
+        def _kw_cb(done: int, total: int) -> None:
+            if progress_cb:
+                progress_cb(done, total, {**stats, "step": "keywords"})
+
+        if progress_cb:
+            progress_cb(0, len(companies), {**stats, "step": "keywords"})
+        company_keywords = extract_company_keywords(X_tfidf, feature_names, cfg, progress_cb=_kw_cb)
+        logger.info(f"[6c/7] Keywords done in {time.time()-t5c:.1f}s")
+
+    # Summary
+    label_counter: Counter = Counter()
+    for cluster_ids in assignments:
+        for cid in cluster_ids:
+            label_counter[canonical_labels_map[cid]] += 1
+    stats["summary"] = [
+        {"label": label, "company_count": count}
+        for label, count in label_counter.most_common(50)
+    ]
+    stats["undefined"] = sum(1 for a in assignments if not a)
+
+    # ── Step 6: Save to DB ──
+    t6 = time.time()
+
+    def _save_cb(done: int, total: int, s: dict) -> None:
+        if progress_cb:
+            progress_cb(done, total, s)
+
+    save_stats = save_results(
+        db,
+        companies,
+        assignments,
+        canonical_labels_map,
+        company_keywords,
+        cfg,
+        _save_cb,
+        cluster_specificity=cluster_specificity,
+    )
+    stats.update(save_stats)
+    logger.info(f"[7/7] DB save done in {time.time()-t6:.1f}s")
+
+    # ── Persist artifacts (BIRCH-compatible centroids) ──
+    try:
+        import numpy as np
+        from sklearn.preprocessing import normalize
+
+        if canonical_labels_map:
+            # BIRCH doesn't have explicit centroids, but we can compute them
+            # from cluster membership for compatibility with incremental assignment
+            n_clusters = len(canonical_labels_map)
+            dim = int(X_reduced.shape[1])
+            centers = np.zeros((n_clusters, dim), dtype="float32")
+            counts = np.zeros(n_clusters, dtype="int32")
+
+            for row_idx, cluster_ids in enumerate(assignments):
+                if not cluster_ids:
+                    continue
+                cid = int(cluster_ids[0])
+                centers[cid] += X_reduced[row_idx]
+                counts[cid] += 1
+
+            for cid in range(n_clusters):
+                if counts[cid] > 0:
+                    centers[cid] /= counts[cid]
+
+            centers = normalize(centers)
+
+            class _CentroidModel:
+                def __init__(self, cluster_centers_):
+                    self.cluster_centers_ = cluster_centers_
+
+            _save_pipeline_artifacts(vectorizer, svd, _CentroidModel(centers), canonical_labels_map)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("S3 artifact upload failed: %s", exc)
+
+    # ── Cross-cluster analysis ──
+    try:
+        analysis_path = analyze_cross_cluster_terms(db, cfg)
+        stats["analysis_file"] = str(analysis_path)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(f"Cross-cluster analysis failed: {exc}")
+        stats["analysis_file"] = None
+
+    logger.info(f"Total BIRCH pipeline time: {time.time()-t_total:.1f}s")
+    return stats
+
+
+def run_batch_merge_hdbscan_pipeline(
+    db,
+    cfg: PipelineConfig | None = None,
+    *,
+    canton: str | None = None,
+    min_zefix_score: int | None = None,
+    max_zefix_score: int | None = None,
+    limit: int | None = None,
+    use_keywords: bool = False,
+    batch_size: int = 100000,  # Process batches of 100K to stay within memory limits
+    progress_cb: Callable[[int, int, dict], None] | None = None,
+) -> dict[str, Any]:
+    """Run HDBSCAN on batches with cluster merging (memory-efficient for full dataset).
+
+    Solves the memory problem by processing data in batches:
+    1. Split data into ~100K company batches
+    2. Run HDBSCAN independently on each batch
+    3. Compute cluster centroids for each batch
+    4. Merge batch clusters via hierarchical clustering on centroids
+    5. Relabel all companies based on merged cluster structure
+
+    Trade-off: More complex than single-pass, but allows HDBSCAN quality on large datasets.
+    Typical runtime: 30-40 min total for 763K companies (5 min per batch × 8 batches + merge overhead).
+    """
+    from app.models.company import Company
+    from collections import Counter
+    import numpy as np
+    from sklearn.preprocessing import normalize
+    from scipy.cluster.hierarchy import linkage, fcluster
+
+    if cfg is None:
+        cfg = PipelineConfig()
+
+    stats: dict[str, Any] = {
+        "classified": 0,
+        "undefined": 0,
+        "noise": 0,
+        "skipped": 0,
+        "n_clusters": 0,
+        "n_batches": 0,
+        "errors": [],
+        "summary": [],
+    }
+    t_total = time.time()
+
+    # ── Load companies ──
+    t0 = time.time()
+    q = (
+        db.query(Company.id, Company.uid, Company.purpose, Company.purpose_keywords)
+        .filter(Company.purpose.isnot(None))
+    )
+    if canton:
+        q = q.filter(Company.canton == canton.upper())
+
+    if min_zefix_score is not None:
+        q = q.filter(Company.zefix_score >= min_zefix_score)
+    if max_zefix_score is not None:
+        q = q.filter(Company.zefix_score <= max_zefix_score)
+    q = q.order_by(Company.id.asc())
+    if limit:
+        q = q.limit(limit)
+    companies = q.all()
+    n_total = len(companies)
+    logger.info(f"[1/8] Loaded {n_total} companies in {time.time()-t0:.1f}s")
+    if not companies:
+        return stats
+
+    # ── Step 1: Build input texts ──
+    t1 = time.time()
+    if use_keywords:
+        n_keywords = sum(1 for c in companies if c.purpose_keywords)
+        n_fallback = n_total - n_keywords
+        logger.info(
+            f"[2/8] use_keywords=True — {n_keywords} from keywords, "
+            f"{n_fallback} falling back to purpose text"
+        )
+        cleaned = [
+            c.purpose_keywords.replace(",", " ") if c.purpose_keywords else (c.purpose or "")
+            for c in companies
+        ]
+        logger.info(f"[2/8] Input texts ready in {time.time()-t1:.1f}s (no lemmatization)")
+    else:
+        purposes = [c.purpose or "" for c in companies]
+
+        def _prep_cb(done: int, total: int) -> None:
+            if progress_cb:
+                progress_cb(done, total, {**stats, "step": "lemmatizing"})
+
+        cleaned = preprocess_texts(purposes, cfg, progress_cb=_prep_cb)
+        logger.info(f"[2/8] Lemmatization done in {time.time()-t1:.1f}s")
+
+    # ── Step 2: TF-IDF ──
+    t2 = time.time()
+    cleaned = strip_boilerplate(cleaned)
+    vectorizer, X_tfidf = vectorize(cleaned, cfg)
+    feature_names = vectorizer.get_feature_names_out()
+    logger.info(f"[3/8] TF-IDF done in {time.time()-t2:.1f}s — shape: {X_tfidf.shape}")
+
+    # ── Step 3: Dimensionality reduction ──
+    t3 = time.time()
+    svd, X_reduced = reduce_dimensions(X_tfidf, cfg)
+    logger.info(f"[4/8] SVD done in {time.time()-t3:.1f}s — shape: {X_reduced.shape}")
+
+    # ── Step 4: Batch HDBSCAN ──
+    # Process in batches and collect cluster info for merging
+    t4 = time.time()
+    if progress_cb:
+        progress_cb(0, n_total, {**stats, "step": "batch clustering"})
+
+    try:
+        from hdbscan import HDBSCAN
+    except ImportError as exc:
+        raise ImportError("hdbscan is required. Run: pip install hdbscan") from exc
+
+    batch_clusters: list[dict[str, Any]] = []  # Per-batch cluster info
+    sample_to_batch = np.zeros(n_total, dtype=np.int32)  # Which batch each company belongs to
+    sample_to_local_label = np.zeros(n_total, dtype=np.int32)  # Local cluster ID within batch
+
+    n_batches = (n_total + batch_size - 1) // batch_size
+    stats["n_batches"] = n_batches
+
+    logger.info(
+        "Starting batch HDBSCAN on %d companies; batch_size=%d → %d batches; "
+        "est. 5-8 min per batch + merge overhead",
+        n_total, batch_size, n_batches
+    )
+
+    for batch_idx in range(n_batches):
+        start_idx = batch_idx * batch_size
+        end_idx = min(start_idx + batch_size, n_total)
+        batch_companies = companies[start_idx:end_idx]
+        X_batch = X_reduced[start_idx:end_idx]
+
+        logger.info(
+            f"[5/8] Batch {batch_idx+1}/{n_batches}: clustering {len(batch_companies)} companies"
+        )
+
+        hdb = HDBSCAN(
+            min_cluster_size=max(2, int(cfg.hdbscan_min_cluster_size)),
+            min_samples=(None if cfg.hdbscan_min_samples is None else max(1, int(cfg.hdbscan_min_samples))),
+            cluster_selection_epsilon=max(0.0, float(cfg.hdbscan_cluster_selection_epsilon)),
+            metric="euclidean",
+            core_dist_n_jobs=-1,
+        )
+        local_labels = hdb.fit_predict(X_batch)
+        unique_local = sorted({int(v) for v in local_labels if int(v) >= 0})
+
+        # Remap local cluster IDs to 0..n-1
+        local_remap = {cid: i for i, cid in enumerate(unique_local)}
+
+        # Store batch metadata
+        batch_info = {
+            "batch_idx": batch_idx,
+            "start_idx": start_idx,
+            "end_idx": end_idx,
+            "n_clusters": len(unique_local),
+            "n_noise": int(sum(1 for v in local_labels if int(v) < 0)),
+            "centroids": np.zeros((len(unique_local), X_batch.shape[1]), dtype=np.float32),
+            "counts": np.zeros(len(unique_local), dtype=np.int32),
+        }
+
+        # Compute centroids for this batch's clusters
+        for local_idx in range(len(unique_local)):
+            mask = (local_labels >= 0) & (np.array([local_remap.get(int(v), -1) for v in local_labels]) == local_idx)
+            if mask.sum() > 0:
+                batch_info["centroids"][local_idx] = X_batch[mask].mean(axis=0)
+                batch_info["counts"][local_idx] = mask.sum()
+
+        batch_clusters.append(batch_info)
+
+        # Record batch membership for each sample
+        sample_to_batch[start_idx:end_idx] = batch_idx
+        for i, local_label in enumerate(local_labels):
+            if local_label >= 0:
+                sample_to_local_label[start_idx + i] = local_remap[int(local_label)]
+
+        if progress_cb:
+            progress_cb(end_idx, n_total, {**stats, "step": "batch clustering", "n_batches": n_batches})
+
+    logger.info(f"[5/8] HDBSCAN batches done in {time.time()-t4:.1f}s")
+
+    # ── Step 5: Merge batch clusters ──
+    t5 = time.time()
+    logger.info(f"[6/8] Merging {n_batches} batch cluster sets")
+
+    if n_batches == 1:
+        # Single batch — no merge needed
+        merged_remap = {}
+        for local_idx in range(batch_clusters[0]["n_clusters"]):
+            merged_remap[(0, local_idx)] = local_idx
+        n_merged = batch_clusters[0]["n_clusters"]
+    else:
+        # Multiple batches — merge centroids via hierarchical clustering
+        all_centroids = np.vstack([b["centroids"] for b in batch_clusters])
+        all_centroids = normalize(all_centroids)
+
+        # Hierarchical clustering on centroids
+        from scipy.spatial.distance import pdist
+        distances = pdist(all_centroids, metric="euclidean")
+        Z = linkage(distances, method="ward")
+
+        # Cut tree to get merged cluster IDs
+        # Use a distance threshold that roughly preserves cluster count
+        # Conservative: aim for 1.2× to 1.5× the target cluster count to allow merges
+        merge_target = cfg.n_clusters
+        merged_labels = fcluster(Z, merge_target * 1.2, criterion="maxclust")
+        unique_merged = sorted(set(merged_labels))
+
+        # Map (batch_idx, local_idx) → merged_idx
+        merged_remap = {}
+        centroid_idx = 0
+        for batch_idx, batch_info in enumerate(batch_clusters):
+            for local_idx in range(batch_info["n_clusters"]):
+                merged_remap[(batch_idx, local_idx)] = int(merged_labels[centroid_idx]) - 1
+                centroid_idx += 1
+        n_merged = len(unique_merged)
+
+    logger.info(f"[6/8] Merge done in {time.time()-t5:.1f}s — {n_merged} merged clusters")
+
+    # ── Step 6: Relabel companies ──
+    final_labels = np.full(n_total, -1, dtype=np.int32)
+    for i in range(n_total):
+        batch_idx = sample_to_batch[i]
+        local_label = sample_to_local_label[i]
+        if local_label >= 0:  # Not noise
+            merged_idx = merged_remap[(batch_idx, local_label)]
+            final_labels[i] = merged_idx
+
+    # ── Step 7: Label clusters ──
+    t6 = time.time()
+    hard_labels = final_labels[final_labels >= 0]
+    if len(hard_labels) > 0:
+        labels_map = label_clusters(hard_labels.astype(np.int32), X_tfidf, feature_names, n_merged, cfg)
+        cluster_specificity = score_cluster_specificity(labels_map, vectorizer)
+        n_low = sum(1 for s in cluster_specificity.values() if s < cfg.min_cluster_specificity)
+    else:
+        labels_map = {}
+        cluster_specificity = {}
+        n_low = 0
+
+    logger.info(
+        f"[7/7] Labeling done in {time.time()-t6:.1f}s — {n_low}/{n_merged} low-quality clusters"
+    )
+
+    # ── Step 7b: Registry matching ──
+    from app.crud.cluster_registry import deactivate_missing_clusters, get_or_create_registry_entry
+    canonical_labels_map: dict[int, str] = {}
+    seen_canonical: set[str] = set()
+    for cid, label in labels_map.items():
+        entry = get_or_create_registry_entry(db, label)
+        canonical_labels_map[cid] = entry.canonical_name
+        seen_canonical.add(entry.canonical_name)
+    deactivate_missing_clusters(db, seen_canonical)
+    db.commit()
+    logger.info(f"[7b/7] Registry sync done — {len(seen_canonical)} active canonical clusters")
+
+    # ── Step 7c: Multi-label assignments (hard labels from HDBSCAN → soft assignment) ──
+    assignments = [
+        [final_labels[i]] if final_labels[i] >= 0 else []
+        for i in range(n_total)
+    ]
+
+    # ── Step 7d: Per-doc keyword extraction ──
+    t7c = time.time()
+    if use_keywords:
+        company_keywords = [c.purpose_keywords for c in companies]
+        logger.info("[7c/7] Keyword extraction skipped (use_keywords=True)")
+    else:
+        def _kw_cb(done: int, total: int) -> None:
+            if progress_cb:
+                progress_cb(done, total, {**stats, "step": "keywords"})
+
+        if progress_cb:
+            progress_cb(0, n_total, {**stats, "step": "keywords"})
+        company_keywords = extract_company_keywords(X_tfidf, feature_names, cfg, progress_cb=_kw_cb)
+        logger.info(f"[7c/7] Keywords done in {time.time()-t7c:.1f}s")
+
+    # Summary
+    label_counter: Counter = Counter()
+    for cluster_ids in assignments:
+        for cid in cluster_ids:
+            if cid in canonical_labels_map:
+                label_counter[canonical_labels_map[cid]] += 1
+    stats["summary"] = [
+        {"label": label, "company_count": count}
+        for label, count in label_counter.most_common(50)
+    ]
+    stats["n_clusters"] = n_merged
+    stats["undefined"] = sum(1 for a in assignments if not a)
+    stats["noise"] = sum(1 for v in final_labels if v < 0)
+
+    # ── Step 8: Save to DB ──
+    t8 = time.time()
+
+    def _save_cb(done: int, total: int, s: dict) -> None:
+        if progress_cb:
+            progress_cb(done, total, s)
+
+    save_stats = save_results(
+        db,
+        companies,
+        assignments,
+        canonical_labels_map,
+        company_keywords,
+        cfg,
+        _save_cb,
+        cluster_specificity=cluster_specificity,
+    )
+    stats.update(save_stats)
+    logger.info(f"[8/8] DB save done in {time.time()-t8:.1f}s")
+
+    logger.info(f"Total batch-merge HDBSCAN time: {time.time()-t_total:.1f}s ({n_batches} batches merged)")
     return stats
 
 

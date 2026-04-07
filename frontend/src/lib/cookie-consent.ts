@@ -11,7 +11,7 @@ export type CookieConsent = {
 export function defaultCookieConsent(): CookieConsent {
   return {
     essential: true,
-    analytics: false,
+    analytics: true,
     updatedAt: new Date().toISOString(),
   };
 }

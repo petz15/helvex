@@ -1,0 +1,200 @@
+"""Nightly subscription billing renewal service.
+
+Runs every night (scheduled via main.py) to:
+1. Downgrade orgs that requested cancellation and have reached their period end.
+2. Charge recurring subscriptions that are due using Transaction/AuthorizeReferenced.
+3. Renew subscription_period_end on success, or downgrade to free on failure.
+"""
+from __future__ import annotations
+
+import logging
+import secrets
+from datetime import datetime, timedelta, timezone
+from typing import Any
+
+from sqlalchemy.orm import Session
+
+from app.models.organization import Organization
+from app.services import payments, payment_transactions
+
+logger = logging.getLogger(__name__)
+
+
+def _next_period_end(current_end: datetime, billing_cycle: str) -> datetime:
+    if billing_cycle == "yearly":
+        # Add one year (handle leap years via timedelta approximation)
+        try:
+            return current_end.replace(year=current_end.year + 1)
+        except ValueError:
+            # Feb 29 → Feb 28 of next year
+            return current_end.replace(year=current_end.year + 1, day=28)
+    # monthly: add ~30 days then anchor to same day-of-month
+    candidate = current_end + timedelta(days=31)
+    try:
+        return candidate.replace(day=current_end.day)
+    except ValueError:
+        return candidate
+
+
+def run_billing_renewal(db: Session) -> dict[str, Any]:
+    """Process all subscriptions due for renewal or cancellation.
+
+    Returns a stats dict: {processed, renewed, cancelled, failed, skipped}
+    """
+    now = datetime.now(tz=timezone.utc)
+    stats: dict[str, Any] = {
+        "processed": 0,
+        "renewed": 0,
+        "cancelled": 0,
+        "failed": 0,
+        "skipped": 0,
+        "errors": [],
+    }
+
+    # Find all paid orgs whose subscription_period_end is in the past (or within 1h).
+    due_orgs = (
+        db.query(Organization)
+        .filter(
+            Organization.tier_id > 0,  # not free
+            Organization.subscription_period_end <= now + timedelta(hours=1),
+        )
+        .all()
+    )
+
+    logger.info("billing_renewal.start due_count=%s now=%s", len(due_orgs), now.isoformat())
+
+    for org in due_orgs:
+        stats["processed"] += 1
+        org_id = org.id
+        tier = org.tier
+        cycle = org.subscription_billing_cycle or "monthly"
+
+        # --- Cancel-at-period-end: downgrade to free ---
+        if org.subscription_cancel_at_period_end:
+            logger.info(
+                "billing_renewal.cancel org_id=%s tier=%s cycle=%s period_end=%s",
+                org_id, tier, cycle,
+                org.subscription_period_end.isoformat() if org.subscription_period_end else "None",
+            )
+            org.tier = "free"
+            org.subscription_billing_cycle = "monthly"
+            org.subscription_period_end = None
+            org.subscription_cancel_at_period_end = False
+            db.commit()
+            stats["cancelled"] += 1
+            continue
+
+        # --- No recurring reference → cannot charge, downgrade ---
+        ref_tx_id = str(org.recurring_transaction_id or "").strip()
+        if not ref_tx_id:
+            logger.warning(
+                "billing_renewal.no_reference org_id=%s tier=%s — downgrading to free",
+                org_id, tier,
+            )
+            org.tier = "free"
+            org.subscription_billing_cycle = "monthly"
+            org.subscription_period_end = None
+            db.commit()
+            stats["failed"] += 1
+            stats["errors"].append(f"org_id={org_id}: no recurring_transaction_id")
+            continue
+
+        # --- Compute renewal amount ---
+        try:
+            amount_chf = payments.compute_subscription_price_chf(
+                tier=tier,
+                billing_cycle=cycle,  # type: ignore[arg-type]
+                custom_features=getattr(org, "custom_features", None),
+                verified_business=bool(getattr(org, "verified_business", False)),
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("billing_renewal.price_error org_id=%s tier=%s", org_id, tier)
+            stats["failed"] += 1
+            stats["errors"].append(f"org_id={org_id}: price error: {exc}")
+            continue
+
+        if amount_chf <= 0:
+            logger.info("billing_renewal.skip_free org_id=%s tier=%s amount=0", org_id, tier)
+            stats["skipped"] += 1
+            continue
+
+        order_reference = f"wl_recur_{org_id}_{secrets.token_hex(6)}"
+        description = f"Helvex {tier.title()} ({cycle}) renewal"
+
+        # --- Charge via AuthorizeReferenced ---
+        try:
+            provider = payments.WorldlineProvider()
+            result = provider.authorize_referenced_transaction(
+                org_id=org_id,
+                transaction_id=ref_tx_id,
+                amount_chf=amount_chf,
+                order_reference=order_reference,
+                description=description,
+            )
+        except RuntimeError as exc:
+            logger.error(
+                "billing_renewal.charge_failed org_id=%s tier=%s error=%s",
+                org_id, tier, exc,
+            )
+            # Downgrade on payment failure
+            org.tier = "free"
+            org.subscription_billing_cycle = "monthly"
+            org.subscription_period_end = None
+            db.commit()
+            stats["failed"] += 1
+            stats["errors"].append(f"org_id={org_id}: charge failed: {exc}")
+            continue
+
+        transaction = result.get("Transaction") if isinstance(result, dict) else {}
+        new_tx_id = str(transaction.get("Id") or "") if isinstance(transaction, dict) else ""
+        tx_status = str(transaction.get("Status") or "").upper() if isinstance(transaction, dict) else ""
+        normalized = payment_transactions.validate_transaction_status(tx_status)
+
+        # Log the renewal transaction
+        try:
+            payment_transactions.log_payment_transaction(
+                db,
+                org_id=org_id,
+                provider="worldline",
+                external_id=new_tx_id or order_reference,
+                order_reference=order_reference,
+                amount_chf=amount_chf,
+                kind="subscription",
+                status=normalized,
+                provider_transaction_id=new_tx_id or None,
+                subscription_tier=tier,
+                subscription_billing_cycle=cycle,
+            )
+        except (payment_transactions.DuplicatePaymentError, payment_transactions.PaymentValidationError) as exc:
+            logger.warning("billing_renewal.log_failed org_id=%s error=%s", org_id, exc)
+
+        if normalized in {"authorized", "captured"}:
+            # Renew: advance period_end
+            current_end = org.subscription_period_end or now
+            org.subscription_period_end = _next_period_end(current_end, cycle)
+            # Update recurring reference to the new transaction for future renewals
+            if new_tx_id:
+                org.recurring_transaction_id = new_tx_id
+            db.commit()
+            logger.info(
+                "billing_renewal.renewed org_id=%s tier=%s new_period_end=%s",
+                org_id, tier, org.subscription_period_end.isoformat(),
+            )
+            stats["renewed"] += 1
+        else:
+            logger.warning(
+                "billing_renewal.charge_declined org_id=%s tier=%s tx_status=%s — downgrading",
+                org_id, tier, tx_status,
+            )
+            org.tier = "free"
+            org.subscription_billing_cycle = "monthly"
+            org.subscription_period_end = None
+            db.commit()
+            stats["failed"] += 1
+            stats["errors"].append(f"org_id={org_id}: declined tx_status={tx_status}")
+
+    logger.info(
+        "billing_renewal.done processed=%s renewed=%s cancelled=%s failed=%s skipped=%s",
+        stats["processed"], stats["renewed"], stats["cancelled"], stats["failed"], stats["skipped"],
+    )
+    return stats

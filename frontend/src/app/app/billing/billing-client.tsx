@@ -67,8 +67,9 @@ function fmtCredits(n: number) {
 
 // ── sub-components ─────────────────────────────────────────────────────────────
 
-function SummaryCards({ balance, tier, billingCycle, periodEnd, onCancelSubscription }: {
+function SummaryCards({ balance, tier, billingCycle, periodEnd, cancelAtPeriodEnd, onCancelSubscription }: {
   balance: number; tier: string; billingCycle: string; periodEnd: string | null;
+  cancelAtPeriodEnd?: boolean;
   onCancelSubscription: () => void;
 }) {
   const [cancelling, setCancelling] = useState(false);
@@ -123,10 +124,17 @@ function SummaryCards({ balance, tier, billingCycle, periodEnd, onCancelSubscrip
             <CreditCard size={12} className="text-violet-400" />Subscription
           </div>
           <div className="mt-2 text-slate-800 font-medium">
-            {periodEnd ? `Renews ${fmtDate(periodEnd)}` : isPaid ? "Active" : "—"}
+            {cancelAtPeriodEnd && periodEnd
+              ? `Cancels ${fmtDate(periodEnd)}`
+              : periodEnd
+                ? `Renews ${fmtDate(periodEnd)}`
+                : isPaid ? "Active" : "—"}
           </div>
-          {isPaid && (
+          {isPaid && !cancelAtPeriodEnd && (
             <p className="mt-0.5 text-xs text-slate-400">Renews automatically until cancelled</p>
+          )}
+          {cancelAtPeriodEnd && periodEnd && (
+            <p className="mt-0.5 text-xs text-amber-600">Access ends {fmtDate(periodEnd)}</p>
           )}
           <div className="mt-2 flex items-center gap-3">
             <Link
@@ -135,7 +143,7 @@ function SummaryCards({ balance, tier, billingCycle, periodEnd, onCancelSubscrip
             >
               Change plan <ArrowUpRight size={11} />
             </Link>
-            {isPaid && !showCancelConfirm && (
+            {isPaid && !showCancelConfirm && !cancelAtPeriodEnd && (
               <button
                 onClick={() => setShowCancelConfirm(true)}
                 className="text-xs text-red-500 hover:underline"
@@ -152,7 +160,7 @@ function SummaryCards({ balance, tier, billingCycle, periodEnd, onCancelSubscrip
         <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 space-y-2">
           <p className="text-sm font-medium text-red-800">Cancel subscription?</p>
           <p className="text-xs text-red-700">
-            Your plan will be downgraded to <strong>Free</strong> immediately. Credits already in your balance are kept. No refund is issued.
+            Your subscription will <strong>not renew</strong> at the end of the current billing period. You keep access until then. Credits already in your balance are kept. No refund is issued.
           </p>
           {cancelError && <p className="text-xs text-red-600">{cancelError}</p>}
           <div className="flex gap-2">
@@ -669,6 +677,7 @@ export function BillingClient() {
           tier={summary.tier}
           billingCycle={summary.billing_cycle}
           periodEnd={summary.subscription_period_end}
+          cancelAtPeriodEnd={summary.subscription_cancel_at_period_end}
           onCancelSubscription={() => void mutateSummary()}
         />
       )}
