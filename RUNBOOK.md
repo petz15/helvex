@@ -517,6 +517,41 @@ kubectl get backup -n helvex-prod
 kubectl get scheduledbackup -n helvex-prod
 ```
 
+## 10b. TLS Troubleshooting: Let's Encrypt Rate Limit (429)
+
+Symptom in browser:
+- `Dies ist keine sichere Verbindung`
+- `net::ERR_CERT_AUTHORITY_INVALID`
+
+Common cluster signs:
+- `kubectl describe certificate helvex-tls -n helvex-prod` shows `Failed to create Order: 429`
+- Message includes `too many certificates (5) already issued for this exact set of identifiers in the last 168h`
+- Ingress serves Traefik default self-signed cert until issuance succeeds
+
+This is not usually a cert-manager or Ingress misconfiguration. It is a Let's Encrypt policy limit for the exact same host set.
+
+### What to do
+
+1. Stop forcing re-issues until the `retry after ... UTC` timestamp shown in the cert-manager error.
+2. At/after that timestamp, trigger a single clean retry:
+
+```bash
+kubectl delete certificaterequest -n helvex-prod --all
+kubectl delete order -n helvex-prod --all
+kubectl delete challenge -n helvex-prod --all
+kubectl delete certificate helvex-tls -n helvex-prod --ignore-not-found
+kubectl delete secret helvex-tls -n helvex-prod --ignore-not-found
+kubectl annotate ingress helvex -n helvex-prod cert-manager.io/cluster-issuer=letsencrypt-prod --overwrite
+
+kubectl get certificate -n helvex-prod -w
+kubectl describe certificate helvex-tls -n helvex-prod
+```
+
+### Notes
+
+- Re-running Helm or deleting/recreating resources before the retry timestamp will not bypass the ACME limit.
+- If valid TLS is needed immediately, use an alternative certificate source temporarily (for example a manually provisioned cert from another CA).
+
 ---
 
 ## 11. Logs: Where to Find Them

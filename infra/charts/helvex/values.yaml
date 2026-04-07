@@ -85,10 +85,10 @@ mlWorker:
   resources:
     requests:
       cpu: "4"
-      memory: 20Gi
+      memory: 8Gi
     limits:
       cpu: "6"
-      memory: 25Gi
+      memory: 16Gi
 
 # CloudNativePG PostgreSQL cluster
 postgres:

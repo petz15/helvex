@@ -50,6 +50,13 @@ mlWorker:
   replicaCount: 1  # Runs continuously; Option B (KEDA autoscaling) will replace this
   keda:
     enabled: false  # Set to true after KEDA + Hetzner Cluster Autoscaler are installed
+  resources:
+    requests:
+      cpu: "1000m"
+      memory: 4Gi
+    limits:
+      cpu: "2000m"
+      memory: 6Gi
   # Dedicated ML nodes only; enable fallback once autoscaler node group is ready.
   nodeSelector: {workload: ml}
   tolerations:
