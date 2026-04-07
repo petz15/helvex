@@ -15,6 +15,30 @@ resource "hcloud_firewall" "this" {
     source_ips = var.admin_cidrs
   }
 
+  # Allow worker nodes on private subnet to join/control-plane API.
+  rule {
+    direction  = "in"
+    protocol   = "tcp"
+    port       = "6443"
+    source_ips = [var.cluster_private_cidr]
+  }
+
+  # Flannel VXLAN node-to-node traffic.
+  rule {
+    direction  = "in"
+    protocol   = "udp"
+    port       = "8472"
+    source_ips = [var.cluster_private_cidr]
+  }
+
+  # Kubelet API used by control-plane for logs/exec and node operations.
+  rule {
+    direction  = "in"
+    protocol   = "tcp"
+    port       = "10250"
+    source_ips = [var.cluster_private_cidr]
+  }
+
   rule {
     direction  = "in"
     protocol   = "tcp"

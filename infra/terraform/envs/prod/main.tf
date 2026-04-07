@@ -10,8 +10,9 @@ module "network" {
 module "firewall" {
   source = "../../modules/firewall"
 
-  name        = "${var.project_name}-fw"
-  admin_cidrs = var.admin_cidrs
+  name                 = "${var.project_name}-fw"
+  admin_cidrs          = var.admin_cidrs
+  cluster_private_cidr = var.subnet_cidr
 }
 
 locals {

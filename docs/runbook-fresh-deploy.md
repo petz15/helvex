@@ -127,6 +127,26 @@ kubectl get nodes
 
 Both `app1` (control-plane) and `db1` (worker) should show `Ready`. No `sudo`, no `export KUBECONFIG` needed.
 
+If only `app1` appears:
+
+```bash
+# 1) Re-apply Terraform to update firewall rules for private subnet joins
+cd infra/terraform/envs/prod
+terraform apply
+
+# 2) Check db1 cloud-init / agent logs
+ssh ubuntu@<db1-public-ip>
+sudo tail -n 200 /var/log/cloud-init-output.log
+sudo journalctl -u k3s-agent -n 200 --no-pager
+
+# 3) Restart agent after firewall is fixed
+sudo systemctl restart k3s-agent
+
+# 4) Back on app1, confirm both nodes
+ssh ubuntu@<app1-public-ip>
+kubectl get nodes -o wide
+```
+
 ### Step 5 — Create the ARC GitHub App secret
 
 ARC needs this secret to authenticate with GitHub. It must exist before helmfile runs.
@@ -263,7 +283,7 @@ Use this after a fresh deploy when `app1` is healthy and you want dedicated ML c
 ```hcl
 ml_nodes = {
   ml1 = {
-    server_type = "cpx31"
+    server_type = "cx43"
     role        = "k3s-worker"
     private_ip  = "10.0.1.21"
     node_labels = ["workload=ml", "location=cloud"]

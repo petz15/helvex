@@ -1134,6 +1134,21 @@ This chapter tracks dedicated ML capacity using Hetzner nodes on private network
 - ML workers run on nodes labeled `workload=ml`
 - KEDA scales `ml-worker` pods based on queue depth
 
+If you only see `app1` in `kubectl get nodes`, run:
+
+```bash
+cd infra/terraform/envs/prod
+terraform apply
+
+ssh ubuntu@<db1-public-ip>
+sudo tail -n 200 /var/log/cloud-init-output.log
+sudo journalctl -u k3s-agent -n 200 --no-pager
+sudo systemctl restart k3s-agent
+
+ssh ubuntu@<app1-public-ip>
+kubectl get nodes -o wide
+```
+
 ### Add a Hetzner ML node (two approaches)
 
 Approach A: Terraform-managed (recommended for stable infra state)
