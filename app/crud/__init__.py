@@ -85,6 +85,7 @@ from app.crud.job_run import (
     list_jobs_for_user,
     list_org_jobs,
     list_queued_jobs,
+    has_shab_daily_run_today,
     list_waiting_llm_batches,
     mark_cancel_requested,
     mark_cancelled,

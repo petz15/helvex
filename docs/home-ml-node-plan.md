@@ -42,7 +42,7 @@ This gives home-first, cloud-fallback behavior.
 ## 3) Pre-flight checklist
 
 - [ ] Home server has stable Linux install and enough RAM/CPU for ML jobs
-- [ ] Private networking available between cluster and home node (WireGuard/Tailscale strongly preferred)
+- [ ] Private networking available between cluster and worker node(s)
 - [ ] Firewall rules restricted to required k3s control-plane traffic only
 - [ ] Time sync (NTP) and DNS are stable on home node
 - [ ] Home node has reliable disk and swap policy understood

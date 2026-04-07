@@ -417,7 +417,7 @@ class WorldlineProvider:
         if payment_alias_id:
             payload["PaymentMeans"] = {"Card": {"Alias": {"Id": payment_alias_id}}}
         elif save_payment_method:
-            payload["RegisterAlias"] = {"IdGenerator": "RANDOM"}
+            payload["RegisterAlias"] = {"IdGenerator": "RANDOM", "Type": "CARD"}
         # Add billing address if provided (required by Worldline for chargeback evidence)
         if billing_address:
             payload["Payer"]["FirstName"] = billing_address.get("first_name", "")

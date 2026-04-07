@@ -74,19 +74,20 @@ variable "servers" {
   }
 }
 
+variable "ml_nodes" {
+  type = map(object({
+    server_type = string
+    role        = string
+    private_ip  = string
+    node_labels = optional(list(string), [])
+    node_taints = optional(list(string), [])
+  }))
+  default     = {}
+  description = "Optional additional ML worker nodes managed by Terraform. Entries are merged into servers for provisioning."
+}
+
 variable "k3s_token" {
   type      = string
   sensitive = true
   description = "Shared secret for K3s cluster — generate with: openssl rand -hex 32"
-}
-
-variable "tailscale_auth_key" {
-  type        = string
-  sensitive   = true
-  description = "Reusable Tailscale auth key. Generate at tailscale.com/admin/settings/keys — use 'Reusable, non-ephemeral' so it survives server rebuilds."
-}
-variable "cluster_networking_mode" {
-  type        = string
-  default     = "tailscale"
-  description = "K3s networking mode: 'tailscale' (all networking via Tailscale IPs) or 'private' (Hetzner private IPs)"
 }

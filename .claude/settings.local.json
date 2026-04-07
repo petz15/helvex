@@ -174,7 +174,13 @@
       "Read(//d/coding_projects/**)",
       "Read(//mnt/d/coding_projects/**)",
       "Bash(find c:Dcoding_projectszefix_analyzer -type f \\\\\\(-name *.tsx -o -name *.ts -o -name *.jsx -o -name *.js \\\\\\) ! -path */node_modules/* ! -path */.next/* ! -path */.git/*)",
-      "Bash(find c:/D/coding_projects/zefix_analyzer -type f \\\\\\(-name *.config.* -o -name next.config.* -o -name .env* \\\\\\))"
+      "Bash(find c:/D/coding_projects/zefix_analyzer -type f \\\\\\(-name *.config.* -o -name next.config.* -o -name .env* \\\\\\))",
+      "WebFetch(domain:saferpay.github.io)",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "WebFetch(domain:docs.saferpay.com)",
+      "Bash(ls -la /c/D/coding_projects/zefix_analyzer/alembic/versions/*.py)",
+      "Bash(find /c/D/coding_projects/zefix_analyzer -type f \\\\\\( -name \"*.md\" -o -name \"RUNBOOK*\" -o -name \"ROADMAP*\" \\\\\\) -exec grep -l \"SHAB\\\\|shab\" {} \\\\;)",
+      "Bash(python -c ':*)"
     ]
   }
 }

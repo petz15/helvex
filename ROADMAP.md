@@ -57,11 +57,11 @@
 ## Company Explore page
 
 - [ ] **Settings** - set up settings page for LLM, FLEX scoring, etc
-- [ ] **Remove default flex score and categories** - Remove my default flex scores and categories
 - [ ] **Jobs page** - Shows running jobs and possibility to start new jobs such as batch web search, LLM classification etc
 - [ ] **Categories page** - Needs to be fixed from the existing, first to use org data and to show NOGA classification better
 - [ ] **Browse page** - Pretty simple, maybe needs to be made nicer?
 - [ ] **More pages(?)** - (?)
+- [ ] **Remove default flex score and categories** - Remove my default flex scores and categories only 
 
 
 ## Company Data
@@ -99,10 +99,10 @@
 - [ ] **Monitoring & Logging stack** — deploy Prometheus + Grafana on K3s; scrape app metrics (request rate, job queue depth, error rate), Kubernetes node/pod metrics, and Redis/PostgreSQL exporters; alert on pod restarts, high memory, queue stalls -> started but not fully done yet probably not going to continue with prometheus or grafana for a while
 - [ ] **Web analytics** — integrate Google Tag Manager + GA4 (or privacy-first alternative like Plausible/Umami); track page views, funnel steps (signup, first job, first export), feature usage; cookie consent banner for GDPR compliance
 - [ ] **Cluster autoscaler (node-level)** — KEDA handles pod-level; Hetzner Cluster Autoscaler handles node provisioning for ML workload node pool; requires `hcloud-cloud-controller-manager` + CA Helm chart + node group config mapping `workload=ml` label to specific server type (cx41 or cx51); Terraform manages control-plane + DB nodes only; CA manages ML worker node pool separately
-- [x] **home ML node phase A** - home server added as k3s ML node (`ubuntuserverhome`) with `workload=ml`, `location=home`, and ML taint model
-- [ ] **home ML node phase B (deferred)** - add cloud fallback ML node class with labels `workload=ml`, `location=cloud` and matching taints/tolerations
-- [ ] **home ML node phase C (deferred)** - implement Helm affinity policy: required `workload=ml`, preferred `location=home`, cloud fallback when home unavailable
-- [ ] **home ML node mode policy** - keep home-only ML mode active for now (no cloud fallback); if home node is unavailable, ML jobs queue until node recovery
+- [ ] **Hetzner ML node provisioning flow** - finalize documented/manual flow + helper scripts to create and join dedicated Hetzner ML nodes with private IP networking
+- [ ] **Hetzner ML fallback node class** - define cloud fallback ML node class with labels `workload=ml`, `location=cloud` and matching taints/tolerations
+- [ ] **ML scheduling policy** - implement Helm affinity policy: required `workload=ml`, preferred primary ML node class, cloud fallback when unavailable
+- [ ] **ML capacity mode policy** - define default behavior when no ML node is available (queue-only vs temporary fallback)
 - [ ] **Change postgres backup/recovery** - 1) Maintain an explicit latest backup pointer After each successful backup, write a small object like latest.json in the same bucket/prefix. 2) Manual restore source override as first-class input Add a workflow dispatch input or repo variable like POSTGRES_RESTORE_SOURCE. If set, workflow uses it exactly. If not set, then run auto-discovery.
 
 

@@ -644,6 +644,92 @@ def trigger_cluster_drift_check(body: ClusterDriftCheckBody, request: Request, d
     return JobOut.from_orm_obj(job)
 
 
+# ── SHAB import triggers ───────────────────────────────────────────────────────
+
+class ShabDailyBody(BaseModel):
+    date: str | None = None          # ISO date (YYYY-MM-DD); defaults to yesterday
+    request_delay: float = 0.15      # seconds between SHAB detail API calls
+
+
+class ShabBackfillBody(BaseModel):
+    from_date: str                   # ISO date (YYYY-MM-DD), required
+    to_date: str | None = None       # ISO date; defaults to yesterday
+    request_delay: float = 0.15
+
+
+@router.post("/collection/shab-daily", response_model=JobOut, status_code=status.HTTP_202_ACCEPTED)
+def trigger_shab_daily(
+    body: ShabDailyBody,
+    request: Request,
+    db: Session = Depends(get_db),
+    _: User = Depends(require_superadmin),
+):
+    """Import SHAB HR publications for a single day (default: yesterday)."""
+    from datetime import date, timedelta, timezone
+    from datetime import datetime as _dt
+
+    if body.date:
+        try:
+            target = date.fromisoformat(body.date)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=f"Invalid date: {exc}") from exc
+    else:
+        target = (_dt.now(tz=timezone.utc) - timedelta(days=1)).date()
+
+    label = f"SHAB daily import — {target.isoformat()}"
+    job = _enqueue_or_http_error(
+        request,
+        job_type="shab_daily",
+        label=label,
+        params={"date": target.isoformat(), "request_delay": body.request_delay},
+        db=db,
+    )
+    return JobOut.from_orm_obj(job)
+
+
+@router.post("/collection/shab-backfill", response_model=JobOut, status_code=status.HTTP_202_ACCEPTED)
+def trigger_shab_backfill(
+    body: ShabBackfillBody,
+    request: Request,
+    db: Session = Depends(get_db),
+    _: User = Depends(require_superadmin),
+):
+    """Import all SHAB HR publications for a date range (historical backfill)."""
+    from datetime import date, timedelta, timezone
+    from datetime import datetime as _dt
+
+    try:
+        from_date = date.fromisoformat(body.from_date)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=f"Invalid from_date: {exc}") from exc
+
+    if body.to_date:
+        try:
+            to_date = date.fromisoformat(body.to_date)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=f"Invalid to_date: {exc}") from exc
+    else:
+        to_date = (_dt.now(tz=timezone.utc) - timedelta(days=1)).date()
+
+    if from_date > to_date:
+        raise HTTPException(status_code=400, detail="from_date must be on or before to_date")
+
+    days = (to_date - from_date).days + 1
+    label = f"SHAB backfill — {from_date} → {to_date} ({days} day{'s' if days != 1 else ''})"
+    job = _enqueue_or_http_error(
+        request,
+        job_type="shab_backfill",
+        label=label,
+        params={
+            "from_date": from_date.isoformat(),
+            "to_date": to_date.isoformat(),
+            "request_delay": body.request_delay,
+        },
+        db=db,
+    )
+    return JobOut.from_orm_obj(job)
+
+
 @router.get("/cantons")
 def list_cantons():
     return {"cantons": SWISS_CANTONS}

@@ -62,26 +62,3 @@ variable "db_volume_size_gb" {
   default     = 80
   description = "Size (GiB) of the persistent data volume attached to database-role nodes. Set to 0 to skip."
 }
-
-variable "tailscale_auth_key" {
-  type        = string
-  sensitive   = true
-  description = "Reusable Tailscale auth key. Generate at tailscale.com/admin/settings/keys — use 'Reusable, non-ephemeral' so it survives server rebuilds."
-}
-
-variable "subnet_cidr" {
-  type        = string
-  default     = "10.0.1.0/24"
-  description = "Hetzner private subnet CIDR. Advertised via Tailscale so home nodes can reach cluster IPs."
-  }
-
-  variable "cluster_networking_mode" {
-    type        = string
-    default     = "tailscale"
-    description = "Network mode for K3s cluster communication: 'tailscale' (all via Tailscale IPs) or 'private' (Hetzner private IPs). Set to 'tailscale' for remote deployments, 'private' for on-premises."
-  
-    validation {
-      condition     = contains(["tailscale", "private"], var.cluster_networking_mode)
-      error_message = "cluster_networking_mode must be 'tailscale' or 'private'."
-    }
-}

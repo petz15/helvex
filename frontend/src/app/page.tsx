@@ -1,7 +1,9 @@
 import Link from "next/link";
+import { Database, Sparkles, Search, Building2, CheckCircle2, ArrowRight } from "lucide-react";
+import type { LucideIcon } from "lucide-react";
 import { HelvexMark } from "@/components/helvex-logo";
 import { CookieSettingsButton } from "../components/cookie-settings-button";
-import { CREDIT_ACTIONS, LANDING_FEATURE_CARDS, PRICING_TIERS, creditsToChf } from "@/lib/marketing-data";
+import { CREDIT_ACTIONS, PRICING_TIERS, creditsToChf } from "@/lib/marketing-data";
 
 // ─── Post CH AG mock data ─────────────────────────────────────────────────────
 
@@ -17,6 +19,86 @@ const POST_CH = {
   fitScore: 92,
   categories: ["Logistics", "Public Services", "Telecoms"],
 };
+
+// ─── Feature categories ───────────────────────────────────────────────────────
+
+type FeatureCategory = {
+  id: string;
+  Icon: LucideIcon;
+  title: string;
+  tagline: string;
+  accent: string;
+  iconBg: string;
+  border: string;
+  features: string[];
+};
+
+const FEATURE_CATEGORIES: FeatureCategory[] = [
+  {
+    id: "data",
+    Icon: Database,
+    title: "Data Foundation",
+    tagline: "Live Swiss commercial register data with full SHAB mutation history.",
+    accent: "text-blue-700",
+    iconBg: "bg-blue-100 text-blue-600",
+    border: "border-blue-100 hover:border-blue-300",
+    features: [
+      "Automated SHAB ingestion keeps records current",
+      "CHE UID anchoring for reliable joins and exports",
+      "Mutation timeline — name, signer, address changes",
+      "Regional filtering by seat, canton, and locality",
+      "Normalized purpose text for scoring and clustering",
+    ],
+  },
+  {
+    id: "ai",
+    Icon: Sparkles,
+    title: "AI & Scoring",
+    tagline: "Qualify thousands of companies with LLM classification and fit scoring.",
+    accent: "text-violet-700",
+    iconBg: "bg-violet-100 text-violet-600",
+    border: "border-violet-100 hover:border-violet-300",
+    features: [
+      "AI fit score — numeric relevance for fast triage",
+      "Batch and immediate LLM classification flows",
+      "Flex rescoring whenever targeting criteria change",
+      "Auto-score newly discovered companies on entry",
+      "Custom ML stopwords for cleaner clustering",
+    ],
+  },
+  {
+    id: "search",
+    Icon: Search,
+    title: "Search & Discovery",
+    tagline: "Find and track the right companies with filters, collections, and digests.",
+    accent: "text-emerald-700",
+    iconBg: "bg-emerald-100 text-emerald-600",
+    border: "border-emerald-100 hover:border-emerald-300",
+    features: [
+      "Combine status, geography, score, and purpose filters",
+      "Organize targets into reusable named collections",
+      "Daily digest emails for newly matched companies",
+      "Web search enrichment for additional signal",
+      "Map view with lat/lon and cluster inspection",
+    ],
+  },
+  {
+    id: "workspace",
+    Icon: Building2,
+    title: "Workspace & Scale",
+    tagline: "Team workspace, transparent billing, and enterprise-grade controls.",
+    accent: "text-slate-700",
+    iconBg: "bg-slate-100 text-slate-600",
+    border: "border-slate-200 hover:border-slate-400",
+    features: [
+      "Shared org with common data and credit balance",
+      "CSV exports — basic (UID/Name) or full detail",
+      "Per-action credit economy with CHF conversion",
+      "Top-up bonuses that scale with your plan tier",
+      "BYO LLM keys, queue priority, and audit history",
+    ],
+  },
+];
 
 // ─── Fit-score ring ───────────────────────────────────────────────────────────
 
@@ -129,14 +211,6 @@ function CompanyMock() {
   );
 }
 
-// ─── Features ─────────────────────────────────────────────────────────────────
-
-function isWhiteCrossCell(index: number): boolean {
-  const row = Math.floor(index / 5);
-  const col = index % 5;
-  return row === 2 || col === 2;
-}
-
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default function LandingPage() {
@@ -193,89 +267,67 @@ export default function LandingPage() {
       {/* ── Features ── */}
       <section
         id="features"
-        className="relative overflow-hidden border-t border-slate-200 bg-[radial-gradient(circle_at_top,_rgba(59,130,246,0.08),_transparent_42%),linear-gradient(180deg,#f8fafc_0%,#eff6ff_100%)] py-24"
+        className="border-t border-slate-100 bg-gradient-to-b from-slate-50 to-white py-24"
       >
-        <div className="absolute left-1/2 top-0 h-56 w-56 -translate-x-1/2 rounded-full bg-blue-300/20 blur-3xl" />
-        <div className="max-w-6xl mx-auto px-6 relative">
-          <div className="mx-auto max-w-3xl text-center mb-10">
-            <span className="inline-flex items-center rounded-full border border-blue-200 bg-white/90 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.25em] text-blue-700 shadow-sm">
-              Feature board
+        <div className="max-w-6xl mx-auto px-6">
+          {/* Header */}
+          <div className="mx-auto max-w-2xl text-center mb-14">
+            <span className="inline-flex items-center rounded-full border border-blue-200 bg-white px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.25em] text-blue-700 shadow-sm">
+              Platform capabilities
             </span>
             <h2 className="mt-4 text-3xl sm:text-4xl font-black tracking-tight text-slate-900">
-              A visual map of what Helvex does
+              Everything for Swiss market research
             </h2>
-            <p className="mt-4 text-sm sm:text-base text-slate-600 leading-relaxed">
-              The blue tiles are the product surface. The white cross highlights the core areas where the platform is most differentiated.
+            <p className="mt-3 text-base text-slate-500 leading-relaxed">
+              From live register data to AI scoring — Helvex covers every step of finding and qualifying Swiss companies.
             </p>
           </div>
 
-          <div className="rounded-[2rem] border border-white/70 bg-white/75 p-4 sm:p-5 shadow-[0_20px_60px_rgba(15,23,42,0.08)] backdrop-blur">
-            <div className="mb-4 flex flex-wrap items-center justify-between gap-3 px-1 text-[11px] font-medium text-slate-500">
-              <span>Hover a tile to reveal details</span>
-              <span>Use keyboard focus too</span>
-            </div>
+          {/* 2×2 feature category grid */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            {FEATURE_CATEGORIES.map((cat) => (
+              <div
+                key={cat.id}
+                className={`group rounded-2xl border bg-white p-7 shadow-sm transition-all duration-200 hover:shadow-md ${cat.border}`}
+              >
+                {/* Icon + title */}
+                <div className="flex items-start gap-4 mb-4">
+                  <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl ${cat.iconBg}`}>
+                    <cat.Icon size={20} />
+                  </div>
+                  <div>
+                    <h3 className={`text-lg font-bold ${cat.accent}`}>{cat.title}</h3>
+                    <p className="mt-0.5 text-sm text-slate-500 leading-snug">{cat.tagline}</p>
+                  </div>
+                </div>
 
-            <div className="overflow-x-auto pb-2">
-              <div className="grid min-w-[920px] grid-cols-5 gap-4">
-                {LANDING_FEATURE_CARDS.map((feature, index) => {
-                  const isWhite = isWhiteCrossCell(index);
-                  return (
-                    <article
-                      key={feature.title}
-                      tabIndex={0}
-                      className={`group relative aspect-square overflow-hidden rounded-2xl border p-4 outline-none transition-all duration-300 hover:-translate-y-1 hover:shadow-xl focus-visible:ring-2 focus-visible:ring-blue-500 ${
-                        isWhite
-                          ? "border-blue-200 bg-white text-blue-700 shadow-[0_10px_30px_rgba(37,99,235,0.08)]"
-                          : "border-blue-400/20 bg-gradient-to-br from-blue-600 via-blue-600 to-blue-700 text-white shadow-[0_14px_40px_rgba(37,99,235,0.26)]"
-                      }`}
-                    >
-                      <div className={`absolute inset-0 transition-opacity duration-300 ${isWhite ? "opacity-0" : "bg-[radial-gradient(circle_at_top_right,rgba(255,255,255,0.18),transparent_45%)] opacity-100 group-hover:opacity-70"}`} />
-                      <div className="relative z-10 flex h-full flex-col">
-                        <div className="flex items-start justify-between gap-3">
-                          <span
-                            className={`inline-flex h-7 items-center rounded-full px-2.5 text-[10px] font-semibold tracking-[0.24em] uppercase ${
-                              isWhite ? "bg-blue-50 text-blue-600" : "bg-white/15 text-white/80"
-                            }`}
-                          >
-                            {String(index + 1).padStart(2, "0")}
-                          </span>
-                          <span className={`mt-1 h-2.5 w-2.5 rounded-full ${isWhite ? "bg-blue-500" : "bg-white/70"}`} />
-                        </div>
-
-                        <div className="mt-4 flex-1">
-                          <h3 className="text-[1.05rem] font-semibold leading-tight">
-                            {feature.title}
-                          </h3>
-                        </div>
-
-                        <div className="mt-3">
-                          <p
-                            className={`text-[11px] font-medium uppercase tracking-[0.2em] transition-opacity duration-300 group-hover:opacity-0 group-focus-visible:opacity-0 ${
-                              isWhite ? "text-blue-500/70" : "text-white/70"
-                            }`}
-                          >
-                            Hover for detail
-                          </p>
-                          <p
-                            className={`mt-2 text-sm leading-relaxed transition-all duration-300 opacity-0 translate-y-2 group-hover:opacity-100 group-hover:translate-y-0 group-focus-visible:opacity-100 group-focus-visible:translate-y-0 ${
-                              isWhite ? "text-slate-600" : "text-white/90"
-                            }`}
-                          >
-                            {feature.detail}
-                          </p>
-                        </div>
-                      </div>
-                    </article>
-                  );
-                })}
+                {/* Feature list */}
+                <ul className="space-y-2.5 mt-5">
+                  {cat.features.map((f) => (
+                    <li key={f} className="flex items-start gap-2.5 text-sm text-slate-600">
+                      <CheckCircle2 size={15} className="mt-0.5 shrink-0 text-slate-400 group-hover:text-emerald-500 transition-colors" />
+                      <span>{f}</span>
+                    </li>
+                  ))}
+                </ul>
               </div>
-            </div>
+            ))}
+          </div>
+
+          {/* CTA nudge */}
+          <div className="mt-10 text-center">
+            <Link
+              href="/register"
+              className="inline-flex items-center gap-1.5 text-sm font-semibold text-blue-600 hover:text-blue-700 transition-colors"
+            >
+              Start for free <ArrowRight size={15} />
+            </Link>
           </div>
         </div>
       </section>
 
-      {/* ── Bottom CTA ── */}
-      <section id="pricing" className="py-20 px-6">
+      {/* ── Pricing ── */}
+      <section id="pricing" className="py-20 px-6 border-t border-slate-100">
         <div className="max-w-6xl mx-auto">
           <div className="flex justify-center mb-4 text-blue-600">
             <HelvexMark size={30} />

@@ -50,7 +50,7 @@ mlWorker:
   replicaCount: 1  # Runs continuously; Option B (KEDA autoscaling) will replace this
   keda:
     enabled: false  # Set to true after KEDA + Hetzner Cluster Autoscaler are installed
-  # Home-only mode for now: no cloud fallback.
+  # Dedicated ML nodes only; enable fallback once autoscaler node group is ready.
   nodeSelector: {workload: ml}
   tolerations:
     - key: workload

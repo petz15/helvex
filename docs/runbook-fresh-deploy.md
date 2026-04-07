@@ -63,8 +63,6 @@ If the GitHub App does not exist yet:
 
 Make sure all local changes are **pushed to GitHub** before running terraform. Cloud-init clones the repo from GitHub on boot — if your changes are only local, the server will get stale code.
 
-If tailscale is necessary, set up the tailscale_auth_key in the terafrom.tfvars
-
 ```bash
 git push
 ```
@@ -84,23 +82,10 @@ Note:
 - `lb_ipv4` — load balancer public IP (for DNS)
 - `server_public_ips["app1"]` — control-plane public IP (for SSH)
 
-### Step 2 — Tailscale is pre-installed and joined automatically
+### Step 2 — Access model
 
-Both `app1` and `db1` automatically install and join your Tailscale network during cloud-init (from the reusable auth key in `terraform.tfvars`). They are assigned stable Tailscale hostnames (`helvex-app1`, `helvex-db1`) for consistent identification.
-
-You do **not** need to run any manual Tailscale setup on `app1` or `db1` — it's done at boot.
-
-To verify:
-
-```bash
-tailscale ip -4
-# Should show app1's Tailscale IP immediately
-tailscale status
-# Should list both app1 and db1 as connected peers
-ssh ubuntu@<app1-ip>w
-```
-
-**Note:** Tailscale is only installed on cluster servers (app1, db1). To add additional compute nodes later (e.g., your home server), you manually install Tailscale on those nodes and join them to the cluster using k3s agent — see Step 9.
+Cluster provisioning uses Hetzner private networking only for K3s control-plane and pod traffic.
+Use the public IP of `app1` for SSH administration.
 
 ### Step 3 — Update DNS
 
@@ -121,8 +106,8 @@ Cloud-init installs K3s, Helm, Helmfile, the helm-diff plugin, sets up the ubunt
 SSH in and tail the log:
 
 ```bash
-ssh-keygen -R <app1-tailscale-ip>
-ssh ubuntu@<app1-tailscale-ip>
+ssh-keygen -R <app1-public-ip>
+ssh ubuntu@<app1-public-ip>
 sudo tail -f /var/log/cloud-init-output.log
 ```
 
@@ -136,7 +121,7 @@ Then **log out and back in** so the kubeconfig and group membership take effect:
 
 ```bash
 exit
-ssh ubuntu@<app1-tailscale-ip>
+ssh ubuntu@<app1-public-ip>
 kubectl get nodes
 ```
 
@@ -246,7 +231,7 @@ Optional manual run from GitHub Actions UI:
 ### Step 8 — Verify
 
 ```bash
-ssh ubuntu@<app1-tailscale-ip>
+ssh ubuntu@<app1-public-ip>
 kubectl get pods -n helvex-prod
 ```
 
@@ -267,64 +252,106 @@ helvex-db-2                   1/1   Running   # CloudNativePG standby
 
 Then open https://helvex.dicy.ch in a browser. TLS should be valid (cert-manager issues the Let's Encrypt cert on first request — allow up to 60s).
 
-### Step 9 — Add home node to a fresh control plane (Phase A)
+### Step 9 — Add a Hetzner ML node (two options)
 
-Use this after a fresh deploy when `app1` is healthy and you want ML jobs to run on your home server.
+Use this after a fresh deploy when `app1` is healthy and you want dedicated ML capacity.
 
-**Networking design** (Hetzner nodes never route through Tailscale for mutual traffic):
-- `app1 ↔ db1`: Flannel VXLAN on `enp7s0` (10.0.1.x) — direct, no Tailscale
-- `home ↔ Hetzner`: Flannel VXLAN via Tailscale. Home node accepts subnet route `10.0.1.0/24`
-  so it can reach `10.0.1.10/11` through Tailscale. Do NOT add a flannel public-ip annotation
-  to app1 — that breaks db1→app1 VXLAN by routing it through Tailscale.
+#### Option A: Terraform-managed ML node (recommended)
 
-Cloud-init already runs `tailscale set --advertise-routes=10.0.1.0/24` on app1 and db1.
-You only need to **approve the route** in the Tailscale admin console (once per Terraform rebuild).
+1. Edit `infra/terraform/envs/prod/terraform.tfvars` and set `ml_nodes`:
 
-1. On `app1`, collect join inputs:
-
-```bash
-ssh ubuntu@<app1-tailscale-ip>
-sudo cat /var/lib/rancher/k3s/server/node-token   # K3S_TOKEN
-tailscale ip -4                                   # CP_TAILSCALE_IP
+```hcl
+ml_nodes = {
+  ml1 = {
+    server_type = "cpx31"
+    role        = "k3s-worker"
+    private_ip  = "10.0.1.21"
+    node_labels = ["workload=ml", "location=cloud"]
+    node_taints = ["workload=ml:NoSchedule"]
+  }
+}
 ```
 
-2. Copy and run the automated join script on the home server:
+2. Apply Terraform:
 
 ```bash
-# From your local machine
-scp scripts/join-home-node.sh ubuntu@ubuntuserverhome:/tmp/
-
-ssh ubuntu@ubuntuserverhome
-sudo bash /tmp/join-home-node.sh \
-  <CP_TAILSCALE_IP> \
-  <K3S_TOKEN> \
-  <TAILSCALE_AUTH_KEY>
+cd infra/terraform/envs/prod
+terraform apply
 ```
 
-The script handles: Tailscale join (with `--accept-routes`), old agent removal, correct
-flannel flags (`--flannel-iface=tailscale0`, `--node-ip=<TS_IP>`), and agent installation.
+3. Verify node readiness:
 
-3. **One-time Tailscale route approval** (required once per Terraform rebuild):
+```bash
+ssh ubuntu@<app1-public-ip>
+kubectl get nodes -o wide
+kubectl describe node <terraform-node-name> | grep -E "Taints|workload=|location="
+```
 
-Go to **admin.tailscale.com → Machines**:
-- `app1` → Edit route settings → approve `10.0.1.0/24`
-- `db1`  → Edit route settings → approve `10.0.1.0/24`
+Quick helper (one command):
 
-4. On `app1`, verify and label the home node:
+```bash
+bash scripts/toggle-terraform-ml-node.sh enable \
+  --name helvex-ml-1 \
+  --private-ip 10.0.1.21
+```
+
+Windows PowerShell:
+
+```powershell
+.\scripts\toggle-terraform-ml-node.ps1 enable `
+  -Name helvex-ml-1 `
+  -PrivateIp 10.0.1.21
+```
+
+#### Option B: Script-managed ML node (fast/manual)
+
+1. On `app1`, collect join input:
+
+```bash
+ssh ubuntu@<app1-public-ip>
+sudo cat /var/lib/rancher/k3s/server/node-token
+```
+
+2. Provision and join with helper script:
+
+```bash
+bash scripts/provision-hetzner-ml-node.sh \
+  --name helvex-ml-1 \
+  --type cpx31 \
+  --image ubuntu-24.04 \
+  --location nbg1 \
+  --network helvex-prod-net \
+  --private-ip 10.0.1.21 \
+  --ssh-key-name helvex_prod_sshkey_v1 \
+  --ssh-user ubuntu \
+  --cp-host ubuntu@<app1-public-ip> \
+  --cp-private-ip 10.0.1.10
+```
+
+Windows PowerShell:
+
+```powershell
+.\scripts\provision-hetzner-ml-node.ps1 `
+  -Name helvex-ml-1 `
+  -Type cpx31 `
+  -Image ubuntu-24.04 `
+  -Location nbg1 `
+  -Network helvex-prod-net `
+  -PrivateIp 10.0.1.21 `
+  -SshKeyName helvex_prod_sshkey_v1 `
+  -SshUser ubuntu `
+  -CpHost "ubuntu@<app1-public-ip>" `
+  -CpPrivateIp 10.0.1.10
+```
+
+3. Verify labels/taints from `app1`:
 
 ```bash
 kubectl get nodes -o wide
-kubectl label node ubuntuserverhome workload=ml location=home --overwrite
-kubectl taint node ubuntuserverhome workload=ml:NoSchedule --overwrite
-kubectl describe node ubuntuserverhome | grep -E "Taints|workload=|location="
+kubectl describe node helvex-ml-1 | grep -E "Taints|workload=|location="
 ```
 
-Expected:
-- `app1` Ready (control-plane)
-- `ubuntuserverhome` Ready (agent)
-- Labels `workload=ml`, `location=home` and taint `workload=ml:NoSchedule`
-
-5. Verify pod DNS works from the home node:
+4. Verify pod DNS from the ML node:
 
 ```bash
 kubectl run dns-test --image=busybox:1.36 --restart=Never \
@@ -334,11 +361,49 @@ kubectl exec dns-test -- nslookup kubernetes.default.svc.cluster.local
 kubectl delete pod dns-test
 ```
 
-6. Rotate the node join token after successful onboarding (hardening):
+5. Rotate the node join token after successful onboarding (hardening):
 
 ```bash
-ssh ubuntu@<app1-tailscale-ip>
+ssh ubuntu@<app1-public-ip>
 sudo k3s token rotate
+```
+
+#### Deprovisioning
+
+Terraform-managed node:
+
+```bash
+# Remove the entry from ml_nodes in terraform.tfvars, then:
+cd infra/terraform/envs/prod
+terraform apply
+```
+
+Quick helper (one command):
+
+```bash
+bash scripts/toggle-terraform-ml-node.sh disable --name helvex-ml-1
+```
+
+Windows PowerShell:
+
+```powershell
+.\scripts\toggle-terraform-ml-node.ps1 disable -Name helvex-ml-1
+```
+
+Script-managed node:
+
+```bash
+bash scripts/deprovision-hetzner-ml-node.sh \
+  --name helvex-ml-1 \
+  --cp-host ubuntu@<app1-public-ip>
+```
+
+Windows PowerShell:
+
+```powershell
+.\scripts\deprovision-hetzner-ml-node.ps1 `
+  -Name helvex-ml-1 `
+  -CpHost "ubuntu@<app1-public-ip>"
 ```
 
 ---
@@ -377,7 +442,7 @@ The deploy workflow uses `kubectl create ... --dry-run=client -o yaml | kubectl 
 3. Restart any pods that need the new value (they read env vars at startup):
 
 ```bash
-ssh ubuntu@<app1-tailscale-ip>
+ssh ubuntu@<app1-public-ip>
 kubectl rollout restart deployment/helvex -n helvex-prod
 ```
 

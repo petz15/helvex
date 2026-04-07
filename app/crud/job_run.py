@@ -461,3 +461,26 @@ def list_waiting_llm_batches(db: Session) -> list[JobRun]:
         .order_by(JobRun.queued_at.asc())
         .all()
     )
+
+
+def has_shab_daily_run_today(db: Session) -> bool:
+    """Return True if a shab_daily job was queued, is running, or completed today (UTC).
+
+    Used by the nightly scheduler to avoid duplicate enqueues.
+    """
+    from datetime import timedelta
+
+    today_start = datetime.now(tz=timezone.utc).replace(
+        hour=0, minute=0, second=0, microsecond=0
+    )
+    today_end = today_start + timedelta(days=1)
+    return (
+        db.query(JobRun)
+        .filter(
+            JobRun.job_type == "shab_daily",
+            JobRun.queued_at >= today_start,
+            JobRun.queued_at < today_end,
+        )
+        .first()
+        is not None
+    )

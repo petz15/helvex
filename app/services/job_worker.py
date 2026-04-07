@@ -64,6 +64,8 @@ _QUEUE_FOR_JOB_TYPE: dict[str, str] = {
     "bulk":                      "helvex-zefix",
     "detail":                    "helvex-zefix",
     "initial":                   "helvex-zefix",
+    "shab_daily":                "helvex-zefix",
+    "shab_backfill":             "helvex-zefix",
     "batch":                     "helvex-api",
     "re_geocode":                "helvex-api",
     "recalculate_scores":        "helvex-api",
@@ -91,6 +93,7 @@ def _compute_dedup_key(job_type: str, org_id: int | None, params: dict) -> str |
     # These types allow at most one active job per org at a time.
     ONE_PER_ORG = {
         "bulk", "detail", "initial",
+        "shab_daily", "shab_backfill",
         "recalculate_scores", "recalculate_google_scores",
         "reextract_purpose", "reclassify_noga",
         "re_geocode",
@@ -905,6 +908,60 @@ def _run_job(app, job_id: int) -> None:  # noqa: C901
                 )
                 tokens = stats.get("input_tokens", 0) + stats.get("output_tokens", 0)
                 done_msg = f"Done — {stats['classified']} classified, {stats['skipped']} skipped, ~{tokens} tokens, {len(stats['errors'])} errors"
+
+            elif job.job_type in ("shab_daily", "shab_backfill"):
+                from datetime import date as _date, timedelta as _td
+                from app.services.shab_import import import_shab_publications, yesterday
+
+                if job.job_type == "shab_daily":
+                    date_str = params.get("date")
+                    if date_str:
+                        target_date = _date.fromisoformat(date_str)
+                    else:
+                        target_date = yesterday()
+                    from_date = target_date
+                    to_date = target_date
+                else:
+                    from_date = _date.fromisoformat(params["from_date"])
+                    to_date_str = params.get("to_date")
+                    to_date = _date.fromisoformat(to_date_str) if to_date_str else yesterday()
+
+                def _progress(done: int, total: int, _stats: dict) -> None:
+                    _assert_not_cancelled()
+                    msg = (
+                        f"Processing {done}/{total} — "
+                        f"{_stats.get('created', 0)} new, "
+                        f"{_stats.get('updated', 0)} updated, "
+                        f"{_stats.get('deleted', 0)} deleted"
+                    )
+                    crud.update_progress(db, job, message=msg, done=done, total=total, stats=_stats)
+                    crud.create_event(db, job_id=job.id, level="debug", message=msg)
+                    _maybe_sync(app, job_type=job.job_type, label=job.label, message=msg, stats=dict(_stats), error=None, done=False)
+                    _heartbeat()
+
+                stats = import_shab_publications(
+                    db,
+                    from_date=from_date,
+                    to_date=to_date,
+                    request_delay=float(params.get("request_delay", 0.15)),
+                    resume_from=resume_from,
+                    progress_cb=_progress,
+                    status_cb=lambda m: (
+                        _assert_not_cancelled(),
+                        crud.update_progress(db, job, message=str(m)),
+                        crud.create_event(db, job_id=job.id, level="info", message=str(m)),
+                        _maybe_sync(app, job_type=job.job_type, label=job.label, message=str(m), stats=json.loads(job.stats_json) if job.stats_json else {}, error=None, done=False),
+                    ),
+                    abort_cb=_assert_not_cancelled,
+                )
+                done_msg = (
+                    f"Done — {stats['created']} new, {stats['updated']} updated, "
+                    f"{stats['deleted']} deleted, {stats['skipped']} skipped, "
+                    f"{len(stats['errors'])} errors "
+                    f"({stats['publications_fetched']} publications fetched)"
+                )
+                if resume_from:
+                    done_msg += f" (resumed from {resume_from})"
 
             elif job.job_type == "csv_export":
                 from app.services.csv_export import run_csv_export

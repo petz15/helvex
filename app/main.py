@@ -189,6 +189,66 @@ def _maybe_enqueue_geocode_upgrade(app, app_state) -> None:
     app_state.startup_message = "Queued one-time geocoding upgrade"
 
 
+def _start_nightly_shab_scheduler(app) -> None:
+    """Start a background daemon thread that auto-enqueues a shab_daily job each night.
+
+    The thread wakes up every 10 minutes and, once the clock enters the
+    02:00–02:59 window in Europe/Zurich time, enqueues a shab_daily job for
+    yesterday if one has not already been queued today.
+    """
+    import threading
+    import time
+
+    def _scheduler_loop():
+        while True:
+            time.sleep(600)  # check every 10 minutes
+            try:
+                _maybe_enqueue_shab_daily(app)
+            except Exception:  # noqa: BLE001
+                pass  # never crash the scheduler thread
+
+    t = threading.Thread(target=_scheduler_loop, daemon=True, name="shab-nightly-scheduler")
+    t.start()
+
+
+def _maybe_enqueue_shab_daily(app) -> None:
+    """Enqueue a shab_daily job for yesterday if it's 02:00–02:59 local time and not done yet."""
+    from datetime import datetime, timedelta, timezone
+
+    # Determine current hour in Europe/Zurich
+    try:
+        from zoneinfo import ZoneInfo
+        tz_zurich = ZoneInfo("Europe/Zurich")
+    except Exception:  # noqa: BLE001
+        # Fallback: UTC+1 (CET) — close enough for scheduling purposes
+        tz_zurich = timezone(timedelta(hours=1))
+
+    now_local = datetime.now(tz=tz_zurich)
+    if now_local.hour != 2:
+        return  # only run during the 02:00–02:59 window
+
+    from app.crud import create_event, create_job, has_shab_daily_run_today
+    from app.database import SessionLocal
+    from app.services.job_worker import kick_job_worker
+
+    yesterday = (datetime.now(tz=timezone.utc) - timedelta(days=1)).date()
+
+    with SessionLocal() as db:
+        if has_shab_daily_run_today(db):
+            return  # already queued or ran today
+
+        job = create_job(
+            db,
+            job_type="shab_daily",
+            label=f"SHAB daily import — {yesterday.isoformat()} (auto)",
+            params={"date": yesterday.isoformat(), "request_delay": 0.15},
+        )
+        create_event(db, job_id=job.id, level="info", message="Auto-queued by nightly scheduler")
+
+    kick_job_worker(app)
+    logger.info("shab_nightly_scheduler: enqueued shab_daily for %s", yesterday)
+
+
 def _recover_jobs_and_start_worker(app, app_state) -> None:
     from app.crud import (
         delete_old_finished_jobs,
@@ -244,6 +304,7 @@ async def lifespan(app: FastAPI):
             await loop.run_in_executor(None, _seed_settings, app.state)
             await loop.run_in_executor(None, _recover_jobs_and_start_worker, app, app.state)
             await loop.run_in_executor(None, _maybe_enqueue_geocode_upgrade, app, app.state)
+            _start_nightly_shab_scheduler(app)
             app.state.ready = True
             app.state.startup_message = "Ready"
         except Exception as exc:  # noqa: BLE001

@@ -36,10 +36,7 @@ locals {
           token                 = var.k3s_token
           private_ip            = v.private_ip
           public_ip             = hcloud_primary_ip.cp[k].ip_address
-          tailscale_auth_key    = var.tailscale_auth_key
           node_name             = "${var.name_prefix}-${k}"
-            subnet_cidr           = var.subnet_cidr
-            networking_mode       = var.cluster_networking_mode
         })
       : templatefile("${path.module}/templates/worker.yaml.tpl", {
           token                 = var.k3s_token
@@ -47,10 +44,7 @@ locals {
           cp_ip                 = local.cp_ip
           node_labels           = v.node_labels
           node_taints           = v.node_taints
-          tailscale_auth_key    = var.tailscale_auth_key
           node_name             = "${var.name_prefix}-${k}"
-          subnet_cidr           = var.subnet_cidr
-            networking_mode       = var.cluster_networking_mode
         })
     )
   }

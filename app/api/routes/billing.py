@@ -59,7 +59,8 @@ class TopupCheckoutRequest(BaseModel):
     success_url: str
     cancel_url: str
     billing_address: BillingAddress | None = None
-    save_payment_method: bool = False
+    save_payment_method: bool = True
+    use_new_card: bool = False
     provider: Literal["worldline", "stripe"] | None = None
 
 
@@ -307,7 +308,11 @@ def create_topup_checkout(
         session = payments.create_topup_checkout(
             org_id=org.id,
             user_id=_user.id,
-            payment_alias_id=(_resolve_worldline_payment_alias(db, org, _user) if body.provider in {None, "worldline"} else None),
+            payment_alias_id=(
+                _resolve_worldline_payment_alias(db, org, _user)
+                if body.provider in {None, "worldline"} and not body.use_new_card
+                else None
+            ),
             save_payment_method=body.save_payment_method,
             credits=body.credits,
             success_url=body.success_url,

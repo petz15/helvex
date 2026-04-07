@@ -6,36 +6,15 @@ packages:
 
 runcmd:
   - |
-    # Install Tailscale for admin access. If it fails, K3s still installs.
-    curl -fsSL https://tailscale.com/install.sh | sh || true
-    tailscale up --authkey="${tailscale_auth_key}" --hostname="${node_name}" || true
-
-    # Wait briefly for a Tailscale IP so we can add it to the TLS SAN.
-    TAILSCALE_IP=""
-    for i in $(seq 1 6); do
-      TAILSCALE_IP=$(tailscale ip -4 2>/dev/null || true)
-      [ -n "$TAILSCALE_IP" ] && break
-      sleep 5
-    done
-
-    # Advertise the Hetzner private subnet so home nodes can reach cluster IPs via Tailscale.
-    # Requires one-time approval in the Tailscale admin console.
-    [ -n "$TAILSCALE_IP" ] && tailscale set --advertise-routes=${subnet_cidr} || true
-
     mkdir -p /etc/rancher/k3s
-    if [ -n "$TAILSCALE_IP" ]; then
-      printf 'tls-san:\n  - %s\n  - %s\n' "${public_ip}" "$TAILSCALE_IP" > /etc/rancher/k3s/config.yaml
-    fi
-
-    TLS_SAN_FLAGS="--tls-san=${public_ip}"
-    [ -n "$TAILSCALE_IP" ] && TLS_SAN_FLAGS="$TLS_SAN_FLAGS --tls-san=$TAILSCALE_IP"
+    printf 'tls-san:\n  - %s\n' "${public_ip}" > /etc/rancher/k3s/config.yaml
 
     curl -sfL https://get.k3s.io | K3S_TOKEN="${token}" sh -s - server \
       --disable=servicelb \
       --node-ip=${private_ip} \
       --advertise-address=${private_ip} \
       --flannel-iface=enp7s0 \
-      $TLS_SAN_FLAGS \
+      --tls-san=${public_ip} \
       --cluster-cidr=10.244.0.0/16 \
       --service-cidr=10.96.0.0/12 \
       --write-kubeconfig-mode=640 \

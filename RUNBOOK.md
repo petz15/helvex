@@ -1126,122 +1126,112 @@ Now keywords are available for embedding similarity. **Duration: 2–10 min**
 
 ## 17. Home ML Node Rollout (Phases A-C)
 
-**Currrently**: switched all nodes to tailscale communications. got fed up with the issues and this seems to work. gotta watch costs especially ingress/egress costs on hetzner. 
+This chapter tracks dedicated ML capacity using Hetzner nodes on private networking only.
 
-This chapter is the step-by-step implementation tracker for home-first ML scheduling with cloud fallback.
+### Current operating mode
 
-Current decision: run in home-only mode for now. Cloud fallback (Phase B/C) is deferred.
+- K3s node traffic runs on Hetzner private subnet (`10.0.1.0/24`)
+- ML workers run on nodes labeled `workload=ml`
+- KEDA scales `ml-worker` pods based on queue depth
 
-### Status tracker
+### Add a Hetzner ML node (two approaches)
 
-- Phase A (add home node): completed
-- Phase B (cloud fallback node class): deferred
-- Phase C (scheduling policy in Helm): deferred
+Approach A: Terraform-managed (recommended for stable infra state)
 
-### Current operating mode (active)
+1) Add ML node entry in `infra/terraform/envs/prod/terraform.tfvars`:
 
-- ML runs on home node only
-- No cloud fallback node class is configured
-- If home node is down, ML jobs remain queued until home node returns
-
-Operational note:
-- Keep KEDA behavior unchanged if desired, but expect Pending pods or queued jobs when no schedulable home ML node is available.
-
-### Networking architecture
-
-```
-app1 (10.0.1.10, TS: 100.x.x.x) ←─ enp7s0 ──→ db1 (10.0.1.11, TS: 100.x.x.x)
-       │ tailscale0                                      │ tailscale0
-       └─────────────── Tailscale ─────────────────────┘
-                              │
-                    ubuntuserverhome (TS: 100.x.x.x)
+```hcl
+ml_nodes = {
+  ml1 = {
+    server_type = "cpx31"
+    role        = "k3s-worker"
+    private_ip  = "10.0.1.21"
+    node_labels = ["workload=ml", "location=cloud"]
+    node_taints = ["workload=ml:NoSchedule"]
+  }
+}
 ```
 
-- **Hetzner ↔ Hetzner**: Flannel VXLAN stays on `enp7s0` (private network). No Tailscale.
-- **Home ↔ Hetzner**: Flannel VXLAN via Tailscale. The home node accepts route `10.0.1.0/24`
-  via Tailscale subnet routing, so it can send VXLAN to `10.0.1.10/11` through Tailscale.
-  **Do NOT annotate app1's flannel public-ip with the Tailscale IP** — that routes db1→app1
-  VXLAN through Tailscale and creates a dependency that breaks Hetzner-to-Hetzner comms.
+2) Apply Terraform:
 
-### Repair: current cluster broken (app1↔db1 unreachable after subnet change)
-
-If db1 can no longer reach app1 (or vice versa), the likely cause is either:
-- `--accept-routes` was inadvertently set on a Hetzner node, causing it to route `10.0.1.x`
-  traffic via Tailscale instead of directly over enp7s0
-- The flannel public-ip annotation on app1 is set to the Tailscale IP, forcing db1 VXLAN
-  through Tailscale which then broke when subnet settings changed
-
-**On app1 and db1 (run both):**
 ```bash
-# Remove accept-routes so Hetzner nodes route 10.0.1.x locally, not via Tailscale
-sudo tailscale set --accept-routes=false
-
-# Remove the flannel annotation if present (it forces VXLAN through Tailscale)
-kubectl annotate node helvex-prod-app1 \
-  flannel.alpha.coreos.com/public-ip- \
-  flannel.alpha.coreos.com/public-ip-overwrite- 2>/dev/null || true
-
-# Restart to flush flannel state
-sudo systemctl restart k3s        # on app1
-# sudo systemctl restart k3s-agent  # on db1
+cd infra/terraform/envs/prod
+terraform apply
 ```
 
-Verify:
-```bash
-kubectl get nodes -o wide
-# Both app1 and db1 should be Ready
-# app1's flannel public-ip should show 10.0.1.10 (private IP), not a Tailscale IP
-kubectl get node helvex-prod-app1 -o jsonpath='{.metadata.annotations}' | python3 -m json.tool | grep flannel
-```
-
-### Phase A replay procedure (fresh control plane + home node)
-
-Use this if the cluster was freshly rebuilt and you need to re-attach the home node.
-
-1) On control-plane node `app1`, collect join inputs:
+3) Validate:
 
 ```bash
 ssh ubuntu@<app1-public-ip>
-sudo cat /var/lib/rancher/k3s/server/node-token   # K3S_TOKEN
-tailscale ip -4                                   # CP_TAILSCALE_IP
+kubectl get nodes -o wide
+kubectl describe node <terraform-node-name> | grep -E "Taints|workload=|location="
 ```
 
-2) Copy the join script to the home server and run it:
+Quick helper (one command):
 
 ```bash
-# On your local machine — copy the script
-scp scripts/join-home-node.sh ubuntu@ubuntuserverhome:/tmp/
-
-# On the home server
-ssh ubuntu@ubuntuserverhome
-sudo bash /tmp/join-home-node.sh \
-  <CP_TAILSCALE_IP> \
-  <K3S_TOKEN> \
-  <TAILSCALE_AUTH_KEY>
+bash scripts/toggle-terraform-ml-node.sh enable \
+  --name helvex-ml-1 \
+  --private-ip 10.0.1.21
 ```
 
-The script installs Tailscale (if absent), joins with `--accept-routes` (so the home node
-can reach Hetzner private IPs via Tailscale subnet routing), removes any old k3s agent,
-and installs a fresh agent using the Tailscale IP for the API connection.
+Windows PowerShell:
 
-3) **One-time Tailscale admin step** (needed once per Terraform rebuild, not per join):
+```powershell
+.\scripts\toggle-terraform-ml-node.ps1 enable `
+  -Name helvex-ml-1 `
+  -PrivateIp 10.0.1.21
+```
 
-Cloud-init already runs `tailscale set --advertise-routes=10.0.1.0/24` on both Hetzner
-nodes. You only need to approve the routes in the admin console:
+Approach B: Script-managed (fast/manual)
 
-- **admin.tailscale.com → Machines → app1** → Edit route settings → approve `10.0.1.0/24`
-- **admin.tailscale.com → Machines → db1**  → Edit route settings → approve `10.0.1.0/24`
+1) On control-plane node `app1`, get the join token:
 
-4) Back on control-plane, verify both nodes and confirm labels/taints:
+```bash
+ssh ubuntu@<app1-public-ip>
+sudo cat /var/lib/rancher/k3s/server/node-token
+```
+
+2) Run provisioning helper:
+
+```bash
+bash scripts/provision-hetzner-ml-node.sh \
+  --name helvex-ml-1 \
+  --type cpx31 \
+  --image ubuntu-24.04 \
+  --location nbg1 \
+  --network helvex-prod-net \
+  --private-ip 10.0.1.21 \
+  --ssh-key-name helvex_prod_sshkey_v1 \
+  --ssh-user ubuntu \
+  --cp-host ubuntu@<app1-public-ip> \
+  --cp-private-ip 10.0.1.10
+```
+
+Windows PowerShell:
+
+```powershell
+.\scripts\provision-hetzner-ml-node.ps1 `
+  -Name helvex-ml-1 `
+  -Type cpx31 `
+  -Image ubuntu-24.04 `
+  -Location nbg1 `
+  -Network helvex-prod-net `
+  -PrivateIp 10.0.1.21 `
+  -SshKeyName helvex_prod_sshkey_v1 `
+  -SshUser ubuntu `
+  -CpHost "ubuntu@<app1-public-ip>" `
+  -CpPrivateIp 10.0.1.10
+```
+
+3) Validate:
 
 ```bash
 kubectl get nodes -o wide
-kubectl label node ubuntuserverhome workload=ml location=home --overwrite
-kubectl taint node ubuntuserverhome workload=ml:NoSchedule --overwrite
-kubectl describe node ubuntuserverhome | grep -E "Taints|workload=|location="
+kubectl describe node helvex-ml-1 | grep -E "Taints|workload=|location="
 ```
 
-5) Verify pod DNS works from the home node:
+4) Validate pod DNS on the ML node:
 
 ```bash
 kubectl run dns-test --image=busybox:1.36 --restart=Never \
@@ -1251,175 +1241,64 @@ kubectl exec dns-test -- nslookup kubernetes.default.svc.cluster.local
 kubectl delete pod dns-test
 ```
 
-Acceptance checks (both nodes):
-- `app1` is `Ready`
-- `ubuntuserverhome` is `Ready`
-- Home node has labels `workload=ml`, `location=home`
-- Home node has taint `workload=ml:NoSchedule`
-- DNS test resolves `kubernetes.default.svc.cluster.local`
-
-Post-step hardening:
+5) Rotate join token after onboarding:
 
 ```bash
 sudo k3s token rotate
 ```
 
-Run on the control-plane after successful home-node onboarding.
+### Remove a Hetzner ML node
 
-### Home-only ops checklist (small)
-
-Daily checks:
-- Verify home node is Ready
-- Verify ML labels/taint are still present
-- Verify no long-running Pending ML pod
+Terraform-managed node:
 
 ```bash
-kubectl get node ubuntuserverhome
-kubectl describe node ubuntuserverhome | grep -E "Taints|workload=|location="
-kubectl get pods -n helvex-prod -l app.kubernetes.io/component=ml-worker -o wide
+# Remove the node from ml_nodes in terraform.tfvars
+cd infra/terraform/envs/prod
+terraform apply
 ```
 
-Planned home shutdown:
+Quick helper (one command):
 
 ```bash
-kubectl cordon ubuntuserverhome
-kubectl drain ubuntuserverhome --ignore-daemonsets --delete-emptydir-data
+bash scripts/toggle-terraform-ml-node.sh disable --name helvex-ml-1
 ```
 
-Expected during shutdown:
-- ML jobs stay queued
-- No cloud fallback scheduling in current mode
+Windows PowerShell:
 
-Resume home node:
+```powershell
+.\scripts\toggle-terraform-ml-node.ps1 disable -Name helvex-ml-1
+```
+
+Script-managed node:
 
 ```bash
-kubectl uncordon ubuntuserverhome
-kubectl get node ubuntuserverhome
-kubectl get pods -n helvex-prod -l app.kubernetes.io/component=ml-worker -o wide
+bash scripts/deprovision-hetzner-ml-node.sh \
+  --name helvex-ml-1 \
+  --cp-host ubuntu@<app1-public-ip>
 ```
 
-### Phase A completion record
+Windows PowerShell:
 
-Completed and verified:
-- Home node `ubuntuserverhome` joined as k3s agent
-- Control plane is reachable via Tailscale (`100.95.141.34:6443`)
-- Home node labeled: `workload=ml`, `location=home`
-- Home node tainted: `workload=ml:NoSchedule`
-
-Post-completion hardening:
-- Rotate k3s node token (it was exposed during troubleshooting)
-
-### Phase B next steps (cloud fallback node class, deferred)
-
-Goal: ensure cloud fallback nodes are also ML-capable and satisfy the same required scheduling key.
-
-1) Pick at least one cloud node (or autoscaled node template/group) for ML fallback.
-
-2) Apply labels on cloud fallback nodes:
-
-```bash
-kubectl label node <cloud-ml-node> workload=ml location=cloud --overwrite
+```powershell
+.\scripts\deprovision-hetzner-ml-node.ps1 `
+  -Name helvex-ml-1 `
+  -CpHost "ubuntu@<app1-public-ip>"
 ```
 
-3) If using taints for dedicated ML nodes, apply the same taint model:
+### Autoscaling policy
 
-```bash
-kubectl taint node <cloud-ml-node> workload=ml:NoSchedule --overwrite
-```
+- Pod-level autoscaling: KEDA ScaledObject for `ml-worker` (0 -> N based on Redis queue)
+- Node-level autoscaling: managed by Hetzner Cluster Autoscaler node group for ML nodes
+- Scheduling guardrails:
+  - Node selector: `workload=ml`
+  - Toleration: `workload=ml:NoSchedule`
 
-4) Validate labels and taints:
+### Acceptance checks
 
-```bash
-kubectl get nodes --show-labels | grep -E "workload=ml|location=cloud|location=home"
-kubectl describe node <cloud-ml-node> | grep -E "Taints|workload=|location="
-kubectl describe node ubuntuserverhome | grep -E "Taints|workload=|location="
-```
-
-5) if logs dont show up on control plae
-
-```bash
-The systemctl edit approach with k3s is tricky because k3s rewrites its own service file on restart. Instead, edit the service file directly:
-
-
-sudo nano /etc/systemd/system/k3s.service
-# Change: '--advertise-address=10.0.1.10'
-# To:     '--advertise-address=100.102.98.50'
-
-sudo systemctl daemon-reload
-sudo systemctl restart k3s
-```
-
-Phase B acceptance checks:
-- At least one cloud node has `workload=ml` and `location=cloud`
-- Home node remains `workload=ml` and `location=home`
-- Taint/toleration model is consistent across ML nodes
-
-### Phase C next steps (home preferred, cloud fallback scheduling, deferred)
-
-Goal: configure ML worker to require ML nodes, prefer home, and tolerate ML taints.
-
-1) Update Helm chart to support `mlWorker.affinity` in the ML worker Deployment template.
-
-2) Configure prod values for ML worker scheduling:
-
-```yaml
-mlWorker:
-  enabled: true
-  # keda.enabled should be true once KEDA is installed and active
-  nodeSelector:
-    workload: ml
-  tolerations:
-    - key: workload
-      operator: Equal
-      value: ml
-      effect: NoSchedule
-  affinity:
-    nodeAffinity:
-      requiredDuringSchedulingIgnoredDuringExecution:
-        nodeSelectorTerms:
-          - matchExpressions:
-              - key: workload
-                operator: In
-                values: ["ml"]
-      preferredDuringSchedulingIgnoredDuringExecution:
-        - weight: 100
-          preference:
-            matchExpressions:
-              - key: location
-                operator: In
-                values: ["home"]
-```
-
-3) Deploy and verify scheduling behavior:
-
-```bash
-# Trigger one ML job so worker scales from 0 to 1
-kubectl get pods -n helvex-prod -l app.kubernetes.io/component=ml-worker -o wide -w
-
-# Confirm pod lands on home node when available
-kubectl get pod -n helvex-prod -l app.kubernetes.io/component=ml-worker -o wide
-
-# Simulate planned home downtime
-kubectl cordon ubuntuserverhome
-kubectl drain ubuntuserverhome --ignore-daemonsets --delete-emptydir-data
-
-# Trigger ML job again and verify fallback to cloud node
-kubectl get pods -n helvex-prod -l app.kubernetes.io/component=ml-worker -o wide -w
-
-# Recover home node
-kubectl uncordon ubuntuserverhome
-```
-
-Phase C acceptance checks:
-- ML worker scales from 0 when queue has jobs
-- With home node healthy, ML pod schedules to `ubuntuserverhome`
-- With home node unavailable, ML pod schedules to cloud `workload=ml` node
-- ML worker does not land on non-ML nodes
-
-### Update log
-
-- 2026-04-03: Phase A completed; Phase B/C tasks documented.
-- 2026-04-03: Decision recorded to defer Phase B/C and continue in home-only ML mode.
+- ML node is `Ready`
+- Node has label `workload=ml`
+- Node has taint `workload=ml:NoSchedule`
+- `ml-worker` schedules only on ML nodes
 
 
 

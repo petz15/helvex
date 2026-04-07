@@ -121,14 +121,26 @@ function SummaryCards({ balance, tier, billingCycle, periodEnd }: {
   );
 }
 
-function TopupSection({ billingAddress }: { billingAddress: BillingAddressPayload | null }) {
+function TopupSection({
+  billingAddress,
+  hasSavedPaymentMethod,
+}: {
+  billingAddress: BillingAddressPayload | null;
+  hasSavedPaymentMethod: boolean;
+}) {
   const [loading, setLoading] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Default: save card automatically. User can opt out.
   const [savePaymentMethod, setSavePaymentMethod] = useState<boolean>(true);
+  // When user has a saved card, default to using it. User can override to use a different card.
+  const [useNewCard, setUseNewCard] = useState<boolean>(false);
   const [customCreditsInput, setCustomCreditsInput] = useState<string>("25000");
 
   const customCredits = Number.parseInt(customCreditsInput, 10);
   const customCreditsValid = Number.isInteger(customCredits) && customCredits >= 100;
+
+  // Effective: are we going to use the saved card for this payment?
+  const willUseSavedCard = hasSavedPaymentMethod && !useNewCard;
 
   async function handleTopup(credits: number) {
     if (!billingAddress) {
@@ -157,6 +169,7 @@ function TopupSection({ billingAddress }: { billingAddress: BillingAddressPayloa
 
     clearCheckoutIntent();
     void startTopupCheckout(intent.credits);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [billingAddress]);
 
   async function startTopupCheckout(credits: number) {
@@ -196,7 +209,8 @@ function TopupSection({ billingAddress }: { billingAddress: BillingAddressPayloa
         success_url: successUrl.toString(),
         cancel_url: cancelUrl.toString(),
         billing_address: billingAddress,
-        save_payment_method: savePaymentMethod,
+        save_payment_method: willUseSavedCard ? false : savePaymentMethod,
+        use_new_card: useNewCard,
       });
       window.location.assign(session.checkout_url);
     } catch (e) {
@@ -210,29 +224,54 @@ function TopupSection({ billingAddress }: { billingAddress: BillingAddressPayloa
     <div className="rounded-2xl border border-slate-200 bg-white p-5">
       <h2 className="text-sm font-semibold text-slate-700">Top up credits</h2>
       <p className="text-xs text-slate-400 mt-0.5 mb-4">Credits never expire. Higher tiers receive bonus credits on every purchase.</p>
+
       {error && (
         <div className="mb-3 text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">{error}</div>
       )}
+
+      {/* Payment method status banner */}
       {billingAddress && (
-        <div className="mb-4 rounded-xl border border-slate-200 bg-slate-50 p-4 space-y-3">
-          <div className="text-xs uppercase tracking-wide text-slate-400 font-semibold">Billing address</div>
-          <div className="text-sm text-slate-700">
-            {billingAddress.first_name} {billingAddress.last_name}, {billingAddress.street} {billingAddress.number}, {billingAddress.postal_code} {billingAddress.city}, {billingAddress.country}
-          </div>
-          <label className="flex items-center gap-2 text-xs text-slate-600">
-            <input
-              type="checkbox"
-              checked={savePaymentMethod}
-              onChange={(e) => setSavePaymentMethod(e.target.checked)}
-              className="h-4 w-4 rounded border-slate-300 text-blue-600"
-            />
-            Save this card for future charges
-          </label>
-          <div className="text-xs text-slate-500">
-            Top-up and plan buttons will go directly to payment using your saved alias when available.
-          </div>
+        <div className="mb-4 rounded-xl border bg-slate-50 p-3 space-y-2">
+          {willUseSavedCard ? (
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex items-center gap-2 text-sm text-slate-700">
+                <CreditCard size={14} className="text-emerald-500 shrink-0" />
+                <span>Paying with your saved card</span>
+              </div>
+              <button
+                onClick={() => setUseNewCard(true)}
+                className="text-xs text-blue-600 hover:underline shrink-0"
+              >
+                Use a different card
+              </button>
+            </div>
+          ) : (
+            <>
+              {hasSavedPaymentMethod && (
+                <div className="flex items-center justify-between gap-3">
+                  <span className="text-xs text-slate-500">Entering a new card</span>
+                  <button
+                    onClick={() => setUseNewCard(false)}
+                    className="text-xs text-blue-600 hover:underline shrink-0"
+                  >
+                    Use saved card instead
+                  </button>
+                </div>
+              )}
+              <label className="flex items-center gap-2 text-xs text-slate-600 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={savePaymentMethod}
+                  onChange={(e) => setSavePaymentMethod(e.target.checked)}
+                  className="h-3.5 w-3.5 rounded border-slate-300 text-blue-600 accent-blue-600"
+                />
+                Save card for future payments
+              </label>
+            </>
+          )}
         </div>
       )}
+
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
         {TOPUP_AMOUNTS.map(({ credits, label, chf }) => (
           <button
@@ -250,6 +289,7 @@ function TopupSection({ billingAddress }: { billingAddress: BillingAddressPayloa
           </button>
         ))}
       </div>
+
       <div className="mt-4 rounded-xl border border-slate-200 bg-white p-4 space-y-3">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
           <label className="flex-1 space-y-1">
@@ -717,7 +757,7 @@ export function BillingClient() {
         />
       )}
 
-      <TopupSection billingAddress={billingAddress} />
+      <TopupSection billingAddress={billingAddress} hasSavedPaymentMethod={summary?.has_saved_payment_method ?? false} />
       {summary && (
         <SavedCardSection billingAddress={billingAddress} hasSavedPaymentMethod={summary.has_saved_payment_method} />
       )}

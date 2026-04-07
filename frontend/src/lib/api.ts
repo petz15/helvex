@@ -261,6 +261,7 @@ export async function createTopupCheckout(data: {
   cancel_url: string;
   billing_address?: BillingAddressPayload | null;
   save_payment_method?: boolean;
+  use_new_card?: boolean;
   provider?: "worldline" | "stripe" | null;
 }): Promise<BillingCheckoutResponse> {
   const res = await fetch("/api/v1/billing/checkout/topup", {

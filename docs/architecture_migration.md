@@ -250,15 +250,13 @@ Deploy the existing monolith to K3s — no microservices split yet.
 
 2. **Run `terraform apply`** — provisions static primary IP for app1, updates server
 
-3. **Install and join Tailscale on `app1` and `db1`**:
+3. **Validate private-network K3s join on `app1` and `db1`**:
    ```bash
    ssh ubuntu@<app1-public-ip>
-   curl -fsSL https://tailscale.com/install.sh | sh
-   sudo tailscale up --authkey <TAILSCALE_AUTH_KEY> --hostname app1
+   kubectl get nodes -o wide
 
    ssh ubuntu@<db1-public-ip>
-   curl -fsSL https://tailscale.com/install.sh | sh
-   sudo tailscale up --authkey <TAILSCALE_AUTH_KEY> --hostname db1
+   ip addr show enp7s0
    ```
 
 4. **Run helmfile** (deploys cert-manager, CloudNativePG, Redis, ARC, app):
