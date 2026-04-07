@@ -2,8 +2,10 @@ param(
     [Parameter(Mandatory = $true)]
     [string]$Name,
 
+    [Alias("NodeType")]
     [string]$Type = "cpx31",
     [string]$Image = "ubuntu-24.04",
+    [Alias("NodeLocation")]
     [string]$Location = "nbg1",
 
     [Parameter(Mandatory = $true)]

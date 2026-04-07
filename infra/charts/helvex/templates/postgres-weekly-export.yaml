@@ -55,7 +55,9 @@ spec:
               args:
                 - |
                   set -euo pipefail
-                  : "${DATABASE_URL:?DATABASE_URL missing}"
+                  # Backward compatibility: some older clusters still use DB_URL.
+                  : "${DATABASE_URL:=${DB_URL:-}}"
+                  : "${DATABASE_URL:?DATABASE_URL/DB_URL missing}"
                   ts=$(date -u +%Y%m%dT%H%M%SZ)
                   out="/backup/helvex-${ts}.dump"
                   pg_dump \

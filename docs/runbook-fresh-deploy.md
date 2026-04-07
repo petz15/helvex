@@ -27,6 +27,11 @@ Go to **github.com/petz15/helvex → Settings → Secrets and variables → Acti
 | `SMTP_USER` | SMTP login username |
 | `SMTP_PASSWORD` | SMTP login password |
 | `SMTP_FROM` | Sender address, e.g. `Helvex <noreply@helvex.dicy.ch>` |
+| `STORAGEBOX_HOST` | Hetzner Storage Box host, e.g. `u12345.your-storagebox.de` |
+| `STORAGEBOX_USER` | Hetzner Storage Box user, e.g. `u12345` |
+| `STORAGEBOX_PATH` | Optional export folder, e.g. `/backups/helvex/pg-prod` |
+| `STORAGEBOX_PORT` | Storage Box SSH/SFTP port, usually `23` |
+| `STORAGEBOX_SSH_PRIVATE_KEY` | Private key (multiline) for Storage Box SFTP authentication |
 | NEXT_PUBLIC_GTM_ID | Google Tag Manager container ID for frontend build, e.g. `GTM-XXXXXXX` |
 | NEXT_PUBLIC_ADSENSE_CLIENT_ID | Google AdSense publisher client ID for frontend build, e.g. `ca-pub-XXXXXXXXXXXXXXXX` |
 | NEXT_PUBLIC_POSTHOG_KEY | PostHog project API key for frontend build, e.g. `phc_xxx...` |
@@ -320,6 +325,8 @@ Windows PowerShell:
 ```powershell
 .\scripts\toggle-terraform-ml-node.ps1 enable `
   -Name helvex-ml-1 `
+  -Location nbg1 `
+  -NodeType cax21 `
   -PrivateIp 10.0.1.21
 ```
 
@@ -353,9 +360,9 @@ Windows PowerShell:
 ```powershell
 .\scripts\provision-hetzner-ml-node.ps1 `
   -Name helvex-ml-1 `
-  -Type cpx31 `
+  -NodeType cax21 `
   -Image ubuntu-24.04 `
-  -Location nbg1 `
+  -NodeLocation nbg1 `
   -Network helvex-prod-net `
   -PrivateIp 10.0.1.21 `
   -SshKeyName helvex_prod_sshkey_v1 `

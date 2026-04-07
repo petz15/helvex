@@ -1195,6 +1195,8 @@ Windows PowerShell:
 ```powershell
 .\scripts\toggle-terraform-ml-node.ps1 enable `
   -Name helvex-ml-1 `
+  -Location nbg1 `
+  -NodeType cax21 `
   -PrivateIp 10.0.1.21
 ```
 
@@ -1228,9 +1230,9 @@ Windows PowerShell:
 ```powershell
 .\scripts\provision-hetzner-ml-node.ps1 `
   -Name helvex-ml-1 `
-  -Type cpx31 `
+  -NodeType cax21 `
   -Image ubuntu-24.04 `
-  -Location nbg1 `
+  -NodeLocation nbg1 `
   -Network helvex-prod-net `
   -PrivateIp 10.0.1.21 `
   -SshKeyName helvex_prod_sshkey_v1 `

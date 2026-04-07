@@ -7,13 +7,29 @@ param(
     [string]$Name,
 
     [string]$PrivateIp,
+    [Alias("NodeType")]
     [string]$Type = "cpx31",
+    [Alias("NodeLocation")]
+    [string]$Location = "nbg1",
     [string]$Key = "ml1",
     [string]$TfDir = "infra/terraform/envs/prod",
     [switch]$NoApply
 )
 
 $ErrorActionPreference = "Stop"
+
+function Write-Utf8NoBomJson {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Path,
+
+        [Parameter(Mandatory = $true)]
+        [string]$Json
+    )
+
+    $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+    [System.IO.File]::WriteAllText($Path, $Json, $utf8NoBom)
+}
 
 if ($Action -eq "enable" -and [string]::IsNullOrWhiteSpace($PrivateIp)) {
     throw "--PrivateIp is required for enable"
@@ -34,12 +50,14 @@ if ($Action -eq "enable") {
             }
         }
     }
-    $payload | ConvertTo-Json -Depth 10 | Set-Content -Path $tfvarsFile -Encoding UTF8
+    $json = $payload | ConvertTo-Json -Depth 10
+    Write-Utf8NoBomJson -Path $tfvarsFile -Json $json
     Write-Host "Wrote $tfvarsFile with ML node '$Name' (key '$Key')."
 }
 else {
     $payload = [ordered]@{ ml_nodes = @{} }
-    $payload | ConvertTo-Json -Depth 10 | Set-Content -Path $tfvarsFile -Encoding UTF8
+    $json = $payload | ConvertTo-Json -Depth 10
+    Write-Utf8NoBomJson -Path $tfvarsFile -Json $json
     Write-Host "Wrote $tfvarsFile with ml_nodes disabled for helper-managed node '$Name'."
 }
 
@@ -54,4 +72,4 @@ if (-not $terraformCmd) {
 }
 
 Write-Host "Running terraform apply in $TfDir ..."
-terraform -chdir="$TfDir" apply
+terraform -chdir="$TfDir" apply -var="location=$Location"
