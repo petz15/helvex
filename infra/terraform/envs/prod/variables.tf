@@ -85,3 +85,8 @@ variable "tailscale_auth_key" {
   sensitive   = true
   description = "Reusable Tailscale auth key. Generate at tailscale.com/admin/settings/keys — use 'Reusable, non-ephemeral' so it survives server rebuilds."
 }
+variable "cluster_networking_mode" {
+  type        = string
+  default     = "tailscale"
+  description = "K3s networking mode: 'tailscale' (all networking via Tailscale IPs) or 'private' (Hetzner private IPs)"
+}

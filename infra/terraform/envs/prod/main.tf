@@ -25,7 +25,8 @@ module "servers" {
   subnet_id             = module.network.subnet_id
   firewall_id           = module.firewall.firewall_id
   servers               = var.servers
-  db_volume_size_gb     = 0
+    db_volume_size_gb     = 0
+    cluster_networking_mode = var.cluster_networking_mode
   k3s_token             = var.k3s_token
   tailscale_auth_key    = var.tailscale_auth_key
   subnet_cidr           = var.subnet_cidr
