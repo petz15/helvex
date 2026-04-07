@@ -1025,7 +1025,7 @@ The classification pipeline consists of three independent ML jobs that improve c
 
 | Job | Purpose | Duration | Depends On | S3 Artifacts |
 |-----|---------|----------|------------|---|
-| `hdbscan_cluster` | Train TF-IDF + K-Means, assign clusters, extract keywords | 10–30 min | — | ✅ Uploads SVD, vectorizer, centroids |
+| `hdbscan_cluster` | Train TF-IDF + HDBSCAN, assign clusters, extract keywords | 10–30 min | — | ✅ Uploads SVD, vectorizer, centroids |
 | `reextract_keywords` | Re-extract keywords for all companies using cached vectorizer | 1–5 min | `hdbscan_cluster` S3 artifacts | — |
 | `reclassify_noga` | Classify companies with NOGA taxonomy + embedding similarity | 2–10 min | — | ✅ Uses NOGA embeddings |
 
@@ -1037,8 +1037,12 @@ POST /api/v1/jobs
 {
   "job_type": "hdbscan_cluster",
   "params": {
-    "n_clusters": 150,
-    "only_missing_noga": false
+    "min_cluster_size": 30,
+    "min_samples": null,
+    "cluster_selection_epsilon": 0.0,
+    "n_components": 50,
+    "top_terms": 5,
+    "top_keywords_per_company": 10
   }
 }
 ```
@@ -1091,12 +1095,13 @@ Now keywords are available for embedding similarity. **Duration: 2–10 min**
 3. Lemmatize with spaCy German model
 4. TF-IDF vectorization (corpus-wide)
 5. Dimensionality reduction (SVD)
-6. K-Means clustering
-7. Extract keywords per company (same TF-IDF)
-8. Assign clusters (multi-label soft assignment)
-9. **Save to S3:** TF-IDF vectorizer, SVD transformer, K-Means centroids, cluster registry mapping
-10. Filter low-quality clusters (specificity < threshold)
-11. Store `tfidf_cluster` + `purpose_keywords` in DB
+6. HDBSCAN clustering (noise points are left unassigned)
+7. Label discovered clusters via c-TF-IDF terms
+8. Extract keywords per company (same TF-IDF)
+9. Assign clusters (single-cluster assignment for non-noise points)
+10. **Save to S3:** TF-IDF vectorizer, SVD transformer, centroid prototypes, cluster registry mapping
+11. Filter low-quality clusters (specificity < threshold)
+12. Store `tfidf_cluster` + `purpose_keywords` in DB
 
 #### `reextract_keywords`
 
@@ -1120,6 +1125,8 @@ Now keywords are available for embedding similarity. **Duration: 2–10 min**
 ---
 
 ## 17. Home ML Node Rollout (Phases A-C)
+
+**Currrently**: switched all nodes to tailscale communications. got fed up with the issues and this seems to work. gotta watch costs especially ingress/egress costs on hetzner. 
 
 This chapter is the step-by-step implementation tracker for home-first ML scheduling with cloud fallback.
 

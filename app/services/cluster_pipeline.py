@@ -53,6 +53,11 @@ class PipelineConfig:
     kmeans_max_iter: int = 300
     kmeans_n_init: int = 3
 
+    # ── HDBSCAN ──
+    hdbscan_min_cluster_size: int = 30
+    hdbscan_min_samples: int | None = None
+    hdbscan_cluster_selection_epsilon: float = 0.0
+
     # ── Multi-label assignment ──
     max_clusters_per_company: int = 3   # assign up to this many clusters per company
     min_similarity: float = 0.20        # cosine similarity threshold; below → Undefined
@@ -856,6 +861,251 @@ def run_pipeline(
     return stats
 
 
+def run_hdbscan_pipeline(
+    db,
+    cfg: PipelineConfig | None = None,
+    *,
+    canton: str | None = None,
+    min_zefix_score: int | None = None,
+    max_zefix_score: int | None = None,
+    limit: int | None = None,
+    use_keywords: bool = False,
+    progress_cb: Callable[[int, int, dict], None] | None = None,
+) -> dict[str, Any]:
+    """Run the HDBSCAN clustering pipeline end-to-end.
+
+    The text preprocessing and keyword extraction stages are shared with the
+    K-Means pipeline. Clustering differs at step 4 where HDBSCAN discovers the
+    number of clusters automatically and marks outliers as noise (-1).
+    """
+    from app.models.company import Company
+
+    if cfg is None:
+        cfg = PipelineConfig()
+
+    stats: dict[str, Any] = {
+        "classified": 0,
+        "undefined": 0,
+        "noise": 0,
+        "skipped": 0,
+        "n_clusters": 0,
+        "errors": [],
+        "summary": [],
+    }
+    t_total = time.time()
+
+    # ── Load companies — fetch only the fields we need ──
+    t0 = time.time()
+    q = (
+        db.query(Company.id, Company.uid, Company.purpose, Company.purpose_keywords)
+        .filter(Company.purpose.isnot(None))
+    )
+    if canton:
+        q = q.filter(Company.canton == canton.upper())
+
+    if min_zefix_score is not None:
+        q = q.filter(Company.zefix_score >= min_zefix_score)
+    if max_zefix_score is not None:
+        q = q.filter(Company.zefix_score <= max_zefix_score)
+    q = q.order_by(Company.id.asc())
+    if limit:
+        q = q.limit(limit)
+    companies = q.all()
+    logger.info(f"[1/7] Loaded {len(companies)} companies in {time.time()-t0:.1f}s")
+    if not companies:
+        return stats
+
+    # ── Step 1: Build input texts ──
+    t1 = time.time()
+    if use_keywords:
+        n_keywords = sum(1 for c in companies if c.purpose_keywords)
+        n_fallback = len(companies) - n_keywords
+        logger.info(
+            f"[2/7] use_keywords=True — {n_keywords} from keywords, "
+            f"{n_fallback} falling back to purpose text"
+        )
+        cleaned = [
+            c.purpose_keywords.replace(",", " ") if c.purpose_keywords else (c.purpose or "")
+            for c in companies
+        ]
+        logger.info(f"[2/7] Input texts ready in {time.time()-t1:.1f}s (no lemmatization)")
+    else:
+        purposes = [c.purpose or "" for c in companies]
+
+        def _prep_cb(done: int, total: int) -> None:
+            if progress_cb:
+                progress_cb(done, total, {**stats, "step": "lemmatizing"})
+
+        cleaned = preprocess_texts(purposes, cfg, progress_cb=_prep_cb)
+        logger.info(f"[2/7] Lemmatization done in {time.time()-t1:.1f}s")
+
+    # ── Step 2: TF-IDF ──
+    t2 = time.time()
+    cleaned = strip_boilerplate(cleaned)
+    vectorizer, X_tfidf = vectorize(cleaned, cfg)
+    feature_names = vectorizer.get_feature_names_out()
+    logger.info(f"[3/7] TF-IDF done in {time.time()-t2:.1f}s — shape: {X_tfidf.shape}")
+
+    # ── Step 3: Dimensionality reduction ──
+    t3 = time.time()
+    svd, X_reduced = reduce_dimensions(X_tfidf, cfg)
+    logger.info(f"[4/7] SVD done in {time.time()-t3:.1f}s — shape: {X_reduced.shape}")
+
+    # ── Step 4: HDBSCAN ──
+    t4 = time.time()
+    if progress_cb:
+        progress_cb(0, len(companies), {**stats, "step": "clustering"})
+    try:
+        from hdbscan import HDBSCAN
+    except ImportError as exc:
+        raise ImportError("hdbscan is required for hdbscan_cluster jobs. Run: pip install hdbscan") from exc
+
+    hdb = HDBSCAN(
+        min_cluster_size=max(2, int(cfg.hdbscan_min_cluster_size)),
+        min_samples=(None if cfg.hdbscan_min_samples is None else max(1, int(cfg.hdbscan_min_samples))),
+        cluster_selection_epsilon=max(0.0, float(cfg.hdbscan_cluster_selection_epsilon)),
+        metric="euclidean",
+    )
+    raw_labels = hdb.fit_predict(X_reduced)
+    unique_cluster_ids = sorted({int(v) for v in raw_labels if int(v) >= 0})
+    remap = {cid: i for i, cid in enumerate(unique_cluster_ids)}
+    stats["noise"] = int(sum(1 for v in raw_labels if int(v) < 0))
+    stats["n_clusters"] = len(unique_cluster_ids)
+    logger.info(
+        "[5/7] HDBSCAN done in %.1fs — %d clusters, %d noise",
+        time.time() - t4,
+        stats["n_clusters"],
+        stats["noise"],
+    )
+
+    # ── Step 5: Label clusters ──
+    t5 = time.time()
+    if unique_cluster_ids:
+        clustered_idx = [i for i, cid in enumerate(raw_labels) if int(cid) >= 0]
+        hard_labels = [remap[int(raw_labels[i])] for i in clustered_idx]
+        X_tfidf_clustered = X_tfidf[clustered_idx]
+        labels_map = label_clusters(hard_labels, X_tfidf_clustered, feature_names, len(unique_cluster_ids), cfg)
+        cluster_specificity = score_cluster_specificity(labels_map, vectorizer)
+        n_low = sum(1 for s in cluster_specificity.values() if s < cfg.min_cluster_specificity)
+    else:
+        labels_map = {}
+        cluster_specificity = {}
+        n_low = 0
+    logger.info(
+        f"[6/7] Labeling done in {time.time()-t5:.1f}s — {n_low}/{stats['n_clusters']} low-quality clusters"
+    )
+
+    # ── Step 5d: Registry matching — replace raw labels with stable canonical names ──
+    from app.crud.cluster_registry import deactivate_missing_clusters, get_or_create_registry_entry
+    canonical_labels_map: dict[int, str] = {}
+    seen_canonical: set[str] = set()
+    for cid, label in labels_map.items():
+        entry = get_or_create_registry_entry(db, label)
+        canonical_labels_map[cid] = entry.canonical_name
+        seen_canonical.add(entry.canonical_name)
+    deactivate_missing_clusters(db, seen_canonical)
+    db.commit()
+    logger.info(f"[6d/7] Registry sync done — {len(seen_canonical)} active canonical clusters")
+
+    # ── Step 5b: Convert HDBSCAN labels to assignment format ──
+    if progress_cb:
+        progress_cb(0, len(companies), {**stats, "step": "assigning"})
+    assignments = [
+        [remap[int(cid)]] if int(cid) >= 0 else []
+        for cid in raw_labels
+    ]
+
+    # ── Step 5c: Per-doc keyword extraction ──
+    t5c = time.time()
+    if use_keywords:
+        company_keywords = [c.purpose_keywords for c in companies]
+        logger.info("[6c/7] Keyword extraction skipped (use_keywords=True — keeping existing purpose_keywords)")
+    else:
+        def _kw_cb(done: int, total: int) -> None:
+            if progress_cb:
+                progress_cb(done, total, {**stats, "step": "keywords"})
+
+        if progress_cb:
+            progress_cb(0, len(companies), {**stats, "step": "keywords"})
+        company_keywords = extract_company_keywords(X_tfidf, feature_names, cfg, progress_cb=_kw_cb)
+        logger.info(f"[6c/7] Keywords done in {time.time()-t5c:.1f}s")
+
+    from collections import Counter
+    label_counter: Counter = Counter()
+    for cluster_ids in assignments:
+        for cid in cluster_ids:
+            label_counter[canonical_labels_map[cid]] += 1
+    stats["summary"] = [
+        {"label": label, "company_count": count}
+        for label, count in label_counter.most_common(50)
+    ]
+    stats["undefined"] = sum(1 for a in assignments if not a)
+
+    # ── Step 6: Save to DB ──
+    t6 = time.time()
+
+    def _save_cb(done: int, total: int, s: dict) -> None:
+        if progress_cb:
+            progress_cb(done, total, s)
+
+    save_stats = save_results(
+        db,
+        companies,
+        assignments,
+        canonical_labels_map,
+        company_keywords,
+        cfg,
+        _save_cb,
+        cluster_specificity=cluster_specificity,
+    )
+    stats.update(save_stats)
+    logger.info(f"[7/7] DB save done in {time.time()-t6:.1f}s")
+
+    # ── Persist trained artifacts to S3 (HDBSCAN-compatible centroids) ──
+    try:
+        import numpy as np
+        from sklearn.preprocessing import normalize
+
+        if canonical_labels_map:
+            n_clusters = len(canonical_labels_map)
+            dim = int(X_reduced.shape[1])
+            centers = np.zeros((n_clusters, dim), dtype="float32")
+            counts = np.zeros(n_clusters, dtype="int32")
+
+            for row_idx, cluster_ids in enumerate(assignments):
+                if not cluster_ids:
+                    continue
+                cid = int(cluster_ids[0])
+                centers[cid] += X_reduced[row_idx]
+                counts[cid] += 1
+
+            for cid in range(n_clusters):
+                if counts[cid] > 0:
+                    centers[cid] /= counts[cid]
+
+            # Reuse existing artifact format expected by incremental assignment.
+            centers = normalize(centers)
+
+            class _CentroidModel:
+                def __init__(self, cluster_centers_):
+                    self.cluster_centers_ = cluster_centers_
+
+            _save_pipeline_artifacts(vectorizer, svd, _CentroidModel(centers), canonical_labels_map)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("S3 artifact upload failed (incremental assignment unavailable): %s", exc)
+
+    # ── Cross-cluster analysis ──
+    try:
+        analysis_path = analyze_cross_cluster_terms(db, cfg)
+        stats["analysis_file"] = str(analysis_path)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(f"Cross-cluster analysis failed: {exc}")
+        stats["analysis_file"] = None
+
+    logger.info(f"Total HDBSCAN pipeline time: {time.time()-t_total:.1f}s")
+    return stats
+
+
 # ── Phase 2c: S3 artifact persistence ─────────────────────────────────────────
 
 _S3_TFIDF_KEY = "models/tfidf_vectorizer.pkl"
@@ -1089,7 +1339,8 @@ def reextract_keywords_all(
     """Re-extract purpose_keywords for all companies using the S3-cached TF-IDF vectorizer.
 
     Lighter than recompute_keywords: no corpus refit, no spaCy, no SVD.
-    Uses the vectorizer from the last full hdbscan_cluster run.
+    Uses the vectorizer from the last full clustering run
+    (hdbscan_cluster or tfidf_kmeans_cluster).
 
     only_missing: if True, skip companies that already have purpose_keywords.
     """

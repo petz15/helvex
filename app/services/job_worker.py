@@ -683,10 +683,42 @@ def _run_job(app, job_id: int) -> None:  # noqa: C901
                 done_msg = f"Done — {n_c} clusters, {classified} companies labelled, {noise} noise"
 
             elif job.job_type == "hdbscan_cluster":
-                raise RuntimeError(
-                    "HDBSCAN pipeline is wired separately but not implemented yet. "
-                    "Use the TF-IDF + KMeans pipeline for production runs."
+                from app.services.cluster_pipeline import PipelineConfig, run_hdbscan_pipeline
+
+                def _progress(done: int, total: int, stats: dict) -> None:
+                    _assert_not_cancelled()
+                    step = stats.get("step", "clustering")
+                    msg = f"[{step}] {done}/{total} — {stats.get('classified', 0)} clustered, {stats.get('noise', 0)} noise"
+                    crud.update_progress(db, job, message=msg, done=done, total=total, stats=stats)
+                    crud.create_event(db, job_id=job.id, level="debug", message=msg)
+                    _maybe_sync(app, job_type=job.job_type, label=job.label, message=msg, stats=dict(stats), error=None, done=False)
+                    _heartbeat()
+
+                cfg = PipelineConfig(
+                    hdbscan_min_cluster_size=int(params.get("min_cluster_size", 30)),
+                    hdbscan_min_samples=(
+                        int(params["min_samples"])
+                        if params.get("min_samples") not in (None, "")
+                        else None
+                    ),
+                    hdbscan_cluster_selection_epsilon=float(params.get("cluster_selection_epsilon", 0.0)),
+                    n_components=int(params.get("n_components", 50)),
+                    top_terms_per_cluster=int(params.get("top_terms", 5)),
+                    top_keywords_per_company=int(params.get("top_keywords_per_company", 10)),
                 )
+                stats = run_hdbscan_pipeline(
+                    db, cfg,
+                    canton=params.get("canton") or None,
+                    min_zefix_score=int(params["min_zefix_score"]) if params.get("min_zefix_score") else None,
+                    max_zefix_score=int(params["max_zefix_score"]) if params.get("max_zefix_score") else None,
+                    limit=int(params["limit"]) if params.get("limit") else None,
+                    use_keywords=bool(params.get("use_keywords", False)),
+                    progress_cb=_progress,
+                )
+                n_c = stats.get("n_clusters", 0)
+                classified = stats.get("classified", 0)
+                noise = stats.get("noise", 0)
+                done_msg = f"Done — {n_c} clusters, {classified} companies labelled, {noise} noise"
 
             elif job.job_type == "recompute_keywords":
                 from app.services.cluster_pipeline import PipelineConfig, recompute_keywords
