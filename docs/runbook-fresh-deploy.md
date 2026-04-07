@@ -93,11 +93,11 @@ You do **not** need to run any manual Tailscale setup on `app1` or `db1` — it'
 To verify:
 
 ```bash
-ssh ubuntu@<app1-public-ip>
 tailscale ip -4
 # Should show app1's Tailscale IP immediately
 tailscale status
 # Should list both app1 and db1 as connected peers
+ssh ubuntu@<app1-tailscale-ip>
 ```
 
 **Note:** Tailscale is only installed on cluster servers (app1, db1). To add additional compute nodes later (e.g., your home server), you manually install Tailscale on those nodes and join them to the cluster using k3s agent — see Step 9.
@@ -121,8 +121,8 @@ Cloud-init installs K3s, Helm, Helmfile, the helm-diff plugin, sets up the ubunt
 SSH in and tail the log:
 
 ```bash
-ssh-keygen -R <app1-public-ip>
-ssh ubuntu@<app1-public-ip>
+ssh-keygen -R <app1-tailscale-ip>
+ssh ubuntu@<app1-tailscale-ip>
 sudo tail -f /var/log/cloud-init-output.log
 ```
 
@@ -136,7 +136,7 @@ Then **log out and back in** so the kubeconfig and group membership take effect:
 
 ```bash
 exit
-ssh ubuntu@<app1-public-ip>
+ssh ubuntu@<app1-tailscale-ip>
 kubectl get nodes
 ```
 
@@ -246,7 +246,7 @@ Optional manual run from GitHub Actions UI:
 ### Step 8 — Verify
 
 ```bash
-ssh ubuntu@<app1-public-ip>
+ssh ubuntu@<app1-tailscale-ip>
 kubectl get pods -n helvex-prod
 ```
 
@@ -283,7 +283,7 @@ You only need to **approve the route** in the Tailscale admin console (once per 
 1. On `app1`, collect join inputs:
 
 ```bash
-ssh ubuntu@<app1-public-ip>
+ssh ubuntu@<app1-tailscale-ip>
 sudo cat /var/lib/rancher/k3s/server/node-token   # K3S_TOKEN
 tailscale ip -4                                   # CP_TAILSCALE_IP
 ```
@@ -337,7 +337,7 @@ kubectl delete pod dns-test
 6. Rotate the node join token after successful onboarding (hardening):
 
 ```bash
-ssh ubuntu@<app1-public-ip>
+ssh ubuntu@<app1-tailscale-ip>
 sudo k3s token rotate
 ```
 
@@ -377,7 +377,7 @@ The deploy workflow uses `kubectl create ... --dry-run=client -o yaml | kubectl 
 3. Restart any pods that need the new value (they read env vars at startup):
 
 ```bash
-ssh ubuntu@<app1-public-ip>
+ssh ubuntu@<app1-tailscale-ip>
 kubectl rollout restart deployment/helvex -n helvex-prod
 ```
 
