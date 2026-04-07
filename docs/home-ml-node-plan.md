@@ -58,6 +58,7 @@ This gives home-first, cloud-fallback behavior.
    - Label: `workload=ml`
    - Label: `location=home`
    - Optional taint: `workload=ml:NoSchedule` (forces explicit toleration)
+   - Do not introduce a second ML taint key unless every ML workload tolerates it; keep the scheduling contract to one canonical ML taint.
 
 ### Validate
 - `kubectl get nodes -o wide`
@@ -72,6 +73,7 @@ This gives home-first, cloud-fallback behavior.
    - Label: `workload=ml`
    - Label: `location=cloud`
 3. If using taints, ensure ML worker tolerates the same taint key/effect.
+   - Avoid legacy taints such as `helvex.io/role=ml-worker:NoSchedule` on newly provisioned ML nodes unless the deployment has been updated to tolerate them.
 
 ### Validate
 - Existing cloud nodes show proper labels

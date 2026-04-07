@@ -237,55 +237,22 @@ export function PricingClient() {
   const [flexAuto, setFlexAuto] = useState(false);
   const [llmAuto, setLlmAuto] = useState(false);
 
-  async function handlePlanCheckout(tier: TierId) {
-    if (!billingAddress) {
-      const sourcePath = `${window.location.pathname}${window.location.search}`;
-      saveCheckoutIntent({
-        kind: "subscription",
-        sourcePath,
-        tier,
-        billing_cycle: yearly ? "yearly" : "monthly",
-        success_path: "/app/account",
-        cancel_path: "/app/pricing",
-      });
-      window.location.assign(buildAddressReturnUrl(sourcePath));
-      return;
-    }
-    void confirmPlanCheckout(tier);
+  function handlePlanCheckout(tier: TierId) {
+    const cycle = yearly ? "yearly" : "monthly";
+    const params = new URLSearchParams({
+      kind: "subscription",
+      tier,
+      billing_cycle: cycle,
+      success_path: "/app/billing",
+      cancel_path: "/app/pricing",
+    });
+    window.location.assign(`/app/payment?${params.toString()}`);
   }
 
+  // Keep for resume-checkout compat (address redirect flow)
   async function confirmPlanCheckout(tier: TierId, cycleOverride?: "monthly" | "yearly") {
-    if (!billingAddress) {
-      setCheckoutMessage({ kind: "error", message: "Add a billing address first in Address Management before starting checkout." });
-      return;
-    }
-    setCheckoutLoading(tier);
-    setCheckoutMessage(null);
-    try {
-      const origin = window.location.origin;
-      const successUrl = new URL("/app/account", origin);
-      successUrl.searchParams.set("checkout", "success");
-      successUrl.searchParams.set("tier", tier);
-      const cancelUrl = new URL("/app/pricing", origin);
-      cancelUrl.searchParams.set("checkout", "cancel");
-      cancelUrl.searchParams.set("tier", tier);
-      const session = await createSubscriptionCheckout({
-        tier,
-        billing_cycle: cycleOverride ?? (yearly ? "yearly" : "monthly"),
-        success_url: successUrl.toString(),
-        cancel_url: cancelUrl.toString(),
-        billing_address: billingAddress,
-        save_payment_method: true,
-      });
-      window.location.assign(session.checkout_url);
-    } catch (err) {
-      setCheckoutMessage({
-        kind: "error",
-        message: err instanceof Error ? err.message : "Failed to start checkout",
-      });
-    } finally {
-      setCheckoutLoading(null);
-    }
+    void cycleOverride; // unused — redirect flow handles cycle
+    handlePlanCheckout(tier);
   }
 
   const customMonthly = useMemo(() => {
@@ -384,6 +351,11 @@ export function PricingClient() {
                 >
                   {checkoutLoading === tier.id ? "Starting…" : `Start ${tier.name} checkout`}
                 </button>
+                {price > 0 && (
+                  <p className={`mt-2 text-center text-[10px] ${isDark ? "text-slate-500" : "text-slate-400"}`}>
+                    Renews automatically · cancel anytime
+                  </p>
+                )}
               </div>
             );
           })}

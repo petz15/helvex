@@ -9,22 +9,16 @@ import {
   fetchCreditTransactions,
   fetchPaymentHistory,
   cancelPendingPayment,
+  cancelSubscription,
   fetchOrg,
   fetchOrgMembers,
   setOrgDefaultPaymentUser,
-  createTopupCheckout,
   createWorldlineCardRegistration,
   parseBillingAddressJson,
   type BillingAddressPayload,
   type CreditTransaction,
   type PaymentRecord,
 } from "@/lib/api";
-import {
-  buildAddressReturnUrl,
-  clearCheckoutIntent,
-  readCheckoutIntent,
-  saveCheckoutIntent,
-} from "@/lib/checkout-resume";
 import { creditsToChf } from "@/lib/entitlements";
 
 // ── helpers ───────────────────────────────────────────────────────────────────
@@ -73,151 +67,129 @@ function fmtCredits(n: number) {
 
 // ── sub-components ─────────────────────────────────────────────────────────────
 
-function SummaryCards({ balance, tier, billingCycle, periodEnd }: {
+function SummaryCards({ balance, tier, billingCycle, periodEnd, onCancelSubscription }: {
   balance: number; tier: string; billingCycle: string; periodEnd: string | null;
+  onCancelSubscription: () => void;
 }) {
+  const [cancelling, setCancelling] = useState(false);
+  const [cancelError, setCancelError] = useState<string | null>(null);
+  const [showCancelConfirm, setShowCancelConfirm] = useState(false);
+  const isPaid = tier !== "free";
+
+  async function handleCancel() {
+    setCancelling(true);
+    setCancelError(null);
+    try {
+      await cancelSubscription();
+      setShowCancelConfirm(false);
+      onCancelSubscription();
+    } catch (e) {
+      setCancelError(e instanceof Error ? e.message : "Failed to cancel");
+    } finally {
+      setCancelling(false);
+    }
+  }
+
   return (
-    <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-      {/* Credit balance */}
-      <div className="rounded-2xl border border-slate-200 bg-white p-5">
-        <div className="flex items-center gap-2 text-xs text-slate-400 font-medium uppercase tracking-wide">
-          <Zap size={12} className="text-amber-400" />Credit balance
+    <div className="space-y-3">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        {/* Credit balance */}
+        <div className="rounded-2xl border border-slate-200 bg-white p-5">
+          <div className="flex items-center gap-2 text-xs text-slate-400 font-medium uppercase tracking-wide">
+            <Zap size={12} className="text-amber-400" />Credit balance
+          </div>
+          <div className="mt-2 text-3xl font-bold text-slate-900">{balance.toLocaleString()}</div>
+          <div className="mt-0.5 text-sm text-slate-400">
+            ≈ CHF {creditsToChf(balance).toFixed(2)}
+          </div>
         </div>
-        <div className="mt-2 text-3xl font-bold text-slate-900">{balance.toLocaleString()}</div>
-        <div className="mt-0.5 text-sm text-slate-400">
-          ≈ CHF {creditsToChf(balance).toFixed(2)}
+
+        {/* Plan */}
+        <div className="rounded-2xl border border-slate-200 bg-white p-5">
+          <div className="flex items-center gap-2 text-xs text-slate-400 font-medium uppercase tracking-wide">
+            <TrendingUp size={12} className="text-blue-400" />Current plan
+          </div>
+          <div className="mt-2 flex items-center gap-2">
+            <span className={`text-lg font-bold capitalize px-2.5 py-0.5 rounded-lg ${TIER_COLORS[tier] ?? "bg-slate-100 text-slate-700"}`}>
+              {tier}
+            </span>
+          </div>
+          <div className="mt-1 text-sm text-slate-400 capitalize">{billingCycle ? `${billingCycle} billing` : "—"}</div>
+        </div>
+
+        {/* Subscription */}
+        <div className="rounded-2xl border border-slate-200 bg-white p-5">
+          <div className="flex items-center gap-2 text-xs text-slate-400 font-medium uppercase tracking-wide">
+            <CreditCard size={12} className="text-violet-400" />Subscription
+          </div>
+          <div className="mt-2 text-slate-800 font-medium">
+            {periodEnd ? `Renews ${fmtDate(periodEnd)}` : isPaid ? "Active" : "—"}
+          </div>
+          {isPaid && (
+            <p className="mt-0.5 text-xs text-slate-400">Renews automatically until cancelled</p>
+          )}
+          <div className="mt-2 flex items-center gap-3">
+            <Link
+              href="/app/pricing"
+              className="inline-flex items-center gap-1 text-xs text-blue-600 hover:underline"
+            >
+              Change plan <ArrowUpRight size={11} />
+            </Link>
+            {isPaid && !showCancelConfirm && (
+              <button
+                onClick={() => setShowCancelConfirm(true)}
+                className="text-xs text-red-500 hover:underline"
+              >
+                Cancel subscription
+              </button>
+            )}
+          </div>
         </div>
       </div>
 
-      {/* Plan */}
-      <div className="rounded-2xl border border-slate-200 bg-white p-5">
-        <div className="flex items-center gap-2 text-xs text-slate-400 font-medium uppercase tracking-wide">
-          <TrendingUp size={12} className="text-blue-400" />Current plan
+      {/* Cancel confirmation */}
+      {showCancelConfirm && (
+        <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 space-y-2">
+          <p className="text-sm font-medium text-red-800">Cancel subscription?</p>
+          <p className="text-xs text-red-700">
+            Your plan will be downgraded to <strong>Free</strong> immediately. Credits already in your balance are kept. No refund is issued.
+          </p>
+          {cancelError && <p className="text-xs text-red-600">{cancelError}</p>}
+          <div className="flex gap-2">
+            <button
+              onClick={handleCancel}
+              disabled={cancelling}
+              className="rounded-lg bg-red-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-red-700 disabled:opacity-60"
+            >
+              {cancelling ? "Cancelling…" : "Yes, cancel subscription"}
+            </button>
+            <button
+              onClick={() => { setShowCancelConfirm(false); setCancelError(null); }}
+              className="rounded-lg border border-red-200 px-3 py-1.5 text-xs text-red-700 hover:bg-red-100"
+            >
+              Keep subscription
+            </button>
+          </div>
         </div>
-        <div className="mt-2 flex items-center gap-2">
-          <span className={`text-lg font-bold capitalize px-2.5 py-0.5 rounded-lg ${TIER_COLORS[tier] ?? "bg-slate-100 text-slate-700"}`}>
-            {tier}
-          </span>
-        </div>
-        <div className="mt-1 text-sm text-slate-400 capitalize">{billingCycle} billing</div>
-      </div>
-
-      {/* Next renewal */}
-      <div className="rounded-2xl border border-slate-200 bg-white p-5">
-        <div className="flex items-center gap-2 text-xs text-slate-400 font-medium uppercase tracking-wide">
-          <CreditCard size={12} className="text-violet-400" />Subscription
-        </div>
-        <div className="mt-2 text-slate-800 font-medium">
-          {periodEnd ? `Renews ${fmtDate(periodEnd)}` : "—"}
-        </div>
-        <Link
-          href="/app/pricing"
-          className="mt-1 inline-flex items-center gap-1 text-xs text-blue-600 hover:underline"
-        >
-          Change plan <ArrowUpRight size={11} />
-        </Link>
-      </div>
+      )}
     </div>
   );
 }
 
-function TopupSection({
-  billingAddress,
-  hasSavedPaymentMethod,
-}: {
-  billingAddress: BillingAddressPayload | null;
-  hasSavedPaymentMethod: boolean;
-}) {
-  const [loading, setLoading] = useState<number | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  // Default: save card automatically. User can opt out.
-  const [savePaymentMethod, setSavePaymentMethod] = useState<boolean>(true);
-  // When user has a saved card, default to using it. User can override to use a different card.
-  const [useNewCard, setUseNewCard] = useState<boolean>(false);
+function TopupSection() {
   const [customCreditsInput, setCustomCreditsInput] = useState<string>("25000");
 
   const customCredits = Number.parseInt(customCreditsInput, 10);
   const customCreditsValid = Number.isInteger(customCredits) && customCredits >= 100;
 
-  // Effective: are we going to use the saved card for this payment?
-  const willUseSavedCard = hasSavedPaymentMethod && !useNewCard;
-
-  async function handleTopup(credits: number) {
-    if (!billingAddress) {
-      const sourcePath = `${window.location.pathname}${window.location.search}`;
-      saveCheckoutIntent({
-        kind: "topup",
-        sourcePath,
-        credits,
-        success_path: "/app/billing",
-        cancel_path: "/app/billing",
-      });
-      window.location.assign(buildAddressReturnUrl(sourcePath));
-      return;
-    }
-    void startTopupCheckout(credits);
-  }
-
-  useEffect(() => {
-    if (!billingAddress) return;
-    const params = new URLSearchParams(window.location.search);
-    if (params.get("resume_checkout") !== "1") return;
-
-    const intent = readCheckoutIntent();
-    if (!intent || intent.kind !== "topup") return;
-    if (!intent.sourcePath.startsWith("/app/billing")) return;
-
-    clearCheckoutIntent();
-    void startTopupCheckout(intent.credits);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [billingAddress]);
-
-  async function startTopupCheckout(credits: number) {
-    if (!Number.isInteger(credits) || credits < 100) {
-      setError("Top-up amount must be at least 100 credits.");
-      return;
-    }
-
-    if (!billingAddress) {
-      const sourcePath = `${window.location.pathname}${window.location.search}`;
-      saveCheckoutIntent({
-        kind: "topup",
-        sourcePath,
-        credits,
-        success_path: "/app/billing",
-        cancel_path: "/app/billing",
-      });
-      window.location.assign(buildAddressReturnUrl(sourcePath));
-      return;
-    }
-
-    setLoading(credits);
-    setError(null);
-    try {
-      const origin = window.location.origin;
-      const successUrl = new URL("/app/billing", origin);
-      successUrl.searchParams.set("checkout", "success");
-      successUrl.searchParams.set("kind", "topup");
-      successUrl.searchParams.set("credits", String(credits));
-      const cancelUrl = new URL("/app/billing", origin);
-      cancelUrl.searchParams.set("checkout", "cancel");
-      cancelUrl.searchParams.set("kind", "topup");
-      cancelUrl.searchParams.set("credits", String(credits));
-
-      const session = await createTopupCheckout({
-        credits,
-        success_url: successUrl.toString(),
-        cancel_url: cancelUrl.toString(),
-        billing_address: billingAddress,
-        save_payment_method: willUseSavedCard ? false : savePaymentMethod,
-        use_new_card: useNewCard,
-      });
-      window.location.assign(session.checkout_url);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to start checkout");
-    } finally {
-      setLoading(null);
-    }
+  function goToPayment(credits: number) {
+    const p = new URLSearchParams({
+      kind: "topup",
+      credits: String(credits),
+      success_path: "/app/billing",
+      cancel_path: "/app/billing",
+    });
+    window.location.assign(`/app/payment?${p.toString()}`);
   }
 
   return (
@@ -225,65 +197,14 @@ function TopupSection({
       <h2 className="text-sm font-semibold text-slate-700">Top up credits</h2>
       <p className="text-xs text-slate-400 mt-0.5 mb-4">Credits never expire. Higher tiers receive bonus credits on every purchase.</p>
 
-      {error && (
-        <div className="mb-3 text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">{error}</div>
-      )}
-
-      {/* Payment method status banner */}
-      {billingAddress && (
-        <div className="mb-4 rounded-xl border bg-slate-50 p-3 space-y-2">
-          {willUseSavedCard ? (
-            <div className="flex items-center justify-between gap-3">
-              <div className="flex items-center gap-2 text-sm text-slate-700">
-                <CreditCard size={14} className="text-emerald-500 shrink-0" />
-                <span>Paying with your saved card</span>
-              </div>
-              <button
-                onClick={() => setUseNewCard(true)}
-                className="text-xs text-blue-600 hover:underline shrink-0"
-              >
-                Use a different card
-              </button>
-            </div>
-          ) : (
-            <>
-              {hasSavedPaymentMethod && (
-                <div className="flex items-center justify-between gap-3">
-                  <span className="text-xs text-slate-500">Entering a new card</span>
-                  <button
-                    onClick={() => setUseNewCard(false)}
-                    className="text-xs text-blue-600 hover:underline shrink-0"
-                  >
-                    Use saved card instead
-                  </button>
-                </div>
-              )}
-              <label className="flex items-center gap-2 text-xs text-slate-600 cursor-pointer select-none">
-                <input
-                  type="checkbox"
-                  checked={savePaymentMethod}
-                  onChange={(e) => setSavePaymentMethod(e.target.checked)}
-                  className="h-3.5 w-3.5 rounded border-slate-300 text-blue-600 accent-blue-600"
-                />
-                Save card for future payments
-              </label>
-            </>
-          )}
-        </div>
-      )}
-
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
         {TOPUP_AMOUNTS.map(({ credits, label, chf }) => (
           <button
             key={credits}
-            onClick={() => handleTopup(credits)}
-            disabled={loading !== null}
-            className="flex flex-col items-center rounded-xl border border-slate-200 px-3 py-3 text-center hover:border-blue-400 hover:bg-blue-50 transition-colors disabled:opacity-60"
+            onClick={() => goToPayment(credits)}
+            className="flex flex-col items-center rounded-xl border border-slate-200 px-3 py-3 text-center hover:border-blue-400 hover:bg-blue-50 transition-colors"
           >
-            {loading === credits
-              ? <Loader2 size={16} className="animate-spin text-blue-500 mb-1" />
-              : <Zap size={16} className="text-amber-400 mb-1" />
-            }
+            <Zap size={16} className="text-amber-400 mb-1" />
             <span className="text-sm font-semibold text-slate-800">{label}</span>
             <span className="text-xs text-slate-400">{chf}</span>
           </button>
@@ -308,19 +229,13 @@ function TopupSection({
             {customCreditsValid ? `≈ CHF ${creditsToChf(customCredits).toFixed(2)}` : "Minimum is 100 credits."}
           </div>
           <button
-            onClick={() => void startTopupCheckout(customCredits)}
-            disabled={loading !== null || !customCreditsValid}
+            onClick={() => goToPayment(customCredits)}
+            disabled={!customCreditsValid}
             className="rounded-lg bg-slate-900 px-3 py-2 text-xs font-medium text-white transition-colors hover:bg-slate-800 disabled:opacity-60"
           >
-            {loading === customCredits ? "Starting…" : "Top up custom amount"}
+            Top up custom amount
           </button>
         </div>
-        {!billingAddress && (
-          <p className="text-xs text-amber-600">Add a billing address first to continue.</p>
-        )}
-        <a href="/app/addresses?return_to=/app/billing" className="text-xs text-blue-600 hover:underline">
-          Manage addresses
-        </a>
       </div>
     </div>
   );
@@ -669,7 +584,7 @@ function PaymentHistory() {
 // ── main component ────────────────────────────────────────────────────────────
 
 export function BillingClient() {
-  const { data: summary, isLoading } = useSWR("billing-summary", fetchBillingSummary);
+  const { data: summary, isLoading, mutate: mutateSummary } = useSWR("billing-summary", fetchBillingSummary);
   const { data: me } = useSWR("me", fetchCurrentUser);
   const { data: org } = useSWR(summary ? `org-${summary.org_id}` : null, () => fetchOrg(summary!.org_id));
   const { data: members, mutate: mutateMembers } = useSWR(summary ? `org-members-${summary.org_id}` : null, () => fetchOrgMembers(summary!.org_id));
@@ -754,10 +669,11 @@ export function BillingClient() {
           tier={summary.tier}
           billingCycle={summary.billing_cycle}
           periodEnd={summary.subscription_period_end}
+          onCancelSubscription={() => void mutateSummary()}
         />
       )}
 
-      <TopupSection billingAddress={billingAddress} hasSavedPaymentMethod={summary?.has_saved_payment_method ?? false} />
+      <TopupSection />
       {summary && (
         <SavedCardSection billingAddress={billingAddress} hasSavedPaymentMethod={summary.has_saved_payment_method} />
       )}

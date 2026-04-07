@@ -3,7 +3,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import useSWR, { useSWRConfig } from "swr";
 import { cn } from "@/lib/utils";
-import { Search, Compass, Map, Cog, Database, Activity, UserCircle, Shield, LayoutGrid, CreditCard } from "lucide-react";
+import { Search, Compass, Map, Cog, Database, Activity, UserCircle, Shield, LayoutGrid, CreditCard, BookOpen } from "lucide-react";
 import { fetchCurrentUser, fetchMyOrgs, switchOrg } from "@/lib/api";
 import { HelvexMark } from "@/components/helvex-logo";
 
@@ -17,6 +17,7 @@ const NAV_MAIN = [
 
 const NAV_ADMIN = [
   { href: "/app/collection", label: "Collection", icon: Database },
+  { href: "/app/shab", label: "SHAB", icon: BookOpen },
   { href: "/app/settings", label: "Settings", icon: Cog },
 ];
 

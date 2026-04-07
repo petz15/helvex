@@ -1003,6 +1003,32 @@ def list_payment_history(
     }
 
 
+@router.post("/subscription/cancel", response_model=WebhookResponse)
+def cancel_subscription(
+    user_org: tuple[User, object] = Depends(require_org_role("admin", "owner")),
+    db: Session = Depends(get_db),
+) -> WebhookResponse:
+    """Immediately downgrade the org to the free tier (cancel subscription).
+
+    This is a self-service cancellation — no refund is issued.  The org keeps any
+    credits already in the balance.  Billing cycle and period-end are cleared.
+    """
+    _user, org = user_org
+    logger.info(
+        "billing.subscription_cancel user_id=%s org_id=%s current_tier=%s",
+        _user.id, org.id, org.tier,
+    )
+    if getattr(org, "tier", "free") == "free":
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Organization is already on the free tier")
+
+    org.tier = "free"
+    org.subscription_billing_cycle = None
+    org.subscription_period_end = None
+    db.commit()
+    logger.info("billing.subscription_cancelled org_id=%s", org.id)
+    return WebhookResponse(ok=True)
+
+
 @router.post("/payments/{payment_id}/cancel", response_model=WebhookResponse)
 def cancel_pending_payment(
     payment_id: int,

@@ -139,6 +139,17 @@ export async function fetchPaymentHistory(page = 1, page_size = 20): Promise<Pag
   return res.json();
 }
 
+export async function cancelSubscription(): Promise<void> {
+  const res = await fetch("/api/v1/billing/subscription/cancel", {
+    method: "POST",
+    credentials: "include",
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error((body as { detail?: string }).detail ?? "Failed to cancel subscription");
+  }
+}
+
 export async function cancelPendingPayment(paymentId: number): Promise<void> {
   const res = await fetch(`/api/v1/billing/payments/${paymentId}/cancel`, {
     method: "POST",

@@ -943,6 +943,7 @@ def _run_job(app, job_id: int) -> None:  # noqa: C901
                     db,
                     from_date=from_date,
                     to_date=to_date,
+                    app=app,
                     request_delay=float(params.get("request_delay", 0.15)),
                     resume_from=resume_from,
                     progress_cb=_progress,
@@ -960,6 +961,8 @@ def _run_job(app, job_id: int) -> None:  # noqa: C901
                     f"{len(stats['errors'])} errors "
                     f"({stats['publications_fetched']} publications fetched)"
                 )
+                if stats.get("detail_jobs_queued"):
+                    done_msg += f"; {stats['detail_jobs_queued']} detail job(s) queued for new UIDs"
                 if resume_from:
                     done_msg += f" (resumed from {resume_from})"
 

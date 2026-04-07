@@ -359,6 +359,70 @@ export function CollectionClient() {
       
       </Section>  
 
+      <Section title="SHAB Daily Import">
+        <form onSubmit={async e => {
+          e.preventDefault();
+          const fd = new FormData(e.currentTarget);
+          const date = (fd.get("shab_date") as string)?.trim() || null;
+          await submit("collection/shab-daily", {
+            date: date || undefined,
+            request_delay: parseFloat(fd.get("shab_delay") as string) || 0.15,
+          });
+        }} className="space-y-4">
+          <div>
+            <h2 className="text-sm font-semibold text-slate-800">SHAB daily import</h2>
+            <p className="mt-1 text-xs text-slate-500">
+              Imports HR01 (new), HR02 (mutations) and HR03 (deletions) from the SHAB public API for a single day.
+              Leave date empty to import yesterday. New registrations automatically trigger a Zefix detail fetch.
+            </p>
+          </div>
+          <div className="grid grid-cols-2 gap-4">
+            <Field label="Date (YYYY-MM-DD)" hint="Leave empty for yesterday">
+              <input name="shab_date" type="date" className={inputCls} />
+            </Field>
+            <Field label="Request delay (seconds)" hint="Between SHAB detail API calls">
+              <input name="shab_delay" type="number" step="0.05" min="0.05" defaultValue="0.15" className={inputCls} />
+            </Field>
+          </div>
+          <SubmitBtn loading={loading === "collection/shab-daily"} />
+        </form>
+      </Section>
+
+      <Section title="SHAB Historical Backfill">
+        <form onSubmit={async e => {
+          e.preventDefault();
+          const fd = new FormData(e.currentTarget);
+          const fromDate = (fd.get("shab_from_date") as string)?.trim();
+          const toDate = (fd.get("shab_to_date") as string)?.trim() || undefined;
+          if (!fromDate) { setError("From date is required for SHAB backfill"); return; }
+          await submit("collection/shab-backfill", {
+            from_date: fromDate,
+            to_date: toDate,
+            request_delay: parseFloat(fd.get("shab_backfill_delay") as string) || 0.15,
+          });
+        }} className="space-y-4">
+          <div>
+            <h2 className="text-sm font-semibold text-slate-800">SHAB historical backfill</h2>
+            <p className="mt-1 text-xs text-slate-500">
+              Fetches all SHAB HR publications across a date range. Use this to import past data.
+              Leave &quot;to date&quot; empty to backfill through yesterday.
+            </p>
+          </div>
+          <div className="grid grid-cols-2 gap-4">
+            <Field label="From date (YYYY-MM-DD)" hint="Required — earliest date to import">
+              <input name="shab_from_date" type="date" required className={inputCls} />
+            </Field>
+            <Field label="To date (YYYY-MM-DD)" hint="Leave empty for yesterday">
+              <input name="shab_to_date" type="date" className={inputCls} />
+            </Field>
+          </div>
+          <Field label="Request delay (seconds)">
+            <input name="shab_backfill_delay" type="number" step="0.05" min="0.05" defaultValue="0.15" className={cn(inputCls, "w-32")} />
+          </Field>
+          <SubmitBtn loading={loading === "collection/shab-backfill"} />
+        </form>
+      </Section>
+
       <Section title="Bulk import from Zefix">
         <form onSubmit={async e => {
           e.preventDefault();

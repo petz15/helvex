@@ -28,6 +28,10 @@ from app.api.shab_client import (
 from app.schemas.company import CompanyUpdate
 from app.services.collection import import_company_from_zefix_uid
 
+# UIDs queued for detail fetch are collected during import and submitted
+# as a single job at the end to avoid enqueuing hundreds of tiny jobs.
+_DETAIL_BATCH_SIZE = 500  # max UIDs per detail-fetch job
+
 
 def yesterday() -> date:
     """Return yesterday's date in UTC."""
@@ -41,6 +45,7 @@ def import_shab_publications(
     *,
     request_delay: float = 0.15,
     resume_from: int = 0,
+    app=None,
     progress_cb=None,
     status_cb=None,
     abort_cb=None,
@@ -64,7 +69,10 @@ def import_shab_publications(
         "skipped": 0,
         "errors": [],
         "warnings": [],
+        "detail_jobs_queued": 0,
     }
+    # Track newly created UIDs (HR01) so we can enqueue a detail fetch at the end.
+    new_uids: list[str] = []
 
     if status_cb:
         status_cb(f"Fetching SHAB publications {from_date} → {to_date}…")
@@ -129,6 +137,8 @@ def import_shab_publications(
                 )
                 if created:
                     stats["created"] += 1
+                    # Queue for detail fetch — new companies don't have full data yet.
+                    new_uids.append(uid)
                 else:
                     stats["updated"] += 1
 
@@ -161,5 +171,24 @@ def import_shab_publications(
             progress_cb(i, total, stats)
 
         time.sleep(request_delay)
+
+    # Enqueue detail-fetch jobs for newly created companies (HR01).
+    # Batch into chunks to keep job labels readable and avoid overly large param blobs.
+    if new_uids and app is not None:
+        try:
+            from app.services.job_worker import enqueue_job, kick_job_worker
+            for batch_start in range(0, len(new_uids), _DETAIL_BATCH_SIZE):
+                batch = new_uids[batch_start: batch_start + _DETAIL_BATCH_SIZE]
+                enqueue_job(
+                    app,
+                    job_type="detail",
+                    label=f"SHAB auto detail fetch — {len(batch)} new UID(s) ({from_date}–{to_date})",
+                    params={"uids": batch, "only_missing_details": True, "score_if_missing": True},
+                    db=db,
+                )
+                stats["detail_jobs_queued"] += 1
+            kick_job_worker(app)
+        except Exception as exc:  # noqa: BLE001
+            stats["warnings"].append(f"Detail fetch auto-enqueue failed: {exc}")
 
     return stats

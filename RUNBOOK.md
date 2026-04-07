@@ -1225,6 +1225,17 @@ bash scripts/toggle-terraform-ml-node.sh enable \
   --private-ip 10.0.1.21
 ```
 
+ML node convention:
+- Use `workload=ml` as the required label/taint pair for ML scheduling.
+- Do not add a second taint such as `helvex.io/role=ml-worker:NoSchedule` unless the deployment also tolerates it.
+- If an older node has that extra taint, remove it before expecting the ML worker to schedule there.
+
+```bash
+kubectl taint node helvex-prod-ml1 helvex.io/role=ml-worker:NoSchedule-
+```
+
+If `helvex-ml-worker` fails immediately with `exec /usr/local/bin/python: exec format error`, the image and node architectures do not match. Rebuild and push a multi-arch image, then make sure the ML node is running the architecture that image supports.
+
 Windows PowerShell:
 
 ```powershell

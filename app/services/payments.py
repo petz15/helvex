@@ -178,7 +178,12 @@ def decode_worldline_callback_context(ctx: str | None) -> dict[str, str]:
 
 
 def _worldline_callback_url(*, org_id: int, user_id: int | None, kind: str, order_reference: str, success_url: str, cancel_url: str, source: str) -> str:
-    base_path = "/api/v1/billing/webhooks/worldline/return"
+    # Alias/card-registration callbacks must go to the card-specific endpoint.
+    # Payment (subscription/topup) callbacks go to the generic return endpoint.
+    if kind in {"alias", "card_alias"}:
+        base_path = "/api/v1/billing/webhooks/worldline/card/return"
+    else:
+        base_path = "/api/v1/billing/webhooks/worldline/return"
     ctx = create_worldline_callback_context(
         org_id=org_id,
         user_id=user_id,
