@@ -5,6 +5,11 @@ image:
   tag: latest
   pullPolicy: Always
 
+mlImage:
+  repository: ""
+  tag: ""
+  pullPolicy: ""
+
 replicaCount: 1
 
 service:

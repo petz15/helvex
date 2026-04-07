@@ -6,7 +6,43 @@ on:
   pull_request:
 
 jobs:
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      backend: ${{ steps.filter.outputs.backend }}
+      frontend: ${{ steps.filter.outputs.frontend }}
+      ml: ${{ steps.filter.outputs.ml }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Detect changed areas
+        id: filter
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            backend:
+              - 'app/**'
+              - 'alembic/**'
+              - 'tests/**'
+              - 'requirements.txt'
+              - 'pyproject.toml'
+              - 'Dockerfile'
+              - 'entrypoint.sh'
+            frontend:
+              - 'frontend/**'
+            ml:
+              - 'app/services/cluster_pipeline.py'
+              - 'app/services/noga.py'
+              - 'app/services/job_worker.py'
+              - 'scripts/build_noga_embeddings.py'
+              - 'noga_lookup.json'
+              - 'noga_tree.json'
+              - 'requirements.txt'
+              - 'Dockerfile'
+
   test-backend:
+    needs: changes
+    if: needs.changes.outputs.backend == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -28,7 +64,29 @@ jobs:
       - name: Dependency vulnerability audit
         run: python -m pip_audit -r requirements.txt
 
+  test-ml-imports:
+    needs: changes
+    if: needs.changes.outputs.ml == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Verify ML imports
+        run: |
+          python -c "import app.services.cluster_pipeline as cp; print('cluster_pipeline ok')"
+          python -c "import app.services.noga as noga; print('noga ok')"
+
   test-frontend:
+    needs: changes
+    if: needs.changes.outputs.frontend == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5

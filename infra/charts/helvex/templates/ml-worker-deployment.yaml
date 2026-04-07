@@ -1,4 +1,7 @@
 {{- if .Values.mlWorker.enabled }}
+{{- $mlRepo := (.Values.mlImage.repository | default .Values.image.repository) -}}
+{{- $mlTag := (.Values.mlImage.tag | default .Values.image.tag) -}}
+{{- $mlPullPolicy := (.Values.mlImage.pullPolicy | default .Values.image.pullPolicy) -}}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -46,8 +49,8 @@ spec:
       {{- end }}
       containers:
         - name: ml-worker
-          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
-          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          image: "{{ $mlRepo }}:{{ $mlTag }}"
+          imagePullPolicy: {{ $mlPullPolicy }}
           command: ["python", "-m", "app.worker_entrypoint"]
           envFrom:
             - secretRef:

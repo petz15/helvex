@@ -16,6 +16,7 @@ General fixes, recovery procedures, and operational checklists.
 7. [Google Search: Quota Exhausted](#7-google-search-quota-exhausted)
 8. [Pod: OOMKilled](#8-pod-oomkilled)
 9. [Deploy: Migration Fails on Startup](#9-deploy-migration-fails-on-startup)
+9b. [Deploy: Selective Build/Deploy Modes (Backend, Frontend, ML)](#9b-deploy-selective-builddeploy-modes-backend-frontend-ml)
 10. [Useful kubectl Commands](#10-useful-kubectl-commands)
 11. [Logs: Where to Find Them](#11-logs-where-to-find-them)
 11b. [Logs: ML Worker on Home Node](#11b-logs-ml-worker-on-home-node)
@@ -499,6 +500,89 @@ resources:
      -c "SELECT version_num FROM alembic_version;"
    # Compare to the head in your local alembic/versions/
    ```
+
+---
+
+## 9b. Deploy: Selective Build/Deploy Modes (Backend, Frontend, ML)
+
+Use selective modes/tags to avoid rebuilding or rolling out unchanged components.
+
+### Supported prod commit tags
+
+- `[deploy-prod]` → full deploy path (infra/bootstrap + app)
+- `[deploy-app]` → app release via Helm
+- `[deploy-frontend]` → frontend deployment only
+- `[deploy-backend]` → backend app deployment only
+- `[deploy-ml]` → ML worker deployment only
+
+### Supported prod workflow-dispatch modes
+
+- `prod`
+- `app`
+- `frontend`
+- `backend`
+- `ml`
+
+### Image split now used by deploy workflows
+
+- Backend app image: `ghcr.io/<repo>:<tag>`
+- ML worker image: `ghcr.io/<repo>-ml:<tag>`
+- Frontend image: `ghcr.io/<repo>-frontend:<tag>`
+
+ML image is built from the same Dockerfile with heavy build args enabled:
+- `INSTALL_SPACY_MODEL=true`
+- `BUILD_GEOCODING_DB=true`
+
+Lean backend build keeps these disabled for faster rebuilds.
+
+### Dev deploy behavior
+
+`[deploy-dev]` now uses changed-path detection and only builds changed areas (backend/frontend/ml).
+
+Dev Helm deploy uses stable tags (`dev`) for all three images so unchanged components are not forced to a new SHA tag.
+
+### Quick examples
+
+Frontend-only production rollout:
+```bash
+git commit --allow-empty -m "frontend hotfix [deploy-frontend]"
+git push
+```
+
+ML-only production rollout:
+```bash
+git commit --allow-empty -m "tune clustering params [deploy-ml]"
+git push
+```
+
+Backend-only production rollout:
+```bash
+git commit --allow-empty -m "api bugfix [deploy-backend]"
+git push
+```
+
+### If a selective rollout appears stale
+
+1. Confirm expected image tag is deployed:
+```bash
+kubectl get deploy helvex -n helvex-prod -o jsonpath='{.spec.template.spec.containers[0].image}'
+kubectl get deploy helvex-frontend -n helvex-prod -o jsonpath='{.spec.template.spec.containers[0].image}'
+kubectl get deploy helvex-ml-worker -n helvex-prod -o jsonpath='{.spec.template.spec.containers[0].image}'
+```
+
+2. Confirm rollout status for the targeted deployment:
+```bash
+kubectl rollout status deployment/helvex -n helvex-prod --timeout=360s
+kubectl rollout status deployment/helvex-frontend -n helvex-prod --timeout=180s
+kubectl rollout status deployment/helvex-ml-worker -n helvex-prod --timeout=360s
+```
+
+3. If needed, force restart the specific deployment only:
+```bash
+kubectl rollout restart deployment/helvex -n helvex-prod
+kubectl rollout restart deployment/helvex-frontend -n helvex-prod
+kubectl rollout restart deployment/helvex-ml-worker -n helvex-prod
+```
 
 ---
 

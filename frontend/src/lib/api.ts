@@ -73,6 +73,7 @@ export interface BillingSummary {
   tier: string;
   billing_cycle: string;
   subscription_period_end: string | null;
+  subscription_cancel_at_period_end: boolean;
   credits_balance: number;
   credits_balance_chf: number;
   has_saved_payment_method: boolean;

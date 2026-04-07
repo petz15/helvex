@@ -4,6 +4,11 @@ image:
   tag: latest
   pullPolicy: Always
 
+mlImage:
+  repository: ghcr.io/petz15/helvex-ml
+  tag: latest
+  pullPolicy: Always
+
 replicaCount: 1
 
 frontend:

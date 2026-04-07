@@ -122,9 +122,9 @@ zefix_analyzer/
 │   └── registry/
 │
 ├── .github/workflows/
-│   ├── ci.yml                  # Lint + test on every push/PR
-│   ├── deploy-dev.yml          # Build + deploy to dev on [deploy-dev]
-│   ├── deploy-prod.yml         # Build + deploy to prod on [deploy-prod] or [deploy-app]
+│   ├── ci.yml                  # Path-aware lint/test (backend/frontend/ml)
+│   ├── deploy-dev.yml          # Path-aware build + deploy to dev on [deploy-dev]
+│   ├── deploy-prod.yml         # Selective prod deploy ([deploy-prod]/[deploy-app]/[deploy-frontend]/[deploy-backend]/[deploy-ml])
 │   └── cleanup.yml             # Weekly GHCR image cleanup
 │
 ├── Dockerfile                  # Multi-stage Python 3.12 image
@@ -729,18 +729,29 @@ GitHub Actions secrets to keep up to date (stored in the repo's Settings → Sec
 
 **File:** `Dockerfile`
 
-Multi-stage Python 3.12 slim build:
+Python 3.12 slim build with two image profiles (same Dockerfile, different build args):
 
 1. Install system packages (`gcc`, `libpq-dev`, etc.)
 2. `pip install -r requirements.txt`
-3. Python 3.12 `ForwardRef._evaluate` compatibility patch (for spaCy/pydantic.v1)
-4. Download spaCy German model: `python -m spacy download de_core_news_md`
-5. Build geocoding databases:
-   - GeoNames PLZ TSV → SQLite
-   - swisstopo Amtliches Gebäudeadressverzeichnis zip (~143 MB) → SQLite
-6. Copy `app/` source
-7. `EXPOSE 8000`
-8. `CMD ["sh", "entrypoint.sh"]`
+3. Optional Python 3.12 `ForwardRef._evaluate` compatibility patch + spaCy model download
+4. Optional geocoding DB build:
+  - GeoNames PLZ TSV → SQLite
+  - swisstopo Amtliches Gebäudeadressverzeichnis zip (~143 MB) → SQLite
+5. Copy application source
+6. `EXPOSE 8000`
+7. `CMD ["sh", "entrypoint.sh"]`
+
+Build profile args:
+
+| Build arg | Lean backend image | ML image |
+|---|---|---|
+| `INSTALL_SPACY_MODEL` | `false` | `true` |
+| `BUILD_GEOCODING_DB` | `false` | `true` |
+
+This separation keeps regular API builds fast while preserving an ML-ready image for clustering/NOGA jobs.
+
+Build context optimization:
+- Root `.dockerignore` excludes heavy local folders (`.venv`, `frontend/node_modules`, `.git`, caches), reducing context upload and cache invalidation.
 
 **`entrypoint.sh`** runs:
 ```bash
@@ -748,7 +759,9 @@ alembic upgrade head
 uvicorn app.main:app --host 0.0.0.0 --port 8000
 ```
 
-Build args set in CI: `BUILD_DATE`, `BUILD_GIT_SHA` (exposed via `/metadata` endpoint).
+Build args set in CI:
+- Metadata: `BUILD_DATE`, `BUILD_GIT_SHA` (exposed via `/metadata` endpoint)
+- Profile split: `INSTALL_SPACY_MODEL`, `BUILD_GEOCODING_DB`
 
 ---
 
@@ -756,26 +769,55 @@ Build args set in CI: `BUILD_DATE`, `BUILD_GIT_SHA` (exposed via `/metadata` end
 
 **Location:** `.github/workflows/`
 
-### `ci.yml` — runs on every push + PR to main
+### `ci.yml` — runs on every push + PR to main (path-aware)
 
-1. Python 3.12 — `ruff` lint, `pytest`, `pip-audit`
-2. Node.js 22 — `tsc --noEmit`, `eslint`, `npm run build`
+`ci.yml` starts with a changed-path detector (`dorny/paths-filter`) and then executes only relevant lanes:
 
-### `deploy-dev.yml` — trigger: `[deploy-dev]` in commit message
+1. `test-backend` (Python 3.12: `ruff`, `pytest`, `pip-audit`) when backend paths changed
+2. `test-frontend` (Node 22: `tsc`, `eslint`, `npm run build`) when frontend paths changed
+3. `test-ml-imports` (ML smoke imports) when ML-specific paths changed
 
-1. Build + push backend Docker image to GHCR
-2. Build + push frontend Docker image to GHCR
-3. SSH to dev K3s cluster via `helvex-dev` self-hosted runner
-4. `helmfile apply --environment dev`
+### `deploy-dev.yml` — trigger: `[deploy-dev]` in commit message (path-aware)
 
-### `deploy-prod.yml` — trigger: `[deploy-prod]` or `[deploy-app]` in commit message
+1. Detect changed areas (backend/frontend/ml)
+2. Build + push only changed images:
+  - backend: `ghcr.io/<repo>:dev`
+  - ml backend: `ghcr.io/<repo>-ml:dev`
+  - frontend: `ghcr.io/<repo>-frontend:dev`
+3. Deploy via Helm with stable dev tags (`image.tag=dev`, `mlImage.tag=dev`, `frontend.image.tag=dev`)
 
-1. Build + push Docker images (signed with Cosign)
-2. Bootstrap CRDs if `[deploy-prod]` (cert-manager + CloudNativePG CRDs)
-3. `kubectl apply` the `helvex-env` secret from GitHub secrets
-4. `helmfile apply --environment prod`
-5. `kubectl rollout status` (360 s timeout)
-6. On failure: dump pod logs, events, describe
+Using stable `:dev` tags avoids forcing unnecessary image updates for unchanged components.
+
+### `deploy-prod.yml` — selective deploy modes + images
+
+Commit-tag triggers:
+- `[deploy-prod]` full infra + app release
+- `[deploy-app]` app release via Helm
+- `[deploy-frontend]` frontend-only rollout
+- `[deploy-backend]` backend app-only rollout
+- `[deploy-ml]` ML worker-only rollout
+
+Workflow-dispatch deploy modes:
+- `prod`, `app`, `frontend`, `backend`, `ml`
+
+Image/build behavior:
+1. Build only required images for requested mode/tag
+2. Publish split images:
+  - backend: `ghcr.io/<repo>:<sha>`
+  - ml backend: `ghcr.io/<repo>-ml:<sha>`
+  - frontend: `ghcr.io/<repo>-frontend:<sha>`
+3. Sign backend image with Cosign (non-frontend-only paths)
+
+Deploy behavior:
+1. Full/app paths run `helmfile apply` and set `image.tag`, `mlImage.tag`, `frontend.image.tag`
+2. Frontend-only path updates `deployment/helvex-frontend`
+3. Backend-only path updates `deployment/helvex`
+4. ML-only path updates `deployment/helvex-ml-worker`
+5. Rollout wait targets only the deployment(s) relevant to selected mode/tag
+
+Helm chart wiring:
+- `mlWorker` now supports a dedicated image source via `mlImage.*`
+- `ml-worker` deployment uses `mlImage` with fallback to default `image`
 
 ### `cleanup.yml` — weekly cron (Sun 02:00 UTC)
 

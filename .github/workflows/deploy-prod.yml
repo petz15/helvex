@@ -15,6 +15,7 @@ on:
           - app
           - frontend
           - backend
+          - ml
       restore_source: 
         description: Optional restore source (helvex-pg-YYYYMMDDTHHMMSSZ); leave empty to use restore-point file
         required: false
@@ -28,7 +29,8 @@ jobs:
       contains(github.event.head_commit.message, '[deploy-prod]') ||
       contains(github.event.head_commit.message, '[deploy-app]') ||
       contains(github.event.head_commit.message, '[deploy-frontend]') ||
-      contains(github.event.head_commit.message, '[deploy-backend]')
+      contains(github.event.head_commit.message, '[deploy-backend]') ||
+      contains(github.event.head_commit.message, '[deploy-ml]')
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -53,8 +55,8 @@ jobs:
       - name: Build and push backend
         id: build
         if: |
-          (github.event_name != 'workflow_dispatch' && !contains(github.event.head_commit.message, '[deploy-frontend]')) ||
-          (github.event_name == 'workflow_dispatch' && github.event.inputs.deploy_mode != 'frontend')
+          (github.event_name != 'workflow_dispatch' && !contains(github.event.head_commit.message, '[deploy-frontend]') && !contains(github.event.head_commit.message, '[deploy-ml]')) ||
+          (github.event_name == 'workflow_dispatch' && github.event.inputs.deploy_mode != 'frontend' && github.event.inputs.deploy_mode != 'ml')
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -67,19 +69,42 @@ jobs:
           build-args: |
             BUILD_DATE=${{ github.event.head_commit.timestamp }}
             BUILD_GIT_SHA=${{ github.sha }}
+            INSTALL_SPACY_MODEL=false
+            BUILD_GEOCODING_DB=false
           cache-from: type=gha,scope=backend
           cache-to: type=gha,mode=max,scope=backend
 
+      - name: Build and push ml backend
+        if: |
+          (github.event_name != 'workflow_dispatch' && !contains(github.event.head_commit.message, '[deploy-frontend]') && !contains(github.event.head_commit.message, '[deploy-backend]')) ||
+          (github.event_name == 'workflow_dispatch' && github.event.inputs.deploy_mode != 'frontend' && github.event.inputs.deploy_mode != 'backend')
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          provenance: false
+          platforms: linux/amd64,linux/arm64
+          tags: |
+            ghcr.io/${{ github.repository }}-ml:latest
+            ghcr.io/${{ github.repository }}-ml:${{ github.sha }}
+          build-args: |
+            BUILD_DATE=${{ github.event.head_commit.timestamp }}
+            BUILD_GIT_SHA=${{ github.sha }}
+            INSTALL_SPACY_MODEL=true
+            BUILD_GEOCODING_DB=true
+          cache-from: type=gha,scope=ml-backend
+          cache-to: type=gha,mode=max,scope=ml-backend
+
       - name: Install cosign
         if: |
-          (github.event_name != 'workflow_dispatch' && !contains(github.event.head_commit.message, '[deploy-frontend]')) ||
-          (github.event_name == 'workflow_dispatch' && github.event.inputs.deploy_mode != 'frontend')
+          (github.event_name != 'workflow_dispatch' && !contains(github.event.head_commit.message, '[deploy-frontend]') && !contains(github.event.head_commit.message, '[deploy-ml]')) ||
+          (github.event_name == 'workflow_dispatch' && github.event.inputs.deploy_mode != 'frontend' && github.event.inputs.deploy_mode != 'ml')
         uses: sigstore/cosign-installer@v3
 
       - name: Sign image
         if: |
-          (github.event_name != 'workflow_dispatch' && !contains(github.event.head_commit.message, '[deploy-frontend]')) ||
-          (github.event_name == 'workflow_dispatch' && github.event.inputs.deploy_mode != 'frontend')
+          (github.event_name != 'workflow_dispatch' && !contains(github.event.head_commit.message, '[deploy-frontend]') && !contains(github.event.head_commit.message, '[deploy-ml]')) ||
+          (github.event_name == 'workflow_dispatch' && github.event.inputs.deploy_mode != 'frontend' && github.event.inputs.deploy_mode != 'ml')
         continue-on-error: true
         run: |
           cosign sign --yes \
@@ -87,8 +112,8 @@ jobs:
 
       - name: Build and push frontend
         if: |
-          (github.event_name != 'workflow_dispatch' && !contains(github.event.head_commit.message, '[deploy-backend]')) ||
-          (github.event_name == 'workflow_dispatch' && github.event.inputs.deploy_mode != 'backend')
+          (github.event_name != 'workflow_dispatch' && !contains(github.event.head_commit.message, '[deploy-backend]') && !contains(github.event.head_commit.message, '[deploy-ml]')) ||
+          (github.event_name == 'workflow_dispatch' && github.event.inputs.deploy_mode != 'backend' && github.event.inputs.deploy_mode != 'ml')
         uses: docker/build-push-action@v6
         with:
           context: ./frontend
@@ -116,7 +141,8 @@ jobs:
       contains(github.event.head_commit.message, '[deploy-prod]') ||
       contains(github.event.head_commit.message, '[deploy-app]') ||
       contains(github.event.head_commit.message, '[deploy-frontend]') ||
-      contains(github.event.head_commit.message, '[deploy-backend]')
+      contains(github.event.head_commit.message, '[deploy-backend]') ||
+      contains(github.event.head_commit.message, '[deploy-ml]')
     runs-on: helvex-prod
     environment: production
     permissions:
@@ -466,6 +492,7 @@ jobs:
           fi
           helmfile -e prod apply $SELECTOR \
             --set "image.tag=${{ github.sha }}" \
+            --set "mlImage.tag=${{ github.sha }}" \
             --set "frontend.image.tag=${{ github.sha }}" \
             --set "postgres.backupServerName=${{ steps.pg-meta.outputs.server_name }}" \
             --set "postgres.restoreSourceServerName=${{ steps.pg-meta.outputs.restore_source }}" \
@@ -487,6 +514,15 @@ jobs:
         run: |
           kubectl set image deployment/helvex \
             app=ghcr.io/${{ github.repository }}:${{ github.sha }} \
+            -n helvex-prod
+
+      - name: Deploy ml worker only
+        if: |
+          (github.event_name != 'workflow_dispatch' && contains(github.event.head_commit.message, '[deploy-ml]')) ||
+          (github.event_name == 'workflow_dispatch' && github.event.inputs.deploy_mode == 'ml')
+        run: |
+          kubectl set image deployment/helvex-ml-worker \
+            ml-worker=ghcr.io/${{ github.repository }}-ml:${{ github.sha }} \
             -n helvex-prod
 
       - name: Wait for PostgreSQL to be healthy
@@ -522,16 +558,22 @@ jobs:
               kubectl rollout status deployment/helvex-frontend -n helvex-prod --timeout=180s
             elif [ "${DEPLOY_MODE}" = "backend" ]; then
               kubectl rollout status deployment/helvex -n helvex-prod --timeout=360s
+            elif [ "${DEPLOY_MODE}" = "ml" ]; then
+              kubectl rollout status deployment/helvex-ml-worker -n helvex-prod --timeout=360s
             else
               kubectl rollout status deployment/helvex -n helvex-prod --timeout=360s
+              kubectl rollout status deployment/helvex-ml-worker -n helvex-prod --timeout=360s
               kubectl rollout status deployment/helvex-frontend -n helvex-prod --timeout=180s
             fi
           elif echo "$COMMIT_MSG" | grep -qF '[deploy-frontend]'; then
             kubectl rollout status deployment/helvex-frontend -n helvex-prod --timeout=180s
           elif echo "$COMMIT_MSG" | grep -qF '[deploy-backend]'; then
             kubectl rollout status deployment/helvex -n helvex-prod --timeout=360s
+          elif echo "$COMMIT_MSG" | grep -qF '[deploy-ml]'; then
+            kubectl rollout status deployment/helvex-ml-worker -n helvex-prod --timeout=360s
           else
             kubectl rollout status deployment/helvex -n helvex-prod --timeout=360s
+            kubectl rollout status deployment/helvex-ml-worker -n helvex-prod --timeout=360s
             kubectl rollout status deployment/helvex-frontend -n helvex-prod --timeout=180s
           fi
 
