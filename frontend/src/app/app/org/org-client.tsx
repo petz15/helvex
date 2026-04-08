@@ -48,7 +48,7 @@ const ALL_SETTING_KEYS = [
 
 type SettingKey = typeof ALL_SETTING_KEYS[number];
 
-function OrgScoringSection({ orgId, isAdmin }: { orgId: number; isAdmin: boolean }) {
+export function OrgScoringSection({ orgId, isAdmin }: { orgId: number; isAdmin: boolean }) {
   const { data: saved = {}, mutate: reloadSettings } = useSWR(
     ["org-settings", orgId],
     () => fetchOrgSettings(orgId),
@@ -871,15 +871,22 @@ export function OrgClient({ embedded = false }: { embedded?: boolean }) {
         )}
       </div>
 
-      {/* Scoring & AI config */}
+      {/* Scoring & AI config — moved to Settings page */}
       <div className="flex items-center gap-2 pt-2">
         <Sparkles size={15} className="text-blue-500" />
         <SectionTitle title="Scoring & AI config" />
       </div>
-      <p className="text-xs text-slate-500 -mt-3">
-        Override the global scoring defaults for your org. Changes here only affect your org&apos;s lead scores and AI classification.
-      </p>
-      {orgId && <OrgScoringSection orgId={orgId} isAdmin={isAdmin} />}
+      <div className="rounded-xl border border-blue-100 bg-blue-50 p-4 flex items-center justify-between">
+        <p className="text-sm text-blue-700">
+          LLM configuration, FLEX scoring parameters, and AI classification settings have moved to the Settings page.
+        </p>
+        <a
+          href="/app/settings?tab=llm"
+          className="ml-4 shrink-0 flex items-center gap-1.5 bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded-lg text-sm font-medium transition-colors"
+        >
+          <Sparkles size={13} /> Open Settings
+        </a>
+      </div>
 
       {/* Danger Zone */}
       {isOwner && (

@@ -25,7 +25,7 @@ def fetch_hr_publications(
     from_date: date,
     to_date: date,
     *,
-    page_size: int = 2000,
+    page_size: int = 100,
     timeout: float = 60.0,
 ) -> list[dict[str, Any]]:
     """Fetch all SHAB HR publications for a date range.
@@ -51,10 +51,13 @@ def fetch_hr_publications(
             return None
 
     results: list[dict[str, Any]] = []
-    page = 1
+    page = 0
     with httpx.Client(timeout=timeout) as client:
         while True:
-            params["pageNumber"] = page
+            # SHAB currently uses zero-based `page`; keep `pageNumber` in sync
+            # for compatibility with older wrappers/proxies.
+            params["page"] = page
+            params["pageNumber"] = page + 1
             resp = client.get(f"{SHAB_API_BASE}/publications", params=params)
             resp.raise_for_status()
 
@@ -79,12 +82,18 @@ def fetch_hr_publications(
 
             # Prefer explicit pagination metadata when available. SHAB may enforce
             # its own per-page cap (often 100) even when `pageSize` is larger.
+            page_request = meta.get("pageRequest") if isinstance(meta, dict) else None
             total_pages = (
                 _to_int(meta.get("totalPages"))
                 or _to_int(meta.get("numberOfPages"))
                 or _to_int(meta.get("pageCount"))
             )
-            current_page = _to_int(meta.get("pageNumber")) or _to_int(meta.get("page")) or page
+            current_page = (
+                _to_int(meta.get("page"))
+                or (_to_int(page_request.get("page")) if isinstance(page_request, dict) else None)
+                or _to_int(meta.get("pageNumber"))
+                or page
+            )
             total_items = (
                 _to_int(meta.get("totalElements"))
                 or _to_int(meta.get("totalEntries"))

@@ -121,8 +121,8 @@ def fetch_companies_by_prefix(
 
 def get_company(uid: str | list[Any]) -> dict[str, Any]:
     """Fetch full company details by UID from the Zefix API."""
-    uid_str = _coerce_uid(uid)
-    uid_clean = uid_str.replace("-", "").replace(".", "")
+    uid_str = _normalise_uid(uid)
+    uid_clean = "".join(ch for ch in str(uid_str) if ch.isalnum())
     url = f"{settings.zefix_api_base_url}/company/uid/{uid_clean}"
 
     with httpx.Client(timeout=60.0) as client:

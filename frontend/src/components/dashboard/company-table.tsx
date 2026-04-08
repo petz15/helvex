@@ -5,7 +5,7 @@ import {
   useReactTable, getCoreRowModel, flexRender,
   createColumnHelper, type VisibilityState,
 } from "@tanstack/react-table";
-import { ChevronUp, ChevronDown, ChevronsUpDown, Settings2 } from "lucide-react";
+import { ChevronUp, ChevronDown, ChevronsUpDown, Settings2, ThumbsUp, ThumbsDown, Minus } from "lucide-react";
 import { cn, reviewBadgeClass, proposalBadgeClass, scoreColor } from "@/lib/utils";
 import { ScoreBar } from "@/components/ui/score-bar";
 import { Badge } from "@/components/ui/badge";
@@ -32,6 +32,8 @@ interface CompanyTableProps {
   selectedIds?: Set<number>;
   onToggleSelect?: (id: number) => void;
   onSelectAll?: (ids: number[]) => void;
+  // inline triage
+  onUpdateReview?: (id: number, status: string | null) => void;
 }
 
 function SortIcon({ col, sort }: { col: string; sort: string }) {
@@ -118,7 +120,7 @@ function FlexScoreCell({ score, breakdownJson }: { score: number | null; breakdo
   );
 }
 
-export function CompanyTable({ companies, selectedId, onSelect, filters, onSort, isLoading, selectedIds, onToggleSelect, onSelectAll }: CompanyTableProps) {
+export function CompanyTable({ companies, selectedId, onSelect, filters, onSort, isLoading, selectedIds, onToggleSelect, onSelectAll, onUpdateReview }: CompanyTableProps) {
   const sort = filters.sort ?? "-updated";
 
   const [columnVisibility, setColumnVisibility] = useState<VisibilityState>({
@@ -207,14 +209,40 @@ export function CompanyTable({ companies, selectedId, onSelect, filters, onSort,
         header: "Combined",
         cell: (info) => {
           const v = info.getValue() as number | null;
+          const row = info.row.original;
+          const hasComponents = row.ai_score != null || row.web_score != null || row.flex_score != null;
           return (
-            <div className="min-w-[6rem]">
+            <div className="relative group min-w-[6rem]">
               <div className={cn("text-xs font-bold tabular-nums", scoreTextClass(v))}>
                 {v == null ? "—" : Math.round(v)}
               </div>
               <div className="mt-1 h-1.5 bg-slate-200 rounded-full overflow-hidden">
                 <div className={cn("h-full rounded-full", scoreColor(v))} style={{ width: `${v ?? 0}%` }} />
               </div>
+              {hasComponents && (
+                <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1.5 z-50 hidden group-hover:block pointer-events-none">
+                  <div className="bg-slate-800 text-white text-xs rounded-lg px-3 py-2 shadow-xl w-40 space-y-1">
+                    <p className="font-semibold text-slate-200 mb-1.5">Score breakdown</p>
+                    {[
+                      ["AI", row.ai_score, "70%"],
+                      ["Web", row.web_score, "20%"],
+                      ["FLEX", row.flex_score, "10%"],
+                    ].map(([label, val]) => (
+                      <div key={label as string} className="flex justify-between gap-2">
+                        <span className="text-slate-400">{label}</span>
+                        <span className={cn("tabular-nums font-medium", val == null ? "text-slate-500" : "text-white")}>
+                          {val == null ? "—" : Math.round(val as number)}
+                        </span>
+                      </div>
+                    ))}
+                    <div className="border-t border-slate-600 pt-1 flex justify-between gap-2">
+                      <span className="text-slate-300 font-medium">Combined</span>
+                      <span className="tabular-nums font-bold text-white">{v == null ? "—" : Math.round(v)}</span>
+                    </div>
+                    <div className="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-slate-800" />
+                  </div>
+                </div>
+              )}
             </div>
           );
         },
@@ -345,6 +373,7 @@ export function CompanyTable({ companies, selectedId, onSelect, filters, onSort,
                     </th>
                   );
                 })}
+                {onUpdateReview && <th className="w-24 border-b border-slate-200" />}
               </tr>
             ))}
           </thead>
@@ -363,7 +392,7 @@ export function CompanyTable({ companies, selectedId, onSelect, filters, onSort,
                   key={row.id}
                   onClick={() => onSelect(row.original)}
                   className={cn(
-                    "border-b border-slate-100 cursor-pointer transition-colors",
+                    "group border-b border-slate-100 cursor-pointer transition-colors",
                     String(row.original.status ?? "").toLowerCase() === "cancelled" && "opacity-60",
                     selectedIds?.has(row.original.id)
                       ? "bg-blue-50"
@@ -387,6 +416,43 @@ export function CompanyTable({ companies, selectedId, onSelect, filters, onSort,
                       {flexRender(cell.column.columnDef.cell, cell.getContext())}
                     </td>
                   ))}
+                  {onUpdateReview && (
+                    <td className="px-2 py-2 align-middle w-24" onClick={(e) => e.stopPropagation()}>
+                      <div className="invisible group-hover:visible flex items-center gap-0.5">
+                        <button
+                          title="Mark interesting"
+                          onClick={() => onUpdateReview(row.original.id, row.original.review_status === "interesting" ? null : "interesting")}
+                          className={cn(
+                            "p-1 rounded transition-colors",
+                            row.original.review_status === "interesting"
+                              ? "text-amber-600 bg-amber-50"
+                              : "text-slate-300 hover:text-amber-600 hover:bg-amber-50"
+                          )}
+                        >
+                          <ThumbsUp size={12} />
+                        </button>
+                        <button
+                          title="Skip (clear review)"
+                          onClick={() => onUpdateReview(row.original.id, null)}
+                          className="p-1 rounded text-slate-300 hover:text-slate-600 hover:bg-slate-100 transition-colors"
+                        >
+                          <Minus size={12} />
+                        </button>
+                        <button
+                          title="Reject"
+                          onClick={() => onUpdateReview(row.original.id, row.original.review_status === "rejected" ? null : "rejected")}
+                          className={cn(
+                            "p-1 rounded transition-colors",
+                            row.original.review_status === "rejected"
+                              ? "text-red-500 bg-red-50"
+                              : "text-slate-300 hover:text-red-500 hover:bg-red-50"
+                          )}
+                        >
+                          <ThumbsDown size={12} />
+                        </button>
+                      </div>
+                    </td>
+                  )}
                 </tr>
               ))
             )}

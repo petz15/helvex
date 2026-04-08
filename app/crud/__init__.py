@@ -46,14 +46,18 @@ from app.crud.collection_run import (
 )
 from app.crud.company import (
     bulk_update_status,
+    bulk_update_tags,
     count_companies,
     create_company,
     delete_company,
     get_company,
     get_company_by_uid,
     get_company_stats,
+    get_noga_hierarchy,
     get_taxonomy_stats,
     list_companies,
+    search_clusters,
+    search_keywords,
     update_company,
 )
 from app.crud.note import create_note, delete_note, get_note, list_notes_for_company, update_note
@@ -132,7 +136,11 @@ __all__ = [
     "count_companies",
     "get_company_stats",
     "get_taxonomy_stats",
+    "get_noga_hierarchy",
+    "search_keywords",
+    "search_clusters",
     "bulk_update_status",
+    "bulk_update_tags",
     "create_company",
     "update_company",
     "delete_company",

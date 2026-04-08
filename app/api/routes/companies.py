@@ -306,8 +306,45 @@ def list_cantons(db: Session = Depends(get_db)):
 
 
 @router.get("/taxonomy", response_model=dict, summary="Taxonomy stats (clusters, keywords, tags, categories)")
-def get_taxonomy(db: Session = Depends(get_db)):
-    return crud.get_taxonomy_stats(db)
+def get_taxonomy(
+    org_id: int | None = Query(None, description="Scope stats to companies with an org state for this org"),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    effective_org_id = org_id or current_user.org_id
+    return crud.get_taxonomy_stats(db, org_id=effective_org_id)
+
+
+@router.get("/noga-hierarchy", response_model=list, summary="NOGA codes as a collapsible hierarchy with aggregated counts")
+def get_noga_hierarchy(
+    org_id: int | None = Query(None),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    effective_org_id = org_id or current_user.org_id
+    return crud.get_noga_hierarchy(db, org_id=effective_org_id)
+
+
+@router.get("/keywords/search", response_model=list, summary="Autocomplete search across all purpose keywords")
+def search_keywords(
+    q: str = Query(..., min_length=1),
+    limit: int = Query(20, ge=1, le=100),
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+):
+    results = crud.search_keywords(db, q=q, limit=limit)
+    return [{"keyword": kw, "count": cnt} for kw, cnt in results]
+
+
+@router.get("/clusters/search", response_model=list, summary="Autocomplete search across all cluster labels")
+def search_clusters(
+    q: str = Query(..., min_length=1),
+    limit: int = Query(20, ge=1, le=100),
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+):
+    results = crud.search_clusters(db, q=q, limit=limit)
+    return [{"cluster": c, "count": cnt} for c, cnt in results]
 
 _DEMO_UID = "CHE-435.551.225" # Post CH AG
 
@@ -528,6 +565,24 @@ def bulk_update_companies(
         updated = crud.bulk_update_status(db, body.company_ids, body.field, body.value)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    return {"updated": updated}
+
+
+class BulkTagBody(BaseModel):
+    company_ids: list[int]
+    tag: str
+    action: str  # "add" | "remove"
+
+
+@router.post("/bulk-tag", summary="Add or remove a tag across multiple companies")
+def bulk_tag_companies(
+    body: BulkTagBody,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    if body.action not in ("add", "remove"):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="action must be 'add' or 'remove'")
+    updated = crud.bulk_update_tags(db, body.company_ids, body.tag, body.action)
     return {"updated": updated}
 
 

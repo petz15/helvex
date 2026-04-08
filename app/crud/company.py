@@ -1,7 +1,7 @@
 from collections import Counter
 from datetime import date
 
-from sqlalchemy import case, func, nullslast
+from sqlalchemy import case, func, nullslast, or_
 from sqlalchemy.orm import Session
 
 from app.models.company import Company
@@ -127,7 +127,8 @@ def _apply_filters(query, *, name_filter, uid_filter=None, canton, review_status
     if ai_category == "_none":
         query = query.filter(Company.ai_category.is_(None))
     elif ai_category:
-        query = query.filter(Company.ai_category.ilike(f"%{ai_category}%"))
+        terms = [t.strip() for t in ai_category.split(",") if t.strip()]
+        query = query.filter(or_(*[Company.ai_category.ilike(f"%{t}%") for t in terms]))
     if tags:
         query = query.filter(Company.tags.ilike(f"%{tags}%"))
     if tfidf_cluster == "_none":
@@ -135,19 +136,23 @@ def _apply_filters(query, *, name_filter, uid_filter=None, canton, review_status
     elif tfidf_cluster == "_any":
         query = query.filter(Company.tfidf_cluster.isnot(None))
     elif tfidf_cluster:
-        query = query.filter(Company.tfidf_cluster.ilike(f"%{tfidf_cluster}%"))
+        terms = [t.strip() for t in tfidf_cluster.split(",") if t.strip()]
+        query = query.filter(or_(*[Company.tfidf_cluster.ilike(f"%{t}%") for t in terms]))
     if purpose_keywords:
-        query = query.filter(Company.purpose_keywords.ilike(f"%{purpose_keywords}%"))
+        terms = [t.strip() for t in purpose_keywords.split(",") if t.strip()]
+        query = query.filter(or_(*[Company.purpose_keywords.ilike(f"%{t}%") for t in terms]))
     if noga_code == "_none":
         query = query.filter(Company.noga_code.is_(None))
     elif noga_code == "_any":
         query = query.filter(Company.noga_code.isnot(None))
     elif noga_code:
-        query = query.filter(Company.noga_code.ilike(f"%{noga_code}%"))
+        terms = [t.strip() for t in noga_code.split(",") if t.strip()]
+        query = query.filter(or_(*[Company.noga_code.ilike(f"%{t}%") for t in terms]))
     if noga_label:
         query = query.filter(Company.noga_label.ilike(f"%{noga_label}%"))
     if noga_level:
-        query = query.filter(Company.noga_level == noga_level)
+        terms = [t.strip() for t in noga_level.split(",") if t.strip()]
+        query = query.filter(Company.noga_level.in_(terms))
     if exclude_tags:
         for term in [t.strip() for t in exclude_tags.split(",") if t.strip()]:
             query = query.filter(
@@ -180,9 +185,10 @@ def _apply_filters(query, *, name_filter, uid_filter=None, canton, review_status
                 (Company.purpose_keywords.is_(None)) | (Company.purpose_keywords.notilike(f"%{term}%"))
             )
     if exclude_ai_category:
-        query = query.filter(
-            (Company.ai_category.is_(None)) | (Company.ai_category != exclude_ai_category)
-        )
+        for term in [t.strip() for t in exclude_ai_category.split(",") if t.strip()]:
+            query = query.filter(
+                (Company.ai_category.is_(None)) | (Company.ai_category.notilike(f"%{term}%"))
+            )
     if exclude_noga_code:
         for term in [t.strip() for t in exclude_noga_code.split(",") if t.strip()]:
             query = query.filter(
@@ -194,9 +200,10 @@ def _apply_filters(query, *, name_filter, uid_filter=None, canton, review_status
                 (Company.noga_label.is_(None)) | (Company.noga_label.notilike(f"%{term}%"))
             )
     if exclude_noga_level:
-        query = query.filter(
-            (Company.noga_level.is_(None)) | (Company.noga_level != exclude_noga_level)
-        )
+        for term in [t.strip() for t in exclude_noga_level.split(",") if t.strip()]:
+            query = query.filter(
+                (Company.noga_level.is_(None)) | (Company.noga_level != term)
+            )
     return query
 
 
@@ -416,6 +423,30 @@ def get_company_stats(db: Session) -> dict:
     for label in ("sent", "responded", "converted", "rejected"):
         contact_counts[label] = db.query(Company).filter(Company.contact_status == label).count()
 
+    # Score distribution: bucket combined_score into 10-point bands 0-9, 10-19, ..., 90-100
+    score_rows = (
+        db.query(
+            Company.ai_score,
+            Company.web_score,
+            Company.flex_score,
+        )
+        .filter(
+            Company.ai_score.isnot(None) | Company.web_score.isnot(None) | Company.flex_score.isnot(None)
+        )
+        .all()
+    )
+    score_dist = {f"{i*10}-{i*10+9}": 0 for i in range(10)}
+    score_dist["100"] = 0
+    for row in score_rows:
+        combined = (
+            (row.ai_score or 0) * 0.70
+            + (row.web_score or 0) * 0.20
+            + (row.flex_score or 0) * 0.10
+        )
+        bucket = min(int(combined // 10), 9)
+        key = f"{bucket*10}-{bucket*10+9}"
+        score_dist[key] += 1
+
     return {
         "total": total,
         "searched": searched,
@@ -423,84 +454,7 @@ def get_company_stats(db: Session) -> dict:
         "searches_today": searches_today,
         "review": review_counts,
         "contact": contact_counts,
-    }
-
-
-def get_taxonomy_stats(db: Session) -> dict:
-    """Return distinct values + counts for tfidf_cluster and tags (sorted by count desc)."""
-    # tfidf_cluster format: "label_a|label_b|label_c" where each label is "term1,term2,..."
-    # Count how many companies belong to each cluster label (pipe-separated chunk)
-    raw_clusters = (
-        db.query(Company.tfidf_cluster)
-        .filter(Company.tfidf_cluster.isnot(None))
-        .filter(Company.tfidf_cluster != "Undefined")
-        .all()
-    )
-    label_counter: Counter = Counter()
-    for (val,) in raw_clusters:
-        for label in val.split("|"):
-            label = label.strip()
-            if label:
-                label_counter[label] += 1
-    clusters_list = label_counter.most_common()
-
-    # purpose_keywords is comma-separated per-company terms — count per individual keyword
-    raw_keywords = (
-        db.query(Company.purpose_keywords)
-        .filter(Company.purpose_keywords.isnot(None))
-        .all()
-    )
-    kw_counter: Counter = Counter()
-    for (val,) in raw_keywords:
-        for kw in val.split(","):
-            kw = kw.strip()
-            if kw:
-                kw_counter[kw] += 1
-    keywords_list = kw_counter.most_common(100)
-
-    tags = (
-        db.query(Company.tags, func.count(Company.id).label("cnt"))
-        .filter(Company.tags.isnot(None))
-        .group_by(Company.tags)
-        .order_by(func.count(Company.id).desc())
-        .all()
-    )
-    categories = (
-        db.query(Company.ai_category, func.count(Company.id).label("cnt"))
-        .filter(Company.ai_category.isnot(None))
-        .group_by(Company.ai_category)
-        .order_by(func.count(Company.id).desc())
-        .all()
-    )
-    noga_codes = (
-        db.query(Company.noga_code, Company.noga_label, func.count(Company.id).label("cnt"))
-        .filter(Company.noga_code.isnot(None))
-        .group_by(Company.noga_code, Company.noga_label)
-        .order_by(func.count(Company.id).desc())
-        .all()
-    )
-    noga_levels = (
-        db.query(Company.noga_level, func.count(Company.id).label("cnt"))
-        .filter(Company.noga_level.isnot(None))
-        .group_by(Company.noga_level)
-        .order_by(func.count(Company.id).desc())
-        .all()
-    )
-    legal_forms = (
-        db.query(Company.legal_form, func.count(Company.id).label("cnt"))
-        .filter(Company.legal_form.isnot(None))
-        .group_by(Company.legal_form)
-        .order_by(func.count(Company.id).desc())
-        .all()
-    )
-    return {
-        "clusters": clusters_list,
-        "keywords": keywords_list,
-        "tags": [(r.tags, r.cnt) for r in tags],
-        "categories": [(r.ai_category, r.cnt) for r in categories],
-        "noga_codes": [(((r.noga_code or "") + " — " + (r.noga_label or "")).strip(" —"), r.cnt) for r in noga_codes],
-        "noga_levels": [(r.noga_level, r.cnt) for r in noga_levels],
-        "legal_forms": [(r.legal_form, r.cnt) for r in legal_forms],
+        "score_distribution": score_dist,
     }
 
 
@@ -542,3 +496,233 @@ def bulk_update_status(
 def delete_company(db: Session, db_company: Company) -> None:
     db.delete(db_company)
     db.commit()
+
+
+def bulk_update_tags(
+    db: Session,
+    company_ids: list[int],
+    tag: str,
+    action: str,  # "add" | "remove"
+) -> int:
+    """Add or remove a tag from multiple companies. Returns updated count."""
+    tag = tag.strip()
+    if not tag or not company_ids:
+        return 0
+    rows = db.query(Company).filter(Company.id.in_(company_ids)).all()
+    updated = 0
+    for company in rows:
+        current_tags = [t.strip() for t in (company.tags or "").split(",") if t.strip()]
+        if action == "add" and tag not in current_tags:
+            current_tags.append(tag)
+            company.tags = ", ".join(current_tags)
+            updated += 1
+        elif action == "remove" and tag in current_tags:
+            current_tags.remove(tag)
+            company.tags = ", ".join(current_tags) or None
+            updated += 1
+    db.commit()
+    return updated
+
+
+def search_keywords(db: Session, q: str, limit: int = 20) -> list[tuple[str, int]]:
+    """Return individual keywords from purpose_keywords matching q, sorted by frequency."""
+    raw = (
+        db.query(Company.purpose_keywords)
+        .filter(Company.purpose_keywords.isnot(None))
+        .filter(Company.purpose_keywords.ilike(f"%{q}%"))
+        .all()
+    )
+    counter: Counter = Counter()
+    q_lower = q.lower()
+    for (val,) in raw:
+        for kw in val.split(","):
+            kw = kw.strip()
+            if kw and q_lower in kw.lower():
+                counter[kw] += 1
+    return counter.most_common(limit)
+
+
+def search_clusters(db: Session, q: str, limit: int = 20) -> list[tuple[str, int]]:
+    """Return cluster labels matching q, sorted by frequency."""
+    raw = (
+        db.query(Company.tfidf_cluster)
+        .filter(Company.tfidf_cluster.isnot(None))
+        .filter(Company.tfidf_cluster.ilike(f"%{q}%"))
+        .all()
+    )
+    counter: Counter = Counter()
+    q_lower = q.lower()
+    for (val,) in raw:
+        for label in val.split("|"):
+            label = label.strip()
+            if label and q_lower in label.lower():
+                counter[label] += 1
+    return counter.most_common(limit)
+
+
+def get_noga_hierarchy(db: Session, org_id: int | None = None) -> list[dict]:
+    """Return NOGA codes as a tree with aggregated counts.
+
+    Each node: {code, label, level, own_count, count (aggregated), children}.
+    Top-level sections are returned as the root list.
+    """
+    from app.models.org_company_state import OrgCompanyState
+
+    query = db.query(Company.noga_code, Company.noga_label, Company.noga_level, func.count(Company.id).label("cnt"))
+    query = query.filter(Company.noga_code.isnot(None))
+    if org_id:
+        query = query.join(OrgCompanyState, (OrgCompanyState.company_id == Company.id) & (OrgCompanyState.org_id == org_id), isouter=False)
+    rows = query.group_by(Company.noga_code, Company.noga_label, Company.noga_level).all()
+
+    nodes: dict[str, dict] = {}
+    for r in rows:
+        code = r.noga_code or ""
+        nodes[code] = {
+            "code": code,
+            "label": r.noga_label or "",
+            "level": r.noga_level or "",
+            "own_count": r.cnt,
+            "count": r.cnt,
+            "children": [],
+        }
+
+    def _parent_code(code: str) -> str | None:
+        """Derive parent code: 68.20 → 68.2 → 68 → section letter → None."""
+        if "." in code:
+            parts = code.split(".")
+            sub = parts[-1]
+            if len(sub) > 1:
+                return ".".join(parts[:-1] + [sub[:-1]])
+            return parts[0]
+        if len(code) == 2 and code.isdigit():
+            # division code like "68" — no known parent in flat data, skip
+            return None
+        if len(code) > 1:
+            return code[:-1]
+        return None
+
+    # Propagate counts upward and wire children
+    for code in sorted(nodes.keys(), key=len, reverse=True):
+        parent = _parent_code(code)
+        while parent is not None:
+            if parent in nodes:
+                nodes[parent]["count"] += nodes[code]["own_count"]
+                if nodes[code] not in nodes[parent]["children"]:
+                    nodes[parent]["children"].append(nodes[code])
+                break
+            parent = _parent_code(parent)
+
+    # Return only root nodes (those with no parent in our node set)
+    roots = []
+    all_child_codes: set[str] = set()
+    for node in nodes.values():
+        for child in node["children"]:
+            all_child_codes.add(child["code"])
+    for code, node in sorted(nodes.items()):
+        if code not in all_child_codes:
+            roots.append(node)
+
+    # Sort children by count desc at each level
+    def _sort_children(node: dict) -> None:
+        node["children"].sort(key=lambda x: -x["count"])
+        for child in node["children"]:
+            _sort_children(child)
+
+    for root in roots:
+        _sort_children(root)
+    roots.sort(key=lambda x: -x["count"])
+    return roots
+
+
+def get_taxonomy_stats(db: Session, org_id: int | None = None) -> dict:
+    """Return distinct values + counts for tfidf_cluster and tags (sorted by count desc)."""
+    from app.models.org_company_state import OrgCompanyState
+
+    # Base query — optionally scoped to companies with an OrgCompanyState for this org
+    base_q = db.query(Company)
+    if org_id:
+        base_q = base_q.join(
+            OrgCompanyState,
+            (OrgCompanyState.company_id == Company.id) & (OrgCompanyState.org_id == org_id),
+        )
+
+    # tfidf_cluster format: "label_a|label_b|label_c" where each label is "term1,term2,..."
+    raw_clusters = (
+        base_q.with_entities(Company.tfidf_cluster)
+        .filter(Company.tfidf_cluster.isnot(None))
+        .filter(Company.tfidf_cluster != "Undefined")
+        .all()
+    )
+    label_counter: Counter = Counter()
+    for (val,) in raw_clusters:
+        for label in val.split("|"):
+            label = label.strip()
+            if label:
+                label_counter[label] += 1
+    clusters_list = label_counter.most_common()
+
+    raw_keywords = (
+        base_q.with_entities(Company.purpose_keywords)
+        .filter(Company.purpose_keywords.isnot(None))
+        .all()
+    )
+    kw_counter: Counter = Counter()
+    for (val,) in raw_keywords:
+        for kw in val.split(","):
+            kw = kw.strip()
+            if kw:
+                kw_counter[kw] += 1
+    keywords_list = kw_counter.most_common(100)
+
+    tags = (
+        base_q.with_entities(Company.tags, func.count(Company.id).label("cnt"))
+        .filter(Company.tags.isnot(None))
+        .group_by(Company.tags)
+        .order_by(func.count(Company.id).desc())
+        .all()
+    )
+    categories = (
+        base_q.with_entities(Company.ai_category, func.count(Company.id).label("cnt"))
+        .filter(Company.ai_category.isnot(None))
+        .group_by(Company.ai_category)
+        .order_by(func.count(Company.id).desc())
+        .all()
+    )
+    noga_codes = (
+        base_q.with_entities(Company.noga_code, Company.noga_label, func.count(Company.id).label("cnt"))
+        .filter(Company.noga_code.isnot(None))
+        .group_by(Company.noga_code, Company.noga_label)
+        .order_by(func.count(Company.id).desc())
+        .all()
+    )
+    noga_levels = (
+        base_q.with_entities(Company.noga_level, func.count(Company.id).label("cnt"))
+        .filter(Company.noga_level.isnot(None))
+        .group_by(Company.noga_level)
+        .order_by(func.count(Company.id).desc())
+        .all()
+    )
+    legal_forms = (
+        base_q.with_entities(Company.legal_form, func.count(Company.id).label("cnt"))
+        .filter(Company.legal_form.isnot(None))
+        .group_by(Company.legal_form)
+        .order_by(func.count(Company.id).desc())
+        .all()
+    )
+    cantons = (
+        base_q.with_entities(Company.canton, func.count(Company.id).label("cnt"))
+        .filter(Company.canton.isnot(None))
+        .group_by(Company.canton)
+        .order_by(func.count(Company.id).desc())
+        .all()
+    )
+    return {
+        "clusters": clusters_list,
+        "keywords": keywords_list,
+        "tags": [(r.tags, r.cnt) for r in tags],
+        "categories": [(r.ai_category, r.cnt) for r in categories],
+        "noga_codes": [(((r.noga_code or "") + " — " + (r.noga_label or "")).strip(" —"), r.cnt) for r in noga_codes],
+        "noga_levels": [(r.noga_level, r.cnt) for r in noga_levels],
+        "legal_forms": [(r.legal_form, r.cnt) for r in legal_forms],
+        "cantons": [(r.canton, r.cnt) for r in cantons],
+    }

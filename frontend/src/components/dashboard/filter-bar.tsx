@@ -3,6 +3,8 @@ import { useState, useCallback } from "react";
 import { X, SlidersHorizontal, ChevronDown, Bookmark, BookmarkCheck, Trash2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Combobox } from "./combobox";
+import { MultiSelectFilter } from "./multi-select-filter";
+import { searchKeywords, searchClusters } from "@/lib/api";
 import type { CompanyFilters, SavedView } from "@/lib/types";
 import { REVIEW_STATUSES, CONTACT_STATUSES } from "@/lib/types";
 
@@ -195,22 +197,65 @@ export function FilterBar({
           <ChevronDown size={12} className={cn("transition-transform", expanded && "rotate-180")} />
         </button>
 
-        {/* Active filter chips */}
+        {/* Active filter chips — multi-value fields split into individual chips */}
         <div className="flex flex-wrap gap-1.5 flex-1 min-w-0">
           {activeEntries
             .filter(([k]) => !["q", "uid", "canton", "status"].includes(String(k)))
-            .map(([k, v]) => (
-              <span
-                key={String(k)}
-                className="inline-flex items-center gap-1 rounded-full bg-white border border-slate-200 text-slate-700 px-2 py-0.5 text-xs"
-              >
-                <span className="text-slate-400">{CHIP_LABELS[k] ?? String(k).replace(/_/g, " ")}:</span>
-                <span>{String(v).replace(/^_none$/, "none").replace(/^_any$/, "any")}</span>
-                <button type="button" onClick={() => unset(k)} className="text-slate-400 hover:text-slate-700">
-                  <X size={11} />
-                </button>
-              </span>
-            ))}
+            .flatMap(([k, v]) => {
+              const label = CHIP_LABELS[k] ?? String(k).replace(/_/g, " ");
+              const isExclude = String(k).startsWith("exclude_");
+              const strVal = String(v);
+              // Split comma-separated multi-select fields into individual chips
+              const MULTI_KEYS: (keyof CompanyFilters)[] = [
+                "ai_category", "tfidf_cluster", "purpose_keywords", "noga_code", "noga_level",
+                "exclude_ai_category", "exclude_tfidf_cluster", "exclude_purpose_keywords",
+                "exclude_noga_code", "exclude_noga_level",
+              ];
+              if (MULTI_KEYS.includes(k) && strVal.includes(",")) {
+                return strVal.split(",").map((part) => part.trim()).filter(Boolean).map((part, i) => (
+                  <span
+                    key={`${String(k)}-${i}`}
+                    className={cn(
+                      "inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs",
+                      isExclude
+                        ? "bg-red-50 border-red-200 text-red-700"
+                        : "bg-white border-slate-200 text-slate-700"
+                    )}
+                  >
+                    <span className="text-slate-400">{label}:</span>
+                    <span>{part}</span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const remaining = strVal.split(",").map((s) => s.trim()).filter((s) => s !== part);
+                        if (remaining.length > 0) onChange({ ...filters, [k]: remaining.join(", "), page: 1 });
+                        else unset(k);
+                      }}
+                      className="text-slate-400 hover:text-slate-700"
+                    >
+                      <X size={11} />
+                    </button>
+                  </span>
+                ));
+              }
+              return [(
+                <span
+                  key={String(k)}
+                  className={cn(
+                    "inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs",
+                    isExclude
+                      ? "bg-red-50 border-red-200 text-red-700"
+                      : "bg-white border-slate-200 text-slate-700"
+                  )}
+                >
+                  <span className="text-slate-400">{label}:</span>
+                  <span>{strVal.replace(/^_none$/, "none").replace(/^_any$/, "any")}</span>
+                  <button type="button" onClick={() => unset(k)} className="text-slate-400 hover:text-slate-700">
+                    <X size={11} />
+                  </button>
+                </span>
+              )];
+            })}
           {activeCount > 0 && (
             <button onClick={onClear} className="text-xs text-slate-400 hover:text-slate-600 flex items-center gap-0.5">
               <X size={11} /> Clear all
@@ -329,66 +374,58 @@ export function FilterBar({
           <div className="grid grid-cols-1 sm:grid-cols-3 lg:grid-cols-6 gap-x-4 gap-y-3">
             <div>
               <Label>Cluster</Label>
-              <Combobox
-                options={clusters}
+              <MultiSelectFilter
                 value={filters.tfidf_cluster === "_none" || filters.tfidf_cluster === "_any" ? undefined : filters.tfidf_cluster}
                 onChange={(v) => set("tfidf_cluster", v)}
                 placeholder="Search clusters…"
-                extraOptions={[
-                  { value: "_none", label: "None (unset)" },
-                  { value: "_any", label: "Any (set)" },
-                ]}
+                options={clusters}
+                onSearch={async (q) => { const r = await searchClusters(q); return r.map(x => ({ label: x.cluster, count: x.count })); }}
+                extraOptions={[{ value: "_none", label: "None (unset)" }, { value: "_any", label: "Any (set)" }]}
+                variant="include"
               />
             </div>
             <div>
               <Label>Purpose keyword</Label>
-              <Combobox
-                options={keywords}
+              <MultiSelectFilter
                 value={filters.purpose_keywords === "_none" ? undefined : filters.purpose_keywords}
                 onChange={(v) => set("purpose_keywords", v)}
                 placeholder="Search keywords…"
+                options={keywords}
+                onSearch={async (q) => { const r = await searchKeywords(q); return r.map(x => ({ label: x.keyword, count: x.count })); }}
                 extraOptions={[{ value: "_none", label: "None (unset)" }]}
+                variant="include"
               />
             </div>
             <div>
               <Label>AI Classification</Label>
-              <Combobox
-                options={categories}
+              <MultiSelectFilter
                 value={filters.ai_category === "_none" ? undefined : filters.ai_category}
                 onChange={(v) => set("ai_category", v)}
                 placeholder="Search categories…"
+                options={categories}
                 extraOptions={[{ value: "_none", label: "None (unset)" }]}
+                variant="include"
               />
             </div>
             <div>
-              <Label>NOGA code + label</Label>
-              <Combobox
-                options={nogaCodes}
+              <Label>NOGA code</Label>
+              <MultiSelectFilter
                 value={filters.noga_code === "_none" || filters.noga_code === "_any" ? undefined : filters.noga_code}
-                onChange={(v) => set("noga_code", v ? v.split(" — ")[0]?.trim() : undefined)}
+                onChange={(v) => set("noga_code", v)}
                 placeholder="Search NOGA code…"
-                extraOptions={[
-                  { value: "_none", label: "None (unset)" },
-                  { value: "_any", label: "Any (set)" },
-                ]}
-              />
-            </div>
-            <div>
-              <Label>NOGA label</Label>
-              <Combobox
-                options={nogaCodes}
-                value={filters.noga_label}
-                onChange={(v) => set("noga_label", v ? (v.split(" — ").slice(1).join(" — ").trim() || undefined) : undefined)}
-                placeholder="Search NOGA label…"
+                options={nogaCodes.map(([entry, cnt]) => [entry.split(" — ")[0]?.trim() ?? entry, cnt] as [string, number])}
+                extraOptions={[{ value: "_none", label: "None (unset)" }, { value: "_any", label: "Any (set)" }]}
+                variant="include"
               />
             </div>
             <div>
               <Label>NOGA level</Label>
-              <Combobox
-                options={nogaLevels}
+              <MultiSelectFilter
                 value={filters.noga_level}
                 onChange={(v) => set("noga_level", v)}
                 placeholder="Search NOGA level…"
+                options={nogaLevels}
+                variant="include"
               />
             </div>
             <div>
@@ -434,56 +471,54 @@ export function FilterBar({
           <div className="grid grid-cols-1 sm:grid-cols-3 lg:grid-cols-6 gap-x-4 gap-y-3">
             <div>
               <Label>Excl. cluster</Label>
-              <Combobox
-                options={clusters}
+              <MultiSelectFilter
                 value={filters.exclude_tfidf_cluster}
                 onChange={(v) => set("exclude_tfidf_cluster", v)}
                 placeholder="Search clusters…"
+                options={clusters}
+                onSearch={async (q) => { const r = await searchClusters(q); return r.map(x => ({ label: x.cluster, count: x.count })); }}
+                variant="exclude"
               />
             </div>
             <div>
               <Label>Excl. purpose keyword</Label>
-              <Combobox
-                options={keywords}
+              <MultiSelectFilter
                 value={filters.exclude_purpose_keywords}
                 onChange={(v) => set("exclude_purpose_keywords", v)}
                 placeholder="Search keywords…"
+                options={keywords}
+                onSearch={async (q) => { const r = await searchKeywords(q); return r.map(x => ({ label: x.keyword, count: x.count })); }}
+                variant="exclude"
               />
             </div>
             <div>
               <Label>Excl. AI classification</Label>
-              <Combobox
-                options={categories}
+              <MultiSelectFilter
                 value={filters.exclude_ai_category}
                 onChange={(v) => set("exclude_ai_category", v)}
                 placeholder="Search categories…"
+                options={categories}
+                variant="exclude"
               />
             </div>
             <div>
               <Label>Excl. NOGA code</Label>
-              <Combobox
-                options={nogaCodes}
+              <MultiSelectFilter
                 value={filters.exclude_noga_code}
-                onChange={(v) => set("exclude_noga_code", v ? v.split(" — ")[0]?.trim() : undefined)}
+                onChange={(v) => set("exclude_noga_code", v)}
                 placeholder="Search NOGA code…"
-              />
-            </div>
-            <div>
-              <Label>Excl. NOGA label</Label>
-              <Combobox
-                options={nogaCodes}
-                value={filters.exclude_noga_label}
-                onChange={(v) => set("exclude_noga_label", v ? (v.split(" — ").slice(1).join(" — ").trim() || undefined) : undefined)}
-                placeholder="Search NOGA label…"
+                options={nogaCodes.map(([entry, cnt]) => [entry.split(" — ")[0]?.trim() ?? entry, cnt] as [string, number])}
+                variant="exclude"
               />
             </div>
             <div>
               <Label>Excl. NOGA level</Label>
-              <Combobox
-                options={nogaLevels}
+              <MultiSelectFilter
                 value={filters.exclude_noga_level}
                 onChange={(v) => set("exclude_noga_level", v)}
                 placeholder="Search NOGA level…"
+                options={nogaLevels}
+                variant="exclude"
               />
             </div>
           </div>

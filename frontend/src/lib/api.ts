@@ -445,6 +445,48 @@ export async function fetchTaxonomy(): Promise<Record<string, [string, number][]
   return res.json();
 }
 
+export interface NogaNode {
+  code: string;
+  label: string;
+  level: string;
+  own_count: number;
+  count: number;
+  children: NogaNode[];
+}
+
+export async function fetchNogaHierarchy(): Promise<NogaNode[]> {
+  const res = await fetch("/api/v1/companies/noga-hierarchy", { credentials: "include" });
+  if (!res.ok) return [];
+  return res.json();
+}
+
+export async function searchKeywords(q: string, limit = 20): Promise<{ keyword: string; count: number }[]> {
+  const res = await fetch(`/api/v1/companies/keywords/search?q=${encodeURIComponent(q)}&limit=${limit}`, { credentials: "include" });
+  if (!res.ok) return [];
+  return res.json();
+}
+
+export async function searchClusters(q: string, limit = 20): Promise<{ cluster: string; count: number }[]> {
+  const res = await fetch(`/api/v1/companies/clusters/search?q=${encodeURIComponent(q)}&limit=${limit}`, { credentials: "include" });
+  if (!res.ok) return [];
+  return res.json();
+}
+
+export async function bulkTagCompanies(
+  companyIds: number[],
+  tag: string,
+  action: "add" | "remove",
+): Promise<{ updated: number }> {
+  const res = await fetch("/api/v1/companies/bulk-tag", {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ company_ids: companyIds, tag, action }),
+  });
+  if (!res.ok) throw new Error("Bulk tag failed");
+  return res.json();
+}
+
 export async function createNote(companyId: number, content: string): Promise<import("./types").Note> {
   const res = await fetch(`/api/v1/companies/${companyId}/notes`, {
     method: "POST",

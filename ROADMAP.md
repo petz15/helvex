@@ -119,14 +119,14 @@
 - [X] **Adress flow** - improve the adress flow, use default choosing one etc
 - [ ] **Adjustments to pricing** - More adjustments to pricing page: remove flex rescore from, some consumptions are not available for certain tiers and the question marks are not filled in. also for first time org accounts, give about 1k credits or even more
 - [X] **Billing admin panel** — superadmin view of all orgs' tiers, subscription status, credit balance, transaction history; tier/credit adjustment UI
-- [ ] **Invoice & receipt generation** — PDF invoices for annual subscriptions; receipts for top-up purchases; email delivery
+- [X] **Invoice & receipt generation** — PDF invoices for annual subscriptions; receipts for top-up purchases; email delivery -> could be improved
 - [ ] **Verified business discount** — 20% extra discount (on top of tier bonus) for verified business orgs; applied at Stripe price calculation
 - [ ] **Check Free tier limitations enforcement** — export limit enforcement in CSV export endpoint; API rate limits (once API access is gated)
 - [ ] **Ad banner integration** — Ads embed for free tier; currently renders fake ads -> get real ad agency once I have users
-- [ ] **Credit grant system** — admin interface to grant/refund credits with reason; used for migration credits, promotions, support refunds
+- [X] **Credit grant system** — admin interface to grant/refund credits with reason; used for migration credits, promotions, support refunds
 - [ ] **Credit expiry automation** — background job to expire grant-type credits after 1 year; topup credits never expire
 - [ ] **automatic reocurring billing** on saferpay (worldline) I need to use the secure card data interface to save card data at saferpay which I can then utilize for later payments (reocurring payments like subscriptions or automatic topups). https://saferpay.github.io/jsonapi/#ChapterAliasStore
-- [ ] **refund and other admin function** - check QOL of billing such as refunds and other methods. What happens when an automatic payment fails?
+- [ ] **refund and other admin function** - check QOL of billing such as refunds and other methods. What happens when an automatic payment fails? -> subscription upgrades not working correctly, other functions not fully tested, definitely not complete
 
 
 

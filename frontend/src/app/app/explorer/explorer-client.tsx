@@ -1,8 +1,8 @@
 "use client";
-import { useState, useCallback, useTransition } from "react";
+import { useState, useCallback, useTransition, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import useSWR from "swr";
-import { Compass, Search, ChevronRight, X, Download, Settings, AlertTriangle, Star } from "lucide-react";
+import { Compass, Search, ChevronRight, X, Download, Settings, AlertTriangle, Star, BarChart2 } from "lucide-react";
 import { CompanyTable } from "@/components/dashboard/company-table";
 import { CompanyPreview } from "@/components/dashboard/company-preview";
 import { FilterBar } from "@/components/dashboard/filter-bar";
@@ -10,10 +10,11 @@ import { BaloghAdCard } from "@/components/balogh-ad-card";
 import { Pagination } from "@/components/dashboard/pagination";
 import {
   fetchCompanies, fetchStats, fetchCantons, fetchTaxonomy,
-  fetchSavedViews, saveView, deleteView, bulkUpdateCompanies,
+  fetchSavedViews, saveView, deleteView, bulkUpdateCompanies, bulkTagCompanies,
   fetchCurrentUser, fetchOrgEffectiveSettings,
-  fetchOrg,
+  fetchOrg, fetchNogaHierarchy,
 } from "@/lib/api";
+import type { NogaNode } from "@/lib/api";
 import type { Company, CompanyFilters, CompanyStats } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { getExportLimit } from "@/lib/entitlements";
@@ -89,7 +90,7 @@ function SetupGateBanner({ orgId, hasApiKey, hasTargetDescription }: SetupGatePr
         </p>
       </div>
       <a
-        href="/app/account#team"
+        href="/app/settings?tab=llm"
         className="shrink-0 flex items-center gap-1 text-xs font-medium text-amber-700 hover:text-amber-900 border border-amber-300 bg-white rounded-lg px-2.5 py-1.5 hover:bg-amber-50 transition-colors"
       >
         <Settings size={12} />
@@ -159,11 +160,47 @@ function ScoreDistributionBar({ filters }: ScoreDistributionProps) {
   );
 }
 
+// ── Pipeline funnel ───────────────────────────────────────────────────────────
+
+function PipelineFunnel({ stats }: { stats: CompanyStats }) {
+  const total = stats.total || 1;
+  const withWebsite = stats.with_website ?? 0;
+  const searched = stats.searched ?? 0;
+  const interesting = stats.review?.interesting ?? 0;
+  const confirmed = stats.review?.confirmed_proposal ?? 0;
+
+  const stages = [
+    { label: "Total", value: stats.total, color: "bg-slate-300" },
+    { label: "Website", value: withWebsite, color: "bg-blue-300" },
+    { label: "Searched", value: searched, color: "bg-indigo-400" },
+    { label: "Interesting", value: interesting, color: "bg-amber-400" },
+    { label: "Confirmed", value: confirmed, color: "bg-emerald-500" },
+  ];
+
+  return (
+    <div className="space-y-2">
+      {stages.map((s) => (
+        <div key={s.label} className="flex items-center gap-2 text-xs">
+          <span className="w-20 text-right text-slate-500 shrink-0">{s.label}</span>
+          <div className="flex-1 h-4 bg-slate-100 rounded-full overflow-hidden">
+            <div
+              className={`h-full ${s.color} rounded-full transition-all`}
+              style={{ width: `${Math.min(100, (s.value / total) * 100)}%` }}
+            />
+          </div>
+          <span className="w-16 tabular-nums text-slate-600 shrink-0">{s.value.toLocaleString()}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 // ── Guided mode ───────────────────────────────────────────────────────────────
 
 interface GuidedPickerProps {
   cantons: string[];
   taxonomy: Record<string, [string, number][]>;
+  stats: CompanyStats;
   onBrowse: (filters: CompanyFilters) => void;
   orgId: number | null;
   hasApiKey: boolean;
@@ -172,20 +209,60 @@ interface GuidedPickerProps {
 
 type IndustryMode = "category" | "cluster";
 
-function GuidedPicker({ cantons, taxonomy, onBrowse, orgId, hasApiKey, hasTargetDescription }: GuidedPickerProps) {
+const LS_KEY = "firmiq_guided_picker";
+
+function GuidedPicker({ cantons, taxonomy, stats, onBrowse, orgId, hasApiKey, hasTargetDescription }: GuidedPickerProps) {
   const [industryMode, setIndustryMode] = useState<IndustryMode>("category");
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
   const [selectedCluster, setSelectedCluster] = useState<string | null>(null);
   const [selectedCanton, setSelectedCanton] = useState<string | null>(null);
+  const [selectedNoga, setSelectedNoga] = useState<string | null>(null);
   const [selectedLegalForm, setSelectedLegalForm] = useState<string | null>(null);
   const [scoreMin, setScoreMin] = useState(0);
   const [selectedReview, setSelectedReview] = useState<string | null>(null);
   const [bulkMarking, setBulkMarking] = useState(false);
   const [bulkBanner, setBulkBanner] = useState<string | null>(null);
+  const [industrySearch, setIndustrySearch] = useState("");
+  const [showFunnel, setShowFunnel] = useState(false);
+  const didRestoreRef = useRef(false);
+
+  const { data: nogaTree = [] } = useSWR("noga-hierarchy", fetchNogaHierarchy);
+
+  // Restore last state from localStorage
+  useEffect(() => {
+    if (didRestoreRef.current) return;
+    didRestoreRef.current = true;
+    try {
+      const saved = localStorage.getItem(LS_KEY);
+      if (saved) {
+        const s = JSON.parse(saved);
+        if (s.industryMode) setIndustryMode(s.industryMode);
+        if (s.selectedCategory) setSelectedCategory(s.selectedCategory);
+        if (s.selectedCluster) setSelectedCluster(s.selectedCluster);
+        if (s.selectedCanton) setSelectedCanton(s.selectedCanton);
+        if (s.selectedNoga) setSelectedNoga(s.selectedNoga);
+        if (s.selectedLegalForm) setSelectedLegalForm(s.selectedLegalForm);
+        if (s.scoreMin !== undefined) setScoreMin(s.scoreMin);
+        if (s.selectedReview) setSelectedReview(s.selectedReview);
+      }
+    } catch { /* ignore */ }
+  }, []);
+
+  // Persist state to localStorage on change
+  useEffect(() => {
+    if (!didRestoreRef.current) return;
+    try {
+      localStorage.setItem(LS_KEY, JSON.stringify({
+        industryMode, selectedCategory, selectedCluster, selectedCanton,
+        selectedNoga, selectedLegalForm, scoreMin, selectedReview,
+      }));
+    } catch { /* ignore */ }
+  }, [industryMode, selectedCategory, selectedCluster, selectedCanton, selectedNoga, selectedLegalForm, scoreMin, selectedReview]);
 
   const aiCategories: [string, number][] = taxonomy["ai_category"] ?? [];
   const clusters: [string, number][] = taxonomy["clusters"] ?? [];
   const legalForms: [string, number][] = taxonomy["legal_forms"] ?? [];
+  const cantonCounts: Record<string, number> = Object.fromEntries((taxonomy["cantons"] ?? []) as [string, number][]);
 
   // Live count based on current guided filters
   const guidedFilters: CompanyFilters = {
@@ -196,6 +273,7 @@ function GuidedPicker({ cantons, taxonomy, onBrowse, orgId, hasApiKey, hasTarget
     ...(selectedCategory ? { ai_category: selectedCategory } : {}),
     ...(selectedCluster ? { tfidf_cluster: selectedCluster } : {}),
     ...(selectedCanton ? { canton: selectedCanton } : {}),
+    ...(selectedNoga ? { noga_code: selectedNoga } : {}),
     ...(selectedLegalForm ? { legal_form: selectedLegalForm } : {}),
     ...(scoreMin > 0 ? { min_combined_score: scoreMin } : {}),
     ...(selectedReview === "_none" ? { exclude_review_status: "interesting,potential_proposal,confirmed_proposal,rejected" } : {}),
@@ -213,6 +291,7 @@ function GuidedPicker({ cantons, taxonomy, onBrowse, orgId, hasApiKey, hasTarget
       ...(selectedCategory ? { ai_category: selectedCategory } : {}),
       ...(selectedCluster ? { tfidf_cluster: selectedCluster } : {}),
       ...(selectedCanton ? { canton: selectedCanton } : {}),
+      ...(selectedNoga ? { noga_code: selectedNoga } : {}),
       ...(selectedLegalForm ? { legal_form: selectedLegalForm } : {}),
       ...(scoreMin > 0 ? { min_combined_score: scoreMin } : {}),
       ...(selectedReview === "_none" ? { exclude_review_status: "interesting,potential_proposal,confirmed_proposal,rejected" } : {}),
@@ -258,17 +337,30 @@ function GuidedPicker({ cantons, taxonomy, onBrowse, orgId, hasApiKey, hasTarget
           <p className="text-slate-500 text-sm">
             Narrow down by industry, canton, and quality — then browse matching companies.
           </p>
+          <button
+            onClick={() => setShowFunnel(v => !v)}
+            className="inline-flex items-center gap-1.5 text-xs text-slate-400 hover:text-slate-600 mt-1"
+          >
+            <BarChart2 size={12} />
+            {showFunnel ? "Hide pipeline stats" : "Show pipeline stats"}
+          </button>
+          {showFunnel && (
+            <div className="mt-3 bg-slate-50 rounded-xl border border-slate-200 p-4 text-left">
+              <p className="text-xs font-medium text-slate-600 mb-3">Pipeline Overview</p>
+              <PipelineFunnel stats={stats} />
+            </div>
+          )}
         </div>
 
         {/* Step 1: Industry / Cluster */}
         <div className="space-y-3">
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
             <span className="flex items-center justify-center w-5 h-5 rounded-full bg-blue-600 text-white text-xs font-bold shrink-0">1</span>
             <h2 className="text-sm font-semibold text-slate-700 uppercase tracking-wide">Industry</h2>
             {/* Mode tabs */}
             <div className="flex items-center gap-0.5 bg-slate-100 rounded-md p-0.5 ml-2">
               <button
-                onClick={() => { setIndustryMode("category"); setSelectedCluster(null); }}
+                onClick={() => { setIndustryMode("category"); setSelectedCluster(null); setIndustrySearch(""); }}
                 className={cn(
                   "px-2.5 py-0.5 rounded text-xs font-medium transition-colors",
                   industryMode === "category" ? "bg-white text-slate-800 shadow-sm" : "text-slate-500 hover:text-slate-700"
@@ -277,7 +369,7 @@ function GuidedPicker({ cantons, taxonomy, onBrowse, orgId, hasApiKey, hasTarget
                 AI Category
               </button>
               <button
-                onClick={() => { setIndustryMode("cluster"); setSelectedCategory(null); }}
+                onClick={() => { setIndustryMode("cluster"); setSelectedCategory(null); setIndustrySearch(""); }}
                 className={cn(
                   "px-2.5 py-0.5 rounded text-xs font-medium transition-colors",
                   industryMode === "cluster" ? "bg-white text-slate-800 shadow-sm" : "text-slate-500 hover:text-slate-700"
@@ -286,10 +378,21 @@ function GuidedPicker({ cantons, taxonomy, onBrowse, orgId, hasApiKey, hasTarget
                 TF-IDF Cluster
               </button>
             </div>
+            {/* Inline search */}
+            <div className="relative ml-auto">
+              <Search size={12} className="absolute left-2 top-1.5 text-slate-400 pointer-events-none" />
+              <input
+                type="text"
+                value={industrySearch}
+                onChange={(e) => setIndustrySearch(e.target.value)}
+                placeholder="Search…"
+                className="pl-6 pr-2 py-1 text-xs border border-slate-200 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-300 bg-white w-36"
+              />
+            </div>
             {(selectedCategory || selectedCluster) && (
               <button
                 onClick={() => { setSelectedCategory(null); setSelectedCluster(null); }}
-                className="ml-auto text-xs text-slate-400 hover:text-slate-600 flex items-center gap-0.5"
+                className="text-xs text-slate-400 hover:text-slate-600 flex items-center gap-0.5"
               >
                 <X size={11} /> Clear
               </button>
@@ -298,24 +401,26 @@ function GuidedPicker({ cantons, taxonomy, onBrowse, orgId, hasApiKey, hasTarget
 
           {industryMode === "category" ? (
             aiCategories.length > 0 ? (
-              <div className="flex flex-wrap gap-2">
-                {aiCategories.slice(0, 24).map(([cat, count]) => (
-                  <button
-                    key={cat}
-                    onClick={() => setSelectedCategory(selectedCategory === cat ? null : cat)}
-                    className={cn(
-                      "px-3 py-1.5 rounded-full text-sm border transition-colors",
-                      selectedCategory === cat
-                        ? "bg-blue-600 text-white border-blue-600 font-medium"
-                        : "bg-white text-slate-600 border-slate-200 hover:border-blue-300 hover:text-blue-600"
-                    )}
-                  >
-                    {cat}
-                    <span className={cn("ml-1.5 text-xs", selectedCategory === cat ? "text-blue-200" : "text-slate-400")}>
-                      {count.toLocaleString()}
-                    </span>
-                  </button>
-                ))}
+              <div className="flex flex-wrap gap-2 max-h-64 overflow-y-auto">
+                {aiCategories
+                  .filter(([cat]) => !industrySearch || cat.toLowerCase().includes(industrySearch.toLowerCase()))
+                  .map(([cat, count]) => (
+                    <button
+                      key={cat}
+                      onClick={() => setSelectedCategory(selectedCategory === cat ? null : cat)}
+                      className={cn(
+                        "px-3 py-1.5 rounded-full text-sm border transition-colors",
+                        selectedCategory === cat
+                          ? "bg-blue-600 text-white border-blue-600 font-medium"
+                          : "bg-white text-slate-600 border-slate-200 hover:border-blue-300 hover:text-blue-600"
+                      )}
+                    >
+                      {cat}
+                      <span className={cn("ml-1.5 text-xs", selectedCategory === cat ? "text-blue-200" : "text-slate-400")}>
+                        {count.toLocaleString()}
+                      </span>
+                    </button>
+                  ))}
               </div>
             ) : (
               <div className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-5 text-center space-y-2">
@@ -326,36 +431,38 @@ function GuidedPicker({ cantons, taxonomy, onBrowse, orgId, hasApiKey, hasTarget
                     : "Configure your Anthropic API key in workspace settings first."}
                 </p>
                 <a
-                  href={hasApiKey ? "/app/pipeline" : "/app/account#team"}
+                  href={hasApiKey ? "/app/pipeline" : "/app/settings?tab=llm"}
                   className="inline-block text-xs text-blue-600 hover:underline"
                 >
-                  {hasApiKey ? "Go to Pipeline →" : "Go to Workspace settings →"}
+                  {hasApiKey ? "Go to Pipeline →" : "Go to Settings →"}
                 </a>
               </div>
             )
           ) : (
             clusters.length > 0 ? (
-              <div className="flex flex-wrap gap-2">
-                {clusters.slice(0, 24).map(([label, count]) => {
-                  const terms = label.split(",").map(t => t.trim()).filter(Boolean).slice(0, 3).join(", ");
-                  return (
-                    <button
-                      key={label}
-                      onClick={() => setSelectedCluster(selectedCluster === label ? null : label)}
-                      className={cn(
-                        "px-3 py-1.5 rounded-full text-sm border transition-colors",
-                        selectedCluster === label
-                          ? "bg-purple-600 text-white border-purple-600 font-medium"
-                          : "bg-white text-slate-600 border-slate-200 hover:border-purple-300 hover:text-purple-600"
-                      )}
-                    >
-                      {terms}
-                      <span className={cn("ml-1.5 text-xs", selectedCluster === label ? "text-purple-200" : "text-slate-400")}>
-                        {count.toLocaleString()}
-                      </span>
-                    </button>
-                  );
-                })}
+              <div className="flex flex-wrap gap-2 max-h-64 overflow-y-auto">
+                {clusters
+                  .filter(([label]) => !industrySearch || label.toLowerCase().includes(industrySearch.toLowerCase()))
+                  .map(([label, count]) => {
+                    const terms = label.split(",").map(t => t.trim()).filter(Boolean).slice(0, 3).join(", ");
+                    return (
+                      <button
+                        key={label}
+                        onClick={() => setSelectedCluster(selectedCluster === label ? null : label)}
+                        className={cn(
+                          "px-3 py-1.5 rounded-full text-sm border transition-colors",
+                          selectedCluster === label
+                            ? "bg-purple-600 text-white border-purple-600 font-medium"
+                            : "bg-white text-slate-600 border-slate-200 hover:border-purple-300 hover:text-purple-600"
+                        )}
+                      >
+                        {terms}
+                        <span className={cn("ml-1.5 text-xs", selectedCluster === label ? "text-purple-200" : "text-slate-400")}>
+                          {count.toLocaleString()}
+                        </span>
+                      </button>
+                    );
+                  })}
               </div>
             ) : (
               <div className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-5 text-center space-y-2">
@@ -378,30 +485,77 @@ function GuidedPicker({ cantons, taxonomy, onBrowse, orgId, hasApiKey, hasTarget
               </button>
             )}
           </div>
-          <div className="flex flex-wrap gap-1.5">
-            {cantons.map((c) => (
-              <button
-                key={c}
-                onClick={() => setSelectedCanton(selectedCanton === c ? null : c)}
-                title={CANTON_LABELS[c] ?? c}
-                className={cn(
-                  "px-2.5 py-1 rounded text-xs font-medium border transition-colors",
-                  selectedCanton === c
-                    ? "bg-blue-600 text-white border-blue-600"
-                    : "bg-white text-slate-600 border-slate-200 hover:border-blue-300 hover:text-blue-600"
-                )}
-              >
-                {c}
-              </button>
-            ))}
-          </div>
+          {/* Canton heatmap: buttons sized by relative company count */}
+          {(() => {
+            const maxCount = Math.max(1, ...cantons.map(c => cantonCounts[c] ?? 0));
+            return (
+              <div className="flex flex-wrap gap-1.5">
+                {cantons.map((c) => {
+                  const cnt = cantonCounts[c] ?? 0;
+                  const opacity = 0.2 + 0.8 * (cnt / maxCount);
+                  return (
+                    <button
+                      key={c}
+                      onClick={() => setSelectedCanton(selectedCanton === c ? null : c)}
+                      title={`${CANTON_LABELS[c] ?? c}: ${cnt.toLocaleString()} companies`}
+                      className={cn(
+                        "px-2.5 py-1 rounded text-xs font-medium border transition-colors",
+                        selectedCanton === c
+                          ? "bg-blue-600 text-white border-blue-600"
+                          : "bg-white text-slate-600 border-slate-200 hover:border-blue-300 hover:text-blue-600"
+                      )}
+                      style={selectedCanton !== c ? { backgroundColor: `rgba(59,130,246,${opacity * 0.15})` } : undefined}
+                    >
+                      {c}
+                      {cnt > 0 && <span className={cn("ml-1 text-[10px]", selectedCanton === c ? "text-blue-200" : "text-slate-400")}>{cnt >= 1000 ? `${Math.round(cnt / 1000)}k` : cnt}</span>}
+                    </button>
+                  );
+                })}
+              </div>
+            );
+          })()}
         </div>
 
-        {/* Step 3: Legal form */}
-        {legalForms.length > 0 && (
+        {/* Step 3: NOGA Industry Section */}
+        {nogaTree.length > 0 && (
           <div className="space-y-3">
             <div className="flex items-center gap-2">
               <span className="flex items-center justify-center w-5 h-5 rounded-full bg-blue-600 text-white text-xs font-bold shrink-0">3</span>
+              <h2 className="text-sm font-semibold text-slate-700 uppercase tracking-wide">NOGA Section</h2>
+              <span className="text-xs text-slate-400">Swiss industry classification</span>
+              {selectedNoga && (
+                <button onClick={() => setSelectedNoga(null)} className="ml-auto text-xs text-slate-400 hover:text-slate-600 flex items-center gap-0.5">
+                  <X size={11} /> Clear
+                </button>
+              )}
+            </div>
+            <div className="flex flex-wrap gap-1.5">
+              {nogaTree.map((node: NogaNode) => (
+                <button
+                  key={node.code}
+                  onClick={() => setSelectedNoga(selectedNoga === node.code ? null : node.code)}
+                  title={node.label}
+                  className={cn(
+                    "px-2.5 py-1 rounded text-xs font-medium border transition-colors text-left",
+                    selectedNoga === node.code
+                      ? "bg-blue-600 text-white border-blue-600"
+                      : "bg-white text-slate-600 border-slate-200 hover:border-blue-300 hover:text-blue-600"
+                  )}
+                >
+                  <span className="font-mono mr-1">{node.code}</span>
+                  <span className="hidden sm:inline">{node.label.length > 24 ? node.label.slice(0, 22) + "…" : node.label}</span>
+                  <span className={cn("ml-1 text-[10px]", selectedNoga === node.code ? "text-blue-200" : "text-slate-400")}>{node.count >= 1000 ? `${Math.round(node.count / 1000)}k` : node.count}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Step 4: Legal form */}
+        {legalForms.length > 0 && (
+          <div className="space-y-3">
+            <div className="flex items-center gap-2">
+              <span className="flex items-center justify-center w-5 h-5 rounded-full bg-blue-600 text-white text-xs font-bold shrink-0">4</span>
               <h2 className="text-sm font-semibold text-slate-700 uppercase tracking-wide">Legal Form</h2>
               {selectedLegalForm && (
                 <button onClick={() => setSelectedLegalForm(null)} className="ml-auto text-xs text-slate-400 hover:text-slate-600 flex items-center gap-0.5">
@@ -431,10 +585,10 @@ function GuidedPicker({ cantons, taxonomy, onBrowse, orgId, hasApiKey, hasTarget
           </div>
         )}
 
-        {/* Step 4: Minimum score */}
+        {/* Step 5: Minimum score */}
         <div className="space-y-3">
           <div className="flex items-center gap-2">
-            <span className="flex items-center justify-center w-5 h-5 rounded-full bg-blue-600 text-white text-xs font-bold shrink-0">4</span>
+            <span className="flex items-center justify-center w-5 h-5 rounded-full bg-blue-600 text-white text-xs font-bold shrink-0">5</span>
             <h2 className="text-sm font-semibold text-slate-700 uppercase tracking-wide">Minimum Quality Score</h2>
           </div>
           <div className="flex gap-2">
@@ -456,10 +610,10 @@ function GuidedPicker({ cantons, taxonomy, onBrowse, orgId, hasApiKey, hasTarget
           </div>
         </div>
 
-        {/* Step 5: Review status filter */}
+        {/* Step 6: Review status filter */}
         <div className="space-y-3">
           <div className="flex items-center gap-2">
-            <span className="flex items-center justify-center w-5 h-5 rounded-full bg-blue-600 text-white text-xs font-bold shrink-0">5</span>
+            <span className="flex items-center justify-center w-5 h-5 rounded-full bg-blue-600 text-white text-xs font-bold shrink-0">6</span>
             <h2 className="text-sm font-semibold text-slate-700 uppercase tracking-wide">Review Status</h2>
             {selectedReview && (
               <button onClick={() => setSelectedReview(null)} className="ml-auto text-xs text-slate-400 hover:text-slate-600 flex items-center gap-0.5">
@@ -615,6 +769,8 @@ function BrowseView({ initialFilters, initialCantons, initialStats, initialTaxon
   const [selectedCompany, setSelectedCompany] = useState<Company | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   const [batchLoading, setBatchLoading] = useState(false);
+  const [tagInput, setTagInput] = useState("");
+  const [tagLoading, setTagLoading] = useState(false);
 
   const { data: page, isLoading, mutate: mutateCompanies } = useSWR(
     ["companies", filters],
@@ -657,6 +813,25 @@ function BrowseView({ initialFilters, initialCantons, initialStats, initialTaxon
     }
   }
 
+  async function handleBulkTag(action: "add" | "remove") {
+    const tag = tagInput.trim();
+    if (!tag || selectedIds.size === 0) return;
+    setTagLoading(true);
+    try {
+      await bulkTagCompanies([...selectedIds], tag, action);
+      setTagInput("");
+      setSelectedIds(new Set());
+      mutateCompanies();
+    } finally {
+      setTagLoading(false);
+    }
+  }
+
+  async function handleInlineReview(id: number, status: string | null) {
+    await bulkUpdateCompanies([id], "review_status", status);
+    mutateCompanies();
+  }
+
   // Active filter chips summary for the browse bar
   const activeFilters: { label: string; key: string }[] = [];
   if (filters.ai_category) activeFilters.push({ label: `Industry: ${filters.ai_category}`, key: "ai_category" });
@@ -677,6 +852,10 @@ function BrowseView({ initialFilters, initialCantons, initialStats, initialTaxon
         <span><span className="font-semibold text-slate-700">{(stats?.total ?? 0).toLocaleString()}</span> total</span>
         <span>·</span>
         <span><span className="font-semibold text-slate-700">{(stats?.with_website ?? 0).toLocaleString()}</span> with website</span>
+        <span>·</span>
+        <span title="Reviewed as interesting"><span className="font-semibold text-amber-600">{(stats?.review?.interesting ?? 0).toLocaleString()}</span> interesting</span>
+        <span>·</span>
+        <span title="Confirmed proposals"><span className="font-semibold text-emerald-600">{(stats?.review?.confirmed_proposal ?? 0).toLocaleString()}</span> confirmed</span>
         {page?.total !== undefined && (
           <>
             <span>·</span>
@@ -732,10 +911,10 @@ function BrowseView({ initialFilters, initialCantons, initialStats, initialTaxon
         <div className="flex-1 flex flex-col overflow-hidden bg-white">
           <div className="flex items-center justify-between px-3 py-1 border-b border-slate-100 bg-slate-50">
             {selectedIds.size > 0 ? (
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 flex-wrap">
                 <span className="text-xs font-medium text-blue-700">{selectedIds.size} selected</span>
                 <span className="text-slate-300">|</span>
-                <span className="text-xs text-slate-500">Set review:</span>
+                <span className="text-xs text-slate-500">Review:</span>
                 {["interesting", "potential_proposal", "confirmed_proposal"].map(v => (
                   <button
                     key={v}
@@ -752,6 +931,30 @@ function BrowseView({ initialFilters, initialCantons, initialStats, initialTaxon
                   className="px-2 py-0.5 text-xs rounded border border-slate-200 bg-white hover:bg-red-50 hover:border-red-300 hover:text-red-700 disabled:opacity-50 transition-colors"
                 >
                   Clear
+                </button>
+                <span className="text-slate-300">|</span>
+                <span className="text-xs text-slate-500">Tag:</span>
+                <input
+                  type="text"
+                  value={tagInput}
+                  onChange={(e) => setTagInput(e.target.value)}
+                  placeholder="tag name…"
+                  className="px-2 py-0.5 text-xs border border-slate-200 rounded focus:outline-none focus:ring-1 focus:ring-blue-300 w-24"
+                  onKeyDown={(e) => { if (e.key === "Enter") handleBulkTag("add"); }}
+                />
+                <button
+                  disabled={tagLoading || !tagInput.trim()}
+                  onClick={() => handleBulkTag("add")}
+                  className="px-2 py-0.5 text-xs rounded border border-slate-200 bg-white hover:bg-emerald-50 hover:border-emerald-300 hover:text-emerald-700 disabled:opacity-50 transition-colors"
+                >
+                  +Tag
+                </button>
+                <button
+                  disabled={tagLoading || !tagInput.trim()}
+                  onClick={() => handleBulkTag("remove")}
+                  className="px-2 py-0.5 text-xs rounded border border-slate-200 bg-white hover:bg-red-50 hover:border-red-300 hover:text-red-700 disabled:opacity-50 transition-colors"
+                >
+                  −Tag
                 </button>
                 <button onClick={() => setSelectedIds(new Set())} className="ml-1 text-xs text-slate-400 hover:text-slate-600">
                   <X size={12} />
@@ -788,6 +991,7 @@ function BrowseView({ initialFilters, initialCantons, initialStats, initialTaxon
             selectedIds={selectedIds}
             onToggleSelect={toggleSelect}
             onSelectAll={selectAll}
+            onUpdateReview={handleInlineReview}
           />
           <Pagination
             page={page?.page ?? 1}
@@ -885,6 +1089,7 @@ export function ExplorerClient({ initialCantons, initialStats, initialTaxonomy }
         <GuidedPicker
           cantons={initialCantons}
           taxonomy={initialTaxonomy}
+          stats={initialStats}
           onBrowse={handleBrowse}
           orgId={orgId}
           hasApiKey={hasApiKey}

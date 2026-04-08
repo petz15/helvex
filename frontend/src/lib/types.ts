@@ -89,6 +89,7 @@ export interface CompanyStats {
   searches_today: number;
   review: Record<string, number>;
   contact: Record<string, number>;
+  score_distribution?: Record<string, number>;
 }
 
 export interface CompanyFilters {

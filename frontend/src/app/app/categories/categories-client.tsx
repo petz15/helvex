@@ -1,6 +1,8 @@
 "use client";
+import { useState, useMemo } from "react";
 import Link from "next/link";
 import useSWR from "swr";
+import { ChevronRight, ChevronDown, Download, ThumbsDown, Search } from "lucide-react";
 import {
   BarChart,
   Bar,
@@ -11,7 +13,7 @@ import {
   Cell,
 } from "recharts";
 import { cn } from "@/lib/utils";
-import { fetchTaxonomy } from "@/lib/api";
+import { fetchTaxonomy, fetchNogaHierarchy, fetchCurrentUser, fetchOrgSettings, saveOrgWorkspaceSettings, type NogaNode } from "@/lib/api";
 
 // ── Colour helpers ────────────────────────────────────────────────────────────
 
@@ -39,26 +41,130 @@ function CategoryTooltip({ active, payload }: { active?: boolean; payload?: { va
 
 // ── Section wrapper ───────────────────────────────────────────────────────────
 
-function Section({ title, subtitle, children }: { title: string; subtitle?: string; children: React.ReactNode }) {
+function Section({ title, subtitle, children, searchValue, onSearchChange }: {
+  title: string;
+  subtitle?: string;
+  children: React.ReactNode;
+  searchValue?: string;
+  onSearchChange?: (v: string) => void;
+}) {
   return (
     <section className="space-y-4">
-      <div>
-        <h2 className="text-lg font-semibold text-slate-800">{title}</h2>
-        {subtitle && <p className="text-sm text-slate-500 mt-0.5">{subtitle}</p>}
+      <div className="flex items-center justify-between gap-4 flex-wrap">
+        <div>
+          <h2 className="text-lg font-semibold text-slate-800">{title}</h2>
+          {subtitle && <p className="text-sm text-slate-500 mt-0.5">{subtitle}</p>}
+        </div>
+        {onSearchChange !== undefined && (
+          <div className="relative">
+            <Search size={13} className="absolute left-2.5 top-2 text-slate-400 pointer-events-none" />
+            <input
+              type="text"
+              value={searchValue ?? ""}
+              onChange={(e) => onSearchChange(e.target.value)}
+              placeholder="Filter…"
+              className="pl-7 pr-3 py-1.5 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-300 bg-white w-48"
+            />
+          </div>
+        )}
       </div>
       {children}
     </section>
   );
 }
 
+// ── Export helper ─────────────────────────────────────────────────────────────
+
+function ExportButton({ filterKey, filterValue, label }: { filterKey: string; filterValue: string; label: string }) {
+  return (
+    <a
+      href={`/api/v1/companies/export.csv?${filterKey}=${encodeURIComponent(filterValue)}`}
+      className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs text-slate-400 hover:text-emerald-600 hover:bg-emerald-50 transition-colors"
+      title={`Export ${label} as CSV`}
+    >
+      <Download size={11} />
+    </a>
+  );
+}
+
+// ── NOGA tree node ────────────────────────────────────────────────────────────
+
+function NogaTreeNode({ node, depth = 0, filterQ }: { node: NogaNode; depth?: number; filterQ: string }) {
+  const [expanded, setExpanded] = useState(depth === 0 && node.children.length > 0 && node.count > 200);
+  const hasChildren = node.children.length > 0;
+
+  const matchesFilter = !filterQ ||
+    node.code.toLowerCase().includes(filterQ.toLowerCase()) ||
+    node.label.toLowerCase().includes(filterQ.toLowerCase());
+
+  const childrenMatchFilter = filterQ
+    ? node.children.some((c) => nodeMatchesFilter(c, filterQ))
+    : true;
+
+  if (!matchesFilter && !childrenMatchFilter) return null;
+
+  return (
+    <div className={cn("", depth > 0 && "ml-5 border-l border-slate-100 pl-3")}>
+      <div className="flex items-center gap-1.5 py-1 group">
+        {hasChildren ? (
+          <button
+            type="button"
+            onClick={() => setExpanded((e) => !e)}
+            className="shrink-0 text-slate-400 hover:text-slate-700 transition-colors"
+          >
+            {expanded ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+          </button>
+        ) : (
+          <span className="w-[13px] shrink-0" />
+        )}
+        <Link
+          href={`/app/search?noga_code=${encodeURIComponent(node.code)}`}
+          className="text-sm text-slate-700 hover:text-blue-600 hover:underline transition-colors"
+        >
+          <span className="font-mono text-xs text-slate-400 mr-1.5">{node.code}</span>
+          {node.label}
+        </Link>
+        <span className="ml-1 text-xs text-slate-400 tabular-nums">{node.count.toLocaleString()}</span>
+        <ExportButton filterKey="noga_code" filterValue={node.code} label={node.label} />
+      </div>
+      {expanded && hasChildren && (
+        <div>
+          {node.children.map((child) => (
+            <NogaTreeNode key={child.code} node={child} depth={depth + 1} filterQ={filterQ} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function nodeMatchesFilter(node: NogaNode, q: string): boolean {
+  if (node.code.toLowerCase().includes(q.toLowerCase())) return true;
+  if (node.label.toLowerCase().includes(q.toLowerCase())) return true;
+  return node.children.some((c) => nodeMatchesFilter(c, q));
+}
+
 // ── Main component ────────────────────────────────────────────────────────────
 
 export function CategoriesClient() {
   const { data: taxonomy, isLoading, error } = useSWR("taxonomy", fetchTaxonomy);
+  const { data: nogaTree = [], isLoading: nogaLoading } = useSWR("noga-hierarchy", fetchNogaHierarchy);
+  const { data: me } = useSWR("me", fetchCurrentUser);
+  const orgId = me?.org?.id;
+  const isAdmin = me?.org_role === "admin" || me?.org_role === "owner" || me?.is_superadmin;
+  const { data: orgSettings = {}, mutate: reloadOrgSettings } = useSWR(
+    orgId ? ["org-settings", orgId] : null,
+    () => fetchOrgSettings(orgId!),
+  );
+
   const categories: [string, number][] = taxonomy?.categories ?? [];
   const keywords: [string, number][] = taxonomy?.keywords ?? [];
-  const nogaCodes: [string, number][] = taxonomy?.noga_codes ?? [];
-  const nogaLevels: [string, number][] = taxonomy?.noga_levels ?? [];
+
+  const [categorySearch, setCategorySearch] = useState("");
+  const [keywordSearch, setKeywordSearch] = useState("");
+  const [nogaSearch, setNogaSearch] = useState("");
+  const [showAllCategories, setShowAllCategories] = useState(false);
+  const [markingIrrelevant, setMarkingIrrelevant] = useState<string | null>(null);
 
   if (isLoading) return <div className="max-w-7xl mx-auto px-4 py-6 text-sm text-slate-400">Loading…</div>;
   if (error) return <div className="max-w-7xl mx-auto px-4 py-6 text-sm text-red-500">Failed to load taxonomy data.</div>;
@@ -66,15 +172,38 @@ export function CategoriesClient() {
   const maxCategoryCount = categories[0]?.[1] ?? 1;
   const maxKeywordCount = keywords[0]?.[1] ?? 1;
 
-  // Prepare recharts data
-  const categoryData = categories.slice(0, 30).map(([name, count]) => ({ name, count }));
+  const filteredCategories = categorySearch
+    ? categories.filter(([name]) => name.toLowerCase().includes(categorySearch.toLowerCase()))
+    : categories;
+  const displayedCategories = showAllCategories ? filteredCategories : filteredCategories.slice(0, 30);
+  const categoryData = displayedCategories.slice(0, 50).map(([name, count]) => ({ name, count }));
 
-  // Keyword font-size tiers based on relative frequency
+  const filteredKeywords = keywordSearch
+    ? keywords.filter(([kw]) => kw.toLowerCase().includes(keywordSearch.toLowerCase()))
+    : keywords;
+
   function kwSize(count: number): string {
     const ratio = count / maxKeywordCount;
     if (ratio >= 0.6) return "text-base font-semibold";
     if (ratio >= 0.3) return "text-sm font-medium";
     return "text-xs";
+  }
+
+  async function markCategoryIrrelevant(category: string) {
+    if (!orgId || !isAdmin) return;
+    setMarkingIrrelevant(category);
+    try {
+      const current = (orgSettings as Record<string, string>).claude_classify_categories ?? "";
+      const lines = current.split("\n").map((l) => l.trim()).filter(Boolean);
+      const excl = `!${category}`;
+      if (!lines.includes(excl)) {
+        lines.push(excl);
+        await saveOrgWorkspaceSettings(orgId, { claude_classify_categories: lines.join("\n") });
+        await reloadOrgSettings();
+      }
+    } finally {
+      setMarkingIrrelevant(null);
+    }
   }
 
   return (
@@ -89,12 +218,14 @@ export function CategoriesClient() {
       {/* ── AI Categories ──────────────────────────────────────────────── */}
       <Section
         title="AI Categories"
-        subtitle={`${categories.length} distinct categories assigned by Claude — top ${Math.min(categories.length, 30)} shown`}
+        subtitle={`${categories.length} distinct categories assigned by Claude`}
+        searchValue={categorySearch}
+        onSearchChange={setCategorySearch}
       >
         {categories.length === 0 ? (
           <p className="text-sm text-slate-400">No categories found. Run an AI classification job first.</p>
         ) : (
-          <div className="bg-white rounded-xl border border-slate-200 p-5 shadow-sm">
+          <div className="bg-white rounded-xl border border-slate-200 p-5 shadow-sm space-y-3">
             <ResponsiveContainer width="100%" height={Math.max(300, categoryData.length * 32)}>
               <BarChart
                 data={categoryData}
@@ -102,31 +233,51 @@ export function CategoriesClient() {
                 margin={{ top: 0, right: 60, left: 0, bottom: 0 }}
                 barCategoryGap="20%"
               >
-                <XAxis
-                  type="number"
-                  tick={{ fontSize: 11, fill: "#94a3b8" }}
-                  axisLine={false}
-                  tickLine={false}
-                  domain={[0, maxCategoryCount]}
-                />
-                <YAxis
-                  type="category"
-                  dataKey="name"
-                  width={180}
-                  tick={{ fontSize: 12, fill: "#475569" }}
-                  axisLine={false}
-                  tickLine={false}
-                />
+                <XAxis type="number" tick={{ fontSize: 11, fill: "#94a3b8" }} axisLine={false} tickLine={false} domain={[0, maxCategoryCount]} />
+                <YAxis type="category" dataKey="name" width={180} tick={{ fontSize: 12, fill: "#475569" }} axisLine={false} tickLine={false} />
                 <Tooltip content={<CategoryTooltip />} cursor={{ fill: "#f1f5f9" }} />
                 <Bar dataKey="count" radius={[0, 4, 4, 0]} onClick={(d: { name?: string }) => {
                   if (d.name) window.location.href = `/app/search?ai_category=${encodeURIComponent(d.name)}`;
                 }} style={{ cursor: "pointer" }}>
-                  {categoryData.map((_, i) => (
-                    <Cell key={i} fill={barColor(i)} fillOpacity={0.85} />
-                  ))}
+                  {categoryData.map((_, i) => <Cell key={i} fill={barColor(i)} fillOpacity={0.85} />)}
                 </Bar>
               </BarChart>
             </ResponsiveContainer>
+
+            {/* Per-category actions row */}
+            {orgId && isAdmin && (
+              <div className="border-t border-slate-100 pt-3 space-y-1">
+                <p className="text-xs text-slate-400 mb-2">Mark a category as irrelevant for your org (appends to classification exclusion list):</p>
+                <div className="flex flex-wrap gap-2">
+                  {filteredCategories.slice(0, 50).map(([name, count]) => (
+                    <div key={name} className="inline-flex items-center gap-1 border border-slate-200 rounded-full px-2 py-0.5 text-xs bg-slate-50">
+                      <Link href={`/app/search?ai_category=${encodeURIComponent(name)}`} className="text-slate-700 hover:text-blue-600 hover:underline">{name}</Link>
+                      <span className="text-slate-400">{count}</span>
+                      <ExportButton filterKey="ai_category" filterValue={name} label={name} />
+                      <button
+                        type="button"
+                        title="Mark irrelevant for this org"
+                        disabled={markingIrrelevant === name}
+                        onClick={() => markCategoryIrrelevant(name)}
+                        className="text-slate-300 hover:text-red-500 transition-colors disabled:opacity-50"
+                      >
+                        <ThumbsDown size={10} />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {filteredCategories.length > 30 && (
+              <button
+                type="button"
+                onClick={() => setShowAllCategories((v) => !v)}
+                className="text-xs text-blue-600 hover:underline"
+              >
+                {showAllCategories ? "Show less" : `Show all ${filteredCategories.length} categories`}
+              </button>
+            )}
           </div>
         )}
       </Section>
@@ -135,80 +286,51 @@ export function CategoriesClient() {
       <Section
         title="Purpose Keywords"
         subtitle={`Top ${keywords.length} TF-IDF keywords extracted from company purpose texts`}
+        searchValue={keywordSearch}
+        onSearchChange={setKeywordSearch}
       >
         {keywords.length === 0 ? (
           <p className="text-sm text-slate-400">No keywords found. Run the pipeline job to extract them.</p>
         ) : (
           <div className="bg-white rounded-xl border border-slate-200 p-5 shadow-sm">
             <div className="flex flex-wrap gap-2">
-              {keywords.map(([kw, count]) => (
-                <Link
-                  key={kw}
-                  href={`/app/search?purpose_keywords=${encodeURIComponent(kw)}`}
-                  className={cn(
-                    "inline-flex items-center gap-1 px-2.5 py-1 rounded-full border transition-colors",
-                    "bg-blue-50 text-blue-700 border-blue-100 hover:bg-blue-100 hover:border-blue-300",
-                    kwSize(count),
-                  )}
-                >
-                  {kw}
-                  <span className="text-blue-400 text-xs tabular-nums">{count}</span>
-                </Link>
+              {filteredKeywords.map(([kw, count]) => (
+                <div key={kw} className="inline-flex items-center gap-1">
+                  <Link
+                    href={`/app/search?purpose_keywords=${encodeURIComponent(kw)}`}
+                    className={cn(
+                      "inline-flex items-center gap-1 px-2.5 py-1 rounded-full border transition-colors",
+                      "bg-blue-50 text-blue-700 border-blue-100 hover:bg-blue-100 hover:border-blue-300",
+                      kwSize(count),
+                    )}
+                  >
+                    {kw}
+                    <span className="text-blue-400 text-xs tabular-nums">{count}</span>
+                  </Link>
+                  <ExportButton filterKey="purpose_keywords" filterValue={kw} label={kw} />
+                </div>
               ))}
             </div>
           </div>
         )}
       </Section>
 
-      {/* ── NOGA Codes ─────────────────────────────────────────────────── */}
+      {/* ── NOGA Hierarchy ─────────────────────────────────────────────── */}
       <Section
-        title="NOGA Codes"
-        subtitle={`${nogaCodes.length} classified NOGA codes — click to filter dashboard`}
+        title="NOGA Classification"
+        subtitle="Swiss industry classification — aggregated counts include all sub-levels. Click any code to filter."
+        searchValue={nogaSearch}
+        onSearchChange={setNogaSearch}
       >
-        {nogaCodes.length === 0 ? (
+        {nogaLoading ? (
+          <p className="text-sm text-slate-400">Loading NOGA hierarchy…</p>
+        ) : nogaTree.length === 0 ? (
           <p className="text-sm text-slate-400">No NOGA classifications found yet.</p>
         ) : (
           <div className="bg-white rounded-xl border border-slate-200 p-5 shadow-sm">
-            <div className="flex flex-wrap gap-2">
-              {nogaCodes.map(([entry, count]) => {
-                const code = entry.split(" — ")[0]?.trim() || entry;
-                return (
-                  <Link
-                    key={entry}
-                    href={`/app/search?noga_code=${encodeURIComponent(code)}`}
-                    className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full border bg-emerald-50 text-emerald-700 border-emerald-100 hover:bg-emerald-100 hover:border-emerald-300 text-xs"
-                  >
-                    {entry}
-                    <span className="text-emerald-500 tabular-nums">{count}</span>
-                  </Link>
-                );
-              })}
-            </div>
-          </div>
-        )}
-      </Section>
-
-      {/* ── NOGA Levels ────────────────────────────────────────────────── */}
-      <Section
-        title="NOGA Levels"
-        subtitle={`${nogaLevels.length} NOGA hierarchy levels represented in your data`}
-      >
-        {nogaLevels.length === 0 ? (
-          <p className="text-sm text-slate-400">No NOGA levels found yet.</p>
-        ) : (
-          <div className="bg-white rounded-xl border border-slate-200 p-5 shadow-sm">
-            <div className="flex flex-wrap gap-2">
-              {nogaLevels.map(([level, count]) => (
-                <Link
-                  key={level}
-                  href={`/app/search?noga_level=${encodeURIComponent(level)}`}
-                  className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full border bg-teal-50 text-teal-700 border-teal-100 hover:bg-teal-100 hover:border-teal-300 text-xs"
-                >
-                  {level}
-                  <span className="text-teal-500 tabular-nums">{count}</span>
-                </Link>
-              ))}
-            </div>
+            {nogaTree.map((root) => (
+              <NogaTreeNode key={root.code} node={root} depth={0} filterQ={nogaSearch} />
+            ))}
           </div>
         )}
       </Section>
