@@ -211,6 +211,46 @@ export async function fetchAdminOrgPaymentTransactions(
   return res.json();
 }
 
+export async function adminAdjustOrgCredits(
+  orgId: number,
+  amount: number,
+  adjustmentType: "grant" | "deduct",
+  reason: string,
+): Promise<void> {
+  const res = await fetch(`/api/v1/admin/orgs/${orgId}/credits`, {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ amount, adjustment_type: adjustmentType, reason }),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error((body as { detail?: string }).detail ?? "Failed to adjust credits");
+  }
+}
+
+export async function adminRefundTransaction(
+  txId: number,
+  amountChf: number,
+  reason: string,
+): Promise<AdminPaymentTransaction> {
+  const res = await fetch(`/api/v1/admin/payment-transactions/${txId}/refund`, {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ amount_chf: amountChf, reason }),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error((body as { detail?: string }).detail ?? "Refund failed");
+  }
+  return res.json();
+}
+
+export function getPaymentInvoiceUrl(paymentId: number): string {
+  return `/api/v1/billing/payments/${paymentId}/invoice`;
+}
+
 export interface BillingAddressPayload {
   first_name: string;
   last_name: string;
@@ -1138,6 +1178,8 @@ export interface AdminOrg {
   slug: string;
   tier: string;
   member_count: number;
+  credits_balance: number;
+  credits_unlimited: boolean;
   created_at: string;
 }
 

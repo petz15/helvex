@@ -52,6 +52,9 @@ jobs:
     permissions:
       contents: read
       packages: write
+    env:
+      USE_QEMU: ${{ vars.BUILD_QEMU_BACKEND == 'true' }}
+      BUILD_PLATFORMS: ${{ vars.BUILD_QEMU_BACKEND == 'true' && 'linux/amd64,linux/arm64' || 'linux/amd64' }}
     steps:
       - uses: actions/checkout@v5
 
@@ -65,12 +68,17 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
+      - name: Set up QEMU
+        if: env.USE_QEMU == 'true'
+        uses: docker/setup-qemu-action@v3
+
       - name: Build and push backend
         uses: docker/build-push-action@v6
         with:
           context: .
           push: true
           provenance: false
+          platforms: ${{ env.BUILD_PLATFORMS }}
           build-args: |
             INSTALL_SPACY_MODEL=false
             BUILD_GEOCODING_DB=false
@@ -89,6 +97,9 @@ jobs:
     permissions:
       contents: read
       packages: write
+    env:
+      USE_QEMU: ${{ vars.BUILD_QEMU_ML_BASE == 'true' || vars.BUILD_QEMU_ML == 'true' }}
+      BUILD_PLATFORMS: ${{ (vars.BUILD_QEMU_ML_BASE == 'true' || vars.BUILD_QEMU_ML == 'true') && 'linux/amd64,linux/arm64' || 'linux/amd64' }}
     steps:
       - uses: actions/checkout@v5
 
@@ -102,6 +113,10 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
+      - name: Set up QEMU
+        if: env.USE_QEMU == 'true'
+        uses: docker/setup-qemu-action@v3
+
       - name: Build and push ml worker
         uses: docker/build-push-action@v6
         with:
@@ -109,6 +124,7 @@ jobs:
           file: Dockerfile.ml
           push: true
           provenance: false
+          platforms: ${{ env.BUILD_PLATFORMS }}
           tags: |
             ghcr.io/${{ github.repository }}-ml:dev
             ghcr.io/${{ github.repository }}-ml:${{ github.sha }}
@@ -124,6 +140,9 @@ jobs:
     permissions:
       contents: read
       packages: write
+    env:
+      USE_QEMU: ${{ vars.BUILD_QEMU_FRONTEND == 'true' }}
+      BUILD_PLATFORMS: ${{ vars.BUILD_QEMU_FRONTEND == 'true' && 'linux/amd64,linux/arm64' || 'linux/amd64' }}
     steps:
       - uses: actions/checkout@v5
 
@@ -137,12 +156,17 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
+      - name: Set up QEMU
+        if: env.USE_QEMU == 'true'
+        uses: docker/setup-qemu-action@v3
+
       - name: Build and push frontend
         uses: docker/build-push-action@v6
         with:
           context: ./frontend
           push: true
           provenance: false
+          platforms: ${{ env.BUILD_PLATFORMS }}
           tags: |
             ghcr.io/${{ github.repository }}-frontend:dev
             ghcr.io/${{ github.repository }}-frontend:${{ github.sha }}

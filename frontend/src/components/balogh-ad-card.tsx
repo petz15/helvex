@@ -18,20 +18,39 @@ export function BaloghAdCard({ className = "" }: BaloghAdCardProps) {
   if (hasNoAds({ tier: org.tier, customFeatures: org.custom_features })) return null;
 
   return (
-    <div className={`rounded-lg border border-slate-200 bg-white p-4 shadow-sm ${className}`}>
-      <div className="flex flex-col gap-3">
-        <div>
-          <p className="text-xs text-slate-400 uppercase tracking-wide font-medium">Powered by</p>
-          <h3 className="text-sm font-semibold text-slate-900 mt-0.5">Balogh Consulting</h3>
-          <p className="mt-1 text-xs text-slate-600">Value first — you decide what it's worth.</p>
+    <div className={`overflow-hidden rounded-xl border border-blue-200 bg-gradient-to-br from-blue-50 to-indigo-50 shadow-sm ${className}`}>
+      {/* Accent bar */}
+      <div className="h-1 w-full bg-gradient-to-r from-blue-500 to-indigo-500" />
+      <div className="p-5 flex flex-col gap-4">
+        {/* Header */}
+        <div className="flex items-center gap-3">
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-blue-600 text-white font-bold text-sm shadow-sm">
+            BC
+          </div>
+          <div>
+            <div className="flex items-center gap-1.5">
+              <span className="font-semibold text-slate-900">Balogh Consulting</span>
+              <span className="rounded-full bg-blue-100 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-blue-700">
+                Sponsor
+              </span>
+            </div>
+            <p className="text-xs text-slate-500 mt-0.5">Business consulting · Zurich</p>
+          </div>
         </div>
+
+        {/* Body */}
+        <p className="text-sm text-slate-700 leading-relaxed">
+          Value first — you decide what it's worth.
+        </p>
+
+        {/* CTA */}
         <Link
           href="https://balogh-consulting.ch"
           target="_blank"
           rel="noopener noreferrer"
-          className="inline-flex items-center gap-1 text-xs font-medium text-blue-600 hover:text-blue-700 hover:underline"
+          className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-blue-700 transition-colors"
         >
-          Learn more →
+          Visit balogh-consulting.ch →
         </Link>
       </div>
     </div>

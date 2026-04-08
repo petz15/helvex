@@ -15,6 +15,7 @@ import {
   setOrgDefaultPaymentUser,
   createWorldlineCardRegistration,
   parseBillingAddressJson,
+  getPaymentInvoiceUrl,
   type BillingAddressPayload,
   type CreditTransaction,
   type PaymentRecord,
@@ -554,15 +555,27 @@ function PaymentHistory() {
                   )}
                 </td>
                 <td className="px-4 py-2.5 text-right">
-                  {tx.status === "pending" && (
-                    <button
-                      onClick={() => handleCancel(tx.id)}
-                      disabled={cancelingId !== null}
-                      className="rounded-lg border border-slate-200 px-2 py-1 text-xs text-slate-700 hover:bg-slate-100 disabled:opacity-60"
-                    >
-                      {cancelingId === tx.id ? "Cancelling..." : "Cancel"}
-                    </button>
-                  )}
+                  <div className="flex items-center justify-end gap-2">
+                    {(tx.status === "captured" || tx.status === "authorized") && (
+                      <a
+                        href={getPaymentInvoiceUrl(tx.id)}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="rounded-lg border border-slate-200 px-2 py-1 text-xs text-slate-700 hover:bg-slate-100"
+                      >
+                        Invoice
+                      </a>
+                    )}
+                    {tx.status === "pending" && (
+                      <button
+                        onClick={() => handleCancel(tx.id)}
+                        disabled={cancelingId !== null}
+                        className="rounded-lg border border-slate-200 px-2 py-1 text-xs text-slate-700 hover:bg-slate-100 disabled:opacity-60"
+                      >
+                        {cancelingId === tx.id ? "Cancelling..." : "Cancel"}
+                      </button>
+                    )}
+                  </div>
                 </td>
               </tr>
             ))}

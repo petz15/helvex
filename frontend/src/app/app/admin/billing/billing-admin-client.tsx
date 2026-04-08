@@ -3,9 +3,9 @@ import { useState, useCallback } from "react";
 import useSWR from "swr";
 import {
   Loader2, ChevronLeft, ChevronRight, CheckCircle2, XCircle, Clock,
-  AlertCircle, CreditCard, RefreshCw,
+  AlertCircle, CreditCard, RefreshCw, RotateCcw,
 } from "lucide-react";
-import { fetchAdminPaymentTransactions, type AdminPaymentTransaction } from "@/lib/api";
+import { fetchAdminPaymentTransactions, adminRefundTransaction, type AdminPaymentTransaction } from "@/lib/api";
 
 const STATUS_META: Record<string, { label: string; cls: string; icon: React.ReactNode }> = {
   captured:   { label: "Captured",  cls: "bg-emerald-50 text-emerald-700 border-emerald-200",  icon: <CheckCircle2 size={12} /> },
@@ -47,7 +47,98 @@ function fmtChf(v: number | null) {
   return `CHF ${v.toFixed(2)}`;
 }
 
-function DetailDrawer({ tx, onClose }: { tx: AdminPaymentTransaction; onClose: () => void }) {
+function RefundPanel({ tx, onRefunded }: { tx: AdminPaymentTransaction; onRefunded: (updated: AdminPaymentTransaction) => void }) {
+  const [open, setOpen] = useState(false);
+  const [amount, setAmount] = useState(tx.amount_chf.toFixed(2));
+  const [reason, setReason] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const canRefund = (tx.status === "captured" || tx.status === "authorized")
+    && tx.provider === "worldline"
+    && !tx.refunded_at;
+
+  if (!canRefund) return null;
+
+  async function handleRefund() {
+    const amt = parseFloat(amount);
+    if (isNaN(amt) || amt <= 0) { setError("Enter a valid amount"); return; }
+    if (amt > tx.amount_chf) { setError(`Cannot exceed CHF ${tx.amount_chf.toFixed(2)}`); return; }
+    if (!reason.trim()) { setError("Reason is required"); return; }
+    setLoading(true);
+    setError(null);
+    try {
+      const updated = await adminRefundTransaction(tx.id, amt, reason.trim());
+      onRefunded(updated);
+      setOpen(false);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Refund failed");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  if (!open) {
+    return (
+      <button
+        onClick={() => setOpen(true)}
+        className="mt-4 flex items-center gap-1.5 text-xs font-medium text-amber-700 border border-amber-300 bg-amber-50 rounded-lg px-3 py-2 hover:bg-amber-100 transition-colors"
+      >
+        <RotateCcw size={12} /> Issue Refund
+      </button>
+    );
+  }
+
+  return (
+    <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 p-4 space-y-3">
+      <div className="text-xs font-semibold text-amber-800 uppercase tracking-wide">Issue Refund</div>
+      <div className="space-y-2">
+        <label className="block">
+          <span className="text-xs text-slate-500">Amount (CHF, max {tx.amount_chf.toFixed(2)})</span>
+          <input
+            type="number"
+            step="0.01"
+            min="0.01"
+            max={tx.amount_chf}
+            value={amount}
+            onChange={(e) => setAmount(e.target.value)}
+            className="mt-1 block w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-300"
+          />
+        </label>
+        <label className="block">
+          <span className="text-xs text-slate-500">Reason (required)</span>
+          <input
+            type="text"
+            value={reason}
+            onChange={(e) => setReason(e.target.value)}
+            placeholder="e.g. Customer requested cancellation"
+            className="mt-1 block w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-300"
+          />
+        </label>
+      </div>
+      {error && <p className="text-xs text-red-600">{error}</p>}
+      <div className="flex gap-2">
+        <button
+          onClick={handleRefund}
+          disabled={loading}
+          className="rounded-lg bg-amber-600 text-white px-3 py-1.5 text-xs font-medium hover:bg-amber-700 disabled:opacity-60"
+        >
+          {loading ? <Loader2 size={12} className="animate-spin inline" /> : "Confirm Refund"}
+        </button>
+        <button
+          onClick={() => { setOpen(false); setError(null); }}
+          className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs text-slate-600 hover:bg-slate-100"
+        >
+          Cancel
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function DetailDrawer({ tx: initialTx, onClose, onMutate }: { tx: AdminPaymentTransaction; onClose: () => void; onMutate: () => void }) {
+  const [tx, setTx] = useState(initialTx);
+
   const rows: [string, React.ReactNode][] = [
     ["ID",              tx.id],
     ["Org ID",          tx.org_id],
@@ -104,6 +195,13 @@ function DetailDrawer({ tx, onClose }: { tx: AdminPaymentTransaction; onClose: (
               </div>
             ))}
           </dl>
+          <RefundPanel
+            tx={tx}
+            onRefunded={(updated) => {
+              setTx(updated);
+              onMutate();
+            }}
+          />
         </div>
       </div>
     </div>
@@ -146,7 +244,7 @@ export function BillingAdminClient() {
 
   return (
     <div className="p-6 space-y-5">
-      {selected && <DetailDrawer tx={selected} onClose={() => setSelected(null)} />}
+      {selected && <DetailDrawer tx={selected} onClose={() => setSelected(null)} onMutate={() => mutate()} />}
 
       <div className="flex items-start justify-between gap-4">
         <div>

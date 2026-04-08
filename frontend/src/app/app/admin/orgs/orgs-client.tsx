@@ -1,12 +1,13 @@
 "use client";
 import { useState, useCallback } from "react";
 import useSWR from "swr";
-import { Search, Loader2, Trash2, ChevronLeft, ChevronRight, ExternalLink } from "lucide-react";
+import { Search, Loader2, Trash2, ChevronLeft, ChevronRight, ExternalLink, Coins } from "lucide-react";
 import {
   fetchAdminOrgs,
   fetchAdminTiers,
   updateAdminOrg,
   deleteAdminOrg,
+  adminAdjustOrgCredits,
   type BillingTier,
   type AdminOrg,
 } from "@/lib/api";
@@ -29,12 +30,109 @@ const TIER_COLORS: Record<string, string> = {
   custom: "bg-amber-100 text-amber-800",
 };
 
+function CreditModal({ org, onClose, onSuccess }: { org: AdminOrg; onClose: () => void; onSuccess: (msg: string) => void }) {
+  const [tab, setTab] = useState<"grant" | "deduct">("grant");
+  const [amount, setAmount] = useState("");
+  const [reason, setReason] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function handleSubmit() {
+    const amt = parseInt(amount, 10);
+    if (isNaN(amt) || amt < 1) { setError("Enter a positive integer amount"); return; }
+    if (!reason.trim()) { setError("Reason is required"); return; }
+    setLoading(true);
+    setError(null);
+    try {
+      await adminAdjustOrgCredits(org.id, amt, tab, reason.trim());
+      onSuccess(`${tab === "grant" ? "Granted" : "Deducted"} ${amt.toLocaleString()} credits ${tab === "grant" ? "to" : "from"} ${org.name}`);
+      onClose();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center">
+      <div className="absolute inset-0 bg-black/30" onClick={onClose} />
+      <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-sm mx-4 overflow-hidden">
+        <div className="px-5 py-4 border-b border-slate-200 flex items-center justify-between">
+          <div>
+            <div className="font-semibold text-slate-800">Adjust Credits</div>
+            <div className="text-xs text-slate-400 mt-0.5">{org.name}</div>
+          </div>
+          <button onClick={onClose} className="text-slate-400 hover:text-slate-600 text-xl leading-none">×</button>
+        </div>
+        <div className="p-5 space-y-4">
+          {/* Tab switcher */}
+          <div className="flex rounded-lg border border-slate-200 overflow-hidden text-sm font-medium">
+            <button
+              onClick={() => setTab("grant")}
+              className={`flex-1 py-2 transition-colors ${tab === "grant" ? "bg-emerald-600 text-white" : "text-slate-500 hover:bg-slate-50"}`}
+            >
+              Grant
+            </button>
+            <button
+              onClick={() => setTab("deduct")}
+              className={`flex-1 py-2 transition-colors ${tab === "deduct" ? "bg-red-600 text-white" : "text-slate-500 hover:bg-slate-50"}`}
+            >
+              Deduct
+            </button>
+          </div>
+
+          <label className="block">
+            <span className="text-xs text-slate-500 font-medium">Credits (integer)</span>
+            <input
+              type="number"
+              min={1}
+              step={1}
+              value={amount}
+              onChange={(e) => setAmount(e.target.value)}
+              placeholder="e.g. 10000"
+              className="mt-1 block w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300"
+            />
+          </label>
+
+          <label className="block">
+            <span className="text-xs text-slate-500 font-medium">
+              Reason {tab === "deduct" && <span className="text-red-500">*</span>}
+            </span>
+            <input
+              type="text"
+              value={reason}
+              onChange={(e) => setReason(e.target.value)}
+              placeholder={tab === "grant" ? "e.g. Promotional grant" : "e.g. Chargeback correction"}
+              className="mt-1 block w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300"
+            />
+          </label>
+
+          {error && <p className="text-xs text-red-600">{error}</p>}
+
+          <button
+            onClick={handleSubmit}
+            disabled={loading}
+            className={`w-full rounded-lg px-4 py-2.5 text-sm font-semibold text-white transition-colors disabled:opacity-60 ${tab === "grant" ? "bg-emerald-600 hover:bg-emerald-700" : "bg-red-600 hover:bg-red-700"}`}
+          >
+            {loading
+              ? <Loader2 size={14} className="animate-spin inline mr-1.5" />
+              : null}
+            {tab === "grant" ? "Grant Credits" : "Deduct Credits"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function OrgsAdminClient() {
   const [q, setQ] = useState("");
   const [tierFilter, setTierFilter] = useState("");
   const [page, setPage] = useState(1);
   const [saving, setSaving] = useState<number | null>(null);
   const [deleting, setDeleting] = useState<number | null>(null);
+  const [creditOrg, setCreditOrg] = useState<AdminOrg | null>(null);
   const [banner, setBanner] = useState<{ kind: "success" | "error"; msg: string } | null>(null);
 
   const PAGE_SIZE = 50;
@@ -83,6 +181,14 @@ export function OrgsAdminClient() {
 
   return (
     <div className="p-6 space-y-5">
+      {creditOrg && (
+        <CreditModal
+          org={creditOrg}
+          onClose={() => setCreditOrg(null)}
+          onSuccess={(msg) => { flash("success", msg); void mutate(); }}
+        />
+      )}
+
       <div>
         <h1 className="text-xl font-semibold text-slate-900">Organizations</h1>
         <p className="text-sm text-slate-500 mt-0.5">Manage all orgs — {total} total</p>
@@ -130,11 +236,12 @@ export function OrgsAdminClient() {
               <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">Members</th>
               <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">Created</th>
               <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">Actions</th>
+              <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">Credits</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
             {!data && (
-              <tr><td colSpan={5} className="text-center py-8 text-slate-400">
+              <tr><td colSpan={6} className="text-center py-8 text-slate-400">
                 <Loader2 size={20} className="animate-spin mx-auto" />
               </td></tr>
             )}
@@ -178,10 +285,24 @@ export function OrgsAdminClient() {
                     </button>
                   </div>
                 </td>
+                <td className="px-4 py-3">
+                  <div className="flex flex-col gap-1">
+                    <span className="text-xs text-slate-500 tabular-nums">
+                      {org.credits_unlimited ? "∞" : (org.credits_balance ?? 0).toLocaleString()}
+                    </span>
+                    <button
+                      onClick={() => setCreditOrg(org)}
+                      title="Grant or deduct credits"
+                      className="flex items-center gap-1 text-xs text-emerald-600 hover:text-emerald-800 border border-emerald-200 rounded-lg px-2 py-1 hover:bg-emerald-50 transition-colors w-fit"
+                    >
+                      <Coins size={11} /> Adjust
+                    </button>
+                  </div>
+                </td>
               </tr>
             ))}
             {data?.items.length === 0 && (
-              <tr><td colSpan={5} className="text-center py-8 text-slate-400 text-sm">No organizations found</td></tr>
+              <tr><td colSpan={6} className="text-center py-8 text-slate-400 text-sm">No organizations found</td></tr>
             )}
           </tbody>
         </table>

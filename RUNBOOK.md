@@ -558,6 +558,33 @@ All three build tracks run in parallel. `build-ml` is a child of `build-ml-base`
 
 Dev Helm deploy uses stable tags (`dev`) for all three images so unchanged components are not forced to a new SHA tag.
 
+### Optional QEMU / multi-arch controls
+
+By default, builds run amd64-only. That keeps backend and frontend images fast.
+
+Where to set the flags:
+- For manual prod deploys, open GitHub Actions, run [Deploy Prod](.github/workflows/deploy-prod.yml), and set the `qemu_*` inputs in the dispatch form.
+- For push-based dev deploys, set the repo variables in GitHub Actions settings: `BUILD_QEMU_BACKEND`, `BUILD_QEMU_ML_BASE`, `BUILD_QEMU_ML`, and `BUILD_QEMU_FRONTEND`.
+
+Enable QEMU only for the image you actually need to publish as multi-arch:
+
+Prod workflow dispatch inputs:
+- `qemu_backend`
+- `qemu_ml_base`
+- `qemu_ml`
+- `qemu_frontend`
+
+Dev / push-based deploy repo variables:
+- `BUILD_QEMU_BACKEND`
+- `BUILD_QEMU_ML_BASE`
+- `BUILD_QEMU_ML`
+- `BUILD_QEMU_FRONTEND`
+
+Notes:
+- The ML base and ML worker images share the same architecture setting in practice. If you want arm64 ML images, enable both `qemu_ml_base` and `qemu_ml` together, or set both dev variables to `true`.
+- Leaving all of them off gives you the fastest possible amd64-only builds.
+- QEMU is only worth it when you actually need arm64 images for that release.
+
 ### Quick examples
 
 Frontend-only production rollout:

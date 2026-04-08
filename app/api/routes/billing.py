@@ -1095,3 +1095,189 @@ def cancel_pending_payment(
     except payment_transactions.PaymentValidationError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     return WebhookResponse(ok=True)
+
+
+@router.get("/payments/{payment_id}/invoice", response_class=HTMLResponse)
+def get_payment_invoice(
+    payment_id: int,
+    user_org: tuple[User, object] = Depends(get_current_org),
+    db: Session = Depends(get_db),
+) -> HTMLResponse:
+    """Generate and return an HTML invoice/receipt for a captured payment.
+
+    The invoice can be printed or saved as PDF from the browser.
+    Only accessible to members of the org that made the payment.
+    """
+    _user, org = user_org
+    tx = (
+        db.query(PaymentTransaction)
+        .filter(PaymentTransaction.id == payment_id, PaymentTransaction.org_id == org.id)
+        .first()
+    )
+    if tx is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Payment not found")
+
+    if tx.status not in {"captured", "authorized"}:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invoice is only available for completed payments",
+        )
+
+    # Parse billing address
+    billing_addr_str = ""
+    if tx.billing_address:
+        try:
+            addr = json.loads(tx.billing_address)
+            parts = []
+            if addr.get("company_name"):
+                parts.append(addr["company_name"])
+            name_parts = []
+            if addr.get("first_name"):
+                name_parts.append(addr["first_name"])
+            if addr.get("last_name"):
+                name_parts.append(addr["last_name"])
+            if name_parts:
+                parts.append(" ".join(name_parts))
+            street = f"{addr.get('street', '')} {addr.get('number', '')}".strip()
+            if street:
+                parts.append(street)
+            city_line = f"{addr.get('postal_code', '')} {addr.get('city', '')}".strip()
+            if city_line:
+                parts.append(city_line)
+            if addr.get("country"):
+                parts.append(addr["country"].upper())
+            billing_addr_str = "<br>".join(p for p in parts if p)
+        except (ValueError, TypeError):
+            billing_addr_str = tx.billing_address or ""
+
+    # Format amounts
+    amount_str = f"CHF {tx.amount_chf:.2f}"
+    refund_str = f"CHF {tx.refunded_amount_chf:.2f}" if tx.refunded_amount_chf else None
+    net_amount = tx.amount_chf - (tx.refunded_amount_chf or 0)
+    net_amount_str = f"CHF {net_amount:.2f}"
+
+    # Description line
+    if tx.kind == "subscription":
+        description = f"{(tx.subscription_tier or '').capitalize()} plan — {tx.subscription_billing_cycle or 'monthly'} billing"
+    else:
+        credits_total = tx.credits_total_granted or tx.credits_purchased or 0
+        description = f"Credit top-up — {credits_total:,} credits"
+        if tx.credits_bonus:
+            description += f" (incl. {tx.credits_bonus:,} bonus)"
+
+    invoice_number = f"INV-{tx.id:06d}"
+    issued_date = tx.authorized_at or tx.created_at
+    issued_str = issued_date.strftime("%d %B %Y") if issued_date else "—"
+
+    # Minimal inline-styled invoice HTML suitable for print/PDF
+    html = f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Invoice {invoice_number}</title>
+<style>
+  * {{ box-sizing: border-box; margin: 0; padding: 0; }}
+  body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; font-size: 14px; color: #1e293b; background: #fff; padding: 40px; max-width: 720px; margin: 0 auto; }}
+  .header {{ display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 40px; padding-bottom: 24px; border-bottom: 2px solid #e2e8f0; }}
+  .brand {{ font-size: 22px; font-weight: 700; color: #0f172a; letter-spacing: -0.5px; }}
+  .brand-sub {{ font-size: 12px; color: #64748b; margin-top: 2px; }}
+  .invoice-meta {{ text-align: right; }}
+  .invoice-meta .label {{ font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; color: #64748b; }}
+  .invoice-meta .value {{ font-size: 18px; font-weight: 700; color: #0f172a; }}
+  .invoice-meta .date {{ font-size: 13px; color: #475569; margin-top: 4px; }}
+  .section {{ margin-bottom: 28px; }}
+  .section-title {{ font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; color: #94a3b8; font-weight: 600; margin-bottom: 8px; }}
+  .addr {{ line-height: 1.7; color: #334155; }}
+  table {{ width: 100%; border-collapse: collapse; margin-bottom: 24px; }}
+  thead tr {{ background: #f8fafc; }}
+  th {{ text-align: left; padding: 10px 14px; font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; color: #64748b; font-weight: 600; border-bottom: 1px solid #e2e8f0; }}
+  td {{ padding: 12px 14px; border-bottom: 1px solid #f1f5f9; color: #334155; }}
+  .amount-col {{ text-align: right; }}
+  .totals {{ margin-left: auto; width: 280px; }}
+  .total-row {{ display: flex; justify-content: space-between; padding: 6px 0; font-size: 13px; color: #475569; }}
+  .total-row.main {{ font-size: 15px; font-weight: 700; color: #0f172a; border-top: 2px solid #e2e8f0; padding-top: 10px; margin-top: 4px; }}
+  .refund-note {{ color: #d97706; font-size: 12px; }}
+  .footer {{ margin-top: 48px; padding-top: 20px; border-top: 1px solid #e2e8f0; font-size: 11px; color: #94a3b8; line-height: 1.6; }}
+  .status-badge {{ display: inline-block; padding: 2px 8px; border-radius: 12px; font-size: 11px; font-weight: 600; }}
+  .status-captured {{ background: #d1fae5; color: #065f46; }}
+  .status-refunded {{ background: #fef3c7; color: #92400e; }}
+  @media print {{
+    body {{ padding: 20px; }}
+    .no-print {{ display: none; }}
+  }}
+</style>
+</head>
+<body>
+  <div class="header">
+    <div>
+      <div class="brand">Firmiq</div>
+      <div class="brand-sub">firmiq.io</div>
+    </div>
+    <div class="invoice-meta">
+      <div class="label">Invoice</div>
+      <div class="value">{invoice_number}</div>
+      <div class="date">Issued {issued_str}</div>
+    </div>
+  </div>
+
+  <div style="display:flex; gap:60px; margin-bottom:36px;">
+    <div class="section" style="flex:1;">
+      <div class="section-title">Billed to</div>
+      <div class="addr">{billing_addr_str if billing_addr_str else f'<span style="color:#94a3b8">Organization: {org.name}</span>'}</div>
+    </div>
+    <div class="section" style="flex:1;">
+      <div class="section-title">Payment details</div>
+      <div style="line-height:1.8; color:#334155;">
+        <div><strong>Method:</strong> {(tx.payment_method or '—').replace('_', ' ').title()}</div>
+        {"<div><strong>Cardholder:</strong> " + tx.cardholder_name + "</div>" if tx.cardholder_name else ""}
+        <div><strong>Provider ref:</strong> <span style="font-family:monospace;font-size:12px;">{tx.provider_transaction_id or tx.external_id or '—'}</span></div>
+        <div><strong>Status:</strong> <span class="status-badge {'status-refunded' if tx.refunded_at else 'status-captured'}">{('Refunded' if tx.refunded_at else 'Paid')}</span></div>
+      </div>
+    </div>
+  </div>
+
+  <table>
+    <thead>
+      <tr>
+        <th>Description</th>
+        <th>Type</th>
+        <th class="amount-col">Amount</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>{description}</td>
+        <td style="text-transform:capitalize;">{tx.kind}</td>
+        <td class="amount-col" style="font-weight:600;">{amount_str}</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <div class="totals">
+    <div class="total-row">
+      <span>Subtotal</span>
+      <span>{amount_str}</span>
+    </div>
+    {f'<div class="total-row refund-note"><span>Refund issued</span><span>−{refund_str}</span></div>' if refund_str else ''}
+    <div class="total-row main">
+      <span>Total paid</span>
+      <span>{net_amount_str}</span>
+    </div>
+  </div>
+
+  <div class="footer">
+    <p>Transaction ID: {tx.id} &nbsp;·&nbsp; Order ref: {tx.order_reference or '—'} &nbsp;·&nbsp; Provider: {tx.provider.title()}</p>
+    <p style="margin-top:6px;">This document serves as your receipt. For support, contact support@firmiq.io.</p>
+    {f'<p class="refund-note" style="margin-top:6px;">Refund of {refund_str} issued {tx.refunded_at.strftime("%d %B %Y") if tx.refunded_at else "—"}. Reason: {tx.refund_reason or "—"}</p>' if tx.refunded_at else ''}
+  </div>
+
+  <div class="no-print" style="margin-top:32px; text-align:center;">
+    <button onclick="window.print()" style="padding:10px 24px; background:#0f172a; color:#fff; border:none; border-radius:8px; font-size:14px; cursor:pointer;">
+      Print / Save as PDF
+    </button>
+  </div>
+</body>
+</html>"""
+
+    return HTMLResponse(content=html, status_code=200)

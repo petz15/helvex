@@ -548,6 +548,61 @@ class WorldlineProvider:
             timeout=100.0,
         )
 
+    def refund_transaction(
+        self,
+        *,
+        transaction_id: str,
+        amount_chf: float,
+        order_id: str,
+        description: str = "Refund",
+    ) -> dict[str, Any]:
+        """Issue a referenced refund for a captured Saferpay/Worldline transaction.
+
+        Uses POST /Payment/v1/Transaction/Refund with CaptureReference.TransactionId.
+        The transaction_id must be the Saferpay Transaction.Id from a previously
+        captured transaction (stored as provider_transaction_id in PaymentTransaction).
+        """
+        tx_id = str(transaction_id or "").strip()
+        if not tx_id:
+            raise RuntimeError("Saferpay refund failed: missing transaction_id")
+        if amount_chf <= 0:
+            raise RuntimeError("Saferpay refund failed: amount must be > 0")
+
+        payload = {
+            "RequestHeader": {
+                "SpecVersion": _worldline_spec_version(),
+                "CustomerId": _worldline_customer_id(),
+                "RequestId": f"wl_refund_{secrets.token_hex(8)}",
+                "RetryIndicator": 0,
+            },
+            "Refund": {
+                "Amount": {
+                    "Value": str(int(round(amount_chf * 100))),
+                    "CurrencyCode": "CHF",
+                },
+                "OrderId": order_id,
+                "Description": description,
+            },
+            "CaptureReference": {
+                "TransactionId": tx_id,
+            },
+        }
+        logger.info(
+            "saferpay.refund tx_id=%s amount_chf=%s order_id=%s",
+            tx_id[:20], amount_chf, order_id,
+        )
+        data = self._post_worldline_json(
+            endpoint_path="/Payment/v1/Transaction/Refund",
+            payload=payload,
+            operation="Saferpay refund",
+            timeout=100.0,
+        )
+        logger.info(
+            "saferpay.refund_result tx_id=%s response_keys=%s",
+            tx_id[:20], list(data.keys()),
+        )
+        return data
+
     def authorize_referenced_transaction(
         self,
         *,

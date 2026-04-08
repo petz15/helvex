@@ -1,18 +1,28 @@
 """Superadmin-only routes for platform management."""
 from __future__ import annotations
 
+import logging
+import secrets
+from datetime import datetime, timezone
+from typing import Literal
+
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.auth import get_current_user
 from app.database import get_db
+from app.models.org_credit_transaction import OrgCreditTransaction
 from app.models.organization import Organization
 from app.models.payment_transaction import PaymentTransaction
 from app.models.user import User
 from app.schemas.billing import BillingTierRead
+from app.services import credits as credits_service
+from app.services import payments as payments_service
 from app.services.tiers import TIER_ID_BY_NAME, get_billing_tier_names, get_billing_tiers
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
@@ -32,6 +42,17 @@ class AdminUserUpdate(BaseModel):
 class AdminOrgUpdate(BaseModel):
     name: str | None = None
     tier: str | None = None
+
+
+class AdminCreditAdjustment(BaseModel):
+    amount: int = Field(..., ge=1, description="Number of credits (always positive; type determines direction)")
+    adjustment_type: Literal["grant", "deduct"]
+    reason: str = Field(..., min_length=1, max_length=500)
+
+
+class AdminRefundRequest(BaseModel):
+    amount_chf: float = Field(..., gt=0)
+    reason: str = Field(..., min_length=1, max_length=500)
 
 
 # ── Stats ──────────────────────────────────────────────────────────────────────
@@ -125,6 +146,8 @@ def _org_dict(org: Organization, member_count: int) -> dict:
         "slug": org.slug,
         "tier": org.tier,
         "member_count": member_count,
+        "credits_balance": int(org.credits_balance or 0),
+        "credits_unlimited": bool(org.credits_unlimited),
         "created_at": org.created_at.isoformat(),
     }
 
@@ -308,6 +331,160 @@ def list_billing_tiers_admin(
         )
         for tier in tiers
     ]
+
+
+@router.post("/orgs/{org_id}/credits", summary="Grant or deduct credits for an org (superadmin)")
+def adjust_org_credits(
+    org_id: int,
+    body: AdminCreditAdjustment,
+    db: Session = Depends(get_db),
+    actor: User = Depends(_require_superadmin),
+):
+    """Grant or deduct credits from an organization's balance.
+
+    - grant: adds credits with type="grant" ledger entry
+    - deduct: removes credits with type="deduction" ledger entry (reason required)
+
+    The deduction will fail if the org does not have sufficient balance,
+    unless credits_unlimited is True.
+    """
+    org = db.get(Organization, org_id)
+    if not org:
+        raise HTTPException(status_code=404, detail="Org not found")
+
+    if body.adjustment_type == "grant":
+        credits_service.grant_credits(
+            db,
+            org_id=org_id,
+            amount=body.amount,
+            tx_type="grant",
+            action_type="admin_grant",
+            reference_id=f"admin:{actor.id}",
+        )
+        logger.info(
+            "admin.credit_grant actor=%s org=%s amount=%s reason=%s",
+            actor.id, org_id, body.amount, body.reason,
+        )
+    else:
+        # Deduction: check balance first (unless unlimited)
+        org_fresh = db.query(Organization).filter(Organization.id == org_id).with_for_update().first()
+        if not org_fresh:
+            raise HTTPException(status_code=404, detail="Org not found")
+        if not org_fresh.credits_unlimited:
+            balance = int(org_fresh.credits_balance or 0)
+            if balance < body.amount:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Insufficient balance: org has {balance} credits, requested deduction is {body.amount}",
+                )
+        before = int(org_fresh.credits_balance or 0)
+        after = before - body.amount if not org_fresh.credits_unlimited else before
+        if not org_fresh.credits_unlimited:
+            org_fresh.credits_balance = after
+        tx = OrgCreditTransaction(
+            org_id=org_id,
+            amount=-body.amount,
+            type="deduction",
+            action_type="admin_deduct",
+            reference_id=f"admin:{actor.id}",
+            credits_before=before,
+            credits_after=after,
+        )
+        db.add(tx)
+        db.commit()
+        logger.info(
+            "admin.credit_deduct actor=%s org=%s amount=%s reason=%s before=%s after=%s",
+            actor.id, org_id, body.amount, body.reason, before, after,
+        )
+
+    db.refresh(org)
+    mc = db.query(func.count(User.id)).filter(User.org_id == org_id).scalar() or 0
+    return {
+        **_org_dict(org, mc),
+        "credits_balance": int(org.credits_balance or 0),
+    }
+
+
+@router.post(
+    "/payment-transactions/{tx_id}/refund",
+    summary="Refund a captured payment transaction via Saferpay referenced refund (superadmin)",
+)
+def refund_payment_transaction(
+    tx_id: int,
+    body: AdminRefundRequest,
+    db: Session = Depends(get_db),
+    actor: User = Depends(_require_superadmin),
+):
+    """Issue a referenced refund for a captured Worldline/Saferpay transaction.
+
+    - Only captured/authorized worldline transactions can be refunded.
+    - The refund amount must not exceed the original transaction amount.
+    - The Saferpay API is called synchronously; on success the local record is updated.
+    - The org's credit balance is NOT automatically adjusted — use the credit
+      grant/deduct endpoint separately if a credit correction is also needed.
+    """
+    tx = db.get(PaymentTransaction, tx_id)
+    if not tx:
+        raise HTTPException(status_code=404, detail="Payment transaction not found")
+
+    if tx.provider != "worldline":
+        raise HTTPException(status_code=400, detail="Only Worldline transactions can be refunded via this endpoint")
+
+    if tx.status not in {"captured", "authorized"}:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Only captured/authorized transactions can be refunded (current status: {tx.status})",
+        )
+
+    if tx.refunded_at is not None:
+        raise HTTPException(status_code=400, detail="Transaction has already been refunded")
+
+    if not tx.provider_transaction_id:
+        raise HTTPException(status_code=400, detail="Transaction has no provider_transaction_id — cannot issue referenced refund")
+
+    if body.amount_chf > tx.amount_chf:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Refund amount CHF {body.amount_chf:.2f} exceeds transaction amount CHF {tx.amount_chf:.2f}",
+        )
+
+    refund_order_id = f"refund_{tx.order_reference or tx.id}_{secrets.token_hex(4)}"
+
+    try:
+        result = payments_service.WorldlineProvider().refund_transaction(
+            transaction_id=tx.provider_transaction_id,
+            amount_chf=body.amount_chf,
+            order_id=refund_order_id,
+            description=f"Refund: {body.reason}",
+        )
+    except (payments_service.PaymentConfigurationError, RuntimeError) as exc:
+        logger.error("admin.refund_failed tx_id=%s actor=%s error=%s", tx_id, actor.id, exc)
+        raise HTTPException(status_code=502, detail=f"Saferpay refund failed: {exc}") from exc
+
+    # Update local record
+    tx.refunded_amount_chf = body.amount_chf
+    tx.refund_reason = body.reason
+    tx.refunded_at = datetime.now(tz=timezone.utc)
+    # Capture the refund transaction ID from Saferpay response if available
+    refund_tx = result.get("Transaction") or {}
+    refund_tx_id = refund_tx.get("Id") or refund_tx.get("TransactionId")
+    if refund_tx_id:
+        # Store refund transaction ID in error_message field for audit trail
+        # (dedicated refund_transaction_id column can be added via migration if needed)
+        existing_err = tx.error_message or ""
+        tx.error_message = f"{existing_err}[refund_tx:{refund_tx_id}]".strip()
+
+    db.commit()
+
+    logger.info(
+        "admin.refund_ok tx_id=%s actor=%s amount_chf=%s reason=%s",
+        tx_id, actor.id, body.amount_chf, body.reason,
+    )
+
+    return {
+        **_payment_tx_dict(tx),
+        "refund_saferpay_response": {k: v for k, v in result.items() if k in {"Transaction", "ExecutionDateTime", "ResponseHeader"}},
+    }
 
 
 @router.get("/orgs/{org_id}/payment-transactions", summary="List payment transactions for org (superadmin)")

@@ -21,6 +21,26 @@ on:
         required: false
         default: ""
         type: string
+      qemu_backend:
+        description: Build the backend image with QEMU (amd64+arm64)
+        required: false
+        default: false
+        type: boolean
+      qemu_ml_base:
+        description: Build the ML base image with QEMU (amd64+arm64)
+        required: false
+        default: false
+        type: boolean
+      qemu_ml:
+        description: Build the ML worker image with QEMU (amd64+arm64)
+        required: false
+        default: false
+        type: boolean
+      qemu_frontend:
+        description: Build the frontend image with QEMU (amd64+arm64)
+        required: false
+        default: false
+        type: boolean
 
 # ── Reusable condition fragments (referenced via jobs.<id>.if) ────────────────
 # A push triggers builds only when a deploy tag is in the commit message.
@@ -46,6 +66,9 @@ jobs:
       contents: read
       packages: write
       id-token: write
+    env:
+      USE_QEMU: ${{ (github.event_name == 'workflow_dispatch' && github.event.inputs.qemu_backend == 'true') || (github.event_name != 'workflow_dispatch' && vars.BUILD_QEMU_BACKEND == 'true') }}
+      BUILD_PLATFORMS: ${{ ((github.event_name == 'workflow_dispatch' && github.event.inputs.qemu_backend == 'true') || (github.event_name != 'workflow_dispatch' && vars.BUILD_QEMU_BACKEND == 'true')) && 'linux/amd64,linux/arm64' || 'linux/amd64' }}
     steps:
       - uses: actions/checkout@v5
 
@@ -60,6 +83,7 @@ jobs:
         uses: docker/setup-buildx-action@v3
 
       - name: Set up QEMU
+        if: env.USE_QEMU == 'true'
         uses: docker/setup-qemu-action@v3
 
       - name: Build and push backend
@@ -69,7 +93,7 @@ jobs:
           context: .
           push: true
           provenance: false
-          platforms: linux/amd64,linux/arm64
+          platforms: ${{ env.BUILD_PLATFORMS }}
           tags: |
             ghcr.io/${{ github.repository }}:latest
             ghcr.io/${{ github.repository }}:${{ github.sha }}
@@ -109,6 +133,9 @@ jobs:
     permissions:
       contents: read
       packages: write
+    env:
+      USE_QEMU: ${{ (github.event_name == 'workflow_dispatch' && (github.event.inputs.qemu_ml_base == 'true' || github.event.inputs.qemu_ml == 'true')) || (github.event_name != 'workflow_dispatch' && (vars.BUILD_QEMU_ML_BASE == 'true' || vars.BUILD_QEMU_ML == 'true')) }}
+      BUILD_PLATFORMS: ${{ ((github.event_name == 'workflow_dispatch' && (github.event.inputs.qemu_ml_base == 'true' || github.event.inputs.qemu_ml == 'true')) || (github.event_name != 'workflow_dispatch' && (vars.BUILD_QEMU_ML_BASE == 'true' || vars.BUILD_QEMU_ML == 'true'))) && 'linux/amd64,linux/arm64' || 'linux/amd64' }}
     steps:
       - uses: actions/checkout@v5
 
@@ -123,6 +150,7 @@ jobs:
         uses: docker/setup-buildx-action@v3
 
       - name: Set up QEMU
+        if: env.USE_QEMU == 'true'
         uses: docker/setup-qemu-action@v3
 
       - name: Build and push ml-base
@@ -132,7 +160,7 @@ jobs:
           file: Dockerfile.ml-base
           push: true
           provenance: false
-          platforms: linux/amd64,linux/arm64
+          platforms: ${{ env.BUILD_PLATFORMS }}
           tags: ghcr.io/${{ github.repository }}-ml-base:latest
           cache-from: type=gha,scope=ml-base
           cache-to: type=gha,mode=max,scope=ml-base
@@ -145,6 +173,9 @@ jobs:
     permissions:
       contents: read
       packages: write
+    env:
+      USE_QEMU: ${{ (github.event_name == 'workflow_dispatch' && (github.event.inputs.qemu_ml_base == 'true' || github.event.inputs.qemu_ml == 'true')) || (github.event_name != 'workflow_dispatch' && (vars.BUILD_QEMU_ML_BASE == 'true' || vars.BUILD_QEMU_ML == 'true')) }}
+      BUILD_PLATFORMS: ${{ ((github.event_name == 'workflow_dispatch' && (github.event.inputs.qemu_ml_base == 'true' || github.event.inputs.qemu_ml == 'true')) || (github.event_name != 'workflow_dispatch' && (vars.BUILD_QEMU_ML_BASE == 'true' || vars.BUILD_QEMU_ML == 'true'))) && 'linux/amd64,linux/arm64' || 'linux/amd64' }}
     steps:
       - uses: actions/checkout@v5
 
@@ -159,6 +190,7 @@ jobs:
         uses: docker/setup-buildx-action@v3
 
       - name: Set up QEMU
+        if: env.USE_QEMU == 'true'
         uses: docker/setup-qemu-action@v3
 
       - name: Build and push ml worker
@@ -168,7 +200,7 @@ jobs:
           file: Dockerfile.ml
           push: true
           provenance: false
-          platforms: linux/amd64,linux/arm64
+          platforms: ${{ env.BUILD_PLATFORMS }}
           tags: |
             ghcr.io/${{ github.repository }}-ml:latest
             ghcr.io/${{ github.repository }}-ml:${{ github.sha }}
@@ -196,6 +228,9 @@ jobs:
     permissions:
       contents: read
       packages: write
+    env:
+      USE_QEMU: ${{ (github.event_name == 'workflow_dispatch' && github.event.inputs.qemu_frontend == 'true') || (github.event_name != 'workflow_dispatch' && vars.BUILD_QEMU_FRONTEND == 'true') }}
+      BUILD_PLATFORMS: ${{ ((github.event_name == 'workflow_dispatch' && github.event.inputs.qemu_frontend == 'true') || (github.event_name != 'workflow_dispatch' && vars.BUILD_QEMU_FRONTEND == 'true')) && 'linux/amd64,linux/arm64' || 'linux/amd64' }}
     steps:
       - uses: actions/checkout@v5
 
@@ -210,6 +245,7 @@ jobs:
         uses: docker/setup-buildx-action@v3
 
       - name: Set up QEMU
+        if: env.USE_QEMU == 'true'
         uses: docker/setup-qemu-action@v3
 
       - name: Build and push frontend
@@ -218,7 +254,7 @@ jobs:
           context: ./frontend
           push: true
           provenance: false
-          platforms: linux/amd64,linux/arm64
+          platforms: ${{ env.BUILD_PLATFORMS }}
           tags: |
             ghcr.io/${{ github.repository }}-frontend:latest
             ghcr.io/${{ github.repository }}-frontend:${{ github.sha }}
