@@ -679,6 +679,10 @@ class WorldlineProvider:
     ) -> CheckoutSession:
         self._assert_configured()
         order_reference = f"wl_alias_{org_id}_{user_id or 0}_{secrets.token_hex(6)}"
+        # Saferpay Alias/Insert requires the literal placeholder "{TOKEN}" in the
+        # ReturnUrl so it can substitute the session token on redirect.  Without it
+        # Saferpay does NOT append the token, and our callback receives TOKEN=NONE.
+        # The notify URL does not need this — it is a server-side call.
         return_url = _worldline_callback_url(
             org_id=org_id,
             user_id=user_id,
@@ -687,7 +691,7 @@ class WorldlineProvider:
             success_url=success_url,
             cancel_url=cancel_url,
             source="return",
-        )
+        ) + "&TOKEN={TOKEN}"
         notify_url = _worldline_callback_url(
             org_id=org_id,
             user_id=user_id,

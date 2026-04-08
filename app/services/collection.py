@@ -559,7 +559,7 @@ def _extract_company_fields(
 
 def import_company_from_zefix_uid(
     db: Session,
-    uid: str,
+    uid: str | list[Any],
     *,
     pause_on_zefix_500: bool = False,
     status_cb: Any = None,
@@ -570,9 +570,13 @@ def import_company_from_zefix_uid(
     Returns:
         (company, created)
     """
+    uid_normalized = _normalise_uid(uid)
+    if not uid_normalized:
+        raise ValueError("UID is required")
+
     while True:
         try:
-            raw = zefix_get_company(uid)
+            raw = zefix_get_company(uid_normalized)
             break
         except httpx.HTTPStatusError as exc:
             if (
@@ -584,7 +588,7 @@ def import_company_from_zefix_uid(
                 continue
             raise
     scoring_config = _load_scoring_config(db)
-    company_data = _extract_company_fields(raw, uid, scoring_config=scoring_config)
+    company_data = _extract_company_fields(raw, uid_normalized, scoring_config=scoring_config)
 
     existing = crud.get_company_by_uid(db, company_data.uid)
     if existing:

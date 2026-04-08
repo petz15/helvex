@@ -108,6 +108,46 @@ def send_invite_email(*, to: str, org_name: str, invited_by_email: str, token: s
     send_email(to=to, subject=subject, html=html, text=text)
 
 
+def send_capture_failure_alert(*, to: str, failed_tx_ids: list[int]) -> None:
+    """Alert the operator that Saferpay capture retries failed.
+
+    Called by the nightly billing_renewal job when one or more authorized
+    transactions could not be captured after retry.  Funds are reserved at
+    Saferpay but will NOT be settled unless manually captured before expiry.
+    """
+    from datetime import datetime, timezone
+    ids_str = ", ".join(f"#{i}" for i in failed_tx_ids)
+    count = len(failed_tx_ids)
+    now_str = datetime.now(tz=timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+    admin_url = f"{settings.app_base_url}/app/admin/billing"
+
+    subject = f"[ACTION REQUIRED] {count} Saferpay capture(s) failed — {now_str}"
+    html = f"""
+    <p><strong>⚠️ {count} Worldline/Saferpay transaction(s) could not be captured during the nightly billing renewal.</strong></p>
+    <p>These payments are <em>authorized</em> (funds reserved) but <strong>not yet settled</strong>.
+    Without a successful capture, Saferpay will release the authorization after ~7 days and you will not receive the money.</p>
+    <table style="border-collapse:collapse;font-family:monospace;">
+      <tr>
+        <th style="text-align:left;padding:4px 12px 4px 0;border-bottom:1px solid #ccc;">Payment Transaction IDs</th>
+      </tr>
+      {"".join(f'<tr><td style="padding:4px 12px 4px 0;">#{tid}</td></tr>' for tid in failed_tx_ids)}
+    </table>
+    <p><strong>What to do:</strong></p>
+    <ol>
+      <li>Open <a href="{admin_url}">Admin → Billing</a> and locate each transaction above.</li>
+      <li>Verify the Saferpay transaction ID (Provider tx ID) is present.</li>
+      <li>Manually trigger a capture via the Saferpay Back Office, or fix the configuration issue and redeploy so the next nightly run can retry.</li>
+    </ol>
+    <p style="color:#666;font-size:12px;">Sent by the nightly billing_renewal job at {now_str}. Transaction IDs: {ids_str}</p>
+    """
+    text = (
+        f"ACTION REQUIRED: {count} Saferpay capture(s) failed during nightly billing renewal ({now_str}).\n\n"
+        f"Transaction IDs: {ids_str}\n\n"
+        f"Funds are reserved but not settled. Log in to the admin panel to investigate:\n{admin_url}\n"
+    )
+    send_email(to=to, subject=subject, html=html, text=text)
+
+
 def send_email_change_verification(*, to: str, token: str) -> None:
     link = f"{settings.app_base_url}/confirm-email-change?token={token}"
     subject = "Confirm your new Helvex email address"

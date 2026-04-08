@@ -76,6 +76,7 @@ function SummaryCards({ balance, tier, billingCycle, periodEnd, cancelAtPeriodEn
   const [cancelling, setCancelling] = useState(false);
   const [cancelError, setCancelError] = useState<string | null>(null);
   const [showCancelConfirm, setShowCancelConfirm] = useState(false);
+  const [cancelSucceeded, setCancelSucceeded] = useState(false);
   const isPaid = tier !== "free";
 
   async function handleCancel() {
@@ -84,6 +85,7 @@ function SummaryCards({ balance, tier, billingCycle, periodEnd, cancelAtPeriodEn
     try {
       await cancelSubscription();
       setShowCancelConfirm(false);
+      setCancelSucceeded(true);
       onCancelSubscription();
     } catch (e) {
       setCancelError(e instanceof Error ? e.message : "Failed to cancel");
@@ -94,6 +96,19 @@ function SummaryCards({ balance, tier, billingCycle, periodEnd, cancelAtPeriodEn
 
   return (
     <div className="space-y-3">
+      {/* Cancellation success banner */}
+      {cancelSucceeded && (
+        <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 flex items-start gap-3">
+          <span className="text-emerald-500 mt-0.5 shrink-0">✓</span>
+          <div>
+            <p className="text-sm font-medium text-emerald-800">Subscription cancelled successfully.</p>
+            <p className="text-xs text-emerald-700 mt-0.5">
+              Your {tier} plan remains active until{periodEnd ? ` ${fmtDate(periodEnd)}` : " the end of your current period"}. After that it will downgrade to Free automatically — no further charges.
+            </p>
+          </div>
+        </div>
+      )}
+
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         {/* Credit balance */}
         <div className="rounded-2xl border border-slate-200 bg-white p-5">
@@ -107,16 +122,24 @@ function SummaryCards({ balance, tier, billingCycle, periodEnd, cancelAtPeriodEn
         </div>
 
         {/* Plan */}
-        <div className="rounded-2xl border border-slate-200 bg-white p-5">
+        <div className={`rounded-2xl border bg-white p-5 ${cancelAtPeriodEnd ? "border-amber-200" : "border-slate-200"}`}>
           <div className="flex items-center gap-2 text-xs text-slate-400 font-medium uppercase tracking-wide">
             <TrendingUp size={12} className="text-blue-400" />Current plan
           </div>
-          <div className="mt-2 flex items-center gap-2">
+          <div className="mt-2 flex items-center gap-2 flex-wrap">
             <span className={`text-lg font-bold capitalize px-2.5 py-0.5 rounded-lg ${TIER_COLORS[tier] ?? "bg-slate-100 text-slate-700"}`}>
               {tier}
             </span>
+            {cancelAtPeriodEnd && (
+              <span className="inline-flex items-center gap-1 rounded-full border border-amber-300 bg-amber-50 px-2 py-0.5 text-[11px] font-semibold text-amber-700">
+                Cancels {periodEnd ? fmtDate(periodEnd) : "at period end"}
+              </span>
+            )}
           </div>
-          <div className="mt-1 text-sm text-slate-400 capitalize">{billingCycle ? `${billingCycle} billing` : "—"}</div>
+          <div className="mt-1 text-xs text-slate-400 capitalize">{billingCycle ? `${billingCycle} billing` : "—"}</div>
+          {cancelAtPeriodEnd && (
+            <p className="mt-1.5 text-xs text-amber-600">Will not renew — downgrades to Free after {periodEnd ? fmtDate(periodEnd) : "period end"}.</p>
+          )}
         </div>
 
         {/* Subscription */}
@@ -124,26 +147,36 @@ function SummaryCards({ balance, tier, billingCycle, periodEnd, cancelAtPeriodEn
           <div className="flex items-center gap-2 text-xs text-slate-400 font-medium uppercase tracking-wide">
             <CreditCard size={12} className="text-violet-400" />Subscription
           </div>
-          <div className="mt-2 text-slate-800 font-medium">
-            {cancelAtPeriodEnd && periodEnd
-              ? `Cancels ${fmtDate(periodEnd)}`
-              : periodEnd
-                ? `Renews ${fmtDate(periodEnd)}`
-                : isPaid ? "Active" : "—"}
+          <div className="mt-3 space-y-2">
+            <div>
+              <div className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+                {cancelAtPeriodEnd ? "Access ends" : isPaid ? "Next billing" : "Status"}
+              </div>
+              <div className={`mt-0.5 text-base font-bold ${cancelAtPeriodEnd ? "text-amber-600" : "text-slate-800"}`}>
+                {periodEnd ? fmtDate(periodEnd) : isPaid ? "—" : "Free"}
+              </div>
+            </div>
+            {isPaid && (
+              <div>
+                <div className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">Cycle</div>
+                <div className="mt-0.5 text-sm font-medium text-slate-600 capitalize">
+                  {billingCycle || "monthly"}
+                </div>
+              </div>
+            )}
           </div>
           {isPaid && !cancelAtPeriodEnd && (
-            <p className="mt-0.5 text-xs text-slate-400">Renews automatically until cancelled</p>
-          )}
-          {cancelAtPeriodEnd && periodEnd && (
-            <p className="mt-0.5 text-xs text-amber-600">Access ends {fmtDate(periodEnd)}</p>
+            <p className="mt-2 text-xs text-slate-400">Renews automatically until cancelled</p>
           )}
           <div className="mt-2 flex items-center gap-3">
-            <Link
-              href="/app/pricing"
-              className="inline-flex items-center gap-1 text-xs text-blue-600 hover:underline"
-            >
-              Change plan <ArrowUpRight size={11} />
-            </Link>
+            {!cancelAtPeriodEnd && (
+              <Link
+                href="/app/pricing"
+                className="inline-flex items-center gap-1 text-xs text-blue-600 hover:underline"
+              >
+                Change plan <ArrowUpRight size={11} />
+              </Link>
+            )}
             {isPaid && !showCancelConfirm && !cancelAtPeriodEnd && (
               <button
                 onClick={() => setShowCancelConfirm(true)}
@@ -158,23 +191,25 @@ function SummaryCards({ balance, tier, billingCycle, periodEnd, cancelAtPeriodEn
 
       {/* Cancel confirmation */}
       {showCancelConfirm && (
-        <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 space-y-2">
-          <p className="text-sm font-medium text-red-800">Cancel subscription?</p>
-          <p className="text-xs text-red-700">
-            Your subscription will <strong>not renew</strong> at the end of the current billing period. You keep access until then. Credits already in your balance are kept. No refund is issued.
+        <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 space-y-2">
+          <p className="text-sm font-medium text-amber-900">Cancel subscription?</p>
+          <p className="text-xs text-amber-800">
+            You keep full access to your <strong>{tier}</strong> plan until{" "}
+            <strong>{periodEnd ? fmtDate(periodEnd) : "the end of your current billing period"}</strong>.
+            After that the plan downgrades to Free automatically. Credits in your balance are never removed. No refund is issued.
           </p>
           {cancelError && <p className="text-xs text-red-600">{cancelError}</p>}
           <div className="flex gap-2">
             <button
               onClick={handleCancel}
               disabled={cancelling}
-              className="rounded-lg bg-red-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-red-700 disabled:opacity-60"
+              className="rounded-lg bg-amber-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-amber-700 disabled:opacity-60"
             >
               {cancelling ? "Cancelling…" : "Yes, cancel subscription"}
             </button>
             <button
               onClick={() => { setShowCancelConfirm(false); setCancelError(null); }}
-              className="rounded-lg border border-red-200 px-3 py-1.5 text-xs text-red-700 hover:bg-red-100"
+              className="rounded-lg border border-amber-200 px-3 py-1.5 text-xs text-amber-800 hover:bg-amber-100"
             >
               Keep subscription
             </button>

@@ -39,6 +39,17 @@ import { creditsToChf } from "@/lib/entitlements";
 
 function chf(n: number) { return `CHF ${n.toFixed(2)}`; }
 
+function addPeriod(date: Date, cycle: "monthly" | "yearly"): Date {
+  const d = new Date(date);
+  if (cycle === "yearly") { d.setFullYear(d.getFullYear() + 1); }
+  else { d.setMonth(d.getMonth() + 1); }
+  return d;
+}
+
+function fmtDate(d: Date): string {
+  return d.toLocaleDateString("en-CH", { day: "numeric", month: "short", year: "numeric" });
+}
+
 // ── component ─────────────────────────────────────────────────────────────────
 
 export function PaymentGatewayClient() {
@@ -237,15 +248,31 @@ export function PaymentGatewayClient() {
         </div>
 
         {/* Subscription notice */}
-        {kind === "subscription" && (
-          <div className="flex items-start gap-2 rounded-lg border border-blue-100 bg-blue-50 px-3 py-2.5 text-xs text-blue-700">
-            <Info size={13} className="shrink-0 mt-0.5" />
-            <span>
-              This subscription <strong>renews automatically</strong> each {billingCycle === "yearly" ? "year" : "month"} until you cancel.
-              No minimum term — you can cancel at any time from your billing page.
-            </span>
-          </div>
-        )}
+        {kind === "subscription" && (() => {
+          const startDate = new Date();
+          const nextDate = addPeriod(startDate, billingCycle);
+          return (
+            <div className="space-y-2">
+              <div className="grid grid-cols-2 gap-2 text-xs">
+                <div className="rounded-lg border border-slate-100 bg-slate-50 px-3 py-2">
+                  <div className="text-slate-400 font-medium uppercase tracking-wide text-[10px]">Starts</div>
+                  <div className="font-semibold text-slate-700 mt-0.5">{fmtDate(startDate)}</div>
+                </div>
+                <div className="rounded-lg border border-slate-100 bg-slate-50 px-3 py-2">
+                  <div className="text-slate-400 font-medium uppercase tracking-wide text-[10px]">Next billing</div>
+                  <div className="font-semibold text-slate-700 mt-0.5">{fmtDate(nextDate)}</div>
+                </div>
+              </div>
+              <div className="flex items-start gap-2 rounded-lg border border-blue-100 bg-blue-50 px-3 py-2.5 text-xs text-blue-700">
+                <Info size={13} className="shrink-0 mt-0.5" />
+                <span>
+                  Renews automatically every {billingCycle === "yearly" ? "year" : "month"} until you cancel.
+                  No minimum term — cancel any time from your billing page.
+                </span>
+              </div>
+            </div>
+          );
+        })()}
       </div>
 
       {/* Billing address */}

@@ -187,6 +187,7 @@ export function MapClient() {
   useEffect(() => {
     if (!mapRef.current || mapInstanceRef.current) return;
     let mounted = true;
+    let resizeObserver: ResizeObserver | null = null;
     (async () => {
       const L = await import("leaflet");
       if (!mounted) return;
@@ -199,6 +200,12 @@ export function MapClient() {
         maxZoom: 21,
       }).addTo(map);
       mapInstanceRef.current = map;
+      resizeObserver = typeof ResizeObserver === "undefined"
+        ? null
+        : new ResizeObserver(() => {
+            map.invalidateSize();
+          });
+      resizeObserver?.observe(mapRef.current!);
 
       // Reload whenever the viewport changes
       map.on("moveend zoomend", () => {
@@ -212,7 +219,10 @@ export function MapClient() {
 
       await loadViewportRef.current?.(filtersRef.current);
     })();
-    return () => { mounted = false; };
+    return () => {
+      mounted = false;
+      resizeObserver?.disconnect();
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -247,8 +257,8 @@ export function MapClient() {
   return (
     <>
       <MapTurnstileGate />
-      <div className="flex flex-col h-[calc(100vh-3rem)] overflow-hidden bg-slate-50">
-        <div className="border-b border-slate-200 bg-white px-4 py-3 shadow-sm">
+      <div className="flex min-h-0 flex-col h-[calc(100vh-3rem)] overflow-hidden bg-slate-50">
+        <div className="shrink-0 border-b border-slate-200 bg-white px-4 py-3 shadow-sm">
           <form onSubmit={handleGoToAddress} className="flex flex-wrap items-center gap-3">
             <div className="flex-1 min-w-[240px]">
               <label className="mb-1.5 block text-xs font-semibold uppercase tracking-widest text-slate-400">Go to address</label>
@@ -287,16 +297,18 @@ export function MapClient() {
           {addressError && <p className="mt-2 text-xs text-red-600">{addressError}</p>}
         </div>
 
-        <FilterBar
-          filters={filters}
-          cantons={cantons}
-          taxonomy={taxonomy}
-          onChange={handleFiltersChange}
-          onClear={() => handleFiltersChange(DEFAULT_FILTERS)}
-          resultCount={count}
-        />
+        <div className="shrink-0">
+          <FilterBar
+            filters={filters}
+            cantons={cantons}
+            taxonomy={taxonomy}
+            onChange={handleFiltersChange}
+            onClear={() => handleFiltersChange(DEFAULT_FILTERS)}
+            resultCount={count}
+          />
+        </div>
 
-        <div ref={mapRef} className="flex-1" />
+        <div ref={mapRef} className="min-h-0 flex-1" />
       </div>
     </>
   );

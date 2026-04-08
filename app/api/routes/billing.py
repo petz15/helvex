@@ -700,6 +700,29 @@ async def worldline_return(
             payment_tx.amount_chf,
         )
 
+        # Capture the transaction if it is only authorized — Saferpay requires an
+        # explicit Capture call to settle funds.  CAPTURED transactions are already
+        # settled (e.g. via AuthorizeReferenced) and must not be captured again.
+        if normalized_status == "authorized" and transaction_id:
+            try:
+                payments.WorldlineProvider().capture_transaction(transaction_id=transaction_id)
+                _emit(
+                    "info",
+                    "billing.worldline_capture_ok token=%s tx_id=%s provider_tx=%s",
+                    token[:20], payment_tx.id, transaction_id[:20],
+                )
+                payment_tx.status = "captured"
+                normalized_status = "captured"
+                db.commit()
+            except (payments.PaymentConfigurationError, RuntimeError) as cap_exc:
+                # Non-fatal: the payment is authorized so the user gets access now.
+                # The transaction stays as "authorized" and can be captured manually.
+                _emit(
+                    "warning",
+                    "billing.worldline_capture_failed token=%s tx_id=%s provider_tx=%s error=%s",
+                    token[:20], payment_tx.id, transaction_id[:20], cap_exc,
+                )
+
         # Only apply business logic if payment succeeded.
         if normalized_status in {"authorized", "captured"}:
             _emit(
@@ -1046,22 +1069,24 @@ def cancel_subscription(
     if getattr(org, "tier", "free") == "free":
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Organization is already on the free tier")
 
-    if org.subscription_period_end:
-        # Soft cancel: keep tier until period end, let nightly job handle downgrade.
-        org.subscription_cancel_at_period_end = True
-        db.commit()
+    if not org.subscription_period_end:
+        # No period end on record — anchor it to now so the nightly billing_renewal
+        # job picks this org up on its next run and downgrades it then.
+        # We never hard-downgrade here: the user keeps access until the job runs.
+        org.subscription_period_end = datetime.now(tz=timezone.utc)
         logger.info(
-            "billing.subscription_cancel_scheduled org_id=%s period_end=%s",
-            org.id, org.subscription_period_end.isoformat(),
+            "billing.subscription_cancel_no_period_end org_id=%s — anchoring period_end to now",
+            org.id,
         )
-    else:
-        # No period end on record — downgrade immediately.
-        org.tier = "free"
-        org.subscription_billing_cycle = "monthly"
-        org.subscription_period_end = None
-        org.subscription_cancel_at_period_end = False
-        db.commit()
-        logger.info("billing.subscription_cancelled_immediate org_id=%s", org.id)
+
+    # Soft cancel: tier stays active until subscription_period_end.
+    # billing_renewal handles the actual downgrade to free.
+    org.subscription_cancel_at_period_end = True
+    db.commit()
+    logger.info(
+        "billing.subscription_cancel_scheduled org_id=%s period_end=%s",
+        org.id, org.subscription_period_end.isoformat(),
+    )
 
     return WebhookResponse(ok=True)
 
@@ -1211,8 +1236,10 @@ def get_payment_invoice(
 <body>
   <div class="header">
     <div>
-      <div class="brand">Firmiq</div>
-      <div class="brand-sub">firmiq.io</div>
+      <div class="brand">HELVEX by Balogh Consulting</div>
+      <div class="brand-sub">helvex.balogh-consulting.ch</div>
+      <div class="label">MWST: CHE-457.771.278</div>
+      <div class="label">Address: Balogh Consulting, Dorfstrasse 43, 3073 Gümligen</div>
     </div>
     <div class="invoice-meta">
       <div class="label">Invoice</div>
@@ -1270,12 +1297,6 @@ def get_payment_invoice(
     <p>Transaction ID: {tx.id} &nbsp;·&nbsp; Order ref: {tx.order_reference or '—'} &nbsp;·&nbsp; Provider: {tx.provider.title()}</p>
     <p style="margin-top:6px;">This document serves as your receipt. For support, contact support@firmiq.io.</p>
     {f'<p class="refund-note" style="margin-top:6px;">Refund of {refund_str} issued {tx.refunded_at.strftime("%d %B %Y") if tx.refunded_at else "—"}. Reason: {tx.refund_reason or "—"}</p>' if tx.refunded_at else ''}
-  </div>
-
-  <div class="no-print" style="margin-top:32px; text-align:center;">
-    <button onclick="window.print()" style="padding:10px 24px; background:#0f172a; color:#fff; border:none; border-radius:8px; font-size:14px; cursor:pointer;">
-      Print / Save as PDF
-    </button>
   </div>
 </body>
 </html>"""

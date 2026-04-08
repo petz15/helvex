@@ -156,6 +156,9 @@ def import_shab_publications(
             time.sleep(request_delay)
             continue
 
+        # Defensive normalization in case an unexpected payload shape leaks through.
+        uid = _extract_uid(uid) or str(uid).strip()
+
         try:
             if sub_rubric in (SUBR_NEW, SUBR_MUTATION):
                 _company, created = import_company_from_zefix_uid(

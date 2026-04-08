@@ -42,30 +42,72 @@ def fetch_hr_publications(
         "pageSize": page_size,
     }
 
+    def _to_int(value: Any) -> int | None:
+        try:
+            if value is None:
+                return None
+            return int(value)
+        except (TypeError, ValueError):
+            return None
+
     results: list[dict[str, Any]] = []
     page = 1
-    while True:
-        params["pageNumber"] = page
-        with httpx.Client(timeout=timeout) as client:
+    with httpx.Client(timeout=timeout) as client:
+        while True:
+            params["pageNumber"] = page
             resp = client.get(f"{SHAB_API_BASE}/publications", params=params)
             resp.raise_for_status()
 
-        data = resp.json()
-        if isinstance(data, list):
-            items: list = data
-        else:
-            # Unwrap common wrapper formats
-            items = (
-                data.get("publications")
-                or data.get("items")
-                or data.get("content")
-                or []
-            )
+            data = resp.json()
+            meta: dict[str, Any] = data if isinstance(data, dict) else {}
+            if isinstance(data, list):
+                items: list = data
+            else:
+                # Unwrap common wrapper formats
+                items = (
+                    data.get("publications")
+                    or data.get("items")
+                    or data.get("content")
+                    or []
+                )
 
-        results.extend(items)
-        if len(items) < page_size:
-            break  # last page reached
-        page += 1
+            results.extend(items)
+
+            # Stop on obvious end-of-data condition first.
+            if not items:
+                break
+
+            # Prefer explicit pagination metadata when available. SHAB may enforce
+            # its own per-page cap (often 100) even when `pageSize` is larger.
+            total_pages = (
+                _to_int(meta.get("totalPages"))
+                or _to_int(meta.get("numberOfPages"))
+                or _to_int(meta.get("pageCount"))
+            )
+            current_page = _to_int(meta.get("pageNumber")) or _to_int(meta.get("page")) or page
+            total_items = (
+                _to_int(meta.get("totalElements"))
+                or _to_int(meta.get("totalEntries"))
+                or _to_int(meta.get("total"))
+                or _to_int(meta.get("count"))
+            )
+            is_last = meta.get("last") is True
+            has_paging_meta = any(
+                x is not None for x in (total_pages, total_items)
+            ) or ("last" in meta)
+
+            if is_last:
+                break
+            if total_pages is not None and current_page >= total_pages:
+                break
+            if total_items is not None and len(results) >= total_items:
+                break
+
+            # Fallback for list-style responses without page metadata.
+            if not has_paging_meta and len(items) < page_size:
+                break
+
+            page += 1
 
     return results
 

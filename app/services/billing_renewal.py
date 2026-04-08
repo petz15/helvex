@@ -1,9 +1,10 @@
 """Nightly subscription billing renewal service.
 
 Runs every night (scheduled via main.py) to:
-1. Downgrade orgs that requested cancellation and have reached their period end.
-2. Charge recurring subscriptions that are due using Transaction/AuthorizeReferenced.
-3. Renew subscription_period_end on success, or downgrade to free on failure.
+1. Retry any Worldline transactions stuck in 'authorized' (capture previously failed).
+2. Downgrade orgs that requested cancellation and have reached their period end.
+3. Charge recurring subscriptions that are due using Transaction/AuthorizeReferenced.
+4. Renew subscription_period_end on success, or downgrade to free on failure.
 """
 from __future__ import annotations
 
@@ -15,9 +16,75 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from app.models.organization import Organization
+from app.models.payment_transaction import PaymentTransaction
 from app.services import payments, payment_transactions
 
 logger = logging.getLogger(__name__)
+
+# Alert recipient for payment infrastructure failures
+_ALERT_EMAIL = "peter@balogh-consulting.ch"
+
+
+def retry_failed_captures(db: Session) -> dict[str, Any]:
+    """Retry Worldline captures for transactions stuck in 'authorized' status.
+
+    These are payments where Authorization succeeded but the subsequent Capture
+    call failed (network timeout, config error, etc.).  Saferpay authorizations
+    expire after ~7 days, so we only attempt transactions created in that window.
+
+    Returns stats: {attempted, captured, failed, failed_tx_ids}
+    """
+    cutoff = datetime.now(tz=timezone.utc) - timedelta(days=6)
+
+    pending = (
+        db.query(PaymentTransaction)
+        .filter(
+            PaymentTransaction.status == "authorized",
+            PaymentTransaction.provider == "worldline",
+            PaymentTransaction.provider_transaction_id.isnot(None),
+            PaymentTransaction.created_at >= cutoff,
+        )
+        .all()
+    )
+
+    stats: dict[str, Any] = {
+        "attempted": len(pending),
+        "captured": 0,
+        "failed": 0,
+        "failed_tx_ids": [],
+    }
+
+    if not pending:
+        logger.info("capture_retry.none_pending")
+        return stats
+
+    logger.info("capture_retry.start count=%s", len(pending))
+    provider = payments.WorldlineProvider()
+
+    for tx in pending:
+        provider_tx_id = str(tx.provider_transaction_id or "").strip()
+        try:
+            provider.capture_transaction(transaction_id=provider_tx_id)
+            tx.status = "captured"
+            db.commit()
+            stats["captured"] += 1
+            logger.info(
+                "capture_retry.ok tx_id=%s org_id=%s provider_tx=%s",
+                tx.id, tx.org_id, provider_tx_id[:20],
+            )
+        except (payments.PaymentConfigurationError, RuntimeError) as exc:
+            stats["failed"] += 1
+            stats["failed_tx_ids"].append(tx.id)
+            logger.error(
+                "capture_retry.failed tx_id=%s org_id=%s provider_tx=%s error=%s",
+                tx.id, tx.org_id, provider_tx_id[:20], exc,
+            )
+
+    logger.info(
+        "capture_retry.done attempted=%s captured=%s failed=%s",
+        stats["attempted"], stats["captured"], stats["failed"],
+    )
+    return stats
 
 
 def _next_period_end(current_end: datetime, billing_cycle: str) -> datetime:
@@ -39,8 +106,26 @@ def _next_period_end(current_end: datetime, billing_cycle: str) -> datetime:
 def run_billing_renewal(db: Session) -> dict[str, Any]:
     """Process all subscriptions due for renewal or cancellation.
 
-    Returns a stats dict: {processed, renewed, cancelled, failed, skipped}
+    Steps:
+      1. Retry any pending captures from a previous failed Capture call.
+      2. Process cancellations and recurring charges for due subscriptions.
+
+    Returns a stats dict: {processed, renewed, cancelled, failed, skipped, capture_retry}
     """
+    from app.services.email import send_capture_failure_alert
+
+    # ── Step 1: retry stuck captures ─────────────────────────────────────────
+    capture_stats = retry_failed_captures(db)
+    if capture_stats["failed_tx_ids"]:
+        try:
+            send_capture_failure_alert(
+                to=_ALERT_EMAIL,
+                failed_tx_ids=capture_stats["failed_tx_ids"],
+            )
+        except Exception as mail_exc:  # noqa: BLE001
+            logger.error("capture_retry.alert_email_failed error=%s", mail_exc)
+
+    # ── Step 2: subscription renewals / cancellations ─────────────────────────
     now = datetime.now(tz=timezone.utc)
     stats: dict[str, Any] = {
         "processed": 0,
@@ -49,6 +134,7 @@ def run_billing_renewal(db: Session) -> dict[str, Any]:
         "failed": 0,
         "skipped": 0,
         "errors": [],
+        "capture_retry": capture_stats,
     }
 
     # Find all paid orgs whose subscription_period_end is in the past (or within 1h).

@@ -569,20 +569,40 @@ async def api_request_logger(request: Request, call_next):
 async def security_headers(request: Request, call_next):
     response = await call_next(request)
     response.headers["X-Content-Type-Options"] = "nosniff"
-    response.headers["X-Frame-Options"] = "DENY"
     response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
-    response.headers["Content-Security-Policy"] = (
-        "default-src 'self'; "
-        "base-uri 'self'; "
-        "object-src 'none'; "
-        "form-action 'self'; "
-        "script-src 'self'; "
-        "style-src 'self' 'unsafe-inline'; "
-        "img-src 'self' data:; "
-        "font-src 'self'; "
-        "connect-src 'self'; "
-        "frame-ancestors 'none';"
-    )
+
+    path = request.url.path
+
+    # Worldline/Saferpay redirect-back endpoints are loaded *inside* the Saferpay
+    # iframe hosted on a different domain.  They must be frameable so the inline
+    # JS can execute `window.top.location.href = ...` to break out.
+    # All other responses keep strict no-framing headers.
+    if path.startswith("/api/v1/billing/webhooks/worldline/"):
+        # Allow framing from any origin — these endpoints return nothing sensitive,
+        # only a quick JS redirect that immediately leaves the iframe.
+        # unsafe-inline is required for the inline <script> in _iframe_redirect().
+        response.headers["Content-Security-Policy"] = (
+            "default-src 'none'; "
+            "script-src 'unsafe-inline'; "
+            "frame-ancestors *;"
+        )
+        # Do NOT set X-Frame-Options here — CSP frame-ancestors takes precedence
+        # in modern browsers, and setting DENY would conflict.
+    else:
+        response.headers["X-Frame-Options"] = "DENY"
+        response.headers["Content-Security-Policy"] = (
+            "default-src 'self'; "
+            "base-uri 'self'; "
+            "object-src 'none'; "
+            "form-action 'self'; "
+            "script-src 'self'; "
+            "style-src 'self' 'unsafe-inline'; "
+            "img-src 'self' data:; "
+            "font-src 'self'; "
+            "connect-src 'self'; "
+            "frame-ancestors 'none';"
+        )
+
     # HSTS — only meaningful over HTTPS; omit on plain HTTP dev
     forwarded_proto = request.headers.get("x-forwarded-proto", "")
     is_https = request.url.scheme == "https" or forwarded_proto.split(",")[0].strip().lower() == "https"
