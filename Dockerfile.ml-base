@@ -1,0 +1,30 @@
+FROM python:3.12-slim
+
+WORKDIR /app
+
+# System deps
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    gcc \
+    g++ \
+    libpq-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# Python deps — this layer is cached until requirements.txt changes
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# spaCy model — cached until pip layer above changes
+RUN python -c "import spacy.cli; spacy.cli.download('de_core_news_md')"
+
+# Geocoding datasets — only geocoding_client.py is needed (stdlib + httpx, no other app imports)
+# Copying the minimal package structure so the import path works.
+COPY app/__init__.py app/__init__.py
+COPY app/api/__init__.py app/api/__init__.py
+COPY app/api/geocoding_client.py app/api/geocoding_client.py
+
+RUN mkdir -p /app/data && \
+    python -c "from app.api.geocoding_client import _load_plz_table; _load_plz_table()" && \
+    echo "PLZ table ready: $(wc -l < data/plz_ch.tsv) entries" && \
+    python -c "from app.api.geocoding_client import build_geocoding_db; build_geocoding_db()" && \
+    echo "Building DB ready: $(du -sh data/geocoding.db)" && \
+    chown -R 1000:1000 /app/data

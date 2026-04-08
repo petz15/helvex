@@ -16,21 +16,31 @@ on:
           - frontend
           - backend
           - ml
-      restore_source: 
+      restore_source:
         description: Optional restore source (helvex-pg-YYYYMMDDTHHMMSSZ); leave empty to use restore-point file
         required: false
         default: ""
         type: string
 
+# ── Reusable condition fragments (referenced via jobs.<id>.if) ────────────────
+# A push triggers builds only when a deploy tag is in the commit message.
+# Workflow dispatch always triggers (deploy_mode input selects which components).
+
 jobs:
-  build:
+  # ── Parallel build jobs ───────────────────────────────────────────────────
+  build-backend:
     if: |
-      github.event_name == 'workflow_dispatch' ||
-      contains(github.event.head_commit.message, '[deploy-prod]') ||
-      contains(github.event.head_commit.message, '[deploy-app]') ||
-      contains(github.event.head_commit.message, '[deploy-frontend]') ||
-      contains(github.event.head_commit.message, '[deploy-backend]') ||
-      contains(github.event.head_commit.message, '[deploy-ml]')
+      (
+        github.event_name == 'workflow_dispatch' ||
+        contains(github.event.head_commit.message, '[deploy-prod]') ||
+        contains(github.event.head_commit.message, '[deploy-app]') ||
+        contains(github.event.head_commit.message, '[deploy-frontend]') ||
+        contains(github.event.head_commit.message, '[deploy-backend]') ||
+        contains(github.event.head_commit.message, '[deploy-ml]')
+      ) && (
+        (github.event_name != 'workflow_dispatch' && !contains(github.event.head_commit.message, '[deploy-frontend]') && !contains(github.event.head_commit.message, '[deploy-ml]')) ||
+        (github.event_name == 'workflow_dispatch' && github.event.inputs.deploy_mode != 'frontend' && github.event.inputs.deploy_mode != 'ml')
+      )
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -44,7 +54,7 @@ jobs:
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+          password: ${{ secrets.GHCR_PAT != '' && secrets.GHCR_PAT || secrets.GITHUB_TOKEN }}
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -54,9 +64,6 @@ jobs:
 
       - name: Build and push backend
         id: build
-        if: |
-          (github.event_name != 'workflow_dispatch' && !contains(github.event.head_commit.message, '[deploy-frontend]') && !contains(github.event.head_commit.message, '[deploy-ml]')) ||
-          (github.event_name == 'workflow_dispatch' && github.event.inputs.deploy_mode != 'frontend' && github.event.inputs.deploy_mode != 'ml')
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -74,13 +81,91 @@ jobs:
           cache-from: type=gha,scope=backend
           cache-to: type=gha,mode=max,scope=backend
 
-      - name: Build and push ml backend
-        if: |
-          (github.event_name != 'workflow_dispatch' && !contains(github.event.head_commit.message, '[deploy-frontend]') && !contains(github.event.head_commit.message, '[deploy-backend]')) ||
-          (github.event_name == 'workflow_dispatch' && github.event.inputs.deploy_mode != 'frontend' && github.event.inputs.deploy_mode != 'backend')
+      - name: Install cosign
+        uses: sigstore/cosign-installer@v3
+
+      - name: Sign image
+        continue-on-error: true
+        run: |
+          cosign sign --yes \
+            ghcr.io/${{ github.repository }}@${{ steps.build.outputs.digest }}
+
+  build-ml-base:
+    # Rebuilds the heavy base layer (pip deps + spaCy model + geocoding DB).
+    # GHA cache makes this near-instant when requirements.txt / geocoding_client.py are unchanged.
+    if: |
+      (
+        github.event_name == 'workflow_dispatch' ||
+        contains(github.event.head_commit.message, '[deploy-prod]') ||
+        contains(github.event.head_commit.message, '[deploy-app]') ||
+        contains(github.event.head_commit.message, '[deploy-frontend]') ||
+        contains(github.event.head_commit.message, '[deploy-backend]') ||
+        contains(github.event.head_commit.message, '[deploy-ml]')
+      ) && (
+        (github.event_name != 'workflow_dispatch' && !contains(github.event.head_commit.message, '[deploy-frontend]') && !contains(github.event.head_commit.message, '[deploy-backend]')) ||
+        (github.event_name == 'workflow_dispatch' && github.event.inputs.deploy_mode != 'frontend' && github.event.inputs.deploy_mode != 'backend')
+      )
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GHCR_PAT != '' && secrets.GHCR_PAT || secrets.GITHUB_TOKEN }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Build and push ml-base
         uses: docker/build-push-action@v6
         with:
           context: .
+          file: Dockerfile.ml-base
+          push: true
+          provenance: false
+          platforms: linux/amd64,linux/arm64
+          tags: ghcr.io/${{ github.repository }}-ml-base:latest
+          cache-from: type=gha,scope=ml-base
+          cache-to: type=gha,mode=max,scope=ml-base
+
+  build-ml:
+    # Fast build: just copies app code on top of ml-base.
+    # Automatically skipped when build-ml-base is skipped (e.g. [deploy-backend]).
+    needs: build-ml-base
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GHCR_PAT != '' && secrets.GHCR_PAT || secrets.GITHUB_TOKEN }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Build and push ml worker
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.ml
           push: true
           provenance: false
           platforms: linux/amd64,linux/arm64
@@ -88,32 +173,46 @@ jobs:
             ghcr.io/${{ github.repository }}-ml:latest
             ghcr.io/${{ github.repository }}-ml:${{ github.sha }}
           build-args: |
+            ML_BASE_IMAGE=ghcr.io/${{ github.repository }}-ml-base:latest
             BUILD_DATE=${{ github.event.head_commit.timestamp }}
             BUILD_GIT_SHA=${{ github.sha }}
-            INSTALL_SPACY_MODEL=true
-            BUILD_GEOCODING_DB=true
-          cache-from: type=gha,scope=ml-backend
-          cache-to: type=gha,mode=max,scope=ml-backend
+          cache-from: type=gha,scope=ml-worker
+          cache-to: type=gha,mode=max,scope=ml-worker
 
-      - name: Install cosign
-        if: |
-          (github.event_name != 'workflow_dispatch' && !contains(github.event.head_commit.message, '[deploy-frontend]') && !contains(github.event.head_commit.message, '[deploy-ml]')) ||
-          (github.event_name == 'workflow_dispatch' && github.event.inputs.deploy_mode != 'frontend' && github.event.inputs.deploy_mode != 'ml')
-        uses: sigstore/cosign-installer@v3
+  build-frontend:
+    if: |
+      (
+        github.event_name == 'workflow_dispatch' ||
+        contains(github.event.head_commit.message, '[deploy-prod]') ||
+        contains(github.event.head_commit.message, '[deploy-app]') ||
+        contains(github.event.head_commit.message, '[deploy-frontend]') ||
+        contains(github.event.head_commit.message, '[deploy-backend]') ||
+        contains(github.event.head_commit.message, '[deploy-ml]')
+      ) && (
+        (github.event_name != 'workflow_dispatch' && !contains(github.event.head_commit.message, '[deploy-backend]') && !contains(github.event.head_commit.message, '[deploy-ml]')) ||
+        (github.event_name == 'workflow_dispatch' && github.event.inputs.deploy_mode != 'backend' && github.event.inputs.deploy_mode != 'ml')
+      )
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v5
 
-      - name: Sign image
-        if: |
-          (github.event_name != 'workflow_dispatch' && !contains(github.event.head_commit.message, '[deploy-frontend]') && !contains(github.event.head_commit.message, '[deploy-ml]')) ||
-          (github.event_name == 'workflow_dispatch' && github.event.inputs.deploy_mode != 'frontend' && github.event.inputs.deploy_mode != 'ml')
-        continue-on-error: true
-        run: |
-          cosign sign --yes \
-            ghcr.io/${{ github.repository }}@${{ steps.build.outputs.digest }}
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GHCR_PAT != '' && secrets.GHCR_PAT || secrets.GITHUB_TOKEN }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
 
       - name: Build and push frontend
-        if: |
-          (github.event_name != 'workflow_dispatch' && !contains(github.event.head_commit.message, '[deploy-backend]') && !contains(github.event.head_commit.message, '[deploy-ml]')) ||
-          (github.event_name == 'workflow_dispatch' && github.event.inputs.deploy_mode != 'backend' && github.event.inputs.deploy_mode != 'ml')
         uses: docker/build-push-action@v6
         with:
           context: ./frontend
@@ -134,15 +233,22 @@ jobs:
           cache-from: type=gha,scope=frontend
           cache-to: type=gha,mode=max,scope=frontend
 
+  # ── Deploy ────────────────────────────────────────────────────────────────
   deploy:
-    needs: build
+    needs: [build-backend, build-ml, build-frontend]
+    # Run when no build job failed/cancelled (skipped builds are fine).
     if: |
-      github.event_name == 'workflow_dispatch' ||
-      contains(github.event.head_commit.message, '[deploy-prod]') ||
-      contains(github.event.head_commit.message, '[deploy-app]') ||
-      contains(github.event.head_commit.message, '[deploy-frontend]') ||
-      contains(github.event.head_commit.message, '[deploy-backend]') ||
-      contains(github.event.head_commit.message, '[deploy-ml]')
+      always() &&
+      !contains(needs.*.result, 'failure') &&
+      !contains(needs.*.result, 'cancelled') &&
+      (
+        github.event_name == 'workflow_dispatch' ||
+        contains(github.event.head_commit.message, '[deploy-prod]') ||
+        contains(github.event.head_commit.message, '[deploy-app]') ||
+        contains(github.event.head_commit.message, '[deploy-frontend]') ||
+        contains(github.event.head_commit.message, '[deploy-backend]') ||
+        contains(github.event.head_commit.message, '[deploy-ml]')
+      )
     runs-on: helvex-prod
     environment: production
     permissions:
@@ -154,16 +260,22 @@ jobs:
 
       - name: Setup tools
         run: |
-          # kubectl
-          curl -LO "https://dl.k8s.io/release/$(curl -Ls https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
-          chmod +x kubectl && sudo mv kubectl /usr/local/bin/kubectl
-          # helm + helmfile (needed for full deploys; installed always to keep steps simple)
-          curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
-          HELMFILE_VERSION=0.171.0
-          curl -Lo /tmp/helmfile.tar.gz https://github.com/helmfile/helmfile/releases/download/v${HELMFILE_VERSION}/helmfile_${HELMFILE_VERSION}_linux_amd64.tar.gz
-          tar -xzf /tmp/helmfile.tar.gz -C /tmp && sudo mv /tmp/helmfile /usr/local/bin/helmfile
-          # helm-diff plugin
-          helm plugin install https://github.com/databus23/helm-diff
+          # Skip installs if tools are already present on the self-hosted runner.
+          if ! command -v kubectl &>/dev/null; then
+            curl -LO "https://dl.k8s.io/release/$(curl -Ls https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+            chmod +x kubectl && sudo mv kubectl /usr/local/bin/kubectl
+          fi
+          if ! command -v helm &>/dev/null; then
+            curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+          fi
+          if ! command -v helmfile &>/dev/null; then
+            HELMFILE_VERSION=0.171.0
+            curl -Lo /tmp/helmfile.tar.gz https://github.com/helmfile/helmfile/releases/download/v${HELMFILE_VERSION}/helmfile_${HELMFILE_VERSION}_linux_amd64.tar.gz
+            tar -xzf /tmp/helmfile.tar.gz -C /tmp && sudo mv /tmp/helmfile /usr/local/bin/helmfile
+          fi
+          if ! helm plugin list | grep -q diff; then
+            helm plugin install https://github.com/databus23/helm-diff
+          fi
 
       - name: Verify cluster access
         run: kubectl get nodes -o wide

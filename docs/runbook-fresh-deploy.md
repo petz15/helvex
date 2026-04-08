@@ -475,6 +475,30 @@ kubectl rollout restart deployment/helvex -n helvex-prod
 
 ---
 
+## Troubleshooting: GHCR push denied (`write_package`)
+
+If the build job fails with:
+
+```
+denied: permission_denied: write_package
+```
+
+do the following:
+
+1. Confirm repository secret `GHCR_PAT` exists and is a classic PAT for the account that owns the package namespace (`petz15`) with at least:
+  - `write:packages`
+  - `read:packages`
+  - `delete:packages` (optional, but recommended for cleanup workflows)
+2. Ensure SSO is authorized for the token if your org enforces SSO.
+3. In GitHub Packages, open the package (for example `helvex-ml`) and verify repository access includes `petz15/helvex` with write/admin package permission.
+4. Re-run the workflow.
+
+Notes:
+- Deploy workflows log in to GHCR using `GHCR_PAT` when available, with fallback to `GITHUB_TOKEN`.
+- `GITHUB_TOKEN` can fail on pre-existing packages not linked to the current repository; PAT avoids this edge case.
+
+---
+
 ## Security model
 
 This section explains why no secrets are exposed to the public, even though GitHub Actions orchestrates deployments to a private server.
