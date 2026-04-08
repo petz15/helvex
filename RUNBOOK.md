@@ -82,7 +82,7 @@ postgres:
 **6. Deploy the app**
 ```bash
 git add infra/environments/prod.yaml
-git commit -m "restore db from backup [deploy-app]"
+git commit -m "restore db from backup [deploy-prod]"
 git push
 ```
 
@@ -113,7 +113,7 @@ postgres:
 
 ```bash
 git add infra/environments/prod.yaml
-git commit -m "restore complete — reset restoreFromBackup [deploy-app]"
+git commit -m "restore complete — reset restoreFromBackup [deploy-prod]"
 git push
 ```
 
@@ -510,7 +510,8 @@ Use selective modes/tags to avoid rebuilding or rolling out unchanged components
 ### Supported prod commit tags
 
 - `[deploy-prod]` → full deploy path (infra/bootstrap + app)
-- `[deploy-app]` → app release via Helm
+- `[deploy-all]` → backend + frontend + ML image rollout only (no infra/bootstrap)
+- `[deploy-app]` → backend + frontend image rollout only
 - `[deploy-frontend]` → frontend deployment only
 - `[deploy-backend]` → backend app deployment only
 - `[deploy-ml]` → ML worker deployment only
@@ -518,6 +519,7 @@ Use selective modes/tags to avoid rebuilding or rolling out unchanged components
 ### Supported prod workflow-dispatch modes
 
 - `prod`
+- `all`
 - `app`
 - `frontend`
 - `backend`

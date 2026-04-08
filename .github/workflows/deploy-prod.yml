@@ -12,6 +12,7 @@ on:
         type: choice
         options:
           - prod
+          - all
           - app
           - frontend
           - backend
@@ -53,6 +54,7 @@ jobs:
       (
         github.event_name == 'workflow_dispatch' ||
         contains(github.event.head_commit.message, '[deploy-prod]') ||
+        contains(github.event.head_commit.message, '[deploy-all]') ||
         contains(github.event.head_commit.message, '[deploy-app]') ||
         contains(github.event.head_commit.message, '[deploy-frontend]') ||
         contains(github.event.head_commit.message, '[deploy-backend]') ||
@@ -121,13 +123,14 @@ jobs:
       (
         github.event_name == 'workflow_dispatch' ||
         contains(github.event.head_commit.message, '[deploy-prod]') ||
+        contains(github.event.head_commit.message, '[deploy-all]') ||
         contains(github.event.head_commit.message, '[deploy-app]') ||
         contains(github.event.head_commit.message, '[deploy-frontend]') ||
         contains(github.event.head_commit.message, '[deploy-backend]') ||
         contains(github.event.head_commit.message, '[deploy-ml]')
       ) && (
-        (github.event_name != 'workflow_dispatch' && !contains(github.event.head_commit.message, '[deploy-frontend]') && !contains(github.event.head_commit.message, '[deploy-backend]')) ||
-        (github.event_name == 'workflow_dispatch' && github.event.inputs.deploy_mode != 'frontend' && github.event.inputs.deploy_mode != 'backend')
+        (github.event_name != 'workflow_dispatch' && !contains(github.event.head_commit.message, '[deploy-frontend]') && !contains(github.event.head_commit.message, '[deploy-backend]') && !contains(github.event.head_commit.message, '[deploy-app]')) ||
+        (github.event_name == 'workflow_dispatch' && github.event.inputs.deploy_mode != 'frontend' && github.event.inputs.deploy_mode != 'backend' && github.event.inputs.deploy_mode != 'app')
       )
     runs-on: ubuntu-latest
     permissions:
@@ -216,6 +219,7 @@ jobs:
       (
         github.event_name == 'workflow_dispatch' ||
         contains(github.event.head_commit.message, '[deploy-prod]') ||
+        contains(github.event.head_commit.message, '[deploy-all]') ||
         contains(github.event.head_commit.message, '[deploy-app]') ||
         contains(github.event.head_commit.message, '[deploy-frontend]') ||
         contains(github.event.head_commit.message, '[deploy-backend]') ||
@@ -280,6 +284,7 @@ jobs:
       (
         github.event_name == 'workflow_dispatch' ||
         contains(github.event.head_commit.message, '[deploy-prod]') ||
+        contains(github.event.head_commit.message, '[deploy-all]') ||
         contains(github.event.head_commit.message, '[deploy-app]') ||
         contains(github.event.head_commit.message, '[deploy-frontend]') ||
         contains(github.event.head_commit.message, '[deploy-backend]') ||
@@ -399,12 +404,10 @@ jobs:
       - name: Resolve backup server names
         if: |
           (github.event_name != 'workflow_dispatch' && (
-            contains(github.event.head_commit.message, '[deploy-prod]') ||
-            contains(github.event.head_commit.message, '[deploy-app]')
+            contains(github.event.head_commit.message, '[deploy-prod]')
           )) ||
           (github.event_name == 'workflow_dispatch' && (
-            github.event.inputs.deploy_mode == 'prod' ||
-            github.event.inputs.deploy_mode == 'app'
+            github.event.inputs.deploy_mode == 'prod'
           ))
         id: pg-meta
         env:
@@ -595,12 +598,10 @@ jobs:
       - name: Preflight restore summary
         if: |
           (github.event_name != 'workflow_dispatch' && (
-            contains(github.event.head_commit.message, '[deploy-prod]') ||
-            contains(github.event.head_commit.message, '[deploy-app]')
+            contains(github.event.head_commit.message, '[deploy-prod]')
           )) ||
           (github.event_name == 'workflow_dispatch' && (
-            github.event.inputs.deploy_mode == 'prod' ||
-            github.event.inputs.deploy_mode == 'app'
+            github.event.inputs.deploy_mode == 'prod'
           ))
         run: |
           echo "Restore source preflight"
@@ -618,33 +619,47 @@ jobs:
       - name: Apply Helmfile (full deploy)
         if: |
           (github.event_name != 'workflow_dispatch' && (
-            contains(github.event.head_commit.message, '[deploy-prod]') ||
-            contains(github.event.head_commit.message, '[deploy-app]')
+            contains(github.event.head_commit.message, '[deploy-prod]')
           )) ||
           (github.event_name == 'workflow_dispatch' && (
-            github.event.inputs.deploy_mode == 'prod' ||
-            github.event.inputs.deploy_mode == 'app'
+            github.event.inputs.deploy_mode == 'prod'
           ))
         working-directory: infra
-        env:
-          COMMIT_MSG: ${{ github.event.head_commit.message }}
-          DEPLOY_MODE: ${{ github.event.inputs.deploy_mode }}
         run: |
-          SELECTOR=""
-          if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then
-            if [ "${DEPLOY_MODE}" = "app" ]; then
-              SELECTOR="--selector name=helvex"
-            fi
-          elif echo "$COMMIT_MSG" | grep -qF '[deploy-app]'; then
-            SELECTOR="--selector name=helvex"
-          fi
-          helmfile -e prod apply $SELECTOR \
+          helmfile -e prod apply \
             --set "image.tag=${{ github.sha }}" \
             --set "mlImage.tag=${{ github.sha }}" \
             --set "frontend.image.tag=${{ github.sha }}" \
             --set "postgres.backupServerName=${{ steps.pg-meta.outputs.server_name }}" \
             --set "postgres.restoreSourceServerName=${{ steps.pg-meta.outputs.restore_source }}" \
             --suppress-diff
+
+      - name: Deploy app (backend + frontend)
+        if: |
+          (github.event_name != 'workflow_dispatch' && contains(github.event.head_commit.message, '[deploy-app]')) ||
+          (github.event_name == 'workflow_dispatch' && github.event.inputs.deploy_mode == 'app')
+        run: |
+          kubectl set image deployment/helvex \
+            app=ghcr.io/${{ github.repository }}:${{ github.sha }} \
+            -n helvex-prod
+          kubectl set image deployment/helvex-frontend \
+            frontend=ghcr.io/${{ github.repository }}-frontend:${{ github.sha }} \
+            -n helvex-prod
+
+      - name: Deploy all app images (backend + frontend + ml)
+        if: |
+          (github.event_name != 'workflow_dispatch' && contains(github.event.head_commit.message, '[deploy-all]')) ||
+          (github.event_name == 'workflow_dispatch' && github.event.inputs.deploy_mode == 'all')
+        run: |
+          kubectl set image deployment/helvex \
+            app=ghcr.io/${{ github.repository }}:${{ github.sha }} \
+            -n helvex-prod
+          kubectl set image deployment/helvex-frontend \
+            frontend=ghcr.io/${{ github.repository }}-frontend:${{ github.sha }} \
+            -n helvex-prod
+          kubectl set image deployment/helvex-ml-worker \
+            ml-worker=ghcr.io/${{ github.repository }}-ml:${{ github.sha }} \
+            -n helvex-prod
 
       - name: Deploy frontend only
         if: |
@@ -708,6 +723,9 @@ jobs:
               kubectl rollout status deployment/helvex -n helvex-prod --timeout=360s
             elif [ "${DEPLOY_MODE}" = "ml" ]; then
               kubectl rollout status deployment/helvex-ml-worker -n helvex-prod --timeout=360s
+            elif [ "${DEPLOY_MODE}" = "app" ]; then
+              kubectl rollout status deployment/helvex -n helvex-prod --timeout=360s
+              kubectl rollout status deployment/helvex-frontend -n helvex-prod --timeout=180s
             else
               kubectl rollout status deployment/helvex -n helvex-prod --timeout=360s
               kubectl rollout status deployment/helvex-ml-worker -n helvex-prod --timeout=360s
@@ -719,6 +737,9 @@ jobs:
             kubectl rollout status deployment/helvex -n helvex-prod --timeout=360s
           elif echo "$COMMIT_MSG" | grep -qF '[deploy-ml]'; then
             kubectl rollout status deployment/helvex-ml-worker -n helvex-prod --timeout=360s
+          elif echo "$COMMIT_MSG" | grep -qF '[deploy-app]'; then
+            kubectl rollout status deployment/helvex -n helvex-prod --timeout=360s
+            kubectl rollout status deployment/helvex-frontend -n helvex-prod --timeout=180s
           else
             kubectl rollout status deployment/helvex -n helvex-prod --timeout=360s
             kubectl rollout status deployment/helvex-ml-worker -n helvex-prod --timeout=360s
@@ -767,7 +788,8 @@ jobs:
       - name: Bump minor version
         if: |
           contains(github.event.head_commit.message, '[deploy-prod]') ||
-          contains(github.event.head_commit.message, '[deploy-app]')
+          contains(github.event.head_commit.message, '[deploy-app]') ||
+          contains(github.event.head_commit.message, '[deploy-all]')
         run: |
           latest=$(git tag --list 'v*.*.*' --sort=-version:refname | head -1)
           latest=${latest:-v0.0.0}

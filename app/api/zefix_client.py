@@ -119,9 +119,10 @@ def fetch_companies_by_prefix(
     return [_parse_company(item) for item in items]
 
 
-def get_company(uid: str) -> dict[str, Any]:
+def get_company(uid: str | list[Any]) -> dict[str, Any]:
     """Fetch full company details by UID from the Zefix API."""
-    uid_clean = uid.replace("-", "").replace(".", "")
+    uid_str = _coerce_uid(uid)
+    uid_clean = uid_str.replace("-", "").replace(".", "")
     url = f"{settings.zefix_api_base_url}/company/uid/{uid_clean}"
 
     with httpx.Client(timeout=60.0) as client:
@@ -131,9 +132,24 @@ def get_company(uid: str) -> dict[str, Any]:
     data = response.json()
     if isinstance(data, list):
         if not data:
-            raise ValueError(f"No company found for UID {uid}")
+            raise ValueError(f"No company found for UID {uid_str}")
         data = data[0]
     return data
+
+
+def _coerce_uid(uid: str | list[Any] | None) -> str:
+    """Coerce a UID value that may come as string or nested list into text."""
+    if isinstance(uid, str):
+        return uid
+    if isinstance(uid, list):
+        for item in uid:
+            coerced = _coerce_uid(item)
+            if coerced:
+                return coerced
+        return ""
+    if uid is None:
+        return ""
+    return str(uid)
 
 
 def _parse_legal_form(lf: Any) -> tuple[str | None, int | None, str | None, str | None]:
@@ -251,8 +267,9 @@ def _parse_company(data: dict[str, Any]) -> ZefixSearchResult:
     )
 
 
-def _normalise_uid(uid: str) -> str:
+def _normalise_uid(uid: str | list[Any]) -> str:
     """Return the UID in ``CHE-XXX.XXX.XXX`` format when possible."""
+    uid = _coerce_uid(uid)
     digits = "".join(ch for ch in uid if ch.isdigit())
     if len(digits) == 9:
         return f"CHE-{digits[:3]}.{digits[3:6]}.{digits[6:9]}"

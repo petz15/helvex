@@ -722,9 +722,10 @@ Other options if you want to swap out Serper.dev — all return `title`/`link`/`
 | Tag | What runs |
 |---|---|
 | `[deploy-prod]` | Build images → full `helmfile apply` (cert-manager, CloudNativePG, Redis, ARC, app + frontend) |
-| `[deploy-app]` | Build images → apply only the `helvex` Helm release (app + frontend) — faster, leaves infra untouched |
+| `[deploy-all]` | Build backend + frontend + ML images, then roll out app deployments only (no cert-manager/CloudNativePG/infra bootstrap) |
+| `[deploy-app]` | Build backend + frontend images, then roll out only backend + frontend deployments |
 
-Use `[deploy-app]` for all normal code changes. Use `[deploy-prod]` only when infra config (Helm values, chart changes, new releases) has changed.
+Use `[deploy-app]` for normal backend/frontend changes. Use `[deploy-all]` when backend/frontend/ML all changed but infra did not. Use `[deploy-prod]` only when infra config (Helm values, chart changes, new releases) has changed.
 
 #### Partial deploys (manual, from app1)
 

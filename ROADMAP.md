@@ -152,6 +152,7 @@
 - [ ] **Rename users.tier → deprecated_user_tier** — `users.tier` is legacy (pre-org migration); once all routes use `org.tier`, rename the column and add a deprecation comment
 - [ ] **API key management** — token creation/revocation UI for org admins to manage their API credentials; currently only available via admin panel
 - [ ] **uvicorn async** - Each open SSE connection holds one synchronous uvicorn worker thread (blocking I/O). At current scale (<50 concurrent users) this is fine; at higher scale the endpoint should be rewritten as `async def` with `anyio.sleep` and an async Redis client.
+- **Github Action Secrets Mess** - Currently many github action secrets are thrown in there which are my ENV variables, this should be managed and documented much better. Especially when I implement a DEV/INT env I should seperate a lot of these variables
 
 
 ## Other

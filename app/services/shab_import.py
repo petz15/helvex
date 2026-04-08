@@ -38,6 +38,36 @@ def yesterday() -> date:
     return (datetime.now(tz=timezone.utc) - timedelta(days=1)).date()
 
 
+def _extract_uid(value: Any) -> str | None:
+    """Extract a UID string from SHAB payload values.
+
+    SHAB sometimes returns ``meta.uid`` as a scalar string and sometimes as a
+    nested list (for example ``["CHE-123.456.789"]``). This helper normalizes
+    those variants to a single string.
+    """
+    if value is None:
+        return None
+    if isinstance(value, str):
+        uid = value.strip()
+        return uid or None
+    if isinstance(value, list):
+        for item in value:
+            extracted = _extract_uid(item)
+            if extracted:
+                return extracted
+        return None
+    if isinstance(value, dict):
+        for key in ("uid", "value", "text"):
+            if key in value:
+                extracted = _extract_uid(value.get(key))
+                if extracted:
+                    return extracted
+        return None
+
+    uid = str(value).strip()
+    return uid or None
+
+
 def import_shab_publications(
     db: Session,
     from_date: date,
@@ -103,11 +133,11 @@ def import_shab_publications(
             continue
 
         # UID is NOT present in the list response — fetch the detail endpoint.
-        uid: str | None = meta.get("uid") or None
+        uid: str | None = _extract_uid(meta.get("uid"))
         if not uid:
             try:
                 detail = fetch_publication_detail(pub_id)
-                uid = (detail.get("meta") or {}).get("uid") or None
+                uid = _extract_uid((detail.get("meta") or {}).get("uid"))
             except Exception as exc:  # noqa: BLE001
                 stats["errors"].append(f"[{pub_id[:8]}] detail fetch failed: {exc}")
                 if progress_cb:

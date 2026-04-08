@@ -22,6 +22,12 @@ class TestNormaliseUid:
         # Strip non-digit chars and reformat
         assert _normalise_uid("CHE-456.789.012") == "CHE-456.789.012"
 
+    def test_list_uid_is_normalised(self):
+        assert _normalise_uid(["CHE-123.456.789"]) == "CHE-123.456.789"
+
+    def test_nested_list_uid_is_normalised(self):
+        assert _normalise_uid([["CHE-123.456.789"]]) == "CHE-123.456.789"
+
 
 class TestParseCompany:
     def test_basic_fields(self):
@@ -94,3 +100,21 @@ class TestSearchCompanies:
 
         assert len(results) == 1
         assert results[0].name == "Another GmbH"
+
+
+class TestGetCompany:
+    def test_accepts_list_uid(self):
+        mock_response = MagicMock()
+        mock_response.json.return_value = {"uid": "CHE-123.456.789", "name": "Test AG"}
+        mock_response.raise_for_status = MagicMock()
+
+        with patch("app.api.zefix_client.httpx.Client") as mock_client_cls:
+            mock_client = MagicMock()
+            mock_client.__enter__ = MagicMock(return_value=mock_client)
+            mock_client.__exit__ = MagicMock(return_value=False)
+            mock_client.get.return_value = mock_response
+            mock_client_cls.return_value = mock_client
+
+            result = get_company(["CHE-123.456.789"])
+
+        assert result["uid"] == "CHE-123.456.789"
