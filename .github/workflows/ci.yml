@@ -57,7 +57,7 @@ jobs:
           cache: pip
 
       - name: Install dependencies
-        run: pip install -r requirements.txt ruff pip-audit
+        run: pip install -r requirements.backend.txt pytest pytest-asyncio ruff pip-audit
 
       - name: Lint
         run: python -m ruff check app/
@@ -66,7 +66,7 @@ jobs:
         run: python -m pytest tests/ -v
 
       - name: Dependency vulnerability audit
-        run: python -m pip_audit -r requirements.txt
+        run: python -m pip_audit -r requirements.backend.txt
 
   test-ml-imports:
     needs: changes
@@ -81,7 +81,7 @@ jobs:
           cache: pip
 
       - name: Install dependencies
-        run: pip install -r requirements.txt
+        run: pip install -r requirements.ml.txt
 
       - name: Verify ML imports
         run: |

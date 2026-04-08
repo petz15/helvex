@@ -703,6 +703,31 @@ jobs:
           echo "=== Events ==="
           kubectl get events -n helvex-prod --sort-by='.lastTimestamp' | tail -30
 
+      - name: Bump patch version
+        if: |
+          (github.event_name != 'workflow_dispatch' && (
+            contains(github.event.head_commit.message, '[deploy-frontend]') ||
+            contains(github.event.head_commit.message, '[deploy-backend]') ||
+            contains(github.event.head_commit.message, '[deploy-ml]')
+          )) ||
+          (github.event_name == 'workflow_dispatch' && (
+            github.event.inputs.deploy_mode == 'frontend' ||
+            github.event.inputs.deploy_mode == 'backend' ||
+            github.event.inputs.deploy_mode == 'ml'
+          ))
+        run: |
+          latest=$(git tag --list 'v*.*.*' --sort=-version:refname | head -1)
+          latest=${latest:-v0.0.0}
+          major=$(echo "$latest" | cut -d. -f1 | tr -d 'v')
+          minor=$(echo "$latest" | cut -d. -f2)
+          patch=$(echo "$latest" | cut -d. -f3)
+          new_tag="v${major}.${minor}.$((patch + 1))"
+          echo "Bumping $latest → $new_tag"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag "$new_tag" -m "Release $new_tag"
+          git push origin "$new_tag"
+
       - name: Bump minor version
         if: |
           contains(github.event.head_commit.message, '[deploy-prod]') ||

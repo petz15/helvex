@@ -49,17 +49,16 @@
 - [ ] **Fix Branding** — potentially change the icon to have a red cross in the middle (change google and linkedin app connection icons)
 - [ ] **Map** - add adress search in order to jump to a specific place
 - [ ] **Improve colors** - improve some of the colors, look and feel for the website
-- [ ] **Cookie banner settings** - adjust the cookie banner so users by default choose all
+- [X] **Cookie banner settings** - adjust the cookie banner so users by default choose all
 - [ ] **Add dark mode** — add dark mode
 - [ ] **Mobile optimization** - Optimize the website for mobile traffic (maybe limit some features)
 
 
 ## Company Explore page
 
-- [ ] **Settings** - set up settings page for LLM, FLEX scoring, etc
-- [ ] **Jobs page** - Shows running jobs and possibility to start new jobs such as batch web search, LLM classification etc
-- [ ] **Categories page** - Needs to be fixed from the existing, first to use org data and to show NOGA classification better
-- [ ] **Browse page** - Pretty simple, maybe needs to be made nicer?
+- [ ] **Settings** - set up settings page for LLM, FLEX scoring, etc. Move out of account and improve it
+- [ ] **Categories page** - Needs to be fixed from the existing and integrated into the company explore page. first AI classification should be org specific, currently there is some data which should be changed to org 1.  NOGA classification dumps all levels into the field, instead it should display the hierarchy, always sum by total number also from lower hierarchy. add filtering options where necessary
+- [ ] **Browse page** - The search bar, when searching for keywords, clusters etc it should search all available not only the top 20 words. 
 - [ ] **More pages(?)** - (?)
 - [ ] **Remove default flex score and categories** - Remove my default flex scores and categories only 
 
@@ -104,6 +103,8 @@
 - [ ] **ML scheduling policy** - implement Helm affinity policy: required `workload=ml`, preferred primary ML node class, cloud fallback when unavailable
 - [ ] **ML capacity mode policy** - define default behavior when no ML node is available (queue-only vs temporary fallback)
 - [ ] **Change postgres backup/recovery** - 1) Maintain an explicit latest backup pointer After each successful backup, write a small object like latest.json in the same bucket/prefix. 2) Manual restore source override as first-class input Add a workflow dispatch input or repo variable like POSTGRES_RESTORE_SOURCE. If set, workflow uses it exactly. If not set, then run auto-discovery.
+- [ ] **Middleware** - my middleware python program has a chokehold on the whole architecture, if that is down nothing works! Either change that, i.e. review changes or when deploying and something fails, make sure this one can revert to a stable build. 
+- [ ] **DEV/INT env** - for save deployment checks
 
 
 
@@ -115,9 +116,9 @@
 
 
 ## Monetisation & Tiers
-- [ ] **Adress flow** - improve the adress flow, use default choosing one etc
+- [X] **Adress flow** - improve the adress flow, use default choosing one etc
 - [ ] **Adjustments to pricing** - More adjustments to pricing page: remove flex rescore from, some consumptions are not available for certain tiers and the question marks are not filled in. also for first time org accounts, give about 1k credits or even more
-- [ ] **Billing admin panel** — superadmin view of all orgs' tiers, subscription status, credit balance, transaction history; tier/credit adjustment UI
+- [X] **Billing admin panel** — superadmin view of all orgs' tiers, subscription status, credit balance, transaction history; tier/credit adjustment UI
 - [ ] **Invoice & receipt generation** — PDF invoices for annual subscriptions; receipts for top-up purchases; email delivery
 - [ ] **Verified business discount** — 20% extra discount (on top of tier bonus) for verified business orgs; applied at Stripe price calculation
 - [ ] **Check Free tier limitations enforcement** — export limit enforcement in CSV export endpoint; API rate limits (once API access is gated)

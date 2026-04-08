@@ -794,8 +794,8 @@ def create_worldline_card_registration(
     return PaymentMethodRegistrationResponse(provider=session.provider, checkout_url=session.checkout_url, external_id=session.external_id)
 
 
-@router.get("/webhooks/worldline/card/return")
-@router.get("/webhooks/worldline/card/return/{token}")
+@router.get("/webhooks/worldline/card/return", response_model=None)
+@router.get("/webhooks/worldline/card/return/{token}", response_model=None)
 async def worldline_card_return(
     request: Request,
     db: Session = Depends(get_db),
