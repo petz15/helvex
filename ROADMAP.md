@@ -1,6 +1,6 @@
 # Helvex Roadmap
 
-# Major changes
+# Overview
 
 - **Angebotsgestaltung**: 
     - Create a simpler product called "search" which simply shows zefix information in a nice way and has google search for website (this might be limited in the tiering, add reveal website 5 free per month). 
@@ -18,16 +18,7 @@
     - Integrations with other products such as appollo etc?
     - other industry specific directories
 
-
-### Todos
-- Set up AI classification per org
-- filters should show the entire list when searched for (and check how chrome shows these lists)
-- Change the UX/UI for certain settings (such as seperate from account, put into explorer settings or other settings?)
-- zefix detail cant fetch detail for some companies which then loops it to do it every single time I start zefix detail collection
-- Continue on Explore page
-- Change backup methodology. currently its a mess and high chances that it takes the wrong backup i.e. older
-
-### Blockers before real PROD
+### MVP before public PROD
 - Save cards happens automatically
 - Billing QOL
 - Tiers are enforced
@@ -42,7 +33,21 @@
 - SMTP for emails?
 - DNS eintrag auf balogh consulting bei hostpoint
 - umami (also keys probably) potentially posthog?
-- 
+
+## Bug Fixes & Known Issues
+- Map not working correctly
+- categories showing weird numbers
+- shab not running correctly
+- multiple issues in billing
+    - save card not working
+    - existing subscription then upgrading is not working
+    - ...
+- Usermanagement for orgs (atleast untested)
+
+
+
+
+# Specific features
 
 ## Dashboard & UI
 
@@ -61,12 +66,13 @@
 - [ ] **Browse page** - The search bar, when searching for keywords, clusters etc it should search all available not only the top 20 words. 
 - [ ] **More pages(?)** - (?)
 - [ ] **Remove default flex score and categories** - Remove my default flex scores and categories only 
+- [ ] **ML Classifications** - Not sure that all of them are implemented quite correctly also explanations, drawbacks, multi org support for different tiers needs to be implemented, etc. 
 
 
 ## Company Data
 
-- [ ] **Import all companies + full detail** — bulk import entire Zefix register including detailed fields (purpose, capital, offices, etc.) in one run
-- [ ] **Daily SHAB imports** — automated daily job pulling new/changed/deleted companies from SHAB to keep DB current without full re-import -> also means that those listed in the SHAB need a full detail import? (-> with the dazzling-seeking-harp it should work but not tested)
+
+- [ ] **Daily SHAB imports** — automated daily job pulling new/changed/deleted companies from SHAB to keep DB current without full re-import -> not fully implemented, multiple bugs. Should go over it myself because I think the API is misconfigured and AI is not solving it very well. my suspicion is that either wrong endpoint of the zefix is being used or not correctly added to the DB. 
 - [ ] **CSV export** — export current filtered/sorted dashboard view as CSV; include all visible columns; respect active filters and column selection -> somewhat exists but not fully operational yet. No way to set which columns the CSV exports currently!
 - [ ] **Web crawler** — crawl company websites to extract description, contact info, product/service keywords; store as structured fields; feed into scoring and classification; replace/supplement current Google scrape
 - [ ] **Google results & scoring** — Improve the selection and scoring of google results
@@ -126,7 +132,9 @@
 - [X] **Credit grant system** — admin interface to grant/refund credits with reason; used for migration credits, promotions, support refunds
 - [ ] **Credit expiry automation** — background job to expire grant-type credits after 1 year; topup credits never expire
 - [ ] **automatic reocurring billing** on saferpay (worldline) I need to use the secure card data interface to save card data at saferpay which I can then utilize for later payments (reocurring payments like subscriptions or automatic topups). https://saferpay.github.io/jsonapi/#ChapterAliasStore
-- [ ] **refund and other admin function** - check QOL of billing such as refunds and other methods. What happens when an automatic payment fails? -> subscription upgrades not working correctly, other functions not fully tested, definitely not complete
+- [ ] **refund and other admin function** - check QOL of billing such as refunds and other methods. What happens when an automatic payment fails? -> subscription upgrades not working correctly, other functions not fully tested, definitely not complete. 
+    - What happens to other users when an account is downgraded to free?
+    - Subscription upgrade and downgrade flow
 
 
 
@@ -140,9 +148,9 @@
 - [ ] **Testing suite** — introduce consistent testing suite
 
 
-## Bug Fixes & Known Issues
 
-- [ ] **Node autoscaling**: cluster-autoscaler with Hetzner Cloud provider. Split responsibility: Terraform manages control plane + DB node; autoscaler manages worker node pool (CX32, minSize 0, maxSize ~5). Requires `hcloud-cloud-controller-manager`, worker cloud-init bootstrap template (derived from existing Terraform cloud-init), and removing worker nodes from Terraform state. Add PodDisruptionBudget for Redis before enabling scale-down. Trigger: when worker CPU regularly exceeds 70% or ml-worker jobs queue up.
+
+
 
 
 ## Architecture & Refactoring
@@ -218,3 +226,4 @@
 - [X] **How are new companies added to clusters?**: Find a logic how new companies are added to tf-idf/HBDscan clusters without recomputing all of them -> should be done through dazzling-seeking-harp.md untested for now
 - [X] **Generally Classifications** - in general the classifications are not working great. Might need a major overhaul -> dazzling-seeking-harp.md and look at git
 - [X] **Improve classifications** - improvements to the classification NOGA and tf-idf/HBD-SCan see claude plan: dazzling-seeking-harp.md -> should be done. untested for now and not run yet. 
+- [X] **Import all companies + full detail** — bulk import entire Zefix register including detailed fields (purpose, capital, offices, etc.) in one run

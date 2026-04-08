@@ -554,48 +554,185 @@ All weights and the keyword taxonomy are stored in `app_settings` and editable l
 
 **Files:** `app/services/cluster_pipeline.py`, `app/services/noga.py`, `app/services/collection.py`
 
-Three complementary ML pipelines enrich company classification:
+---
 
-#### TF-IDF Clustering + Keyword Extraction (`hdbscan_cluster` job)
+#### ML Pipeline Overview
 
-**Purpose:** Find hidden business domain clusters and extract high-value keywords for each company.
+Three complementary ML pipelines enrich company data:
 
-**Pipeline:**
-1. **Boilerplate stripping** — removes generic legal sentences (e.g. "Die Gesellschaft bezweckt...") using DB patterns
-2. **Lemmatization** — spaCy de_core_news_md reduces words to roots; stopwords filtered
-3. **TF-IDF vectorization** — corpus-wide term frequencies, max 15,000 features
-4. **Dimensionality reduction** — TruncatedSVD 50 components (for numerical stability and speed)
-5. **K-Means clustering** — fit ~150 clusters via MiniBatchKMeans
-6. **Cluster labeling** — c-TF-IDF extracts top-5 terms per cluster with bigram deduplication
-7. **Quality filtering** — clusters with low specificity (generic terms) are suppressed (`min_cluster_specificity` threshold)
-8. **Cluster registry** — canonical names stored in DB to prevent label churn across runs; registry matching via Jaccard similarity on top terms
-9. **Multi-label assignment** — each company assigned to 1–3 clusters via soft cosine similarity
-10. **Keyword extraction** — per-company top-10 TF-IDF terms (same bigram-dedup logic as cluster labels)
+| Pipeline | Input | Output | When to run |
+|---|---|---|---|
+| **Keyword extraction** | `purpose` text | `purpose_keywords` per company | After initial import; incremental on new companies |
+| **Clustering** | `purpose` or `purpose_keywords` | `tfidf_cluster` per company | Periodically, or after large imports change corpus |
+| **NOGA classification** | name + purpose + keywords + cluster | `noga_code`, `noga_path` | After keywords + clustering are done |
 
-**Outputs to DB:**
-- `tfidf_cluster` — pipe-separated canonical cluster names (stable across pipeline re-runs)
-- `purpose_keywords` — comma-separated keywords per company
+**Correct execution order:** Keywords → Clustering → NOGA. NOGA uses `purpose_keywords` and `tfidf_cluster` as input signals; running it before clustering degrades accuracy.
 
-**Outputs to S3 (`models/` prefix):**
-- `tfidf_vectorizer.pkl` — fitted sklearn TfidfVectorizer
-- `svd_transformer.pkl` — fitted TruncatedSVD reducer
-- `kmeans_centroids.npy` — K-Means centroid matrix (normalised, float32)
-- `centroid_registry_map.json` — centroid index → canonical cluster name mapping + shape metadata
+---
 
-**Incremental keyword extraction** (`reextract_keywords` job, or automatic during detail import):
-- Uses S3-cached TF-IDF vectorizer (no refit needed)
-- Single-document keyword extraction without re-running full pipeline
-- Automatically triggered when new companies receive purpose text during detail enrichment
-- Non-fatal if S3 artifacts unavailable (gracefully skipped)
+#### Text Preprocessing (shared by all clustering algorithms)
 
-**Incremental cluster assignment** (automatic during detail import if S3 available):
-- Single-document projection: TF-IDF → SVD → L2-normalise → cosine to centroids
-- Nearest centroid above `min_similarity` threshold assigns the company to one canonical cluster
-- Works in parallel with detail enrichment, no full re-clustering needed
+All three clustering pipelines share the same preprocessing stack before the clustering step differs:
+
+1. **Boilerplate stripping** — removes generic legal boilerplate sentences (e.g. "Die Gesellschaft bezweckt...") using configurable DB regex patterns. Prevents generic legal terms from dominating cluster labels.
+2. **Lemmatization** — spaCy `de_core_news_md` reduces words to their dictionary root. "betreibt" → "betreiben". Skipped when `use_keywords=True`.
+3. **Stopword filtering** — ~30 hardcoded German legal stopwords + DB `tfidf_stopwords` table. `cluster_analysis` job identifies candidates.
+4. **TF-IDF vectorization** — up to 15,000 features, unigrams + bigrams, `min_df=5`, `max_df=0.4`.
+5. **Dimensionality reduction** — TruncatedSVD 50 components + L2 normalisation. Required for HDBSCAN (density requires distances); improves K-Means stability.
+
+**`use_keywords=True` mode:** Passes pre-stored `purpose_keywords` (comma → space) directly into TF-IDF, skipping spaCy. Faster (~20 min vs ~60 min for 700K), cleaner clusters because boilerplate is already stripped. Recommended for re-clustering after keywords are established. Falls back to raw `purpose` for companies where `purpose_keywords` is NULL.
+
+---
+
+#### `recompute_keywords` vs `reextract_keywords`
+
+Two functions produce `purpose_keywords`; they differ fundamentally in whether they **refit** the TF-IDF model or **reuse** a previously fitted one.
+
+| | `recompute_keywords` | `reextract_keywords` |
+|---|---|---|
+| **TF-IDF model** | Fits a new model on the current corpus | Loads frozen model from S3 |
+| **IDF weights** | Computed from today's full corpus | Frozen from last clustering run |
+| **spaCy lemmatization** | Yes — full preprocessing pipeline | No — transforms raw/boilerplate-stripped text |
+| **S3 dependency** | None (uploads a new vectorizer afterwards) | Required — aborts if artifacts missing |
+| **Speed (700K)** | ~20 min | ~3–5 min |
+| **Consistency with existing companies** | May shift (IDF changes when corpus changes) | Guaranteed — same IDF weights as existing companies |
+| **When to use** | After large imports that change corpus composition; to reset model | After small batches of new companies; incremental use |
+
+**Why consistency matters (the key advantage of `reextract_keywords`):**
+
+TF-IDF IDF weights are corpus-relative. A term's "importance" is measured against all other documents. If you fit a new model only on 500 new companies, a term rare in those 500 but common in the full 700K would get an artificially high IDF score — making it appear important when it isn't. `reextract_keywords` uses the same IDF weights that were used for the existing 700K, so new companies' keywords are directly comparable and searchable alongside existing ones.
+
+**Why `recompute_keywords` is still needed:**
+IDF weights drift over time as the corpus grows. After a large import (50K+ new companies from a new industry), terms that were rare become common, changing what "important" means. Re-fitting recalibrates the model to the current reality. This also uploads a fresh S3 vectorizer, so subsequent `reextract_keywords` calls use up-to-date weights.
+
+**Incremental use (automatic during detail import):**
+`extract_keywords_incremental()` — called per-company during the `initial` detail-fetch job — is the single-document version of `reextract_keywords`. It calls `artifacts.vectorizer.transform([text])` (no fit) using the S3 model. This is why running a full clustering job before importing new companies is important: without S3 artifacts, incremental keyword extraction is silently skipped.
+
+---
+
+#### Clustering Algorithm Comparison
+
+Three algorithms are available. They write to the same `tfidf_cluster` column and share the same label pipeline downstream.
+
+| | **K-Means** (`tfidf_kmeans_cluster`) | **HDBSCAN** (`hdbscan_cluster`) | **BIRCH** (`birch_cluster`) |
+|---|---|---|---|
+| **Job type** | `tfidf_kmeans_cluster` | `hdbscan_cluster` | `birch_cluster` |
+| **Function** | `run_pipeline()` | `run_hdbscan_pipeline()` / `run_batch_merge_hdbscan_pipeline()` | `run_birch_pipeline()` |
+| **Library** | scikit-learn | `hdbscan` (separate package) | scikit-learn |
+| **k required?** | Yes — `n_clusters` param (default 150) | No — discovers count automatically | Yes — `n_clusters` param |
+| **Memory scaling** | O(n·k) — fine for full corpus | O(n²) single-pass — **infeasible for n > ~50K** | O(n) single-pass CF-tree — fine for full corpus |
+| **Assignment type** | **Soft multi-label** — 1–3 clusters per company via cosine similarity | Hard single-label — or noise (−1) | Hard single-label |
+| **Noise handling** | None — every company gets at least one cluster | Outliers get label −1 (written as NULL) | None — every company assigned |
+| **Speed (700K corpus)** | ~25 min total | ~40 min batch-merge or OOM single-pass | ~20 min |
+| **Cluster quality** | Good, predictable count | Best quality when it works; many noise points on messy text | Slightly below K-Means |
+| **Label stability** | Via cluster registry (Jaccard match) | Via cluster registry | Via cluster registry |
+| **Artifacts saved to S3** | vectorizer + SVD + centroids | centroids computed as cluster means | centroids computed as cluster means |
+
+---
+
+#### K-Means (`tfidf_kmeans_cluster`) — **Recommended default**
+
+**When to use:** Full corpus runs, production pipeline, whenever you need all companies to be assigned.
+
+**How it works:**
+- MiniBatchKMeans on the SVD-reduced space (50 dimensions)
+- Each company gets up to 3 clusters (`max_clusters_per_company=3`) via soft cosine similarity to centroids
+- Low-quality clusters (mean IDF of top terms below `min_cluster_specificity=0.3`) are suppressed; companies assigned only to those become NULL
+- c-TF-IDF labels: top-5 terms per cluster with bigram deduplication
+
+**Best practice:**
+1. Run `recompute_keywords` (keyword-only job) first to populate `purpose_keywords`
+2. Then run K-Means with `use_keywords=True` — this gives cleaner, more domain-specific clusters because generic legal boilerplate is already absent from the keyword set
+3. After clustering, run `cluster_analysis` to identify stopword candidates from cross-cluster terms
+
+**Parameters to tune:**
+- `n_clusters` (default 150): Swiss company corpus has broad industry coverage. 100–200 is the useful range. Too few → over-broad clusters ("IT dienstleistungen" merges software dev with IT support); too many → label fragmentation.
+- `min_similarity` (default 0.20): Cosine similarity threshold below which a company gets NULL instead of a cluster assignment. Lower → more assignments but noisier; higher → cleaner but more NULLs.
+
+---
+
+#### HDBSCAN (`hdbscan_cluster`) — **Exploration / subset only**
+
+**When to use:** Discovering the natural cluster structure of a subset; calibrating the `n_clusters` parameter for K-Means; high-quality clusters on a bounded dataset (e.g. one canton, one industry).
+
+**Why HDBSCAN is "messy" on purpose keywords:**
+1. **High noise rate** — Purpose text (even after keyword extraction) still contains ambiguous companies. HDBSCAN assigns these to label −1 (NULL), which is correct but leaves many companies unclassified.
+2. **Variable cluster count** — With `min_cluster_size=30`, a 700K corpus can produce anywhere from 50 to 1000 clusters depending on density. Unpredictable for production.
+3. **O(n²) memory** — Single-pass HDBSCAN on 700K companies requires ~2.3 TB for the distance matrix. The pod has 16 GB. This is why `run_batch_merge_hdbscan_pipeline` exists.
+4. **Batch-merge quality loss** — The batch-merge variant (100K batches → hierarchical merge on centroids) avoids OOM but loses the global density estimation that makes HDBSCAN good. Results are similar to K-Means but with more NULLs.
+
+**Recommended usage:**
+- Set `limit=30000` to run on a representative sample — this fits in memory and takes ~3 min
+- Use results to understand how many natural clusters exist and how dense they are
+- Then configure K-Means `n_clusters` accordingly
+
+**Parameters:**
+- `min_cluster_size` (default 30): Minimum companies to form a cluster. Too low → many tiny fragmented clusters; too high → large coarse clusters. For 30K companies, 30–100 is sensible.
+- `min_samples`: Controls how conservative cluster cores are. Lower → more points assigned (less noise). Setting to 1 behaves like single-linkage and produces very large clusters; leave as None to auto-set.
+- `cluster_selection_epsilon` (default 0.0): Merge nearby clusters. Values ~0.1–0.3 reduce fragmentation. Useful if clusters are splitting hairline industry sub-niches.
+
+---
+
+#### BIRCH (`birch_cluster`) — **Full-corpus fast alternative to K-Means**
+
+**When to use:** When you want a quick full-corpus clustering without S3 artifacts available; when K-Means convergence is slow; memory-constrained environments.
+
+**How it works:**
+- Builds a Clustering Feature (CF) tree in a single pass over the data — O(n) memory
+- `n_clusters` controls the final agglomerative merge of CF-tree leaf nodes
+- Assignment is hard single-label only (no soft multi-assignment like K-Means)
+
+**Tradeoffs vs K-Means:**
+- Faster for very large datasets (single pass vs multiple K-Means iterations)
+- No multi-label assignment — each company gets exactly one cluster
+- Cluster quality slightly below K-Means because CF-tree summarisation loses some information
+- `threshold` parameter controls CF-tree node splitting; sklearn sets this automatically when `n_clusters` is given
+
+**When NOT to use:**
+- When you want multi-label assignment (e.g. a company that does "IT support" and "software development" should be in both clusters — K-Means handles this, BIRCH does not)
+- When cluster quality matters more than speed
+
+---
+
+#### Recommended Workflow
+
+```
+1. Initial import (bulk + initial jobs)
+       ↓
+2. recompute_keywords   ← extracts purpose_keywords from raw purpose text
+   (keyword-only job, ~20 min for 700K)
+       ↓
+3. tfidf_kmeans_cluster  use_keywords=True   ← recommended default
+   (K-Means, ~25 min, all companies assigned)
+       ↓                       ← optional: HDBSCAN on sample to calibrate k
+4. reclassify_noga     ← uses purpose_keywords + tfidf_cluster for best accuracy
+       ↓
+5. claude_classify     ← AI scoring uses org-configured categories & target description
+       ↓
+6. recalculate_scores  ← recomputes combined_score with latest flex + AI data
+```
+
+For **ongoing imports** (daily SHAB updates): incremental keyword extraction and cluster assignment run automatically during the `initial` detail-fetch job using S3-cached model artifacts. Full re-cluster periodically (monthly or when corpus shifts significantly).
+
+---
+
+#### Keyword Quality
+
+Keywords (`purpose_keywords`) are the most important intermediate artifact — they feed into clustering, NOGA classification, and the FLEX keyword scoring. Improving keyword quality cascades to all downstream outputs.
+
+Quality depends on:
+1. **Boilerplate stripping** — configure patterns in Admin → Boilerplate Settings
+2. **Stopword filtering** — review `cluster_analysis` output and add cross-cluster terms to DB `tfidf_stopwords`
+3. **IDF reweighting** — bigram terms penalised 15% (`bigram_penalty=0.85`) so German compound nouns don't dominate
+4. **Corpus dependency** — keywords are relative to the full corpus; adding many new companies from a new industry shifts IDF weights. After large imports, re-run step 2 above.
+
+**Monitoring:** After each clustering run, the `cluster_analysis` job writes `static/cluster_analysis.txt` listing terms appearing in 20%+ of top cluster labels — these are stopword candidates.
+
+---
 
 #### NOGA Taxonomy Classification (`reclassify_noga` job)
 
-**Purpose:** Map each company to the official Swiss NOGA industry classification + full hierarchy breadcrumb.
+**Purpose:** Map each company to the official Swiss NOGA industry classification with full hierarchy breadcrumb.
 
 **Data files (repo-resident):**
 - `noga_lookup.json` — flat dict: NOGA code → node (name, annotations, parent link)
@@ -612,11 +749,11 @@ Three complementary ML pipelines enrich company classification:
 4. **Hierarchy path** — walk `noga_lookup.json` via `parentCode` links to build full ancestry (section → division → group → class → type)
 
 **Outputs to DB per company:**
-- `noga_code` — best-matching code (e.g. "263001")
+- `noga_code` — best-matching code (e.g. `"263001"`)
 - `noga_label` — German description
-- `noga_level` — level name ("Art", "Klasse", etc.)
-- `noga_confidence` — embedding similarity of top result (0–1, interpretable)
-- `noga_path` — pipe-separated codes root→leaf (e.g. "C|26|263|2630|263001")
+- `noga_level` — level name (`"Art"`, `"Klasse"`, etc.)
+- `noga_confidence` — embedding similarity of top result (0–1)
+- `noga_path` — pipe-separated codes root→leaf (e.g. `"C|26|263|2630|263001"`)
 - `noga_path_labels` — corresponding German labels, pipe-separated
 
 **S3 artifacts** (produced once by `scripts/build_noga_embeddings.py`):
@@ -624,20 +761,47 @@ Three complementary ML pipelines enrich company classification:
 - `models/noga_embedding_ids.json` — list of NOGA codes in embedding row order + shape metadata
 
 **Graceful degradation:**
-- If S3 embeddings unavailable → falls back to token-only matching
+- If S3 embeddings unavailable → falls back to token-only matching (lower accuracy)
 - If `purpose_keywords` empty → uses raw tokens from name + purpose
 - If purpose text missing → returns no classification
 
-#### Keyword Quality
+---
 
-Keywords influence both clustering assignment and NOGA embedding similarity. Quality depends on:
+#### ML Dependencies
 
-1. **Boilerplate stripping** — removes generic legal language before TF-IDF
-2. **Stopword filtering** — ~30 hardcoded German legal stopwords + DB `tfidf_stopwords` table
-3. **IDF reweighting** — bigram terms penalised 15% to prevent inflated scores from rare compound words
-4. **Corpus dependency** — keywords are relative to the company population; retraining shifts keyword rankings
+**Python packages:**
 
-**Monitoring:** `cluster_analysis` job identifies cross-cluster terms (appearing in 20%+ of top clusters) as candidates for stopword addition. Review and activate in DB to filter future pipeline runs.
+| Package | Image | Purpose |
+|---|---|---|
+| `scikit-learn` | backend + ml | TF-IDF, TruncatedSVD, MiniBatchKMeans, Birch |
+| `scipy` | backend + ml | Sparse matrix ops, hierarchical clustering in batch-merge HDBSCAN |
+| `numpy` | backend + ml | Centroid math, cosine similarity |
+| `spacy` + `de_core_news_md` | ml | German lemmatization (downloaded at build time) |
+| `hdbscan` | **ml only** | HDBSCAN clustering (`requirements.ml.txt`) |
+| `sentence-transformers` | ml | NOGA embedding (`paraphrase-multilingual-MiniLM-L12-v2`) |
+| `tqdm` | ml | Progress bars in pipeline CLI |
+
+**Important:** `hdbscan` is **not** in `requirements.backend.txt` — only in `requirements.ml.txt`. The `hdbscan_cluster` and `birch_cluster` jobs are routed to the `helvex-ml` K8s pod (`job_worker.py` line 78). Triggering them from the `helvex` (backend-only) pod will raise `ImportError`.
+
+**K8s pod routing (from `job_worker.py`):**
+
+```python
+ML_JOB_TYPES = {"hdbscan_cluster", "birch_cluster", "tfidf_kmeans_cluster", ...}
+# → routed to helvex-ml pod when USE_RQ=true
+```
+
+When `USE_RQ=false` (local dev / thread mode), all jobs run in the same process — ensure `hdbscan` is installed locally.
+
+**Model artifacts on S3 (`helvex-exports` bucket, `models/` prefix):**
+
+| File | Written by | Read by |
+|---|---|---|
+| `tfidf_vectorizer.pkl` | all clustering jobs | incremental keyword extraction on new companies |
+| `svd_transformer.pkl` | all clustering jobs | incremental cluster assignment on new companies |
+| `kmeans_centroids.npy` | all clustering jobs (centroids computed as cluster means for HDBSCAN/BIRCH) | incremental cluster assignment |
+| `centroid_registry_map.json` | all clustering jobs | incremental cluster assignment (maps centroid index → canonical name) |
+| `noga_embeddings.npy` | `build_noga_embeddings.py` (one-time) | `reclassify_noga` job |
+| `noga_embedding_ids.json` | `build_noga_embeddings.py` (one-time) | `reclassify_noga` job |
 
 ---
 

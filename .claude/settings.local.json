@@ -182,7 +182,8 @@
       "Bash(find /c/D/coding_projects/zefix_analyzer -type f \\\\\\( -name \"*.md\" -o -name \"RUNBOOK*\" -o -name \"ROADMAP*\" \\\\\\) -exec grep -l \"SHAB\\\\|shab\" {} \\\\;)",
       "Bash(python -c ':*)",
       "Bash(grep -l \"OrgSetting\\\\|AppSetting\" /c/D/coding_projects/zefix_analyzer/alembic/versions/*.py)",
-      "Bash(python -c \"from app.api.routes.billing import router; print\\('billing.py OK'\\)\")"
+      "Bash(python -c \"from app.api.routes.billing import router; print\\('billing.py OK'\\)\")",
+      "Bash(grep -n \"de_core_news_md\\\\|spacy download\" c:/D/coding_projects/zefix_analyzer/Dockerfile* c:/D/coding_projects/zefix_analyzer/requirements*.txt)"
     ]
   }
 }
