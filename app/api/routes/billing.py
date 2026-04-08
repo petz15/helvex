@@ -33,12 +33,14 @@ from app.models.payment_transaction import PaymentTransaction
 from app.models.user import User
 from app.schemas.billing import BillingAddress, BillingTierRead
 from app.services.billing_addresses import get_default_billing_address
-from app.services import payment_transactions, payments
+from app.services import credits as credits_service, payment_transactions, payments
 from app.services.tiers import (
+    TIER_RANK,
     get_billing_tier_by_slug,
     get_billing_tiers,
     get_tier_price_chf,
     get_tier_yearly_price_chf,
+    normalize_tier,
 )
 
 router = APIRouter(prefix="/billing", tags=["billing"])
@@ -1089,6 +1091,87 @@ def cancel_subscription(
     )
 
     return WebhookResponse(ok=True)
+
+
+@router.post("/subscription/reactivate", response_model=WebhookResponse)
+def reactivate_subscription(
+    user_org: tuple[User, object] = Depends(require_org_role("admin", "owner")),
+    db: Session = Depends(get_db),
+) -> WebhookResponse:
+    """Undo a scheduled cancellation — resume automatic renewal at period end."""
+    _user, org = user_org
+    if not getattr(org, "subscription_cancel_at_period_end", False):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Subscription is not scheduled for cancellation")
+    if getattr(org, "tier", "free") == "free":
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Organization is on the free tier")
+    org.subscription_cancel_at_period_end = False
+    db.commit()
+    logger.info("billing.subscription_reactivated org_id=%s tier=%s", org.id, org.tier)
+    return WebhookResponse(ok=True)
+
+
+class UpgradeProrationResponse(BaseModel):
+    credits_granted: int
+    credits_chf: float
+    remaining_days: int
+    plan_cost_chf: float
+
+
+@router.post("/subscription/upgrade-proration", response_model=UpgradeProrationResponse)
+def grant_upgrade_proration(
+    user_org: tuple[User, object] = Depends(require_org_role("admin", "owner")),
+    db: Session = Depends(get_db),
+) -> UpgradeProrationResponse:
+    """Calculate and grant proration credits for upgrading from the current plan.
+
+    Formula: int((plan_cost_chf / 50) * remaining_days) * 10_000 credits.
+    Only valid when the org has an active paid subscription that is not
+    scheduled for cancellation.
+    """
+    _user, org = user_org
+    current_tier = normalize_tier(getattr(org, "tier", "free"))
+    if current_tier == "free":
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No active paid subscription to prorate")
+    if getattr(org, "subscription_cancel_at_period_end", False):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Subscription is already scheduled for cancellation")
+
+    now = datetime.now(tz=timezone.utc)
+    period_end = getattr(org, "subscription_period_end", None)
+    if period_end is None or period_end <= now:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No active subscription period found")
+
+    remaining_days = max(0, (period_end - now).days)
+    billing_cycle = getattr(org, "subscription_billing_cycle", "monthly") or "monthly"
+    plan_cost_chf = _resolve_tier_amount_chf(
+        db,
+        tier=current_tier,
+        billing_cycle=billing_cycle,
+        custom_features=getattr(org, "custom_features", None),
+        verified_business=bool(getattr(org, "verified_business", False)),
+    )
+
+    credits_granted = int((plan_cost_chf / 50) * remaining_days * 10_000)
+    if credits_granted > 0:
+        credits_service.grant_credits(
+            db,
+            org_id=org.id,
+            amount=credits_granted,
+            tx_type="grant",
+            action_type="upgrade_proration",
+            reference_id=f"upgrade_proration_{org.id}_{now.strftime('%Y%m%d')}",
+        )
+        db.commit()
+        logger.info(
+            "billing.upgrade_proration_granted org_id=%s tier=%s remaining_days=%s credits=%s",
+            org.id, current_tier, remaining_days, credits_granted,
+        )
+
+    return UpgradeProrationResponse(
+        credits_granted=credits_granted,
+        credits_chf=round(credits_granted * 0.0001, 4),
+        remaining_days=remaining_days,
+        plan_cost_chf=plan_cost_chf,
+    )
 
 
 @router.post("/payments/{payment_id}/cancel", response_model=WebhookResponse)

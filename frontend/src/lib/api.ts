@@ -151,6 +151,36 @@ export async function cancelSubscription(): Promise<void> {
   }
 }
 
+export async function reactivateSubscription(): Promise<void> {
+  const res = await fetch("/api/v1/billing/subscription/reactivate", {
+    method: "POST",
+    credentials: "include",
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error((body as { detail?: string }).detail ?? "Failed to reactivate subscription");
+  }
+}
+
+export interface UpgradeProration {
+  credits_granted: number;
+  credits_chf: number;
+  remaining_days: number;
+  plan_cost_chf: number;
+}
+
+export async function claimUpgradeProration(): Promise<UpgradeProration> {
+  const res = await fetch("/api/v1/billing/subscription/upgrade-proration", {
+    method: "POST",
+    credentials: "include",
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error((body as { detail?: string }).detail ?? "Failed to calculate proration");
+  }
+  return res.json();
+}
+
 export async function cancelPendingPayment(paymentId: number): Promise<void> {
   const res = await fetch(`/api/v1/billing/payments/${paymentId}/cancel`, {
     method: "POST",

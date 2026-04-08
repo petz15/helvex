@@ -10,6 +10,7 @@ import {
   fetchPaymentHistory,
   cancelPendingPayment,
   cancelSubscription,
+  reactivateSubscription,
   fetchOrg,
   fetchOrgMembers,
   setOrgDefaultPaymentUser,
@@ -68,16 +69,32 @@ function fmtCredits(n: number) {
 
 // ── sub-components ─────────────────────────────────────────────────────────────
 
-function SummaryCards({ balance, tier, billingCycle, periodEnd, cancelAtPeriodEnd, onCancelSubscription }: {
+function SummaryCards({ balance, tier, billingCycle, periodEnd, cancelAtPeriodEnd, onCancelSubscription, onReactivate }: {
   balance: number; tier: string; billingCycle: string; periodEnd: string | null;
   cancelAtPeriodEnd?: boolean;
   onCancelSubscription: () => void;
+  onReactivate: () => void;
 }) {
   const [cancelling, setCancelling] = useState(false);
   const [cancelError, setCancelError] = useState<string | null>(null);
   const [showCancelConfirm, setShowCancelConfirm] = useState(false);
   const [cancelSucceeded, setCancelSucceeded] = useState(false);
+  const [reactivating, setReactivating] = useState(false);
+  const [reactivateError, setReactivateError] = useState<string | null>(null);
   const isPaid = tier !== "free";
+
+  async function handleReactivate() {
+    setReactivating(true);
+    setReactivateError(null);
+    try {
+      await reactivateSubscription();
+      onReactivate();
+    } catch (e) {
+      setReactivateError(e instanceof Error ? e.message : "Failed to reactivate");
+    } finally {
+      setReactivating(false);
+    }
+  }
 
   async function handleCancel() {
     setCancelling(true);
@@ -168,7 +185,7 @@ function SummaryCards({ balance, tier, billingCycle, periodEnd, cancelAtPeriodEn
           {isPaid && !cancelAtPeriodEnd && (
             <p className="mt-2 text-xs text-slate-400">Renews automatically until cancelled</p>
           )}
-          <div className="mt-2 flex items-center gap-3">
+          <div className="mt-2 flex items-center gap-3 flex-wrap">
             {!cancelAtPeriodEnd && (
               <Link
                 href="/app/pricing"
@@ -185,7 +202,17 @@ function SummaryCards({ balance, tier, billingCycle, periodEnd, cancelAtPeriodEn
                 Cancel subscription
               </button>
             )}
+            {cancelAtPeriodEnd && (
+              <button
+                onClick={() => void handleReactivate()}
+                disabled={reactivating}
+                className="text-xs text-emerald-600 hover:underline disabled:opacity-60"
+              >
+                {reactivating ? "Resuming…" : "Resume subscription"}
+              </button>
+            )}
           </div>
+          {reactivateError && <p className="mt-1 text-xs text-red-600">{reactivateError}</p>}
         </div>
       </div>
 
@@ -727,6 +754,7 @@ export function BillingClient() {
           periodEnd={summary.subscription_period_end}
           cancelAtPeriodEnd={summary.subscription_cancel_at_period_end}
           onCancelSubscription={() => void mutateSummary()}
+          onReactivate={() => void mutateSummary()}
         />
       )}
 

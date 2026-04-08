@@ -29,13 +29,22 @@ import {
   createSubscriptionCheckout,
   createTopupCheckout,
   createWorldlineCardRegistration,
+  cancelSubscription,
+  claimUpgradeProration,
   parseBillingAddressJson,
   type BillingAddressPayload,
+  type UpgradeProration,
 } from "@/lib/api";
 import { AddressBookManager } from "@/components/billing/address-book-manager";
 import { creditsToChf } from "@/lib/entitlements";
 
 // ── helpers ───────────────────────────────────────────────────────────────────
+
+const TIER_RANK: Record<string, number> = {
+  free: 0, simple: 1, explorer: 2, researcher: 3, strategist: 4, custom: 5,
+};
+
+function tierRank(t: string): number { return TIER_RANK[t] ?? 0; }
 
 function chf(n: number) { return `CHF ${n.toFixed(2)}`; }
 
@@ -79,6 +88,23 @@ export function PaymentGatewayClient() {
   const [error, setError] = useState<string | null>(null);
   const [iframeUrl, setIframeUrl] = useState<string | null>(null);
 
+  // Tier-change flow state
+  const [showDowngradeConfirm, setShowDowngradeConfirm] = useState(false);
+  const [downgradeLoading, setDowngradeLoading] = useState(false);
+  const [showUpgradeProration, setShowUpgradeProration] = useState(false);
+  const [proration, setProration] = useState<UpgradeProration | null>(null);
+  const [prorationLoading, setProrationLoading] = useState(false);
+  const [prorationClaimed, setProrationClaimed] = useState(false);
+
+  // Derive current tier comparison (only relevant for subscription kind)
+  const currentTier = summary?.tier ?? "free";
+  const currentTierIsPaid = currentTier !== "free" && !summary?.subscription_cancel_at_period_end;
+  const requestedRank = tierRank(tier);
+  const currentRank = tierRank(currentTier);
+  const isSameTier = kind === "subscription" && currentTierIsPaid && tier === currentTier;
+  const isDowngrade = kind === "subscription" && currentTierIsPaid && requestedRank < currentRank;
+  const isUpgrade   = kind === "subscription" && currentTierIsPaid && requestedRank > currentRank;
+
   // If no valid checkout intent, redirect away.
   useEffect(() => {
     if (kind !== "subscription" && kind !== "topup") {
@@ -98,9 +124,52 @@ export function PaymentGatewayClient() {
       ? chf(creditsToChf(credits))
       : null;
 
+  // ── tier-change handlers ───────────────────────────────────────────────────
+
+  async function handleConfirmDowngrade() {
+    setDowngradeLoading(true);
+    setError(null);
+    try {
+      await cancelSubscription();
+      setShowDowngradeConfirm(false);
+      await doCheckout();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to process downgrade");
+    } finally {
+      setDowngradeLoading(false);
+    }
+  }
+
+  async function handleOpenUpgrade() {
+    setProrationLoading(true);
+    setError(null);
+    try {
+      const data = await claimUpgradeProration();
+      setProration(data);
+      setProrationClaimed(true);
+      setShowUpgradeProration(true);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to calculate upgrade credits");
+    } finally {
+      setProrationLoading(false);
+    }
+  }
+
+  async function handleConfirmUpgrade() {
+    setShowUpgradeProration(false);
+    await doCheckout();
+  }
+
   // ── handlers ──────────────────────────────────────────────────────────────
 
   async function handleProceed() {
+    if (isSameTier) { setError("You already have an active subscription to this plan."); return; }
+    if (isDowngrade && !showDowngradeConfirm) { setShowDowngradeConfirm(true); return; }
+    if (isUpgrade && !prorationClaimed) { void handleOpenUpgrade(); return; }
+    await doCheckout();
+  }
+
+  async function doCheckout() {
     if (!billingAddress) { setError("Add a billing address before proceeding."); return; }
     setLoading(true);
     setError(null);
@@ -363,23 +432,100 @@ export function PaymentGatewayClient() {
         Payments are processed securely by Worldline Saferpay. Your card details never touch our servers.
       </div>
 
+      {/* Same-tier block */}
+      {isSameTier && (
+        <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+          You already have an active <strong className="capitalize">{currentTier}</strong> subscription. To change your plan, cancel your current subscription first or choose a different tier.
+        </div>
+      )}
+
+      {/* Downgrade confirmation */}
+      {isDowngrade && showDowngradeConfirm && (
+        <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 space-y-2">
+          <p className="text-sm font-semibold text-amber-900">Downgrade to {tier.charAt(0).toUpperCase() + tier.slice(1)}?</p>
+          <p className="text-xs text-amber-800">
+            Your current <strong className="capitalize">{currentTier}</strong> plan will be cancelled and will stay active until{" "}
+            <strong>{summary?.subscription_period_end ? fmtDate(new Date(summary.subscription_period_end)) : "the end of your billing period"}</strong>.
+            The new <strong className="capitalize">{tier}</strong> plan will start immediately. No refund is issued for the remaining time on your current plan.
+          </p>
+          {error && <p className="text-xs text-red-600">{error}</p>}
+          <div className="flex gap-2">
+            <button
+              onClick={() => void handleConfirmDowngrade()}
+              disabled={downgradeLoading}
+              className="rounded-lg bg-amber-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-amber-700 disabled:opacity-60"
+            >
+              {downgradeLoading ? "Processing…" : `Yes, switch to ${tier.charAt(0).toUpperCase() + tier.slice(1)}`}
+            </button>
+            <button
+              onClick={() => setShowDowngradeConfirm(false)}
+              className="rounded-lg border border-amber-200 px-3 py-1.5 text-xs text-amber-800 hover:bg-amber-100"
+            >
+              Keep current plan
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Upgrade proration modal */}
+      {isUpgrade && showUpgradeProration && proration && (
+        <div className="rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 space-y-2">
+          <p className="text-sm font-semibold text-blue-900">Upgrade to {tier.charAt(0).toUpperCase() + tier.slice(1)}?</p>
+          <p className="text-xs text-blue-800">
+            You have <strong>{proration.remaining_days} days</strong> remaining on your current{" "}
+            <strong className="capitalize">{currentTier}</strong> plan (CHF {proration.plan_cost_chf.toFixed(2)}/cycle).
+            As a thank-you for upgrading, we&apos;ll credit your account with{" "}
+            <strong>{proration.credits_granted.toLocaleString()} credits (≈ CHF {proration.credits_chf.toFixed(4)})</strong>.
+          </p>
+          <p className="text-xs text-blue-700 font-medium">
+            These credits have already been added to your balance. Proceed to pay for your new plan.
+          </p>
+          {error && <p className="text-xs text-red-600">{error}</p>}
+          <div className="flex gap-2">
+            <button
+              onClick={() => void handleConfirmUpgrade()}
+              disabled={loading}
+              className="flex items-center gap-1.5 rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-blue-700 disabled:opacity-60"
+            >
+              {loading ? <Loader2 size={11} className="animate-spin" /> : <ArrowRight size={11} />}
+              {loading ? "Opening payment…" : "Proceed to payment"}
+            </button>
+            <button
+              onClick={() => setShowUpgradeProration(false)}
+              className="rounded-lg border border-blue-200 px-3 py-1.5 text-xs text-blue-800 hover:bg-blue-100"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Proceed */}
-      <div className="flex items-center justify-between gap-4">
-        <Link
-          href={cancelPath}
-          className="text-sm text-slate-500 hover:underline"
-        >
+      {!isSameTier && !showDowngradeConfirm && !showUpgradeProration && (
+        <div className="flex items-center justify-between gap-4">
+          <Link
+            href={cancelPath}
+            className="text-sm text-slate-500 hover:underline"
+          >
+            Cancel
+          </Link>
+          <button
+            onClick={() => void handleProceed()}
+            disabled={loading || prorationLoading || !billingAddress}
+            className="flex items-center gap-2 rounded-xl bg-blue-600 px-6 py-3 text-sm font-semibold text-white shadow hover:bg-blue-700 disabled:opacity-60 transition-colors"
+          >
+            {(loading || prorationLoading) ? <Loader2 size={15} className="animate-spin" /> : <ArrowRight size={15} />}
+            {loading ? "Opening payment…" : prorationLoading ? "Calculating credits…" : "Proceed to payment"}
+          </button>
+        </div>
+      )}
+
+      {/* Cancel link when a modal is open */}
+      {(showDowngradeConfirm || showUpgradeProration) && (
+        <Link href={cancelPath} className="text-sm text-slate-500 hover:underline">
           Cancel
         </Link>
-        <button
-          onClick={() => void handleProceed()}
-          disabled={loading || !billingAddress}
-          className="flex items-center gap-2 rounded-xl bg-blue-600 px-6 py-3 text-sm font-semibold text-white shadow hover:bg-blue-700 disabled:opacity-60 transition-colors"
-        >
-          {loading ? <Loader2 size={15} className="animate-spin" /> : <ArrowRight size={15} />}
-          {loading ? "Opening payment…" : "Proceed to payment"}
-        </button>
-      </div>
+      )}
     </div>
   );
 }
