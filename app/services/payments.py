@@ -124,6 +124,10 @@ def _worldline_spec_version() -> str:
     return (getattr(settings, "worldline_spec_version", "") or "1.51").strip() or "1.51"
 
 
+def _worldline_raw_api_logging_enabled() -> bool:
+    return bool(getattr(settings, "worldline_raw_api_logging_enabled", False))
+
+
 def _worldline_callback_serializer() -> URLSafeSerializer:
     return URLSafeSerializer(settings.secret_key, salt="worldline-callback-v1")
 
@@ -311,14 +315,58 @@ class WorldlineProvider:
                 "(WORLDLINE_CUSTOMER_ID/WORLDLINE_TERMINAL_ID/WORLDLINE_API_USERNAME/WORLDLINE_API_PASSWORD missing)"
             )
 
-    def _create_transaction_initialize(self, payload: dict[str, Any]) -> CheckoutSession:
+    def _post_worldline_json(
+        self,
+        *,
+        endpoint_path: str,
+        payload: dict[str, Any],
+        operation: str,
+        timeout: float = 100.0,
+    ) -> dict[str, Any]:
         base = _worldline_api_base_url()
-        url = f"{base}/Payment/v1/Transaction/Initialize"
-        api_username = _worldline_api_username()
+        url = f"{base}{endpoint_path}"
         headers = {
             "Accept": "application/json",
             "Content-Type": "application/json",
         }
+        auth = (_worldline_api_username(), settings.worldline_api_password)
+
+        if _worldline_raw_api_logging_enabled():
+            logger.info(
+                "worldline.raw_request operation=%s url=%s payload=%s",
+                operation,
+                url,
+                json.dumps(payload),
+            )
+
+        with httpx.Client(timeout=timeout) as client:
+            try:
+                resp = client.post(url, headers=headers, json=payload, auth=auth)
+            except httpx.HTTPError as exc:
+                logger.exception("worldline.http_error operation=%s url=%s", operation, url)
+                raise RuntimeError(f"{operation} request failed: {exc}") from exc
+
+        if _worldline_raw_api_logging_enabled():
+            logger.info(
+                "worldline.raw_response operation=%s url=%s status=%s body=%s",
+                operation,
+                url,
+                resp.status_code,
+                resp.text,
+            )
+
+        if resp.status_code >= 400:
+            raise RuntimeError(f"{operation} failed: {resp.status_code} {resp.text}")
+
+        try:
+            return resp.json()
+        except ValueError as exc:
+            raise RuntimeError(f"{operation} returned non-JSON response") from exc
+
+    def _create_transaction_initialize(self, payload: dict[str, Any]) -> CheckoutSession:
+        base = _worldline_api_base_url()
+        url = f"{base}/Payment/v1/Transaction/Initialize"
+        api_username = _worldline_api_username()
 
         logger.info(
             "worldline.initialize_request url=%s username=%s amount_chf=%s order_ref=%s",
@@ -327,30 +375,18 @@ class WorldlineProvider:
         )
         logger.debug("worldline.initialize_payload payload_keys=%s", list(payload.keys()))
 
-        with httpx.Client(timeout=100.0) as client:
-            try:
-                resp = client.post(
-                    url,
-                    headers=headers,
-                    json=payload,
-                    auth=(api_username, settings.worldline_api_password),
-                )
-            except httpx.HTTPError as exc:
-                logger.exception("worldline.initialize_http_error url=%s", url)
-                raise RuntimeError(f"Worldline checkout request failed: {exc}") from exc
-            
-            logger.info(
-                "worldline.initialize_response status=%s has_token=%s has_redirect=%s",
-                resp.status_code, "Token" in resp.text, "RedirectUrl" in resp.text
-            )
-            
-            if resp.status_code >= 400:
-                logger.error(
-                    "worldline.initialize_error status=%s body=%s",
-                    resp.status_code, resp.text[:200]
-                )
-                raise RuntimeError(f"Worldline checkout creation failed: {resp.status_code} {resp.text}")
-            data = resp.json()
+        data = self._post_worldline_json(
+            endpoint_path="/Payment/v1/Transaction/Initialize",
+            payload=payload,
+            operation="Worldline checkout creation",
+            timeout=100.0,
+        )
+
+        logger.info(
+            "worldline.initialize_response has_token=%s has_redirect=%s",
+            "Token" in data,
+            bool(data.get("RedirectUrl") or ((data.get("Redirect") or {}).get("RedirectUrl") if isinstance(data.get("Redirect"), dict) else None)),
+        )
 
         token = str(data.get("Token") or data.get("token") or "")
         redirect = data.get("RedirectUrl")
@@ -448,10 +484,7 @@ class WorldlineProvider:
         return session
 
     def authorize_transaction(self, *, token: str) -> dict[str, Any]:
-        base = _worldline_api_base_url()
-        url = f"{base}/Payment/v1/Transaction/Authorize"
         customer_id = _worldline_customer_id()
-        api_username = _worldline_api_username()
         payload = {
             "RequestHeader": {
                 "SpecVersion": _worldline_spec_version(),
@@ -461,18 +494,12 @@ class WorldlineProvider:
             },
             "Token": token,
         }
-        headers = {
-            "Accept": "application/json",
-            "Content-Type": "application/json",
-        }
-        with httpx.Client(timeout=100.0) as client:
-            try:
-                resp = client.post(url, headers=headers, json=payload, auth=(api_username, settings.worldline_api_password))
-            except httpx.HTTPError as exc:
-                raise RuntimeError(f"Worldline authorization request failed: {exc}") from exc
-            if resp.status_code >= 400:
-                raise RuntimeError(f"Worldline authorization failed: {resp.status_code} {resp.text}")
-            return resp.json()
+        return self._post_worldline_json(
+            endpoint_path="/Payment/v1/Transaction/Authorize",
+            payload=payload,
+            operation="Worldline authorization",
+            timeout=100.0,
+        )
 
     def cancel_transaction(self, *, transaction_id: str) -> dict[str, Any]:
         """Cancel a previously authorized Worldline/Saferpay transaction."""
@@ -480,8 +507,6 @@ class WorldlineProvider:
         if not tx_id:
             raise RuntimeError("Worldline transaction cancellation failed: missing transaction_id")
 
-        base = _worldline_api_base_url()
-        url = f"{base}/Payment/v1/Transaction/Cancel"
         payload = {
             "RequestHeader": {
                 "SpecVersion": _worldline_spec_version(),
@@ -493,26 +518,18 @@ class WorldlineProvider:
                 "TransactionId": tx_id,
             },
         }
-        headers = {
-            "Accept": "application/json",
-            "Content-Type": "application/json",
-        }
-        with httpx.Client(timeout=100.0) as client:
-            try:
-                resp = client.post(url, headers=headers, json=payload, auth=(_worldline_api_username(), settings.worldline_api_password))
-            except httpx.HTTPError as exc:
-                raise RuntimeError(f"Worldline transaction cancellation failed: {exc}") from exc
-            if resp.status_code >= 400:
-                raise RuntimeError(f"Worldline transaction cancellation failed: {resp.status_code} {resp.text}")
-            return resp.json()
+        return self._post_worldline_json(
+            endpoint_path="/Payment/v1/Transaction/Cancel",
+            payload=payload,
+            operation="Worldline transaction cancellation",
+            timeout=100.0,
+        )
 
     def capture_transaction(self, *, transaction_id: str) -> dict[str, Any]:
         """Capture a previously authorized Saferpay transaction."""
         tx_id = str(transaction_id or "").strip()
         if not tx_id:
             raise RuntimeError("Saferpay capture failed: missing transaction_id")
-        base = _worldline_api_base_url()
-        url = f"{base}/Payment/v1/Transaction/Capture"
         payload = {
             "RequestHeader": {
                 "SpecVersion": _worldline_spec_version(),
@@ -524,15 +541,12 @@ class WorldlineProvider:
                 "TransactionId": tx_id,
             },
         }
-        headers = {"Accept": "application/json", "Content-Type": "application/json"}
-        with httpx.Client(timeout=100.0) as client:
-            try:
-                resp = client.post(url, headers=headers, json=payload, auth=(_worldline_api_username(), settings.worldline_api_password))
-            except httpx.HTTPError as exc:
-                raise RuntimeError(f"Saferpay capture request failed: {exc}") from exc
-            if resp.status_code >= 400:
-                raise RuntimeError(f"Saferpay capture failed: {resp.status_code} {resp.text}")
-            return resp.json()
+        return self._post_worldline_json(
+            endpoint_path="/Payment/v1/Transaction/Capture",
+            payload=payload,
+            operation="Saferpay capture",
+            timeout=100.0,
+        )
 
     def authorize_referenced_transaction(
         self,
@@ -552,8 +566,6 @@ class WorldlineProvider:
         tx_id = str(transaction_id or "").strip()
         if not tx_id:
             raise RuntimeError("AuthorizeReferenced failed: missing transaction_id reference")
-        base = _worldline_api_base_url()
-        url = f"{base}/Payment/v1/Transaction/AuthorizeReferenced"
         payload = {
             "RequestHeader": {
                 "SpecVersion": _worldline_spec_version(),
@@ -574,19 +586,16 @@ class WorldlineProvider:
                 "TransactionId": tx_id,
             },
         }
-        headers = {"Accept": "application/json", "Content-Type": "application/json"}
         logger.info(
             "saferpay.authorize_referenced org_id=%s ref_tx=%s amount_chf=%s order_ref=%s",
             org_id, tx_id[:20], amount_chf, order_reference,
         )
-        with httpx.Client(timeout=100.0) as client:
-            try:
-                resp = client.post(url, headers=headers, json=payload, auth=(_worldline_api_username(), settings.worldline_api_password))
-            except httpx.HTTPError as exc:
-                raise RuntimeError(f"AuthorizeReferenced request failed: {exc}") from exc
-            if resp.status_code >= 400:
-                raise RuntimeError(f"AuthorizeReferenced failed: {resp.status_code} {resp.text}")
-            data = resp.json()
+        data = self._post_worldline_json(
+            endpoint_path="/Payment/v1/Transaction/AuthorizeReferenced",
+            payload=payload,
+            operation="AuthorizeReferenced",
+            timeout=100.0,
+        )
 
         new_tx_id = str((data.get("Transaction") or {}).get("Id") or "")
         tx_status = str((data.get("Transaction") or {}).get("Status") or "").upper()
@@ -654,20 +663,12 @@ class WorldlineProvider:
         }
         # Do not prefill PaymentMeans.Card fields for hosted alias registration.
         # Sending a partial Card object makes Worldline validate Number/Exp* as required.
-        base = _worldline_api_base_url()
-        url = f"{base}/Payment/v1/Alias/Insert"
-        headers = {
-            "Accept": "application/json",
-            "Content-Type": "application/json",
-        }
-        with httpx.Client(timeout=100.0) as client:
-            try:
-                resp = client.post(url, headers=headers, json=payload, auth=(_worldline_api_username(), settings.worldline_api_password))
-            except httpx.HTTPError as exc:
-                raise RuntimeError(f"Worldline alias registration failed: {exc}") from exc
-            if resp.status_code >= 400:
-                raise RuntimeError(f"Worldline alias registration failed: {resp.status_code} {resp.text}")
-            data = resp.json()
+        data = self._post_worldline_json(
+            endpoint_path="/Payment/v1/Alias/Insert",
+            payload=payload,
+            operation="Worldline alias registration",
+            timeout=100.0,
+        )
 
         token = str(data.get("Token") or data.get("token") or "")
         redirect = data.get("RedirectUrl")
@@ -686,8 +687,6 @@ class WorldlineProvider:
         )
 
     def assert_alias_insert(self, *, token: str) -> dict[str, Any]:
-        base = _worldline_api_base_url()
-        url = f"{base}/Payment/v1/Alias/AssertInsert"
         payload = {
             "RequestHeader": {
                 "SpecVersion": _worldline_spec_version(),
@@ -697,18 +696,12 @@ class WorldlineProvider:
             },
             "Token": token,
         }
-        headers = {
-            "Accept": "application/json",
-            "Content-Type": "application/json",
-        }
-        with httpx.Client(timeout=100.0) as client:
-            try:
-                resp = client.post(url, headers=headers, json=payload, auth=(_worldline_api_username(), settings.worldline_api_password))
-            except httpx.HTTPError as exc:
-                raise RuntimeError(f"Worldline alias assertion failed: {exc}") from exc
-            if resp.status_code >= 400:
-                raise RuntimeError(f"Worldline alias assertion failed: {resp.status_code} {resp.text}")
-            return resp.json()
+        return self._post_worldline_json(
+            endpoint_path="/Payment/v1/Alias/AssertInsert",
+            payload=payload,
+            operation="Worldline alias assertion",
+            timeout=100.0,
+        )
 
     def create_subscription_checkout(
         self,

@@ -94,6 +94,7 @@ All settings are read from environment variables (or a `.env` file):
 | `WORLDLINE_TERMINAL_ID` | Saferpay terminal ID used in `TerminalId` | *(empty)* |
 | `WORLDLINE_API_USERNAME` | Saferpay JSON API basic-auth username | *(empty)* |
 | `WORLDLINE_API_PASSWORD` | Worldline API secret | *(empty)* |
+| `WORLDLINE_RAW_API_LOGGING_ENABLED` | Log raw Saferpay JSON request/response payloads for debugging | `false` |
 | `STRIPE_API_BASE_URL` | Stripe API base URL | `https://api.stripe.com` |
 | `STRIPE_SECRET_KEY` | Stripe secret key | *(empty)* |
 | `STRIPE_WEBHOOK_SECRET` | Stripe webhook signing secret | *(empty)* |
@@ -102,10 +103,11 @@ All settings are read from environment variables (or a `.env` file):
 
 1. Expose a public HTTPS endpoint for webhooks and browser returns: `GET /api/v1/billing/webhooks/worldline/return` and `POST /api/v1/billing/webhooks/worldline`.
 2. Set provider mode and credentials: `PAYMENT_PROVIDER_MODE=worldline` (or `dual`), `WORLDLINE_CUSTOMER_ID`, `WORLDLINE_TERMINAL_ID`, `WORLDLINE_API_USERNAME`, `WORLDLINE_API_PASSWORD`.
-3. Ensure reverse proxy / ingress allows GET requests to `/api/v1/billing/webhooks/worldline/return` without auth redirects.
-4. Keep checkout success/cancel URLs customer-facing and validate they are HTTPS URLs.
-5. Send a test initialize flow and verify: redirect URL returned, token present, authorize succeeds, and org credits/tier update in DB.
-6. Configure retries/monitoring: alert on repeated non-2xx responses and keep callback logs for troubleshooting.
+3. If you need raw API debug logs, set `WORLDLINE_RAW_API_LOGGING_ENABLED=true` temporarily.
+4. Ensure reverse proxy / ingress allows GET requests to `/api/v1/billing/webhooks/worldline/return` without auth redirects.
+5. Keep checkout success/cancel URLs customer-facing and validate they are HTTPS URLs.
+6. Send a test initialize flow and verify: redirect URL returned, token present, authorize succeeds, and org credits/tier update in DB.
+7. Configure retries/monitoring: alert on repeated non-2xx responses and keep callback logs for troubleshooting.
 
 ---
 

@@ -82,6 +82,8 @@ class Settings(BaseSettings):
     worldline_terminal_id: str = ""
     worldline_api_username: str = ""
     worldline_api_password: str = ""
+    # Debug toggle: emit raw Saferpay JSON request/response payloads to app logs.
+    worldline_raw_api_logging_enabled: bool = False
     # Optional URL to a CSS file loaded inside the Saferpay iframe for custom styling.
     worldline_css_url: str = ""
 

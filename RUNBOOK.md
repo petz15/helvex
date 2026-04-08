@@ -523,21 +523,38 @@ Use selective modes/tags to avoid rebuilding or rolling out unchanged components
 - `backend`
 - `ml`
 
-### Image split now used by deploy workflows
+### Image types and Dockerfiles
 
-- Backend app image: `ghcr.io/<repo>:<tag>`
-- ML worker image: `ghcr.io/<repo>-ml:<tag>`
-- Frontend image: `ghcr.io/<repo>-frontend:<tag>`
+There are four distinct images, each with its own Dockerfile:
 
-ML image is built from the same Dockerfile with heavy build args enabled:
-- `INSTALL_SPACY_MODEL=true`
-- `BUILD_GEOCODING_DB=true`
+| Image | Dockerfile | GHCR tag | What's in it |
+|---|---|---|---|
+| Backend | `Dockerfile` | `ghcr.io/<repo>:<sha>` | Python deps, app code. spaCy + geocoding DB excluded. Fast build (~10 min). |
+| ML base | `Dockerfile.ml-base` | `ghcr.io/<repo>-ml-base:latest` | Python deps + spaCy model + 143 MB geocoding DB. **Rebuilt only when `requirements.txt` or `geocoding_client.py` change.** GHA cache hit = near-instant. |
+| ML worker | `Dockerfile.ml` | `ghcr.io/<repo>-ml:<sha>` | Inherits from `ml-base`, adds app code. Fast build (~5 min). |
+| Frontend | `frontend/Dockerfile` | `ghcr.io/<repo>-frontend:<sha>` | Node 22 Alpine, Next.js standalone output. |
 
-Lean backend build keeps these disabled for faster rebuilds.
+The `ml-base` / `ml-worker` split is the key optimization: the heavy geocoding DB download and QEMU arm64 emulation only happen when the base layer is actually invalidated, not on every code push.
+
+### Build pipeline (prod, parallel jobs)
+
+```
+push [deploy-*]
+       │
+       ├── build-backend ──────────────────────────────┐
+       │                                               │
+       ├── build-ml-base ──► build-ml ─────────────────┤
+       │                                               │
+       └── build-frontend ─────────────────────────────┘
+                                                       │
+                                                   deploy
+```
+
+All three build tracks run in parallel. `build-ml` is a child of `build-ml-base` (it needs the base image published first). Total wall-clock time on a code-only push: ~12 min vs ~90 min before.
 
 ### Dev deploy behavior
 
-`[deploy-dev]` now uses changed-path detection and only builds changed areas (backend/frontend/ml).
+`[deploy-dev]` uses changed-path detection and only builds changed areas (backend/frontend/ml) in parallel. Dev ml builds reuse `ml-base:latest` from GHCR — no heavy rebuild.
 
 Dev Helm deploy uses stable tags (`dev`) for all three images so unchanged components are not forced to a new SHA tag.
 

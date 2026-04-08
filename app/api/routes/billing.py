@@ -432,8 +432,8 @@ async def stripe_webhook(
     return WebhookResponse(ok=True, ignored=True)
 
 
-@router.get("/webhooks/worldline/return")
-@router.get("/webhooks/worldline/return/{token}")
+@router.get("/webhooks/worldline/return", response_model=None)
+@router.get("/webhooks/worldline/return/{token}", response_model=None)
 async def worldline_return(
     request: Request,
     db: Session = Depends(get_db),

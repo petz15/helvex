@@ -20,8 +20,8 @@
    - [Classification Pipelines](#classification-pipelines-clustering-keywords-noga)
 9. [Frontend](#9-frontend)
 10. [Configuration & Secrets](#10-configuration--secrets)
-11. [Docker Build](#11-docker-build)
-12. [CI/CD Pipelines](#12-cicd-pipelines)
+11. [Docker Build](#11-docker-build) — image types, ml-base split, Dockerfiles
+12. [CI/CD Pipelines](#12-cicd-pipelines) — parallel build graph, deploy modes
 13. [Kubernetes / Helm](#13-kubernetes--helm)
 14. [Terraform / Hetzner](#14-terraform--hetzner)
 15. [Local Development](#15-local-development)
@@ -727,41 +727,65 @@ GitHub Actions secrets to keep up to date (stored in the repo's Settings → Sec
 
 ## 11. Docker Build
 
-**File:** `Dockerfile`
+### Image types
 
-Python 3.12 slim build with two image profiles (same Dockerfile, different build args):
+There are four distinct images, each with its own Dockerfile:
 
-1. Install system packages (`gcc`, `libpq-dev`, etc.)
+| Image | Dockerfile | GHCR tag | Contents |
+|---|---|---|---|
+| **Backend** | `Dockerfile` | `<repo>:<sha>` | Python 3.12 slim + app deps. spaCy and geocoding DB excluded. ~10 min build. |
+| **ML base** | `Dockerfile.ml-base` | `<repo>-ml-base:latest` | Python deps + spaCy `de_core_news_md` + 143 MB geocoding SQLite (swisstopo + GeoNames). Rebuilt only when `requirements.txt` or `geocoding_client.py` change. |
+| **ML worker** | `Dockerfile.ml` | `<repo>-ml:<sha>` | `FROM ml-base` + app code only. ~5 min build on cache hit. |
+| **Frontend** | `frontend/Dockerfile` | `<repo>-frontend:<sha>` | Node 22 Alpine, Next.js standalone output. ~10 min build. |
+
+### Why ml-base exists
+
+The geocoding DB (`data/geocoding.db`) is downloaded and indexed at build time (~143 MB swisstopo zip → SQLite). QEMU arm64 emulation of this step alone took ~60 min on GitHub-hosted 2-core runners. By isolating it in `Dockerfile.ml-base` and letting GHA layer-cache it, code-only pushes skip the heavy step entirely.
+
+`ml-base` is re-built when any of these change:
+- `requirements.txt` (pip layer)
+- `app/api/geocoding_client.py` (geocoding build logic)
+- `Dockerfile.ml-base`
+
+### Backend (`Dockerfile`)
+
+1. Install system packages (`gcc`, `libpq-dev`)
 2. `pip install -r requirements.txt`
-3. Optional Python 3.12 `ForwardRef._evaluate` compatibility patch + spaCy model download
-4. Optional geocoding DB build:
-  - GeoNames PLZ TSV → SQLite
-  - swisstopo Amtliches Gebäudeadressverzeichnis zip (~143 MB) → SQLite
-5. Copy application source
-6. `EXPOSE 8000`
-7. `CMD ["sh", "entrypoint.sh"]`
+3. Copy application source
+4. `EXPOSE 8000` / `ENTRYPOINT ["sh", "entrypoint.sh"]`
 
-Build profile args:
+Build args `INSTALL_SPACY_MODEL=false` and `BUILD_GEOCODING_DB=false` are passed by CI — the conditional blocks exist for local manual builds but are never triggered in the normal pipeline.
 
-| Build arg | Lean backend image | ML image |
-|---|---|---|
-| `INSTALL_SPACY_MODEL` | `false` | `true` |
-| `BUILD_GEOCODING_DB` | `false` | `true` |
+### ML base (`Dockerfile.ml-base`)
 
-This separation keeps regular API builds fast while preserving an ML-ready image for clustering/NOGA jobs.
+1. Install system packages
+2. `pip install -r requirements.txt`
+3. `spacy download de_core_news_md`
+4. Copy only `app/__init__.py`, `app/api/__init__.py`, `app/api/geocoding_client.py`
+5. Build geocoding DB (`_load_plz_table()` + `build_geocoding_db()`)
+6. `chown -R 1000:1000 /app/data`
 
-Build context optimization:
-- Root `.dockerignore` excludes heavy local folders (`.venv`, `frontend/node_modules`, `.git`, caches), reducing context upload and cache invalidation.
+Only `geocoding_client.py` is copied — it has no internal imports beyond `httpx`.
 
-**`entrypoint.sh`** runs:
-```bash
-alembic upgrade head
-uvicorn app.main:app --host 0.0.0.0 --port 8000
+### ML worker (`Dockerfile.ml`)
+
+```dockerfile
+ARG ML_BASE_IMAGE=ghcr.io/.../ml-base:latest
+FROM ${ML_BASE_IMAGE}
+COPY . .          # app code; data/ is git-ignored so ml-base's data/ layer is preserved
 ```
 
-Build args set in CI:
-- Metadata: `BUILD_DATE`, `BUILD_GIT_SHA` (exposed via `/metadata` endpoint)
-- Profile split: `INSTALL_SPACY_MODEL`, `BUILD_GEOCODING_DB`
+### Frontend (`frontend/Dockerfile`)
+
+Multi-stage: `builder` (full `npm ci` + `next build`) → `runner` (standalone output only). The `deps` stage was removed — unused.
+
+**`entrypoint.sh`** (backend + ml-worker only):
+```bash
+alembic upgrade head
+exec "$@"   # uvicorn or rq worker
+```
+
+Build context optimization: `.dockerignore` excludes `.venv`, `frontend/node_modules`, `.git`, `__pycache__`, `data/` (geocoding files are git-ignored anyway).
 
 ---
 
@@ -777,47 +801,56 @@ Build args set in CI:
 2. `test-frontend` (Node 22: `tsc`, `eslint`, `npm run build`) when frontend paths changed
 3. `test-ml-imports` (ML smoke imports) when ML-specific paths changed
 
-### `deploy-dev.yml` — trigger: `[deploy-dev]` in commit message (path-aware)
+### `deploy-dev.yml` — trigger: `[deploy-dev]` in commit message
 
-1. Detect changed areas (backend/frontend/ml)
-2. Build + push only changed images:
-  - backend: `ghcr.io/<repo>:dev`
-  - ml backend: `ghcr.io/<repo>-ml:dev`
-  - frontend: `ghcr.io/<repo>-frontend:dev`
-3. Deploy via Helm with stable dev tags (`image.tag=dev`, `mlImage.tag=dev`, `frontend.image.tag=dev`)
+1. Detect changed areas (backend / frontend / ml) via `dorny/paths-filter`
+2. Run three build jobs in **parallel**, building only changed tracks:
+   - `build-backend` → `ghcr.io/<repo>:dev`
+   - `build-ml` → `ghcr.io/<repo>-ml:dev` (uses `ml-base:latest` from GHCR — no heavy rebuild in dev)
+   - `build-frontend` → `ghcr.io/<repo>-frontend:dev`
+3. Deploy via Helmfile with stable dev tags (`image.tag=dev`, `mlImage.tag=dev`, `frontend.image.tag=dev`)
 
-Using stable `:dev` tags avoids forcing unnecessary image updates for unchanged components.
+### `deploy-prod.yml` — parallel builds + selective deploy
 
-### `deploy-prod.yml` — selective deploy modes + images
+#### Parallel build job graph
 
-Commit-tag triggers:
-- `[deploy-prod]` full infra + app release
-- `[deploy-app]` app release via Helm
-- `[deploy-frontend]` frontend-only rollout
-- `[deploy-backend]` backend app-only rollout
-- `[deploy-ml]` ML worker-only rollout
+```
+push [deploy-*]
+       │
+       ├── build-backend ──────────────────────────────┐
+       │                                               │
+       ├── build-ml-base ──► build-ml ─────────────────┤
+       │                                               │
+       └── build-frontend ─────────────────────────────┘
+                                                       │
+                                                  deploy (helvex-prod runner)
+```
 
-Workflow-dispatch deploy modes:
-- `prod`, `app`, `frontend`, `backend`, `ml`
+All three tracks run in parallel. `build-ml` depends on `build-ml-base`. Wall-clock time on a code-only push: ~12 min (down from ~90 min).
 
-Image/build behavior:
-1. Build only required images for requested mode/tag
-2. Publish split images:
-  - backend: `ghcr.io/<repo>:<sha>`
-  - ml backend: `ghcr.io/<repo>-ml:<sha>`
-  - frontend: `ghcr.io/<repo>-frontend:<sha>`
-3. Sign backend image with Cosign (non-frontend-only paths)
+#### Commit-tag triggers
 
-Deploy behavior:
-1. Full/app paths run `helmfile apply` and set `image.tag`, `mlImage.tag`, `frontend.image.tag`
-2. Frontend-only path updates `deployment/helvex-frontend`
-3. Backend-only path updates `deployment/helvex`
-4. ML-only path updates `deployment/helvex-ml-worker`
-5. Rollout wait targets only the deployment(s) relevant to selected mode/tag
+| Tag | Builds | Deploys |
+|---|---|---|
+| `[deploy-prod]` | backend + ml-base + ml + frontend | full helmfile apply (infra + app) |
+| `[deploy-app]` | backend + ml-base + ml + frontend | helmfile apply `--selector name=helvex` |
+| `[deploy-frontend]` | frontend only | `kubectl set image` on frontend deployment |
+| `[deploy-backend]` | backend only | `kubectl set image` on backend deployment |
+| `[deploy-ml]` | ml-base + ml only | `kubectl set image` on ml-worker deployment |
 
-Helm chart wiring:
-- `mlWorker` now supports a dedicated image source via `mlImage.*`
-- `ml-worker` deployment uses `mlImage` with fallback to default `image`
+Workflow-dispatch `deploy_mode` input mirrors the same logic.
+
+#### Deploy steps (on `helvex-prod` self-hosted runner)
+
+1. kubectl / helm / helmfile checked with `command -v` — only installed if missing (cached between runs)
+2. Ensure K8s secrets exist (`helvex-env`, `ghcr-pull-secret`, `arc-github-app`)
+3. Bootstrap CRDs (`[deploy-prod]` only): cert-manager + CloudNativePG
+4. Resolve PostgreSQL backup server names from S3 pointer file
+5. Helmfile apply (full/app modes) or `kubectl set image` (component-only modes)
+6. Rollout wait scoped to the deployed component(s)
+7. Bump minor semver tag (`[deploy-prod]` / `[deploy-app]`)
+
+Backend image is signed with Cosign after push.
 
 ### `cleanup.yml` — weekly cron (Sun 02:00 UTC)
 
