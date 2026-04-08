@@ -265,7 +265,7 @@ export function SettingsClient() {
   if (!initial) return <div className="p-6 text-slate-400 text-sm">Loading…</div>;
 
   const orgId = me?.org?.id;
-  const isAdmin = me?.org_role === "admin" || me?.org_role === "owner" || me?.is_superadmin;
+  const isAdmin = me?.org_role === "admin" || me?.org_role === "owner" || !!me?.is_superadmin;
 
   return (
     <div className="p-6 max-w-4xl mx-auto space-y-5">

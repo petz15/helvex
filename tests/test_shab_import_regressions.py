@@ -24,36 +24,53 @@ def test_fetch_hr_publications_uses_total_pages_metadata(monkeypatch):
         def __exit__(self, exc_type, exc, tb):
             return False
 
-        def get(self, url, params):
-            self.calls.append((url, dict(params)))
-            page = int(params.get("page", 0))
-            if page == 0:
-                return _Resp({
-                    "publications": [{"meta": {"id": f"p{n}"}} for n in range(1, 101)],
-                    "pageNumber": 1,
-                    "totalPages": 3,
-                })
-            if page == 1:
-                return _Resp({
-                    "publications": [{"meta": {"id": f"p{n}"}} for n in range(101, 201)],
-                    "pageNumber": 2,
-                    "totalPages": 3,
-                })
-            return _Resp({
-                "publications": [{"meta": {"id": f"p{n}"}} for n in range(201, 241)],
-                "pageNumber": 3,
-                "totalPages": 3,
-            })
+        def get(self, url, auth=None):
+            self.calls.append(url)
+            day = url.rsplit("/", 1)[-1]
+            if day == "2026-01-01":
+                return _Resp([
+                    {
+                        "sogcPublication": {
+                            "sogcId": 101,
+                            "sogcDate": "2026-01-01",
+                            "publicationNumber": "HR01-1000000001",
+                            "mutationTypes": [{"key": "NEW"}],
+                        },
+                        "companyShort": {"uid": "CHE-111.111.111", "name": "A AG"},
+                    },
+                    {
+                        "sogcPublication": {
+                            "sogcId": 102,
+                            "sogcDate": "2026-01-01",
+                            "publicationNumber": "HR02-1000000002",
+                            "mutationTypes": [{"key": "MUTATION"}],
+                        },
+                        "companyShort": {"uid": "CHE-222.222.222", "name": "B AG"},
+                    },
+                ])
+            return _Resp([
+                {
+                    "sogcPublication": {
+                        "sogcId": 103,
+                        "sogcDate": "2026-01-02",
+                        "publicationNumber": "HR03-1000000003",
+                        "mutationTypes": [{"key": "DELETION"}],
+                    },
+                    "companyShort": {"uid": "CHE-333.333.333", "name": "C AG"},
+                }
+            ])
 
     monkeypatch.setattr(shab_client.httpx, "Client", _Client)
 
     items = shab_client.fetch_hr_publications(
         from_date=date(2026, 1, 1),
-        to_date=date(2026, 1, 31),
-        page_size=2000,
+        to_date=date(2026, 1, 2),
     )
 
-    assert len(items) == 240
+    assert len(items) == 3
+    assert items[0]["meta"]["id"] == "101"
+    assert items[0]["meta"]["subRubric"] == shab_client.SUBR_NEW
+    assert items[2]["meta"]["subRubric"] == shab_client.SUBR_DELETION
 
 
 def test_fetch_hr_publications_supports_content_page_request_wrapper(monkeypatch):
@@ -79,36 +96,27 @@ def test_fetch_hr_publications_supports_content_page_request_wrapper(monkeypatch
         def __exit__(self, exc_type, exc, tb):
             return False
 
-        def get(self, url, params):
-            self.calls.append((url, dict(params)))
-            page = int(params.get("page", 0))
-            if page == 0:
+        def get(self, url, auth=None):
+            self.calls.append(url)
+            if url.endswith("/sogc/555"):
                 return _Resp({
-                    "content": [{"meta": {"id": f"c{n}"}} for n in range(1, 101)],
-                    "total": 240,
-                    "pageRequest": {"page": 0},
+                    "sogcPublication": {
+                        "sogcId": 555,
+                        "sogcDate": "2026-01-10",
+                        "publicationNumber": "HR02-1000000555",
+                        "mutationTypes": [{"key": "MUTATION"}],
+                    },
+                    "companyShort": {"uid": "CHE-555.555.555", "name": "Mutation AG"},
                 })
-            if page == 1:
-                return _Resp({
-                    "content": [{"meta": {"id": f"c{n}"}} for n in range(101, 201)],
-                    "total": 240,
-                    "pageRequest": {"page": 1},
-                })
-            return _Resp({
-                "content": [{"meta": {"id": f"c{n}"}} for n in range(201, 241)],
-                "total": 240,
-                "pageRequest": {"page": 2},
-            })
+            return _Resp({})
 
     monkeypatch.setattr(shab_client.httpx, "Client", _Client)
 
-    items = shab_client.fetch_hr_publications(
-        from_date=date(2026, 1, 1),
-        to_date=date(2026, 1, 31),
-        page_size=2000,
-    )
+    detail = shab_client.fetch_publication_detail("555")
 
-    assert len(items) == 240
+    assert detail["meta"]["id"] == "555"
+    assert detail["meta"]["subRubric"] == shab_client.SUBR_MUTATION
+    assert detail["meta"]["uid"] == "CHE-555.555.555"
 
 
 def test_import_company_from_zefix_uid_accepts_nested_list_uid(monkeypatch):

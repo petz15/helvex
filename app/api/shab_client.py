@@ -1,17 +1,20 @@
-"""Client for the SHAB (Schweizerisches Handelsamtsblatt) REST API.
+"""Client adapter for HR publications backed by the Zefix Public REST API.
 
-Public API, no authentication required.
-Base URL: https://www.shab.ch/api/v1
+The importer consumes SHAB-like payloads (``meta.id``, ``meta.subRubric``,
+``meta.uid``). This module now sources data from the Zefix SOGC endpoints and
+normalizes responses to that shape.
 """
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, timedelta
 from typing import Any
 
 import httpx
 
-SHAB_API_BASE = "https://www.shab.ch/api/v1"
+from app.config import settings
+
+ZEFIX_API_BASE = settings.zefix_api_base_url.rstrip("/")
 
 # HR sub-rubric constants
 SUBR_NEW = "HR01"       # Neueintragung (new registration)
@@ -21,6 +24,62 @@ SUBR_DELETION = "HR03"  # Löschung (deletion)
 HR_SUBRUBRICS = (SUBR_NEW, SUBR_MUTATION, SUBR_DELETION)
 
 
+def _get_auth() -> httpx.BasicAuth | None:
+    if settings.zefix_api_username and settings.zefix_api_password:
+        return httpx.BasicAuth(settings.zefix_api_username, settings.zefix_api_password)
+    return None
+
+
+def _guess_sub_rubric(publication_number: str, mutation_keys: list[str]) -> str:
+    upper_no = (publication_number or "").upper()
+    if upper_no.startswith("HR01"):
+        return SUBR_NEW
+    if upper_no.startswith("HR02"):
+        return SUBR_MUTATION
+    if upper_no.startswith("HR03"):
+        return SUBR_DELETION
+
+    joined = " ".join(mutation_keys).upper()
+    if any(k in joined for k in ("NEW", "NEU", "ENTRY", "EINTRAG")):
+        return SUBR_NEW
+    if any(k in joined for k in ("DELETE", "DELETION", "CANCEL", "LOESCH", "LÖSCH")):
+        return SUBR_DELETION
+    if mutation_keys:
+        return SUBR_MUTATION
+    return ""
+
+
+def _to_shab_like_item(item: dict[str, Any]) -> dict[str, Any]:
+    # Backward compatibility in case upstream already returns SHAB-shaped objects.
+    if "meta" in item and isinstance(item.get("meta"), dict):
+        return item
+
+    publication = item.get("sogcPublication") or {}
+    company = item.get("companyShort") or {}
+    mutation_types = publication.get("mutationTypes") or []
+    mutation_keys = [str(m.get("key") or "") for m in mutation_types if isinstance(m, dict)]
+
+    publication_number = str(publication.get("publicationNumber") or "")
+    sub_rubric = _guess_sub_rubric(publication_number, mutation_keys)
+
+    uid = company.get("uid")
+    name = str(company.get("name") or "")
+    sogc_id = publication.get("sogcId")
+    sogc_date = publication.get("sogcDate")
+
+    meta: dict[str, Any] = {
+        "id": str(sogc_id) if sogc_id is not None else "",
+        "subRubric": sub_rubric,
+        "uid": uid,
+        "title": {
+            "de": name,
+            "en": name,
+        },
+        "publicationDate": sogc_date,
+    }
+    return {"meta": meta, "zefix_raw": item}
+
+
 def fetch_hr_publications(
     from_date: date,
     to_date: date,
@@ -28,107 +87,47 @@ def fetch_hr_publications(
     page_size: int = 100,
     timeout: float = 60.0,
 ) -> list[dict[str, Any]]:
-    """Fetch all SHAB HR publications for a date range.
+    """Fetch all HR publications for an inclusive date range from Zefix SOGC.
 
-    Returns a flat list of publication dicts.  Each entry's ``meta.id`` is the
-    UUID needed to call :func:`fetch_publication_detail`.  The list endpoint
-    does not include ``meta.uid`` — use the detail endpoint to get it.
+    The ``page_size`` parameter is kept for backward compatibility but is not
+    used by the by-date endpoint.
     """
-    params: dict[str, Any] = {
-        "publicationStates": "PUBLISHED",
-        "rubric": "HR",
-        "from": from_date.isoformat(),
-        "to": to_date.isoformat(),
-        "pageSize": page_size,
-    }
-
-    def _to_int(value: Any) -> int | None:
-        try:
-            if value is None:
-                return None
-            return int(value)
-        except (TypeError, ValueError):
-            return None
+    _ = page_size
 
     results: list[dict[str, Any]] = []
-    page = 0
     with httpx.Client(timeout=timeout) as client:
-        while True:
-            # SHAB currently uses zero-based `page`; keep `pageNumber` in sync
-            # for compatibility with older wrappers/proxies.
-            params["page"] = page
-            params["pageNumber"] = page + 1
-            resp = client.get(f"{SHAB_API_BASE}/publications", params=params)
+        day = from_date
+        while day <= to_date:
+            resp = client.get(
+                f"{ZEFIX_API_BASE}/sogc/bydate/{day.isoformat()}",
+                auth=_get_auth(),
+            )
             resp.raise_for_status()
 
             data = resp.json()
-            meta: dict[str, Any] = data if isinstance(data, dict) else {}
-            if isinstance(data, list):
-                items: list = data
-            else:
-                # Unwrap common wrapper formats
-                items = (
-                    data.get("publications")
-                    or data.get("items")
-                    or data.get("content")
-                    or []
-                )
+            items = data if isinstance(data, list) else []
+            for item in items:
+                if not isinstance(item, dict):
+                    continue
+                normalized = _to_shab_like_item(item)
+                sub = ((normalized.get("meta") or {}).get("subRubric") or "")
+                if sub in HR_SUBRUBRICS:
+                    results.append(normalized)
 
-            results.extend(items)
-
-            # Stop on obvious end-of-data condition first.
-            if not items:
-                break
-
-            # Prefer explicit pagination metadata when available. SHAB may enforce
-            # its own per-page cap (often 100) even when `pageSize` is larger.
-            page_request = meta.get("pageRequest") if isinstance(meta, dict) else None
-            total_pages = (
-                _to_int(meta.get("totalPages"))
-                or _to_int(meta.get("numberOfPages"))
-                or _to_int(meta.get("pageCount"))
-            )
-            current_page = (
-                _to_int(meta.get("page"))
-                or (_to_int(page_request.get("page")) if isinstance(page_request, dict) else None)
-                or _to_int(meta.get("pageNumber"))
-                or page
-            )
-            total_items = (
-                _to_int(meta.get("totalElements"))
-                or _to_int(meta.get("totalEntries"))
-                or _to_int(meta.get("total"))
-                or _to_int(meta.get("count"))
-            )
-            is_last = meta.get("last") is True
-            has_paging_meta = any(
-                x is not None for x in (total_pages, total_items)
-            ) or ("last" in meta)
-
-            if is_last:
-                break
-            if total_pages is not None and current_page >= total_pages:
-                break
-            if total_items is not None and len(results) >= total_items:
-                break
-
-            # Fallback for list-style responses without page metadata.
-            if not has_paging_meta and len(items) < page_size:
-                break
-
-            page += 1
+            day += timedelta(days=1)
 
     return results
 
 
 def fetch_publication_detail(publication_id: str, *, timeout: float = 30.0) -> dict[str, Any]:
-    """Fetch a single SHAB publication by UUID.
-
-    The ``meta`` object of the response includes ``uid`` (CHE-XXX.XXX.XXX)
-    when the publication relates to a Swiss commercial-register entry, and
-    ``subRubric`` (HR01 / HR02 / HR03) indicating the type of change.
-    """
+    """Fetch a single publication detail from Zefix and normalize shape."""
     with httpx.Client(timeout=timeout) as client:
-        resp = client.get(f"{SHAB_API_BASE}/publications/{publication_id}")
+        resp = client.get(
+            f"{ZEFIX_API_BASE}/sogc/{publication_id}",
+            auth=_get_auth(),
+        )
         resp.raise_for_status()
-    return resp.json()
+    data = resp.json()
+    if isinstance(data, dict):
+        return _to_shab_like_item(data)
+    return {"meta": {"id": str(publication_id)}}
