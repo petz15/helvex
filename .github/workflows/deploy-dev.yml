@@ -240,6 +240,7 @@ jobs:
             --from-literal=WORLDLINE_TERMINAL_ID="${{ secrets.WORLDLINE_TERMINAL_ID }}" \
             --from-literal=WORLDLINE_API_USERNAME="${{ secrets.WORLDLINE_API_USERNAME }}" \
             --from-literal=WORLDLINE_API_PASSWORD="${{ secrets.WORLDLINE_API_PASSWORD }}" \
+            --from-literal=WORLDLINE_RAW_API_LOGGING_ENABLED="${{ secrets.WORLDLINE_RAW_API_LOGGING_ENABLED }}" \
             --from-literal=username="helvex" \
             --from-literal=password="${{ secrets.DB_PASSWORD }}" \
             -n helvex-dev \

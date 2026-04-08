@@ -136,7 +136,7 @@
 - [ ] **CAPTCHA evaluation** — evaluate CAPTCHA (hCaptcha / Cloudflare Turnstile / reCAPTCHA v3) for signup, login, and scraping-triggering actions; weigh friction cost against bot/abuse risk at current and projected traffic
 - [ ] **Mobile optimization** - Optimize the website for mobile traffic (maybe limit some features)
 - [ ] **verify api security** - Test and verify the security of the API  which is pretty open (how is it secured against attackers, bots and crawlers/unofficial APIs). 
-- [ ] **A General pass over security not jsut api** - WAF
+- [ ] **A General pass over security not jsut api** - WAF, bot protection etc
 - [ ] **Testing suite** — introduce consistent testing suite
 
 
