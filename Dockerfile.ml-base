@@ -9,9 +9,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libpq-dev \
     && rm -rf /var/lib/apt/lists/*
 
-# Python deps — this layer is cached until requirements.txt changes
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+# Python deps — this layer is cached until requirements.*.txt changes
+COPY requirements.backend.txt requirements.ml.txt ./
+RUN pip install --no-cache-dir -r requirements.ml.txt
 
 # spaCy model — cached until pip layer above changes
 RUN python -c "import spacy.cli; spacy.cli.download('de_core_news_md')"

@@ -25,6 +25,8 @@ jobs:
               - 'alembic/**'
               - 'tests/**'
               - 'requirements.txt'
+              - 'requirements.backend.txt'
+              - 'requirements.ml.txt'
               - 'pyproject.toml'
               - 'Dockerfile'
               - 'entrypoint.sh'
@@ -38,6 +40,8 @@ jobs:
               - 'noga_lookup.json'
               - 'noga_tree.json'
               - 'requirements.txt'
+              - 'requirements.backend.txt'
+              - 'requirements.ml.txt'
               - 'Dockerfile'
 
   test-backend:

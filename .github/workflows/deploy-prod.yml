@@ -92,7 +92,7 @@ jobs:
 
   build-ml-base:
     # Rebuilds the heavy base layer (pip deps + spaCy model + geocoding DB).
-    # GHA cache makes this near-instant when requirements.txt / geocoding_client.py are unchanged.
+    # GHA cache makes this near-instant when requirements.*.txt / geocoding_client.py are unchanged.
     if: |
       (
         github.event_name == 'workflow_dispatch' ||
