@@ -349,8 +349,21 @@ def apply_successful_payment(
                 payment_tx.id, payment_tx.org_id, org.tier, payment_tx.subscription_tier,
             )
             org.tier = payment_tx.subscription_tier
+            billing_cycle = payment_tx.subscription_billing_cycle or org.subscription_billing_cycle or "monthly"
             if payment_tx.subscription_billing_cycle:
-                org.subscription_billing_cycle = payment_tx.subscription_billing_cycle
+                org.subscription_billing_cycle = billing_cycle
+            # Reset period end and cancel flag so billing_renewal doesn't immediately
+            # downgrade (e.g. after a cancel+recheckout downgrade flow).
+            now = datetime.now(tz=timezone.utc)
+            if billing_cycle == "yearly":
+                org.subscription_period_end = now.replace(year=now.year + 1)
+            else:
+                # Add one month, handling end-of-month edge cases
+                month = now.month + 1
+                year = now.year + (month - 1) // 12
+                month = (month - 1) % 12 + 1
+                org.subscription_period_end = now.replace(year=year, month=month)
+            org.subscription_cancel_at_period_end = False
 
         elif payment_tx.kind == "topup":
             # Grant credits

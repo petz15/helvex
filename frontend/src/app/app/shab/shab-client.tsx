@@ -7,7 +7,7 @@ import {
   CheckCircle2, XCircle, Clock, Loader2, PauseCircle,
   RefreshCw, Calendar, ArrowUpRight,
 } from "lucide-react";
-import { fetchJobs, triggerJob } from "@/lib/api";
+import { fetchJobs, triggerJob, fetchCurrentUser } from "@/lib/api";
 import type { Job } from "@/lib/types";
 
 // ── helpers ───────────────────────────────────────────────────────────────────
@@ -123,6 +123,8 @@ function JobCard({ job }: { job: Job }) {
 
 export function ShabClient() {
   const router = useRouter();
+  const { data: me } = useSWR("me", fetchCurrentUser);
+  const isSuperadmin = me?.is_superadmin === true;
   const { data: allJobs = [], isLoading, mutate } = useSWR(
     "shab-jobs",
     () => fetchJobs(),
@@ -206,8 +208,13 @@ export function ShabClient() {
         </div>
       )}
 
-      {/* Trigger panels */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+      {/* Trigger panels — superadmin only */}
+      {!isSuperadmin && (
+        <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">
+          Triggering imports requires superadmin access. Daily imports run automatically at 02:00 Zurich time.
+        </div>
+      )}
+      {isSuperadmin && <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
 
         {/* Daily */}
         <div className="rounded-2xl border border-slate-200 bg-white p-5 space-y-4">
@@ -275,7 +282,7 @@ export function ShabClient() {
             {triggerLoading === "backfill" ? "Queuing…" : "Run backfill"}
           </button>
         </div>
-      </div>
+      </div>}
 
       {/* Active jobs */}
       {(isLoading || active.length > 0) && (

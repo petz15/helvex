@@ -692,6 +692,8 @@ export function BillingClient() {
       setReturnBanner({ kind: "success", message: "This payment was already processed. No changes were applied twice." });
     } else if (saved && checkout === "success") {
       setReturnBanner({ kind: "success", message: "Saved card registered successfully." });
+      void mutateSummary();
+      void mutateMembers();
     } else if (checkout === "success") {
       if (kind === "topup") {
         setReturnBanner({
@@ -703,8 +705,10 @@ export function BillingClient() {
           kind: "success",
           message: `${tier ? `${tier} plan` : "Subscription"} activated successfully.`,
         });
+        void mutateSummary();
       } else {
         setReturnBanner({ kind: "success", message: "Payment completed successfully." });
+        void mutateSummary();
       }
     } else {
       setReturnBanner({

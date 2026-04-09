@@ -143,7 +143,9 @@ export function MapClient() {
     for (const [key, value] of Object.entries(f)) {
       if (["page", "page_size", "sort"].includes(key)) continue;
       if (value === undefined || value === null || value === "") continue;
-      params[key] = String(value);
+      // Map uses zefix_status; CompanyFilters uses status
+      const paramKey = key === "status" ? "zefix_status" : key;
+      params[paramKey] = String(value);
     }
     return params;
   }

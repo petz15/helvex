@@ -606,7 +606,7 @@ def get_noga_hierarchy(db: Session, org_id: int | None = None) -> list[dict]:
         parent = _parent_code(code)
         while parent is not None:
             if parent in nodes:
-                nodes[parent]["count"] += nodes[code]["own_count"]
+                nodes[parent]["count"] += nodes[code]["count"]
                 if nodes[code] not in nodes[parent]["children"]:
                     nodes[parent]["children"].append(nodes[code])
                 break
