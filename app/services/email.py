@@ -254,7 +254,9 @@ def send_saved_view_alert(
     view_url: str,
 ) -> None:
     """Alert a user that new companies match their saved search."""
-    subject = f"[Helvex] {new_count} new {'company' if new_count == 1 else 'companies'} match "{view_name}""
+    noun = "company" if new_count == 1 else "companies"
+    verb = "matches" if new_count == 1 else "match"
+    subject = f'[Helvex] {new_count} new {noun} {verb} "{view_name}"'
     html = f"""
     <p><strong>{new_count} new {'company' if new_count == 1 else 'companies'}</strong>
     {'matches' if new_count == 1 else 'match'} your saved search
