@@ -30,12 +30,12 @@ on:
       qemu_ml_base:
         description: Build the ML base image with QEMU (amd64+arm64)
         required: false
-        default: false
+        default: true
         type: boolean
       qemu_ml:
         description: Build the ML worker image with QEMU (amd64+arm64)
         required: false
-        default: false
+        default: true
         type: boolean
       qemu_frontend:
         description: Build the frontend image with QEMU (amd64+arm64)
