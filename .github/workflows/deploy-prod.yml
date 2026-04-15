@@ -137,8 +137,9 @@ jobs:
       contents: read
       packages: write
     env:
-      USE_QEMU: ${{ (github.event_name == 'workflow_dispatch' && (github.event.inputs.qemu_ml_base == 'true' || github.event.inputs.qemu_ml == 'true')) || (github.event_name != 'workflow_dispatch' && (vars.BUILD_QEMU_ML_BASE == 'true' || vars.BUILD_QEMU_ML == 'true')) && 'true' || 'false' }}
-      BUILD_PLATFORMS: ${{ (github.event_name == 'workflow_dispatch' && (github.event.inputs.qemu_ml_base == 'true' || github.event.inputs.qemu_ml == 'true')) || (github.event_name != 'workflow_dispatch' && (vars.BUILD_QEMU_ML_BASE == 'true' || vars.BUILD_QEMU_ML == 'true')) && 'linux/amd64,linux/arm64' || 'linux/amd64' }}
+      # On push: always build multi-arch for ML. On workflow_dispatch: respect the inputs.
+      USE_QEMU: ${{ github.event_name != 'workflow_dispatch' || github.event.inputs.qemu_ml_base == 'true' || github.event.inputs.qemu_ml == 'true' }}
+      BUILD_PLATFORMS: ${{ (github.event_name != 'workflow_dispatch' || github.event.inputs.qemu_ml_base == 'true' || github.event.inputs.qemu_ml == 'true') && 'linux/amd64,linux/arm64' || 'linux/amd64' }}
     steps:
       - uses: actions/checkout@v5
 
@@ -177,8 +178,9 @@ jobs:
       contents: read
       packages: write
     env:
-      USE_QEMU: ${{ (github.event_name == 'workflow_dispatch' && (github.event.inputs.qemu_ml_base == 'true' || github.event.inputs.qemu_ml == 'true')) || (github.event_name != 'workflow_dispatch' && (vars.BUILD_QEMU_ML_BASE == 'true' || vars.BUILD_QEMU_ML == 'true')) && 'true' || 'false' }}
-      BUILD_PLATFORMS: ${{ (github.event_name == 'workflow_dispatch' && (github.event.inputs.qemu_ml_base == 'true' || github.event.inputs.qemu_ml == 'true')) || (github.event_name != 'workflow_dispatch' && (vars.BUILD_QEMU_ML_BASE == 'true' || vars.BUILD_QEMU_ML == 'true')) && 'linux/amd64,linux/arm64' || 'linux/amd64' }}
+      # On push: always build multi-arch for ML. On workflow_dispatch: respect the inputs.
+      USE_QEMU: ${{ github.event_name != 'workflow_dispatch' || github.event.inputs.qemu_ml_base == 'true' || github.event.inputs.qemu_ml == 'true' }}
+      BUILD_PLATFORMS: ${{ (github.event_name != 'workflow_dispatch' || github.event.inputs.qemu_ml_base == 'true' || github.event.inputs.qemu_ml == 'true') && 'linux/amd64,linux/arm64' || 'linux/amd64' }}
     steps:
       - uses: actions/checkout@v5
 

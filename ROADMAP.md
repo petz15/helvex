@@ -45,11 +45,15 @@
 - multiple issues in billing
     - save card not working
     - existing subscription then upgrading is not working
-    - how did saferpay org get 1'000 credits without it showing up in my superadmin billing?
-    - ...
+    - how did saferpay org get 1'000 credits without it showing up in my superadmin billing or saferpay backoffice dashboard?
+        A: welcome bonus even though they didn't get a subscription
+    - pricing page look terrible
 - Usermanagement for orgs (atleast untested)
 - admin dashboard simple redirects non authorized users, maybe not the safest
-- 
+- user logging: 
+    - does not include login trough google auth
+- UI fixes
+    - pricing page does not look good
 
 
 
