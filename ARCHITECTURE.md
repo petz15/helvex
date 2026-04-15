@@ -2,7 +2,7 @@
 
 > Internal documentation for bug fixing and onboarding.
 > **Stack:** FastAPI · PostgreSQL · Redis · K3s/Hetzner · Helm · Terraform · Next.js
-> **Repo:** `zefix_analyzer` (product name: Helvex)
+> **Repo:** `helvex` (product name: Helvex)
 
 ---
 
@@ -25,8 +25,9 @@
 13. [Kubernetes / Helm](#13-kubernetes--helm)
 14. [Terraform / Hetzner](#14-terraform--hetzner)
 15. [Local Development](#15-local-development)
-16. [Common Bug-Fixing Cheatsheet](#16-common-bug-fixing-cheatsheet)
-17. [Background Job System — Design Evolution](#17-background-job-system--design-evolution)
+16. [Activity Log](#16-activity-log)
+17. [Common Bug-Fixing Cheatsheet](#17-common-bug-fixing-cheatsheet)
+18. [Background Job System — Design Evolution](#18-background-job-system--design-evolution)
 
 ---
 
@@ -239,6 +240,56 @@ HTML routes (browser, in `main.py`):
 | POST | `/api/v1/jobs/enqueue/csv-export` | Enqueue unlimited async CSV export (max 1 active per user) |
 | GET  | `/api/v1/jobs/csv-export/status` | Latest export status + presigned S3 download URL for current user |
 
+#### Views — `app/api/routes/views.py`
+
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| GET | `/api/v1/views` | Member | List saved views for current org |
+| POST | `/api/v1/views` | Member | Save current filter set as a named view |
+| DELETE | `/api/v1/views/{id}` | Member (owner) | Delete a saved view |
+| PATCH | `/api/v1/views/{id}/alert` | Member (owner) | Enable/disable daily new-match alert for a saved view |
+
+#### Workspace / Orgs — `app/api/routes/workspace.py`
+
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| GET | `/api/v1/orgs/{id}/notifications` | Member | Get notification preferences (`email_notifications`) |
+| PATCH | `/api/v1/orgs/{id}/notifications` | Admin/Owner | Update notification preferences |
+| … | (other existing org/member routes) | | |
+
+#### Scoring — `app/api/routes/scoring.py`
+
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| POST | `/api/v1/scoring/claude-preview` | Member | Dry-run Claude scoring on up to 5 companies matching current filters; rate-limited to 3 calls/min per org |
+
+#### Billing — `app/api/routes/billing.py`
+
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| GET | `/api/v1/billing/summary` | Member | Credit balance, tier, low-credit alert threshold |
+| GET | `/api/v1/billing/credits/usage` | Member | Credit spend/refund by action over N days |
+| … | (top-up, history routes) | | |
+
+#### Admin — `app/api/routes/admin.py`
+
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| GET | `/api/v1/admin/analytics` | Superadmin | Platform analytics: org counts, MRR estimate, top credit consumers, job volumes |
+| POST | `/api/v1/admin/jobs/saved-view-alerts` | Superadmin | Manually trigger saved-view alert sweep (also runs nightly via cron) |
+| … | (other existing admin routes) | | |
+
+#### CSV Export status — `app/api/routes/jobs.py`
+
+The `/api/v1/jobs/csv-export/status` response now includes nudge fields:
+
+| Field | Type | Description |
+|---|---|---|
+| `capped` | bool | True if export was truncated at the tier row limit |
+| `tier_limit` | int | The row cap that applied |
+| `total_matching` | int | Total companies that matched the filters |
+| `upgrade_to` | str | First higher tier that would lift the cap |
+
 #### Other routes
 
 | Route module | Path prefix | Summary |
@@ -323,8 +374,24 @@ Persistent record of every background job. Org-scoped: each job stores the org_i
 | `progress_done` / `progress_total` | Resume pointer + UI progress bar |
 | `params_json` | Input params as JSON |
 | `stats_json` | Output stats as JSON |
-| `dedup_key` | Prevents duplicate active jobs — see §17 |
-| `last_heartbeat_at` | Updated every 30 s by worker; guards against double-execution on restart — see §17 |
+| `dedup_key` | Prevents duplicate active jobs — see §18 |
+| `last_heartbeat_at` | Updated every 30 s by worker; guards against double-execution on restart — see §18 |
+
+#### `UserView` — `app/models/user_view.py`
+
+Saved filter sets (named dashboard views) that users can recall later.
+
+| Column | Notes |
+|---|---|
+| `org_id` | FK → organizations |
+| `user_id` | FK → users (owner) |
+| `name` | Human-readable label |
+| `filters_json` | Serialized filter params |
+| `alert_enabled` | Bool (default False) — if True, daily sweep emails the owner when new matches appear |
+| `alert_last_count` | Count of matching companies at last sweep; NULL until first sweep run |
+| `alert_last_checked_at` | Timestamp of last sweep for this view |
+
+Migration: `0052_add_user_view_alert_fields`
 
 #### Other models
 
@@ -333,7 +400,9 @@ Persistent record of every background job. Org-scoped: each job stores the org_i
 | `JobRunEvent` | job_run_events | Per-job structured event log (info/warn/error/debug) |
 | `Note` | notes | Free-text notes on a company, by author |
 | `AppSetting` | app_settings | Key-value store for dynamic configuration |
-| `AuditLog` | audit_logs | User action log |
+| `OrgSetting` | org_settings | Per-org key-value overrides (e.g. `email_notifications`, `low_credit_alert_at`, `anthropic_api_key`) |
+| `AuditLog` | audit_log | Field-level change tracking on company records (old/new values) |
+| `ActivityLog` | activity_log | User action log — who did what, when (see §Activity Log) |
 | `Organization` | organizations | Team seats |
 
 ### CRUD Layer (`app/crud/`)
@@ -386,11 +455,71 @@ SHA-256(plain_text) → base64 → bcrypt(salted)
 
 SHA-256 pre-hash avoids the bcrypt 72-byte truncation vulnerability for long passwords.
 
+### Email verification gate — `app/api/deps.py`
+
+`get_current_org` (the base dependency for every org-scoped route) chains through
+`require_verified_email` before loading org state. Effect: any route that uses
+`get_current_org` or `require_org_role(...)` automatically rejects unverified users
+with HTTP 403. This covers all company, job, billing, workspace, and scoring routes.
+
+Routes that only need `get_current_user` (public search, demo, webhook returns) are
+**not** gated — by design.
+
+Admin-created users (`POST /orgs/{id}/members`) and invite-accepted users
+(`GET /invites/accept`) are set `email_verified = True` by the backend, so they are
+never blocked.
+
 ### Rate limiting — `app/auth.py:250-324`
 
 - Backend: Redis `INCR` + `EXPIRE` (if `REDIS_URL` is set), otherwise in-memory `defaultdict`
 - Login failures: 10 attempts per IP per 15 min → locked out
-- Public endpoints (`/register`, `/forgot-password`): separate per-action counters
+- Public endpoints (`/register`, `/forgot-password`): separate per-action counters, keyed by IP
+
+**Authenticated endpoint rate limits** (keyed by `user_<id>`, not IP):
+
+| Route | Limit | Window | Action key |
+|---|---|---|---|
+| `POST /jobs/enqueue/csv-export` | 5 calls | 10 min | `job_rl:csv_export` |
+| `GET /companies/export.csv` | 5 calls | 10 min | `job_rl:csv_export` |
+| `POST /scoring/claude` | 20 calls | 10 min | `job_rl:claude_classify` |
+| `GET /companies/{id}/google-search` | 30 calls | 10 min | `google_search` |
+| `POST /scoring/claude-preview` | 3 calls | 24 h | `claude_preview:<org_id>` (pre-existing) |
+
+Superadmins bypass all authenticated rate limits. The `_check_job_rate_limit` helper
+in `jobs.py` implements the pattern for job routes; Google search uses
+`check_public_rate_limit` directly with a user-keyed bucket.
+
+### Credit deduction — CSV export
+
+`POST /jobs/enqueue/csv-export` and `GET /companies/export.csv` now deduct credits
+**before** enqueuing using `bulk_export_basic` (6,000 credits per 10k row unit).
+The tier row cap is rounded up to the nearest 10k unit to get a deterministic cost.
+
+| Tier cap | Units charged | Credits charged |
+|---|---|---|
+| 100 rows (free) | 1 unit | 6,000 |
+| 1,000 rows (simple) | 1 unit | 6,000 |
+| 5,000 rows (explorer) | 1 unit | 6,000 |
+| 20,000 rows (researcher) | 2 units | 12,000 |
+| 100,000 rows (strategist) | 10 units | 60,000 |
+
+Superadmin orgs (`credits_unlimited = True`) are never blocked. Insufficient balance
+returns HTTP 402 with a message indicating the cost.
+
+### Open redirect protection — `billing.py`
+
+`_safe_redirect_target()` now validates that the redirect URL's `netloc` matches the
+`app_base_url` configured in settings. Any `success_url` or `cancel_url` pointing to
+a different host is silently replaced with `app_base_url`. This prevents an attacker
+who can supply a checkout body from redirecting users to an external phishing site.
+
+### Saved view size cap — `views.py`
+
+`POST /views` rejects payloads where:
+- `name` exceeds 120 characters
+- serialised `filters` JSON exceeds 64 KiB
+
+Prevents DB bloat from crafted large-payload attacks.
 
 ### Security headers (applied to all responses)
 
@@ -445,6 +574,7 @@ The worker checks `cancel_requested` / `pause_requested` **between companies** (
 | `recalculate_scores` | `limit`, `refresh_zefix` | Recompute combined/flex/ai scores for companies | ✓ Uses org-effective config & API key |
 | `claude_classify` | `limit`, `system_prompt` | Claude Haiku scoring + categorization | ✓ Validated in preflight; uses org-effective API key |
 | `csv_export` | dashboard filter params | Unlimited paginated CSV written to S3 (`helvex-exports/{user_id}/export.csv`); stored 7 days | ✓ Per-user; max 1 active at a time |
+| `saved_view_alerts` | — | Sweep all orgs' alert-enabled saved views; email owner if new companies match since last check | ✓ One active per org; `ONE_PER_ORG` set |
 
 #### Org-scoped job execution
 
@@ -454,6 +584,26 @@ The worker checks `cancel_requested` / `pause_requested` **between companies** (
   - `claude_classify` job → fetches `get_effective_setting(db, "anthropic_api_key", org_id=job.org_id)` per-job; skips jobs without a key
 - **Preflight check**: Before queueing a `claude_classify` job, `_preflight_job` validates the org has both an API key and target description
 - **API key never stored in job params**: The API key is fetched fresh from the database during execution, never persisted in job JSON
+
+#### Job completion email notifications
+
+After `mark_completed` / `mark_failed`, the worker calls `_maybe_send_job_notification`. It:
+1. Checks the org's `email_notifications` setting (default on).
+2. Looks up the org admin/owner email.
+3. For `csv_export` completion → calls `send_export_ready(...)`.
+4. For any job failure → calls `send_job_failed(...)`.
+
+No notification is sent for intermediate states, cancellations, or job types other than export (failures apply to all types).
+
+#### Saved view alert sweep — `app/services/saved_view_alerts.py`
+
+Runs as `saved_view_alerts` job type (nightly via cron, or triggered manually via `POST /admin/jobs/saved-view-alerts`).
+
+For each `UserView` with `alert_enabled=True`:
+- Count matching companies using `count_companies(db, **filter_kwargs)`.
+- **First run** (baseline): set `alert_last_count`, skip email.
+- **Subsequent runs**: if count > `alert_last_count`, send `send_saved_view_alert(...)` to the view owner; update the stored count.
+- Skips views whose owner has `email_notifications=false` or is inactive.
 
 ---
 
@@ -488,9 +638,10 @@ Both are downloaded and compiled into SQLite databases **at Docker build time**.
   - Falls back to global `ANTHROPIC_API_KEY` env var if no org override
   - Never exposed in APIs (replaced with `anthropic_api_key_set: bool` in frontend)
 - **Model**: Claude Haiku (cheapest; ~$0.25 per 1000 companies)
-- **Used for**: `claude_classify` job type only
+- **Used for**: `claude_classify` batch job, and `claude-preview` dry-run endpoint
 - **System prompt**: User-configurable via Settings API; resolved per-org
 - **Preflight check** (`_preflight_job`): Validates org has API key before queueing `claude_classify`
+- **Dry-run / preview**: `claude_classify_batch(dry_run=True)` scores up to 5 companies without writing to DB. Called by `POST /api/v1/scoring/claude-preview`. Rate-limited to 3 calls/min per org (Redis counter).
 
 ### Hetzner Object Storage (S3-compatible) — `app/services/s3_client.py`
 
@@ -517,6 +668,12 @@ Both buckets share the same `S3_ACCESS_KEY` / `S3_SECRET_KEY` credentials.
 - In dev: silently skips if SMTP_HOST is not set
 - In prod: required (enforced by `config.py` validator)
 - Templates: `send_verification_email`, `send_password_reset_email`, `send_welcome_email`
+- Transactional templates added for monetization/alerting:
+  - `send_low_credit_alert(to, org_name, balance, threshold)` — links to `/app/billing`
+  - `send_export_ready(to, row_count, job_id, download_url)` — links to S3 presigned URL
+  - `send_job_failed(to, job_type, label, job_id, summary)` — table of job details
+  - `send_saved_view_alert(to, view_name, new_count, previous_count, view_url)` — links to saved view
+- All transactional emails are gated on the org's `email_notifications` setting (OrgSetting key). Default: on.
 - Links use `APP_BASE_URL` (default `https://helvex.dicy.ch`)
 
 ---
@@ -558,21 +715,22 @@ All weights and the keyword taxonomy are stored in `app_settings` and editable l
 
 #### ML Pipeline Overview
 
-Three complementary ML pipelines enrich company data:
+Four complementary ML pipelines enrich company data:
 
 | Pipeline | Input | Output | When to run |
 |---|---|---|---|
 | **Keyword extraction** | `purpose` text | `purpose_keywords` per company | After initial import; incremental on new companies |
-| **Clustering** | `purpose` or `purpose_keywords` | `tfidf_cluster` per company | Periodically, or after large imports change corpus |
+| **Semantic clustering** | `purpose_keywords` (sentence embeddings) | `tfidf_cluster` per company | Preferred method — run after keywords |
+| **TF-IDF clustering** | `purpose` or `purpose_keywords` | `tfidf_cluster` per company | Faster fallback if semantic clustering is unavailable |
 | **NOGA classification** | name + purpose + keywords + cluster | `noga_code`, `noga_path` | After keywords + clustering are done |
 
 **Correct execution order:** Keywords → Clustering → NOGA. NOGA uses `purpose_keywords` and `tfidf_cluster` as input signals; running it before clustering degrades accuracy.
 
 ---
 
-#### Text Preprocessing (shared by all clustering algorithms)
+#### Text Preprocessing (shared by TF-IDF clustering algorithms)
 
-All three clustering pipelines share the same preprocessing stack before the clustering step differs:
+The TF-IDF-based clustering pipelines share the same preprocessing stack:
 
 1. **Boilerplate stripping** — removes generic legal boilerplate sentences (e.g. "Die Gesellschaft bezweckt...") using configurable DB regex patterns. Prevents generic legal terms from dominating cluster labels.
 2. **Lemmatization** — spaCy `de_core_news_md` reduces words to their dictionary root. "betreibt" → "betreiben". Skipped when `use_keywords=True`.
@@ -612,27 +770,45 @@ IDF weights drift over time as the corpus grows. After a large import (50K+ new 
 
 #### Clustering Algorithm Comparison
 
-Three algorithms are available. They write to the same `tfidf_cluster` column and share the same label pipeline downstream.
+Four algorithms are available. All write to the same `tfidf_cluster` column and share the same label pipeline downstream.
 
-| | **K-Means** (`tfidf_kmeans_cluster`) | **HDBSCAN** (`hdbscan_cluster`) | **BIRCH** (`birch_cluster`) |
-|---|---|---|---|
-| **Job type** | `tfidf_kmeans_cluster` | `hdbscan_cluster` | `birch_cluster` |
-| **Function** | `run_pipeline()` | `run_hdbscan_pipeline()` / `run_batch_merge_hdbscan_pipeline()` | `run_birch_pipeline()` |
-| **Library** | scikit-learn | `hdbscan` (separate package) | scikit-learn |
-| **k required?** | Yes — `n_clusters` param (default 150) | No — discovers count automatically | Yes — `n_clusters` param |
-| **Memory scaling** | O(n·k) — fine for full corpus | O(n²) single-pass — **infeasible for n > ~50K** | O(n) single-pass CF-tree — fine for full corpus |
-| **Assignment type** | **Soft multi-label** — 1–3 clusters per company via cosine similarity | Hard single-label — or noise (−1) | Hard single-label |
-| **Noise handling** | None — every company gets at least one cluster | Outliers get label −1 (written as NULL) | None — every company assigned |
-| **Speed (700K corpus)** | ~25 min total | ~40 min batch-merge or OOM single-pass | ~20 min |
-| **Cluster quality** | Good, predictable count | Best quality when it works; many noise points on messy text | Slightly below K-Means |
-| **Label stability** | Via cluster registry (Jaccard match) | Via cluster registry | Via cluster registry |
-| **Artifacts saved to S3** | vectorizer + SVD + centroids | centroids computed as cluster means | centroids computed as cluster means |
+| | **Semantic K-Means** (`semantic_kmeans_cluster`) | **TF-IDF K-Means** (`tfidf_kmeans_cluster`) | **HDBSCAN** (`hdbscan_cluster`) | **BIRCH** (`birch_cluster`) |
+|---|---|---|---|---|
+| **Function** | `run_semantic_pipeline()` | `run_pipeline()` | `run_hdbscan_pipeline()` / `run_batch_merge_hdbscan_pipeline()` | `run_birch_pipeline()` |
+| **Similarity measure** | Sentence-transformer embeddings (meaning) | TF-IDF bag-of-words (vocabulary) | TF-IDF bag-of-words | TF-IDF bag-of-words |
+| **k required?** | Yes — `n_clusters` (default 150) | Yes — `n_clusters` (default 150) | No — discovers automatically | Yes — `n_clusters` |
+| **Memory scaling** | O(n) after embedding | O(n·k) | O(n²) single-pass / O(n) batch-merge | O(n) single-pass CF-tree |
+| **Assignment type** | Soft multi-label (1–3 per company) | Soft multi-label (1–3 per company) | Hard single-label or NULL | Hard single-label |
+| **Noise handling** | None — every company assigned | None — every company assigned | Outliers → NULL | None — every company assigned |
+| **Speed (700K corpus)** | ~35–50 min (embedding bottleneck) | ~25 min | ~40 min batch-merge; OOM single-pass | ~20 min |
+| **Cluster coherence** | **Highest** — same meaning, different words | Good — same words, different meaning missed | Best when it works; many noise points on messy text | Slightly below TF-IDF K-Means |
+| **Requires** | `purpose_keywords` populated | None (raw purpose is acceptable) | None | None |
+| **Artifacts saved to S3** | vectorizer (TF-IDF for labels) + SVD + centroids | vectorizer + SVD + centroids | centroids computed as cluster means | centroids computed as cluster means |
 
 ---
 
-#### K-Means (`tfidf_kmeans_cluster`) — **Recommended default**
+#### Semantic K-Means (`semantic_kmeans_cluster`) — **Recommended**
 
-**When to use:** Full corpus runs, production pipeline, whenever you need all companies to be assigned.
+**When to use:** Production pipeline. Produces the most coherent, intuitive clusters. Companies with similar business activities group together regardless of the words they use in their purpose text.
+
+**How it works:**
+1. Each company's `purpose_keywords` (comma-separated, pre-extracted) is joined and embedded with `paraphrase-multilingual-MiniLM-L12-v2` (384-dim multilingual sentence-transformer).
+2. Embeddings are reduced with TruncatedSVD (50 components) + L2 normalisation.
+3. MiniBatchKMeans clusters in the reduced embedding space.
+4. Cluster labels are generated via c-TF-IDF on the original keyword text (separate TF-IDF re-vectorization for readability — the clustering itself is in embedding space).
+5. Multi-label soft assignment (up to 3 clusters per company, cosine similarity threshold).
+6. `purpose_keywords` are preserved unchanged — this pipeline does not overwrite them.
+
+**Requirements:** `purpose_keywords` must be populated. Run `recompute_keywords` first.
+
+**Why it's better than TF-IDF clustering:**
+A "software development" company and a "Softwareentwicklung" company land in the same cluster even though neither keyword appears in the other's purpose. TF-IDF treats them as different; embeddings understand they are the same.
+
+---
+
+#### TF-IDF K-Means (`tfidf_kmeans_cluster`) — **Fast fallback**
+
+**When to use:** Full corpus runs when semantic clustering is unavailable; quick iteration when retuning cluster count.
 
 **How it works:**
 - MiniBatchKMeans on the SVD-reduced space (50 dimensions)
@@ -805,7 +981,79 @@ When `USE_RQ=false` (local dev / thread mode), all jobs run in the same process 
 
 ---
 
-## 9. Frontend
+#### Cluster Registry (`app/models/cluster_registry.py`, `app/crud/cluster_registry.py`)
+
+The `cluster_registry` table gives each cluster a stable identity across pipeline runs.
+
+**Why it exists:** Every pipeline run generates fresh c-TF-IDF labels (e.g. `"software,entwicklung,cloud"`). Without the registry, a minor corpus shift could change the top terms enough to produce a different string — breaking saved filter views, scoring rules, and any code that hard-references a cluster name.
+
+**How it works:**
+1. After labeling, each cluster's top terms are matched against existing active registry entries via Jaccard similarity (threshold 0.5).
+2. If a match is found, the existing `canonical_name` is reused (and `top_terms` updated if they've shifted slightly).
+3. If no match, a new entry is created with `canonical_name = label` (the raw c-TF-IDF string).
+4. Entries not produced in the current run are marked `active = False`.
+
+**Renaming:** `PATCH /api/v1/clusters/registry/{id}` renames the `canonical_name` and rewrites all matching `tfidf_cluster` values in the `companies` table atomically. UI: Superadmin → Clusters.
+
+**Display formatting:** Raw cluster names are comma-separated lemmas (`"software,entwicklung,cloud"`). The frontend formats them for display as `"Software · Entwicklung · Cloud"` via `formatClusterLabel()` in `frontend/src/lib/utils.ts`. The raw string is always used as the filter/storage value — only the display is formatted.
+
+---
+
+## 9. Credit System & Monetization
+
+### Overview
+
+Credits are the unit of account for AI-powered actions (Claude scoring, web search, etc.). Each org has a balance stored in `OrgSetting(key="credit_balance")`. Credits are pre-purchased and deducted at action time.
+
+### Core function — `app/services/credits.py`
+
+```
+check_and_deduct(db, org_id, action, count=1) → (ok: bool, balance: int)
+```
+
+- Reads the org's current balance.
+- Checks the deduction amount for `action` from the `CreditCostConfig` table (or hardcoded defaults).
+- Atomically deducts or returns `(False, current_balance)` if insufficient.
+- Calls `_maybe_low_credit_alert(db, org_id, balance)` after every deduction.
+
+### Low-credit alert
+
+`_maybe_low_credit_alert` fires when balance drops below the org's `low_credit_alert_at` threshold (OrgSetting, default `None` / disabled):
+
+1. Checks if an alert was already sent today (`OrgSetting("low_credit_alert_sent_at")`).
+2. Calls `_send_low_credit_email(db, org_id, balance, threshold)`.
+3. The email helper checks `email_notifications` opt-out, looks up the org admin/owner, and calls `send_low_credit_alert(...)`.
+
+### Tier row caps (CSV export)
+
+`csv_export.py` enforces per-tier row limits. After export completes, `stats_json` is extended with:
+
+| Field | Meaning |
+|---|---|
+| `capped` | True if the export was truncated |
+| `tier_limit` | The cap that applied |
+| `total_matching` | Total rows that matched the filters |
+| `upgrade_to` | First tier with a higher cap |
+
+The frontend reads these on status poll and shows an upgrade nudge banner when `capped=true`.
+
+### Billing UI (frontend)
+
+`/app/billing` shows:
+- **Low-credit alert banner** (amber) if `summary.low_credit_alert_at` is set and balance is below threshold
+- **Credit Usage** section: days selector (7/30/90), spend/refund/net totals, per-action bar chart
+- **Notification preferences** toggle (email_notifications)
+- Credit history and payment history tables
+
+### Security
+
+- Credit balance and deduction are performed with a DB-level lock (select-for-update) to prevent double-spend under concurrent requests.
+- The `check_and_deduct` result is not disclosed to the user — actions simply fail silently or with a generic "insufficient credits" error.
+- `GET /billing/summary` and `GET /billing/credits/usage` are member-scoped (own org only).
+
+---
+
+## 10. Frontend
 
 **Location:** `frontend/`
 **Technology:** Next.js (TypeScript, Node.js 22)
@@ -1153,7 +1401,77 @@ alembic upgrade head
 
 ---
 
-## 16. Common Bug-Fixing Cheatsheet
+## 16. Activity Log
+
+### Purpose
+
+The activity log is a lightweight audit trail of **user-initiated actions** across the platform. It is distinct from `audit_log` (field-level data diffs on company records).
+
+### Storage
+
+Table: `activity_log` (migration `0053_add_activity_log`)
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | Integer PK | |
+| `user_id` | FK → users (SET NULL) | Null if user was deleted |
+| `org_id` | FK → organizations (SET NULL) | Org context at time of action |
+| `action` | String(64), indexed | Action slug — see catalogue below |
+| `resource_type` | String(32) | `company`, `view`, `note`, `org`, `user` |
+| `resource_id` | Integer | PK of the affected row (no DB-level FK) |
+| `meta` | JSONB | Extra context (search query, field list, count, etc.) |
+| `ip` | String(45) | Client IP (IPv4 or IPv6) |
+| `created_at` | DateTime(tz), indexed | UTC timestamp |
+
+Indexes: `user_id`, `org_id`, `action`, `created_at`.
+
+### Action Catalogue
+
+| Action slug | Triggered from |
+|---|---|
+| `user_registered` | `POST /auth/register` |
+| `user_login` | `POST /auth/login`, `POST /auth/token` |
+| `email_verified` | `GET /auth/verify-email` |
+| `password_changed` | `POST /auth/change-password` |
+| `email_changed` | `POST /auth/confirm-email-change` |
+| `company_viewed` | `GET /companies/{id}` |
+| `company_updated` | `PATCH /companies/{id}` |
+| `company_deleted` | `DELETE /companies/{id}` |
+| `company_exported` | `GET /companies/export.csv` |
+| `company_bulk_updated` | `POST /companies/bulk-update` |
+| `company_bulk_tagged` | `POST /companies/bulk-tag` |
+| `company_website_set` | `PATCH /companies/{id}/website` |
+| `view_created` | `POST /views` |
+| `view_deleted` | `DELETE /views/{id}` |
+| `view_alert_toggled` | `PATCH /views/{id}/alert` |
+| `note_created` | `POST /companies/{id}/notes` |
+| `note_deleted` | `DELETE /companies/{id}/notes/{note_id}` |
+
+### Service
+
+`app/services/activity.py` — `log_activity(db, *, action, user_id, org_id, ...)`.
+
+The helper is **best-effort**: exceptions are caught and logged but never re-raised. A failed write never breaks the user-facing request. It calls `db.flush()` (not `db.commit()`), so the entry participates in the caller's transaction.
+
+### Admin Dashboard
+
+`GET /api/v1/admin/activity-logs` — paginated log with filters: `user_id`, `org_id`, `action`, `resource_type`.
+
+`GET /api/v1/admin/activity-logs/summary` — per-action counts + distinct active users for the last N days.
+
+Frontend: **Superadmin → Activity** tab (`/app/admin/activity`).
+
+### Retention
+
+No automatic pruning yet. At high volume, add a nightly job to delete rows older than 90 days:
+
+```sql
+DELETE FROM activity_log WHERE created_at < now() - interval '90 days';
+```
+
+---
+
+## 17. Common Bug-Fixing Cheatsheet
 
 ### Email verification not working
 - Verify `SMTP_HOST`, `SMTP_FROM`, `SMTP_USER`, `SMTP_PASSWORD` are set in prod

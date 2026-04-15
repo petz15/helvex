@@ -1,12 +1,15 @@
 "use client";
 import { useState, useEffect } from "react";
 import useSWR from "swr";
-import { ChevronLeft, ChevronRight, CreditCard, Zap, TrendingUp, ArrowUpRight, Loader2 } from "lucide-react";
+import { ChevronLeft, ChevronRight, CreditCard, Zap, TrendingUp, ArrowUpRight, Loader2, AlertTriangle, BarChart2 } from "lucide-react";
 import Link from "next/link";
 import {
   fetchCurrentUser,
   fetchBillingSummary,
   fetchCreditTransactions,
+  fetchCreditUsage,
+  fetchNotificationPreferences,
+  updateNotificationPreferences,
   fetchPaymentHistory,
   cancelPendingPayment,
   cancelSubscription,
@@ -19,6 +22,7 @@ import {
   getPaymentInvoiceUrl,
   type BillingAddressPayload,
   type CreditTransaction,
+  type CreditUsage,
   type PaymentRecord,
 } from "@/lib/api";
 import { creditsToChf } from "@/lib/entitlements";
@@ -65,6 +69,134 @@ function fmtCredits(n: number) {
   const abs = Math.abs(n);
   const sign = n > 0 ? "+" : n < 0 ? "−" : "";
   return `${sign}${abs.toLocaleString()}`;
+}
+
+const ACTION_LABELS: Record<string, string> = {
+  batch_llm:          "AI scoring (batch)",
+  immediate_llm:      "AI scoring (instant)",
+  web_search:         "Web search",
+  flex_rescore:       "Flex rescore",
+  recluster:          "Recluster",
+  bulk_export_basic:  "Export (basic)",
+  bulk_export_detail: "Export (detailed)",
+};
+
+function CreditUsageSection() {
+  const [days, setDays] = useState(30);
+  const { data, isLoading } = useSWR<CreditUsage>(
+    `credit-usage-${days}`,
+    () => fetchCreditUsage(days),
+  );
+
+  const actions = data ? Object.entries(data.by_action).sort((a, b) => b[1].net - a[1].net) : [];
+  const maxNet = actions.length > 0 ? Math.max(...actions.map(([, v]) => v.net), 1) : 1;
+
+  return (
+    <div className="rounded-xl border border-slate-200 bg-white overflow-hidden">
+      <div className="px-4 py-3 border-b border-slate-100 flex items-center justify-between">
+        <p className="text-sm font-medium text-slate-800 flex items-center gap-1.5">
+          <BarChart2 size={14} className="text-slate-400" /> Credit usage
+        </p>
+        <select
+          value={days}
+          onChange={e => setDays(Number(e.target.value))}
+          className="text-xs text-slate-600 border border-slate-200 rounded-lg px-2 py-1 bg-white"
+        >
+          <option value={7}>Last 7 days</option>
+          <option value={30}>Last 30 days</option>
+          <option value={90}>Last 90 days</option>
+        </select>
+      </div>
+
+      {isLoading && (
+        <div className="flex items-center justify-center py-8">
+          <Loader2 size={16} className="animate-spin text-slate-300" />
+        </div>
+      )}
+
+      {data && (
+        <>
+          <div className="grid grid-cols-3 divide-x divide-slate-100 border-b border-slate-100 text-center">
+            <div className="px-4 py-3">
+              <p className="text-xs text-slate-400">Spent</p>
+              <p className="text-lg font-semibold text-slate-800">{data.total_spent.toLocaleString()}</p>
+            </div>
+            <div className="px-4 py-3">
+              <p className="text-xs text-slate-400">Refunded</p>
+              <p className="text-lg font-semibold text-emerald-600">+{data.total_refunded.toLocaleString()}</p>
+            </div>
+            <div className="px-4 py-3">
+              <p className="text-xs text-slate-400">Net</p>
+              <p className="text-lg font-semibold text-slate-800">{data.net_spent.toLocaleString()}</p>
+            </div>
+          </div>
+
+          {actions.length > 0 ? (
+            <div className="p-4 space-y-3">
+              {actions.map(([action, v]) => (
+                <div key={action}>
+                  <div className="flex items-center justify-between text-xs mb-1">
+                    <span className="text-slate-600">{ACTION_LABELS[action] ?? action}</span>
+                    <span className="text-slate-500 tabular-nums">{v.net.toLocaleString()} cr · {v.transactions} tx</span>
+                  </div>
+                  <div className="h-1.5 bg-slate-100 rounded-full overflow-hidden">
+                    <div
+                      className="h-full bg-blue-500 rounded-full"
+                      style={{ width: `${Math.round((v.net / maxNet) * 100)}%` }}
+                    />
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="text-xs text-slate-400 text-center py-6">No credit usage in this period.</p>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
+function NotificationSection({ orgId }: { orgId: number }) {
+  const { data, mutate } = useSWR(`notifications-${orgId}`, () => fetchNotificationPreferences(orgId));
+  const [saving, setSaving] = useState(false);
+
+  async function handleToggle() {
+    if (!data) return;
+    setSaving(true);
+    try {
+      const updated = await updateNotificationPreferences(orgId, { email_notifications: !data.email_notifications });
+      void mutate(updated, false);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="rounded-xl border border-slate-200 bg-white px-4 py-3 flex items-center justify-between">
+      <div>
+        <p className="text-sm font-medium text-slate-800">Email notifications</p>
+        <p className="text-xs text-slate-400 mt-0.5">
+          Receive emails for low-credit alerts, completed exports, and failed jobs.
+        </p>
+      </div>
+      <button
+        onClick={handleToggle}
+        disabled={saving || !data}
+        className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 focus:outline-none disabled:opacity-50 ${
+          data?.email_notifications ? "bg-blue-600" : "bg-slate-200"
+        }`}
+        role="switch"
+        aria-checked={data?.email_notifications ?? true}
+      >
+        <span
+          className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition duration-200 ${
+            data?.email_notifications ? "translate-x-4" : "translate-x-0"
+          }`}
+        />
+      </button>
+    </div>
+  );
 }
 
 // ── sub-components ─────────────────────────────────────────────────────────────
@@ -700,6 +832,7 @@ export function BillingClient() {
           kind: "success",
           message: `Top-up successful! ${credits ? `${Number(credits).toLocaleString()} credits` : "Credits"} added to your balance.`,
         });
+        void mutateSummary();
       } else if (kind === "subscription") {
         setReturnBanner({
           kind: "success",
@@ -740,6 +873,13 @@ export function BillingClient() {
         <p className="text-sm text-slate-500 mt-1">Manage your plan, credits, and payment history.</p>
       </div>
 
+      {summary?.low_credit_alert_at && (
+        <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 flex items-start gap-2">
+          <AlertTriangle size={16} className="shrink-0 mt-0.5" />
+          <span>Your credit balance is running low. <Link href="#" className="underline font-medium" onClick={e => { e.preventDefault(); document.getElementById("topup-section")?.scrollIntoView({ behavior: "smooth" }); }}>Top up now</Link> to avoid service interruptions.</span>
+        </div>
+      )}
+
       {returnBanner && (
         <div className={`rounded-xl border px-4 py-3 text-sm ${
           returnBanner.kind === "success"
@@ -762,7 +902,7 @@ export function BillingClient() {
         />
       )}
 
-      <TopupSection />
+      <div id="topup-section"><TopupSection /></div>
       {summary && (
         <SavedCardSection billingAddress={billingAddress} hasSavedPaymentMethod={summary.has_saved_payment_method} />
       )}
@@ -779,6 +919,8 @@ export function BillingClient() {
           }}
         />
       )}
+      <CreditUsageSection />
+      {summary && <NotificationSection orgId={summary.org_id} />}
       <CreditHistory />
       <PaymentHistory />
     </div>

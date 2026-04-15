@@ -256,4 +256,6 @@ export interface SavedView {
   name: string;
   filters: CompanyFilters;
   created_at: string;
+  alert_enabled: boolean;
+  alert_last_checked_at: string | null;
 }

@@ -31,6 +31,16 @@ def set_setting(db: Session, key: str, value: str) -> None:
     db.commit()
 
 
+def set_org_setting(db: Session, org_id: int, key: str, value: str) -> None:
+    """Upsert a per-org setting override."""
+    row = db.query(OrgSetting).filter(OrgSetting.org_id == org_id, OrgSetting.key == key).first()
+    if row is None:
+        db.add(OrgSetting(org_id=org_id, key=key, value=value))
+    else:
+        row.value = value
+    db.commit()
+
+
 def get_all_settings(db: Session) -> dict[str, str]:
     return {row.key: row.value for row in db.query(AppSetting).all()}
 

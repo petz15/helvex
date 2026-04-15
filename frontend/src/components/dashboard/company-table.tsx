@@ -6,7 +6,7 @@ import {
   createColumnHelper, type VisibilityState,
 } from "@tanstack/react-table";
 import { ChevronUp, ChevronDown, ChevronsUpDown, Settings2, ThumbsUp, ThumbsDown, Minus } from "lucide-react";
-import { cn, reviewBadgeClass, proposalBadgeClass, scoreColor } from "@/lib/utils";
+import { cn, reviewBadgeClass, proposalBadgeClass, scoreColor, formatClusterLabel } from "@/lib/utils";
 import { ScoreBar } from "@/components/ui/score-bar";
 import { Badge } from "@/components/ui/badge";
 import type { Company, CompanyFilters } from "@/lib/types";
@@ -171,7 +171,7 @@ export function CompanyTable({ companies, selectedId, onSelect, filters, onSort,
       }),
       ch.accessor("tfidf_cluster", {
         header: "Cluster",
-        cell: (info) => <span className="text-slate-500 text-xs truncate max-w-[120px] block">{(info.getValue() as string)?.split("|")[0] ?? "—"}</span>,
+        cell: (info) => <span className="text-slate-500 text-xs truncate max-w-[140px] block" title={(info.getValue() as string) ?? undefined}>{formatClusterLabel((info.getValue() as string)?.split("|")[0] ?? "") || "—"}</span>,
       }),
       ch.accessor("website_url", {
         id: "website",

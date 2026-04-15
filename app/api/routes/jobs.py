@@ -11,10 +11,36 @@ from sqlalchemy.orm import Session
 
 from app import crud
 from app.api.zefix_client import SWISS_CANTONS
-from app.auth import get_current_user, require_superadmin
+from app.auth import check_public_rate_limit, get_client_ip, get_current_user, require_superadmin
 from app.database import get_db
+from app.models.organization import Organization
 from app.models.user import User
+from app.services import credits as credits_service
 from app.services.job_worker import enqueue_job
+from app.services.tiers import get_export_limit, has_feature, normalize_tier
+
+
+def _check_job_rate_limit(request: Request, current_user: User, action: str, *, window: int = 300, max_calls: int = 10) -> None:
+    """Rate-limit authenticated job-triggering endpoints by user ID.
+
+    Uses the same Redis-backed sliding window as public rate limiting, keyed
+    on ``job_rl:<action>:<user_id>`` so each user has an independent bucket.
+    Superadmins are never limited.
+
+    Args:
+        window: lookback window in seconds (default 5 min).
+        max_calls: max allowed calls in the window (default 10).
+
+    Raises HTTP 429 when the limit is exceeded.
+    """
+    if current_user.is_superadmin:
+        return
+    key = f"user_{current_user.id}"
+    if not check_public_rate_limit(key, f"job_rl:{action}", window=window, max_requests=max_calls):
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=f"Too many requests. Maximum {max_calls} '{action}' calls per {window // 60} minutes.",
+        )
 
 router = APIRouter(tags=["jobs"])
 
@@ -392,7 +418,7 @@ class ClusterPipelineBody(BaseModel):
     min_zefix_score: int | None = None
     max_zefix_score: int | None = None
     limit: int | None = None
-    use_keywords: bool = False
+    use_keywords: bool = True  # Cluster on pre-extracted purpose_keywords (recommended)
 
 
 class HdbscanClusterBody(BaseModel):
@@ -431,6 +457,24 @@ class ReextractKeywordsBody(BaseModel):
     only_missing: bool = False
     canton: str | None = None
     limit: int | None = None
+
+
+class SemanticClusterBody(BaseModel):
+    """Semantic K-Means clustering using sentence-transformer embeddings.
+
+    Requires purpose_keywords to be already extracted.
+    Run recompute_keywords first if purpose_keywords are missing.
+    """
+    n_clusters: int = 150
+    max_clusters_per_company: int = 3
+    min_similarity: float = 0.20
+    n_components: int = 50
+    top_terms: int = 5
+    canton: str | None = None
+    min_zefix_score: int | None = None
+    max_zefix_score: int | None = None
+    limit: int | None = None
+    embedding_batch_size: int = 512
 
 
 class ClusterAnalysisBody(BaseModel):
@@ -501,29 +545,25 @@ def trigger_detail(body: DetailCollectBody, request: Request, db: Session = Depe
 
 
 @router.post("/scoring/zefix", response_model=JobOut, status_code=status.HTTP_202_ACCEPTED)
-def trigger_recalc_zefix(request: Request, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+def trigger_recalc_zefix(request: Request, db: Session = Depends(get_db), _: User = Depends(require_superadmin)):
     job = _enqueue_or_http_error(
         request,
         job_type="recalculate_scores",
         label="Recalculate Zefix scores",
         params={},
         db=db,
-        org_id=current_user.org_id,
-        user_id=current_user.id,
     )
     return JobOut.from_orm_obj(job)
 
 
 @router.post("/scoring/google", response_model=JobOut, status_code=status.HTTP_202_ACCEPTED)
-def trigger_recalc_google(request: Request, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+def trigger_recalc_google(request: Request, db: Session = Depends(get_db), _: User = Depends(require_superadmin)):
     job = _enqueue_or_http_error(
         request,
         job_type="recalculate_google_scores",
         label="Recalculate Google scores",
         params={},
         db=db,
-        org_id=current_user.org_id,
-        user_id=current_user.id,
     )
     return JobOut.from_orm_obj(job)
 
@@ -584,16 +624,181 @@ def trigger_reclassify_noga(
 
 @router.post("/scoring/claude", response_model=JobOut, status_code=status.HTTP_202_ACCEPTED)
 def trigger_claude_classify(body: ClaudeClassifyBody, request: Request, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    # Rate limit: max 20 claude classify enqueues per user per 10 minutes.
+    _check_job_rate_limit(request, current_user, "claude_classify", window=600, max_calls=20)
+
+    # Non-org users have no credit balance — block to prevent free AI calls.
+    if not current_user.is_superadmin and not current_user.org_id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Organization membership required to use AI classification")
+
+    # Only superadmins may supply a custom system_prompt — it is stored and
+    # executed verbatim by Claude, which is a prompt-injection risk.
+    params = body.model_dump()
+    if not current_user.is_superadmin:
+        params["system_prompt"] = None
+        # immediate_llm (use_batch_api=False) requires Explorer tier or above.
+        # Free / Simple orgs are silently downgraded to batch mode (cheaper, async).
+        if current_user.org_id:
+            org = db.get(Organization, current_user.org_id)
+            if org is not None and not has_feature(org, "immediate_llm"):
+                params["use_batch_api"] = True
+
     job = _enqueue_or_http_error(
         request,
         job_type="claude_classify",
         label=f"Claude classify — up to {body.limit} companies",
-        params=body.model_dump(),
+        params=params,
         db=db,
         org_id=current_user.org_id,
         user_id=current_user.id,
     )
     return JobOut.from_orm_obj(job)
+
+
+_PREVIEW_MAX_COMPANIES = 5
+_PREVIEW_RATE_LIMIT = 3        # calls per org per window
+_PREVIEW_RATE_WINDOW = 86_400  # 24 hours in seconds
+
+
+class ClaudePreviewBody(BaseModel):
+    canton: str | None = None
+    min_zefix_score: int | None = None
+    max_zefix_score: int | None = None
+    purpose_keywords: str | None = None
+    use_fixed_categories: bool = False
+
+
+class ClaudePreviewResult(BaseModel):
+    company_id: int
+    name: str
+    ai_score: float | None
+    ai_category: str | None
+    ai_freeform: str | None
+
+
+class ClaudePreviewOut(BaseModel):
+    results: list[ClaudePreviewResult]
+    previews_used: int
+    previews_remaining: int
+
+
+@router.post("/scoring/claude-preview", response_model=ClaudePreviewOut)
+def trigger_claude_preview(
+    body: ClaudePreviewBody,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Run AI classification on up to 5 companies without persisting results.
+
+    Hard security limits:
+    - Max 5 companies per call (enforced server-side, ignores any limit param).
+    - Always uses batch mode — never immediate_llm regardless of tier.
+    - Always uses the platform Anthropic key — BYO keys are never used.
+    - system_prompt is always stripped.
+    - Rate-limited to 3 calls per org per 24 h to prevent free LLM abuse.
+    - Org membership required.
+    - Results are returned inline and never written to the database.
+    """
+    if not current_user.is_superadmin and not current_user.org_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Organization membership required to use AI preview",
+        )
+
+    org_id = current_user.org_id
+
+    # ── Rate limiting ──────────────────────────────────────────────────────────
+    if not current_user.is_superadmin and org_id:
+        rate_key = f"preview_rate:{org_id}"
+        allowed = True
+
+        # Try Redis first
+        try:
+            from app.config import settings as _cfg
+            if _cfg.redis_url:
+                import redis as _redis
+                r = _redis.Redis.from_url(_cfg.redis_url, socket_connect_timeout=1, socket_timeout=1)
+                count = int(r.incr(rate_key))
+                if count == 1:
+                    r.expire(rate_key, _PREVIEW_RATE_WINDOW)
+                if count > _PREVIEW_RATE_LIMIT:
+                    ttl = r.ttl(rate_key)
+                    raise HTTPException(
+                        status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                        detail=f"Preview rate limit reached ({_PREVIEW_RATE_LIMIT}/day). Resets in {ttl}s.",
+                    )
+                previews_used = count
+                previews_remaining = max(0, _PREVIEW_RATE_LIMIT - count)
+            else:
+                raise RuntimeError("no redis")
+        except HTTPException:
+            raise
+        except Exception:
+            # Redis unavailable — fall back to org-setting counter (less precise but safe)
+            from datetime import date as _date
+            today = _date.today().isoformat()
+            raw = crud.get_effective_setting(db, f"preview_count:{today}", org_id=org_id, default="0")
+            try:
+                count = int(raw) + 1
+            except ValueError:
+                count = 1
+            if count > _PREVIEW_RATE_LIMIT:
+                raise HTTPException(
+                    status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                    detail=f"Preview rate limit reached ({_PREVIEW_RATE_LIMIT}/day).",
+                )
+            from app.crud.app_setting import set_org_setting
+            set_org_setting(db, org_id=org_id, key=f"preview_count:{today}", value=str(count))
+            previews_used = count
+            previews_remaining = max(0, _PREVIEW_RATE_LIMIT - count)
+    else:
+        previews_used = 0
+        previews_remaining = _PREVIEW_RATE_LIMIT
+
+    # ── Run classification synchronously (no job queue) ────────────────────────
+    from app.config import settings as _cfg
+    from app.services.collection import claude_classify_batch
+    import anthropic as _anthropic
+
+    api_key = (_cfg.anthropic_api_key or "").strip()
+    if not api_key:
+        raise HTTPException(status_code=503, detail="AI classification is not configured on this server")
+
+    try:
+        stats = claude_classify_batch(
+            db,
+            canton=body.canton,
+            min_flex_score=body.min_zefix_score,
+            max_flex_score=body.max_zefix_score,
+            purpose_keywords=body.purpose_keywords,
+            use_fixed_categories=body.use_fixed_categories,
+            rerun_classified=True,  # include already-classified for preview
+            limit=_PREVIEW_MAX_COMPANIES,
+            system_prompt=None,           # always stripped for safety
+            api_key=api_key,              # always platform key, never BYO
+            org_id=org_id,
+            use_batch_api=False,          # synchronous, inline results
+            dry_run=True,                 # do not persist to DB
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"AI classification error: {exc}") from exc
+
+    results = [
+        ClaudePreviewResult(
+            company_id=r["company_id"],
+            name=r["name"],
+            ai_score=r.get("ai_score"),
+            ai_category=r.get("ai_category"),
+            ai_freeform=r.get("ai_freeform"),
+        )
+        for r in (stats.get("preview_results") or [])
+    ]
+    return ClaudePreviewOut(
+        results=results,
+        previews_used=previews_used,
+        previews_remaining=previews_remaining,
+    )
 
 
 @router.post("/scoring/cluster", response_model=JobOut, status_code=status.HTTP_202_ACCEPTED)
@@ -626,6 +831,23 @@ def trigger_birch_cluster(body: BirchClusterBody, request: Request, db: Session 
         request,
         job_type="birch_cluster",
         label="BIRCH cluster pipeline (memory-efficient)",
+        params=body.model_dump(),
+        db=db,
+    )
+    return JobOut.from_orm_obj(job)
+
+
+@router.post("/scoring/semantic-cluster", response_model=JobOut, status_code=status.HTTP_202_ACCEPTED)
+def trigger_semantic_cluster(body: SemanticClusterBody, request: Request, db: Session = Depends(get_db), _: User = Depends(require_superadmin)):
+    """Semantic K-Means clustering via sentence-transformer embeddings.
+
+    Groups companies by semantic meaning rather than shared vocabulary.
+    Requires purpose_keywords — run recompute_keywords first.
+    """
+    job = _enqueue_or_http_error(
+        request,
+        job_type="semantic_kmeans_cluster",
+        label=f"Semantic K-Means clustering — {body.n_clusters} clusters",
         params=body.model_dump(),
         db=db,
     )
@@ -810,6 +1032,10 @@ class CSVExportStatusOut(BaseModel):
     download_url: str | None
     expires_at: str | None
     row_count: int | None
+    capped: bool | None = None
+    tier_limit: int | None = None
+    total_matching: int | None = None
+    upgrade_to: str | None = None
 
 
 @router.post("/jobs/enqueue/csv-export", response_model=JobOut, status_code=status.HTTP_202_ACCEPTED)
@@ -819,22 +1045,67 @@ def enqueue_csv_export(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Queue an unlimited CSV export with the current dashboard filters.
+    """Queue a CSV export with the current dashboard filters.
+
+    Row count is capped by the org's tier limit (free=100, simple=1k, explorer=5k,
+    researcher=20k, strategist=100k). Superadmins have no cap.
+
+    Credits are deducted upfront based on the tier row cap (worst-case rows),
+    rounded up to the nearest 10k unit. Action type: bulk_export_basic.
+    Superadmin orgs with credits_unlimited=True are never blocked or charged.
 
     Max 1 active export per user — any queued/running export is cancelled first.
     The finished file is stored in S3 for 7 days.
     """
+    # Rate limit: max 5 export enqueues per user per 10 minutes.
+    _check_job_rate_limit(request, current_user, "csv_export", window=600, max_calls=5)
+
     from app.services.s3_client import is_configured
     if not is_configured():
         raise HTTPException(status_code=503, detail="S3 export storage is not configured on this server")
 
+    # Determine and embed the tier row cap into params so the worker honours it.
+    if current_user.is_superadmin:
+        row_limit = None  # unlimited for superadmins
+    elif current_user.org_id:
+        org = db.get(Organization, current_user.org_id)
+        row_limit = get_export_limit(org) if org else 100
+    else:
+        row_limit = 100  # free/org-less users get the free tier cap
+
+    # Deduct credits before enqueuing. We charge for the tier cap (worst case)
+    # rounded up to the nearest 10k unit so the cost is deterministic.
+    if current_user.org_id and not current_user.is_superadmin:
+        cap = row_limit or 0
+        units = max(1, -(-cap // 10_000))  # ceiling division
+        if not credits_service.check_and_deduct(
+            db,
+            current_user.org_id,
+            "bulk_export_basic",
+            units,
+            reference_id=f"csv_export_user_{current_user.id}",
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_402_PAYMENT_REQUIRED,
+                detail=(
+                    f"Insufficient credits. A {cap:,}-row export costs "
+                    f"{credits_service.compute_cost('bulk_export_basic', units):,} credits."
+                ),
+            )
+
     crud.cancel_active_csv_exports(db, user_id=current_user.id)
 
     params = body.model_dump()
+    params["row_limit"] = row_limit  # worker reads this to cap the export
+
+    tier_label = ""
+    if row_limit is not None:
+        tier_label = f" (tier cap: {row_limit:,} rows)"
+
     job = _enqueue_or_http_error(
         request,
         job_type="csv_export",
-        label="CSV export",
+        label=f"CSV export{tier_label}",
         params=params,
         db=db,
         org_id=current_user.org_id,
@@ -859,6 +1130,10 @@ def get_csv_export_status(
     download_url = None
     expires_at = None
     row_count = None
+    capped = None
+    tier_limit = None
+    total_matching = None
+    upgrade_to = None
 
     if job.status == "completed" and job.stats_json:
         try:
@@ -866,6 +1141,10 @@ def get_csv_export_status(
             s3_key = s.get("s3_key")
             exp = s.get("expires_at")
             row_count = s.get("row_count")
+            capped = s.get("capped")
+            tier_limit = s.get("tier_limit")
+            total_matching = s.get("total_matching")
+            upgrade_to = s.get("upgrade_to")
             if s3_key and exp:
                 # Only generate URL if not expired
                 exp_dt = datetime.fromisoformat(exp)
@@ -882,4 +1161,8 @@ def get_csv_export_status(
         download_url=download_url,
         expires_at=expires_at,
         row_count=row_count,
+        capped=capped,
+        tier_limit=tier_limit,
+        total_matching=total_matching,
+        upgrade_to=upgrade_to,
     )

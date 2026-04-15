@@ -59,7 +59,7 @@ from app.config import settings
 from app.database import Base, engine, get_db
 from app.services.job_worker import kick_job_worker
 from app.services.scoring import get_default_scoring_config
-from app.api.routes import admin_router, auth_router, billing_router, companies_router, invites_router, jobs_router, map_router, notes_router, orgs_router, settings_router, views_router, workspace_router
+from app.api.routes import admin_router, auth_router, billing_router, clusters_router, companies_router, invites_router, jobs_router, map_router, notes_router, orgs_router, settings_router, views_router, workspace_router
 
 # Paths that do NOT require authentication
 _PUBLIC_PREFIXES = (
@@ -404,6 +404,7 @@ Instrumentator().instrument(app).expose(app, endpoint="/metrics", include_in_sch
 
 app.include_router(admin_router, prefix="/api/v1")
 app.include_router(auth_router, prefix="/api/v1")
+app.include_router(clusters_router, prefix="/api/v1")
 app.include_router(billing_router, prefix="/api/v1")
 app.include_router(companies_router, prefix="/api/v1")
 app.include_router(notes_router, prefix="/api/v1")
@@ -421,7 +422,7 @@ async def unhandled_exception_handler(request: Request, exc: Exception):
     tb = "".join(traceback.format_exception(type(exc), exc, exc.__traceback__))
     print(f"UNHANDLED EXCEPTION {request.method} {request.url.path}\n{tb}", file=sys.stderr, flush=True)
     from fastapi.responses import JSONResponse
-    return JSONResponse({"detail": "Internal server error", "traceback": tb}, status_code=500)
+    return JSONResponse({"detail": "Internal server error"}, status_code=500)
 
 
 # ── Startup gate middleware ───────────────────────────────────────────────────

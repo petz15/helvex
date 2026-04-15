@@ -121,7 +121,119 @@ def check_and_deduct(
         credits_after=after,
     )
     db.commit()
+
+    # Low-credit alert: fire when the balance crosses below 20% of the last
+    # top-up amount, or below a fixed floor of 5,000 credits, whichever is
+    # larger.  Best-effort — never raises.
+    _maybe_low_credit_alert(db, org_id=org_id, balance=after, before=before)
+
     return True
+
+
+# 1 credit = 0.0001 CHF → 5,000 credits = 0.50 CHF (absolute floor)
+_LOW_CREDIT_FLOOR = 5_000
+
+
+def _maybe_low_credit_alert(
+    db: "Session",
+    *,
+    org_id: int,
+    balance: int,
+    before: int,
+) -> None:
+    """Emit a low-credit event when the balance drops into the warning zone.
+
+    Only fires once per crossing (not on every subsequent deduction while
+    already low) by checking whether `before` was above the threshold.
+    Logged as a ``job_run_event`` on a synthetic sentinel job so it surfaces
+    in the admin event log without requiring a separate notifications table.
+    """
+    if balance >= before:
+        return  # balance went up or unchanged — no alert needed
+
+    try:
+        # Determine threshold: max(5000, 20% of last topup)
+        from app.models.org_credit_transaction import OrgCreditTransaction
+        from sqlalchemy import desc as _desc
+        last_topup = (
+            db.query(OrgCreditTransaction)
+            .filter(
+                OrgCreditTransaction.org_id == org_id,
+                OrgCreditTransaction.type == "topup",
+            )
+            .order_by(_desc(OrgCreditTransaction.created_at))
+            .first()
+        )
+        threshold = _LOW_CREDIT_FLOOR
+        if last_topup is not None:
+            threshold = max(_LOW_CREDIT_FLOOR, int(last_topup.amount * 0.20))
+
+        # Only alert on the crossing (before was above, after is below)
+        if before <= threshold or balance > threshold:
+            return
+
+        import logging as _logging
+        _log = _logging.getLogger(__name__)
+        _log.warning(
+            "low_credit_alert org_id=%d balance=%d threshold=%d",
+            org_id, balance, threshold,
+        )
+
+        # Store as an org-scoped app setting flag so the frontend can surface it.
+        # Key: "low_credit_alert_at" — value: ISO timestamp.  Cleared when org tops up.
+        from datetime import datetime, timezone
+        from app.crud.app_setting import set_org_setting
+        set_org_setting(db, org_id=org_id, key="low_credit_alert_at",
+                        value=datetime.now(tz=timezone.utc).isoformat())
+
+        _send_low_credit_email(db, org_id=org_id, balance=balance, threshold=threshold)
+
+    except Exception:  # noqa: BLE001
+        pass  # never break a deduction because of alert logic
+
+
+def _send_low_credit_email(
+    db: "Session",
+    *,
+    org_id: int,
+    balance: int,
+    threshold: int,
+) -> None:
+    """Send a low-credit alert email to the org admin if notifications are enabled."""
+    try:
+        from app.crud.app_setting import get_effective_setting
+        if get_effective_setting(db, "email_notifications", org_id=org_id, default="1") != "1":
+            return
+        from app.models.organization import Organization
+        from app.models.user import User
+        org = db.get(Organization, org_id)
+        if not org:
+            return
+        # Email the org admin (earliest-created active admin/owner member)
+        from app.models.org_member import OrgMember
+        admin_member = (
+            db.query(OrgMember)
+            .filter(
+                OrgMember.org_id == org_id,
+                OrgMember.role.in_(["admin", "owner"]),
+            )
+            .order_by(OrgMember.created_at)
+            .first()
+        )
+        if not admin_member:
+            return
+        user = db.get(User, admin_member.user_id)
+        if not user or not user.is_active:
+            return
+        from app.services.email import send_low_credit_alert
+        send_low_credit_alert(
+            to=user.email,
+            org_name=org.name,
+            balance=balance,
+            threshold=threshold,
+        )
+    except Exception:  # noqa: BLE001
+        pass
 
 
 def topup_credits(
@@ -191,6 +303,14 @@ def topup_credits(
         total_granted += bonus_amount
 
     db.commit()
+
+    # Clear the low-credit alert flag now that the org has topped up.
+    try:
+        from app.crud.app_setting import set_org_setting
+        set_org_setting(db, org_id=org_id, key="low_credit_alert_at", value="")
+    except Exception:  # noqa: BLE001
+        pass
+
     return total_granted
 
 

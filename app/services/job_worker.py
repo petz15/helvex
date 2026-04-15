@@ -77,11 +77,13 @@ _QUEUE_FOR_JOB_TYPE: dict[str, str] = {
     "tfidf_kmeans_cluster":      "helvex-ml",
     "hdbscan_cluster":           "helvex-ml",
     "birch_cluster":             "helvex-ml",
+    "semantic_kmeans_cluster":   "helvex-ml",
     "recompute_keywords":        "helvex-ml",
     "reextract_keywords":        "helvex-ml",
     "cluster_analysis":          "helvex-ml",
     "cluster_drift_check":       "helvex-ml",
     "billing_renewal":           "helvex-api",
+    "saved_view_alerts":         "helvex-api",
 }
 
 
@@ -99,9 +101,10 @@ def _compute_dedup_key(job_type: str, org_id: int | None, params: dict) -> str |
         "recalculate_scores", "recalculate_google_scores",
         "reextract_purpose", "reclassify_noga",
         "re_geocode",
-        "tfidf_kmeans_cluster", "hdbscan_cluster", "birch_cluster",
+        "tfidf_kmeans_cluster", "hdbscan_cluster", "birch_cluster", "semantic_kmeans_cluster",
         "recompute_keywords", "reextract_keywords",
         "cluster_analysis", "cluster_drift_check",
+        "saved_view_alerts",  # global singleton — org_id=None gives key "saved_view_alerts:None"
     }
     # No dedup: every trigger creates a fresh independent job.
     NO_DEDUP = {"batch", "csv_export"}
@@ -240,7 +243,7 @@ def _resolve_credit_action_and_count(db: Session, *, job_type: str, params: dict
     if job_type == "recalculate_scores":
         return "flex_rescore", max(1, int(crud.count_companies(db)))
 
-    if job_type in {"tfidf_kmeans_cluster", "hdbscan_cluster", "birch_cluster"}:
+    if job_type in {"tfidf_kmeans_cluster", "hdbscan_cluster", "birch_cluster", "semantic_kmeans_cluster"}:
         return "recluster", 1
 
     if job_type == "csv_export":
@@ -265,22 +268,25 @@ def _apply_credit_deduction_if_needed(
     params: dict,
     org_id: int | None,
     user_id: int | None,
-) -> None:
+) -> tuple[str, int] | None:
     """Deduct enqueue-time credits for credit-metered actions.
+
+    Returns (action, count) so the caller can store it for potential refund,
+    or None when no deduction was made.
 
     Superadmins and org-less jobs bypass checks.
     """
     if org_id is None:
-        return
+        return None
 
     if user_id is not None:
         user = crud.get_user(db, user_id)
         if user is not None and bool(user.is_superadmin):
-            return
+            return None
 
     action_count = _resolve_credit_action_and_count(db, job_type=job_type, params=params)
     if action_count is None:
-        return
+        return None
 
     from app.services.credits import check_and_deduct
 
@@ -294,6 +300,56 @@ def _apply_credit_deduction_if_needed(
     )
     if not ok:
         raise ValueError(f"Insufficient credits for {action} (required units: {count})")
+    return action, count
+
+
+def _refund_job_credits_if_needed(
+    db: Session,
+    *,
+    job: "JobRun",  # type: ignore[name-defined]
+    reason: str,
+) -> None:
+    """Issue a credit refund for a job that was charged at enqueue but never completed.
+
+    Reads the deduction amount from `job.stats_json` (key: `_credit_deduction`).
+    No-ops when: no deduction recorded, org-less job, or org has unlimited credits.
+    """
+    if not job.org_id or not job.stats_json:
+        return
+    try:
+        stored = json.loads(job.stats_json)
+        deduction = stored.get("_credit_deduction")
+        if not deduction:
+            return
+        action = deduction["action"]
+        cost = int(deduction["cost"])
+        if cost <= 0:
+            return
+    except (KeyError, ValueError, TypeError):
+        return
+
+    from app.services.credits import grant_credits
+    from app.models.organization import Organization
+
+    org = db.get(Organization, job.org_id)
+    if org is None or org.credits_unlimited:
+        return
+
+    try:
+        grant_credits(
+            db,
+            org_id=job.org_id,
+            amount=cost,
+            tx_type="refund",
+            action_type=action,
+            reference_id=f"refund:job:{job.id}",
+        )
+        logger.info(
+            "credit_refund job_id=%d org_id=%d action=%s cost=%d reason=%s",
+            job.id, job.org_id, action, cost, reason,
+        )
+    except Exception as _e:  # noqa: BLE001
+        logger.warning("credit_refund_failed job_id=%d error=%s", job.id, _e)
 
 
 # ── Internal state helpers ─────────────────────────────────────────────────────
@@ -339,6 +395,7 @@ def _run_job(app, job_id: int) -> None:  # noqa: C901
             return
 
         if job.status == "cancelled" or job.cancel_requested:
+            _refund_job_credits_if_needed(db, job=job, reason="cancelled_before_start")
             crud.mark_cancelled(db, job, message="Cancelled before start")
             crud.create_event(db, job_id=job.id, level="info", message="Job cancelled before execution started")
             return
@@ -795,6 +852,39 @@ def _run_job(app, job_id: int) -> None:  # noqa: C901
                 classified = stats.get("classified", 0)
                 done_msg = f"Done — {n_c} clusters, {classified} companies labelled"
 
+            elif job.job_type == "semantic_kmeans_cluster":
+                from app.services.cluster_pipeline import PipelineConfig, run_semantic_pipeline
+
+                def _progress(done: int, total: int, stats: dict) -> None:
+                    _assert_not_cancelled()
+                    step = stats.get("step", "clustering")
+                    msg = f"[{step}] {done}/{total} — {stats.get('classified', 0)} clustered, {stats.get('undefined', 0)} unmatched"
+                    crud.update_progress(db, job, message=msg, done=done, total=total, stats=stats)
+                    crud.create_event(db, job_id=job.id, level="debug", message=msg)
+                    _maybe_sync(app, job_type=job.job_type, label=job.label, message=msg, stats=dict(stats), error=None, done=False)
+                    _heartbeat()
+
+                cfg = PipelineConfig(
+                    n_clusters=int(params.get("n_clusters", 150)),
+                    max_clusters_per_company=int(params.get("max_clusters_per_company", 3)),
+                    min_similarity=float(params.get("min_similarity", 0.20)),
+                    n_components=int(params.get("n_components", 50)),
+                    top_terms_per_cluster=int(params.get("top_terms", 5)),
+                    top_keywords_per_company=int(params.get("top_keywords_per_company", 10)),
+                )
+                stats = run_semantic_pipeline(
+                    db, cfg,
+                    canton=params.get("canton") or None,
+                    min_zefix_score=int(params["min_zefix_score"]) if params.get("min_zefix_score") else None,
+                    max_zefix_score=int(params["max_zefix_score"]) if params.get("max_zefix_score") else None,
+                    limit=int(params["limit"]) if params.get("limit") else None,
+                    embedding_batch_size=int(params.get("embedding_batch_size", 512)),
+                    progress_cb=_progress,
+                )
+                n_c = stats.get("n_clusters", 0)
+                classified = stats.get("classified", 0)
+                done_msg = f"Done — {n_c} semantic clusters, {classified} companies labelled"
+
             elif job.job_type == "recompute_keywords":
                 from app.services.cluster_pipeline import PipelineConfig, recompute_keywords
 
@@ -909,7 +999,16 @@ def _run_job(app, job_id: int) -> None:  # noqa: C901
 
                 _org_id = job.org_id
                 _eff = lambda key, default="": crud.get_effective_setting(db, key, org_id=_org_id, default=default)
-                _api_key = _eff("anthropic_api_key") or app_settings.anthropic_api_key
+                # Only use an org-level API key when the org has the byo_llm_keys feature.
+                # All other orgs fall through to the global/env key so user keys are
+                # never used without explicit BYO entitlement.
+                _use_org_key = False
+                if _org_id is not None:
+                    from app.models.organization import Organization as _Org
+                    from app.services.tiers import has_feature as _has_feature
+                    _org_obj = db.get(_Org, _org_id)
+                    _use_org_key = _org_obj is not None and _has_feature(_org_obj, "byo_llm_keys")
+                _api_key = (_eff("anthropic_api_key") if _use_org_key else "") or app_settings.anthropic_api_key
                 _use_batch = bool(params.get("use_batch_api", False))
 
                 if _use_batch:
@@ -1038,6 +1137,22 @@ def _run_job(app, job_id: int) -> None:  # noqa: C901
                 if resume_from:
                     done_msg += f" (resumed from {resume_from})"
 
+                # Auto-enqueue cluster drift check after every SHAB import.
+                # New companies from SHAB may lack cluster assignments if the
+                # model artifacts are stale. The drift check flags this proactively.
+                try:
+                    drift_job = enqueue_job(
+                        app,
+                        job_type="cluster_drift_check",
+                        label=f"Cluster drift check (auto — post {job.job_type})",
+                        params={"days": 7, "warn_threshold": 0.30},
+                        db=db,
+                    )
+                    crud.create_event(db, job_id=job.id, level="info",
+                                      message=f"Auto-enqueued cluster drift check (job #{drift_job.id})")
+                except Exception as _drift_exc:  # noqa: BLE001
+                    logger.warning("Could not enqueue post-SHAB drift check: %s", _drift_exc)
+
             elif job.job_type == "csv_export":
                 from app.services.csv_export import run_csv_export
                 from app.services.s3_client import is_configured
@@ -1075,6 +1190,16 @@ def _run_job(app, job_id: int) -> None:  # noqa: C901
                     f"{stats['skipped']} skipped"
                 )
 
+            elif job.job_type == "saved_view_alerts":
+                from app.services.saved_view_alerts import run_saved_view_alerts
+                crud.update_progress(db, job, message="Checking saved view alerts…")
+                stats = run_saved_view_alerts(db)
+                done_msg = (
+                    f"Done — {stats['checked']} views checked, "
+                    f"{stats['alerted']} alerted, "
+                    f"{stats.get('errors', 0)} errors"
+                )
+
             else:
                 raise RuntimeError(f"Unsupported job type: {job.job_type}")
 
@@ -1086,6 +1211,7 @@ def _run_job(app, job_id: int) -> None:  # noqa: C901
                 crud.create_event(db, job_id=job.id, level="warn", message=str(_err))
             _maybe_sync(app, job_type=job.job_type, label=job.label, message=done_msg, stats=dict(stats), error=None, done=True)
             _publish_job_update(job.org_id)
+            _maybe_send_job_notification(db, job=job, event="completed", stats=stats)
 
         except _JobWaitingExternalSignal:
             # Job transitioned to waiting_external — already committed above; nothing else needed.
@@ -1104,6 +1230,7 @@ def _run_job(app, job_id: int) -> None:  # noqa: C901
 
         except JobCancelledError:
             msg = "Cancelled by user"
+            _refund_job_credits_if_needed(db, job=job, reason="cancelled")
             crud.mark_cancelled(db, job, message=msg)
             crud.create_event(db, job_id=job.id, level="warn", message=msg)
             _maybe_sync(app, job_type=job.job_type, label=job.label, message=msg, stats={}, error=None, done=True)
@@ -1117,14 +1244,65 @@ def _run_job(app, job_id: int) -> None:  # noqa: C901
             except Exception:  # noqa: BLE001
                 pass
             logger.error("Job %s (%s) failed:\n%s", job.id, job.job_type, err)
+            _refund_job_credits_if_needed(db, job=job, reason="failed")
             crud.mark_failed(db, job, error=err, message=summary)
             crud.create_event(db, job_id=job.id, level="error", message=summary)
             crud.create_event(db, job_id=job.id, level="debug", message=err)
             _maybe_sync(app, job_type=job.job_type, label=job.label, message="Failed", stats={}, error=summary, done=True)
             _publish_job_update(job.org_id)
+            _maybe_send_job_notification(db, job=job, event="failed", summary=summary)
 
         finally:
             _hb_stop.set()
+
+
+# ── Job notification emails ───────────────────────────────────────────────────
+
+def _maybe_send_job_notification(
+    db: Session,
+    *,
+    job: "Any",
+    event: str,
+    stats: dict | None = None,
+    summary: str | None = None,
+) -> None:
+    """Send a transactional email after job completion or failure.
+
+    Rules:
+    - Only fires when job.user_id is set (user-originated job).
+    - Respects the org-level ``email_notifications`` setting (default on).
+    - On completion: only emails for csv_export jobs (user explicitly queued it).
+    - On failure: emails for any user-originated job.
+    """
+    try:
+        if not job.user_id:
+            return
+        from app.crud.app_setting import get_effective_setting
+        if get_effective_setting(db, "email_notifications", org_id=job.org_id, default="1") != "1":
+            return
+        from app.models.user import User
+        user = db.get(User, job.user_id)
+        if not user or not user.is_active:
+            return
+        from app.services import email as _email
+        if event == "completed" and job.job_type == "csv_export":
+            _s = stats or {}
+            _email.send_export_ready(
+                to=user.email,
+                row_count=int(_s.get("row_count") or 0),
+                job_id=job.id,
+                download_url=_s.get("download_url") or "",
+            )
+        elif event == "failed":
+            _email.send_job_failed(
+                to=user.email,
+                job_type=job.job_type,
+                label=job.label or job.job_type,
+                job_id=job.id,
+                summary=summary or "Unknown error",
+            )
+    except Exception:  # noqa: BLE001
+        pass  # never let email errors break job status reporting
 
 
 # ── Worker loop ────────────────────────────────────────────────────────────────
@@ -1200,14 +1378,24 @@ def _enqueue_job_in_session(
             return existing
     # ── Normal enqueue path ──────────────────────────────────────────────────
     preflight_params, warnings = _preflight_job(db, job_type=job_type, params=params)
-    _apply_credit_deduction_if_needed(
+    deduction = _apply_credit_deduction_if_needed(
         db,
         job_type=job_type,
         params=preflight_params,
         org_id=org_id,
         user_id=user_id,
     )
-    job = crud.create_job(db, job_type=job_type, label=label, params=preflight_params, org_id=org_id, user_id=user_id, dedup_key=dedup_key)
+    # Embed the deduction record into initial stats so the runner can refund on failure.
+    initial_stats: dict = {}
+    if deduction is not None:
+        from app.services.credits import CREDIT_COSTS
+        action, count = deduction
+        initial_stats["_credit_deduction"] = {
+            "action": action,
+            "count": count,
+            "cost": CREDIT_COSTS.get(action, 0) * count,
+        }
+    job = crud.create_job(db, job_type=job_type, label=label, params=preflight_params, org_id=org_id, user_id=user_id, dedup_key=dedup_key, initial_stats=initial_stats if initial_stats else None)
     crud.create_event(db, job_id=job.id, level="info", message="Job queued")
     if warnings:
         for w in warnings:

@@ -7,7 +7,7 @@ import { FilterBar } from "@/components/dashboard/filter-bar";
 import { CompanyTable } from "@/components/dashboard/company-table";
 import { CompanyPreview } from "@/components/dashboard/company-preview";
 import { Pagination } from "@/components/dashboard/pagination";
-import { fetchCompanies, fetchStats, fetchCantons, fetchTaxonomy, fetchSavedViews, saveView, deleteView, enqueueCSVExport, fetchCurrentUser, fetchOrg } from "@/lib/api";
+import { fetchCompanies, fetchStats, fetchCantons, fetchTaxonomy, fetchSavedViews, saveView, deleteView, enqueueCSVExport, fetchCurrentUser, fetchOrg, toggleViewAlert } from "@/lib/api";
 import { getExportLimit } from "@/lib/entitlements";
 import type { Company, CompanyFilters, CompanyStats } from "@/lib/types";
 
@@ -96,6 +96,11 @@ export function DashboardClient({ initialCantons, initialStats, initialFilters }
     mutateSavedViews();
   }, [mutateSavedViews]);
 
+  const handleToggleAlert = useCallback(async (id: number, enabled: boolean) => {
+    await toggleViewAlert(id, enabled);
+    mutateSavedViews();
+  }, [mutateSavedViews]);
+
   const handleLoadView = useCallback((viewFilters: CompanyFilters) => {
     setFilters({ ...DEFAULT_FILTERS, ...viewFilters });
   }, [setFilters]);
@@ -145,6 +150,7 @@ export function DashboardClient({ initialCantons, initialStats, initialFilters }
         onSaveView={handleSaveView}
         onLoadView={handleLoadView}
         onDeleteView={handleDeleteView}
+        onToggleAlert={handleToggleAlert}
       />
 
       {/* Table + preview (horizontal split) */}

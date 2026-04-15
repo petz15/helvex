@@ -10,7 +10,7 @@ import { BaloghAdCard } from "@/components/balogh-ad-card";
 import { Pagination } from "@/components/dashboard/pagination";
 import {
   fetchCompanies, fetchStats, fetchCantons, fetchTaxonomy,
-  fetchSavedViews, saveView, deleteView, bulkUpdateCompanies, bulkTagCompanies,
+  fetchSavedViews, saveView, deleteView, toggleViewAlert, bulkUpdateCompanies, bulkTagCompanies,
   fetchCurrentUser, fetchOrgEffectiveSettings,
   fetchOrg, fetchNogaHierarchy,
 } from "@/lib/api";
@@ -899,6 +899,7 @@ function BrowseView({ initialFilters, initialCantons, initialStats, initialTaxon
         onSaveView={async (name) => { await saveView(name, filters); mutateSavedViews(); }}
         onLoadView={(f) => setFilters({ ...BROWSE_DEFAULTS, ...f })}
         onDeleteView={async (id) => { await deleteView(id); mutateSavedViews(); }}
+        onToggleAlert={async (id, enabled) => { await toggleViewAlert(id, enabled); mutateSavedViews(); }}
       />
 
       {/* Ad card */}

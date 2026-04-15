@@ -1698,6 +1698,204 @@ def run_batch_merge_hdbscan_pipeline(
     return stats
 
 
+# ── Semantic K-Means Pipeline ─────────────────────────────────────────────────
+
+def run_semantic_pipeline(
+    db,
+    cfg: PipelineConfig | None = None,
+    *,
+    canton: str | None = None,
+    min_zefix_score: int | None = None,
+    max_zefix_score: int | None = None,
+    limit: int | None = None,
+    embedding_batch_size: int = 512,
+    progress_cb: Callable[[int, int, dict], None] | None = None,
+) -> dict[str, Any]:
+    """Run semantic K-Means clustering using sentence-transformer embeddings.
+
+    Unlike TF-IDF+SVD which groups companies by shared vocabulary, this pipeline
+    encodes each company's purpose_keywords with paraphrase-multilingual-MiniLM-L12-v2
+    and clusters in semantic embedding space. Companies with the same business idea
+    expressed with different words end up in the same cluster.
+
+    Workflow:
+      1. Load companies — requires purpose_keywords (run recompute_keywords first)
+         Companies missing purpose_keywords fall back to raw purpose text.
+      2. Embed each company's keywords with sentence-transformers (batched, GPU if avail)
+      3. SVD dimensionality reduction on the embedding matrix (384 → n_components)
+      4. MiniBatchKMeans clustering in reduced space
+      5. Cluster labeling via c-TF-IDF on the original keyword text
+         (separate TF-IDF vectorization purely for label generation)
+      6. Multi-label soft assignment (same logic as K-Means pipeline)
+      7. purpose_keywords are kept unchanged (not overwritten)
+      8. Save tfidf_cluster to DB + registry sync + S3 artifact upload
+
+    This is the recommended clustering workflow when purpose_keywords are available.
+    It produces more coherent, semantically meaningful clusters than the TF-IDF baseline.
+    """
+    import numpy as np
+    from app.models.company import Company
+    from collections import Counter
+
+    if cfg is None:
+        cfg = PipelineConfig()
+
+    stats: dict[str, Any] = {
+        "classified": 0, "undefined": 0, "low_quality": 0, "skipped": 0,
+        "n_clusters": 0, "errors": [], "summary": [],
+    }
+    t_total = time.time()
+
+    # ── Step 1: Load companies ──
+    t0 = time.time()
+    q = (
+        db.query(Company.id, Company.uid, Company.purpose, Company.purpose_keywords)
+        .filter(Company.purpose.isnot(None))
+    )
+    if canton:
+        q = q.filter(Company.canton == canton.upper())
+    if min_zefix_score is not None:
+        q = q.filter(Company.zefix_score >= min_zefix_score)
+    if max_zefix_score is not None:
+        q = q.filter(Company.zefix_score <= max_zefix_score)
+    q = q.order_by(Company.id.asc())
+    if limit:
+        q = q.limit(limit)
+    companies = q.all()
+    n_total = len(companies)
+    logger.info(f"[1/7] Loaded {n_total} companies in {time.time()-t0:.1f}s")
+    if not companies:
+        return stats
+
+    # ── Step 2: Build input texts ──
+    # Use purpose_keywords when available (already lemmatized, boilerplate-free).
+    # Fall back to raw purpose text when missing.
+    n_kw = sum(1 for c in companies if c.purpose_keywords)
+    n_fallback = n_total - n_kw
+    logger.info(f"[2/7] {n_kw} companies from purpose_keywords, {n_fallback} falling back to purpose text")
+    input_texts = [
+        c.purpose_keywords.replace(",", " ") if c.purpose_keywords else (c.purpose or "")
+        for c in companies
+    ]
+
+    # ── Step 3: Embed with sentence-transformers ──
+    t2 = time.time()
+    try:
+        from sentence_transformers import SentenceTransformer
+    except ImportError as exc:
+        raise ImportError(
+            "sentence-transformers is required for semantic_kmeans_cluster. "
+            "It should already be installed — check requirements.backend.txt."
+        ) from exc
+
+    if progress_cb:
+        progress_cb(0, n_total, {**stats, "step": "embedding"})
+
+    logger.info(f"[3/7] Embedding {n_total} texts with paraphrase-multilingual-MiniLM-L12-v2 ...")
+    model = SentenceTransformer("paraphrase-multilingual-MiniLM-L12-v2")
+
+    embeddings_list: list = []
+    for batch_start in range(0, n_total, embedding_batch_size):
+        batch = input_texts[batch_start: batch_start + embedding_batch_size]
+        vecs = model.encode(batch, normalize_embeddings=True, convert_to_numpy=True, show_progress_bar=False)
+        embeddings_list.append(vecs)
+        if progress_cb and batch_start % (embedding_batch_size * 4) == 0:
+            progress_cb(batch_start, n_total, {**stats, "step": "embedding"})
+
+    X_embed = np.vstack(embeddings_list).astype("float32")  # (n_companies, 384)
+    logger.info(f"[3/7] Embeddings done in {time.time()-t2:.1f}s — shape: {X_embed.shape}")
+
+    # ── Step 4: Dimensionality reduction (SVD on embedding matrix) ──
+    t3 = time.time()
+    svd, X_reduced = reduce_dimensions(X_embed, cfg)  # → (n_companies, n_components)
+    logger.info(f"[4/7] SVD done in {time.time()-t3:.1f}s — shape: {X_reduced.shape}")
+
+    # ── Step 5: K-Means clustering ──
+    t4 = time.time()
+    if progress_cb:
+        progress_cb(0, n_total, {**stats, "step": "clustering"})
+    km = cluster_kmeans(X_reduced, cfg)
+    actual_k = km.n_clusters
+    stats["n_clusters"] = actual_k
+    logger.info(f"[5/7] K-Means done in {time.time()-t4:.1f}s — {actual_k} clusters")
+
+    # ── Step 6: Cluster labeling via c-TF-IDF on keyword text ──
+    # We re-vectorize the input texts purely for generating readable labels.
+    # The clustering itself used embedding space, not TF-IDF space.
+    t5 = time.time()
+    if progress_cb:
+        progress_cb(0, n_total, {**stats, "step": "labeling"})
+
+    # Boilerplate-strip + TF-IDF for label generation only
+    stripped_texts = strip_boilerplate(input_texts)
+    vectorizer, X_tfidf = vectorize(stripped_texts, cfg)
+    feature_names = vectorizer.get_feature_names_out()
+    labels_map = label_clusters(km.labels_, X_tfidf, feature_names, actual_k, cfg)
+    cluster_specificity = score_cluster_specificity(labels_map, vectorizer)
+    n_low = sum(1 for s in cluster_specificity.values() if s < cfg.min_cluster_specificity)
+    logger.info(f"[6/7] Labeling done in {time.time()-t5:.1f}s — {n_low}/{actual_k} low-quality clusters")
+
+    # Registry matching — stable canonical cluster names
+    from app.crud.cluster_registry import deactivate_missing_clusters, get_or_create_registry_entry
+    canonical_labels_map: dict[int, str] = {}
+    seen_canonical: set[str] = set()
+    for cid, label in labels_map.items():
+        entry = get_or_create_registry_entry(db, label)
+        canonical_labels_map[cid] = entry.canonical_name
+        seen_canonical.add(entry.canonical_name)
+    deactivate_missing_clusters(db, seen_canonical)
+    db.commit()
+    logger.info(f"[6b/7] Registry sync done — {len(seen_canonical)} active canonical clusters")
+
+    # Multi-label soft assignment (same logic as K-Means pipeline)
+    assignments = assign_multi_label(X_reduced, km, cfg)
+
+    # Keep existing purpose_keywords — semantic pipeline does not overwrite them
+    company_keywords = [c.purpose_keywords for c in companies]
+
+    # Summary
+    label_counter: Counter = Counter()
+    for cluster_ids in assignments:
+        for cid in cluster_ids:
+            label_counter[canonical_labels_map[cid]] += 1
+    stats["summary"] = [
+        {"label": label, "company_count": count}
+        for label, count in label_counter.most_common(50)
+    ]
+    stats["undefined"] = sum(1 for a in assignments if not a)
+
+    # ── Step 7: Save to DB ──
+    t6 = time.time()
+
+    def _save_cb(done: int, total: int, s: dict) -> None:
+        if progress_cb:
+            progress_cb(done, total, s)
+
+    save_stats = save_results(
+        db, companies, assignments, canonical_labels_map, company_keywords, cfg, _save_cb,
+        cluster_specificity=cluster_specificity,
+    )
+    stats.update(save_stats)
+    logger.info(f"[7/7] DB save done in {time.time()-t6:.1f}s")
+
+    # Persist centroids to S3 for incremental assignment compatibility
+    try:
+        _save_pipeline_artifacts(vectorizer, svd, km, canonical_labels_map)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("S3 artifact upload failed: %s", exc)
+
+    # Cross-cluster analysis
+    try:
+        analysis_path = analyze_cross_cluster_terms(db, cfg)
+        stats["analysis_file"] = str(analysis_path)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(f"Cross-cluster analysis failed: {exc}")
+        stats["analysis_file"] = None
+
+    logger.info(f"Total semantic pipeline time: {time.time()-t_total:.1f}s")
+    return stats
+
+
 # ── Phase 2c: S3 artifact persistence ─────────────────────────────────────────
 
 _S3_TFIDF_KEY = "models/tfidf_vectorizer.pkl"

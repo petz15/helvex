@@ -77,6 +77,7 @@ export interface BillingSummary {
   credits_balance: number;
   credits_balance_chf: number;
   has_saved_payment_method: boolean;
+  low_credit_alert_at: string | null;
 }
 
 export interface CreditTransaction {
@@ -469,6 +470,36 @@ export async function searchKeywords(q: string, limit = 20): Promise<{ keyword: 
 export async function searchClusters(q: string, limit = 20): Promise<{ cluster: string; count: number }[]> {
   const res = await fetch(`/api/v1/companies/clusters/search?q=${encodeURIComponent(q)}&limit=${limit}`, { credentials: "include" });
   if (!res.ok) return [];
+  return res.json();
+}
+
+export interface ClusterRegistryEntry {
+  id: number;
+  canonical_name: string;
+  top_terms: string; // JSON array string
+  active: boolean;
+  company_count: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export async function fetchClusterRegistry(): Promise<ClusterRegistryEntry[]> {
+  const res = await fetch("/api/v1/clusters/registry", { credentials: "include" });
+  if (!res.ok) throw new Error("Failed to fetch cluster registry");
+  return res.json();
+}
+
+export async function renameCluster(id: number, newName: string): Promise<ClusterRegistryEntry> {
+  const res = await fetch(`/api/v1/clusters/registry/${id}`, {
+    method: "PATCH",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ new_name: newName }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error((err as { detail?: string }).detail ?? "Rename failed");
+  }
   return res.json();
 }
 
@@ -1342,6 +1373,72 @@ export interface CSVExportStatus {
   download_url: string | null;
   expires_at: string | null;
   row_count: number | null;
+  capped: boolean | null;
+  tier_limit: number | null;
+  total_matching: number | null;
+  upgrade_to: string | null;
+}
+
+// ── Credit usage breakdown ────────────────────────────────────────────────────
+
+export interface CreditUsageByAction {
+  spent: number;
+  refunded: number;
+  net: number;
+  transactions: number;
+}
+
+export interface CreditUsage {
+  days: number;
+  total_spent: number;
+  total_refunded: number;
+  net_spent: number;
+  current_balance: number;
+  by_action: Record<string, CreditUsageByAction>;
+}
+
+export async function fetchCreditUsage(days = 30): Promise<CreditUsage> {
+  const res = await fetch(`/api/v1/billing/credits/usage?days=${days}`, { credentials: "include" });
+  if (!res.ok) throw new Error("Failed to fetch credit usage");
+  return res.json();
+}
+
+// ── AI Preview ───────────────────────────────────────────────────────────────
+
+export interface ClaudePreviewResult {
+  company_id: number;
+  name: string;
+  ai_score: number | null;
+  ai_category: string | null;
+  ai_freeform: string | null;
+}
+
+export interface ClaudePreviewOut {
+  results: ClaudePreviewResult[];
+  previews_used: number;
+  previews_remaining: number;
+}
+
+export interface ClaudePreviewParams {
+  canton?: string | null;
+  min_zefix_score?: number | null;
+  max_zefix_score?: number | null;
+  purpose_keywords?: string | null;
+  use_fixed_categories?: boolean;
+}
+
+export async function fetchClaudePreview(params: ClaudePreviewParams): Promise<ClaudePreviewOut> {
+  const res = await fetch("/api/v1/scoring/claude-preview", {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(params),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error((body as { detail?: string }).detail ?? "Preview failed");
+  }
+  return res.json();
 }
 
 export async function enqueueCSVExport(filters: import("./types").CompanyFilters): Promise<import("./types").Job> {
@@ -1385,4 +1482,103 @@ export async function saveView(name: string, filters: CompanyFilters): Promise<S
 
 export async function deleteView(id: number): Promise<void> {
   await fetch(`/api/v1/views/${id}`, { method: "DELETE" });
+}
+
+export async function toggleViewAlert(id: number, enabled: boolean): Promise<SavedView> {
+  const res = await fetch(`/api/v1/views/${id}/alert`, {
+    method: "PATCH",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ enabled }),
+  });
+  if (!res.ok) throw new Error("Failed to update alert");
+  return res.json();
+}
+
+// ── Notification preferences ─────────────────────────────────────────────────
+
+export async function fetchNotificationPreferences(orgId: number): Promise<{ email_notifications: boolean }> {
+  const res = await fetch(`/api/v1/orgs/${orgId}/notifications`, { credentials: "include" });
+  if (!res.ok) throw new Error("Failed to fetch notification preferences");
+  return res.json();
+}
+
+export async function updateNotificationPreferences(
+  orgId: number,
+  prefs: { email_notifications: boolean },
+): Promise<{ email_notifications: boolean }> {
+  const res = await fetch(`/api/v1/orgs/${orgId}/notifications`, {
+    method: "PATCH",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(prefs),
+  });
+  if (!res.ok) throw new Error("Failed to update notification preferences");
+  return res.json();
+}
+
+// ── Admin analytics ───────────────────────────────────────────────────────────
+
+export interface AdminAnalytics {
+  total_orgs: number;
+  new_orgs_30d: number;
+  orgs_by_tier: Record<string, number>;
+  mrr_estimate_chf: number;
+  top_credit_consumers: Array<{
+    org_id: number;
+    org_name: string;
+    net_spend_credits: number;
+    net_spend_chf: number;
+  }>;
+  job_volume_by_type: Record<string, number>;
+  total_companies_db: number;
+  active_orgs_30d: number;
+}
+
+export async function fetchAdminAnalytics(): Promise<AdminAnalytics> {
+  const res = await fetch("/api/v1/admin/analytics", { credentials: "include" });
+  if (!res.ok) throw new Error("Failed to fetch analytics");
+  return res.json();
+}
+
+// ── Admin activity logs ───────────────────────────────────────────────────────
+
+export interface ActivityLogEntry {
+  id: number;
+  action: string;
+  user_id: number | null;
+  user_email: string | null;
+  org_id: number | null;
+  resource_type: string | null;
+  resource_id: number | null;
+  meta: Record<string, unknown> | null;
+  ip: string | null;
+  created_at: string;
+}
+
+export interface ActivityLogSummary {
+  period_days: number;
+  total_events: number;
+  distinct_active_users: number;
+  by_action: Record<string, number>;
+}
+
+export async function fetchAdminActivityLogs(params?: {
+  user_id?: number;
+  org_id?: number;
+  action?: string;
+  resource_type?: string;
+  page?: number;
+  page_size?: number;
+}): Promise<AdminPage<ActivityLogEntry>> {
+  const url = buildUrl("/api/v1/admin/activity-logs", params as Record<string, string | number | undefined | null>);
+  const res = await fetch(url, { credentials: "include" });
+  if (!res.ok) throw new Error("Failed to fetch activity logs");
+  return res.json();
+}
+
+export async function fetchAdminActivitySummary(days = 30): Promise<ActivityLogSummary> {
+  const res = await fetch(`/api/v1/admin/activity-logs/summary?days=${days}`, { credentials: "include" });
+  if (!res.ok) throw new Error("Failed to fetch activity summary");
+  return res.json();
 }

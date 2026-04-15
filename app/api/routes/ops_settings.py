@@ -109,12 +109,21 @@ class TfidfStopwordCreate(BaseModel):
 
 # ── Settings ───────────────────────────────────────────────────────────────────
 
+_SENSITIVE_KEYS = frozenset({"anthropic_api_key"})
+
+
 @router.get("/settings")
-def get_settings(db: Session = Depends(get_db), _: User = Depends(get_current_user)):
+def get_settings(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     current = crud.get_all_settings(db)
     defaults = get_default_scoring_config()
-    # Merge defaults for any missing keys
-    return {**defaults, **current}
+    merged = {**defaults, **current}
+    # Never return sensitive credential values to non-superadmin callers.
+    # Replace them with a sentinel so the frontend can show "••• (set)" vs "(not set)".
+    if not current_user.is_superadmin:
+        for key in _SENSITIVE_KEYS:
+            if key in merged:
+                merged[key] = "***" if merged[key].strip() else ""
+    return merged
 
 
 @router.put("/settings")

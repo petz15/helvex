@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { ExternalLink, ChevronLeft, Globe, MapPin, Building2, Phone, Mail, FileText, Plus, Trash2, Loader2, Search } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
-import { fmtDate, fmtDateTime, fmtRelativeTime, cn } from "@/lib/utils";
+import { fmtDate, fmtDateTime, fmtRelativeTime, cn, formatClusterLabel } from "@/lib/utils";
 import { createNote, deleteNote, fetchCompany, runCompanyWebSearch, selectCompanyWebsite } from "@/lib/api";
 import type { Company, Note, GoogleScoredResult } from "@/lib/types";
 import "leaflet/dist/leaflet.css";
@@ -355,7 +355,7 @@ export function CompanyDetailClient({ company: initial, readOnlyDemo = false }: 
                   <div className="flex flex-wrap gap-1">
                     {company.tfidf_cluster.split("|").map(cluster => cluster.trim()).filter(Boolean).map(cluster => (
                       <Link key={cluster} href={`/app/search?tfidf_cluster=${encodeURIComponent(cluster)}`}>
-                        <Badge className="bg-purple-50 text-purple-700 text-xs cursor-pointer hover:bg-purple-100">{cluster}</Badge>
+                        <Badge className="bg-purple-50 text-purple-700 text-xs cursor-pointer hover:bg-purple-100">{formatClusterLabel(cluster)}</Badge>
                       </Link>
                     ))}
                   </div>

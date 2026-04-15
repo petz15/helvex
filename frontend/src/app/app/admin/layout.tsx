@@ -3,7 +3,7 @@ import { useEffect } from "react";
 import { useRouter, usePathname } from "next/navigation";
 import Link from "next/link";
 import useSWR from "swr";
-import { Shield, Users, Building2, CreditCard } from "lucide-react";
+import { Shield, Users, Building2, CreditCard, Tags, BarChart2, Activity } from "lucide-react";
 import { fetchCurrentUser } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
@@ -11,6 +11,9 @@ const ADMIN_NAV = [
   { href: "/app/admin/users", label: "Users", icon: Users },
   { href: "/app/admin/orgs", label: "Organizations", icon: Building2 },
   { href: "/app/admin/billing", label: "Billing", icon: CreditCard },
+  { href: "/app/admin/clusters", label: "Clusters", icon: Tags },
+  { href: "/app/admin/analytics", label: "Analytics", icon: BarChart2 },
+  { href: "/app/admin/activity", label: "Activity", icon: Activity },
 ];
 
 export default function AdminLayout({ children }: { children: React.ReactNode }) {

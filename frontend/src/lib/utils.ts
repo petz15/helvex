@@ -64,6 +64,36 @@ export function fmtDateTime(iso: string | null): string {
   });
 }
 
+/**
+ * Format a raw cluster label string for display.
+ *
+ * Raw storage format: "software,entwicklung,cloud,api" (comma-separated lemmas)
+ * Multi-cluster format: "software,entwicklung|cloud,api" (pipe-separated clusters)
+ *
+ * formatClusterLabel("software,entwicklung,cloud") → "Software · Entwicklung · Cloud"
+ * formatClusterTerm("software,entwicklung,cloud") → "Software · Entwicklung · Cloud"
+ *
+ * Use formatClusterLabel for a single pipe-segment (already split by caller).
+ * Use formatClusterFull for the entire tfidf_cluster field (splits on pipe first).
+ */
+export function formatClusterLabel(raw: string): string {
+  return raw
+    .split(",")
+    .map((t) => t.trim())
+    .filter(Boolean)
+    .map((t) => t.charAt(0).toUpperCase() + t.slice(1))
+    .join(" · ");
+}
+
+/** Format the full tfidf_cluster field (pipe-separated) into an array of display strings. */
+export function formatClusterFull(raw: string | null | undefined): string[] {
+  if (!raw) return [];
+  return raw
+    .split("|")
+    .map((seg) => formatClusterLabel(seg.trim()))
+    .filter(Boolean);
+}
+
 export function fmtRelativeTime(iso: string | null): string {
   if (!iso) return "—";
   const date = new Date(iso);

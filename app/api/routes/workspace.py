@@ -26,7 +26,7 @@ from app.database import get_db
 from app.models.org_member import OrgMember
 from app.models.organization import Organization
 from app.models.user import User
-from app.services.tiers import has_feature
+from app.services.tiers import has_feature, normalize_tier
 
 router = APIRouter(prefix="/orgs/{org_id}", tags=["workspace"])
 
@@ -581,7 +581,7 @@ def update_org_state(
     company_id: int,
     body: OrgStateUpdate,
     db: Session = Depends(get_db),
-    user_org: tuple[User, Organization] = Depends(require_org_role("member", "admin", "owner")),
+    user_org: tuple[User, Organization] = Depends(require_org_role("contributor", "admin", "owner")),
 ):
     _validate_org_access(org_id, user_org)
     _, org = user_org
@@ -658,6 +658,9 @@ def list_org_jobs(
 
 # ── Org settings ──────────────────────────────────────────────────────────────
 
+_SENSITIVE_ORG_KEYS = frozenset({"anthropic_api_key"})
+
+
 @router.get(
     "/settings",
     summary="Get org-specific settings overrides",
@@ -668,10 +671,16 @@ def get_org_settings(
     user_org: tuple[User, Organization] = Depends(get_current_org),
 ):
     _validate_org_access(org_id, user_org)
-    _, org = user_org
+    user, org = user_org
     from app.models.org_setting import OrgSetting
     rows = db.query(OrgSetting).filter(OrgSetting.org_id == org.id).all()
-    return {r.key: r.value for r in rows}
+    result = {}
+    for r in rows:
+        if r.key in _SENSITIVE_ORG_KEYS and not user.is_superadmin:
+            result[r.key] = "***" if (r.value or "").strip() else ""
+        else:
+            result[r.key] = r.value
+    return result
 
 
 @router.get(
@@ -717,13 +726,19 @@ def save_org_workspace_settings(
     Fields set to null or empty string are deleted (reset to global default).
     """
     _validate_org_access(org_id, user_org)
-    _, org = user_org
+    user, org = user_org
     from app.models.org_setting import OrgSetting
 
     updates = body.model_dump()
     for key, value in updates.items():
         if key not in _ORG_ALLOWED_SETTING_KEYS:
             continue
+        # Only orgs with the byo_llm_keys feature may store their own Anthropic key.
+        if key == "anthropic_api_key" and not user.is_superadmin and not has_feature(org, "byo_llm_keys"):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Bringing your own API key requires the Strategist tier or above (current: {normalize_tier(org.tier)})",
+            )
         row = db.query(OrgSetting).filter(OrgSetting.org_id == org.id, OrgSetting.key == key).first()
         if value is None or value == "":
             if row is not None:
@@ -749,9 +764,14 @@ def set_org_setting(
     user_org: tuple[User, Organization] = Depends(require_org_role("admin", "owner")),
 ):
     _validate_org_access(org_id, user_org)
-    _, org = user_org
+    user, org = user_org
     if key not in _ORG_ALLOWED_SETTING_KEYS:
         raise HTTPException(status_code=400, detail=f"Unknown setting key '{key}'")
+    if key == "anthropic_api_key" and not user.is_superadmin and not has_feature(org, "byo_llm_keys"):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"Bringing your own API key requires the Strategist tier or above (current: {normalize_tier(org.tier)})",
+        )
     from app.models.org_setting import OrgSetting
     row = db.query(OrgSetting).filter(OrgSetting.org_id == org.id, OrgSetting.key == key).first()
     if row is None:
@@ -784,3 +804,42 @@ def delete_org_setting(
         raise HTTPException(status_code=404, detail="Setting not found")
     db.delete(row)
     db.commit()
+
+
+# ── Email notification preferences ────────────────────────────────────────────
+
+class NotificationPreferences(BaseModel):
+    email_notifications: bool
+
+
+@router.get(
+    "/notifications",
+    summary="Get email notification preferences for this org",
+)
+def get_notification_preferences(
+    org_id: int,
+    db: Session = Depends(get_db),
+    user_org: tuple[User, Organization] = Depends(require_org_role("contributor", "admin", "owner")),
+):
+    _validate_org_access(org_id, user_org)
+    _, org = user_org
+    from app.crud.app_setting import get_effective_setting
+    val = get_effective_setting(db, "email_notifications", org_id=org.id, default="1")
+    return {"email_notifications": val != "0"}
+
+
+@router.patch(
+    "/notifications",
+    summary="Update email notification preferences for this org (admin+)",
+)
+def update_notification_preferences(
+    org_id: int,
+    body: NotificationPreferences,
+    db: Session = Depends(get_db),
+    user_org: tuple[User, Organization] = Depends(require_org_role("admin", "owner")),
+):
+    _validate_org_access(org_id, user_org)
+    _, org = user_org
+    from app.crud.app_setting import set_org_setting as _set_org_setting
+    _set_org_setting(db, org_id=org.id, key="email_notifications", value="1" if body.email_notifications else "0")
+    return {"email_notifications": body.email_notifications}

@@ -3,6 +3,7 @@ import { useState, useMemo } from "react";
 import Link from "next/link";
 import useSWR from "swr";
 import { ChevronRight, ChevronDown, Download, ThumbsDown, Search } from "lucide-react";
+import { formatClusterLabel } from "@/lib/utils";
 import {
   BarChart,
   Bar,
@@ -159,9 +160,12 @@ export function CategoriesClient() {
 
   const categories: [string, number][] = taxonomy?.categories ?? [];
   const keywords: [string, number][] = taxonomy?.keywords ?? [];
+  const clusters: [string, number][] = taxonomy?.clusters ?? [];
 
   const [categorySearch, setCategorySearch] = useState("");
   const [keywordSearch, setKeywordSearch] = useState("");
+  const [clusterSearch, setClusterSearch] = useState("");
+  const [showAllClusters, setShowAllClusters] = useState(false);
   const [nogaSearch, setNogaSearch] = useState("");
   const [showAllCategories, setShowAllCategories] = useState(false);
   const [markingIrrelevant, setMarkingIrrelevant] = useState<string | null>(null);
@@ -181,6 +185,12 @@ export function CategoriesClient() {
   const filteredKeywords = keywordSearch
     ? keywords.filter(([kw]) => kw.toLowerCase().includes(keywordSearch.toLowerCase()))
     : keywords;
+
+  const filteredClusters = clusterSearch
+    ? clusters.filter(([cl]) => cl.toLowerCase().includes(clusterSearch.toLowerCase()) || formatClusterLabel(cl).toLowerCase().includes(clusterSearch.toLowerCase()))
+    : clusters;
+  const displayedClusters = showAllClusters ? filteredClusters : filteredClusters.slice(0, 60);
+  const maxClusterCount = clusters[0]?.[1] ?? 1;
 
   function kwSize(count: number): string {
     const ratio = count / maxKeywordCount;
@@ -218,7 +228,7 @@ export function CategoriesClient() {
       {/* ── AI Categories ──────────────────────────────────────────────── */}
       <Section
         title="AI Categories"
-        subtitle={`${categories.length} distinct categories assigned by Claude`}
+        subtitle={`${categories.length} distinct categories — assigned by Claude Haiku (claude_classify job). Each company receives a short human-readable label and a confidence score. Categories and the classification prompt are customisable per org.`}
         searchValue={categorySearch}
         onSearchChange={setCategorySearch}
       >
@@ -285,7 +295,7 @@ export function CategoriesClient() {
       {/* ── Purpose Keywords ───────────────────────────────────────────── */}
       <Section
         title="Purpose Keywords"
-        subtitle={`Top ${keywords.length} TF-IDF keywords extracted from company purpose texts`}
+        subtitle={`Top ${keywords.length} TF-IDF keywords extracted from company purpose texts (recompute_keywords job). These are distilled, lemmatized terms that represent each company's core activity — used as input for semantic clustering and NOGA classification.`}
         searchValue={keywordSearch}
         onSearchChange={setKeywordSearch}
       >
@@ -315,10 +325,52 @@ export function CategoriesClient() {
         )}
       </Section>
 
+      {/* ── Clusters ───────────────────────────────────────────────────── */}
+      <Section
+        title="Clusters"
+        subtitle={`${clusters.length} active clusters — assigned by semantic_kmeans_cluster or tfidf_kmeans_cluster. Each cluster groups companies with related business activities. Click any cluster to filter the dashboard.`}
+        searchValue={clusterSearch}
+        onSearchChange={setClusterSearch}
+      >
+        {clusters.length === 0 ? (
+          <p className="text-sm text-slate-400">No clusters found. Run a clustering job first.</p>
+        ) : (
+          <div className="bg-white rounded-xl border border-slate-200 p-5 shadow-sm space-y-3">
+            <div className="flex flex-wrap gap-2">
+              {displayedClusters.map(([raw, count]) => {
+                const ratio = count / maxClusterCount;
+                const sizeCls = ratio >= 0.5 ? "text-sm font-semibold" : ratio >= 0.25 ? "text-sm font-medium" : "text-xs";
+                return (
+                  <div key={raw} className="inline-flex items-center gap-1">
+                    <Link
+                      href={`/app/search?tfidf_cluster=${encodeURIComponent(raw)}`}
+                      className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full border transition-colors bg-purple-50 text-purple-700 border-purple-100 hover:bg-purple-100 hover:border-purple-300 ${sizeCls}`}
+                    >
+                      {formatClusterLabel(raw)}
+                      <span className="text-purple-400 text-xs tabular-nums">{count}</span>
+                    </Link>
+                    <ExportButton filterKey="tfidf_cluster" filterValue={raw} label={formatClusterLabel(raw)} />
+                  </div>
+                );
+              })}
+            </div>
+            {filteredClusters.length > 60 && (
+              <button
+                type="button"
+                onClick={() => setShowAllClusters((v) => !v)}
+                className="text-xs text-blue-600 hover:underline"
+              >
+                {showAllClusters ? "Show less" : `Show all ${filteredClusters.length} clusters`}
+              </button>
+            )}
+          </div>
+        )}
+      </Section>
+
       {/* ── NOGA Hierarchy ─────────────────────────────────────────────── */}
       <Section
         title="NOGA Classification"
-        subtitle="Swiss industry classification — aggregated counts include all sub-levels. Click any code to filter."
+        subtitle="Official Swiss industry taxonomy (reclassify_noga job). Each company is assigned a NOGA code via hybrid token-matching + sentence-transformer embeddings. Counts include all sub-levels. Click any code to filter."
         searchValue={nogaSearch}
         onSearchChange={setNogaSearch}
       >

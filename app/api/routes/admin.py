@@ -55,6 +55,125 @@ class AdminRefundRequest(BaseModel):
     reason: str = Field(..., min_length=1, max_length=500)
 
 
+# ── Analytics ─────────────────────────────────────────────────────────────────
+
+@router.get("/analytics", summary="Platform analytics dashboard (superadmin)")
+def get_analytics(
+    db: Session = Depends(get_db),
+    _: User = Depends(_require_superadmin),
+) -> dict:
+    """Aggregate metrics for the superadmin analytics dashboard.
+
+    Returns org counts, MRR estimate, top credit consumers (30d),
+    job volume by type (30d), total companies in DB, and active org count.
+    All monetary values are in CHF.
+    """
+    from datetime import timedelta, timezone as _tz
+    from app.models.job_run import JobRun
+    from app.models.company import Company
+    from app.models.org_credit_transaction import OrgCreditTransaction as OrgCreditTx
+    from app.services.tiers import TIER_NAME_BY_ID
+
+    cutoff = datetime.now(tz=_tz.utc) - timedelta(days=30)
+
+    # Basic org counts
+    total_orgs: int = db.query(func.count(Organization.id)).scalar() or 0
+    new_orgs_30d: int = (
+        db.query(func.count(Organization.id))
+        .filter(Organization.created_at >= cutoff)
+        .scalar() or 0
+    )
+
+    # Orgs by tier name
+    tier_rows = db.query(Organization.tier_id, func.count(Organization.id)).group_by(Organization.tier_id).all()
+    orgs_by_tier = {TIER_NAME_BY_ID.get(tid, str(tid)): int(cnt) for tid, cnt in tier_rows}
+
+    # MRR estimate: sum(monthly_price_chf) for all active paid-tier orgs
+    try:
+        from app.models.billing_tier import BillingTier
+        mrr_rows = (
+            db.query(BillingTier.monthly_price_chf, func.count(Organization.id))
+            .join(Organization, Organization.tier_id == BillingTier.id)
+            .filter(BillingTier.monthly_price_chf > 0)
+            .group_by(BillingTier.monthly_price_chf)
+            .all()
+        )
+        mrr_estimate_chf = float(sum(float(p) * int(c) for p, c in mrr_rows))
+    except Exception:  # noqa: BLE001
+        mrr_estimate_chf = 0.0
+
+    # Top 10 credit consumers (net spend = deductions - refunds, last 30d)
+    top_rows = (
+        db.query(
+            OrgCreditTx.org_id,
+            func.sum(-OrgCreditTx.amount).label("net_spend"),
+        )
+        .filter(OrgCreditTx.created_at >= cutoff, OrgCreditTx.amount < 0)
+        .group_by(OrgCreditTx.org_id)
+        .order_by(func.sum(-OrgCreditTx.amount).desc())
+        .limit(10)
+        .all()
+    )
+    top_credit_consumers = []
+    for org_id, net_spend in top_rows:
+        org = db.get(Organization, org_id)
+        net = int(net_spend or 0)
+        top_credit_consumers.append({
+            "org_id": org_id,
+            "org_name": org.name if org else f"org:{org_id}",
+            "net_spend_credits": net,
+            "net_spend_chf": round(net * 0.0001, 4),
+        })
+
+    # Job volume by type (last 30d)
+    job_rows = (
+        db.query(JobRun.job_type, func.count(JobRun.id))
+        .filter(JobRun.queued_at >= cutoff)
+        .group_by(JobRun.job_type)
+        .all()
+    )
+    job_volume_by_type = {jt: int(cnt) for jt, cnt in job_rows}
+
+    # Total companies in DB
+    total_companies_db: int = db.query(func.count(Company.id)).scalar() or 0
+
+    # Active orgs: had at least one job in last 30d
+    active_orgs_30d: int = (
+        db.query(func.count(func.distinct(JobRun.org_id)))
+        .filter(JobRun.queued_at >= cutoff, JobRun.org_id.isnot(None))
+        .scalar() or 0
+    )
+
+    return {
+        "total_orgs": total_orgs,
+        "new_orgs_30d": new_orgs_30d,
+        "orgs_by_tier": orgs_by_tier,
+        "mrr_estimate_chf": mrr_estimate_chf,
+        "top_credit_consumers": top_credit_consumers,
+        "job_volume_by_type": job_volume_by_type,
+        "total_companies_db": total_companies_db,
+        "active_orgs_30d": active_orgs_30d,
+    }
+
+
+@router.post("/jobs/saved-view-alerts", summary="Manually trigger saved-view alert check (superadmin)")
+def trigger_saved_view_alerts(
+    db: Session = Depends(get_db),
+    actor: User = Depends(_require_superadmin),
+) -> dict:
+    """Enqueue a one-off saved_view_alerts job. The nightly cron calls this automatically."""
+    from app.services.job_worker import enqueue_job
+    job = enqueue_job(
+        db,
+        job_type="saved_view_alerts",
+        label="Saved view alerts",
+        params={},
+        org_id=None,
+        user_id=actor.id,
+    )
+    return {"job_id": job.id, "status": job.status}
+
+
 # ── Stats ──────────────────────────────────────────────────────────────────────
 
 @router.get("/stats", summary="Platform-wide stats (superadmin)")
@@ -484,6 +603,111 @@ def refund_payment_transaction(
     return {
         **_payment_tx_dict(tx),
         "refund_saferpay_response": {k: v for k, v in result.items() if k in {"Transaction", "ExecutionDateTime", "ResponseHeader"}},
+    }
+
+
+# ── Activity Log ───────────────────────────────────────────────────────────────
+
+@router.get("/activity-logs", summary="List user activity logs (superadmin)")
+def list_activity_logs(
+    user_id: int | None = Query(None),
+    org_id: int | None = Query(None),
+    action: str | None = Query(None, description="Exact action slug, e.g. company_viewed"),
+    resource_type: str | None = Query(None),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(50, ge=1, le=200),
+    db: Session = Depends(get_db),
+    _: User = Depends(_require_superadmin),
+) -> dict:
+    """Paginated activity log with optional filters.
+
+    Filters:
+    - user_id: show activity for a specific user
+    - org_id: show activity for a specific org
+    - action: exact action slug (e.g. company_viewed, user_login)
+    - resource_type: e.g. company, view, note
+
+    Results are sorted newest-first.
+    """
+    from app.models.activity_log import ActivityLog
+
+    query = db.query(ActivityLog)
+    if user_id is not None:
+        query = query.filter(ActivityLog.user_id == user_id)
+    if org_id is not None:
+        query = query.filter(ActivityLog.org_id == org_id)
+    if action:
+        query = query.filter(ActivityLog.action == action)
+    if resource_type:
+        query = query.filter(ActivityLog.resource_type == resource_type)
+
+    total = query.count()
+    rows = (
+        query.order_by(ActivityLog.created_at.desc())
+        .offset((page - 1) * page_size)
+        .limit(page_size)
+        .all()
+    )
+
+    def _row(r: ActivityLog) -> dict:
+        return {
+            "id": r.id,
+            "action": r.action,
+            "user_id": r.user_id,
+            "user_email": r.user.email if r.user else None,
+            "org_id": r.org_id,
+            "resource_type": r.resource_type,
+            "resource_id": r.resource_id,
+            "meta": r.meta,
+            "ip": r.ip,
+            "created_at": r.created_at.isoformat(),
+        }
+
+    return {
+        "items": [_row(r) for r in rows],
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+    }
+
+
+@router.get("/activity-logs/summary", summary="Activity summary counts by action (superadmin)")
+def activity_log_summary(
+    days: int = Query(30, ge=1, le=365),
+    db: Session = Depends(get_db),
+    _: User = Depends(_require_superadmin),
+) -> dict:
+    """Returns per-action counts and daily active users for the last N days."""
+    from datetime import timedelta
+    from app.models.activity_log import ActivityLog
+
+    cutoff = datetime.now(tz=timezone.utc) - timedelta(days=days)
+
+    action_rows = (
+        db.query(ActivityLog.action, func.count(ActivityLog.id).label("cnt"))
+        .filter(ActivityLog.created_at >= cutoff)
+        .group_by(ActivityLog.action)
+        .order_by(func.count(ActivityLog.id).desc())
+        .all()
+    )
+
+    dau: int = (
+        db.query(func.count(func.distinct(ActivityLog.user_id)))
+        .filter(ActivityLog.created_at >= cutoff, ActivityLog.user_id.isnot(None))
+        .scalar() or 0
+    )
+
+    total_events: int = (
+        db.query(func.count(ActivityLog.id))
+        .filter(ActivityLog.created_at >= cutoff)
+        .scalar() or 0
+    )
+
+    return {
+        "period_days": days,
+        "total_events": total_events,
+        "distinct_active_users": dau,
+        "by_action": {row.action: int(row.cnt) for row in action_rows},
     }
 
 

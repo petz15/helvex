@@ -40,9 +40,22 @@ def _guess_sub_rubric(publication_number: str, mutation_keys: list[str]) -> str:
         return SUBR_DELETION
 
     joined = " ".join(mutation_keys).upper()
-    if any(k in joined for k in ("NEW", "NEU", "ENTRY", "EINTRAG")):
+
+    # Handle case where mutation key directly encodes the HR rubric code.
+    if "HR01" in joined:
         return SUBR_NEW
-    if any(k in joined for k in ("DELETE", "DELETION", "CANCEL", "LOESCH", "LÖSCH")):
+    if "HR03" in joined:
+        return SUBR_DELETION
+    if "HR02" in joined:
+        return SUBR_MUTATION
+
+    # Keyword fallback for common German/English mutation type labels.
+    if any(k in joined for k in ("NEW", "NEU", "ENTRY", "EINTRAG", "FOUNDING", "NEUEINTRAGUNG")):
+        return SUBR_NEW
+    if any(k in joined for k in (
+        "DELETE", "DELETION", "CANCEL", "LOESCH", "LÖSCH",
+        "DISSOLUTION", "LIQUIDATION", "DISSOLUTION",
+    )):
         return SUBR_DELETION
     if mutation_keys:
         return SUBR_MUTATION
@@ -60,7 +73,18 @@ def _to_shab_like_item(item: dict[str, Any]) -> dict[str, Any]:
     mutation_keys = [str(m.get("key") or "") for m in mutation_types if isinstance(m, dict)]
 
     publication_number = str(publication.get("publicationNumber") or "")
-    sub_rubric = _guess_sub_rubric(publication_number, mutation_keys)
+
+    # Use companyShort.status to detect deletions reliably.
+    # The Zefix API does not expose publicationNumber and mutation type key
+    # values are undocumented, so keyword guessing alone is not trustworthy.
+    company_status = str(company.get("status") or "").upper()
+    if company_status == "CANCELLED":
+        sub_rubric = SUBR_DELETION
+    else:
+        sub_rubric = _guess_sub_rubric(publication_number, mutation_keys)
+        if not sub_rubric:
+            # Default to mutation for active/unknown-status companies.
+            sub_rubric = SUBR_MUTATION
 
     uid = company.get("uid")
     name = str(company.get("name") or "")

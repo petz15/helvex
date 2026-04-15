@@ -96,10 +96,15 @@ def run_csv_export(
     org_id: int | None,
     progress_cb: Callable[[int, int, dict], None] | None = None,
 ) -> dict:
-    """Execute the export: write CSV to temp file, upload to S3, return stats dict."""
+    """Execute the export: write CSV to temp file, upload to S3, return stats dict.
+
+    Honours the ``row_limit`` param injected at enqueue time from the org's tier limit.
+    None means unlimited (superadmin only).
+    """
     # Build filter kwargs from job params
+    row_limit: int | None = params.get("row_limit")  # None = unlimited (superadmin)
     filter_kwargs: dict[str, Any] = {k: v for k, v in params.items()
-                                     if k not in ("user_id", "org_id")}
+                                     if k not in ("user_id", "org_id", "row_limit")}
 
     # First pass: count total rows for progress reporting
     from sqlalchemy import func as sqlfunc
@@ -128,7 +133,9 @@ def run_csv_export(
         exclude_noga_label=filter_kwargs.get("exclude_noga_label"),
         exclude_noga_level=filter_kwargs.get("exclude_noga_level"),
     )
-    total: int = count_q.scalar() or 0
+    total_matching: int = count_q.scalar() or 0
+    # Cap the total reported to the tier limit so the progress bar is accurate.
+    total = min(total_matching, row_limit) if row_limit is not None else total_matching
 
     with tempfile.NamedTemporaryFile(mode="w", suffix=".csv", delete=False, encoding="utf-8", newline="") as fh:
         tmp_path = fh.name
@@ -138,6 +145,9 @@ def run_csv_export(
         written = 0
         page = 1
         while True:
+            # Always use _BATCH as page_size so (page-1)*page_size gives the correct
+            # DB offset. Stopping at row_limit is done by breaking after writing,
+            # not by shrinking the query page — otherwise the offset calculation breaks.
             companies = list_companies(
                 db,
                 page=page,
@@ -175,12 +185,17 @@ def run_csv_export(
                 companies = [_overlay_org(c, org_states.get(c.id)) for c in companies]
 
             for c in companies:
+                if row_limit is not None and written >= row_limit:
+                    break
                 writer.writerow(_row(c))
                 written += 1
 
             if progress_cb:
                 progress_cb(written, total, {"written": written})
 
+            # Stop if we hit the tier cap or ran out of rows.
+            if row_limit is not None and written >= row_limit:
+                break
             if len(companies) < _BATCH:
                 break
             page += 1
@@ -194,7 +209,23 @@ def run_csv_export(
             pass
         upload_file(tmp_path, s3_key)
         expires_at = (datetime.now(tz=timezone.utc) + timedelta(days=7)).isoformat()
-        return {"s3_key": s3_key, "expires_at": expires_at, "row_count": written}
+        capped = row_limit is not None and total_matching > row_limit
+        _upgrade_to: str | None = None
+        if capped and row_limit is not None:
+            from app.services.tiers import EXPORT_LIMITS as _EL
+            for _t in ("simple", "explorer", "researcher", "strategist"):
+                if _EL.get(_t, 0) > row_limit:
+                    _upgrade_to = _t
+                    break
+        return {
+            "s3_key": s3_key,
+            "expires_at": expires_at,
+            "row_count": written,
+            "capped": capped,
+            "tier_limit": row_limit,
+            "total_matching": total_matching,
+            "upgrade_to": _upgrade_to,
+        }
     finally:
         try:
             os.unlink(tmp_path)

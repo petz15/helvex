@@ -1970,6 +1970,7 @@ def claude_classify_batch(
     submit_only: bool = False,
     companies_per_message: int = 1,
     progress_cb: Any = None,
+    dry_run: bool = False,
 ) -> dict[str, Any]:
     """Classify companies using Claude Haiku and store a lead-quality score + category.
 
@@ -1996,6 +1997,8 @@ def claude_classify_batch(
         return {"classified": 0, "skipped": 0, "errors": ["Anthropic API key not configured. Set ANTHROPIC_API_KEY in .env"], "input_tokens": 0, "output_tokens": 0}
 
     stats: dict[str, Any] = {"classified": 0, "skipped": 0, "errors": [], "input_tokens": 0, "output_tokens": 0}
+    if dry_run:
+        stats["preview_results"] = []
     client = _anthropic.Anthropic(api_key=api_key)
     base_prompt = (system_prompt or "").strip() or _DEFAULT_CLAUDE_PROMPT
     if target_description and target_description.strip():
@@ -2221,11 +2224,28 @@ def claude_classify_batch(
             response_text = msg.content[0].text.strip()
             stats["input_tokens"] += msg.usage.input_tokens
             stats["output_tokens"] += msg.usage.output_tokens
-            if len(chunk) == 1:
-                _apply_single(chunk[0], response_text)
+            if dry_run:
+                # Parse response but do NOT mutate company fields or commit to DB
+                parsed = json.loads(_strip_fences(response_text))
+                if len(chunk) == 1:
+                    items = [parsed] if isinstance(parsed, dict) else parsed[:1]
+                else:
+                    items = parsed if isinstance(parsed, list) else []
+                for company, item in zip(chunk, items):
+                    stats["preview_results"].append({
+                        "company_id": company.id,
+                        "name": company.name,
+                        "ai_score": max(0, min(100, int(item.get("score", 0)))) if item.get("score") is not None else None,
+                        "ai_category": str(item.get("category", ""))[:128] if item.get("category") else None,
+                        "ai_freeform": str(item["freeform"]) if item.get("freeform") else None,
+                    })
+                stats["classified"] += len(chunk)
             else:
-                _apply_chunk(chunk, response_text)
-            stats["classified"] += len(chunk)
+                if len(chunk) == 1:
+                    _apply_single(chunk[0], response_text)
+                else:
+                    _apply_chunk(chunk, response_text)
+                stats["classified"] += len(chunk)
 
         except json.JSONDecodeError as exc:
             stats["errors"].append(f"{_chunk_ids(chunk)}: JSON parse error — raw: {response_text!r} — {exc}")
@@ -2234,14 +2254,15 @@ def claude_classify_batch(
             stats["errors"].append(f"{_chunk_ids(chunk)}: {type(exc).__name__}: {exc}")
             stats["skipped"] += len(chunk)
 
-        if done % 50 < companies_per_message or done >= total:
+        if not dry_run and (done % 50 < companies_per_message or done >= total):
             db.commit()
             if progress_cb:
                 progress_cb(min(done, total), total, stats)
 
         time.sleep(0.15)
 
-    db.commit()
+    if not dry_run:
+        db.commit()
     if progress_cb:
         progress_cb(total, total, stats)
 

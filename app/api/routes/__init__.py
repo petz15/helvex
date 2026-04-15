@@ -1,6 +1,7 @@
 from app.api.routes.admin import router as admin_router
 from app.api.routes.auth import router as auth_router
 from app.api.routes.billing import router as billing_router
+from app.api.routes.clusters import router as clusters_router
 from app.api.routes.companies import router as companies_router
 from app.api.routes.invites import router as invites_router
 from app.api.routes.jobs import router as jobs_router
@@ -15,6 +16,7 @@ __all__ = [
     "admin_router",
     "auth_router",
     "billing_router",
+    "clusters_router",
     "companies_router",
     "invites_router",
     "jobs_router",

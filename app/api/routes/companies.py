@@ -10,10 +10,11 @@ from sqlalchemy.orm import Session
 
 from app import crud
 from app.api import google_search_client, zefix_client
-from app.auth import get_current_user
+from app.auth import check_public_rate_limit, get_client_ip, get_current_user
 from app.database import get_db
 from app.models.company import Company
 from app.models.org_company_state import OrgCompanyState
+from app.models.organization import Organization
 from app.models.user import User
 from app.schemas.note import NoteRead
 from app.schemas.company import (
@@ -24,8 +25,11 @@ from app.schemas.company import (
     GoogleSearchResult,
     ZefixSearchResult,
 )
+from app.services import credits as credits_service
+from app.services.activity import log_activity
 from app.services.collection import enrich_company_website
 from app.services.scoring import is_social_lead_domain
+from app.services.tiers import get_export_limit
 
 router = APIRouter(prefix="/companies", tags=["companies"])
 
@@ -76,6 +80,7 @@ def zefix_search(
     name: str = Query(..., description="Company name to search for"),
     max_results: int = Query(20, ge=1, le=100, description="Maximum number of results"),
     active_only: bool = Query(False, description="Return only active companies"),
+    _: User = Depends(get_current_user),
 ):
     """Query the Zefix REST API for Swiss companies matching *name*."""
     try:
@@ -85,7 +90,7 @@ def zefix_search(
 
 
 @router.get("/zefix/{uid}", response_model=dict, summary="Get full Zefix company details")
-def zefix_get_company(uid: str):
+def zefix_get_company(uid: str, _: User = Depends(get_current_user)):
     """Fetch the full company record from the Zefix API by UID."""
     try:
         return zefix_client.get_company(uid)
@@ -104,7 +109,7 @@ def zefix_get_company(uid: str):
     status_code=status.HTTP_201_CREATED,
     summary="Import a company from Zefix into the database",
 )
-def import_from_zefix(uid: str, db: Session = Depends(get_db)):
+def import_from_zefix(uid: str, db: Session = Depends(get_db), _: User = Depends(get_current_user)):
     """Fetch a company from the Zefix API and store it in the local database.
 
     If the company (identified by UID) already exists, it is updated.
@@ -183,14 +188,26 @@ def import_from_zefix(uid: str, db: Session = Depends(get_db)):
 )
 def google_search_for_company(
     company_id: int,
+    request: Request,
     num: int = Query(10, ge=1, le=10, description="Number of results"),
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """Run Google enrichment for an existing company only (no Zefix refresh).
 
     Persists scored results to ``google_search_results_raw`` and updates the selected
     ``website_url`` / ``web_score`` when candidates are found.
+
+    Rate-limited to 30 Google searches per user per 10 minutes to protect the
+    daily Google CSE quota.
     """
+    if not current_user.is_superadmin:
+        key = f"user_{current_user.id}"
+        if not check_public_rate_limit(key, "google_search", window=600, max_requests=30):
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail="Too many Google search requests. Maximum 30 per 10 minutes.",
+            )
     db_company = crud.get_company(db, company_id)
     if not db_company:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Company not found")
@@ -286,6 +303,13 @@ def select_company_website(
         old_values=old_values,
         new_values=new_values,
     )
+    log_activity(
+        db, action="company_website_set",
+        user_id=current_user.id, org_id=current_user.org_id,
+        resource_type="company", resource_id=company_id,
+        meta={"url": wanted},
+    )
+    db.commit()
     return updated
 
 
@@ -295,12 +319,12 @@ def select_company_website(
 
 
 @router.get("/stats", response_model=dict, summary="Company stats (totals, review/proposal counts)")
-def get_stats(db: Session = Depends(get_db)):
+def get_stats(db: Session = Depends(get_db), _: User = Depends(get_current_user)):
     return crud.get_company_stats(db)
 
 
 @router.get("/cantons", response_model=list[str], summary="List distinct cantons")
-def list_cantons(db: Session = Depends(get_db)):
+def list_cantons(db: Session = Depends(get_db), _: User = Depends(get_current_user)):
     rows = db.query(Company.canton).filter(Company.canton.isnot(None)).distinct().order_by(Company.canton).all()
     return [r.canton for r in rows]
 
@@ -498,15 +522,54 @@ def export_companies_csv(
     current_user: User = Depends(get_current_user),
 ):
     """Enqueue a CSV export job with the given filters.
-    
-    Returns job details. The file will be available via /jobs/csv-export/status 
+
+    Returns job details. The file will be available via /jobs/csv-export/status
     once the job completes. File is stored in S3 for 7 days.
+
+    Credits are deducted upfront based on the tier row cap (worst-case rows),
+    rounded up to the nearest 10k unit (bulk_export_basic action).
     """
     from app.api.routes.jobs import _enqueue_or_http_error
     from app.services.s3_client import is_configured
-    
+
     if not is_configured():
         raise HTTPException(status_code=503, detail="S3 export storage is not configured on this server")
+
+    # Rate limit: max 5 export enqueues per user per 10 minutes.
+    if not current_user.is_superadmin:
+        key = f"user_{current_user.id}"
+        if not check_public_rate_limit(key, "job_rl:csv_export", window=600, max_requests=5):
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail="Too many export requests. Maximum 5 per 10 minutes.",
+            )
+
+    # Determine tier row cap so we can charge credits before enqueuing.
+    if current_user.is_superadmin:
+        row_limit = None
+    elif current_user.org_id:
+        org = db.get(Organization, current_user.org_id)
+        row_limit = get_export_limit(org) if org else 100
+    else:
+        row_limit = 100
+
+    if current_user.org_id and not current_user.is_superadmin:
+        cap = row_limit or 0
+        units = max(1, -(-cap // 10_000))
+        if not credits_service.check_and_deduct(
+            db,
+            current_user.org_id,
+            "bulk_export_basic",
+            units,
+            reference_id=f"csv_export_user_{current_user.id}",
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_402_PAYMENT_REQUIRED,
+                detail=(
+                    f"Insufficient credits. A {cap:,}-row export costs "
+                    f"{credits_service.compute_cost('bulk_export_basic', units):,} credits."
+                ),
+            )
 
     crud.cancel_active_csv_exports(db, user_id=current_user.id)
 
@@ -546,6 +609,12 @@ def export_companies_csv(
         org_id=current_user.org_id,
         user_id=current_user.id,
     )
+    log_activity(
+        db, action="company_exported",
+        user_id=current_user.id, org_id=current_user.org_id,
+        meta={"job_id": job.id, "filters": {k: v for k, v in params.items() if v is not None}},
+    )
+    db.commit()
     return JobOut.from_orm_obj(job)
 
 
@@ -565,6 +634,12 @@ def bulk_update_companies(
         updated = crud.bulk_update_status(db, body.company_ids, body.field, body.value)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    log_activity(
+        db, action="company_bulk_updated",
+        user_id=current_user.id, org_id=current_user.org_id,
+        meta={"field": body.field, "value": body.value, "count": updated},
+    )
+    db.commit()
     return {"updated": updated}
 
 
@@ -583,6 +658,12 @@ def bulk_tag_companies(
     if body.action not in ("add", "remove"):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="action must be 'add' or 'remove'")
     updated = crud.bulk_update_tags(db, body.company_ids, body.tag, body.action)
+    log_activity(
+        db, action="company_bulk_tagged",
+        user_id=current_user.id, org_id=current_user.org_id,
+        meta={"tag": body.tag, "action": body.action, "count": updated},
+    )
+    db.commit()
     return {"updated": updated}
 
 
@@ -609,6 +690,13 @@ def get_company(
     else:
         scoped_notes = [n for n in db_company.notes if n.user_id == current_user.id]
     org_state = crud.get_org_company_state(db, org_id=current_user.org_id, company_id=company_id) if current_user.org_id else None
+    log_activity(
+        db, action="company_viewed",
+        user_id=current_user.id, org_id=current_user.org_id,
+        resource_type="company", resource_id=company_id,
+        meta={"name": db_company.name},
+    )
+    db.commit()
     result = _overlay(db_company, org_state)
     return result.model_copy(update={"notes": [NoteRead.model_validate(n) for n in scoped_notes]})
 
@@ -648,6 +736,13 @@ def update_company(
         db, company_id=company_id, user_id=current_user.id,
         old_values=old_values, new_values=payload,
     )
+    log_activity(
+        db, action="company_updated",
+        user_id=current_user.id, org_id=current_user.org_id,
+        resource_type="company", resource_id=company_id,
+        meta={"fields": list(payload.keys())},
+    )
+    db.commit()
     org_state_final = crud.get_org_company_state(db, org_id=current_user.org_id, company_id=company_id) if current_user.org_id else None
     return _overlay(db_company, org_state_final)
 
@@ -661,4 +756,10 @@ def delete_company(
     db_company = crud.get_company(db, company_id)
     if not db_company:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Company not found")
+    log_activity(
+        db, action="company_deleted",
+        user_id=current_user.id, org_id=current_user.org_id,
+        resource_type="company", resource_id=company_id,
+        meta={"name": db_company.name},
+    )
     crud.delete_company(db, db_company)

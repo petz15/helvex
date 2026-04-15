@@ -159,3 +159,115 @@ def send_email_change_verification(*, to: str, token: str) -> None:
     """
     text = f"Confirm your new email address: {link}\n\nLink expires in 1 hour.\n"
     send_email(to=to, subject=subject, html=html, text=text)
+
+
+# ── Transactional notification templates ─────────────────────────────────────
+
+
+def send_low_credit_alert(
+    *,
+    to: str,
+    org_name: str,
+    balance: int,
+    threshold: int,
+) -> None:
+    """Alert an org admin that the credit balance has dropped below the threshold."""
+    topup_url = f"{settings.app_base_url}/app/billing"
+    balance_chf = f"{balance * 0.0001:.2f}"
+    subject = f"[Helvex] Low credit balance for {org_name}"
+    html = f"""
+    <p>Your organisation <strong>{org_name}</strong> has a low credit balance.</p>
+    <p>Current balance: <strong>{balance:,} credits (CHF {balance_chf})</strong></p>
+    <p>AI scoring and other credit-based features will stop working when the balance reaches zero.</p>
+    <p><a href="{topup_url}">Top up credits →</a></p>
+    <p style="color:#888;font-size:12px;">
+      You can disable these alerts under Billing → Notification Settings.
+    </p>
+    """
+    text = (
+        f"Low credit balance for {org_name}.\n\n"
+        f"Current balance: {balance:,} credits (CHF {balance_chf})\n\n"
+        f"Top up at: {topup_url}\n"
+    )
+    send_email(to=to, subject=subject, html=html, text=text)
+
+
+def send_export_ready(
+    *,
+    to: str,
+    row_count: int,
+    job_id: int,
+    download_url: str,
+) -> None:
+    """Notify the user that their CSV export is ready to download."""
+    jobs_url = f"{settings.app_base_url}/app/jobs"
+    subject = "[Helvex] Your CSV export is ready"
+    html = f"""
+    <p>Your CSV export (<strong>{row_count:,} rows</strong>) has finished and is ready to download.</p>
+    <p>The file is available for 7 days.</p>
+    {"<p><a href='" + download_url + "'>Download CSV →</a></p>" if download_url else ""}
+    <p>Or open the <a href="{jobs_url}">Jobs page</a> to download from there.</p>
+    """
+    text = (
+        f"Your CSV export ({row_count:,} rows) is ready.\n\n"
+        + (f"Download: {download_url}\n\n" if download_url else "")
+        + f"Jobs page: {jobs_url}\n"
+    )
+    send_email(to=to, subject=subject, html=html, text=text)
+
+
+def send_job_failed(
+    *,
+    to: str,
+    job_type: str,
+    label: str,
+    job_id: int,
+    summary: str,
+) -> None:
+    """Notify the user that a job they started has failed."""
+    jobs_url = f"{settings.app_base_url}/app/jobs"
+    subject = f"[Helvex] Job failed: {label}"
+    html = f"""
+    <p>A background job you started has failed.</p>
+    <table style="font-size:14px;border-collapse:collapse;">
+      <tr><td style="padding:3px 12px 3px 0;color:#888;">Job</td><td><strong>{label}</strong></td></tr>
+      <tr><td style="padding:3px 12px 3px 0;color:#888;">Type</td><td>{job_type}</td></tr>
+      <tr><td style="padding:3px 12px 3px 0;color:#888;">Error</td><td style="color:#c00;">{summary}</td></tr>
+    </table>
+    <p><a href="{jobs_url}">View in Jobs →</a></p>
+    """
+    text = (
+        f"Job failed: {label}\n"
+        f"Type: {job_type}\n"
+        f"Error: {summary}\n\n"
+        f"Details: {jobs_url}\n"
+    )
+    send_email(to=to, subject=subject, html=html, text=text)
+
+
+def send_saved_view_alert(
+    *,
+    to: str,
+    view_name: str,
+    new_count: int,
+    previous_count: int,
+    view_url: str,
+) -> None:
+    """Alert a user that new companies match their saved search."""
+    subject = f"[Helvex] {new_count} new {'company' if new_count == 1 else 'companies'} match "{view_name}""
+    html = f"""
+    <p><strong>{new_count} new {'company' if new_count == 1 else 'companies'}</strong>
+    {'matches' if new_count == 1 else 'match'} your saved search
+    <strong>"{view_name}"</strong>.</p>
+    <p>Total matching: {previous_count + new_count:,} (was {previous_count:,})</p>
+    <p><a href="{view_url}">View results →</a></p>
+    <p style="color:#888;font-size:12px;">
+      Disable this alert by clicking the bell icon next to "{view_name}" in the filter bar.
+    </p>
+    """
+    text = (
+        f"{new_count} new {'company' if new_count == 1 else 'companies'} match your saved search \"{view_name}\".\n\n"
+        f"Total: {previous_count + new_count:,} (was {previous_count:,})\n\n"
+        f"View results: {view_url}\n"
+    )
+    send_email(to=to, subject=subject, html=html, text=text)

@@ -39,6 +39,27 @@ export default function AgbPage() {
           Alle Preise verstehen sich exklusive gesetzlicher MWST, sofern nicht anders angegeben.
         </p>
 
+        <h2 className="font-semibold text-slate-900">5a. Lieferkonditionen</h2>
+        <p>
+          Helvex erbringt digitale Dienstleistungen (Software-as-a-Service). Der Zugang zur gebuchten
+          Leistung wird unmittelbar nach erfolgreicher Zahlung freigeschaltet – es erfolgt eine einzige
+          Leistungsbereitstellung, keine Teillieferungen. Credits werden dem Konto sofort in voller Höhe
+          gutgeschrieben. Bei technisch bedingten Verzögerungen informiert Helvex den Kunden unverzüglich
+          per E-Mail.
+        </p>
+
+        <h2 className="font-semibold text-slate-900">5b. Rücktrittsrecht</h2>
+        <p>
+          Der Karteninhaber kann ohne Angabe von Gründen innerhalb von <strong>zehn (10) Kalendertagen</strong>{" "}
+          ab Kaufdatum vom Vertrag zurücktreten. Der Rücktritt ist per E-Mail an{" "}
+          <a href="mailto:kontakt@balogh-consulting.ch" className="underline text-blue-600">
+            kontakt@balogh-consulting.ch
+          </a>{" "}
+          unter Angabe der Bestellnummer zu erklären. Bei Abonnements, die während der Rücktrittsfrist
+          bereits vollumfänglich genutzt wurden, kann das Rücktrittsrecht gemäss Art. 40a OR eingeschränkt
+          sein. Credits, die nach dem Rücktritt bereits verbraucht wurden, werden nicht rückvergütet.
+        </p>
+
         <h2 className="font-semibold text-slate-900">6. Pflichten des Kunden</h2>
         <p>
           Der Kunde nutzt die Plattform rechtmässig, unterlässt missbräuchliche Nutzung und ist für eigene Inhalte

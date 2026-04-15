@@ -80,6 +80,7 @@ export function PaymentGatewayClient() {
 
   const [useNewCard, setUseNewCard] = useState(false);
   const [saveCard, setSaveCard] = useState(true);
+  const [termsAccepted, setTermsAccepted] = useState(false);
 
   const willUseSavedCard = hasSavedCard && !useNewCard;
 
@@ -432,6 +433,23 @@ export function PaymentGatewayClient() {
         Payments are processed securely by Worldline Saferpay. Your card details never touch our servers.
       </div>
 
+      {/* AGB acceptance */}
+      <label className="flex items-start gap-3 cursor-pointer select-none">
+        <input
+          type="checkbox"
+          checked={termsAccepted}
+          onChange={e => setTermsAccepted(e.target.checked)}
+          className="mt-0.5 h-4 w-4 shrink-0 rounded border-slate-300 text-blue-600 accent-blue-600"
+        />
+        <span className="text-sm text-slate-700">
+          Ich habe die{" "}
+          <Link href="/agb" target="_blank" className="text-blue-600 underline hover:text-blue-800">
+            Allgemeinen Geschäftsbedingungen (AGB)
+          </Link>{" "}
+          der Balogh Consulting gelesen und akzeptiere diese.
+        </span>
+      </label>
+
       {/* Same-tier block */}
       {isSameTier && (
         <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
@@ -452,7 +470,7 @@ export function PaymentGatewayClient() {
           <div className="flex gap-2">
             <button
               onClick={() => void handleConfirmDowngrade()}
-              disabled={downgradeLoading}
+              disabled={downgradeLoading || !termsAccepted}
               className="rounded-lg bg-amber-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-amber-700 disabled:opacity-60"
             >
               {downgradeLoading ? "Processing…" : `Yes, switch to ${tier.charAt(0).toUpperCase() + tier.slice(1)}`}
@@ -484,7 +502,7 @@ export function PaymentGatewayClient() {
           <div className="flex gap-2">
             <button
               onClick={() => void handleConfirmUpgrade()}
-              disabled={loading}
+              disabled={loading || !termsAccepted}
               className="flex items-center gap-1.5 rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-blue-700 disabled:opacity-60"
             >
               {loading ? <Loader2 size={11} className="animate-spin" /> : <ArrowRight size={11} />}
@@ -511,7 +529,7 @@ export function PaymentGatewayClient() {
           </Link>
           <button
             onClick={() => void handleProceed()}
-            disabled={loading || prorationLoading || !billingAddress}
+            disabled={loading || prorationLoading || !billingAddress || !termsAccepted}
             className="flex items-center gap-2 rounded-xl bg-blue-600 px-6 py-3 text-sm font-semibold text-white shadow hover:bg-blue-700 disabled:opacity-60 transition-colors"
           >
             {(loading || prorationLoading) ? <Loader2 size={15} className="animate-spin" /> : <ArrowRight size={15} />}

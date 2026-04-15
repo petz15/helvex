@@ -3,9 +3,10 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import useSWR, { useSWRConfig } from "swr";
 import { cn } from "@/lib/utils";
-import { Search, Compass, Map, Cog, Database, Activity, UserCircle, Shield, LayoutGrid, CreditCard, BookOpen } from "lucide-react";
+import { Search, Compass, Map, Cog, Database, Activity, UserCircle, Shield, LayoutGrid, CreditCard, BookOpen, Menu, X } from "lucide-react";
 import { fetchCurrentUser, fetchMyOrgs, switchOrg } from "@/lib/api";
 import { HelvexMark } from "@/components/helvex-logo";
+import { useState } from "react";
 
 const NAV_MAIN = [
   { href: "/app/search", label: "Search", icon: Search },
@@ -32,6 +33,7 @@ export function NavBar() {
   const pathname = usePathname();
   const router = useRouter();
   const { mutate } = useSWRConfig();
+  const [mobileOpen, setMobileOpen] = useState(false);
   const { data: me, isLoading } = useSWR("me", fetchCurrentUser, {
     shouldRetryOnError: false,
     revalidateOnMount: true,
@@ -55,175 +57,331 @@ export function NavBar() {
     router.refresh();
   }
 
-  return (
-    <header className="h-12 bg-white border-b border-slate-200 flex items-center px-4 shrink-0 z-40 shadow-sm">
-      {/* Logo */}
-      <Link
-        href={loggedIn ? "/app/search" : "/"}
-        className="flex items-center gap-2 font-bold text-blue-600 mr-6 tracking-tight shrink-0"
-      >
-        <HelvexMark size={18} />
-        Helvex
-      </Link>
+  const closeMobile = () => setMobileOpen(false);
 
-      {/* Logged-in: app nav */}
-      {loggedIn && (
-        <nav className="flex items-center gap-0.5">
-          {NAV_MAIN.map(({ href, label, icon: Icon }) => {
-            const active = pathname === href || pathname.startsWith(href + "/");
-            return (
+  return (
+    <>
+      <header className="h-12 bg-white border-b border-slate-200 flex items-center px-4 shrink-0 z-40 shadow-sm">
+        {/* Logo */}
+        <Link
+          href={loggedIn ? "/app/search" : "/"}
+          className="flex items-center gap-2 font-bold text-blue-600 mr-6 tracking-tight shrink-0"
+          onClick={closeMobile}
+        >
+          <HelvexMark size={18} />
+          Helvex
+        </Link>
+
+        {/* Logged-in: app nav — desktop only */}
+        {loggedIn && (
+          <nav className="hidden md:flex items-center gap-0.5">
+            {NAV_MAIN.map(({ href, label, icon: Icon }) => {
+              const active = pathname === href || pathname.startsWith(href + "/");
+              return (
+                <Link
+                  key={href}
+                  href={href}
+                  className={cn(
+                    "flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm transition-colors",
+                    active
+                      ? "bg-blue-600 text-white font-medium"
+                      : "text-slate-600 hover:bg-slate-100 hover:text-slate-900"
+                  )}
+                >
+                  <Icon size={14} />
+                  {label}
+                </Link>
+              );
+            })}
+            <Link
+              href="/app/pricing"
+              className={cn(
+                "flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm transition-colors",
+                pathname === "/app/pricing"
+                  ? "bg-blue-600 text-white font-medium"
+                  : "text-slate-600 hover:bg-slate-100 hover:text-slate-900"
+              )}
+            >
+              Pricing
+            </Link>
+            {me?.is_superadmin && (
+              <>
+                <div className="w-px h-4 bg-slate-200 mx-1" />
+                {NAV_ADMIN.map(({ href, label, icon: Icon }) => {
+                  const active = pathname === href || pathname.startsWith(href + "/");
+                  return (
+                    <Link
+                      key={href}
+                      href={href}
+                      className={cn(
+                        "flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm transition-colors",
+                        active
+                          ? "bg-blue-600 text-white font-medium"
+                          : "text-slate-600 hover:bg-slate-100 hover:text-slate-900"
+                      )}
+                    >
+                      <Icon size={14} />
+                      {label}
+                    </Link>
+                  );
+                })}
+              </>
+            )}
+          </nav>
+        )}
+
+        {/* Logged-out: marketing nav — desktop only */}
+        {loggedOut && (
+          <nav className="hidden md:flex items-center gap-1">
+            {MARKETING_NAV.map(({ href, label }) => (
               <Link
                 key={href}
                 href={href}
+                className="px-3 py-1.5 rounded-lg text-sm text-slate-600 hover:bg-slate-100 hover:text-slate-900 transition-colors"
+              >
+                {label}
+              </Link>
+            ))}
+          </nav>
+        )}
+
+        <div className="ml-auto flex items-center gap-1">
+          {/* Logged-in: admin + user — desktop only */}
+          {loggedIn && (
+            <div className="hidden md:flex items-center gap-1">
+              {me?.is_superadmin && (
+                <Link
+                  href="/app/admin"
+                  className={cn(
+                    "flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-sm transition-colors",
+                    pathname.startsWith("/app/admin")
+                      ? "bg-purple-600 text-white font-medium"
+                      : "text-purple-600 hover:bg-purple-50"
+                  )}
+                >
+                  <Shield size={14} />
+                  Admin
+                </Link>
+              )}
+              {me?.email && (
+                <span className="text-xs text-slate-400 px-2 truncate max-w-[180px]" title={me.email}>
+                  {me.email}
+                </span>
+              )}
+              {orgs.length > 1 && me?.org_id && (
+                <select
+                  className="text-xs border border-slate-200 rounded-md px-2 py-1 bg-white text-slate-600 max-w-[170px]"
+                  value={String(me.org_id)}
+                  onChange={(e) => handleOrgSwitch(Number(e.target.value))}
+                  title="Switch organization"
+                >
+                  {orgs.map((org) => (
+                    <option key={org.id} value={org.id}>
+                      {org.name}
+                    </option>
+                  ))}
+                </select>
+              )}
+              <Link
+                href="/app/billing"
                 className={cn(
-                  "flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm transition-colors",
-                  active
+                  "flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-sm transition-colors",
+                  pathname.startsWith("/app/billing")
                     ? "bg-blue-600 text-white font-medium"
                     : "text-slate-600 hover:bg-slate-100 hover:text-slate-900"
                 )}
               >
-                <Icon size={14} />
-                {label}
+                <CreditCard size={14} />
+                Billing
               </Link>
-            );
-          })}
-          <Link
-            href="/app/pricing"
-            className={cn(
-              "flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm transition-colors",
-              pathname === "/app/pricing"
-                ? "bg-blue-600 text-white font-medium"
-                : "text-slate-600 hover:bg-slate-100 hover:text-slate-900"
-            )}
-          >
-            Pricing
-          </Link>
-          {me?.is_superadmin && (
-            <>
-              <div className="w-px h-4 bg-slate-200 mx-1" />
-              {NAV_ADMIN.map(({ href, label, icon: Icon }) => {
+              <Link
+                href="/app/account"
+                className={cn(
+                  "flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-sm transition-colors",
+                  pathname.startsWith("/app/account")
+                    ? "bg-blue-600 text-white font-medium"
+                    : "text-slate-600 hover:bg-slate-100 hover:text-slate-900"
+                )}
+              >
+                <UserCircle size={14} />
+                Account
+              </Link>
+              <a href="/logout" className="text-sm text-slate-500 hover:text-slate-700 px-2.5 py-1.5 rounded-lg hover:bg-slate-100 transition-colors">
+                Sign out
+              </a>
+            </div>
+          )}
+
+          {/* Logged-out: sign in + sign up — desktop only */}
+          {loggedOut && (
+            <div className="hidden md:flex items-center gap-1">
+              <Link
+                href="/login"
+                className="px-3 py-1.5 rounded-lg text-sm text-slate-600 hover:bg-slate-100 hover:text-slate-900 transition-colors"
+              >
+                Sign in
+              </Link>
+              <Link
+                href="/register"
+                className="px-3 py-1.5 rounded-lg text-sm font-medium bg-blue-600 text-white hover:bg-blue-700 transition-colors"
+              >
+                Sign up free
+              </Link>
+            </div>
+          )}
+
+          {/* Hamburger — mobile only */}
+          {!isLoading && (
+            <button
+              className="md:hidden p-2 -mr-1 text-slate-600 hover:text-slate-900 rounded-lg hover:bg-slate-100 transition-colors"
+              onClick={() => setMobileOpen((v) => !v)}
+              aria-label="Toggle menu"
+            >
+              {mobileOpen ? <X size={20} /> : <Menu size={20} />}
+            </button>
+          )}
+        </div>
+      </header>
+
+      {/* Mobile menu overlay */}
+      {mobileOpen && (
+        <div className="md:hidden fixed inset-0 top-12 z-30 bg-white overflow-y-auto border-t border-slate-200 shadow-lg">
+          {loggedIn && (
+            <div className="py-1">
+              {NAV_MAIN.map(({ href, label, icon: Icon }) => {
                 const active = pathname === href || pathname.startsWith(href + "/");
                 return (
                   <Link
                     key={href}
                     href={href}
+                    onClick={closeMobile}
                     className={cn(
-                      "flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm transition-colors",
-                      active
-                        ? "bg-blue-600 text-white font-medium"
-                        : "text-slate-600 hover:bg-slate-100 hover:text-slate-900"
+                      "flex items-center gap-3 px-5 py-3.5 text-sm border-b border-slate-50 transition-colors",
+                      active ? "bg-blue-50 text-blue-700 font-medium" : "text-slate-700 hover:bg-slate-50"
                     )}
                   >
-                    <Icon size={14} />
+                    <Icon size={18} />
                     {label}
                   </Link>
                 );
               })}
-            </>
-          )}
-        </nav>
-      )}
-
-      {/* Logged-out: marketing nav */}
-      {loggedOut && (
-        <nav className="flex items-center gap-1">
-          {MARKETING_NAV.map(({ href, label }) => (
-            <Link
-              key={href}
-              href={href}
-              className="px-3 py-1.5 rounded-lg text-sm text-slate-600 hover:bg-slate-100 hover:text-slate-900 transition-colors"
-            >
-              {label}
-            </Link>
-          ))}
-        </nav>
-      )}
-
-      <div className="ml-auto flex items-center gap-1">
-        {/* Logged-in: admin + user */}
-        {loggedIn && (
-          <>
-            {me?.is_superadmin && (
               <Link
-                href="/app/admin"
+                href="/app/pricing"
+                onClick={closeMobile}
                 className={cn(
-                  "flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-sm transition-colors",
-                  pathname.startsWith("/app/admin")
-                    ? "bg-purple-600 text-white font-medium"
-                    : "text-purple-600 hover:bg-purple-50"
+                  "flex items-center gap-3 px-5 py-3.5 text-sm border-b border-slate-50 transition-colors",
+                  pathname === "/app/pricing" ? "bg-blue-50 text-blue-700 font-medium" : "text-slate-700 hover:bg-slate-50"
                 )}
               >
-                <Shield size={14} />
-                Admin
+                Pricing
               </Link>
-            )}
-            {me?.email && (
-              <span className="text-xs text-slate-400 px-2 hidden sm:block truncate max-w-[180px]" title={me.email}>
-                {me.email}
-              </span>
-            )}
-            {orgs.length > 1 && me?.org_id && (
-              <select
-                className="text-xs border border-slate-200 rounded-md px-2 py-1 bg-white text-slate-600 max-w-[170px]"
-                value={String(me.org_id)}
-                onChange={(e) => handleOrgSwitch(Number(e.target.value))}
-                title="Switch organization"
-              >
-                {orgs.map((org) => (
-                  <option key={org.id} value={org.id}>
-                    {org.name}
-                  </option>
-                ))}
-              </select>
-            )}
-            <Link
-              href="/app/billing"
-              className={cn(
-                "flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-sm transition-colors",
-                pathname.startsWith("/app/billing")
-                  ? "bg-blue-600 text-white font-medium"
-                  : "text-slate-600 hover:bg-slate-100 hover:text-slate-900"
-              )}
-            >
-              <CreditCard size={14} />
-              Billing
-            </Link>
-            <Link
-              href="/app/account"
-              className={cn(
-                "flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-sm transition-colors",
-                pathname.startsWith("/app/account")
-                  ? "bg-blue-600 text-white font-medium"
-                  : "text-slate-600 hover:bg-slate-100 hover:text-slate-900"
-              )}
-            >
-              <UserCircle size={14} />
-              Account
-            </Link>
-            <a href="/logout" className="text-sm text-slate-500 hover:text-slate-700 px-2.5 py-1.5 rounded-lg hover:bg-slate-100 transition-colors">
-              Sign out
-            </a>
-          </>
-        )}
 
-        {/* Logged-out: sign in + sign up */}
-        {loggedOut && (
-          <>
-            <Link
-              href="/login"
-              className="px-3 py-1.5 rounded-lg text-sm text-slate-600 hover:bg-slate-100 hover:text-slate-900 transition-colors"
-            >
-              Sign in
-            </Link>
-            <Link
-              href="/register"
-              className="px-3 py-1.5 rounded-lg text-sm font-medium bg-blue-600 text-white hover:bg-blue-700 transition-colors"
-            >
-              Sign up free
-            </Link>
-          </>
-        )}
-      </div>
-    </header>
+              {me?.is_superadmin && (
+                <>
+                  <div className="px-5 py-2 text-xs font-semibold text-slate-400 uppercase tracking-widest bg-slate-50 border-b border-slate-100">
+                    Admin
+                  </div>
+                  {NAV_ADMIN.map(({ href, label, icon: Icon }) => (
+                    <Link
+                      key={href}
+                      href={href}
+                      onClick={closeMobile}
+                      className={cn(
+                        "flex items-center gap-3 px-5 py-3.5 text-sm border-b border-slate-50 transition-colors",
+                        pathname.startsWith(href) ? "bg-blue-50 text-blue-700 font-medium" : "text-slate-700 hover:bg-slate-50"
+                      )}
+                    >
+                      <Icon size={18} />
+                      {label}
+                    </Link>
+                  ))}
+                  <Link
+                    href="/app/admin"
+                    onClick={closeMobile}
+                    className={cn(
+                      "flex items-center gap-3 px-5 py-3.5 text-sm border-b border-slate-50 transition-colors",
+                      pathname.startsWith("/app/admin") ? "bg-purple-50 text-purple-700 font-medium" : "text-purple-600 hover:bg-purple-50"
+                    )}
+                  >
+                    <Shield size={18} />
+                    Admin panel
+                  </Link>
+                </>
+              )}
+
+              <div className="mt-2 border-t border-slate-200" />
+
+              {orgs.length > 1 && me?.org_id && (
+                <div className="px-5 py-3 border-b border-slate-50">
+                  <select
+                    className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 bg-white text-slate-600"
+                    value={String(me.org_id)}
+                    onChange={(e) => { handleOrgSwitch(Number(e.target.value)); closeMobile(); }}
+                  >
+                    {orgs.map((org) => <option key={org.id} value={org.id}>{org.name}</option>)}
+                  </select>
+                </div>
+              )}
+              {me?.email && (
+                <div className="px-5 py-3 text-sm text-slate-500 border-b border-slate-50">{me.email}</div>
+              )}
+              <Link
+                href="/app/billing"
+                onClick={closeMobile}
+                className="flex items-center gap-3 px-5 py-3.5 text-sm text-slate-700 hover:bg-slate-50 border-b border-slate-50 transition-colors"
+              >
+                <CreditCard size={18} />
+                Billing
+              </Link>
+              <Link
+                href="/app/account"
+                onClick={closeMobile}
+                className="flex items-center gap-3 px-5 py-3.5 text-sm text-slate-700 hover:bg-slate-50 border-b border-slate-50 transition-colors"
+              >
+                <UserCircle size={18} />
+                Account
+              </Link>
+              <a
+                href="/logout"
+                className="flex items-center gap-3 px-5 py-3.5 text-sm text-slate-500 hover:bg-slate-50 transition-colors"
+              >
+                Sign out
+              </a>
+            </div>
+          )}
+
+          {loggedOut && (
+            <div className="py-1">
+              {MARKETING_NAV.map(({ href, label }) => (
+                <Link
+                  key={href}
+                  href={href}
+                  onClick={closeMobile}
+                  className="flex items-center px-5 py-3.5 text-sm text-slate-700 hover:bg-slate-50 border-b border-slate-50 transition-colors"
+                >
+                  {label}
+                </Link>
+              ))}
+              <div className="px-5 py-4 flex flex-col gap-2">
+                <Link
+                  href="/login"
+                  onClick={closeMobile}
+                  className="w-full text-center py-2.5 rounded-lg border border-slate-200 text-sm text-slate-700 hover:bg-slate-50 transition-colors"
+                >
+                  Sign in
+                </Link>
+                <Link
+                  href="/register"
+                  onClick={closeMobile}
+                  className="w-full text-center py-2.5 rounded-lg bg-blue-600 text-white text-sm font-medium hover:bg-blue-700 transition-colors"
+                >
+                  Sign up free
+                </Link>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+    </>
   );
 }

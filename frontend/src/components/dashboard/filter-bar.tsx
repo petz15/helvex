@@ -1,7 +1,7 @@
 "use client";
 import { useState, useCallback } from "react";
-import { X, SlidersHorizontal, ChevronDown, Bookmark, BookmarkCheck, Trash2 } from "lucide-react";
-import { cn } from "@/lib/utils";
+import { X, SlidersHorizontal, ChevronDown, Bookmark, BookmarkCheck, Trash2, Bell, BellOff } from "lucide-react";
+import { cn, formatClusterLabel } from "@/lib/utils";
 import { Combobox } from "./combobox";
 import { MultiSelectFilter } from "./multi-select-filter";
 import { searchKeywords, searchClusters } from "@/lib/api";
@@ -19,6 +19,7 @@ interface FilterBarProps {
   onSaveView?: (name: string) => void;
   onLoadView?: (filters: CompanyFilters) => void;
   onDeleteView?: (id: number) => void;
+  onToggleAlert?: (id: number, enabled: boolean) => void;
 }
 
 const inputCls =
@@ -94,7 +95,7 @@ const ZEFIX_STATUSES = [
 
 export function FilterBar({
   filters, cantons, taxonomy, onChange, onClear, resultCount,
-  savedViews = [], onSaveView, onLoadView, onDeleteView,
+  savedViews = [], onSaveView, onLoadView, onDeleteView, onToggleAlert,
 }: FilterBarProps) {
   const [expanded, setExpanded] = useState(false);
   const [saveViewName, setSaveViewName] = useState("");
@@ -144,21 +145,21 @@ export function FilterBar({
         {/* Core inputs */}
         <input
           type="text"
-          className={cn(inputCls, "w-36")}
+          className={cn(inputCls, "flex-1 min-w-[7rem] sm:flex-none sm:w-36")}
           placeholder="Company name…"
           value={filters.q ?? ""}
           onChange={(e) => set("q", e.target.value)}
         />
-        <div className="relative">
-          <select className={cn(selectCls, "w-32")} value={filters.canton ?? ""}
+        <div className="relative flex-1 min-w-[5.5rem] sm:flex-none">
+          <select className={cn(selectCls, "w-full sm:w-32")} value={filters.canton ?? ""}
             onChange={(e) => set("canton", e.target.value)}>
             <option value="">All cantons</option>
             {cantons.map((c) => <option key={c} value={c}>{c}</option>)}
           </select>
           <ChevronDown size={13} className="pointer-events-none absolute right-2 top-2 text-slate-400" />
         </div>
-        <div className="relative">
-          <select className={cn(selectCls, "w-36")} value={filters.status ?? ""}
+        <div className="relative flex-1 min-w-[7rem] sm:flex-none">
+          <select className={cn(selectCls, "w-full sm:w-36")} value={filters.status ?? ""}
             onChange={(e) => set("status" as keyof CompanyFilters, e.target.value)}>
             <option value="">All statuses</option>
             {ZEFIX_STATUSES.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
@@ -167,7 +168,7 @@ export function FilterBar({
         </div>
         <input
           type="text"
-          className={cn(inputCls, "w-36")}
+          className={cn(inputCls, "flex-1 min-w-[5.5rem] sm:flex-none sm:w-36")}
           placeholder="UID…"
           value={filters.uid ?? ""}
           onChange={(e) => set("uid", e.target.value)}
@@ -198,7 +199,7 @@ export function FilterBar({
         </button>
 
         {/* Active filter chips — multi-value fields split into individual chips */}
-        <div className="flex flex-wrap gap-1.5 flex-1 min-w-0">
+        <div className="flex flex-wrap gap-1.5 w-full sm:flex-1 sm:w-auto min-w-0">
           {activeEntries
             .filter(([k]) => !["q", "uid", "canton", "status"].includes(String(k)))
             .flatMap(([k, v]) => {
@@ -211,6 +212,7 @@ export function FilterBar({
                 "exclude_ai_category", "exclude_tfidf_cluster", "exclude_purpose_keywords",
                 "exclude_noga_code", "exclude_noga_level",
               ];
+              const CLUSTER_KEYS: (keyof CompanyFilters)[] = ["tfidf_cluster", "exclude_tfidf_cluster"];
               if (MULTI_KEYS.includes(k) && strVal.includes(",")) {
                 return strVal.split(",").map((part) => part.trim()).filter(Boolean).map((part, i) => (
                   <span
@@ -223,7 +225,7 @@ export function FilterBar({
                     )}
                   >
                     <span className="text-slate-400">{label}:</span>
-                    <span>{part}</span>
+                    <span>{CLUSTER_KEYS.includes(k) ? formatClusterLabel(part) : part}</span>
                     <button
                       type="button"
                       onClick={() => {
@@ -249,7 +251,7 @@ export function FilterBar({
                   )}
                 >
                   <span className="text-slate-400">{label}:</span>
-                  <span>{strVal.replace(/^_none$/, "none").replace(/^_any$/, "any")}</span>
+                  <span>{CLUSTER_KEYS.includes(k) ? formatClusterLabel(strVal) : strVal.replace(/^_none$/, "none").replace(/^_any$/, "any")}</span>
                   <button type="button" onClick={() => unset(k)} className="text-slate-400 hover:text-slate-700">
                     <X size={11} />
                   </button>
@@ -264,7 +266,7 @@ export function FilterBar({
         </div>
 
         {/* Saved views + result count */}
-        <div className="flex items-center gap-1.5 shrink-0 ml-auto">
+        <div className="flex items-center gap-1.5 shrink-0 w-full sm:w-auto sm:ml-auto">
           {savedViews.length > 0 && (
             <div className="relative">
               <button
@@ -285,13 +287,26 @@ export function FilterBar({
                       >
                         {v.name}
                       </button>
-                      <button
-                        type="button"
-                        onClick={() => onDeleteView?.(v.id)}
-                        className="text-slate-300 hover:text-red-500 ml-2 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity"
-                      >
-                        <Trash2 size={13} />
-                      </button>
+                      <div className="flex items-center gap-1 ml-2 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
+                        <button
+                          type="button"
+                          onClick={() => onToggleAlert?.(v.id, !v.alert_enabled)}
+                          title={v.alert_enabled ? "Disable daily alert" : "Enable daily alert for new companies"}
+                          className={cn(
+                            "transition-colors",
+                            v.alert_enabled ? "text-amber-500 hover:text-amber-700" : "text-slate-300 hover:text-slate-500"
+                          )}
+                        >
+                          {v.alert_enabled ? <Bell size={13} /> : <BellOff size={13} />}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => onDeleteView?.(v.id)}
+                          className="text-slate-300 hover:text-red-500 transition-colors"
+                        >
+                          <Trash2 size={13} />
+                        </button>
+                      </div>
                     </div>
                   ))}
                 </div>
@@ -381,6 +396,7 @@ export function FilterBar({
                 options={clusters}
                 onSearch={async (q) => { const r = await searchClusters(q); return r.map(x => ({ label: x.cluster, count: x.count })); }}
                 extraOptions={[{ value: "_none", label: "None (unset)" }, { value: "_any", label: "Any (set)" }]}
+                formatValue={formatClusterLabel}
                 variant="include"
               />
             </div>
@@ -477,6 +493,7 @@ export function FilterBar({
                 placeholder="Search clusters…"
                 options={clusters}
                 onSearch={async (q) => { const r = await searchClusters(q); return r.map(x => ({ label: x.cluster, count: x.count })); }}
+                formatValue={formatClusterLabel}
                 variant="exclude"
               />
             </div>

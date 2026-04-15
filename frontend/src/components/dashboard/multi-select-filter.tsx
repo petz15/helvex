@@ -1,7 +1,7 @@
 "use client";
 import { useState, useRef, useEffect, useCallback } from "react";
 import { X, ChevronDown } from "lucide-react";
-import { cn } from "@/lib/utils";
+import { cn, formatClusterLabel } from "@/lib/utils";
 
 interface MultiSelectFilterProps {
   /** Current comma-separated value string */
@@ -16,6 +16,8 @@ interface MultiSelectFilterProps {
   variant?: "include" | "exclude";
   /** Extra fixed options prepended to the dropdown */
   extraOptions?: { value: string; label: string }[];
+  /** Optional function to transform raw stored values into display strings */
+  formatValue?: (raw: string) => string;
 }
 
 const inputCls =
@@ -29,6 +31,7 @@ export function MultiSelectFilter({
   onSearch,
   variant = "include",
   extraOptions = [],
+  formatValue,
 }: MultiSelectFilterProps) {
   const selected = value ? value.split(",").map((s) => s.trim()).filter(Boolean) : [];
 
@@ -119,7 +122,7 @@ export function MultiSelectFilter({
                 pillCls
               )}
             >
-              <span className="max-w-[120px] truncate">{s}</span>
+              <span className="max-w-[120px] truncate">{formatValue ? formatValue(s) : s}</span>
               <button
                 type="button"
                 onClick={() => remove(s)}
@@ -194,7 +197,7 @@ export function MultiSelectFilter({
                 "w-full text-left px-2 py-1.5 hover:bg-blue-50 flex items-center justify-between gap-2 disabled:opacity-40 disabled:cursor-default"
               )}
             >
-              <span className="truncate">{v}</span>
+              <span className="truncate">{formatValue ? formatValue(v) : v}</span>
               <span className="shrink-0 text-xs text-slate-400">{cnt.toLocaleString()}</span>
             </button>
           ))}

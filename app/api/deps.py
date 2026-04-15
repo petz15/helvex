@@ -4,17 +4,20 @@ from __future__ import annotations
 from fastapi import Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
-from app.auth import get_current_user
+from app.auth import get_current_user, require_verified_email
 from app.database import get_db
 from app.models.org_member import OrgMember
 from app.models.organization import Organization
 from app.models.user import User
 
-_ROLE_ORDER = ["viewer", "member", "admin", "owner"]
+_ROLE_ORDER = ["viewer", "contributor", "admin", "owner"]
 
 
 def get_current_org(
-    current_user: User = Depends(get_current_user),
+    # require_verified_email chains through get_current_user so we only need
+    # one dep here. Every org-scoped route that calls get_current_org (or
+    # require_org_role, which calls get_current_org) is automatically gated.
+    current_user: User = Depends(require_verified_email),
     db: Session = Depends(get_db),
 ) -> tuple[User, Organization]:
     """Dependency: validates the user belongs to their active org and returns (user, org).

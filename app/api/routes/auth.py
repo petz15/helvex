@@ -40,6 +40,7 @@ from app.schemas.user import (
     UserRead,
 )
 from app.schemas.billing import BillingAddress, BillingAddressBookRead, BillingAddressCreate, BillingAddressItem
+from app.services.activity import log_activity
 from app.services.billing_addresses import parse_billing_address_book, serialize_billing_address_book
 from app.services.email import (
     send_email_change_verification,
@@ -89,6 +90,8 @@ def login_for_token(
             headers={"WWW-Authenticate": "Bearer"},
         )
     logger.info("auth.login_ok user_id=%s email=%r ip=%s", user.id, user.email, ip)
+    log_activity(db, action="user_login", user_id=user.id, org_id=user.org_id, meta={"method": "token"}, ip=ip)
+    db.commit()
     return TokenResponse(access_token=create_access_token(user.id))
 
 
@@ -122,6 +125,8 @@ def login_cookie(
         logger.warning("auth.login_failed email=%r ip=%s", body.email, ip)
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid email or password")
     logger.info("auth.login_ok user_id=%s email=%r ip=%s", user.id, user.email, ip)
+    log_activity(db, action="user_login", user_id=user.id, org_id=user.org_id, meta={"method": "cookie"}, ip=ip)
+    db.commit()
     forwarded_proto = request.headers.get("x-forwarded-proto", "")
     is_https = request.url.scheme == "https" or forwarded_proto.split(",")[0].strip().lower() == "https"
     response = JSONResponse({"ok": True})
@@ -171,6 +176,8 @@ def confirm_email_change_api(
     if existing and existing.id != user.id:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Email already in use")
     crud.update_email(db, user, new_email)
+    log_activity(db, action="email_changed", user_id=user.id, org_id=user.org_id)
+    db.commit()
     logger.info("auth.email_changed user_id=%s new_email=%r", user.id, new_email)
 
 
@@ -195,6 +202,8 @@ def register(request: Request, body: RegisterRequest, db: Session = Depends(get_
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Email already registered")
     user = crud.create_user(db, email=body.email, password=body.password)
     logger.info("auth.register_ok user_id=%s email=%r ip=%s", user.id, user.email, ip)
+    log_activity(db, action="user_registered", user_id=user.id, meta={"email": user.email}, ip=ip)
+    db.commit()
     _send_verification(db, user)
     return UserRead.model_validate(user)
 
@@ -262,6 +271,8 @@ def verify_email(token: str, db: Session = Depends(get_db)) -> UserRead:
     if not user.email_verified:
         user = crud.mark_email_verified(db, user)
         logger.info("auth.email_verified user_id=%s", user.id)
+        log_activity(db, action="email_verified", user_id=user.id, org_id=user.org_id)
+        db.commit()
         try:
             send_welcome_email(to=user.email)
         except Exception:
@@ -283,6 +294,8 @@ def change_password(
     if not crud.verify_password(body.current_password, current_user.hashed_password):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Current password is incorrect")
     crud.update_password(db, current_user, body.new_password)
+    log_activity(db, action="password_changed", user_id=current_user.id, org_id=current_user.org_id)
+    db.commit()
 
 
 # ---------------------------------------------------------------------------

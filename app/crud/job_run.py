@@ -30,6 +30,7 @@ def create_job(
     org_id: int | None = None,
     user_id: int | None = None,
     dedup_key: str | None = None,
+    initial_stats: dict[str, Any] | None = None,
 ) -> JobRun:
     job = JobRun(
         job_type=job_type,
@@ -37,6 +38,7 @@ def create_job(
         status="queued",
         message=_job_message("Queued"),
         params_json=json.dumps(params or {}),
+        stats_json=json.dumps(initial_stats) if initial_stats else None,
         org_id=org_id,
         user_id=user_id,
         dedup_key=dedup_key,

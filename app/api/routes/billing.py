@@ -144,11 +144,17 @@ def _cancel_provider_transaction(tx: PaymentTransaction) -> None:
 
 
 def _safe_redirect_target(url: str | None) -> str:
+    base = payments.settings.app_base_url.rstrip("/")
     if not url:
-        return payments.settings.app_base_url.rstrip("/")
+        return base
     parsed = urlparse(url)
+    allowed = urlparse(base)
     if parsed.scheme not in {"http", "https"} or not parsed.netloc:
-        return payments.settings.app_base_url.rstrip("/")
+        return base
+    # Only allow redirects to the same host (and port) as the app itself.
+    if parsed.netloc != allowed.netloc:
+        logger.warning("billing.redirect_blocked_open_redirect url=%s allowed=%s", url[:80], allowed.netloc)
+        return base
     return url
 
 
@@ -937,6 +943,8 @@ def get_billing_summary(
         max_age_minutes=15,
         on_expire=_cancel_provider_transaction,
     )
+    from app import crud as _crud
+    alert_at = _crud.get_effective_setting(db, "low_credit_alert_at", org_id=org.id, default="")
     return {
         "org_id": org.id,
         "tier": org.tier,
@@ -945,7 +953,8 @@ def get_billing_summary(
         "subscription_cancel_at_period_end": bool(getattr(org, "subscription_cancel_at_period_end", False)),
         "credits_balance": org.credits_balance,
         "credits_balance_chf": round(org.credits_balance * 0.0001, 4),
-        "has_saved_payment_method": bool(user.payment_customer_id),
+        "has_saved_payment_method": bool(_resolve_worldline_payment_alias(db, org, user)),
+        "low_credit_alert_at": alert_at or None,
     }
 
 
@@ -983,6 +992,67 @@ def list_credit_transactions(
             }
             for tx in rows
         ],
+    }
+
+
+@router.get("/credits/usage")
+def get_credit_usage(
+    days: int = Query(30, ge=1, le=365, description="Lookback window in days"),
+    user_org: tuple[User, object] = Depends(get_current_org),
+    db: Session = Depends(get_db),
+) -> dict:
+    """Return per-action credit consumption for the org over the last N days.
+
+    Groups deductions by action_type and returns totals + refunds.
+    Useful for the org billing dashboard to show what's spending credits.
+    """
+    from datetime import timedelta, timezone
+    from sqlalchemy import func
+
+    _user, org = user_org
+    since = datetime.now(tz=timezone.utc) - timedelta(days=days)
+
+    rows = (
+        db.query(
+            OrgCreditTransaction.action_type,
+            OrgCreditTransaction.type,
+            func.sum(OrgCreditTransaction.amount).label("total"),
+            func.count(OrgCreditTransaction.id).label("count"),
+        )
+        .filter(
+            OrgCreditTransaction.org_id == org.id,
+            OrgCreditTransaction.created_at >= since,
+            OrgCreditTransaction.type.in_(["deduction", "refund"]),
+        )
+        .group_by(OrgCreditTransaction.action_type, OrgCreditTransaction.type)
+        .all()
+    )
+
+    # Build per-action summary: {action: {spent, refunded, net, transactions}}
+    summary: dict[str, dict] = {}
+    for action_type, tx_type, total, count in rows:
+        key = action_type or "unknown"
+        if key not in summary:
+            summary[key] = {"spent": 0, "refunded": 0, "net": 0, "transactions": 0}
+        if tx_type == "deduction":
+            summary[key]["spent"] += abs(int(total))
+        elif tx_type == "refund":
+            summary[key]["refunded"] += int(total)
+        summary[key]["transactions"] += int(count)
+
+    for v in summary.values():
+        v["net"] = v["spent"] - v["refunded"]
+
+    total_spent = sum(v["spent"] for v in summary.values())
+    total_refunded = sum(v["refunded"] for v in summary.values())
+
+    return {
+        "days": days,
+        "total_spent": total_spent,
+        "total_refunded": total_refunded,
+        "net_spent": total_spent - total_refunded,
+        "current_balance": int(org.credits_balance or 0),
+        "by_action": summary,
     }
 
 

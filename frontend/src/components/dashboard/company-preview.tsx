@@ -12,6 +12,7 @@ interface CompanyPreviewProps {
   company: Company | null;
   onClose: () => void;
   onUpdated?: (company: Company) => void;
+  className?: string;
 }
 
 function avatarBg(score: number | null): string {
@@ -21,7 +22,7 @@ function avatarBg(score: number | null): string {
   return "bg-red-100 text-red-800";
 }
 
-export function CompanyPreview({ company: incoming, onClose, onUpdated }: CompanyPreviewProps) {
+export function CompanyPreview({ company: incoming, onClose, onUpdated, className }: CompanyPreviewProps) {
   const [company, setCompany] = useState<Company | null>(incoming);
   const [updating, setUpdating] = useState<string | null>(null);
 
@@ -48,7 +49,7 @@ export function CompanyPreview({ company: incoming, onClose, onUpdated }: Compan
   }
 
   return (
-    <aside className="w-80 shrink-0 flex flex-col bg-white border-l border-slate-200 overflow-y-auto">
+    <aside className={cn("shrink-0 flex flex-col bg-white border-l border-slate-200 overflow-y-auto", className ?? "w-80")}>
       {/* Header */}
       <div className="flex items-start justify-between px-4 py-3 border-b border-slate-100">
         <div className="flex-1 min-w-0 flex gap-2">

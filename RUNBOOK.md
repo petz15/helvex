@@ -27,6 +27,10 @@ General fixes, recovery procedures, and operational checklists.
 15. [Monetization Ops Checks (Phase 4 and Phase 5)](#15-monetization-ops-checks-phase-4-and-phase-5)
 16. [ML Pipeline: Clustering, Keywords, and NOGA](#16-ml-pipeline-clustering-keywords-and-noga)
 17. [Home ML Node Rollout (Phases A-C)](#17-home-ml-node-rollout-phases-a-c)
+18. [Email Notifications: Low-Credit Alert](#18-email-notifications-low-credit-alert)
+19. [Saved View Alerts](#19-saved-view-alerts)
+20. [Admin Analytics Dashboard](#20-admin-analytics-dashboard)
+21. [Email Notification Opt-Out (per org)](#21-email-notification-opt-out-per-org)
 
 ---
 
@@ -1266,22 +1270,23 @@ Expected:
 
 ## 16. ML Pipeline: Clustering, Keywords, and NOGA
 
-Three complementary ML pipelines enrich company data. They share the same text preprocessing stack; only the clustering step differs.
+Four complementary ML pipelines enrich company data. They share the same text preprocessing stack; only the clustering step differs.
 
 ### Correct execution order
 
 ```
-recompute_keywords          ← extract purpose_keywords from raw purpose text
+recompute_keywords            ← extract purpose_keywords from raw purpose text
        ↓
-tfidf_kmeans_cluster        ← cluster with use_keywords=True (recommended)
-  or hdbscan_cluster        ← only for exploration / small subsets
-  or birch_cluster          ← full corpus, fast, single-label only
+semantic_kmeans_cluster       ← RECOMMENDED: cluster by meaning, not vocabulary
+  or tfidf_kmeans_cluster     ← TF-IDF baseline (use_keywords=True, fast)
+  or hdbscan_cluster          ← exploration / calibration on small subsets only
+  or birch_cluster            ← full corpus, memory-efficient, single-label
        ↓
-reclassify_noga             ← needs keywords + cluster labels for best accuracy
+reclassify_noga               ← needs keywords + cluster labels for best accuracy
        ↓
-claude_classify             ← AI scoring (needs org API key)
+claude_classify               ← AI scoring (needs org API key)
        ↓
-recalculate_scores          ← recompute combined_score
+recalculate_scores            ← recompute combined_score
 ```
 
 NOGA uses `purpose_keywords` and `tfidf_cluster` as input signals. Running it before clustering degrades accuracy.
@@ -1294,8 +1299,9 @@ NOGA uses `purpose_keywords` and `tfidf_cluster` as input signals. Running it be
 |---|---|---|---|
 | `recompute_keywords` | **Fit new TF-IDF** on full corpus + extract keywords. No S3 needed. Uploads new vectorizer. | ~20 min | Writes vectorizer |
 | `reextract_keywords` | Extract keywords using **frozen S3 vectorizer** (no refit). Consistent IDF with existing corpus. | ~3–5 min | Reads + requires vectorizer |
-| `tfidf_kmeans_cluster` | K-Means clustering, multi-label soft assignment | ~25 min | Writes vectorizer + SVD + centroids |
-| `hdbscan_cluster` | HDBSCAN clustering (sample only recommended) | ~40 min batch-merge; OOM if single-pass >50K | Writes vectorizer + SVD + centroids |
+| `semantic_kmeans_cluster` | **Semantic K-Means** — embeds purpose_keywords with sentence-transformers, K-Means in embedding space. Most coherent clusters. | ~35–50 min | Writes vectorizer + SVD + centroids |
+| `tfidf_kmeans_cluster` | TF-IDF K-Means clustering, multi-label soft assignment. Fast, vocabulary-based. | ~25 min | Writes vectorizer + SVD + centroids |
+| `hdbscan_cluster` | HDBSCAN density clustering (sample only recommended) | ~40 min batch-merge; OOM if single-pass >50K | Writes vectorizer + SVD + centroids |
 | `birch_cluster` | BIRCH clustering, single-label, memory-efficient | ~20 min | Writes vectorizer + SVD + centroids |
 | `reclassify_noga` | NOGA taxonomy + embedding classification | ~10–30 min | Reads NOGA embeddings |
 | `cluster_analysis` | Write cross-cluster stopword candidates to file | ~1 min | — |
@@ -1306,20 +1312,29 @@ NOGA uses `purpose_keywords` and `tfidf_cluster` as input signals. Running it be
 
 **Step 1 — Extract keywords**
 ```bash
-POST /api/v1/jobs/enqueue/recompute-keywords
+POST /api/v1/scoring/recompute-keywords
 Body: {}
 ```
 Writes `purpose_keywords` (comma-separated domain terms) for every company with a `purpose` text. Takes ~20 min for 700K.
 
-**Step 2 — Cluster (K-Means recommended)**
+**Step 2 — Cluster (Semantic K-Means recommended)**
 ```bash
-POST /api/v1/jobs/enqueue/tfidf-cluster
+POST /api/v1/scoring/semantic-cluster
+Body: {
+  "n_clusters": 150
+}
+```
+Embeds each company's `purpose_keywords` using `paraphrase-multilingual-MiniLM-L12-v2` and clusters in semantic space. Companies with the same business activity land in the same cluster even if they use different words. Takes ~35–50 min for 700K.
+
+**TF-IDF K-Means fallback** (faster, vocabulary-based):
+```bash
+POST /api/v1/scoring/cluster
 Body: {
   "n_clusters": 150,
   "use_keywords": true
 }
 ```
-`use_keywords=true` uses the extracted keywords from Step 1 instead of raw purpose text — produces cleaner, domain-specific clusters because generic legal boilerplate is already stripped. Takes ~25 min.
+`use_keywords=true` (default) uses the extracted keywords from Step 1 instead of raw purpose text — cleaner than raw purpose because boilerplate is already stripped. Takes ~25 min.
 
 After clustering, check the cluster_analysis output (`app/static/cluster_analysis.txt`) for stopword candidates.
 
@@ -1334,7 +1349,30 @@ Maps each company to Swiss NOGA industry code using a hybrid embedding + token m
 
 ### Choosing a Clustering Algorithm
 
-#### K-Means (`tfidf_kmeans_cluster`) — **default, recommended for all production runs**
+#### Semantic K-Means (`semantic_kmeans_cluster`) — **recommended for best cluster quality**
+
+**Use when:** You want coherent, meaningful clusters where companies with the same business purpose group together regardless of vocabulary. This is the preferred method.
+
+**Key properties:**
+- Embeds `purpose_keywords` with a multilingual sentence-transformer model (384-dim vectors)
+- Clusters in semantic space — synonymous terms are treated as similar, not different
+- Multi-label soft assignment: each company gets 1–3 clusters
+- Labels are still generated via c-TF-IDF for readability
+- Requires `purpose_keywords` to be populated — run `recompute_keywords` first
+- ~35–50 min for 700K companies (embedding is the bottleneck)
+
+```bash
+POST /api/v1/scoring/semantic-cluster
+Body: {
+  "n_clusters": 150,
+  "max_clusters_per_company": 3,
+  "min_similarity": 0.20
+}
+```
+
+---
+
+#### K-Means (`tfidf_kmeans_cluster`) — **fast vocabulary-based baseline**
 
 **Use when:** Full corpus, all companies should be assigned, multi-label matters (one company in 2–3 relevant clusters).
 
@@ -1412,9 +1450,10 @@ Body: {
 
 **After large import batches (100K+ new companies):**
 ```
-recompute_keywords    (all companies, ~20 min)
-tfidf_kmeans_cluster  (use_keywords=True, re-trains model, uploads new S3 artifacts)
-reclassify_noga       (all companies)
+recompute_keywords        (all companies, ~20 min)
+semantic_kmeans_cluster   (recommended — embeds keywords, ~35–50 min)
+  or tfidf_kmeans_cluster (faster fallback, use_keywords=True, ~25 min)
+reclassify_noga           (all companies)
 ```
 
 **Incremental (daily SHAB import, small batches):**
@@ -1451,7 +1490,7 @@ Body: {"key": "tfidf_stopwords", "value": "beratung\nhandel\ndienstleistung"}
 
 **4. Add boilerplate patterns** for recurring legal sentence templates that appear in keywords (Admin → Boilerplate Settings).
 
-**5. Re-run** `recompute_keywords` + `tfidf_kmeans_cluster` to apply changes.
+**5. Re-run** `recompute_keywords` + `semantic_kmeans_cluster` (or `tfidf_kmeans_cluster`) to apply changes.
 
 **Common symptoms and fixes:**
 
@@ -1460,8 +1499,43 @@ Body: {"key": "tfidf_stopwords", "value": "beratung\nhandel\ndienstleistung"}
 | All clusters labelled "verwaltung gesellschaft holding" | Boilerplate not stripped | Add boilerplate patterns; add terms to stopwords |
 | Many similar-sounding duplicate clusters | `n_clusters` too high | Reduce to 100–120 |
 | One giant cluster containing everything | `n_clusters` too low | Increase; or increase TF-IDF `min_df` |
+| Clusters feel disjointed / vocabulary mismatch | TF-IDF grouping by word, not meaning | Switch to `semantic_kmeans_cluster` |
+| Semantic clustering too slow | Embedding 700K docs is the bottleneck | Reduce `embedding_batch_size`; run on GPU pod |
 | >40% companies have NULL cluster (HDBSCAN) | Too-sparse vector space / `min_cluster_size` too high | Lower `min_cluster_size`; or switch to K-Means |
 | `purpose_keywords` contains "bezweckt", "insbesondere" | Missing stopwords | Run cluster_analysis, add candidates |
+
+---
+
+### Cluster Registry Management
+
+The cluster registry stores stable canonical names across pipeline runs. Renaming a cluster in the registry immediately updates `tfidf_cluster` on all company rows.
+
+**UI:** Superadmin → Clusters (`/app/admin/clusters`)
+- Table of all clusters (active + inactive) with live company counts
+- Hover any row → pencil icon → inline rename
+- `PATCH /api/v1/clusters/registry/{id}` with `{"new_name": "..."}`
+- Inactive entries = clusters not produced in the latest pipeline run; still referenced in historical company data
+
+**Rename via API:**
+```bash
+curl -X PATCH https://helvex.dicy.ch/api/v1/clusters/registry/42 \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"new_name": "Software · Cloud · API"}'
+```
+
+**Note:** Rename updates company rows with a `LIKE %old_name%` query. For very large datasets (>100K matching companies) this may take a few seconds. Always rename in the UI or via API, never directly in the database.
+
+---
+
+### Cluster Drift Check (auto-triggered)
+
+After every `shab_daily` or `shab_backfill` job, a `cluster_drift_check` job is automatically enqueued. It checks what fraction of companies created in the last 7 days have no cluster assignment. If > 30% are unclassified, it logs a warning.
+
+**What to do when drift is detected:**
+1. Check if `purpose_keywords` are populated for new companies (`recompute_keywords` or incremental from S3 artifacts)
+2. Check if S3 artifacts are current — if the model is stale, new companies can't be assigned incrementally
+3. Re-run `semantic_kmeans_cluster` or `tfidf_kmeans_cluster` to rebuild and re-assign everything
 
 ---
 
@@ -1764,6 +1838,176 @@ Windows PowerShell:
 - Node has label `workload=ml`
 - Node has taint `workload=ml:NoSchedule`
 - `ml-worker` schedules only on ML nodes
+
+---
+
+## 18. Email Notifications: Low-Credit Alert
+
+**Trigger:** Org credit balance drops below `low_credit_alert_at` (OrgSetting). Default: disabled (NULL). Sent at most once per day per org.
+
+### Check whether alerts are enabled for an org
+
+```sql
+SELECT key, value FROM org_settings
+WHERE org_id = <org_id> AND key IN ('low_credit_alert_at', 'low_credit_alert_sent_at', 'email_notifications');
+```
+
+| Key | Meaning |
+|---|---|
+| `low_credit_alert_at` | Threshold. NULL = disabled. |
+| `low_credit_alert_sent_at` | ISO date of last alert. Prevents repeat same-day emails. |
+| `email_notifications` | `"0"` = opted out. Default `"1"` (on). |
+
+### Clear today's alert cooldown (re-send if balance still low)
+
+```sql
+DELETE FROM org_settings
+WHERE org_id = <org_id> AND key = 'low_credit_alert_sent_at';
+```
+
+### Disable low-credit alerts for an org
+
+```sql
+DELETE FROM org_settings
+WHERE org_id = <org_id> AND key = 'low_credit_alert_at';
+```
+
+### Check org admin email (who receives the alert)
+
+```sql
+SELECT u.email, u.username, om.role
+FROM org_members om
+JOIN users u ON u.id = om.user_id
+WHERE om.org_id = <org_id> AND om.role IN ('admin', 'owner');
+```
+
+If no admin/owner has an email set, the alert is silently skipped. Check user rows and ensure at least one admin has `email` populated.
+
+---
+
+## 19. Saved View Alerts
+
+**How it works:** The `saved_view_alerts` job sweeps all orgs. For each `UserView` with `alert_enabled=True`, it counts matching companies. If the count grew since last check, it emails the view owner.
+
+### Trigger manually (e.g. to test or re-run a missed nightly run)
+
+```bash
+curl -X POST https://helvex.dicy.ch/api/v1/admin/jobs/saved-view-alerts \
+  -H "Authorization: Bearer <superadmin-token>"
+```
+
+Or via the superadmin UI: Admin → Analytics → (future: Alerts tab).
+
+### Check sweep results in worker logs
+
+```bash
+kubectl logs -n helvex-prod -l app.kubernetes.io/component=worker --tail=200 | grep -i "saved_view"
+```
+
+Expected log entries:
+```
+INFO:app.services.saved_view_alerts:saved_view_alerts: checked=12 alerted=2 errors=0
+```
+
+### Debug: why didn't a specific view alert?
+
+1. Confirm `alert_enabled = true`:
+```sql
+SELECT id, name, alert_enabled, alert_last_count, alert_last_checked_at
+FROM user_views WHERE id = <view_id>;
+```
+
+2. Check `email_notifications` for the view owner:
+```sql
+SELECT value FROM org_settings
+WHERE org_id = (SELECT org_id FROM users WHERE id = (SELECT user_id FROM user_views WHERE id = <view_id>))
+AND key = 'email_notifications';
+```
+If `"0"`, the org has opted out.
+
+3. Check whether the user is active:
+```sql
+SELECT is_active, email FROM users WHERE id = (SELECT user_id FROM user_views WHERE id = <view_id>);
+```
+
+4. Check baseline: if `alert_last_count IS NULL`, the first sweep only sets the baseline — no email is sent. The next sweep will compare against that baseline.
+
+### Reset the baseline (force-alert on next sweep even if count is same)
+
+```sql
+UPDATE user_views SET alert_last_count = NULL WHERE id = <view_id>;
+```
+
+---
+
+## 20. Admin Analytics Dashboard
+
+**Access:** `/app/admin/analytics` — superadmin only (enforced in backend by `_require_superadmin` dependency).
+
+### What the MRR estimate means
+
+`mrr_estimate_chf` is the sum of `tier_monthly_price_chf` for all orgs on paid tiers. It is:
+- A **subscription revenue estimate only** — does not include credit top-ups or one-off charges
+- Based on list prices, not actual invoiced amounts (discounts not reflected)
+- Intended as a quick health check, not a financial report
+
+### Check the numbers directly
+
+```sql
+-- Orgs by tier
+SELECT tier, COUNT(*) FROM organizations GROUP BY tier ORDER BY COUNT(*) DESC;
+
+-- New orgs in last 30 days
+SELECT COUNT(*) FROM organizations WHERE created_at > NOW() - INTERVAL '30 days';
+
+-- Active orgs (any job or credit activity in last 30 days)
+SELECT COUNT(DISTINCT org_id) FROM job_runs WHERE created_at > NOW() - INTERVAL '30 days';
+
+-- Top credit consumers
+SELECT o.name, SUM(ABS(t.amount)) AS spent
+FROM org_credit_transactions t
+JOIN organizations o ON o.id = t.org_id
+WHERE t.type = 'deduction' AND t.created_at > NOW() - INTERVAL '30 days'
+GROUP BY o.name ORDER BY spent DESC LIMIT 10;
+
+-- Job volume by type
+SELECT job_type, COUNT(*) FROM job_runs
+WHERE created_at > NOW() - INTERVAL '30 days'
+GROUP BY job_type ORDER BY COUNT(*) DESC;
+```
+
+### Refresh
+
+The dashboard has a **Refresh** button (top-right) that re-fetches via `GET /api/v1/admin/analytics`. Data is not cached — each load hits the DB.
+
+---
+
+## 21. Email Notification Opt-Out (per org)
+
+Users can toggle `email_notifications` at `/app/billing` (Notifications section). Admins can also set it directly:
+
+### Check current preference
+
+```sql
+SELECT value FROM org_settings WHERE org_id = <org_id> AND key = 'email_notifications';
+-- '1' = enabled (default), '0' = opted out, NULL = not set (defaults to enabled)
+```
+
+### Force opt-in (override via DB)
+
+```sql
+INSERT INTO org_settings (org_id, key, value) VALUES (<org_id>, 'email_notifications', '1')
+ON CONFLICT (org_id, key) DO UPDATE SET value = '1';
+```
+
+### Force opt-out (override via DB)
+
+```sql
+INSERT INTO org_settings (org_id, key, value) VALUES (<org_id>, 'email_notifications', '0')
+ON CONFLICT (org_id, key) DO UPDATE SET value = '0';
+```
+
+This affects **all** transactional emails for the org: low-credit alerts, export-ready, job-failed, and saved-view alerts.
 
 
 
