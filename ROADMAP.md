@@ -36,14 +36,20 @@
 
 ## Bug Fixes & Known Issues
 - Map not working correctly
-- categories showing weird numbers
-- shab not running correctly
+- categories:
+    - showing weird numbers
+    - all users should see purpose ekywords, clusters and noga classifications in the category overview
+- shab: 
+    - not running correctly
+    - how to display to users?
 - multiple issues in billing
     - save card not working
     - existing subscription then upgrading is not working
     - how did saferpay org get 1'000 credits without it showing up in my superadmin billing?
     - ...
 - Usermanagement for orgs (atleast untested)
+- admin dashboard simple redirects non authorized users, maybe not the safest
+- 
 
 
 

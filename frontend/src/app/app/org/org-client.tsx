@@ -4,7 +4,7 @@ import useSWR from "swr";
 import {
   Building2, Edit2, Check, X, Trash2, Plus, Loader2, ShieldCheck, UserCog, Mail, Sparkles, ChevronDown, ChevronUp,
 } from "lucide-react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import {
   fetchCurrentUser,
   fetchOrg,
@@ -380,7 +380,11 @@ function SectionTitle({ title }: { title: string }) {
 export function OrgClient({ embedded = false }: { embedded?: boolean }) {
   const { data: me, mutate: reloadMe } = useSWR("me", fetchCurrentUser);
   const router = useRouter();
-  const orgId = me?.org?.id;
+  const searchParams = useSearchParams();
+  const requestedOrgId = Number(searchParams.get("org_id"));
+  const hasRequestedOrgId = Number.isInteger(requestedOrgId) && requestedOrgId > 0;
+  const orgId = me?.is_superadmin && hasRequestedOrgId ? requestedOrgId : me?.org?.id;
+  const isSuperadminOrgOverride = !!me?.is_superadmin && hasRequestedOrgId;
 
   const { data: org, mutate: reloadOrg } = useSWR(
     orgId ? ["org", orgId] : null,
@@ -576,6 +580,11 @@ export function OrgClient({ embedded = false }: { embedded?: boolean }) {
           <div>
             <h1 className="text-xl font-semibold text-slate-900">Organization</h1>
             <p className="text-sm text-slate-500 mt-0.5">Manage your org and its members</p>
+            {isSuperadminOrgOverride && (
+              <span className="mt-2 inline-flex items-center rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 text-xs font-medium text-amber-800">
+                Viewing as org #{org.id} ({org.name})
+              </span>
+            )}
           </div>
         </div>
       )}

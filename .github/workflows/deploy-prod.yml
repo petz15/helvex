@@ -137,8 +137,8 @@ jobs:
       contents: read
       packages: write
     env:
-      USE_QEMU: ${{ (github.event_name == 'workflow_dispatch' && (github.event.inputs.qemu_ml_base == 'true' || github.event.inputs.qemu_ml == 'true')) || (github.event_name != 'workflow_dispatch' && (vars.BUILD_QEMU_ML_BASE == 'true' || vars.BUILD_QEMU_ML == 'true')) }}
-      BUILD_PLATFORMS: ${{ ((github.event_name == 'workflow_dispatch' && (github.event.inputs.qemu_ml_base == 'true' || github.event.inputs.qemu_ml == 'true')) || (github.event_name != 'workflow_dispatch' && (vars.BUILD_QEMU_ML_BASE == 'true' || vars.BUILD_QEMU_ML == 'true'))) && 'linux/amd64,linux/arm64' || 'linux/amd64' }}
+      USE_QEMU: ${{ (github.event_name == 'workflow_dispatch' && (github.event.inputs.qemu_ml_base == 'true' || github.event.inputs.qemu_ml == 'true')) || (github.event_name != 'workflow_dispatch' && (vars.BUILD_QEMU_ML_BASE == 'true' || vars.BUILD_QEMU_ML == 'true')) && 'true' || 'false' }}
+      BUILD_PLATFORMS: ${{ (github.event_name == 'workflow_dispatch' && (github.event.inputs.qemu_ml_base == 'true' || github.event.inputs.qemu_ml == 'true')) || (github.event_name != 'workflow_dispatch' && (vars.BUILD_QEMU_ML_BASE == 'true' || vars.BUILD_QEMU_ML == 'true')) && 'linux/amd64,linux/arm64' || 'linux/amd64' }}
     steps:
       - uses: actions/checkout@v5
 
@@ -177,8 +177,8 @@ jobs:
       contents: read
       packages: write
     env:
-      USE_QEMU: ${{ (github.event_name == 'workflow_dispatch' && (github.event.inputs.qemu_ml_base == 'true' || github.event.inputs.qemu_ml == 'true')) || (github.event_name != 'workflow_dispatch' && (vars.BUILD_QEMU_ML_BASE == 'true' || vars.BUILD_QEMU_ML == 'true')) }}
-      BUILD_PLATFORMS: ${{ ((github.event_name == 'workflow_dispatch' && (github.event.inputs.qemu_ml_base == 'true' || github.event.inputs.qemu_ml == 'true')) || (github.event_name != 'workflow_dispatch' && (vars.BUILD_QEMU_ML_BASE == 'true' || vars.BUILD_QEMU_ML == 'true'))) && 'linux/amd64,linux/arm64' || 'linux/amd64' }}
+      USE_QEMU: ${{ (github.event_name == 'workflow_dispatch' && (github.event.inputs.qemu_ml_base == 'true' || github.event.inputs.qemu_ml == 'true')) || (github.event_name != 'workflow_dispatch' && (vars.BUILD_QEMU_ML_BASE == 'true' || vars.BUILD_QEMU_ML == 'true')) && 'true' || 'false' }}
+      BUILD_PLATFORMS: ${{ (github.event_name == 'workflow_dispatch' && (github.event.inputs.qemu_ml_base == 'true' || github.event.inputs.qemu_ml == 'true')) || (github.event_name != 'workflow_dispatch' && (vars.BUILD_QEMU_ML_BASE == 'true' || vars.BUILD_QEMU_ML == 'true')) && 'linux/amd64,linux/arm64' || 'linux/amd64' }}
     steps:
       - uses: actions/checkout@v5
 
@@ -647,13 +647,19 @@ jobs:
             frontend=ghcr.io/${{ github.repository }}-frontend:${{ github.sha }} \
             -n helvex-prod
 
-      - name: Deploy all app images (backend + frontend + ml)
+      - name: Deploy all app images (backend + frontend + ml + workers)
         if: |
           (github.event_name != 'workflow_dispatch' && contains(github.event.head_commit.message, '[deploy-all]')) ||
           (github.event_name == 'workflow_dispatch' && github.event.inputs.deploy_mode == 'all')
         run: |
           kubectl set image deployment/helvex \
             app=ghcr.io/${{ github.repository }}:${{ github.sha }} \
+            -n helvex-prod
+          kubectl set image deployment/helvex-zefix-worker \
+            zefix-worker=ghcr.io/${{ github.repository }}:${{ github.sha }} \
+            -n helvex-prod
+          kubectl set image deployment/helvex-api-worker \
+            api-worker=ghcr.io/${{ github.repository }}:${{ github.sha }} \
             -n helvex-prod
           kubectl set image deployment/helvex-frontend \
             frontend=ghcr.io/${{ github.repository }}-frontend:${{ github.sha }} \
@@ -678,6 +684,12 @@ jobs:
         run: |
           kubectl set image deployment/helvex \
             app=ghcr.io/${{ github.repository }}:${{ github.sha }} \
+            -n helvex-prod
+          kubectl set image deployment/helvex-zefix-worker \
+            zefix-worker=ghcr.io/${{ github.repository }}:${{ github.sha }} \
+            -n helvex-prod
+          kubectl set image deployment/helvex-api-worker \
+            api-worker=ghcr.io/${{ github.repository }}:${{ github.sha }} \
             -n helvex-prod
 
       - name: Deploy ml worker only
