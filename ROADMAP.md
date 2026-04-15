@@ -41,8 +41,10 @@
 - multiple issues in billing
     - save card not working
     - existing subscription then upgrading is not working
+    - how did saferpay org get 1'000 credits without it showing up in my superadmin billing?
     - ...
 - Usermanagement for orgs (atleast untested)
+
 
 
 
