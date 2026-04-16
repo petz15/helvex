@@ -41,10 +41,11 @@
 - shab: 
     - not running correctly -> worked now. check how deleted, edited, and new is handled before importing the whole history
     - how to display to users? -> should be done now
-- billing/payment
+- billing/payment/pricing
     - save card not working -> still not working
     - existing subscription then upgrading is not working
     - pricing page look terrible
+    - bonuses and org stuff seems to be in multiple location i.e. files and DB. should be centralized
 - Usermanagement for orgs (atleast untested)
 - admin dashboard simple redirects non authorized users, maybe not the safest
 - user logging: 
