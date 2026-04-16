@@ -5,14 +5,14 @@ not when the user opens the upgrade dialog. The amount is stored on the
 transaction so apply_successful_payment can grant it idempotently.
 
 Revision ID: 0055_add_upgrade_proration_credits
-Revises: 0054_add_first_sogc_date
+Revises: 0055a_widen_alembic_version
 Create Date: 2026-04-16
 """
 from alembic import op
 import sqlalchemy as sa
 
 revision = "0055_add_upgrade_proration_credits"
-down_revision = "0054_add_first_sogc_date"
+down_revision = "0055a_widen_alembic_version"
 branch_labels = None
 depends_on = None
 

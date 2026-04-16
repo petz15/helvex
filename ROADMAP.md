@@ -41,8 +41,6 @@
 - billing/payment/pricing
     - save card not working -> still not working
     - existing subscription then upgrading is not working
-    - pricing page look terrible
-    - bonuses and org stuff seems to be in multiple location i.e. files and DB. should be centralized
 - Usermanagement for orgs (atleast untested)
 - admin dashboard simple redirects non authorized users, maybe not the safest
 - user logging: 
