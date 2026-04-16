@@ -430,7 +430,7 @@ export function PaymentGatewayClient() {
       {/* Security note */}
       <div className="flex items-center gap-2 text-xs text-slate-400">
         <ShieldCheck size={13} className="shrink-0" />
-        Payments are processed securely by Worldline Saferpay. Your card details never touch our servers.
+        Payments are processed securely by Worldline Saferpay. Your card details never reaches our servers.
       </div>
 
       {/* AGB acceptance */}
@@ -442,11 +442,11 @@ export function PaymentGatewayClient() {
           className="mt-0.5 h-4 w-4 shrink-0 rounded border-slate-300 text-blue-600 accent-blue-600"
         />
         <span className="text-sm text-slate-700">
-          Ich habe die{" "}
+          I have read and accept the{" "}
           <Link href="/agb" target="_blank" className="text-blue-600 underline hover:text-blue-800">
-            Allgemeinen Geschäftsbedingungen (AGB)
+            General Terms and Conditions (AGB)
           </Link>{" "}
-          der Balogh Consulting gelesen und akzeptiere diese.
+           .
         </span>
       </label>
 

@@ -58,7 +58,7 @@ spec:
             initialDelaySeconds: 5
             periodSeconds: 10
             timeoutSeconds: 5
-            failureThreshold: 30   # up to 5 min for migrations before giving up
+            failureThreshold: 90   # up to 15 min for migrations before giving up
           livenessProbe:
             httpGet:
               path: /health

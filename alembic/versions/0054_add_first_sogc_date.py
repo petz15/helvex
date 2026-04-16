@@ -21,11 +21,6 @@ depends_on = None
 
 def upgrade():
     op.add_column("companies", sa.Column("first_sogc_date", sa.String(32), nullable=True))
-    # Best-effort backfill: existing rows get sogc_date as starting point
-    op.execute(
-        "UPDATE companies SET first_sogc_date = sogc_date "
-        "WHERE first_sogc_date IS NULL AND sogc_date IS NOT NULL"
-    )
     op.create_index("ix_companies_first_sogc_date", "companies", ["first_sogc_date"])
 
 
