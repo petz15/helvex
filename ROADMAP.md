@@ -40,12 +40,10 @@
     - all users should see purpose ekywords, clusters and noga classifications in the category overview
 - shab: 
     - not running correctly -> worked now. check how deleted, edited, and new is handled before importing the whole history
-    - how to display to users?
+    - how to display to users? -> should be done now
 - billing/payment
-    - save card not working
+    - save card not working -> still not working
     - existing subscription then upgrading is not working
-    - how did saferpay org get 1'000 credits without it showing up in my superadmin billing or saferpay backoffice dashboard?
-        A: welcome bonus even though they didn't get a subscription
     - pricing page look terrible
 - Usermanagement for orgs (atleast untested)
 - admin dashboard simple redirects non authorized users, maybe not the safest
@@ -56,6 +54,8 @@
 - Move ML Job Reference from Jobs to collection page. 
 - AI Preview: AI classification is not configured on this server
 - Wire collections for other tiers i.e. finish up the explorer page
+- Tiers:
+    - web results are not gated, immediately shown. Should have been atleast 1 week of pause form a simple tier. 
 
 
 
@@ -66,6 +66,7 @@
 
 - [ ] **Fix Branding** — potentially change the icon to have a red cross in the middle (change google and linkedin app connection icons)
 - [ ] **Add dark mode** — add dark mode
+- [ ] **Options for Emails** - Create an options for emails and also probably need to configure how the email looks including unsubscribe button
 
 
 ## Company Explore page
@@ -88,6 +89,7 @@
 - [ ] **Google results & scoring** — Improve the selection and scoring of google results
 - [ ] **NOGA Data** — add NOGA data (or similar) which is something other sites have such as business-monitor.ch or moneyhouse.ch -> first implementation done via AI classification; needs improvement preferably without AI or optional with AI; displaying is not looking too good yet; only shows the level it is confident in but not the full hierarchy
 - [ ] **Free tier**- show some limited or teaser data for free tier
+- [ ] **Flex Rescore** - Needs to be implemented differently. Should be 1x rescore or maybe 2x rescore per month for all available companies. then like 1000 credits per rescore. Depends how much actual computation power it needs
 
 
 ## Company Profile

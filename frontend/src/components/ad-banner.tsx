@@ -18,7 +18,7 @@ export function AdBanner() {
       <div className="flex items-center justify-between rounded-xl border border-blue-200 bg-gradient-to-r from-blue-50 via-white to-indigo-50 px-5 py-3 shadow-sm">
         <div className="flex items-center gap-3">
           <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-blue-600 text-white text-xs font-bold shadow-sm">
-            BC
+            B
           </div>
           <div>
             <div className="flex items-center gap-2">

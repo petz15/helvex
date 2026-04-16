@@ -2,20 +2,20 @@ import type { Metadata } from "next";
 
 export const metadata: Metadata = {
   title: "AGB | Helvex",
-  description: "Allgemeine Geschaeftsbedingungen der Helvex Webanwendung.",
+  description: "Allgemeine Geschäftsbedingungen der Helvex Webanwendung.",
 };
 
 export default function AgbPage() {
   return (
     <div className="mx-auto max-w-3xl px-6 py-10 space-y-6">
       <header>
-        <h1 className="text-3xl font-bold text-slate-900">Allgemeine Geschaeftsbedingungen (AGB)</h1>
+        <h1 className="text-3xl font-bold text-slate-900">Allgemeine Geschäftsbedingungen (AGB)</h1>
       </header>
 
       <section className="rounded-xl border border-slate-200 bg-white p-6 space-y-3 text-sm text-slate-700">
         <h2 className="font-semibold text-slate-900">1. Geltungsbereich</h2>
         <p>
-          Diese AGB regeln die Nutzung der Plattform durch Unternehmen und beruflich handelnde Personen.
+          Diese AGB regeln die Nutzung der Plattform durch Einzelpersonen, Unternehmen und beruflich handelnde Personen.
         </p>
 
         <h2 className="font-semibold text-slate-900">2. Anbieterin</h2>
@@ -36,7 +36,7 @@ export default function AgbPage() {
         <h2 className="font-semibold text-slate-900">5. Preise und Laufzeit</h2>
         <p>
           Preise, Leistungsumfang und Laufzeiten richten sich nach dem gewählten Plan.
-          Alle Preise verstehen sich exklusive gesetzlicher MWST, sofern nicht anders angegeben.
+          Alle Preise verstehen sich inklusive gesetzlicher MWST, sofern nicht anders angegeben.
         </p>
 
         <h2 className="font-semibold text-slate-900">5a. Lieferkonditionen</h2>
@@ -88,7 +88,7 @@ export default function AgbPage() {
         </p>
       </section>
 
-      <p className="text-xs text-slate-400">Stand: 29.03.2026</p>
+      <p className="text-xs text-slate-400">Stand: 16.04.2026</p>
     </div>
   );
 }

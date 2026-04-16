@@ -156,11 +156,6 @@ export function SearchClient({ initialCantons, initialStats, initialFilters }: S
         onToggleAlert={handleToggleAlert}
       />
 
-      {/* Ad card */}
-      <div className="px-4 py-2 bg-slate-50 border-b border-slate-100 shrink-0">
-        <BaloghAdCard className="max-w-xs" />
-      </div>
-
       {/* Table + preview (horizontal split) */}
       <div className="flex flex-1 overflow-hidden">
         {/* Table + pagination */}

@@ -70,7 +70,7 @@ const FEATURE_GROUPS: FeatureGroup[] = [
       {
         label: "Topup credit bonus",
         tip: "Extra credits granted on top of every credit purchase. E.g. Explorer buying 10,000 credits receives 1,500 bonus credits.",
-        values: ["None", "+10%", "+15%", "+20%", "+30%"],
+        values: ["None", "+5%", "+10%", "+15%", "+20%"],
       },
     ],
   },
@@ -139,10 +139,10 @@ const FEATURE_GROUPS: FeatureGroup[] = [
 
 const TIER_BONUS_RATE: Record<TierId, number> = {
   free: 0,
-  simple: 0.1,
-  explorer: 0.15,
-  researcher: 0.2,
-  strategist: 0.3,
+  simple: 0.05,
+  explorer: 0.10,
+  researcher: 0.15,
+  strategist: 0.20,
 };
 
 // ── Sub-components ─────────────────────────────────────────────────────────────
@@ -374,36 +374,6 @@ export function PricingClient() {
           </div>
         )}
 
-        {/* ── Consumption pricing ── */}
-        <div className="space-y-3">
-          <h2 className="text-xl font-semibold text-slate-900">Consumption pricing</h2>
-          <p className="text-sm text-slate-500 max-w-3xl">
-            Consumption actions use the same credit rates across every plan. Higher tiers only change what is included and how much bonus credit you receive on top-ups.
-          </p>
-          <div className="overflow-x-auto rounded-xl border border-slate-200 shadow-sm">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-slate-200 bg-slate-100">
-                  <th className="px-4 py-3 text-left font-semibold text-slate-600">Action</th>
-                  <th className="px-4 py-3 text-center font-semibold text-slate-600">Unit</th>
-                  <th className="px-4 py-3 text-center font-semibold text-slate-600">Credits</th>
-                  <th className="px-4 py-3 text-center font-semibold text-slate-600">CHF</th>
-                </tr>
-              </thead>
-              <tbody>
-                {CREDIT_ACTIONS.map((action, i) => (
-                  <tr key={action.label} className={`border-b border-slate-100 ${i % 2 === 0 ? "bg-white" : "bg-slate-50/50"}`}>
-                    <td className="px-4 py-3 text-slate-700 font-medium">{action.label}</td>
-                    <td className="px-4 py-3 text-center text-slate-500 text-xs">{action.unit}</td>
-                    <td className="px-4 py-3 text-center text-slate-700 font-semibold">{action.base.toLocaleString()}</td>
-                    <td className="px-4 py-3 text-center text-slate-600">{creditsToChf(action.base)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-
         {/* ── Feature comparison table ── */}
         <div className="space-y-3">
           <h2 className="text-xl font-semibold text-slate-900">Compare plans</h2>
@@ -419,7 +389,7 @@ export function PricingClient() {
                         "dark" in t && t.dark
                           ? "bg-slate-900 text-white"
                           : t.popular
-                          ? "bg-blue-50 text-blue-700"
+                          ? "bg-blue-50 text-blue-800"
                           : "text-slate-700"
                       }`}
                     >
@@ -455,7 +425,7 @@ export function PricingClient() {
                             <td
                               key={colIdx}
                               className={`px-3 py-3 text-center ${
-                                isDark ? "bg-slate-900" : tier.popular ? "bg-blue-50/40" : ""
+                                isDark ? "bg-slate-900" : tier.popular ? "bg-blue-100/40" : ""
                               }`}
                             >
                               <Cell value={val} dark={isDark} />
@@ -636,9 +606,6 @@ export function PricingClient() {
             </div>
           </div>
           <div className="flex flex-wrap items-center justify-between gap-3">
-            <p className="text-xs text-slate-400">
-              The buttons above start a live checkout for the selected tier so you can verify the browser return flow.
-            </p>
             {process.env.NODE_ENV !== "production" && (
               <a
                 href="/app/dev/billing"
@@ -652,7 +619,7 @@ export function PricingClient() {
 
         {/* ── Footer note ── */}
         <p className="text-center text-xs text-slate-400 pb-4">
-          All prices in CHF (Swiss francs) excluding VAT. Yearly billing charged as a single annual payment. Credits are shared across your organization.
+          All prices in CHF (Swiss francs) including VAT. Yearly billing charged as a single annual payment. Credits are shared across your organization.
         </p>
 
       </div>

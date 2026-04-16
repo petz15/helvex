@@ -65,7 +65,7 @@ DEFAULT_BILLING_TIERS: list[dict[str, object]] = [
         "description": "For individuals who need a clean workspace without ads.",
         "monthly_price_chf": 6.0,
         "yearly_multiplier": 10.0,
-        "topup_bonus_rate": 0.10,
+        "topup_bonus_rate": 0.05,
         "sort_order": 1,
         "is_active": True,
         "is_public": True,
@@ -77,7 +77,7 @@ DEFAULT_BILLING_TIERS: list[dict[str, object]] = [
         "description": "Immediate LLM scoring and automated flex rescoring.",
         "monthly_price_chf": 12.0,
         "yearly_multiplier": 10.0,
-        "topup_bonus_rate": 0.15,
+        "topup_bonus_rate": 0.10,
         "sort_order": 2,
         "is_active": True,
         "is_public": True,
@@ -89,7 +89,7 @@ DEFAULT_BILLING_TIERS: list[dict[str, object]] = [
         "description": "Full LLM auto-scoring and custom ML stopwords.",
         "monthly_price_chf": 17.0,
         "yearly_multiplier": 10.0,
-        "topup_bonus_rate": 0.20,
+        "topup_bonus_rate": 0.15,
         "sort_order": 3,
         "is_active": True,
         "is_public": True,
@@ -101,7 +101,7 @@ DEFAULT_BILLING_TIERS: list[dict[str, object]] = [
         "description": "Highest priority, BYO keys, and future API access.",
         "monthly_price_chf": 37.0,
         "yearly_multiplier": 10.0,
-        "topup_bonus_rate": 0.30,
+        "topup_bonus_rate": 0.20,
         "sort_order": 4,
         "is_active": True,
         "is_public": True,
@@ -274,10 +274,10 @@ QUEUE_PRIORITY: dict[str, int] = {
 #: E.g. simple=0.10 means buying 10,000 credits grants 1,000 bonus credits on top.
 BONUS_RATE: dict[str, float] = {
     "free": 0.0,
-    "simple": 0.10,
-    "explorer": 0.15,
-    "researcher": 0.20,
-    "strategist": 0.30,
+    "simple": 0.05,
+    "explorer": 0.10,
+    "researcher": 0.15,
+    "strategist": 0.20,
     "superadmin": 0.0,  # superadmin orgs use credits_unlimited instead
     # custom: bonus_steps * 0.05, capped at 0.40
 }
