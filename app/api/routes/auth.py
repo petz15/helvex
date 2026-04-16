@@ -598,6 +598,7 @@ async def google_callback(
     user = _crud.get_or_create_oauth_user(db, provider="google", provider_user_id=provider_user_id, email=email)
     logger.info("auth.google_oauth_ok user_id=%s email=%r", user.id, user.email)
     log_activity(db, action="user_login", user_id=user.id, org_id=user.org_id, meta={"method": "google"}, ip=get_client_ip(request))
+    db.commit()
 
     forwarded_proto = request.headers.get("x-forwarded-proto", "")
     is_https = request.url.scheme == "https" or forwarded_proto.split(",")[0].strip().lower() == "https"
@@ -684,6 +685,7 @@ async def linkedin_callback(
     user = _crud.get_or_create_oauth_user(db, provider="linkedin", provider_user_id=provider_user_id, email=email)
     logger.info("auth.linkedin_oauth_ok user_id=%s email=%r", user.id, user.email)
     log_activity(db, action="user_login", user_id=user.id, org_id=user.org_id, meta={"method": "linkedin"}, ip=get_client_ip(request))
+    db.commit()
 
     forwarded_proto = request.headers.get("x-forwarded-proto", "")
     is_https = request.url.scheme == "https" or forwarded_proto.split(",")[0].strip().lower() == "https"

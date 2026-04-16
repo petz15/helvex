@@ -1286,6 +1286,8 @@ def _maybe_send_job_notification(
             return
         from app.services import email as _email
         if event == "completed" and job.job_type == "csv_export":
+            if get_effective_setting(db, "notif_export_ready", org_id=job.org_id, default="1") != "1":
+                return
             _s = stats or {}
             _email.send_export_ready(
                 to=user.email,
@@ -1294,6 +1296,8 @@ def _maybe_send_job_notification(
                 download_url=_s.get("download_url") or "",
             )
         elif event == "failed":
+            if get_effective_setting(db, "notif_job_failed", org_id=job.org_id, default="1") != "1":
+                return
             _email.send_job_failed(
                 to=user.email,
                 job_type=job.job_type,

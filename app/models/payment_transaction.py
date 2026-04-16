@@ -55,6 +55,7 @@ class PaymentTransaction(Base):
     # For subscriptions
     subscription_tier: Mapped[str | None] = mapped_column(String(20), nullable=True)
     subscription_billing_cycle: Mapped[str | None] = mapped_column(String(10), nullable=True)  # "monthly" or "yearly"
+    upgrade_proration_credits: Mapped[int | None] = mapped_column(BigInteger, nullable=True)  # credits to grant on capture for plan upgrades
 
     # For topups
     credits_purchased: Mapped[int | None] = mapped_column(BigInteger, nullable=True)

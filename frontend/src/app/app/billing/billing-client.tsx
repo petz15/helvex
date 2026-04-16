@@ -1,7 +1,7 @@
 "use client";
 import { useState, useEffect } from "react";
 import useSWR from "swr";
-import { ChevronLeft, ChevronRight, CreditCard, Zap, TrendingUp, ArrowUpRight, Loader2, AlertTriangle, BarChart2 } from "lucide-react";
+import { ChevronLeft, ChevronRight, CreditCard, Zap, TrendingUp, ArrowUpRight, Loader2, AlertTriangle, BarChart2, ChevronDown } from "lucide-react";
 import Link from "next/link";
 import {
   fetchCurrentUser,
@@ -24,8 +24,10 @@ import {
   type CreditTransaction,
   type CreditUsage,
   type PaymentRecord,
+  type NotificationPreferences,
 } from "@/lib/api";
 import { creditsToChf } from "@/lib/entitlements";
+import { CREDIT_ACTIONS, creditsToChf as fmtCreditsToChf } from "@/lib/marketing-data";
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -55,20 +57,24 @@ const STATUS_CLS: Record<string, string> = {
 };
 
 const TOPUP_AMOUNTS = [
-  { credits: 10_000, label: "10,000", chf: "CHF 1.00" },
-  { credits: 50_000, label: "50,000", chf: "CHF 5.00" },
-  { credits: 100_000, label: "100,000", chf: "CHF 10.00" },
-  { credits: 500_000, label: "500,000", chf: "CHF 50.00" },
+  { credits: 10_000, label: "10000", chf: "CHF 1.00" },
+  { credits: 50_000, label: "50000", chf: "CHF 5.00" },
+  { credits: 100_000, label: "100000", chf: "CHF 10.00" },
+  { credits: 500_000, label: "500000", chf: "CHF 50.00" },
 ];
 
 function fmtDate(iso: string) {
   return new Date(iso).toLocaleDateString("en-CH", { day: "2-digit", month: "short", year: "numeric" });
 }
 
+function fmtNum(n: number): string {
+  return Math.trunc(n).toString().replace(/\B(?=(\d{3})+(?!\d))/g, " ");
+}
+
 function fmtCredits(n: number) {
   const abs = Math.abs(n);
   const sign = n > 0 ? "+" : n < 0 ? "−" : "";
-  return `${sign}${abs.toLocaleString()}`;
+  return `${sign}${fmtNum(abs)}`;
 }
 
 const ACTION_LABELS: Record<string, string> = {
@@ -80,6 +86,51 @@ const ACTION_LABELS: Record<string, string> = {
   bulk_export_basic:  "Export (basic)",
   bulk_export_detail: "Export (detailed)",
 };
+
+function ConsumptionPricesSection() {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="rounded-xl border border-slate-200 bg-white overflow-hidden">
+      <button
+        onClick={() => setOpen((v) => !v)}
+        className="w-full flex items-center justify-between px-4 py-3 text-sm font-medium text-slate-800 hover:bg-slate-50 transition-colors"
+      >
+        <span className="flex items-center gap-1.5">
+          <Zap size={14} className="text-amber-400" />
+          Consumption prices
+        </span>
+        <ChevronDown size={14} className={`text-slate-400 transition-transform ${open ? "rotate-180" : ""}`} />
+      </button>
+      {open && (
+        <div className="border-t border-slate-100">
+          <p className="px-4 pt-3 pb-1 text-xs text-slate-400">
+            1 credit = CHF 0.0001. Credits are deducted at full base cost per action regardless of tier.
+          </p>
+          <table className="w-full text-sm">
+            <thead className="bg-slate-50">
+              <tr>
+                <th className="text-left px-4 py-2 text-xs text-slate-400 font-medium">Action</th>
+                <th className="text-center px-4 py-2 text-xs text-slate-400 font-medium">Unit</th>
+                <th className="text-right px-4 py-2 text-xs text-slate-400 font-medium">Credits</th>
+                <th className="text-right px-4 py-2 text-xs text-slate-400 font-medium">CHF</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-50">
+              {CREDIT_ACTIONS.map((action) => (
+                <tr key={action.label} className="hover:bg-slate-50 transition-colors">
+                  <td className="px-4 py-2.5 text-xs text-slate-700 font-medium">{action.label}</td>
+                  <td className="px-4 py-2.5 text-center text-xs text-slate-400">{action.unit}</td>
+                  <td className="px-4 py-2.5 text-right text-xs font-semibold text-slate-700 tabular-nums">{fmtNum(action.base)}</td>
+                  <td className="px-4 py-2.5 text-right text-xs text-slate-500 tabular-nums">{fmtCreditsToChf(action.base)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
 
 function CreditUsageSection() {
   const [days, setDays] = useState(30);
@@ -119,15 +170,15 @@ function CreditUsageSection() {
           <div className="grid grid-cols-3 divide-x divide-slate-100 border-b border-slate-100 text-center">
             <div className="px-4 py-3">
               <p className="text-xs text-slate-400">Spent</p>
-              <p className="text-lg font-semibold text-slate-800">{data.total_spent.toLocaleString()}</p>
+              <p className="text-lg font-semibold text-slate-800">{fmtNum(data.total_spent)}</p>
             </div>
             <div className="px-4 py-3">
               <p className="text-xs text-slate-400">Refunded</p>
-              <p className="text-lg font-semibold text-emerald-600">+{data.total_refunded.toLocaleString()}</p>
+              <p className="text-lg font-semibold text-emerald-600">+{fmtNum(data.total_refunded)}</p>
             </div>
             <div className="px-4 py-3">
               <p className="text-xs text-slate-400">Net</p>
-              <p className="text-lg font-semibold text-slate-800">{data.net_spent.toLocaleString()}</p>
+              <p className="text-lg font-semibold text-slate-800">{fmtNum(data.net_spent)}</p>
             </div>
           </div>
 
@@ -137,7 +188,7 @@ function CreditUsageSection() {
                 <div key={action}>
                   <div className="flex items-center justify-between text-xs mb-1">
                     <span className="text-slate-600">{ACTION_LABELS[action] ?? action}</span>
-                    <span className="text-slate-500 tabular-nums">{v.net.toLocaleString()} cr · {v.transactions} tx</span>
+                    <span className="text-slate-500 tabular-nums">{fmtNum(v.net)} cr · {v.transactions} tx</span>
                   </div>
                   <div className="h-1.5 bg-slate-100 rounded-full overflow-hidden">
                     <div
@@ -157,44 +208,82 @@ function CreditUsageSection() {
   );
 }
 
+const NOTIF_ITEMS: { key: keyof NotificationPreferences; label: string; description: string }[] = [
+  { key: "notif_low_credit",   label: "Low credit balance",   description: "Alert when your credit balance drops below the threshold." },
+  { key: "notif_export_ready", label: "Export completed",     description: "Notify when a CSV export finishes and is ready to download." },
+  { key: "notif_job_failed",   label: "Job failed",           description: "Notify when a background job encounters an error." },
+  { key: "notif_saved_view",   label: "Saved search matches", description: "Alert when new companies match a saved search." },
+];
+
+function Toggle({ checked, onChange, disabled }: { checked: boolean; onChange: () => void; disabled: boolean }) {
+  return (
+    <button
+      onClick={onChange}
+      disabled={disabled}
+      className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 focus:outline-none disabled:opacity-50 ${
+        checked ? "bg-blue-600" : "bg-slate-200"
+      }`}
+      role="switch"
+      aria-checked={checked}
+    >
+      <span
+        className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition duration-200 ${
+          checked ? "translate-x-4" : "translate-x-0"
+        }`}
+      />
+    </button>
+  );
+}
+
 function NotificationSection({ orgId }: { orgId: number }) {
   const { data, mutate } = useSWR(`notifications-${orgId}`, () => fetchNotificationPreferences(orgId));
   const [saving, setSaving] = useState(false);
 
-  async function handleToggle() {
+  async function handleChange(patch: Partial<NotificationPreferences>) {
     if (!data) return;
+    const next: NotificationPreferences = { ...data, ...patch };
     setSaving(true);
     try {
-      const updated = await updateNotificationPreferences(orgId, { email_notifications: !data.email_notifications });
+      const updated = await updateNotificationPreferences(orgId, next);
       void mutate(updated, false);
     } finally {
       setSaving(false);
     }
   }
 
+  const masterOn = data?.email_notifications ?? true;
+
   return (
-    <div className="rounded-xl border border-slate-200 bg-white px-4 py-3 flex items-center justify-between">
-      <div>
-        <p className="text-sm font-medium text-slate-800">Email notifications</p>
-        <p className="text-xs text-slate-400 mt-0.5">
-          Receive emails for low-credit alerts, completed exports, and failed jobs.
-        </p>
-      </div>
-      <button
-        onClick={handleToggle}
-        disabled={saving || !data}
-        className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 focus:outline-none disabled:opacity-50 ${
-          data?.email_notifications ? "bg-blue-600" : "bg-slate-200"
-        }`}
-        role="switch"
-        aria-checked={data?.email_notifications ?? true}
-      >
-        <span
-          className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition duration-200 ${
-            data?.email_notifications ? "translate-x-4" : "translate-x-0"
-          }`}
+    <div className="rounded-xl border border-slate-200 bg-white divide-y divide-slate-100">
+      {/* Master toggle */}
+      <div className="px-4 py-3 flex items-center justify-between">
+        <div>
+          <p className="text-sm font-medium text-slate-800">Email notifications</p>
+          <p className="text-xs text-slate-400 mt-0.5">
+            Turn off to stop all notification emails from Helvex.
+          </p>
+        </div>
+        <Toggle
+          checked={masterOn}
+          onChange={() => handleChange({ email_notifications: !masterOn })}
+          disabled={saving || !data}
         />
-      </button>
+      </div>
+
+      {/* Per-type toggles — only shown when master is on */}
+      {masterOn && NOTIF_ITEMS.map(({ key, label, description }) => (
+        <div key={key} className="px-4 py-3 flex items-center justify-between pl-7">
+          <div>
+            <p className="text-sm text-slate-700">{label}</p>
+            <p className="text-xs text-slate-400 mt-0.5">{description}</p>
+          </div>
+          <Toggle
+            checked={data ? (data[key] as boolean) : true}
+            onChange={() => handleChange({ [key]: !(data?.[key] ?? true) })}
+            disabled={saving || !data}
+          />
+        </div>
+      ))}
     </div>
   );
 }
@@ -264,7 +353,7 @@ function SummaryCards({ balance, tier, billingCycle, periodEnd, cancelAtPeriodEn
           <div className="flex items-center gap-2 text-xs text-slate-400 font-medium uppercase tracking-wide">
             <Zap size={12} className="text-amber-400" />Credit balance
           </div>
-          <div className="mt-2 text-3xl font-bold text-slate-900">{balance.toLocaleString()}</div>
+          <div className="mt-2 text-3xl font-bold text-slate-900">{fmtNum(balance)}</div>
           <div className="mt-0.5 text-sm text-slate-400">
             ≈ CHF {creditsToChf(balance).toFixed(2)}
           </div>
@@ -398,7 +487,7 @@ function TopupSection() {
   return (
     <div className="rounded-2xl border border-slate-200 bg-white p-5">
       <h2 className="text-sm font-semibold text-slate-700">Top up credits</h2>
-      <p className="text-xs text-slate-400 mt-0.5 mb-4">Credits never expire. Higher tiers receive bonus credits on every purchase.</p>
+      <p className="text-xs text-slate-400 mt-0.5 mb-4">Higher tiers receive bonus credits on every purchase.</p>
 
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
         {TOPUP_AMOUNTS.map(({ credits, label, chf }) => (
@@ -420,7 +509,7 @@ function TopupSection() {
             <span className="block text-xs uppercase tracking-wide text-slate-400 font-semibold">Custom amount</span>
             <input
               type="number"
-              min={100}
+              min={10000}
               step={1}
               value={customCreditsInput}
               onChange={(e) => setCustomCreditsInput(e.target.value)}
@@ -429,7 +518,7 @@ function TopupSection() {
             />
           </label>
           <div className="text-xs text-slate-500 sm:min-w-40">
-            {customCreditsValid ? `≈ CHF ${creditsToChf(customCredits).toFixed(2)}` : "Minimum is 100 credits."}
+            {customCreditsValid ? `≈ CHF ${creditsToChf(customCredits).toFixed(2)}` : "Minimum is 10000 credits."}
           </div>
           <button
             onClick={() => goToPayment(customCredits)}
@@ -647,7 +736,7 @@ function CreditHistory() {
                     {fmtCredits(tx.amount)}
                   </td>
                   <td className="px-4 py-2.5 text-right text-xs text-slate-400 tabular-nums">
-                    {tx.credits_after.toLocaleString()}
+                    {fmtNum(tx.credits_after)}
                   </td>
                 </tr>
               );
@@ -728,7 +817,7 @@ function PaymentHistory() {
                   {tx.kind === "subscription"
                     ? <span className="capitalize">{tx.subscription_tier ?? "?"} · {tx.subscription_billing_cycle ?? "?"}</span>
                     : tx.credits_total_granted
-                      ? <span>{tx.credits_total_granted.toLocaleString()} credits{tx.credits_bonus ? <span className="text-emerald-500 ml-1">(+{tx.credits_bonus.toLocaleString()} bonus)</span> : null}</span>
+                      ? <span>{fmtNum(tx.credits_total_granted)} credits{tx.credits_bonus ? <span className="text-emerald-500 ml-1">(+{fmtNum(tx.credits_bonus)} bonus)</span> : null}</span>
                       : "—"
                   }
                 </td>
@@ -818,7 +907,16 @@ export function BillingClient() {
     const saved = params.get("saved") === "1";
     const alreadyProcessed = params.get("already_processed") === "true";
 
-    if (!checkout && !alreadyProcessed && !reason && !saved) return;
+    const downgradeScheduled = params.get("downgrade_scheduled") === "1";
+
+    if (!checkout && !alreadyProcessed && !reason && !saved && !downgradeScheduled) return;
+
+    if (downgradeScheduled) {
+      setReturnBanner({ kind: "success", message: "Downgrade scheduled. Your plan will switch at the end of the current billing period." });
+      void mutateSummary();
+      window.history.replaceState({}, "", window.location.pathname);
+      return;
+    }
 
     if (alreadyProcessed) {
       setReturnBanner({ kind: "success", message: "This payment was already processed. No changes were applied twice." });
@@ -830,7 +928,7 @@ export function BillingClient() {
       if (kind === "topup") {
         setReturnBanner({
           kind: "success",
-          message: `Top-up successful! ${credits ? `${Number(credits).toLocaleString()} credits` : "Credits"} added to your balance.`,
+          message: `Top-up successful! ${credits ? `${fmtNum(Number(credits))} credits` : "Credits"} added to your balance.`,
         });
         void mutateSummary();
       } else if (kind === "subscription") {
@@ -903,6 +1001,7 @@ export function BillingClient() {
       )}
 
       <div id="topup-section"><TopupSection /></div>
+      <ConsumptionPricesSection />
       {summary && (
         <SavedCardSection billingAddress={billingAddress} hasSavedPaymentMethod={summary.has_saved_payment_method} />
       )}

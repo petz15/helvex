@@ -33,7 +33,7 @@ from app.models.payment_transaction import PaymentTransaction
 from app.models.user import User
 from app.schemas.billing import BillingAddress, BillingTierRead
 from app.services.billing_addresses import get_default_billing_address
-from app.services import credits as credits_service, payment_transactions, payments
+from app.services import payment_transactions, payments
 from app.services.tiers import (
     TIER_RANK,
     get_billing_tier_by_slug,
@@ -54,6 +54,7 @@ class SubscriptionCheckoutRequest(BaseModel):
     billing_address: BillingAddress | None = None
     save_payment_method: bool = False
     provider: Literal["worldline", "stripe"] | None = None
+    upgrade_proration_credits: int | None = None
 
 
 class TopupCheckoutRequest(BaseModel):
@@ -283,6 +284,7 @@ def create_subscription_checkout(
                     status="pending",
                     subscription_tier=body.tier,
                     subscription_billing_cycle=body.billing_cycle,
+                    upgrade_proration_credits=body.upgrade_proration_credits,
                     billing_address=json.dumps(billing_address),
                 )
             except payment_transactions.DuplicatePaymentError:
@@ -951,6 +953,7 @@ def get_billing_summary(
         "billing_cycle": org.subscription_billing_cycle,
         "subscription_period_end": org.subscription_period_end.isoformat() if org.subscription_period_end else None,
         "subscription_cancel_at_period_end": bool(getattr(org, "subscription_cancel_at_period_end", False)),
+        "pending_downgrade_tier": getattr(org, "pending_downgrade_tier", None),
         "credits_balance": org.credits_balance,
         "credits_balance_chf": round(org.credits_balance * 0.0001, 4),
         "has_saved_payment_method": bool(_resolve_worldline_payment_alias(db, org, user)),
@@ -1175,8 +1178,50 @@ def reactivate_subscription(
     if getattr(org, "tier", "free") == "free":
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Organization is on the free tier")
     org.subscription_cancel_at_period_end = False
+    org.pending_downgrade_tier = None
     db.commit()
     logger.info("billing.subscription_reactivated org_id=%s tier=%s", org.id, org.tier)
+    return WebhookResponse(ok=True)
+
+
+class ScheduleDowngradeRequest(BaseModel):
+    tier: str
+
+
+@router.post("/subscription/schedule-downgrade", response_model=WebhookResponse)
+def schedule_downgrade(
+    body: ScheduleDowngradeRequest,
+    user_org: tuple[User, object] = Depends(require_org_role("admin", "owner")),
+    db: Session = Depends(get_db),
+) -> WebhookResponse:
+    """Schedule a downgrade to a lower tier at the end of the current billing period.
+
+    The org keeps its current tier and access until subscription_period_end.
+    The nightly billing_renewal job will then switch to the requested tier (charging
+    for its first period) instead of dropping to free.
+    """
+    _user, org = user_org
+    current_tier = normalize_tier(getattr(org, "tier", "free"))
+    target_tier = normalize_tier(body.tier)
+
+    if current_tier == "free":
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No active paid subscription")
+    if TIER_RANK.get(target_tier, 0) >= TIER_RANK.get(current_tier, 0):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Target tier must be lower than current tier")
+    if getattr(org, "subscription_cancel_at_period_end", False):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Subscription is already scheduled for cancellation")
+
+    if not org.subscription_period_end:
+        org.subscription_period_end = datetime.now(tz=timezone.utc)
+
+    org.subscription_cancel_at_period_end = True
+    org.pending_downgrade_tier = target_tier
+    db.commit()
+    logger.info(
+        "billing.downgrade_scheduled org_id=%s current_tier=%s target_tier=%s period_end=%s",
+        org.id, current_tier, target_tier,
+        org.subscription_period_end.isoformat() if org.subscription_period_end else "None",
+    )
     return WebhookResponse(ok=True)
 
 
@@ -1188,11 +1233,15 @@ class UpgradeProrationResponse(BaseModel):
 
 
 @router.post("/subscription/upgrade-proration", response_model=UpgradeProrationResponse)
-def grant_upgrade_proration(
+def calculate_upgrade_proration(
     user_org: tuple[User, object] = Depends(require_org_role("admin", "owner")),
     db: Session = Depends(get_db),
 ) -> UpgradeProrationResponse:
-    """Calculate and grant proration credits for upgrading from the current plan.
+    """Calculate proration credits for upgrading from the current plan.
+
+    Returns the amount that will be granted once the upgrade payment is captured.
+    Credits are NOT granted here — they are granted in apply_successful_payment
+    after a confirmed subscription payment with upgrade_proration_credits set.
 
     Formula: int((plan_cost_chf / 50) * remaining_days) * 10_000 credits.
     Only valid when the org has an active paid subscription that is not
@@ -1221,20 +1270,10 @@ def grant_upgrade_proration(
     )
 
     credits_granted = int((plan_cost_chf / 50) * remaining_days * 10_000)
-    if credits_granted > 0:
-        credits_service.grant_credits(
-            db,
-            org_id=org.id,
-            amount=credits_granted,
-            tx_type="grant",
-            action_type="upgrade_proration",
-            reference_id=f"upgrade_proration_{org.id}_{now.strftime('%Y%m%d')}",
-        )
-        db.commit()
-        logger.info(
-            "billing.upgrade_proration_granted org_id=%s tier=%s remaining_days=%s credits=%s",
-            org.id, current_tier, remaining_days, credits_granted,
-        )
+    logger.info(
+        "billing.upgrade_proration_calculated org_id=%s tier=%s remaining_days=%s credits=%s",
+        org.id, current_tier, remaining_days, credits_granted,
+    )
 
     return UpgradeProrationResponse(
         credits_granted=credits_granted,

@@ -38,9 +38,6 @@
 - categories:
     - showing weird numbers
     - all users should see purpose ekywords, clusters and noga classifications in the category overview
-- shab: 
-    - not running correctly -> worked now. check how deleted, edited, and new is handled before importing the whole history
-    - how to display to users? -> should be done now
 - billing/payment/pricing
     - save card not working -> still not working
     - existing subscription then upgrading is not working
@@ -79,6 +76,7 @@
 - [ ] **More pages(?)** - (?)
 - [ ] **Remove default flex score and categories** - Remove my default flex scores and categories only 
 - [ ] **ML Classifications** - Not sure that all of them are implemented quite correctly also explanations, drawbacks, multi org support for different tiers needs to be implemented, etc. 
+- [ ] **Create a mutation Timeline page** - A place where users can scroll through the daily company mutations with filters. Basically the company data but sorted by date instead of grouped by company and displayed on individual pages. This will probably require some preprocessing and then daily processing. 
 
 
 ## Company Data

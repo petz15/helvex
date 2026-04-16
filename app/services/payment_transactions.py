@@ -140,6 +140,7 @@ def log_payment_transaction(
     billing_address: str | None = None,
     subscription_tier: str | None = None,
     subscription_billing_cycle: str | None = None,
+    upgrade_proration_credits: int | None = None,
     credits_purchased: int | None = None,
     credits_bonus: int | None = None,
     credits_total_granted: int | None = None,
@@ -208,6 +209,7 @@ def log_payment_transaction(
         billing_address=billing_address,
         subscription_tier=subscription_tier,
         subscription_billing_cycle=subscription_billing_cycle,
+        upgrade_proration_credits=upgrade_proration_credits,
         credits_purchased=credits_purchased,
         credits_bonus=credits_bonus,
         credits_total_granted=credits_total_granted,
@@ -364,6 +366,22 @@ def apply_successful_payment(
                 month = (month - 1) % 12 + 1
                 org.subscription_period_end = now.replace(year=year, month=month)
             org.subscription_cancel_at_period_end = False
+
+            # Grant upgrade proration credits now that payment is confirmed.
+            proration = payment_tx.upgrade_proration_credits
+            if proration and proration > 0:
+                credits.grant_credits(
+                    db,
+                    org_id=payment_tx.org_id,
+                    amount=proration,
+                    tx_type="grant",
+                    action_type="upgrade_proration",
+                    reference_id=f"upgrade_proration_{payment_tx.org_id}_{payment_tx.id}",
+                )
+                logger.info(
+                    "payment_tx.upgrade_proration_granted tx_id=%s org_id=%s credits=%s",
+                    payment_tx.id, payment_tx.org_id, proration,
+                )
 
         elif payment_tx.kind == "topup":
             # Grant credits

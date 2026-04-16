@@ -204,6 +204,8 @@ def _send_low_credit_email(
         from app.crud.app_setting import get_effective_setting
         if get_effective_setting(db, "email_notifications", org_id=org_id, default="1") != "1":
             return
+        if get_effective_setting(db, "notif_low_credit", org_id=org_id, default="1") != "1":
+            return
         from app.models.organization import Organization
         from app.models.user import User
         org = db.get(Organization, org_id)

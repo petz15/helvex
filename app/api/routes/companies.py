@@ -2,7 +2,7 @@
 
 import json
 import math
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel
@@ -29,7 +29,7 @@ from app.services import credits as credits_service
 from app.services.activity import log_activity
 from app.services.collection import enrich_company_website
 from app.services.scoring import is_social_lead_domain
-from app.services.tiers import get_export_limit
+from app.services.tiers import get_export_limit, get_web_results_privacy_months, normalize_tier, TIER_RANK
 
 router = APIRouter(prefix="/companies", tags=["companies"])
 
@@ -68,6 +68,48 @@ def _bulk_org_states(db: Session, company_ids: list[int], org_id: int | None) ->
         OrgCompanyState.company_id.in_(company_ids),
     ).all()
     return {r.company_id: r for r in rows}
+
+
+_WEB_RESULT_FIELDS = ("website_url", "web_score", "google_search_results_raw")
+
+
+def _apply_web_results_gate(company: CompanyRead, org: Organization | None, is_superadmin: bool) -> CompanyRead:
+    """Mask web-search result fields based on the org's tier and the privacy window.
+
+    - Superadmin: always visible.
+    - Free tier: always masked.
+    - Simple tier (rank 1): visible only if website_checked_at is older than the
+      privacy window (~1 week).  Fresh results stay hidden.
+    - Explorer+ (rank >= 2): always visible — higher tiers see results immediately.
+    """
+    if is_superadmin:
+        return company
+    if org is None:
+        return company.model_copy(update={f: None for f in _WEB_RESULT_FIELDS})
+
+    tier = normalize_tier(org.tier)
+    rank = TIER_RANK.get(tier, 0)
+
+    if rank == 0:
+        # Free tier: no web results
+        return company.model_copy(update={f: None for f in _WEB_RESULT_FIELDS})
+
+    if rank >= 2:
+        # Explorer and above: always visible
+        return company
+
+    # Simple tier: apply the privacy window
+    privacy_months = get_web_results_privacy_months(org)
+    if privacy_months > 0 and company.website_checked_at is not None:
+        cutoff = datetime.now(tz=timezone.utc) - timedelta(days=privacy_months * 30)
+        checked_at = company.website_checked_at
+        if checked_at.tzinfo is None:
+            checked_at = checked_at.replace(tzinfo=timezone.utc)
+        if checked_at > cutoff:
+            # Results are still within the privacy window — mask them
+            return company.model_copy(update={f: None for f in _WEB_RESULT_FIELDS})
+
+    return company
 
 
 # ---------------------------------------------------------------------------
@@ -503,6 +545,7 @@ def list_companies(
     )
     total = crud.count_companies(db, **filter_kwargs)
     items = crud.list_companies(db, page=page, page_size=page_size, sort=sort, **filter_kwargs)
+    org: Organization | None = db.get(Organization, current_user.org_id) if current_user.org_id else None
     if current_user.org_id:
         ids = [c.id for c in items]
         org_states = _bulk_org_states(db, ids, current_user.org_id)
@@ -511,6 +554,7 @@ def list_companies(
         w_web = float(_eff("scoring_weight_web", "0.20"))
         w_flex = float(_eff("scoring_weight_flex", "0.10"))
         items = [_overlay(c, org_states.get(c.id), w_ai=w_ai, w_web=w_web, w_flex=w_flex) for c in items]
+    items = [_apply_web_results_gate(c if isinstance(c, CompanyRead) else _overlay(c, None), org, current_user.is_superadmin) for c in items]
     return CompanyPage(
         items=items,
         total=total,
@@ -726,7 +770,9 @@ def get_company(
     )
     db.commit()
     result = _overlay(db_company, org_state)
-    return result.model_copy(update={"notes": [NoteRead.model_validate(n) for n in scoped_notes]})
+    result = result.model_copy(update={"notes": [NoteRead.model_validate(n) for n in scoped_notes]})
+    org: Organization | None = db.get(Organization, current_user.org_id) if current_user.org_id else None
+    return _apply_web_results_gate(result, org, current_user.is_superadmin)
 
 
 @router.patch("/{company_id}", response_model=CompanyRead, summary="Update company")

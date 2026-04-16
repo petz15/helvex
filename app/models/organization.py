@@ -55,6 +55,9 @@ class Organization(Base):
     # Set to True when the customer requests cancellation; tier is downgraded by the
     # nightly billing_renewal job once subscription_period_end is reached.
     subscription_cancel_at_period_end: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    # If set, the nightly job switches to this tier instead of "free" when the period ends.
+    # Used for scheduled downgrades ("downgrade at end of period").
+    pending_downgrade_tier: Mapped[str | None] = mapped_column(String(20), nullable=True)
     # Saferpay Transaction.Id from the initial subscription payment, used as
     # reference for all subsequent AuthorizeReferenced recurring charges.
     recurring_transaction_id: Mapped[str | None] = mapped_column(String(255), nullable=True)

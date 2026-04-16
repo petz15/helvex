@@ -808,8 +808,22 @@ def delete_org_setting(
 
 # ── Email notification preferences ────────────────────────────────────────────
 
+# Keys used in org_settings for granular notification control.
+_NOTIF_KEYS = {
+    "email_notifications",   # master on/off
+    "notif_low_credit",      # low-credit balance alert
+    "notif_export_ready",    # CSV export completed
+    "notif_job_failed",      # background job failed
+    "notif_saved_view",      # new companies match a saved search
+}
+
+
 class NotificationPreferences(BaseModel):
     email_notifications: bool
+    notif_low_credit: bool = True
+    notif_export_ready: bool = True
+    notif_job_failed: bool = True
+    notif_saved_view: bool = True
 
 
 @router.get(
@@ -824,8 +838,13 @@ def get_notification_preferences(
     _validate_org_access(org_id, user_org)
     _, org = user_org
     from app.crud.app_setting import get_effective_setting
-    val = get_effective_setting(db, "email_notifications", org_id=org.id, default="1")
-    return {"email_notifications": val != "0"}
+    return {
+        "email_notifications": get_effective_setting(db, "email_notifications", org_id=org.id, default="1") != "0",
+        "notif_low_credit":    get_effective_setting(db, "notif_low_credit",    org_id=org.id, default="1") != "0",
+        "notif_export_ready":  get_effective_setting(db, "notif_export_ready",  org_id=org.id, default="1") != "0",
+        "notif_job_failed":    get_effective_setting(db, "notif_job_failed",    org_id=org.id, default="1") != "0",
+        "notif_saved_view":    get_effective_setting(db, "notif_saved_view",    org_id=org.id, default="1") != "0",
+    }
 
 
 @router.patch(
@@ -841,5 +860,14 @@ def update_notification_preferences(
     _validate_org_access(org_id, user_org)
     _, org = user_org
     from app.crud.app_setting import set_org_setting as _set_org_setting
-    _set_org_setting(db, org_id=org.id, key="email_notifications", value="1" if body.email_notifications else "0")
-    return {"email_notifications": body.email_notifications}
+
+    def _v(flag: bool) -> str:
+        return "1" if flag else "0"
+
+    _set_org_setting(db, org_id=org.id, key="email_notifications", value=_v(body.email_notifications))
+    _set_org_setting(db, org_id=org.id, key="notif_low_credit",    value=_v(body.notif_low_credit))
+    _set_org_setting(db, org_id=org.id, key="notif_export_ready",  value=_v(body.notif_export_ready))
+    _set_org_setting(db, org_id=org.id, key="notif_job_failed",    value=_v(body.notif_job_failed))
+    _set_org_setting(db, org_id=org.id, key="notif_saved_view",    value=_v(body.notif_saved_view))
+
+    return body.model_dump()

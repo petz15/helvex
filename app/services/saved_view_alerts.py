@@ -101,6 +101,8 @@ def _check_view(db: Session, view: "Any", stats: dict[str, Any]) -> None:
     # Respect org-level email opt-out
     if get_effective_setting(db, "email_notifications", org_id=user.org_id, default="1") != "1":
         return
+    if get_effective_setting(db, "notif_saved_view", org_id=user.org_id, default="1") != "1":
+        return
 
     filters = json.loads(view.filters_json or "{}")
     kwargs = {

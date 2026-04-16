@@ -155,20 +155,39 @@ def run_billing_renewal(db: Session) -> dict[str, Any]:
         tier = org.tier
         cycle = org.subscription_billing_cycle or "monthly"
 
-        # --- Cancel-at-period-end: downgrade to free ---
+        # --- Cancel-at-period-end ---
         if org.subscription_cancel_at_period_end:
-            logger.info(
-                "billing_renewal.cancel org_id=%s tier=%s cycle=%s period_end=%s",
-                org_id, tier, cycle,
-                org.subscription_period_end.isoformat() if org.subscription_period_end else "None",
-            )
-            org.tier = "free"
-            org.subscription_billing_cycle = "monthly"
-            org.subscription_period_end = None
-            org.subscription_cancel_at_period_end = False
-            db.commit()
-            stats["cancelled"] += 1
-            continue
+            pending_tier = getattr(org, "pending_downgrade_tier", None)
+            if pending_tier:
+                # Scheduled downgrade: switch to the lower tier and charge for its
+                # first period. On payment failure fall back to free.
+                logger.info(
+                    "billing_renewal.scheduled_downgrade org_id=%s from=%s to=%s",
+                    org_id, tier, pending_tier,
+                )
+                org.tier = pending_tier
+                org.pending_downgrade_tier = None
+                org.subscription_cancel_at_period_end = False
+                # Reuse the remaining renewal logic below — tier/cycle vars need refresh
+                tier = org.tier
+                cycle = org.subscription_billing_cycle or "monthly"
+                db.commit()
+                # Fall through to the recurring-charge block so the new plan's first
+                # period is charged immediately.
+            else:
+                # Plain cancellation: downgrade to free.
+                logger.info(
+                    "billing_renewal.cancel org_id=%s tier=%s cycle=%s period_end=%s",
+                    org_id, tier, cycle,
+                    org.subscription_period_end.isoformat() if org.subscription_period_end else "None",
+                )
+                org.tier = "free"
+                org.subscription_billing_cycle = "monthly"
+                org.subscription_period_end = None
+                org.subscription_cancel_at_period_end = False
+                db.commit()
+                stats["cancelled"] += 1
+                continue
 
         # --- No recurring reference → cannot charge, downgrade ---
         ref_tx_id = str(org.recurring_transaction_id or "").strip()

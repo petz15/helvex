@@ -5,14 +5,7 @@ import useSWR from "swr";
 import {
   createSubscriptionCheckout,
   fetchCurrentUser,
-  parseBillingAddressJson,
 } from "@/lib/api";
-import {
-  buildAddressReturnUrl,
-  clearCheckoutIntent,
-  readCheckoutIntent,
-  saveCheckoutIntent,
-} from "@/lib/checkout-resume";
 import { CREDIT_ACTIONS, PRICING_TIERS, creditsToChf } from "@/lib/marketing-data";
 
 // ── Data ──────────────────────────────────────────────────────────────────────
@@ -55,7 +48,7 @@ const FEATURE_GROUPS: FeatureGroup[] = [
     rows: [
       {
         label: "CSV export rows",
-        values: ["100", "1,000", "5,000", "20,000", "100,000"],
+        values: ["100", "1 000", "5 000", "20 000", "100 000"],
       },
       {
         label: "Queue priority",
@@ -69,7 +62,7 @@ const FEATURE_GROUPS: FeatureGroup[] = [
       },
       {
         label: "Topup credit bonus",
-        tip: "Extra credits granted on top of every credit purchase. E.g. Explorer buying 10,000 credits receives 1,500 bonus credits.",
+        tip: "Extra credits granted on top of every credit purchase. E.g. Explorer buying 10 000 credits receives 1 000 bonus credits.",
         values: ["None", "+5%", "+10%", "+15%", "+20%"],
       },
     ],
@@ -192,8 +185,6 @@ export function PricingClient() {
   const [checkoutLoading, setCheckoutLoading] = useState<string | null>(null);
   const [checkoutMessage, setCheckoutMessage] = useState<{ kind: "success" | "error"; message: string } | null>(null);
   const { data: me } = useSWR("me", fetchCurrentUser);
-  const billingAddress = parseBillingAddressJson(me?.billing_address_json);
-
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const checkout = params.get("checkout");
@@ -213,19 +204,6 @@ export function PricingClient() {
     }
     window.history.replaceState({}, "", window.location.pathname);
   }, []);
-
-  useEffect(() => {
-    if (!billingAddress) return;
-    const params = new URLSearchParams(window.location.search);
-    if (params.get("resume_checkout") !== "1") return;
-
-    const intent = readCheckoutIntent();
-    if (!intent || intent.kind !== "subscription") return;
-    if (!intent.sourcePath.startsWith("/app/pricing")) return;
-
-    clearCheckoutIntent();
-    void confirmPlanCheckout(intent.tier as TierId, intent.billing_cycle);
-  }, [billingAddress]);
 
   // Custom configurator state
   const [webMonths, setWebMonths] = useState(0);
@@ -247,12 +225,6 @@ export function PricingClient() {
       cancel_path: "/app/pricing",
     });
     window.location.assign(`/app/payment?${params.toString()}`);
-  }
-
-  // Keep for resume-checkout compat (address redirect flow)
-  async function confirmPlanCheckout(tier: TierId, cycleOverride?: "monthly" | "yearly") {
-    void cycleOverride; // unused — redirect flow handles cycle
-    handlePlanCheckout(tier);
   }
 
   const customMonthly = useMemo(() => {

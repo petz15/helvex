@@ -3,7 +3,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import useSWR, { useSWRConfig } from "swr";
 import { cn } from "@/lib/utils";
-import { Search, Compass, Map, Cog, Database, Activity, UserCircle, Shield, LayoutGrid, CreditCard, BookOpen, Menu, X } from "lucide-react";
+import { Search, Compass, Map, Cog, Database, Activity, UserCircle, Shield, LayoutGrid, CreditCard, Menu, X, Tag } from "lucide-react";
 import { fetchCurrentUser, fetchMyOrgs, switchOrg } from "@/lib/api";
 import { HelvexMark } from "@/components/helvex-logo";
 import { useState } from "react";
@@ -18,7 +18,6 @@ const NAV_MAIN = [
 
 const NAV_ADMIN = [
   { href: "/app/collection", label: "Collection", icon: Database },
-  { href: "/app/shab", label: "SHAB", icon: BookOpen },
   { href: "/app/settings", label: "Settings", icon: Cog },
 ];
 
@@ -93,17 +92,20 @@ export function NavBar() {
                 </Link>
               );
             })}
-            <Link
-              href="/app/pricing"
-              className={cn(
-                "flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm transition-colors",
-                pathname === "/app/pricing"
-                  ? "bg-blue-600 text-white font-medium"
-                  : "text-slate-600 hover:bg-slate-100 hover:text-slate-900"
-              )}
-            >
-              Pricing
-            </Link>
+            {me?.org?.tier === "free" && (
+              <Link
+                href="/app/pricing"
+                className={cn(
+                  "flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm transition-colors",
+                  pathname === "/app/pricing"
+                    ? "bg-blue-600 text-white font-medium"
+                    : "text-slate-600 hover:bg-slate-100 hover:text-slate-900"
+                )}
+              >
+                <Tag size={14} />
+                Pricing
+              </Link>
+            )}
             {me?.is_superadmin && (
               <>
                 <div className="w-px h-4 bg-slate-200 mx-1" />
@@ -265,16 +267,19 @@ export function NavBar() {
                   </Link>
                 );
               })}
-              <Link
-                href="/app/pricing"
-                onClick={closeMobile}
-                className={cn(
-                  "flex items-center gap-3 px-5 py-3.5 text-sm border-b border-slate-50 transition-colors",
-                  pathname === "/app/pricing" ? "bg-blue-50 text-blue-700 font-medium" : "text-slate-700 hover:bg-slate-50"
-                )}
-              >
-                Pricing
-              </Link>
+              {me?.org?.tier === "free" && (
+                <Link
+                  href="/app/pricing"
+                  onClick={closeMobile}
+                  className={cn(
+                    "flex items-center gap-3 px-5 py-3.5 text-sm border-b border-slate-50 transition-colors",
+                    pathname === "/app/pricing" ? "bg-blue-50 text-blue-700 font-medium" : "text-slate-700 hover:bg-slate-50"
+                  )}
+                >
+                  <Tag size={18} />
+                  Pricing
+                </Link>
+              )}
 
               {me?.is_superadmin && (
                 <>

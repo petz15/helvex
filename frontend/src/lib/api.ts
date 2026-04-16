@@ -74,6 +74,7 @@ export interface BillingSummary {
   billing_cycle: string;
   subscription_period_end: string | null;
   subscription_cancel_at_period_end: boolean;
+  pending_downgrade_tier: string | null;
   credits_balance: number;
   credits_balance_chf: number;
   has_saved_payment_method: boolean;
@@ -160,6 +161,19 @@ export async function reactivateSubscription(): Promise<void> {
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
     throw new Error((body as { detail?: string }).detail ?? "Failed to reactivate subscription");
+  }
+}
+
+export async function scheduleDowngrade(tier: string): Promise<void> {
+  const res = await fetch("/api/v1/billing/subscription/schedule-downgrade", {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ tier }),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error((body as { detail?: string }).detail ?? "Failed to schedule downgrade");
   }
 }
 
@@ -317,6 +331,7 @@ export async function createSubscriptionCheckout(data: {
   billing_address?: BillingAddressPayload | null;
   save_payment_method?: boolean;
   provider?: "worldline" | "stripe" | null;
+  upgrade_proration_credits?: number | null;
 }): Promise<BillingCheckoutResponse> {
   const res = await fetch("/api/v1/billing/checkout/subscription", {
     method: "POST",
@@ -1497,7 +1512,15 @@ export async function toggleViewAlert(id: number, enabled: boolean): Promise<Sav
 
 // ── Notification preferences ─────────────────────────────────────────────────
 
-export async function fetchNotificationPreferences(orgId: number): Promise<{ email_notifications: boolean }> {
+export interface NotificationPreferences {
+  email_notifications: boolean;
+  notif_low_credit: boolean;
+  notif_export_ready: boolean;
+  notif_job_failed: boolean;
+  notif_saved_view: boolean;
+}
+
+export async function fetchNotificationPreferences(orgId: number): Promise<NotificationPreferences> {
   const res = await fetch(`/api/v1/orgs/${orgId}/notifications`, { credentials: "include" });
   if (!res.ok) throw new Error("Failed to fetch notification preferences");
   return res.json();
@@ -1505,8 +1528,8 @@ export async function fetchNotificationPreferences(orgId: number): Promise<{ ema
 
 export async function updateNotificationPreferences(
   orgId: number,
-  prefs: { email_notifications: boolean },
-): Promise<{ email_notifications: boolean }> {
+  prefs: NotificationPreferences,
+): Promise<NotificationPreferences> {
   const res = await fetch(`/api/v1/orgs/${orgId}/notifications`, {
     method: "PATCH",
     credentials: "include",

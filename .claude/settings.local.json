@@ -190,7 +190,9 @@
       "Bash(bash -c \"cd '/c/D/coding_projects/zefix_analyzer/frontend' && npx tsc --noEmit 2>&1 | head -40\")",
       "Bash(echo \"EXIT:$?\")",
       "Bash(grep -n \"claude.preview\\\\|claude_preview\\\\|claude-preview\" app/api/routes/*.py)",
-      "Bash(grep -r \"activity_log\\\\|audit_log\" /c/D/coding_projects/zefix_analyzer/alembic/versions/*.py)"
+      "Bash(grep -r \"activity_log\\\\|audit_log\" /c/D/coding_projects/zefix_analyzer/alembic/versions/*.py)",
+      "Bash(grep -n \"send_email\\\\|send_low_credit\\\\|send_export\\\\|send_job_failed\\\\|send_saved_view\" /c/D/coding_projects/zefix_analyzer/app/services/*.py)",
+      "Bash(grep -l \"org_settings\" /c/D/coding_projects/zefix_analyzer/alembic/versions/*.py)"
     ]
   }
 }

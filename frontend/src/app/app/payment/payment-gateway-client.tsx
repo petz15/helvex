@@ -30,6 +30,7 @@ import {
   createTopupCheckout,
   createWorldlineCardRegistration,
   cancelSubscription,
+  scheduleDowngrade,
   claimUpgradeProration,
   parseBillingAddressJson,
   type BillingAddressPayload,
@@ -90,8 +91,10 @@ export function PaymentGatewayClient() {
   const [iframeUrl, setIframeUrl] = useState<string | null>(null);
 
   // Tier-change flow state
+  const [showDowngradeChoice, setShowDowngradeChoice] = useState(false);
   const [showDowngradeConfirm, setShowDowngradeConfirm] = useState(false);
   const [downgradeLoading, setDowngradeLoading] = useState(false);
+  const [scheduleLoading, setScheduleLoading] = useState(false);
   const [showUpgradeProration, setShowUpgradeProration] = useState(false);
   const [proration, setProration] = useState<UpgradeProration | null>(null);
   const [prorationLoading, setProrationLoading] = useState(false);
@@ -141,6 +144,18 @@ export function PaymentGatewayClient() {
     }
   }
 
+  async function handleScheduleDowngrade() {
+    setScheduleLoading(true);
+    setError(null);
+    try {
+      await scheduleDowngrade(tier);
+      router.replace(`${successPath}?downgrade_scheduled=1`);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to schedule downgrade");
+      setScheduleLoading(false);
+    }
+  }
+
   async function handleOpenUpgrade() {
     setProrationLoading(true);
     setError(null);
@@ -165,7 +180,7 @@ export function PaymentGatewayClient() {
 
   async function handleProceed() {
     if (isSameTier) { setError("You already have an active subscription to this plan."); return; }
-    if (isDowngrade && !showDowngradeConfirm) { setShowDowngradeConfirm(true); return; }
+    if (isDowngrade && !showDowngradeChoice && !showDowngradeConfirm) { setShowDowngradeChoice(true); return; }
     if (isUpgrade && !prorationClaimed) { void handleOpenUpgrade(); return; }
     await doCheckout();
   }
@@ -191,6 +206,7 @@ export function PaymentGatewayClient() {
           cancel_url: cancelUrl.toString(),
           billing_address: billingAddress,
           save_payment_method: willUseSavedCard ? false : saveCard,
+          upgrade_proration_credits: proration?.credits_granted ?? null,
         });
         setIframeUrl(session.checkout_url);
       } else if (kind === "topup") {
@@ -442,11 +458,11 @@ export function PaymentGatewayClient() {
           className="mt-0.5 h-4 w-4 shrink-0 rounded border-slate-300 text-blue-600 accent-blue-600"
         />
         <span className="text-sm text-slate-700">
-          I have read and accept the{" "}
+          I have read and accepted the{" "}
           <Link href="/agb" target="_blank" className="text-blue-600 underline hover:text-blue-800">
             General Terms and Conditions (AGB)
           </Link>{" "}
-           .
+          .
         </span>
       </label>
 
@@ -457,14 +473,59 @@ export function PaymentGatewayClient() {
         </div>
       )}
 
-      {/* Downgrade confirmation */}
+      {/* Downgrade: timing choice */}
+      {isDowngrade && showDowngradeChoice && !showDowngradeConfirm && (
+        <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 space-y-3">
+          <p className="text-sm font-semibold text-amber-900">
+            Downgrade to <span className="capitalize">{tier}</span> — when?
+          </p>
+          <p className="text-xs text-amber-700">
+            Your current <strong className="capitalize">{currentTier}</strong> plan is active until{" "}
+            <strong>{summary?.subscription_period_end ? fmtDate(new Date(summary.subscription_period_end)) : "the end of your billing period"}</strong>.
+          </p>
+          {error && <p className="text-xs text-red-600">{error}</p>}
+          <div className="flex flex-col sm:flex-row gap-2">
+            <button
+              onClick={() => { setShowDowngradeChoice(false); setShowDowngradeConfirm(true); }}
+              disabled={!termsAccepted}
+              className="flex-1 rounded-lg border border-amber-300 bg-white px-3 py-2.5 text-xs font-semibold text-amber-900 hover:bg-amber-100 disabled:opacity-60 text-left space-y-0.5"
+            >
+              <div>Downgrade immediately</div>
+              <div className="font-normal text-amber-700">Cancel now and start the new plan today. No refund for remaining time.</div>
+            </button>
+            <button
+              onClick={() => void handleScheduleDowngrade()}
+              disabled={scheduleLoading || !termsAccepted}
+              className="flex-1 rounded-lg border border-amber-300 bg-white px-3 py-2.5 text-xs font-semibold text-amber-900 hover:bg-amber-100 disabled:opacity-60 text-left space-y-0.5"
+            >
+              <div className="flex items-center gap-1.5">
+                {scheduleLoading && <Loader2 size={11} className="animate-spin shrink-0" />}
+                Downgrade at end of period
+              </div>
+              <div className="font-normal text-amber-700">
+                Keep <span className="capitalize">{currentTier}</span> until{" "}
+                {summary?.subscription_period_end ? fmtDate(new Date(summary.subscription_period_end)) : "period end"},
+                then switch to <span className="capitalize">{tier}</span> automatically.
+              </div>
+            </button>
+          </div>
+          <button
+            onClick={() => setShowDowngradeChoice(false)}
+            className="text-xs text-amber-700 hover:underline"
+          >
+            Keep current plan
+          </button>
+        </div>
+      )}
+
+      {/* Downgrade: immediate confirmation */}
       {isDowngrade && showDowngradeConfirm && (
         <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 space-y-2">
-          <p className="text-sm font-semibold text-amber-900">Downgrade to {tier.charAt(0).toUpperCase() + tier.slice(1)}?</p>
+          <p className="text-sm font-semibold text-amber-900">Downgrade to <span className="capitalize">{tier}</span> immediately?</p>
           <p className="text-xs text-amber-800">
-            Your current <strong className="capitalize">{currentTier}</strong> plan will be cancelled and will stay active until{" "}
+            Your current <strong className="capitalize">{currentTier}</strong> plan will be cancelled and stays active until{" "}
             <strong>{summary?.subscription_period_end ? fmtDate(new Date(summary.subscription_period_end)) : "the end of your billing period"}</strong>.
-            The new <strong className="capitalize">{tier}</strong> plan will start immediately. No refund is issued for the remaining time on your current plan.
+            The new <strong className="capitalize">{tier}</strong> plan starts immediately. No refund is issued for remaining time.
           </p>
           {error && <p className="text-xs text-red-600">{error}</p>}
           <div className="flex gap-2">
@@ -473,13 +534,13 @@ export function PaymentGatewayClient() {
               disabled={downgradeLoading || !termsAccepted}
               className="rounded-lg bg-amber-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-amber-700 disabled:opacity-60"
             >
-              {downgradeLoading ? "Processing…" : `Yes, switch to ${tier.charAt(0).toUpperCase() + tier.slice(1)}`}
+              {downgradeLoading ? "Processing…" : `Yes, switch to ${tier.charAt(0).toUpperCase() + tier.slice(1)} now`}
             </button>
             <button
-              onClick={() => setShowDowngradeConfirm(false)}
+              onClick={() => { setShowDowngradeConfirm(false); setShowDowngradeChoice(true); }}
               className="rounded-lg border border-amber-200 px-3 py-1.5 text-xs text-amber-800 hover:bg-amber-100"
             >
-              Keep current plan
+              Back
             </button>
           </div>
         </div>
@@ -519,7 +580,7 @@ export function PaymentGatewayClient() {
       )}
 
       {/* Proceed */}
-      {!isSameTier && !showDowngradeConfirm && !showUpgradeProration && (
+      {!isSameTier && !showDowngradeChoice && !showDowngradeConfirm && !showUpgradeProration && (
         <div className="flex items-center justify-between gap-4">
           <Link
             href={cancelPath}
@@ -539,7 +600,7 @@ export function PaymentGatewayClient() {
       )}
 
       {/* Cancel link when a modal is open */}
-      {(showDowngradeConfirm || showUpgradeProration) && (
+      {(showDowngradeChoice || showDowngradeConfirm || showUpgradeProration) && (
         <Link href={cancelPath} className="text-sm text-slate-500 hover:underline">
           Cancel
         </Link>
