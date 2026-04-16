@@ -259,7 +259,7 @@ export function SearchClient({ initialCantons, initialStats, initialFilters }: S
               )}
               {previewResult && (
                 <>
-                  <p className="text-xs text-slate-400 mb-3">
+                  <p className="text-xs text-slate-600 mb-3">
                     {previewResult.results.length} companies scored · {previewResult.previews_used}/{previewResult.previews_used + previewResult.previews_remaining} previews used today
                   </p>
                   <div className="space-y-2">
@@ -277,8 +277,8 @@ export function SearchClient({ initialCantons, initialStats, initialFilters }: S
                             </span>
                           )}
                         </div>
-                        {r.ai_category && <p className="text-xs text-slate-500 mt-0.5">{r.ai_category}</p>}
-                        {r.ai_freeform && <p className="text-xs text-slate-400 mt-1 line-clamp-2">{r.ai_freeform}</p>}
+                        {r.ai_category && <p className="text-xs text-slate-600 mt-0.5">{r.ai_category}</p>}
+                        {r.ai_freeform && <p className="text-xs text-slate-600 mt-1 line-clamp-2">{r.ai_freeform}</p>}
                       </div>
                     ))}
                   </div>

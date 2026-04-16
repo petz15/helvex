@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 
 from app import crud
 from app.api.geocoding_client import geocode_address
+from app.crud.company import _apply_filters as _apply_company_filters
 from app.database import get_db
 from app.models.company import Company as CompanyModel
 
@@ -76,7 +77,7 @@ def _apply_map_filters(
     max_lon: float | None,
 ):
     """Apply search-style company filters to an existing SQLAlchemy query."""
-    query = crud._apply_filters(
+    query = _apply_company_filters(
         query,
         name_filter=q,
         uid_filter=uid,

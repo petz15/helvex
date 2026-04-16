@@ -41,7 +41,7 @@ function SortIcon({ col, sort }: { col: string; sort: string }) {
   if (!key) return null;
   if (sort === key) return <ChevronUp size={12} className="text-blue-600" />;
   if (sort === `-${key}`) return <ChevronDown size={12} className="text-blue-600" />;
-  return <ChevronsUpDown size={12} className="text-slate-300" />;
+  return <ChevronsUpDown size={12} className="text-slate-400" />;
 }
 
 function reviewLeftBorderClass(status: string | null): string {
@@ -167,11 +167,11 @@ export function CompanyTable({ companies, selectedId, onSelect, filters, onSort,
       }),
       ch.accessor("status", {
         header: "Status",
-        cell: (info) => <span className="text-slate-500 text-xs">{info.getValue() as string ?? "—"}</span>,
+        cell: (info) => <span className="text-slate-700 text-xs">{info.getValue() as string ?? "—"}</span>,
       }),
       ch.accessor("tfidf_cluster", {
         header: "Cluster",
-        cell: (info) => <span className="text-slate-500 text-xs truncate max-w-[140px] block" title={(info.getValue() as string) ?? undefined}>{formatClusterLabel((info.getValue() as string)?.split("|")[0] ?? "") || "—"}</span>,
+        cell: (info) => <span className="text-slate-600 text-xs truncate max-w-[140px] block" title={(info.getValue() as string) ?? undefined}>{formatClusterLabel((info.getValue() as string)?.split("|")[0] ?? "") || "—"}</span>,
       }),
       ch.accessor("website_url", {
         id: "website",
@@ -203,7 +203,7 @@ export function CompanyTable({ companies, selectedId, onSelect, filters, onSort,
       }),
       ch.accessor("ai_category", {
         header: "Category",
-        cell: (info) => <span className="text-slate-500 text-xs truncate max-w-[120px] block">{info.getValue() as string ?? "—"}</span>,
+        cell: (info) => <span className="text-slate-600 text-xs truncate max-w-[120px] block">{info.getValue() as string ?? "—"}</span>,
       }),
       ch.accessor("combined_score", {
         header: "Combined",
@@ -267,27 +267,27 @@ export function CompanyTable({ companies, selectedId, onSelect, filters, onSort,
         header: "Last Google",
         cell: (info) => {
           const v = info.getValue() as string | null;
-          return <span className="text-slate-400 text-xs">{v ? new Date(v).toLocaleDateString("de-CH") : "—"}</span>;
+          return <span className="text-slate-600 text-xs">{v ? new Date(v).toLocaleDateString("de-CH") : "—"}</span>;
         },
       }),
       ch.accessor("flex_scored_at", {
         header: "Last Flex",
         cell: (info) => {
           const v = info.getValue() as string | null;
-          return <span className="text-slate-400 text-xs">{v ? new Date(v).toLocaleDateString("de-CH") : "—"}</span>;
+          return <span className="text-slate-600 text-xs">{v ? new Date(v).toLocaleDateString("de-CH") : "—"}</span>;
         },
       }),
       ch.accessor("ai_scored_at", {
         header: "Last AI",
         cell: (info) => {
           const v = info.getValue() as string | null;
-          return <span className="text-slate-400 text-xs">{v ? new Date(v).toLocaleDateString("de-CH") : "—"}</span>;
+          return <span className="text-slate-600 text-xs">{v ? new Date(v).toLocaleDateString("de-CH") : "—"}</span>;
         },
       }),
       ch.accessor("updated_at", {
         header: "Updated",
         cell: (info) => (
-          <span className="text-slate-400 text-xs">{new Date(info.getValue() as string).toLocaleDateString("de-CH")}</span>
+          <span className="text-slate-600 text-xs">{new Date(info.getValue() as string).toLocaleDateString("de-CH")}</span>
         ),
       }),
     ],
@@ -362,7 +362,7 @@ export function CompanyTable({ companies, selectedId, onSelect, filters, onSort,
                       key={header.id}
                       onClick={sortable ? () => handleHeaderClick(header.id) : undefined}
                       className={cn(
-                        "px-3 py-2 text-left text-xs font-medium text-slate-500 border-b border-slate-200 whitespace-nowrap",
+                        "px-3 py-2 text-left text-xs font-semibold text-slate-700 border-b border-slate-200 whitespace-nowrap",
                         sortable && "cursor-pointer select-none hover:text-slate-700 hover:bg-slate-50"
                       )}
                     >
@@ -380,11 +380,11 @@ export function CompanyTable({ companies, selectedId, onSelect, filters, onSort,
           <tbody>
             {isLoading ? (
               <tr>
-                <td colSpan={columns.length} className="text-center py-12 text-slate-400 text-sm">Loading…</td>
+                <td colSpan={columns.length} className="text-center py-12 text-slate-500 text-sm">Loading…</td>
               </tr>
             ) : companies.length === 0 ? (
               <tr>
-                <td colSpan={columns.length} className="text-center py-12 text-slate-400 text-sm">No companies found</td>
+                <td colSpan={columns.length} className="text-center py-12 text-slate-500 text-sm">No companies found</td>
               </tr>
             ) : (
               table.getRowModel().rows.map((row) => (

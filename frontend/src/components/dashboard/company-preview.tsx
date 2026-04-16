@@ -65,7 +65,7 @@ export function CompanyPreview({ company: incoming, onClose, onUpdated, classNam
                 </a>
               )}
             </h2>
-            <p className="text-xs text-slate-500 mt-0.5 flex items-center gap-1">
+            <p className="text-xs text-slate-600 mt-0.5 flex items-center gap-1">
               <MapPin size={12} className="text-slate-400" />
               <span className="truncate">{[company.municipality, company.canton].filter(Boolean).join(", ") || "—"}</span>
               {company.legal_form && <span className="text-slate-300">·</span>}
@@ -127,19 +127,19 @@ export function CompanyPreview({ company: incoming, onClose, onUpdated, classNam
       {/* Scores */}
       <div className="px-4 py-3 flex flex-col gap-2 border-b border-slate-100">
         <div className="flex items-center justify-between text-xs">
-          <span className="text-slate-500 w-16">Combined</span>
+          <span className="text-slate-700 font-medium w-16">Combined</span>
           <ScoreBar score={company.combined_score} className="flex-1" />
         </div>
         <div className="flex items-center justify-between text-xs">
-          <span className="text-slate-500 w-16">Web</span>
+          <span className="text-slate-700 font-medium w-16">Web</span>
           <ScoreBar score={company.web_score} className="flex-1" />
         </div>
         <div className="flex items-center justify-between text-xs">
-          <span className="text-slate-500 w-16">AI</span>
+          <span className="text-slate-700 font-medium w-16">AI</span>
           <ScoreBar score={company.ai_score} className="flex-1" />
         </div>
         <div className="flex items-center justify-between text-xs">
-          <span className="text-slate-500 w-16">Flex</span>
+          <span className="text-slate-700 font-medium w-16">Flex</span>
           <ScoreBar score={company.flex_score} className="flex-1" />
         </div>
         {company.flex_score_breakdown && (() => {
@@ -154,7 +154,7 @@ export function CompanyPreview({ company: incoming, onClose, onUpdated, classNam
             return (
               <div className="mt-1 pl-16 space-y-0.5">
                 {entries.map(([label, val]) => (
-                  <div key={label} className="flex justify-between text-[11px] text-slate-400">
+                  <div key={label} className="flex justify-between text-[11px] text-slate-600">
                     <span>{label}</span>
                     <span className={val > 0 ? "text-green-600" : val < 0 ? "text-red-500" : ""}>
                       {val > 0 ? "+" : ""}{val}
@@ -171,7 +171,7 @@ export function CompanyPreview({ company: incoming, onClose, onUpdated, classNam
       <div className="px-4 py-3 flex flex-col gap-2 text-sm border-b border-slate-100">
         {company.website_url && (
           <div>
-            <span className="text-xs text-slate-400 block mb-0.5">Website</span>
+            <span className="text-xs font-medium text-slate-600 block mb-0.5">Website</span>
             <a href={company.website_url} target="_blank" rel="noopener noreferrer"
               className="text-blue-600 hover:underline flex items-center gap-1 text-xs truncate">
               {company.website_url} <ExternalLink size={11} />
@@ -180,10 +180,10 @@ export function CompanyPreview({ company: incoming, onClose, onUpdated, classNam
         )}
         {(company.address || company.address_city || company.address_zip) && (
           <div>
-            <span className="text-xs text-slate-400 block mb-0.5">Address</span>
+            <span className="text-xs font-medium text-slate-600 block mb-0.5">Address</span>
             {company.address && <span className="text-xs text-slate-700">{company.address}</span>}
             {(company.address_zip || company.address_city) && (
-              <span className="text-xs text-slate-500 block mt-0.5">
+              <span className="text-xs text-slate-600 block mt-0.5">
                 {[company.address_zip, company.address_city].filter(Boolean).join(" ")}
               </span>
             )}
@@ -191,13 +191,13 @@ export function CompanyPreview({ company: incoming, onClose, onUpdated, classNam
         )}
         {company.purpose && (
           <div>
-            <span className="text-xs text-slate-400 block mb-0.5">Purpose</span>
+            <span className="text-xs font-medium text-slate-600 block mb-0.5">Purpose</span>
             <p className="text-xs text-slate-700 line-clamp-4">{company.purpose}</p>
           </div>
         )}
         {company.ai_category && (
           <div>
-            <span className="text-xs text-slate-400 block mb-0.5">AI category</span>
+            <span className="text-xs font-medium text-slate-600 block mb-0.5">AI category</span>
             <span className="text-xs text-slate-700">{company.ai_category}</span>
           </div>
         )}
@@ -207,7 +207,7 @@ export function CompanyPreview({ company: incoming, onClose, onUpdated, classNam
             if (names.length > 0) {
               return (
                 <div>
-                  <span className="text-xs text-slate-400 block mb-0.5">Also known as:</span>
+                  <span className="text-xs font-medium text-slate-600 block mb-0.5">Also known as:</span>
                   <div className="flex flex-wrap gap-1">
                     {names.map((t, i) => (
                       <Badge key={i} className="bg-slate-100 text-slate-600 text-xs">{t}</Badge>
@@ -223,7 +223,7 @@ export function CompanyPreview({ company: incoming, onClose, onUpdated, classNam
         })()}
         {(company.contact_name || company.contact_email || company.contact_phone) && (
           <div>
-            <span className="text-xs text-slate-400 block mb-0.5">Contact</span>
+            <span className="text-xs font-medium text-slate-600 block mb-0.5">Contact</span>
             <div className="text-xs text-slate-700 space-y-0.5">
               {company.contact_name && <div>{company.contact_name}</div>}
               {company.contact_email && (
@@ -250,7 +250,7 @@ export function CompanyPreview({ company: incoming, onClose, onUpdated, classNam
       {/* Notes preview */}
       {company.notes.length > 0 && (
         <div className="px-4 py-3 border-b border-slate-100">
-          <span className="text-xs font-medium text-slate-500 block mb-2">Notes ({company.notes.length})</span>
+          <span className="text-xs font-semibold text-slate-700 block mb-2">Notes ({company.notes.length})</span>
           <div className="space-y-2">
             {company.notes.slice(0, 2).map((n) => (
               <div key={n.id} className="text-xs text-slate-700 bg-slate-50 rounded p-2 line-clamp-3">

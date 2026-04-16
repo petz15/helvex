@@ -54,7 +54,7 @@ function RelatedCompaniesList({ items, label }: { items: CompanyShortEntry[]; la
   if (items.length === 0) return null;
   return (
     <div>
-      <dt className="text-xs text-slate-400 mb-1">{label}</dt>
+      <dt className="text-xs font-medium text-slate-600 mb-1">{label}</dt>
       <dd className="space-y-1">
         {items.map((c, i) => (
           <div key={c.uid ?? i} className="text-xs text-slate-700 flex items-center gap-1.5 flex-wrap">
@@ -225,7 +225,7 @@ export function CompanyDetailClient({ company: initial, readOnlyDemo = false }: 
       {/* Main content */}
       <div className="flex-1 min-w-0 max-w-5xl mx-auto space-y-6">
       {/* Breadcrumb */}
-      <div className="flex items-center gap-2 text-sm text-slate-500">
+      <div className="flex items-center gap-2 text-sm text-slate-600">
         {readOnlyDemo ? (
           <Link href="/demo" className="hover:text-slate-700 flex items-center gap-1">
             <ChevronLeft size={14} /> Demo
@@ -244,7 +244,7 @@ export function CompanyDetailClient({ company: initial, readOnlyDemo = false }: 
         <div className="flex items-start justify-between gap-4">
           <div>
             <h1 className="text-2xl font-bold text-slate-900">{company.name}</h1>
-            <p className="text-sm text-slate-500 mt-0.5">
+            <p className="text-sm text-slate-600 mt-0.5">
               {[company.legal_form, company.canton, company.municipality].filter(Boolean).join(" · ")}
             </p>
             <div className="flex flex-wrap gap-2 mt-3">
@@ -301,7 +301,7 @@ export function CompanyDetailClient({ company: initial, readOnlyDemo = false }: 
       {!readOnlyDemo && showWebsitePicker && (
         <div className="bg-white rounded-xl border border-slate-200 p-5 shadow-sm">
           <div className="flex items-center justify-between">
-            <h2 className="text-sm font-semibold text-slate-700">Select a different website</h2>
+            <h2 className="text-base font-semibold text-slate-800">Select a different website</h2>
             <button
               type="button"
               onClick={() => setShowWebsitePicker(false)}
@@ -345,13 +345,13 @@ export function CompanyDetailClient({ company: initial, readOnlyDemo = false }: 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Classification */}
         <div className="bg-white rounded-xl border border-slate-200 p-5 space-y-4 shadow-sm">
-          <h2 className="text-sm font-semibold text-slate-700">Classification</h2>
+          <h2 className="text-base font-semibold text-slate-800">Classification</h2>
           
           {(company.tfidf_cluster || company.purpose_keywords) && (
             <div className="pt-2 border-t border-slate-100 space-y-2">
               {company.tfidf_cluster && (
                 <div>
-                  <span className="text-xs text-slate-400 block mb-1">Flex Cluster</span>
+                  <span className="text-xs font-medium text-slate-600 block mb-1">Flex Cluster</span>
                   <div className="flex flex-wrap gap-1">
                     {company.tfidf_cluster.split("|").map(cluster => cluster.trim()).filter(Boolean).map(cluster => (
                       <Link key={cluster} href={`/app/search?tfidf_cluster=${encodeURIComponent(cluster)}`}>
@@ -363,7 +363,7 @@ export function CompanyDetailClient({ company: initial, readOnlyDemo = false }: 
               )}
               {company.purpose_keywords && (
                 <div>
-                  <span className="text-xs text-slate-400 block mb-1">Purpose Keywords</span>
+                  <span className="text-xs font-medium text-slate-600 block mb-1">Purpose Keywords</span>
                   <div className="flex flex-wrap gap-1">
                     {company.purpose_keywords.split(",").map(k => (
                       <Link key={k.trim()} href={`/app/search?purpose_keywords=${encodeURIComponent(k.trim())}`}>
@@ -377,7 +377,7 @@ export function CompanyDetailClient({ company: initial, readOnlyDemo = false }: 
           )}
           {(company.noga_code || company.noga_label || company.noga_level) && (
             <div className="pt-2 border-t border-slate-100 space-y-2">
-              <span className="text-xs text-slate-400 block">NOGA Classification</span>
+              <span className="text-xs font-medium text-slate-600 block">NOGA Classification</span>
               {company.noga_code && (
                 <Link href={`/app/search?noga_code=${encodeURIComponent(company.noga_code)}`}>
                   <Badge className="bg-emerald-50 text-emerald-700 text-xs cursor-pointer hover:bg-emerald-100">Code: {company.noga_code}</Badge>
@@ -400,7 +400,7 @@ export function CompanyDetailClient({ company: initial, readOnlyDemo = false }: 
           )}
           {company.ai_category && (
             <div className="pt-2 border-t border-slate-100">
-              <span className="text-xs text-slate-400 block mb-1">AI Category</span>
+              <span className="text-xs font-medium text-slate-600 block mb-1">AI Category</span>
               <Link href={`/app/search?ai_category=${encodeURIComponent(company.ai_category)}`}>
                 <Badge className="bg-slate-100 text-slate-700 text-xs cursor-pointer hover:bg-slate-200">{company.ai_category}</Badge>
               </Link>
@@ -408,7 +408,7 @@ export function CompanyDetailClient({ company: initial, readOnlyDemo = false }: 
           )}
           {company.ai_freeform && (
             <div>
-              <span className="text-xs text-slate-400 block mb-1">AI notes</span>
+              <span className="text-xs font-medium text-slate-600 block mb-1">AI notes</span>
               <p className="text-xs text-slate-600 whitespace-pre-wrap">{company.ai_freeform}</p>
             </div>
           )}
@@ -416,7 +416,7 @@ export function CompanyDetailClient({ company: initial, readOnlyDemo = false }: 
 
         {/* Company info */}
         <div className="bg-white rounded-xl border border-slate-200 p-5 space-y-3 shadow-sm lg:col-span-2">
-          <h2 className="text-sm font-semibold text-slate-700">Company Info</h2>
+          <h2 className="text-base font-semibold text-slate-800">Company Info</h2>
 
           {company.lat != null && company.lon != null && (
             <div className="rounded-lg border border-slate-200 overflow-hidden">
@@ -432,38 +432,38 @@ export function CompanyDetailClient({ company: initial, readOnlyDemo = false }: 
               { label: "Municipality", value: company.municipality },
             ].map(({ label, value }) => value && (
               <div key={label} className="flex gap-2">
-                <dt className="text-slate-400 w-24 shrink-0">{label}</dt>
+                <dt className="text-slate-600 w-24 shrink-0">{label}</dt>
                 <dd className="text-slate-700">{value}</dd>
               </div>
             ))}
             {company.address && (
               <div className="flex gap-2">
-                <dt className="text-slate-400 w-24 shrink-0 flex items-center gap-1"><MapPin size={11} /> Address</dt>
+                <dt className="text-slate-600 w-24 shrink-0 flex items-center gap-1"><MapPin size={11} /> Address</dt>
                 <dd className="text-slate-700">{company.address}</dd>
               </div>
             )}
             {company.capital_nominal && (
               <div className="flex gap-2">
-                <dt className="text-slate-400 w-24 shrink-0">Capital</dt>
+                <dt className="text-slate-600 w-24 shrink-0">Capital</dt>
                 <dd className="text-slate-700">{company.capital_nominal} {company.capital_currency}</dd>
               </div>
             )}
             {company.sogc_date && (
               <div className="flex gap-2">
-                <dt className="text-slate-400 w-24 shrink-0">SOGC date</dt>
+                <dt className="text-slate-600 w-24 shrink-0">SOGC date</dt>
                 <dd className="text-slate-700">{company.sogc_date}</dd>
               </div>
             )}
             {company.deletion_date && (
               <div className="flex gap-2">
-                <dt className="text-slate-400 w-24 shrink-0">Deleted</dt>
+                <dt className="text-slate-600 w-24 shrink-0">Deleted</dt>
                 <dd className="text-red-700 font-medium">{company.deletion_date}</dd>
               </div>
             )}
           </dl>
           {(company.contact_name || company.contact_email || company.contact_phone) && (
             <div className="pt-3 border-t border-slate-100 space-y-2">
-              <h3 className="text-sm font-semibold text-slate-700 flex items-center gap-1.5">
+              <h3 className="text-base font-semibold text-slate-800 flex items-center gap-1.5">
                 <Building2 size={14} /> Contact
               </h3>
               <div className="space-y-1 text-sm">
@@ -487,7 +487,7 @@ export function CompanyDetailClient({ company: initial, readOnlyDemo = false }: 
       {/* Purpose */}
       {company.purpose && (
         <div className="bg-white rounded-xl border border-slate-200 p-5 shadow-sm">
-          <h2 className="text-sm font-semibold text-slate-700 mb-2 flex items-center gap-1.5">
+          <h2 className="text-base font-semibold text-slate-800 mb-2 flex items-center gap-1.5">
             <FileText size={14} /> Purpose
           </h2>
           <div className="relative">
@@ -510,11 +510,11 @@ export function CompanyDetailClient({ company: initial, readOnlyDemo = false }: 
       {/* Corporate Structure */}
       {hasStructureData && (
         <div className="bg-white rounded-xl border border-slate-200 p-5 shadow-sm">
-          <h2 className="text-sm font-semibold text-slate-700 mb-4">Corporate Structure</h2>
+          <h2 className="text-base font-semibold text-slate-800 mb-4">Corporate Structure</h2>
           <dl className="space-y-4">
             {translations.length > 0 && (
               <div>
-                <dt className="text-xs text-slate-400 mb-1">Also known as</dt>
+                <dt className="text-xs font-medium text-slate-600 mb-1">Also known as</dt>
                 <dd className="flex flex-wrap gap-1.5">
                   {translations.map((t, i) => (
                     <Badge key={i} className="bg-slate-100 text-slate-600 text-xs">{t}</Badge>
@@ -524,7 +524,7 @@ export function CompanyDetailClient({ company: initial, readOnlyDemo = false }: 
             )}
             {oldNames.length > 0 && (
               <div>
-                <dt className="text-xs text-slate-400 mb-1">Previous names</dt>
+                <dt className="text-xs font-medium text-slate-600 mb-1">Previous names</dt>
                 <dd className="space-y-0.5">
                   {oldNames
                     .sort((a, b) => (b.sequenceNr ?? 0) - (a.sequenceNr ?? 0))
@@ -558,7 +558,7 @@ export function CompanyDetailClient({ company: initial, readOnlyDemo = false }: 
 
       {/* Notes */}
       {!readOnlyDemo && <div className="bg-white rounded-xl border border-slate-200 p-5 shadow-sm">
-        <h2 className="text-sm font-semibold text-slate-700 mb-4">Notes ({notes.length})</h2>
+        <h2 className="text-base font-semibold text-slate-800 mb-4">Notes ({notes.length})</h2>
         <form onSubmit={handleAddNote} className="mb-4">
           <div className="flex gap-2">
             <textarea
@@ -578,11 +578,11 @@ export function CompanyDetailClient({ company: initial, readOnlyDemo = false }: 
             </button>
           </div>
           <div className="mt-1 flex justify-end">
-            <span className="text-xs text-slate-400">{noteText.length} chars</span>
+            <span className="text-xs text-slate-500">{noteText.length} chars</span>
           </div>
         </form>
         {notes.length === 0 && (
-          <p className="text-sm text-slate-400 text-center py-4">No notes yet</p>
+          <p className="text-sm text-slate-500 text-center py-4">No notes yet</p>
         )}
         <div className="space-y-2">
           {notes.map(n => (
@@ -595,10 +595,10 @@ export function CompanyDetailClient({ company: initial, readOnlyDemo = false }: 
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2">
                   <span className="text-xs font-semibold text-slate-600">User</span>
-                  <span className="text-xs text-slate-400">{fmtRelativeTime(n.created_at)}</span>
+                  <span className="text-xs text-slate-500">{fmtRelativeTime(n.created_at)}</span>
                 </div>
                 <p className="text-sm text-slate-700 whitespace-pre-wrap">{n.content}</p>
-                <p className="text-xs text-slate-400 mt-1">{fmtDateTime(n.created_at)}</p>
+                <p className="text-xs text-slate-500 mt-1">{fmtDateTime(n.created_at)}</p>
               </div>
               <button
                 onClick={() => handleDeleteNote(n.id)}

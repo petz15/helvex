@@ -22,9 +22,8 @@
 - Save cards happens automatically
 - Billing QOL
 - Tiers are enforced
-- Daily SHAB
+- Daily SHAB - partially done. 
 - Multilang (?)
-- Mobile optimized (enough for quick uses not full set of features)
 
 ## PROD CHANGES
 - wordline notification url
@@ -40,7 +39,7 @@
     - showing weird numbers
     - all users should see purpose ekywords, clusters and noga classifications in the category overview
 - shab: 
-    - not running correctly -> worked now. check how deleted, edited, and new is handled
+    - not running correctly -> worked now. check how deleted, edited, and new is handled before importing the whole history
     - how to display to users?
 - billing/payment
     - save card not working
@@ -64,17 +63,14 @@
 ## Dashboard & UI
 
 - [ ] **Fix Branding** — potentially change the icon to have a red cross in the middle (change google and linkedin app connection icons)
-- [ ] **Map** - add adress search in order to jump to a specific place
-- [ ] **Improve colors** - improve some of the colors, look and feel for the website
-- [X] **Cookie banner settings** - adjust the cookie banner so users by default choose all
 - [ ] **Add dark mode** — add dark mode
-- [ ] **Mobile optimization** - Optimize the website for mobile traffic (maybe limit some features)
 
 
 ## Company Explore page
 
 - [ ] **Settings** - set up settings page for LLM, FLEX scoring, etc. Move out of account and improve it
 - [ ] **Categories page** - Needs to be fixed from the existing and integrated into the company explore page. first AI classification should be org specific, currently there is some data which should be changed to org 1.  NOGA classification dumps all levels into the field, instead it should display the hierarchy, always sum by total number also from lower hierarchy. add filtering options where necessary
+- [ ] **NOGA** - NOGA still doesnt quite look correct
 - [ ] **Browse page** - The search bar, when searching for keywords, clusters etc it should search all available not only the top 20 words. 
 - [ ] **More pages(?)** - (?)
 - [ ] **Remove default flex score and categories** - Remove my default flex scores and categories only 
@@ -107,7 +103,7 @@
 - [ ] **LLM classification extensions** — add OpenAI (ChatGPT) alongside Claude; user-configurable classification prompt per LLM; user-adjustable criteria
 - [ ] **Custom review & proposal categories** — keep sensible defaults, allow users to define own categories per account
 - [ ] **Per-user scoring rules** — custom distance origin, keyword boosts/penalties, cluster weights; DB: `user_scoring_config` (1:1 with users) + `company_user_score` (per user/company); scoring service already accepts a config dict
-- [ ] **Imporve Purpose Keyword extraction** - Seeing as this is central for NOGA and clustering, these keywords should be as accurate as possible. Review how it is done. E.g.
+- [ ] **Imporve Purpose Keyword extraction** - Seeing as this is central for NOGA and clustering, these keywords should be as accurate as possible. Review how it is done. Generally improve ML later as much as possible
 - [ ] **NOGA Improvement** - More NOGA related improvements on displaying and other.
 - [ ] **Semantic K Means unavailable** - cant find it in the Collection part
 
@@ -244,3 +240,7 @@
 - [X] **Generally Classifications** - in general the classifications are not working great. Might need a major overhaul -> dazzling-seeking-harp.md and look at git
 - [X] **Improve classifications** - improvements to the classification NOGA and tf-idf/HBD-SCan see claude plan: dazzling-seeking-harp.md -> should be done. untested for now and not run yet. 
 - [X] **Import all companies + full detail** — bulk import entire Zefix register including detailed fields (purpose, capital, offices, etc.) in one run
+- [X] **Map** - add adress search in order to jump to a specific place
+- [X] **Improve colors** - improve some of the colors, look and feel for the website
+- [X] **Cookie banner settings** - adjust the cookie banner so users by default choose all
+- [X] **Mobile optimization** - Optimize the website for mobile traffic (maybe limit some features)

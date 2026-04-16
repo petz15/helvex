@@ -29,14 +29,14 @@ const selectCls = cn(inputCls, "appearance-none pr-6");
 
 function SectionLabel({ children }: { children: React.ReactNode }) {
   return (
-    <div className="text-xs font-semibold text-slate-400 uppercase tracking-widest mb-2 mt-3 first:mt-0">
+    <div className="text-xs font-semibold text-slate-600 uppercase tracking-widest mb-2 mt-3 first:mt-0">
       {children}
     </div>
   );
 }
 
 function Label({ children }: { children: React.ReactNode }) {
-  return <div className="text-xs font-medium text-slate-500 mb-1">{children}</div>;
+  return <div className="text-xs font-medium text-slate-700 mb-1">{children}</div>;
 }
 
 function ScoreRange({
@@ -58,7 +58,7 @@ function ScoreRange({
           value={(filters[minKey] as number | undefined) ?? ""}
           onChange={(e) => set(minKey, e.target.value ? Number(e.target.value) : undefined)}
         />
-        <span className="text-slate-300 text-xs shrink-0">–</span>
+        <span className="text-slate-500 text-xs shrink-0">–</span>
         <input
           type="number" min={0} max={100} placeholder="Max"
           className={cn(inputCls, "w-full")}
@@ -224,7 +224,7 @@ export function FilterBar({
                         : "bg-white border-slate-200 text-slate-700"
                     )}
                   >
-                    <span className="text-slate-400">{label}:</span>
+                    <span className="text-slate-600">{label}:</span>
                     <span>{CLUSTER_KEYS.includes(k) ? formatClusterLabel(part) : part}</span>
                     <button
                       type="button"
@@ -259,7 +259,7 @@ export function FilterBar({
               )];
             })}
           {activeCount > 0 && (
-            <button onClick={onClear} className="text-xs text-slate-400 hover:text-slate-600 flex items-center gap-0.5">
+            <button onClick={onClear} className="text-xs text-slate-500 hover:text-slate-700 flex items-center gap-0.5">
               <X size={11} /> Clear all
             </button>
           )}
@@ -345,7 +345,7 @@ export function FilterBar({
               <Bookmark size={13} /> Save view
             </button>
           )}
-          <span className="text-xs text-slate-400 px-1">
+          <span className="text-xs text-slate-600 px-1">
             {resultCount.toLocaleString()} result{resultCount !== 1 ? "s" : ""}
           </span>
         </div>

@@ -164,7 +164,7 @@ export function NavBar() {
                 </Link>
               )}
               {me?.email && (
-                <span className="text-xs text-slate-400 px-2 truncate max-w-[180px]" title={me.email}>
+                <span className="text-xs text-slate-600 px-2 truncate max-w-[180px]" title={me.email}>
                   {me.email}
                 </span>
               )}
@@ -206,7 +206,7 @@ export function NavBar() {
                 <UserCircle size={14} />
                 Account
               </Link>
-              <a href="/logout" className="text-sm text-slate-500 hover:text-slate-700 px-2.5 py-1.5 rounded-lg hover:bg-slate-100 transition-colors">
+              <a href="/logout" className="text-sm text-slate-600 hover:text-slate-800 px-2.5 py-1.5 rounded-lg hover:bg-slate-100 transition-colors">
                 Sign out
               </a>
             </div>
