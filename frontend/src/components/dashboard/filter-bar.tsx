@@ -75,7 +75,7 @@ const CHIP_LABELS: Partial<Record<keyof CompanyFilters, string>> = {
   google_searched: "Web search", tags: "Tags", ai_category: "AI Class.",
   tfidf_cluster: "Cluster", purpose_keywords: "Keyword",
   noga_code: "NOGA code", noga_label: "NOGA label", noga_level: "NOGA level",
-  legal_form: "Legal form", registered_after: "Founded after", registered_before: "Founded before",
+  legal_form: "Legal form", registered_after: "First SOGC after", registered_before: "First SOGC before",
   min_web_score: "Min Web", max_web_score: "Max Web",
   min_flex_score: "Min Flex", max_flex_score: "Max Flex",
   min_ai_score: "Min AI", max_ai_score: "Max AI",
@@ -454,7 +454,7 @@ export function FilterBar({
               />
             </div>
             <div>
-              <Label>Founded after</Label>
+              <Label>First SOGC after</Label>
               <input
                 type="date"
                 className={inputCls}
@@ -463,7 +463,7 @@ export function FilterBar({
               />
             </div>
             <div>
-              <Label>Founded before</Label>
+              <Label>First SOGC before</Label>
               <input
                 type="date"
                 className={inputCls}

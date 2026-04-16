@@ -34,7 +34,7 @@
 - umami (also keys probably) potentially posthog?
 
 ## Bug Fixes & Known Issues
-- Map not working correctly
+- Map Adress search only works with streetname, number and plz. it should work with different configurations
 - categories:
     - showing weird numbers
     - all users should see purpose ekywords, clusters and noga classifications in the category overview
@@ -54,6 +54,8 @@
 - Filters: the found after is not actually for founding but last SHAB entry (would be a potentially new filter though)
 - NOGA: Zweigniederlassung ist falsch zbs: https://helvex.dicy.ch/app/companies/238698
 - Move ML Job Reference from Jobs to collection page. 
+- AI Preview: AI classification is not configured on this server
+- Wire collections for other tiers i.e. finish up the explorer page
 
 
 

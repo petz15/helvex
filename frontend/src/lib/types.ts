@@ -50,6 +50,7 @@ export interface Company {
   audit_companies: string | null;
   sogc_pub: string | null;
   sogc_date: string | null;
+  first_sogc_date: string | null;
   deletion_date: string | null;
   ehraid: string | null;
   chid: string | null;
@@ -129,6 +130,9 @@ export interface CompanyFilters {
   legal_form?: string;
   registered_after?: string;
   registered_before?: string;
+  sogc_after?: string;
+  sogc_before?: string;
+  shab_type?: string;
   sort?: string;
   page?: number;
   page_size?: number;

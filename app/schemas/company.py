@@ -33,6 +33,7 @@ class CompanyBase(BaseModel):
     legal_form_uid: str | None = None
     legal_form_short_name: str | None = None
     sogc_date: str | None = None
+    first_sogc_date: str | None = None
     deletion_date: str | None = None
     # Extended detail fields (from per-UID Zefix endpoint)
     sogc_pub: str | None = None
@@ -104,6 +105,7 @@ class CompanyUpdate(BaseModel):
     legal_form_uid: str | None = None
     legal_form_short_name: str | None = None
     sogc_date: str | None = None
+    first_sogc_date: str | None = None
     deletion_date: str | None = None
     # Extended detail fields
     sogc_pub: str | None = None

@@ -43,6 +43,10 @@ _SORT_MAP = {
     "-ai_scored_at":        (Company.ai_scored_at,        False),
     "ai_category":          (Company.ai_category,         True),
     "-ai_category":         (Company.ai_category,         False),
+    "sogc_date":            (Company.sogc_date,           True),
+    "-sogc_date":           (Company.sogc_date,           False),
+    "first_sogc_date":      (Company.first_sogc_date,     True),
+    "-first_sogc_date":     (Company.first_sogc_date,     False),
 }
 _DEFAULT_SORT = "-updated"
 
@@ -53,6 +57,9 @@ def get_company(db: Session, company_id: int) -> Company | None:
 
 def get_company_by_uid(db: Session, uid: str) -> Company | None:
     return db.query(Company).filter(Company.uid == uid).first()
+
+
+_DELETED_STATUSES = ("Gelöscht", "CANCELLED", "BEING_CANCELLED")
 
 
 def _apply_filters(query, *, name_filter, uid_filter=None, canton, review_status, contact_status,
@@ -66,7 +73,8 @@ def _apply_filters(query, *, name_filter, uid_filter=None, canton, review_status
                    exclude_purpose_keywords=None, exclude_ai_category=None,
                    exclude_noga_code=None, exclude_noga_label=None, exclude_noga_level=None,
                    zefix_status=None, has_website=None,
-                   legal_form=None, registered_after=None, registered_before=None):
+                   legal_form=None, registered_after=None, registered_before=None,
+                   sogc_after=None, sogc_before=None, shab_type=None):
     if zefix_status:
         query = query.filter(Company.status == zefix_status)
     if has_website is True:
@@ -75,10 +83,31 @@ def _apply_filters(query, *, name_filter, uid_filter=None, canton, review_status
         query = query.filter(Company.website_url.is_(None))
     if legal_form:
         query = query.filter(Company.legal_form == legal_form)
+    # registered_after/before filter by first_sogc_date (earliest SOGC appearance)
     if registered_after:
-        query = query.filter(Company.sogc_date >= registered_after)
+        query = query.filter(Company.first_sogc_date >= registered_after)
     if registered_before:
-        query = query.filter(Company.sogc_date <= registered_before)
+        query = query.filter(Company.first_sogc_date <= registered_before)
+    # sogc_after/before filter by sogc_date (most recent SOGC entry)
+    if sogc_after:
+        query = query.filter(Company.sogc_date >= sogc_after)
+    if sogc_before:
+        query = query.filter(Company.sogc_date <= sogc_before)
+    # shab_type: "new" (HR01), "mutation" (HR02), "deleted" (HR03)
+    if shab_type == "new":
+        query = query.filter(
+            Company.first_sogc_date.isnot(None),
+            Company.first_sogc_date == Company.sogc_date,
+            Company.status.notin_(list(_DELETED_STATUSES)),
+        )
+    elif shab_type == "mutation":
+        query = query.filter(
+            Company.first_sogc_date.isnot(None),
+            Company.first_sogc_date != Company.sogc_date,
+            Company.status.notin_(list(_DELETED_STATUSES)),
+        )
+    elif shab_type == "deleted":
+        query = query.filter(Company.status.in_(list(_DELETED_STATUSES)))
     if name_filter:
         query = query.filter(Company.name.ilike(f"%{name_filter}%"))
     if uid_filter:
@@ -248,6 +277,9 @@ def list_companies(
     legal_form: str | None = None,
     registered_after: str | None = None,
     registered_before: str | None = None,
+    sogc_after: str | None = None,
+    sogc_before: str | None = None,
+    shab_type: str | None = None,
     # kept for backward-compat with collection.py batch query
     limit: int | None = None,
     skip: int = 0,
@@ -291,6 +323,9 @@ def list_companies(
         legal_form=legal_form,
         registered_after=registered_after,
         registered_before=registered_before,
+        sogc_after=sogc_after,
+        sogc_before=sogc_before,
+        shab_type=shab_type,
     )
 
     if sort in ("combined_score", "-combined_score"):
@@ -358,6 +393,9 @@ def count_companies(
     legal_form: str | None = None,
     registered_after: str | None = None,
     registered_before: str | None = None,
+    sogc_after: str | None = None,
+    sogc_before: str | None = None,
+    shab_type: str | None = None,
 ) -> int:
     query = db.query(Company)
     query = _apply_filters(
@@ -398,6 +436,9 @@ def count_companies(
         legal_form=legal_form,
         registered_after=registered_after,
         registered_before=registered_before,
+        sogc_after=sogc_after,
+        sogc_before=sogc_before,
+        shab_type=shab_type,
     )
     return query.count()
 

@@ -452,8 +452,11 @@ def list_companies(
     status: str | None = Query(None, description="Filter by Zefix company status, e.g. ACTIVE"),
     has_website: bool | None = Query(None, description="true = has website, false = no website"),
     legal_form: str | None = Query(None, description="Filter by exact legal form string"),
-    registered_after: str | None = Query(None, description="SOGC registration date >= (YYYY-MM-DD)"),
-    registered_before: str | None = Query(None, description="SOGC registration date <= (YYYY-MM-DD)"),
+    registered_after: str | None = Query(None, description="First SOGC date >= (YYYY-MM-DD) — filters by company's earliest SOGC appearance"),
+    registered_before: str | None = Query(None, description="First SOGC date <= (YYYY-MM-DD) — filters by company's earliest SOGC appearance"),
+    sogc_after: str | None = Query(None, description="Most recent SOGC date >= (YYYY-MM-DD)"),
+    sogc_before: str | None = Query(None, description="Most recent SOGC date <= (YYYY-MM-DD)"),
+    shab_type: str | None = Query(None, description="SHAB entry type: 'new' (HR01), 'mutation' (HR02), 'deleted' (HR03)"),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> CompanyPage:
@@ -494,6 +497,9 @@ def list_companies(
         legal_form=legal_form,
         registered_after=registered_after,
         registered_before=registered_before,
+        sogc_after=sogc_after,
+        sogc_before=sogc_before,
+        shab_type=shab_type,
     )
     total = crud.count_companies(db, **filter_kwargs)
     items = crud.list_companies(db, page=page, page_size=page_size, sort=sort, **filter_kwargs)

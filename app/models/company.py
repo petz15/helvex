@@ -48,6 +48,7 @@ class Company(Base):
     legal_form_uid: Mapped[str | None] = mapped_column(String(64), nullable=True)
     legal_form_short_name: Mapped[str | None] = mapped_column(String(32), nullable=True)
     sogc_date: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    first_sogc_date: Mapped[str | None] = mapped_column(String(32), nullable=True, index=True)
     deletion_date: Mapped[str | None] = mapped_column(String(32), nullable=True)
     # Extended Zefix detail fields (populated from per-UID endpoint only)
     sogc_pub: Mapped[str | None] = mapped_column(Text, nullable=True)  # JSON array

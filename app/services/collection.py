@@ -537,6 +537,7 @@ def _extract_company_fields(
         chid=chid,
         legal_seat_id=legal_seat_id,
         sogc_date=sogc_date,
+        first_sogc_date=sogc_date,  # set once on creation; never overwritten on updates
         deletion_date=deletion_date,
         sogc_pub=sogc_pub,
         capital_nominal=capital_nominal,
@@ -595,7 +596,8 @@ def import_company_from_zefix_uid(
         # Keep website enrichment data when refreshing core company data from Zefix.
         # Use exclude_none=True so that fields absent from the Zefix response (e.g. purpose
         # on CompanyFull when the API omits it) never overwrite already-stored values.
-        payload = company_data.model_dump(exclude={"uid", "website_url"}, exclude_none=True)
+        # Exclude first_sogc_date — it is set once on creation and must never be overwritten.
+        payload = company_data.model_dump(exclude={"uid", "website_url", "first_sogc_date"}, exclude_none=True)
         updated = crud.update_company(db, existing, CompanyUpdate(**payload))
         return updated, False
 

@@ -10,7 +10,7 @@ import { Loader2, MapPin, Search } from "lucide-react";
 import "leaflet/dist/leaflet.css";
 
 // Below this zoom level show grid-aggregated cluster circles; at/above show individual points.
-const DETAIL_ZOOM = 12;
+const DETAIL_ZOOM = 15;
 
 const DEFAULT_FILTERS: CompanyFilters = { sort: "-combined_score", page: 1, page_size: 50, status: "ACTIVE" };
 
