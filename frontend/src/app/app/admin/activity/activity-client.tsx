@@ -41,6 +41,8 @@ const ACTION_META: Record<string, { label: string; colour: string }> = {
   admin_org_deleted:    { label: "Admin: org delete",  colour: "bg-rose-100 text-rose-800" },
   job_enqueued:         { label: "Job enqueued",       colour: "bg-sky-100 text-sky-800" },
   job_cancelled:        { label: "Job cancelled",      colour: "bg-slate-100 text-slate-600" },
+  page_viewed:          { label: "Page view",          colour: "bg-slate-100 text-slate-500" },
+  web_search_run:       { label: "Web search",         colour: "bg-cyan-100 text-cyan-800" },
 };
 
 function ActionBadge({ action }: { action: string }) {
@@ -294,6 +296,8 @@ function MetaSummary({ meta, action }: { meta: Record<string, unknown>; action: 
   if (action === "company_website_set") return <>{String(meta.url ?? "")}</>;
   if (action === "view_created" || action === "view_deleted") return <>"{String(meta.name ?? "")}"</>;
   if (action === "view_alert_toggled") return <>{meta.enabled ? "enabled" : "disabled"} on "{String(meta.view_name ?? "")}"</>;
+  if (action === "page_viewed" && meta.path) return <>{String(meta.path)}</>;
+  if (action === "web_search_run" && meta.company_id) return <>Company #{String(meta.company_id)}</>;
   if (action === "user_login") return <>via {String(meta.method ?? "")}</>;
   if (action === "user_registered") return <>{String(meta.email ?? "")}</>;
   // fallback: compact JSON

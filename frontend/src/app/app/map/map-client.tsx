@@ -10,7 +10,7 @@ import { Loader2, MapPin, Search } from "lucide-react";
 import "leaflet/dist/leaflet.css";
 
 // Below this zoom level show grid-aggregated cluster circles; at/above show individual points.
-const DETAIL_ZOOM = 15;
+const DETAIL_ZOOM = 12;
 
 const DEFAULT_FILTERS: CompanyFilters = { sort: "-combined_score", page: 1, page_size: 50, status: "ACTIVE" };
 
@@ -55,6 +55,7 @@ export function MapClient() {
   const loadViewportRef = useRef<((f: CompanyFilters) => Promise<void>) | null>(null);
 
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [count, setCount] = useState(0);
   const [truncated, setTruncated] = useState(false);
   const [clustered, setClustered] = useState(true);
@@ -70,11 +71,20 @@ export function MapClient() {
   // Keep filtersRef in sync
   useEffect(() => { filtersRef.current = filters; }, [filters]);
 
+  function getOrCreateLayer() {
+    const L = (window as WindowWithLeaflet)._L;
+    if (!L || !mapInstanceRef.current) return null;
+    if (!layerRef.current) {
+      layerRef.current = L.layerGroup().addTo(mapInstanceRef.current);
+    }
+    layerRef.current.clearLayers();
+    return layerRef.current;
+  }
+
   function renderClusters(cells: MapCluster[]) {
     const L = (window as WindowWithLeaflet)._L;
-    if (!L || !mapInstanceRef.current) return;
-    layerRef.current?.clearLayers();
-    const layer = L.layerGroup();
+    const layer = getOrCreateLayer();
+    if (!L || !layer || !mapInstanceRef.current) return;
     for (const cell of cells) {
       if (cell.count === 0) continue;
       const color = clusterColor(cell.count);
@@ -87,17 +97,19 @@ export function MapClient() {
         iconSize: [size, size] as [number, number],
         iconAnchor: [size / 2, size / 2] as [number, number],
       });
-      layer.addLayer(L.marker([cell.lat, cell.lon], { icon }));
+      const marker = L.marker([cell.lat, cell.lon], { icon });
+      // Click to zoom in one step past DETAIL_ZOOM
+      marker.on("click", () => {
+        mapInstanceRef.current?.setView([cell.lat, cell.lon], DETAIL_ZOOM + 1);
+      });
+      layer.addLayer(marker);
     }
-    layer.addTo(mapInstanceRef.current);
-    layerRef.current = layer;
   }
 
   function renderMarkers(features: MapFeature[]) {
     const L = (window as WindowWithLeaflet)._L;
-    if (!L || !mapInstanceRef.current) return;
-    layerRef.current?.clearLayers();
-    const layer = L.layerGroup();
+    const layer = getOrCreateLayer();
+    if (!L || !layer || !mapInstanceRef.current) return;
 
     // Group co-located companies (same lat/lon to 5 decimal places ≈ 1m precision)
     const byLocation = new globalThis.Map<string, MapFeature[]>();
@@ -134,8 +146,6 @@ export function MapClient() {
       }
     }
 
-    layer.addTo(mapInstanceRef.current);
-    layerRef.current = layer;
   }
 
   function buildMapParams(f: CompanyFilters): Record<string, string> {
@@ -163,6 +173,7 @@ export function MapClient() {
     params.max_lon = String(bounds.getEast());
 
     setLoading(true);
+    setError(null);
     try {
       if (zoom < DETAIL_ZOOM) {
         params.zoom = String(zoom);
@@ -178,6 +189,8 @@ export function MapClient() {
         setClustered(false);
         renderMarkers(data.features);
       }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to load map data");
     } finally {
       setLoading(false);
     }
@@ -288,15 +301,18 @@ export function MapClient() {
               </span>
               <span>
                 {count.toLocaleString()} companies
-                {clustered
-                  ? " · zoom in for individual points"
+                {count === 0 && !loading
+                  ? " · no geocoded companies in view"
+                  : clustered
+                  ? " · click a bubble to zoom in"
                   : truncated
-                  ? " · capped at 5 000"
+                  ? " · capped at 20 000"
                   : " · in view"}
               </span>
             </div>
           </form>
           {addressError && <p className="mt-2 text-xs text-red-600">{addressError}</p>}
+          {error && <p className="mt-2 text-xs text-red-600">Map error: {error}</p>}
         </div>
 
         <div className="shrink-0">
@@ -310,7 +326,14 @@ export function MapClient() {
           />
         </div>
 
-        <div ref={mapRef} className="min-h-0 flex-1" />
+        <div className="relative min-h-0 flex-1">
+          <div ref={mapRef} className="h-full w-full" />
+          {loading && (
+            <div className="pointer-events-none absolute top-2 right-2 z-[400] flex items-center gap-1.5 rounded-lg bg-white/90 px-2.5 py-1.5 text-xs text-slate-600 shadow">
+              <Loader2 size={12} className="animate-spin" /> Loading…
+            </div>
+          )}
+        </div>
       </div>
     </>
   );

@@ -711,6 +711,69 @@ def activity_log_summary(
     }
 
 
+# ── Credit Transactions ────────────────────────────────────────────────────────
+
+@router.get("/credit-transactions", summary="List all credit transactions across all orgs (superadmin)")
+def list_credit_transactions(
+    org_id: int | None = Query(None, description="Filter by org"),
+    user_id: int | None = Query(None, description="Filter by user who triggered the transaction (via reference_id)"),
+    tx_type: str | None = Query(None, description="Filter by type: grant | topup | deduction | refund | expire"),
+    action_type: str | None = Query(None, description="Filter by action: web_search | batch_llm | etc."),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(50, ge=1, le=200),
+    db: Session = Depends(get_db),
+    _: User = Depends(_require_superadmin),
+) -> dict:
+    """Paginated ledger of all credit transactions platform-wide, newest first.
+
+    Each row shows org, amount, type, action_type, reference_id, balance before/after, and timestamp.
+    """
+    query = db.query(OrgCreditTransaction)
+    if org_id is not None:
+        query = query.filter(OrgCreditTransaction.org_id == org_id)
+    if tx_type:
+        query = query.filter(OrgCreditTransaction.type == tx_type)
+    if action_type:
+        query = query.filter(OrgCreditTransaction.action_type == action_type)
+
+    total = query.count()
+    rows = (
+        query.order_by(OrgCreditTransaction.created_at.desc())
+        .offset((page - 1) * page_size)
+        .limit(page_size)
+        .all()
+    )
+
+    # Eagerly resolve org names for display
+    org_ids = {r.org_id for r in rows if r.org_id is not None}
+    orgs_by_id: dict[int, Organization] = {}
+    if org_ids:
+        orgs_by_id = {o.id: o for o in db.query(Organization).filter(Organization.id.in_(org_ids)).all()}
+
+    def _row(r: OrgCreditTransaction) -> dict:
+        org = orgs_by_id.get(r.org_id) if r.org_id else None
+        return {
+            "id": r.id,
+            "org_id": r.org_id,
+            "org_name": org.name if org else None,
+            "amount": r.amount,
+            "type": r.type,
+            "action_type": r.action_type,
+            "reference_id": r.reference_id,
+            "credits_before": r.credits_before,
+            "credits_after": r.credits_after,
+            "expires_at": r.expires_at.isoformat() if r.expires_at else None,
+            "created_at": r.created_at.isoformat(),
+        }
+
+    return {
+        "items": [_row(r) for r in rows],
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+    }
+
+
 @router.get("/orgs/{org_id}/payment-transactions", summary="List payment transactions for org (superadmin)")
 def list_org_payment_transactions(
     org_id: int,

@@ -1,10 +1,12 @@
 import Link from "next/link";
 import { CookieSettingsButton } from "@/components/cookie-settings-button";
 import { AdBanner } from "@/components/ad-banner";
+import { PageViewTracker } from "@/components/page-view-tracker";
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   return (
     <div className="flex min-h-full flex-col">
+      <PageViewTracker />
       <AdBanner />
       <div className="flex-1">{children}</div>
       <footer className="border-t border-slate-200 bg-white px-4 py-3 text-xs text-slate-500">

@@ -40,9 +40,9 @@
     - showing weird numbers
     - all users should see purpose ekywords, clusters and noga classifications in the category overview
 - shab: 
-    - not running correctly
+    - not running correctly -> worked now. check how deleted, edited, and new is handled
     - how to display to users?
-- multiple issues in billing
+- billing/payment
     - save card not working
     - existing subscription then upgrading is not working
     - how did saferpay org get 1'000 credits without it showing up in my superadmin billing or saferpay backoffice dashboard?
@@ -52,9 +52,9 @@
 - admin dashboard simple redirects non authorized users, maybe not the safest
 - user logging: 
     - does not include login trough google auth
-- UI fixes
-    - pricing page does not look good
-
+- Filters: the found after is not actually for founding but last SHAB entry (would be a potentially new filter though)
+- NOGA: Zweigniederlassung ist falsch zbs: https://helvex.dicy.ch/app/companies/238698
+- Move ML Job Reference from Jobs to collection page. 
 
 
 
@@ -95,7 +95,7 @@
 ## Company Profile
 
 
-- [X] **History overview** —  Old names and taken over is already visible but not SOGC publications, which needs to be custom handled in order to display changes such as people and other changes. -> nicer overview
+- [X] **History overview** —  Old names and taken over is already visible but not SOGC publications, which needs to be custom handled in order to display changes such as people and other changes. -> nicer overview and improvements, there are still some mistakes sometimes in the displayment of people (preprocessing might be necessary)
 - [ ] **Graph overview of relationships** — based on past SHAB changes and name changes, take overs etc -> create nicer visuals for timeline. evaluate js on the fly calculations vs backend/DB
 - [ ] **Cross-company person graph** — normalize sogcPub organ changes into `persons` / `company_persons` tables via a pipeline job; build a graph UI showing where signers appear across multiple companies, what roles they held, and when — enabling network analysis of directors, beneficial owners, and corporate groups -> could use a graph DB for that
 - [ ] **Do not immediatly show scoring unless explore has been setup for org or user** —
@@ -107,6 +107,9 @@
 - [ ] **LLM classification extensions** — add OpenAI (ChatGPT) alongside Claude; user-configurable classification prompt per LLM; user-adjustable criteria
 - [ ] **Custom review & proposal categories** — keep sensible defaults, allow users to define own categories per account
 - [ ] **Per-user scoring rules** — custom distance origin, keyword boosts/penalties, cluster weights; DB: `user_scoring_config` (1:1 with users) + `company_user_score` (per user/company); scoring service already accepts a config dict
+- [ ] **Imporve Purpose Keyword extraction** - Seeing as this is central for NOGA and clustering, these keywords should be as accurate as possible. Review how it is done. E.g.
+- [ ] **NOGA Improvement** - More NOGA related improvements on displaying and other.
+- [ ] **Semantic K Means unavailable** - cant find it in the Collection part
 
 
 ## Jobs & Infrastructure
@@ -175,9 +178,11 @@
 - **Github Action Secrets Mess** - Currently many github action secrets are thrown in there which are my ENV variables, this should be managed and documented much better. Especially when I implement a DEV/INT env I should seperate a lot of these variables
 
 
-## Other
+## Other & QOL
 
 - [ ] **DE / FR / IT support** — UI strings, labels, tooltips; Zefix data already multilingual by canton
+- [ ] **Report Bug** - easy report Bug somewhere
+- [ ] **Site version in UI**- the version of the site somewhere in the UI
 
 
 

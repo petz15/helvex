@@ -597,6 +597,7 @@ async def google_callback(
 
     user = _crud.get_or_create_oauth_user(db, provider="google", provider_user_id=provider_user_id, email=email)
     logger.info("auth.google_oauth_ok user_id=%s email=%r", user.id, user.email)
+    log_activity(db, action="user_login", user_id=user.id, org_id=user.org_id, meta={"method": "google"}, ip=get_client_ip(request))
 
     forwarded_proto = request.headers.get("x-forwarded-proto", "")
     is_https = request.url.scheme == "https" or forwarded_proto.split(",")[0].strip().lower() == "https"
@@ -682,6 +683,7 @@ async def linkedin_callback(
 
     user = _crud.get_or_create_oauth_user(db, provider="linkedin", provider_user_id=provider_user_id, email=email)
     logger.info("auth.linkedin_oauth_ok user_id=%s email=%r", user.id, user.email)
+    log_activity(db, action="user_login", user_id=user.id, org_id=user.org_id, meta={"method": "linkedin"}, ip=get_client_ip(request))
 
     forwarded_proto = request.headers.get("x-forwarded-proto", "")
     is_https = request.url.scheme == "https" or forwarded_proto.split(",")[0].strip().lower() == "https"
@@ -689,6 +691,33 @@ async def linkedin_callback(
     _set_session(response, user.id, is_https=is_https)
     response.delete_cookie(_OAUTH_STATE_COOKIE)
     return response
+
+
+# ---------------------------------------------------------------------------
+# Page view tracking
+# ---------------------------------------------------------------------------
+
+class _PageViewBody(_BaseModel):
+    path: str
+
+
+@router.post("/page-view", status_code=204, include_in_schema=False)
+def record_page_view(
+    body: _PageViewBody,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> None:
+    """Record a frontend page navigation event for the current user."""
+    from app.services.activity import log_activity as _log_activity
+    _log_activity(
+        db,
+        action="page_viewed",
+        user_id=current_user.id,
+        org_id=current_user.org_id,
+        meta={"path": body.path},
+        ip=get_client_ip(request),
+    )
 
 
 # ---------------------------------------------------------------------------

@@ -189,7 +189,8 @@
       "Bash(grep -E \"\\\\.\\(py|ts\\)$\")",
       "Bash(bash -c \"cd '/c/D/coding_projects/zefix_analyzer/frontend' && npx tsc --noEmit 2>&1 | head -40\")",
       "Bash(echo \"EXIT:$?\")",
-      "Bash(grep -n \"claude.preview\\\\|claude_preview\\\\|claude-preview\" app/api/routes/*.py)"
+      "Bash(grep -n \"claude.preview\\\\|claude_preview\\\\|claude-preview\" app/api/routes/*.py)",
+      "Bash(grep -r \"activity_log\\\\|audit_log\" /c/D/coding_projects/zefix_analyzer/alembic/versions/*.py)"
     ]
   }
 }

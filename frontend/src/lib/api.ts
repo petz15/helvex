@@ -1582,3 +1582,32 @@ export async function fetchAdminActivitySummary(days = 30): Promise<ActivityLogS
   if (!res.ok) throw new Error("Failed to fetch activity summary");
   return res.json();
 }
+
+// ── Admin credit transactions ─────────────────────────────────────────────────
+
+export interface AdminCreditTransaction {
+  id: number;
+  org_id: number | null;
+  org_name: string | null;
+  amount: number;
+  type: string;
+  action_type: string | null;
+  reference_id: string | null;
+  credits_before: number | null;
+  credits_after: number | null;
+  expires_at: string | null;
+  created_at: string;
+}
+
+export async function fetchAdminCreditTransactions(params?: {
+  org_id?: number;
+  tx_type?: string;
+  action_type?: string;
+  page?: number;
+  page_size?: number;
+}): Promise<AdminPage<AdminCreditTransaction>> {
+  const url = buildUrl("/api/v1/admin/credit-transactions", params as Record<string, string | number | undefined | null>);
+  const res = await fetch(url, { credentials: "include" });
+  if (!res.ok) throw new Error("Failed to fetch credit transactions");
+  return res.json();
+}

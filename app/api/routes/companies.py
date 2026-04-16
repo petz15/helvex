@@ -208,9 +208,31 @@ def google_search_for_company(
                 status_code=status.HTTP_429_TOO_MANY_REQUESTS,
                 detail="Too many Google search requests. Maximum 30 per 10 minutes.",
             )
+        if current_user.org_id:
+            if not credits_service.check_and_deduct(
+                db,
+                current_user.org_id,
+                "web_search",
+                1,
+                reference_id=f"google_search:company_{company_id}:user_{current_user.id}",
+            ):
+                raise HTTPException(
+                    status_code=status.HTTP_402_PAYMENT_REQUIRED,
+                    detail=f"Insufficient credits. A web search costs {credits_service.CREDIT_COSTS['web_search']:,} credits.",
+                )
     db_company = crud.get_company(db, company_id)
     if not db_company:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Company not found")
+
+    log_activity(
+        db,
+        action="web_search_run",
+        user_id=current_user.id,
+        org_id=current_user.org_id,
+        resource_type="company",
+        resource_id=company_id,
+        meta={"company_id": company_id, "name": db_company.name},
+    )
 
     try:
         enrich_company_website(db, db_company, num=num)
