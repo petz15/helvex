@@ -906,8 +906,10 @@ function CategoryDetail({
   const [selectedBm, setSelectedBm] = useState<string | null>(null);
   const [breakdownCompany, setBreakdownCompany] = useState<Company | null>(null);
 
-  const { data: stats } = useSWR(["cat-stats", catType, catValue, orgId], () =>
-    fetchCategoryStats(catType, catValue, orgId)
+  const { data: stats } = useSWR(
+    ["cat-stats", catType, catValue, orgId],
+    () => fetchCategoryStats(catType, catValue, orgId),
+    { dedupingInterval: 300000 }
   );
 
   // Filters for the company table

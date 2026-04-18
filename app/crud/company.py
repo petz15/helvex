@@ -53,6 +53,9 @@ _SORT_MAP = {
     "-sogc_date":           (Company.sogc_date,           False),
     "first_sogc_date":      (Company.first_sogc_date,     True),
     "-first_sogc_date":     (Company.first_sogc_date,     False),
+    # combined_score is a Python @property — express it as a SQL literal for ORDER BY
+    "combined_score":       (literal_column("(COALESCE(ai_score*0.70,0)+COALESCE(web_score*0.20,0)+COALESCE(flex_score*0.10,0))"), True),
+    "-combined_score":      (literal_column("(COALESCE(ai_score*0.70,0)+COALESCE(web_score*0.20,0)+COALESCE(flex_score*0.10,0))"), False),
 }
 _DEFAULT_SORT = "-updated"
 
