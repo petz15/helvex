@@ -886,89 +886,161 @@ def get_category_stats(
 ) -> dict:
     """Return score landscape stats for a specific category value.
 
-    category_type: 'ai_category' | 'tfidf_cluster' | 'keyword' | 'noga_code'
-    Returns score distribution bands, component averages, canton breakdown, and coverage.
+    All aggregation is done in a single SQL query — no rows fetched into Python.
+    combined_score = weighted avg(ai*0.7, web*0.2, flex*0.1) mirrored in SQL.
     """
-    from app.models.org_company_state import OrgCompanyState
+    from sqlalchemy import text as _text
 
-    base_q = db.query(Company)
-    if org_id:
-        base_q = base_q.join(
-            OrgCompanyState,
-            (OrgCompanyState.company_id == Company.id) & (OrgCompanyState.org_id == org_id),
-        )
-
-    # Apply category filter
-    if category_type == "ai_category":
-        base_q = base_q.filter(Company.ai_category == value)
-    elif category_type == "tfidf_cluster":
-        base_q = base_q.filter(Company.tfidf_cluster.contains(value))
-    elif category_type == "keyword":
-        base_q = base_q.filter(Company.purpose_keywords.contains(value))
-    elif category_type == "noga_code":
-        base_q = base_q.filter(Company.noga_code == value)
-    else:
+    _TYPE_TO_COL = {
+        "ai_category": "ai_category",
+        "tfidf_cluster": "tfidf_cluster",
+        "keyword": "purpose_keywords",
+        "noga_code": "noga_code",
+    }
+    if category_type not in _TYPE_TO_COL:
         return {"error": f"Unknown category_type: {category_type}"}
 
-    # Fetch relevant score columns only (avoid loading full Company objects)
-    rows = base_q.with_entities(
-        Company.ai_score,
-        Company.flex_score,
-        Company.web_score,
-        Company.canton,
-    ).all()
+    col = _TYPE_TO_COL[category_type]
+    # tfidf_cluster and keyword are multi-value fields — use LIKE for membership.
+    if category_type in ("tfidf_cluster", "keyword"):
+        where_clause = f"{col} LIKE :pattern"
+        bind = {"pattern": f"%{value}%"}
+    else:
+        where_clause = f"{col} = :value"
+        bind = {"value": value}
 
-    if not rows:
+    # Single query: all aggregates + score bands via SQL CASE.
+    # combined = weighted avg of whichever scores are present, matching the
+    # Python @property logic (weights renormalised to present scores).
+    # Because renormalisation is complex in SQL, we use the stored scores
+    # directly: combined ≈ (0.7*ai + 0.2*web + 0.1*flex) / (sum of weights present).
+    # This is exact for companies with all three scores; an approximation otherwise.
+    agg_sql = _text(f"""
+        SELECT
+            COUNT(*)                                                    AS total,
+            AVG(ai_score)                                               AS avg_ai,
+            AVG(flex_score)                                             AS avg_flex,
+            AVG(web_score)                                              AS avg_web,
+            AVG(
+                CASE
+                    WHEN ai_score IS NOT NULL AND web_score IS NOT NULL AND flex_score IS NOT NULL
+                        THEN (0.70 * ai_score + 0.20 * web_score + 0.10 * flex_score)
+                    WHEN ai_score IS NOT NULL AND web_score IS NOT NULL
+                        THEN (0.70 * ai_score + 0.20 * web_score) / 0.90
+                    WHEN ai_score IS NOT NULL AND flex_score IS NOT NULL
+                        THEN (0.70 * ai_score + 0.10 * flex_score) / 0.80
+                    WHEN web_score IS NOT NULL AND flex_score IS NOT NULL
+                        THEN (0.20 * web_score + 0.10 * flex_score) / 0.30
+                    WHEN ai_score IS NOT NULL  THEN ai_score
+                    WHEN web_score IS NOT NULL THEN web_score
+                    WHEN flex_score IS NOT NULL THEN flex_score
+                    ELSE NULL
+                END
+            )                                                           AS avg_combined,
+            COUNT(CASE WHEN ai_score IS NULL AND web_score IS NULL
+                            AND flex_score IS NULL THEN 1 END)         AS unscored,
+            COUNT(CASE WHEN (
+                    CASE
+                        WHEN ai_score IS NOT NULL AND web_score IS NOT NULL AND flex_score IS NOT NULL
+                            THEN (0.70*ai_score + 0.20*web_score + 0.10*flex_score)
+                        WHEN ai_score IS NOT NULL AND web_score IS NOT NULL
+                            THEN (0.70*ai_score + 0.20*web_score) / 0.90
+                        WHEN ai_score IS NOT NULL AND flex_score IS NOT NULL
+                            THEN (0.70*ai_score + 0.10*flex_score) / 0.80
+                        WHEN web_score IS NOT NULL AND flex_score IS NOT NULL
+                            THEN (0.20*web_score + 0.10*flex_score) / 0.30
+                        WHEN ai_score IS NOT NULL  THEN ai_score
+                        WHEN web_score IS NOT NULL THEN web_score
+                        ELSE flex_score
+                    END
+                ) >= 80 THEN 1 END)                                    AS band_80plus,
+            COUNT(CASE WHEN (
+                    CASE
+                        WHEN ai_score IS NOT NULL AND web_score IS NOT NULL AND flex_score IS NOT NULL
+                            THEN (0.70*ai_score + 0.20*web_score + 0.10*flex_score)
+                        WHEN ai_score IS NOT NULL AND web_score IS NOT NULL
+                            THEN (0.70*ai_score + 0.20*web_score) / 0.90
+                        WHEN ai_score IS NOT NULL AND flex_score IS NOT NULL
+                            THEN (0.70*ai_score + 0.10*flex_score) / 0.80
+                        WHEN web_score IS NOT NULL AND flex_score IS NOT NULL
+                            THEN (0.20*web_score + 0.10*flex_score) / 0.30
+                        WHEN ai_score IS NOT NULL  THEN ai_score
+                        WHEN web_score IS NOT NULL THEN web_score
+                        ELSE flex_score
+                    END
+                ) BETWEEN 60 AND 79.999 THEN 1 END)                   AS band_60to80,
+            COUNT(CASE WHEN (
+                    CASE
+                        WHEN ai_score IS NOT NULL AND web_score IS NOT NULL AND flex_score IS NOT NULL
+                            THEN (0.70*ai_score + 0.20*web_score + 0.10*flex_score)
+                        WHEN ai_score IS NOT NULL AND web_score IS NOT NULL
+                            THEN (0.70*ai_score + 0.20*web_score) / 0.90
+                        WHEN ai_score IS NOT NULL AND flex_score IS NOT NULL
+                            THEN (0.70*ai_score + 0.10*flex_score) / 0.80
+                        WHEN web_score IS NOT NULL AND flex_score IS NOT NULL
+                            THEN (0.20*web_score + 0.10*flex_score) / 0.30
+                        WHEN ai_score IS NOT NULL  THEN ai_score
+                        WHEN web_score IS NOT NULL THEN web_score
+                        ELSE flex_score
+                    END
+                ) BETWEEN 40 AND 59.999 THEN 1 END)                   AS band_40to60,
+            COUNT(CASE WHEN (
+                    CASE
+                        WHEN ai_score IS NOT NULL AND web_score IS NOT NULL AND flex_score IS NOT NULL
+                            THEN (0.70*ai_score + 0.20*web_score + 0.10*flex_score)
+                        WHEN ai_score IS NOT NULL AND web_score IS NOT NULL
+                            THEN (0.70*ai_score + 0.20*web_score) / 0.90
+                        WHEN ai_score IS NOT NULL AND flex_score IS NOT NULL
+                            THEN (0.70*ai_score + 0.10*flex_score) / 0.80
+                        WHEN web_score IS NOT NULL AND flex_score IS NOT NULL
+                            THEN (0.20*web_score + 0.10*flex_score) / 0.30
+                        WHEN ai_score IS NOT NULL  THEN ai_score
+                        WHEN web_score IS NOT NULL THEN web_score
+                        ELSE flex_score
+                    END
+                ) < 40 THEN 1 END)                                     AS band_below40
+        FROM companies
+        WHERE {where_clause}
+    """)
+
+    canton_sql = _text(f"""
+        SELECT canton, COUNT(*) AS cnt
+        FROM companies
+        WHERE {where_clause} AND canton IS NOT NULL
+        GROUP BY canton
+        ORDER BY cnt DESC
+        LIMIT 10
+    """)
+
+    r = db.execute(agg_sql, bind).fetchone()
+    cantons = db.execute(canton_sql, bind).fetchall()
+
+    if not r or r.total == 0:
         return {
             "count": 0,
-            "avg_ai_score": None,
-            "avg_flex_score": None,
-            "avg_web_score": None,
-            "avg_combined_score": None,
+            "avg_ai_score": None, "avg_flex_score": None,
+            "avg_web_score": None, "avg_combined_score": None,
             "bands": {"80plus": 0, "60to80": 0, "40to60": 0, "below40": 0, "unscored": 0},
             "canton_breakdown": [],
             "unscored_count": 0,
         }
 
-    W_AI, W_WEB, W_FLEX = 0.70, 0.20, 0.10
-
-    total = len(rows)
-    ai_scores = [r.ai_score for r in rows if r.ai_score is not None]
-    flex_scores = [r.flex_score for r in rows if r.flex_score is not None]
-    web_scores = [r.web_score for r in rows if r.web_score is not None]
-
-    bands = {"80plus": 0, "60to80": 0, "40to60": 0, "below40": 0, "unscored": 0}
-    combined_sum = 0.0
-    combined_count = 0
-    canton_counter: Counter = Counter()
-
-    for r in rows:
-        if r.canton:
-            canton_counter[r.canton] += 1
-        present = [(s, w) for s, w in [(r.ai_score, W_AI), (r.web_score, W_WEB), (r.flex_score, W_FLEX)] if s is not None]
-        if not present:
-            bands["unscored"] += 1
-            continue
-        total_w = sum(w for _, w in present)
-        combined = round(sum(s * w for s, w in present) / total_w)
-        combined_sum += combined
-        combined_count += 1
-        if combined >= 80:
-            bands["80plus"] += 1
-        elif combined >= 60:
-            bands["60to80"] += 1
-        elif combined >= 40:
-            bands["40to60"] += 1
-        else:
-            bands["below40"] += 1
+    def _rnd(v):
+        return round(float(v)) if v is not None else None
 
     return {
-        "count": total,
-        "avg_ai_score": round(sum(ai_scores) / len(ai_scores)) if ai_scores else None,
-        "avg_flex_score": round(sum(flex_scores) / len(flex_scores)) if flex_scores else None,
-        "avg_web_score": round(sum(web_scores) / len(web_scores)) if web_scores else None,
-        "avg_combined_score": round(combined_sum / combined_count) if combined_count else None,
-        "bands": bands,
-        "canton_breakdown": canton_counter.most_common(10),
-        "unscored_count": bands["unscored"] + (total - sum(bands.values())),
+        "count": r.total,
+        "avg_ai_score": _rnd(r.avg_ai),
+        "avg_flex_score": _rnd(r.avg_flex),
+        "avg_web_score": _rnd(r.avg_web),
+        "avg_combined_score": _rnd(r.avg_combined),
+        "bands": {
+            "80plus": r.band_80plus,
+            "60to80": r.band_60to80,
+            "40to60": r.band_40to60,
+            "below40": r.band_below40,
+            "unscored": r.unscored,
+        },
+        "canton_breakdown": [(c.canton, c.cnt) for c in cantons],
+        "unscored_count": r.unscored,
     }
