@@ -1,5 +1,8 @@
+import threading
+import time
 from collections import Counter
 from datetime import date
+from typing import Any
 
 from sqlalchemy import case, func, nullslast, or_, literal_column
 from sqlalchemy.orm import Session
@@ -686,25 +689,32 @@ def get_noga_hierarchy(db: Session, org_id: int | None = None) -> list[dict]:
     return roots
 
 
-def get_taxonomy_stats(db: Session, org_id: int | None = None) -> dict:
-    """Return distinct values + counts for tfidf_cluster and tags (sorted by count desc)."""
-    from app.models.org_company_state import OrgCompanyState
+# ---------------------------------------------------------------------------
+# Taxonomy stats cache
+# Global taxonomy data (clusters, keywords, categories, NOGA, cantons, legal
+# forms) changes only when ML/classify jobs run — cache it for 10 minutes so
+# concurrent explorer loads don't all hammer the DB with full-table scans.
+# Tags are per-org and cheap (indexed GROUP BY), so they are never cached.
+# ---------------------------------------------------------------------------
+_TAX_CACHE_TTL = 600  # seconds
+_tax_cache_lock = threading.Lock()
+_tax_cache_data: dict[str, Any] | None = None
+_tax_cache_ts: float = 0.0
 
-    # Global base query — taxonomy counts (categories, clusters, keywords, NOGA) are always
-    # across all companies, not scoped to an org. Only the tags query uses org_id since tags
-    # are org-specific workflow data stored in OrgCompanyState.
+
+def invalidate_taxonomy_cache() -> None:
+    """Force next get_taxonomy_stats() call to recompute from DB."""
+    global _tax_cache_ts
+    with _tax_cache_lock:
+        _tax_cache_ts = 0.0
+
+
+def _compute_global_taxonomy(db: Session) -> dict[str, Any]:
+    """Run all expensive global taxonomy queries. Result is cached."""
+    from sqlalchemy import text as _text
+
     base_q = db.query(Company)
 
-    # Separate org-scoped query used only for tags
-    org_q = db.query(Company)
-    if org_id:
-        org_q = org_q.join(
-            OrgCompanyState,
-            (OrgCompanyState.company_id == Company.id) & (OrgCompanyState.org_id == org_id),
-        )
-
-    # tfidf_cluster: pipe-separated — aggregate entirely in SQL to avoid fetching 760k rows
-    from sqlalchemy import text as _text
     cluster_rows = db.execute(_text(
         "SELECT trim(unnest(string_to_array(tfidf_cluster, '|'))) AS label, COUNT(*) AS cnt"
         " FROM companies"
@@ -713,7 +723,6 @@ def get_taxonomy_stats(db: Session, org_id: int | None = None) -> dict:
     )).fetchall()
     clusters_list = [(r.label, r.cnt) for r in cluster_rows if r.label]
 
-    # purpose_keywords: comma-separated — same SQL-side split
     kw_rows = db.execute(_text(
         "SELECT trim(unnest(string_to_array(purpose_keywords, ','))) AS kw, COUNT(*) AS cnt"
         " FROM companies"
@@ -722,13 +731,6 @@ def get_taxonomy_stats(db: Session, org_id: int | None = None) -> dict:
     )).fetchall()
     keywords_list = [(r.kw, r.cnt) for r in kw_rows if r.kw]
 
-    tags = (
-        org_q.with_entities(Company.tags, func.count(Company.id).label("cnt"))
-        .filter(Company.tags.isnot(None))
-        .group_by(Company.tags)
-        .order_by(func.count(Company.id).desc())
-        .all()
-    )
     categories = (
         base_q.with_entities(Company.ai_category, func.count(Company.id).label("cnt"))
         .filter(Company.ai_category.isnot(None))
@@ -764,7 +766,6 @@ def get_taxonomy_stats(db: Session, org_id: int | None = None) -> dict:
         .order_by(func.count(Company.id).desc())
         .all()
     )
-    # Per-category average AI score for Layer 1 card display
     cat_scores = (
         base_q.with_entities(
             Company.ai_category,
@@ -790,13 +791,50 @@ def get_taxonomy_stats(db: Session, org_id: int | None = None) -> dict:
     return {
         "clusters": clusters_list,
         "keywords": keywords_list,
-        "tags": [(r.tags, r.cnt) for r in tags],
         "categories": [(r.ai_category, r.cnt) for r in categories],
         "categories_enriched": categories_enriched,
         "noga_codes": [(((r.noga_code or "") + " — " + (r.noga_label or "")).strip(" —"), r.cnt) for r in noga_codes],
         "noga_levels": [(r.noga_level, r.cnt) for r in noga_levels],
         "legal_forms": [(r.legal_form, r.cnt) for r in legal_forms],
         "cantons": [(r.canton, r.cnt) for r in cantons],
+    }
+
+
+def get_taxonomy_stats(db: Session, org_id: int | None = None) -> dict:
+    """Return taxonomy counts for the explorer Layer 1 grid.
+
+    Global fields (clusters, keywords, categories, NOGA, cantons, legal forms)
+    are served from an in-process cache (TTL=10 min) and recomputed only after
+    ML/classify jobs complete. Tags are org-specific and always queried live.
+    """
+    global _tax_cache_data, _tax_cache_ts
+
+    now = time.monotonic()
+    with _tax_cache_lock:
+        if _tax_cache_data is None or (now - _tax_cache_ts) >= _TAX_CACHE_TTL:
+            _tax_cache_data = _compute_global_taxonomy(db)
+            _tax_cache_ts = now
+        global_data = _tax_cache_data
+
+    # Tags are per-org workflow data stored in OrgCompanyState — always live.
+    from app.models.org_company_state import OrgCompanyState
+    org_q = db.query(Company)
+    if org_id:
+        org_q = org_q.join(
+            OrgCompanyState,
+            (OrgCompanyState.company_id == Company.id) & (OrgCompanyState.org_id == org_id),
+        )
+    tags = (
+        org_q.with_entities(Company.tags, func.count(Company.id).label("cnt"))
+        .filter(Company.tags.isnot(None))
+        .group_by(Company.tags)
+        .order_by(func.count(Company.id).desc())
+        .all()
+    )
+
+    return {
+        **global_data,
+        "tags": [(r.tags, r.cnt) for r in tags],
     }
 
 

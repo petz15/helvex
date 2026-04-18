@@ -1237,6 +1237,14 @@ def _run_job(app, job_id: int) -> None:  # noqa: C901
             _maybe_sync(app, job_type=job.job_type, label=job.label, message=done_msg, stats=dict(stats), error=None, done=True)
             _publish_job_update(job.org_id)
             _maybe_send_job_notification(db, job=job, event="completed", stats=stats)
+            # Bust taxonomy cache when any job that changes category/score data finishes.
+            _TAXONOMY_INVALIDATING = {
+                "claude_classify", "reclassify_noga", "recalculate_scores",
+                "recalculate_google_scores", "reextract_purpose", "classify_business_model",
+            }
+            if job.job_type in _TAXONOMY_INVALIDATING:
+                from app.crud.company import invalidate_taxonomy_cache
+                invalidate_taxonomy_cache()
 
         except _JobWaitingExternalSignal:
             # Job transitioned to waiting_external — already committed above; nothing else needed.
