@@ -913,6 +913,7 @@ export interface OrgEffectiveSettings {
   scoring_weight_ai: string;
   scoring_weight_web: string;
   scoring_weight_flex: string;
+  scoring_noga_targets: string;
 }
 
 export async function fetchOrgEffectiveSettings(orgId: number): Promise<OrgEffectiveSettings> {

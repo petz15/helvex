@@ -75,6 +75,7 @@ const CHIP_LABELS: Partial<Record<keyof CompanyFilters, string>> = {
   google_searched: "Web search", tags: "Tags", ai_category: "AI Class.",
   tfidf_cluster: "Cluster", purpose_keywords: "Keyword",
   noga_code: "NOGA code", noga_label: "NOGA label", noga_level: "NOGA level",
+  business_model: "Business model",
   legal_form: "Legal form", registered_after: "First SOGC after", registered_before: "First SOGC before",
   min_web_score: "Min Web", max_web_score: "Max Web",
   min_flex_score: "Min Flex", max_flex_score: "Max Flex",
@@ -451,6 +452,17 @@ export function FilterBar({
                 value={filters.legal_form}
                 onChange={(v) => set("legal_form", v)}
                 placeholder="Search legal form…"
+              />
+            </div>
+            <div>
+              <Label>Business model</Label>
+              <MultiSelectFilter
+                value={filters.business_model}
+                onChange={(v) => set("business_model", v)}
+                placeholder="B2B, B2C, B2G…"
+                options={[["b2b", 0], ["b2c", 0], ["b2g", 0], ["mixed", 0]]}
+                extraOptions={[{ value: "_none", label: "None (unclassified)" }]}
+                variant="include"
               />
             </div>
             <div>

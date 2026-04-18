@@ -74,7 +74,8 @@ def _apply_filters(query, *, name_filter, uid_filter=None, canton, review_status
                    exclude_noga_code=None, exclude_noga_label=None, exclude_noga_level=None,
                    zefix_status=None, has_website=None,
                    legal_form=None, registered_after=None, registered_before=None,
-                   sogc_after=None, sogc_before=None, shab_type=None):
+                   sogc_after=None, sogc_before=None, shab_type=None,
+                   business_model=None):
     if zefix_status:
         query = query.filter(Company.status == zefix_status)
     if has_website is True:
@@ -83,6 +84,12 @@ def _apply_filters(query, *, name_filter, uid_filter=None, canton, review_status
         query = query.filter(Company.website_url.is_(None))
     if legal_form:
         query = query.filter(Company.legal_form == legal_form)
+    if business_model:
+        if business_model == "_none":
+            query = query.filter(Company.business_model.is_(None))
+        else:
+            terms = [t.strip() for t in business_model.split(",") if t.strip()]
+            query = query.filter(Company.business_model.in_(terms))
     # registered_after/before filter by first_sogc_date (earliest SOGC appearance)
     if registered_after:
         query = query.filter(Company.first_sogc_date >= registered_after)
@@ -280,6 +287,7 @@ def list_companies(
     sogc_after: str | None = None,
     sogc_before: str | None = None,
     shab_type: str | None = None,
+    business_model: str | None = None,
     # kept for backward-compat with collection.py batch query
     limit: int | None = None,
     skip: int = 0,
@@ -326,6 +334,7 @@ def list_companies(
         sogc_after=sogc_after,
         sogc_before=sogc_before,
         shab_type=shab_type,
+        business_model=business_model,
     )
 
     if sort in ("combined_score", "-combined_score"):
@@ -396,6 +405,7 @@ def count_companies(
     sogc_after: str | None = None,
     sogc_before: str | None = None,
     shab_type: str | None = None,
+    business_model: str | None = None,
 ) -> int:
     query = db.query(Company)
     query = _apply_filters(
@@ -439,6 +449,7 @@ def count_companies(
         sogc_after=sogc_after,
         sogc_before=sogc_before,
         shab_type=shab_type,
+        business_model=business_model,
     )
     return query.count()
 

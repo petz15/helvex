@@ -511,6 +511,7 @@ def list_companies(
     sogc_after: str | None = Query(None, description="Most recent SOGC date >= (YYYY-MM-DD)"),
     sogc_before: str | None = Query(None, description="Most recent SOGC date <= (YYYY-MM-DD)"),
     shab_type: str | None = Query(None, description="SHAB entry type: 'new' (HR01), 'mutation' (HR02), 'deleted' (HR03)"),
+    business_model: str | None = Query(None, description="Filter by business model: b2b, b2c, b2g, mixed, or _none"),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> CompanyPage:
@@ -554,6 +555,7 @@ def list_companies(
         sogc_after=sogc_after,
         sogc_before=sogc_before,
         shab_type=shab_type,
+        business_model=business_model,
     )
     total = crud.count_companies(db, **filter_kwargs)
     items = crud.list_companies(db, page=page, page_size=page_size, sort=sort, **filter_kwargs)

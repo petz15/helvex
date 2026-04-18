@@ -1,11 +1,11 @@
 "use client";
-import { useState, useCallback, useTransition, useEffect, useRef, Suspense } from "react";
+import { useState, useCallback, useTransition, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import useSWR from "swr";
 import {
-  Compass, Search, X, Download, Settings, AlertTriangle, Star, BarChart2,
+  Compass, Search, X, Download, Settings, AlertTriangle, BarChart2,
   ArrowLeft, Wand2, ChevronRight, HelpCircle, Sparkles, Grid3x3,
-  TrendingUp, Target, MapPin, Building2,
+  TrendingUp, Target, MapPin,
 } from "lucide-react";
 import { CompanyTable } from "@/components/dashboard/company-table";
 import { CompanyPreview } from "@/components/dashboard/company-preview";
@@ -37,6 +37,13 @@ const SCORE_PRESETS = [
 ];
 
 type CategoryType = "ai_category" | "tfidf_cluster" | "keyword" | "noga_code";
+
+const BUSINESS_MODEL_CHIPS = [
+  { value: "b2b", label: "B2B", color: "bg-blue-100 text-blue-700 border-blue-200" },
+  { value: "b2c", label: "B2C", color: "bg-violet-100 text-violet-700 border-violet-200" },
+  { value: "b2g", label: "B2G", color: "bg-amber-100 text-amber-700 border-amber-200" },
+  { value: "mixed", label: "Mixed", color: "bg-slate-100 text-slate-600 border-slate-200" },
+];
 
 const CAT_TYPE_LABELS: Record<CategoryType, string> = {
   ai_category: "AI Categories",
@@ -225,7 +232,12 @@ function ScoringWizard({
     settings?.scoring_keyword_exclude_points || "10"
   );
 
-  // Step 3: scoring weights
+  // Step 3: NOGA targeting
+  const [nogaTargets, setNogaTargets] = useState<string>(() =>
+    settings?.scoring_noga_targets || ""
+  );
+
+  // Step 4: scoring weights
   const [wAi, setWAi] = useState<string>(() => String(Math.round(parseFloat(settings?.scoring_weight_ai || "0.70") * 100)));
   const [wFlex, setWFlex] = useState<string>(() => String(Math.round(parseFloat(settings?.scoring_weight_flex || "0.10") * 100)));
   const [wWeb, setWWeb] = useState<string>(() => String(Math.round(parseFloat(settings?.scoring_weight_web || "0.20") * 100)));
@@ -249,6 +261,7 @@ function ScoringWizard({
         scoring_exclude_keywords: excludeKws,
         scoring_keyword_hit_points: kwHitPts,
         scoring_keyword_exclude_points: kwExclPts,
+        scoring_noga_targets: nogaTargets,
         scoring_weight_ai: totalW > 0 ? String((parseInt(wAi) || 0) / totalW) : "0.70",
         scoring_weight_flex: totalW > 0 ? String((parseInt(wFlex) || 0) / totalW) : "0.10",
         scoring_weight_web: totalW > 0 ? String((parseInt(wWeb) || 0) / totalW) : "0.20",
@@ -280,17 +293,17 @@ function ScoringWizard({
 
         {/* Step indicator */}
         <div className="flex items-center gap-1 px-6 py-3 bg-slate-50 border-b border-slate-100">
-          {[1, 2, 3, 4].map(s => (
+          {[1, 2, 3, 4, 5].map(s => (
             <div key={s} className="flex items-center gap-1">
               <div className={cn(
                 "w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold",
                 step === s ? "bg-blue-600 text-white" : step > s ? "bg-emerald-500 text-white" : "bg-slate-200 text-slate-500"
               )}>{step > s ? "✓" : s}</div>
-              {s < 4 && <div className={cn("w-8 h-0.5", step > s ? "bg-emerald-300" : "bg-slate-200")} />}
+              {s < 5 && <div className={cn("w-6 h-0.5", step > s ? "bg-emerald-300" : "bg-slate-200")} />}
             </div>
           ))}
           <span className="ml-2 text-xs text-slate-500">
-            {["Target categories", "Keywords", "Score weights", "Save"][step - 1]}
+            {["Clusters", "Keywords", "NOGA targets", "Score weights", "Save"][step - 1]}
           </span>
         </div>
 
@@ -377,13 +390,43 @@ function ScoringWizard({
 
           {step === 3 && (
             <div className="space-y-4">
+              <p className="text-sm text-slate-600">
+                Assign bonus points to companies based on their NOGA industry code. Use the format{" "}
+                <code className="font-mono text-xs bg-slate-100 px-1 rounded">CODE:points</code>, pipe-separated.
+                More specific codes override parent codes.
+              </p>
+              <div>
+                <label className="text-xs font-medium text-slate-500 uppercase tracking-wide block mb-1">
+                  NOGA targets (e.g. <code className="font-mono text-xs">J:20|62:35|620:40</code>)
+                </label>
+                <textarea
+                  value={nogaTargets}
+                  onChange={(e) => setNogaTargets(e.target.value)}
+                  rows={3}
+                  className="w-full text-xs border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-300 font-mono"
+                  placeholder="e.g. J:20|62:35|620:40|M:15"
+                />
+              </div>
+              <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs text-slate-600 space-y-1">
+                <p className="font-medium text-slate-700">How it works</p>
+                <p>NOGA codes follow a hierarchy: <strong>J</strong> (section) → <strong>62</strong> (division) → <strong>620</strong> (group) → <strong>6201</strong> (class). The most specific matching code wins.</p>
+                <p>Example: <code className="font-mono bg-white px-1 rounded">J:20|62:35</code> gives 20 pts for any IT-sector company, but 35 pts for software companies (division 62 overrides J).</p>
+              </div>
+              <a href="/app/companies?noga_level=section" target="_blank" className="text-xs text-blue-600 hover:underline">
+                Browse NOGA codes in company list →
+              </a>
+            </div>
+          )}
+
+          {step === 4 && (
+            <div className="space-y-4">
               <p className="text-sm text-slate-600">How much should each score type contribute to the combined score?</p>
               <div className="space-y-4">
                 {[
-                  { label: "AI Score", icon: <Sparkles size={14} className="text-violet-500" />, val: wAi, set: setWAi, desc: "Claude classification relevance" },
-                  { label: "Flex Score", icon: <Target size={14} className="text-blue-500" />, val: wFlex, set: setWFlex, desc: "Rule-based scoring (keywords, clusters, distance)" },
-                  { label: "Web Score", icon: <TrendingUp size={14} className="text-emerald-500" />, val: wWeb, set: setWWeb, desc: "Website quality match" },
-                ].map(({ label, icon, val, set, desc }) => (
+                  { label: "AI Score", icon: <Sparkles size={14} className="text-violet-500" />, val: wAi, set: setWAi },
+                  { label: "Flex Score", icon: <Target size={14} className="text-blue-500" />, val: wFlex, set: setWFlex },
+                  { label: "Web Score", icon: <TrendingUp size={14} className="text-emerald-500" />, val: wWeb, set: setWWeb },
+                ].map(({ label, icon, val, set }) => (
                   <div key={label} className="flex items-center gap-3">
                     <div className="flex items-center gap-1.5 w-24 shrink-0">
                       {icon}<span className="text-sm text-slate-700">{label}</span>
@@ -400,19 +443,12 @@ function ScoringWizard({
                     </div>
                   </div>
                 ))}
-                {[
-                  { label: "AI Score", icon: <Sparkles size={14} className="text-violet-500" />, desc: "Claude classification relevance" },
-                  { label: "Flex Score", icon: <Target size={14} className="text-blue-500" />, desc: "Rule-based scoring" },
-                  { label: "Web Score", icon: <TrendingUp size={14} className="text-emerald-500" />, desc: "Website match" },
-                ].slice(0, 0).map(({ label, desc }) => (
-                  <p key={label} className="text-xs text-slate-400">{label}: {desc}</p>
-                ))}
               </div>
-              <p className="text-xs text-slate-400">Values are normalised to 100%. Change in /settings → Flex tab for precise control.</p>
+              <p className="text-xs text-slate-400">Values are normalised to 100%. For precise control visit Settings → Flex tab.</p>
             </div>
           )}
 
-          {step === 4 && (
+          {step === 5 && (
             <div className="space-y-4">
               <div className="bg-slate-50 rounded-xl border border-slate-200 p-4 space-y-3 text-sm">
                 <p className="font-medium text-slate-700">Summary of changes</p>
@@ -420,6 +456,7 @@ function ScoringWizard({
                   <div><span className="font-medium">Target clusters:</span> {targetClusters || "(none)"}</div>
                   <div><span className="font-medium">Target keywords:</span> {targetKws || "(none)"} (+{kwHitPts}pts each)</div>
                   <div><span className="font-medium">Exclude keywords:</span> {excludeKws || "(none)"} (-{kwExclPts}pts each)</div>
+                  <div><span className="font-medium">NOGA targets:</span> {nogaTargets || "(none)"}</div>
                   <div><span className="font-medium">Score weights:</span> AI {totalW > 0 ? Math.round(((parseInt(wAi) || 0) / totalW) * 100) : 0}% · Flex {totalW > 0 ? Math.round(((parseInt(wFlex) || 0) / totalW) * 100) : 0}% · Web {totalW > 0 ? Math.round(((parseInt(wWeb) || 0) / totalW) * 100) : 0}%</div>
                 </div>
               </div>
@@ -437,7 +474,7 @@ function ScoringWizard({
           >
             {step > 1 ? "← Back" : "Cancel"}
           </button>
-          {step < 4 ? (
+          {step < 5 ? (
             <button
               onClick={() => setStep(s => s + 1)}
               className="flex items-center gap-1.5 px-4 py-2 rounded-lg bg-blue-600 text-white text-sm font-medium hover:bg-blue-700 transition-colors"
@@ -537,11 +574,42 @@ function CategoryGrid({
   const [search, setSearch] = useState("");
   const [minScore, setMinScore] = useState(0);
 
+  const { data: nogaTree } = useSWR(
+    catType === "noga_code" ? "noga-hierarchy" : null,
+    fetchNogaHierarchy,
+    { revalidateOnFocus: false }
+  );
+
   const aiCatsEnriched = (taxonomy["categories_enriched"] as unknown as [string, number, Record<string, number | null>][] | undefined) ?? [];
   const aiCats = (taxonomy["categories"] as [string, number][] | undefined) ?? [];
   const clusters = (taxonomy["clusters"] as [string, number][] | undefined) ?? [];
   const keywords = (taxonomy["keywords"] as [string, number][] | undefined) ?? [];
   const nogaCodes = (taxonomy["noga_codes"] as [string, number][] | undefined) ?? [];
+
+  // Org target sets for ★ badge
+  const orgTargetClusters = new Set(
+    (settings?.scoring_target_clusters || "").split("|").map(s => s.trim().toLowerCase()).filter(Boolean)
+  );
+  const orgTargetKeywords = new Set(
+    (settings?.scoring_target_keywords || "").split("|").map(s => s.trim().toLowerCase()).filter(Boolean)
+  );
+  const orgNogaTargetCodes = new Set(
+    (settings?.scoring_noga_targets || "").split("|").map(s => s.split(":")[0].trim()).filter(Boolean)
+  );
+
+  function isOrgTarget(item: { name: string }): boolean {
+    const nameLower = item.name.toLowerCase();
+    if (catType === "tfidf_cluster") {
+      return Array.from(orgTargetClusters).some(t => nameLower.includes(t));
+    }
+    if (catType === "keyword") {
+      return orgTargetKeywords.has(nameLower);
+    }
+    if (catType === "noga_code") {
+      return orgNogaTargetCodes.has(item.name);
+    }
+    return false;
+  }
 
   function getItems() {
     const q = search.toLowerCase();
@@ -659,9 +727,32 @@ function CategoryGrid({
         </div>
       )}
 
-      {/* Cards */}
+      {/* Cards or NOGA tree */}
       <div className="flex-1 overflow-y-auto px-4 py-4">
-        {isEmpty ? (
+        {catType === "noga_code" ? (
+          <div className="rounded-xl border border-slate-200 bg-white">
+            {!nogaTree ? (
+              <div className="h-40 flex items-center justify-center text-slate-400 text-sm">Loading NOGA hierarchy…</div>
+            ) : nogaTree.length === 0 ? (
+              <div className="h-40 flex items-center justify-center text-slate-400 text-sm">No NOGA data yet.</div>
+            ) : (
+              <div className="py-2">
+                {nogaTree
+                  .filter(node => !search || node.label.toLowerCase().includes(search.toLowerCase()) || node.code.toLowerCase().includes(search.toLowerCase()))
+                  .map(node => (
+                    <NogaTreeNode
+                      key={node.code}
+                      node={node}
+                      depth={0}
+                      orgNogaTargetCodes={orgNogaTargetCodes}
+                      onSelect={(code) => onSelectCategory("noga_code", code)}
+                    />
+                  ))
+                }
+              </div>
+            )}
+          </div>
+        ) : isEmpty ? (
           <div className="flex flex-col items-center justify-center h-40 text-center">
             <p className="text-slate-500 text-sm">
               {search ? `No ${CAT_TYPE_LABELS[catType].toLowerCase()} match "${search}"` : `No ${CAT_TYPE_LABELS[catType].toLowerCase()} yet.`}
@@ -675,30 +766,110 @@ function CategoryGrid({
           </div>
         ) : (
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3">
-            {items.map((item) => (
-              <button
-                key={item.name}
-                onClick={() => onSelectCategory(catType, item.name)}
-                className="group flex flex-col items-start p-3 rounded-xl border border-slate-200 bg-white hover:border-blue-300 hover:shadow-sm transition-all text-left"
-              >
-                <div className="flex items-start justify-between w-full gap-1 mb-2">
-                  <span className="text-sm font-medium text-slate-700 group-hover:text-blue-700 leading-tight line-clamp-2 flex-1">
-                    {getDisplayName(item)}
-                  </span>
-                  {item.avgAi != null && <ScoreAvgBadge score={item.avgAi} />}
-                </div>
-                <span className="text-xs text-slate-400 mb-2">{item.count.toLocaleString()} companies</span>
-                <div className="w-full">
-                  <CategoryScoreBandLoader catType={catType} catValue={item.name} minScore={minScore} />
-                </div>
-                <div className="mt-2 flex items-center gap-1 text-xs text-blue-600 opacity-0 group-hover:opacity-100 transition-opacity">
-                  Explore <ChevronRight size={11} />
-                </div>
-              </button>
-            ))}
+            {items.map((item) => {
+              const isTarget = isOrgTarget(item);
+              return (
+                <button
+                  key={item.name}
+                  onClick={() => onSelectCategory(catType, item.name)}
+                  className={cn(
+                    "group flex flex-col items-start p-3 rounded-xl border bg-white hover:border-blue-300 hover:shadow-sm transition-all text-left",
+                    isTarget ? "border-amber-300 bg-amber-50/30" : "border-slate-200"
+                  )}
+                >
+                  <div className="flex items-start justify-between w-full gap-1 mb-2">
+                    <span className="text-sm font-medium text-slate-700 group-hover:text-blue-700 leading-tight line-clamp-2 flex-1">
+                      {getDisplayName(item)}
+                    </span>
+                    <div className="flex items-center gap-1 shrink-0">
+                      {isTarget && (
+                        <span className="text-amber-500 text-xs" title="Matches your org targets">★</span>
+                      )}
+                      {item.avgAi != null && <ScoreAvgBadge score={item.avgAi} />}
+                    </div>
+                  </div>
+                  <span className="text-xs text-slate-400 mb-2">{item.count.toLocaleString()} companies</span>
+                  <div className="w-full">
+                    <CategoryScoreBandLoader catType={catType} catValue={item.name} minScore={minScore} />
+                  </div>
+                  <div className="mt-2 flex items-center gap-1 text-xs text-blue-600 opacity-0 group-hover:opacity-100 transition-opacity">
+                    Explore <ChevronRight size={11} />
+                  </div>
+                </button>
+              );
+            })}
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+// ── NogaTreeNode — collapsible NOGA hierarchy node ───────────────────────────
+// (defined above CategoryGrid in the module so CategoryGrid can reference it)
+
+function NogaTreeNode({
+  node,
+  depth,
+  orgNogaTargetCodes,
+  onSelect,
+}: {
+  node: NogaNode;
+  depth: number;
+  orgNogaTargetCodes: Set<string>;
+  onSelect: (code: string) => void;
+}) {
+  const [expanded, setExpanded] = useState(depth === 0);
+  const hasChildren = node.children && node.children.length > 0;
+  const isTarget = orgNogaTargetCodes.has(node.code);
+
+  return (
+    <div>
+      <div
+        className={cn(
+          "flex items-center gap-1 py-1 px-2 rounded-lg hover:bg-slate-50 cursor-pointer group",
+          depth === 0 ? "font-semibold" : ""
+        )}
+        style={{ paddingLeft: `${8 + depth * 16}px` }}
+      >
+        {hasChildren ? (
+          <button
+            onClick={() => setExpanded(e => !e)}
+            className="text-slate-400 hover:text-slate-600 shrink-0 w-4"
+          >
+            {expanded ? "▾" : "▸"}
+          </button>
+        ) : (
+          <span className="w-4 shrink-0" />
+        )}
+        <button
+          onClick={() => onSelect(node.code)}
+          className="flex-1 flex items-center gap-1.5 text-left min-w-0"
+        >
+          <span className={cn(
+            "font-mono text-xs shrink-0 px-1 rounded",
+            isTarget ? "bg-amber-100 text-amber-700" : "bg-slate-100 text-slate-600"
+          )}>
+            {node.code}
+            {isTarget && " ★"}
+          </span>
+          <span className="text-sm text-slate-700 truncate group-hover:text-blue-700">{node.label}</span>
+          <span className="text-xs text-slate-400 shrink-0 ml-auto">{node.count.toLocaleString()}</span>
+        </button>
+      </div>
+      {expanded && hasChildren && (
+        <div>
+          {node.children.map(child => (
+            <NogaTreeNode
+              key={child.code}
+              node={child}
+              depth={depth + 1}
+              orgNogaTargetCodes={orgNogaTargetCodes}
+              onSelect={onSelect}
+            />
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -732,6 +903,7 @@ function CategoryDetail({
 }: CategoryDetailProps) {
   const router = useRouter();
   const [selectedBand, setSelectedBand] = useState<string | null>(null);
+  const [selectedBm, setSelectedBm] = useState<string | null>(null);
   const [breakdownCompany, setBreakdownCompany] = useState<Company | null>(null);
 
   const { data: stats } = useSWR(["cat-stats", catType, catValue, orgId], () =>
@@ -751,6 +923,7 @@ function CategoryDetail({
     ...(selectedBand === "60to80" ? { min_combined_score: 60, max_combined_score: 79 } : {}),
     ...(selectedBand === "40to60" ? { min_combined_score: 40, max_combined_score: 59 } : {}),
     ...(selectedBand === "below40" ? { max_combined_score: 39 } : {}),
+    ...(selectedBm ? { business_model: selectedBm } : {}),
   };
 
   const [filters, setFilters] = useState<CompanyFilters>(tableFilters);
@@ -778,6 +951,21 @@ function CategoryDetail({
       ...(next === "60to80" ? { min_combined_score: 60, max_combined_score: 79 } : {}),
       ...(next === "40to60" ? { min_combined_score: 40, max_combined_score: 59 } : {}),
       ...(next === "below40" ? { max_combined_score: 39 } : {}),
+      ...(selectedBm ? { business_model: selectedBm } : {}),
+      page: 1,
+    });
+  }
+
+  function handleBmClick(bm: string) {
+    const next = selectedBm === bm ? null : bm;
+    setSelectedBm(next);
+    setFilters({
+      ...baseFilters,
+      ...(selectedBand === "80plus" ? { min_combined_score: 80 } : {}),
+      ...(selectedBand === "60to80" ? { min_combined_score: 60, max_combined_score: 79 } : {}),
+      ...(selectedBand === "40to60" ? { min_combined_score: 40, max_combined_score: 59 } : {}),
+      ...(selectedBand === "below40" ? { max_combined_score: 39 } : {}),
+      ...(next ? { business_model: next } : {}),
       page: 1,
     });
   }
@@ -927,10 +1115,34 @@ function CategoryDetail({
 
         {/* Company table */}
         <div className="mx-4 mt-4 mb-4 rounded-xl border border-slate-200 bg-white overflow-hidden">
-          <div className="flex items-center justify-between px-3 py-2 border-b border-slate-100 bg-slate-50">
-            <h3 className="text-xs font-semibold text-slate-600">
-              {selectedBand ? `Filtered: ${selectedBand} band` : "All companies"} — {matchingCount.toLocaleString()} results
-            </h3>
+          <div className="flex items-center justify-between px-3 py-2 border-b border-slate-100 bg-slate-50 flex-wrap gap-2">
+            <div className="flex items-center gap-2 flex-wrap">
+              <h3 className="text-xs font-semibold text-slate-600">
+                {matchingCount.toLocaleString()} companies
+              </h3>
+              {/* Business model chips */}
+              <div className="flex items-center gap-1 flex-wrap">
+                {BUSINESS_MODEL_CHIPS.map(chip => (
+                  <button
+                    key={chip.value}
+                    onClick={() => handleBmClick(chip.value)}
+                    className={cn(
+                      "text-xs px-2 py-0.5 rounded-full border transition-colors",
+                      selectedBm === chip.value
+                        ? chip.color + " font-semibold"
+                        : "bg-white text-slate-500 border-slate-200 hover:border-slate-300"
+                    )}
+                  >
+                    {chip.label}
+                  </button>
+                ))}
+                {selectedBm && (
+                  <button onClick={() => handleBmClick(selectedBm)} className="text-xs text-blue-600 hover:underline">
+                    ✕
+                  </button>
+                )}
+              </div>
+            </div>
             <div className="flex items-center gap-2">
               <a
                 href={matchingCount <= exportLimit ? buildExportUrl(filters) : undefined}

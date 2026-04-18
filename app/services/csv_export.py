@@ -132,6 +132,7 @@ def run_csv_export(
         exclude_noga_code=filter_kwargs.get("exclude_noga_code"),
         exclude_noga_label=filter_kwargs.get("exclude_noga_label"),
         exclude_noga_level=filter_kwargs.get("exclude_noga_level"),
+        business_model=filter_kwargs.get("business_model"),
     )
     total_matching: int = count_q.scalar() or 0
     # Cap the total reported to the tier limit so the progress bar is accurate.
@@ -175,6 +176,7 @@ def run_csv_export(
                 exclude_noga_code=filter_kwargs.get("exclude_noga_code"),
                 exclude_noga_label=filter_kwargs.get("exclude_noga_label"),
                 exclude_noga_level=filter_kwargs.get("exclude_noga_level"),
+                business_model=filter_kwargs.get("business_model"),
             )
             if not companies:
                 break

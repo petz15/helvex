@@ -56,6 +56,7 @@ export interface Company {
   chid: string | null;
   lat: number | null;
   lon: number | null;
+  business_model: string | null;
   created_at: string;
   updated_at: string;
   notes: Note[];
@@ -127,6 +128,7 @@ export interface CompanyFilters {
   exclude_noga_code?: string;
   exclude_noga_label?: string;
   exclude_noga_level?: string;
+  business_model?: string;
   legal_form?: string;
   registered_after?: string;
   registered_before?: string;

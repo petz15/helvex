@@ -687,6 +687,49 @@ def _cfg_terms(config: dict[str, str] | None, key: str, fallback: list[str]) -> 
     return [part.strip().lower() for part in raw.split(",") if part.strip()]
 
 
+def _parse_noga_targets(config: dict[str, str] | None) -> dict[str, int]:
+    """Parse scoring_noga_targets setting into a {noga_code_or_section: points} dict.
+
+    Format: pipe-separated "CODE:points" pairs, e.g. "J:25|64:30|641:35|M:15".
+    More specific codes (longer strings) take priority over parent sections.
+    """
+    raw = (config or {}).get("scoring_noga_targets", "").strip()
+    if not raw:
+        return {}
+    result: dict[str, int] = {}
+    for part in raw.split("|"):
+        part = part.strip()
+        if ":" in part:
+            code, _, pts_str = part.partition(":")
+            code = code.strip().upper()
+            try:
+                result[code] = int(pts_str.strip())
+            except ValueError:
+                pass
+    return result
+
+
+def _noga_score(noga_path: str | None, noga_code: str | None, noga_level: str | None, targets: dict[str, int]) -> int:
+    """Return the flex score contribution from NOGA classification.
+
+    Walks the noga_path from root→leaf (e.g. "J|64|641|6419|64190") and picks
+    the most specific (deepest) matching target code.  This means a target on
+    division 64 can be overridden by a more specific target on group 641.
+    """
+    if not targets:
+        return 0
+    best = 0
+    path_parts: list[str] = []
+    if noga_path:
+        path_parts = [p.strip().upper() for p in noga_path.split("|") if p.strip()]
+    elif noga_code:
+        path_parts = [noga_code.upper()]
+    for part in path_parts:
+        if part in targets:
+            best = targets[part]  # later = more specific, overrides parent
+    return best
+
+
 def _parse_legal_form_scores(config: dict[str, str] | None) -> dict[str, int]:
     raw = (config or {}).get("scoring_legal_form_scores") or _DEFAULT_SCORING_CONFIG["scoring_legal_form_scores"]
     result: dict[str, int] = {}
@@ -717,6 +760,9 @@ def compute_flex_score_breakdown(
     lon: float | None = None,
     purpose_keywords: str | None = None,
     tfidf_cluster: str | None = None,
+    noga_path: str | None = None,
+    noga_code: str | None = None,
+    noga_level: str | None = None,
     config: dict[str, str] | None = None,
     # Legacy params accepted but ignored (kept for backward-compat with old call sites)
     capital_nominal: str | None = None,
@@ -728,6 +774,7 @@ def compute_flex_score_breakdown(
     breakdown: dict = {
         "clusters": 0,
         "keywords": 0,
+        "noga": 0,
         "distance": 0,
         "legal_form": 0,
         "data_quality": 0,
@@ -778,6 +825,10 @@ def compute_flex_score_breakdown(
     if not tfidf_cluster or tfidf_cluster.lower().strip() in _undef_cluster_terms:
         breakdown["data_quality"] -= undef_cluster_penalty
 
+    # ── NOGA classification bonus ─────────────────────────────────────────────
+    noga_targets = _parse_noga_targets(config)
+    breakdown["noga"] = _noga_score(noga_path, noga_code, noga_level, noga_targets)
+
     # ── Distance ──────────────────────────────────────────────────────────────
     origin_lat = _cfg_float(config, "scoring_origin_lat", _ORIGIN[0])
     origin_lon = _cfg_float(config, "scoring_origin_lon", _ORIGIN[1])
@@ -792,6 +843,7 @@ def compute_flex_score_breakdown(
     raw = (
         int(breakdown["clusters"])
         + int(breakdown["keywords"])
+        + int(breakdown["noga"])
         + int(breakdown["distance"])
         + int(breakdown["legal_form"])
         + int(breakdown["data_quality"])
@@ -813,6 +865,9 @@ def compute_flex_score(
     lon: float | None = None,
     purpose_keywords: str | None = None,
     tfidf_cluster: str | None = None,
+    noga_path: str | None = None,
+    noga_code: str | None = None,
+    noga_level: str | None = None,
     config: dict[str, str] | None = None,
     # Legacy compat
     capital_nominal: str | None = None,
@@ -829,6 +884,9 @@ def compute_flex_score(
         lon=lon,
         purpose_keywords=purpose_keywords,
         tfidf_cluster=tfidf_cluster,
+        noga_path=noga_path,
+        noga_code=noga_code,
+        noga_level=noga_level,
         config=config,
     )["final_score"])
 

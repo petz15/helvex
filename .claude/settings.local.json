@@ -196,7 +196,9 @@
       "Bash(grep -r \"class.*Job\" /c/D/coding_projects/zefix_analyzer/app/models/*.py --include=\"*.py\")",
       "Bash(npx next:*)",
       "Bash(python -c \"from app.crud.company import get_category_stats, get_taxonomy_stats; print\\('OK'\\)\")",
-      "Bash(python -c \"from app.api.routes.companies import router; print\\('routes OK'\\)\")"
+      "Bash(python -c \"from app.api.routes.companies import router; print\\('routes OK'\\)\")",
+      "Bash(grep -n \"cnt\\\\|count.*toLocale\\\\|\\\\\\\\.toLocale\" c:/D/coding_projects/zefix_analyzer/frontend/src/components/dashboard/multi-select-filter.tsx)",
+      "Bash(python -m py_compile app/services/business_model.py app/services/job_worker.py app/api/routes/jobs.py app/schemas/company.py app/crud/company.py app/api/routes/companies.py app/services/csv_export.py)"
     ]
   }
 }

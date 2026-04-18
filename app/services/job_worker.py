@@ -82,6 +82,7 @@ _QUEUE_FOR_JOB_TYPE: dict[str, str] = {
     "reextract_keywords":        "helvex-ml",
     "cluster_analysis":          "helvex-ml",
     "cluster_drift_check":       "helvex-ml",
+    "classify_business_model":   "helvex-api",
     "billing_renewal":           "helvex-api",
     "saved_view_alerts":         "helvex-api",
 }
@@ -100,7 +101,7 @@ def _compute_dedup_key(job_type: str, org_id: int | None, params: dict) -> str |
         "shab_daily", "shab_backfill",
         "recalculate_scores", "recalculate_google_scores",
         "reextract_purpose", "reclassify_noga",
-        "re_geocode",
+        "re_geocode", "classify_business_model",
         "tfidf_kmeans_cluster", "hdbscan_cluster", "birch_cluster", "semantic_kmeans_cluster",
         "recompute_keywords", "reextract_keywords",
         "cluster_analysis", "cluster_drift_check",
@@ -565,6 +566,30 @@ def _run_job(app, job_id: int) -> None:  # noqa: C901
                 )
                 if resume_from:
                     done_msg += f" (resumed from {resume_from})"
+
+            elif job.job_type == "classify_business_model":
+                from app.services.business_model import run_classify_business_model
+
+                def _progress(done: int, total: int, stats: dict) -> None:
+                    _assert_not_cancelled()
+                    msg = (
+                        f"Classified {done}/{total} — {stats.get('classified', 0)} assigned, "
+                        f"{stats.get('skipped', 0)} skipped"
+                    )
+                    crud.update_progress(db, job, message=msg, done=done, total=total, stats=stats)
+                    crud.create_event(db, job_id=job.id, level="debug", message=msg)
+                    _maybe_sync(app, job_type=job.job_type, label=job.label, message=msg, stats=dict(stats), error=None, done=False)
+                    _heartbeat()
+
+                stats = run_classify_business_model(
+                    db,
+                    limit=params.get("limit") or None,
+                    progress_cb=_progress,
+                )
+                done_msg = (
+                    f"Done — {stats['updated']} processed, {stats['classified']} classified, "
+                    f"{stats['skipped']} skipped (no signal)"
+                )
 
             elif job.job_type == "bulk":
                 from app.services.collection import bulk_import_zefix

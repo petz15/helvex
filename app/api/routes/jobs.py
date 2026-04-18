@@ -885,6 +885,31 @@ def trigger_cluster_analysis(body: ClusterAnalysisBody, request: Request, db: Se
     return JobOut.from_orm_obj(job)
 
 
+class ClassifyBusinessModelBody(BaseModel):
+    limit: int | None = None
+
+
+@router.post("/scoring/classify-business-model", response_model=JobOut, status_code=status.HTTP_202_ACCEPTED)
+def trigger_classify_business_model(
+    body: ClassifyBusinessModelBody,
+    request: Request,
+    db: Session = Depends(get_db),
+    _: User = Depends(require_superadmin),
+):
+    """Run rule-based B2B/B2C/B2G classification on all companies."""
+    label = "Business model classification"
+    if body.limit:
+        label += f" — limit {body.limit}"
+    job = _enqueue_or_http_error(
+        request,
+        job_type="classify_business_model",
+        label=label,
+        params=body.model_dump(),
+        db=db,
+    )
+    return JobOut.from_orm_obj(job)
+
+
 @router.post("/scoring/cluster-drift-check", response_model=JobOut, status_code=status.HTTP_202_ACCEPTED)
 def trigger_cluster_drift_check(body: ClusterDriftCheckBody, request: Request, db: Session = Depends(get_db), _: User = Depends(require_superadmin)):
     job = _enqueue_or_http_error(

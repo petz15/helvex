@@ -634,6 +634,9 @@ def geocode_and_update_company(db: Session, company: Company) -> bool:
         lon=lon,
         purpose_keywords=company.purpose_keywords,
         tfidf_cluster=company.tfidf_cluster,
+        noga_path=company.noga_path,
+        noga_code=company.noga_code,
+        noga_level=company.noga_level,
         config=scoring_config,
     )
     crud.update_company(
@@ -699,6 +702,9 @@ def recalculate_flex_scores(
                     lon=company.lon,
                     purpose_keywords=company.purpose_keywords,
                     tfidf_cluster=company.tfidf_cluster,
+                    noga_path=company.noga_path,
+                    noga_code=company.noga_code,
+                    noga_level=company.noga_level,
                     config=scoring_config,
                 )
                 breakdowns[company.id] = bd
