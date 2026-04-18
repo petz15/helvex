@@ -703,33 +703,24 @@ def get_taxonomy_stats(db: Session, org_id: int | None = None) -> dict:
             (OrgCompanyState.company_id == Company.id) & (OrgCompanyState.org_id == org_id),
         )
 
-    # tfidf_cluster format: "label_a|label_b|label_c" where each label is "term1,term2,..."
-    raw_clusters = (
-        base_q.with_entities(Company.tfidf_cluster)
-        .filter(Company.tfidf_cluster.isnot(None))
-        .filter(Company.tfidf_cluster != "Undefined")
-        .all()
-    )
-    label_counter: Counter = Counter()
-    for (val,) in raw_clusters:
-        for label in val.split("|"):
-            label = label.strip()
-            if label:
-                label_counter[label] += 1
-    clusters_list = label_counter.most_common()
+    # tfidf_cluster: pipe-separated — aggregate entirely in SQL to avoid fetching 760k rows
+    from sqlalchemy import text as _text
+    cluster_rows = db.execute(_text(
+        "SELECT trim(unnest(string_to_array(tfidf_cluster, '|'))) AS label, COUNT(*) AS cnt"
+        " FROM companies"
+        " WHERE tfidf_cluster IS NOT NULL AND tfidf_cluster != 'Undefined'"
+        " GROUP BY label ORDER BY cnt DESC"
+    )).fetchall()
+    clusters_list = [(r.label, r.cnt) for r in cluster_rows if r.label]
 
-    raw_keywords = (
-        base_q.with_entities(Company.purpose_keywords)
-        .filter(Company.purpose_keywords.isnot(None))
-        .all()
-    )
-    kw_counter: Counter = Counter()
-    for (val,) in raw_keywords:
-        for kw in val.split(","):
-            kw = kw.strip()
-            if kw:
-                kw_counter[kw] += 1
-    keywords_list = kw_counter.most_common(100)
+    # purpose_keywords: comma-separated — same SQL-side split
+    kw_rows = db.execute(_text(
+        "SELECT trim(unnest(string_to_array(purpose_keywords, ','))) AS kw, COUNT(*) AS cnt"
+        " FROM companies"
+        " WHERE purpose_keywords IS NOT NULL"
+        " GROUP BY kw ORDER BY cnt DESC LIMIT 100"
+    )).fetchall()
+    keywords_list = [(r.kw, r.cnt) for r in kw_rows if r.kw]
 
     tags = (
         org_q.with_entities(Company.tags, func.count(Company.id).label("cnt"))
