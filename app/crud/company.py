@@ -696,7 +696,7 @@ def get_noga_hierarchy(db: Session, org_id: int | None = None) -> list[dict]:
 # concurrent explorer loads don't all hammer the DB with full-table scans.
 # Tags are per-org and cheap (indexed GROUP BY), so they are never cached.
 # ---------------------------------------------------------------------------
-_TAX_CACHE_TTL = 600  # seconds
+_TAX_CACHE_TTL = 7200  # seconds (2 hours — busted explicitly on ML job completion)
 _tax_cache_lock = threading.Lock()
 _tax_cache_data: dict[str, Any] | None = None
 _tax_cache_ts: float = 0.0

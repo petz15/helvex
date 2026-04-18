@@ -313,6 +313,23 @@ def _maybe_enqueue_shab_daily(app) -> None:
     logger.info("shab_nightly_scheduler: enqueued shab_daily for %s", yesterday)
 
 
+def _warm_taxonomy_cache(app_state) -> None:
+    from app.crud.company import _compute_global_taxonomy, _tax_cache_lock
+    import time as _time
+    import app.crud.company as _cc
+    from app.database import SessionLocal
+    app_state.startup_message = "Warming taxonomy cache…"
+    try:
+        with SessionLocal() as db:
+            data = _compute_global_taxonomy(db)
+        with _tax_cache_lock:
+            _cc._tax_cache_data = data
+            _cc._tax_cache_ts = _time.monotonic()
+        app_state.startup_message = "Taxonomy cache warm"
+    except Exception as exc:
+        logger.warning("taxonomy cache warm failed (non-fatal): %s", exc)
+
+
 def _recover_jobs_and_start_worker(app, app_state) -> None:
     from app.crud import (
         delete_old_finished_jobs,
@@ -370,6 +387,7 @@ async def lifespan(app: FastAPI):
             await loop.run_in_executor(None, _maybe_enqueue_geocode_upgrade, app, app.state)
             _start_nightly_shab_scheduler(app)
             _start_nightly_billing_scheduler(app)
+            await loop.run_in_executor(None, _warm_taxonomy_cache, app.state)
             app.state.ready = True
             app.state.startup_message = "Ready"
         except Exception as exc:  # noqa: BLE001
