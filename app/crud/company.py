@@ -1,7 +1,7 @@
 from collections import Counter
 from datetime import date
 
-from sqlalchemy import case, func, nullslast, or_
+from sqlalchemy import case, func, nullslast, or_, literal_column
 from sqlalchemy.orm import Session
 
 from app.models.company import Company
@@ -757,13 +757,133 @@ def get_taxonomy_stats(db: Session, org_id: int | None = None) -> dict:
         .order_by(func.count(Company.id).desc())
         .all()
     )
+    # Per-category average AI score for Layer 1 card display
+    cat_scores = (
+        base_q.with_entities(
+            Company.ai_category,
+            func.avg(Company.ai_score).label("avg_ai"),
+            func.avg(Company.flex_score).label("avg_flex"),
+        )
+        .filter(Company.ai_category.isnot(None))
+        .group_by(Company.ai_category)
+        .all()
+    )
+    cat_score_map = {
+        r.ai_category: {
+            "avg_ai_score": round(r.avg_ai) if r.avg_ai is not None else None,
+            "avg_flex_score": round(r.avg_flex) if r.avg_flex is not None else None,
+        }
+        for r in cat_scores
+    }
+    categories_enriched = [
+        (r.ai_category, r.cnt, cat_score_map.get(r.ai_category, {}))
+        for r in categories
+    ]
+
     return {
         "clusters": clusters_list,
         "keywords": keywords_list,
         "tags": [(r.tags, r.cnt) for r in tags],
         "categories": [(r.ai_category, r.cnt) for r in categories],
+        "categories_enriched": categories_enriched,
         "noga_codes": [(((r.noga_code or "") + " — " + (r.noga_label or "")).strip(" —"), r.cnt) for r in noga_codes],
         "noga_levels": [(r.noga_level, r.cnt) for r in noga_levels],
         "legal_forms": [(r.legal_form, r.cnt) for r in legal_forms],
         "cantons": [(r.canton, r.cnt) for r in cantons],
+    }
+
+
+def get_category_stats(
+    db: Session,
+    category_type: str,
+    value: str,
+    org_id: int | None = None,
+) -> dict:
+    """Return score landscape stats for a specific category value.
+
+    category_type: 'ai_category' | 'tfidf_cluster' | 'keyword' | 'noga_code'
+    Returns score distribution bands, component averages, canton breakdown, and coverage.
+    """
+    from app.models.org_company_state import OrgCompanyState
+
+    base_q = db.query(Company)
+    if org_id:
+        base_q = base_q.join(
+            OrgCompanyState,
+            (OrgCompanyState.company_id == Company.id) & (OrgCompanyState.org_id == org_id),
+        )
+
+    # Apply category filter
+    if category_type == "ai_category":
+        base_q = base_q.filter(Company.ai_category == value)
+    elif category_type == "tfidf_cluster":
+        base_q = base_q.filter(Company.tfidf_cluster.contains(value))
+    elif category_type == "keyword":
+        base_q = base_q.filter(Company.purpose_keywords.contains(value))
+    elif category_type == "noga_code":
+        base_q = base_q.filter(Company.noga_code == value)
+    else:
+        return {"error": f"Unknown category_type: {category_type}"}
+
+    # Fetch relevant score columns only (avoid loading full Company objects)
+    rows = base_q.with_entities(
+        Company.ai_score,
+        Company.flex_score,
+        Company.web_score,
+        Company.canton,
+    ).all()
+
+    if not rows:
+        return {
+            "count": 0,
+            "avg_ai_score": None,
+            "avg_flex_score": None,
+            "avg_web_score": None,
+            "avg_combined_score": None,
+            "bands": {"80plus": 0, "60to80": 0, "40to60": 0, "below40": 0, "unscored": 0},
+            "canton_breakdown": [],
+            "unscored_count": 0,
+        }
+
+    W_AI, W_WEB, W_FLEX = 0.70, 0.20, 0.10
+
+    total = len(rows)
+    ai_scores = [r.ai_score for r in rows if r.ai_score is not None]
+    flex_scores = [r.flex_score for r in rows if r.flex_score is not None]
+    web_scores = [r.web_score for r in rows if r.web_score is not None]
+
+    bands = {"80plus": 0, "60to80": 0, "40to60": 0, "below40": 0, "unscored": 0}
+    combined_sum = 0.0
+    combined_count = 0
+    canton_counter: Counter = Counter()
+
+    for r in rows:
+        if r.canton:
+            canton_counter[r.canton] += 1
+        present = [(s, w) for s, w in [(r.ai_score, W_AI), (r.web_score, W_WEB), (r.flex_score, W_FLEX)] if s is not None]
+        if not present:
+            bands["unscored"] += 1
+            continue
+        total_w = sum(w for _, w in present)
+        combined = round(sum(s * w for s, w in present) / total_w)
+        combined_sum += combined
+        combined_count += 1
+        if combined >= 80:
+            bands["80plus"] += 1
+        elif combined >= 60:
+            bands["60to80"] += 1
+        elif combined >= 40:
+            bands["40to60"] += 1
+        else:
+            bands["below40"] += 1
+
+    return {
+        "count": total,
+        "avg_ai_score": round(sum(ai_scores) / len(ai_scores)) if ai_scores else None,
+        "avg_flex_score": round(sum(flex_scores) / len(flex_scores)) if flex_scores else None,
+        "avg_web_score": round(sum(web_scores) / len(web_scores)) if web_scores else None,
+        "avg_combined_score": round(combined_sum / combined_count) if combined_count else None,
+        "bands": bands,
+        "canton_breakdown": canton_counter.most_common(10),
+        "unscored_count": bands["unscored"] + (total - sum(bands.values())),
     }

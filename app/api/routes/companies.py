@@ -403,6 +403,18 @@ def get_taxonomy(
     return crud.get_taxonomy_stats(db, org_id=effective_org_id)
 
 
+@router.get("/category-stats", response_model=dict, summary="Score landscape stats for a specific category value")
+def get_category_stats(
+    type: str = Query(..., description="Category type: ai_category | tfidf_cluster | keyword | noga_code"),
+    value: str = Query(..., description="Category value to look up"),
+    org_id: int | None = Query(None),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    effective_org_id = org_id or current_user.org_id
+    return crud.get_category_stats(db, category_type=type, value=value, org_id=effective_org_id)
+
+
 @router.get("/noga-hierarchy", response_model=list, summary="NOGA codes as a collapsible hierarchy with aggregated counts")
 def get_noga_hierarchy(
     org_id: int | None = Query(None),

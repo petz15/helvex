@@ -192,7 +192,11 @@
       "Bash(grep -n \"claude.preview\\\\|claude_preview\\\\|claude-preview\" app/api/routes/*.py)",
       "Bash(grep -r \"activity_log\\\\|audit_log\" /c/D/coding_projects/zefix_analyzer/alembic/versions/*.py)",
       "Bash(grep -n \"send_email\\\\|send_low_credit\\\\|send_export\\\\|send_job_failed\\\\|send_saved_view\" /c/D/coding_projects/zefix_analyzer/app/services/*.py)",
-      "Bash(grep -l \"org_settings\" /c/D/coding_projects/zefix_analyzer/alembic/versions/*.py)"
+      "Bash(grep -l \"org_settings\" /c/D/coding_projects/zefix_analyzer/alembic/versions/*.py)",
+      "Bash(grep -r \"class.*Job\" /c/D/coding_projects/zefix_analyzer/app/models/*.py --include=\"*.py\")",
+      "Bash(npx next:*)",
+      "Bash(python -c \"from app.crud.company import get_category_stats, get_taxonomy_stats; print\\('OK'\\)\")",
+      "Bash(python -c \"from app.api.routes.companies import router; print\\('routes OK'\\)\")"
     ]
   }
 }

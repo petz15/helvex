@@ -1,5 +1,5 @@
-import { CategoriesClient } from "./categories-client";
+import { redirect } from "next/navigation";
 
 export default function CategoriesPage() {
-  return <CategoriesClient />;
+  redirect("/app/explorer");
 }

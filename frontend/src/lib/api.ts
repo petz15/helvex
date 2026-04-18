@@ -461,6 +461,43 @@ export async function fetchTaxonomy(): Promise<Record<string, [string, number][]
   return res.json();
 }
 
+export interface CategoryStats {
+  count: number;
+  avg_ai_score: number | null;
+  avg_flex_score: number | null;
+  avg_web_score: number | null;
+  avg_combined_score: number | null;
+  bands: { "80plus": number; "60to80": number; "40to60": number; "below40": number; "unscored": number };
+  canton_breakdown: [string, number][];
+  unscored_count: number;
+}
+
+export async function fetchCategoryStats(
+  type: string,
+  value: string,
+  orgId?: number | null,
+): Promise<CategoryStats> {
+  const params = new URLSearchParams({ type, value });
+  if (orgId) params.set("org_id", String(orgId));
+  const res = await fetch(`/api/v1/companies/category-stats?${params}`, { credentials: "include" });
+  if (!res.ok) throw new Error("Failed to fetch category stats");
+  return res.json();
+}
+
+export async function enqueueGenericJob(
+  endpoint: string,
+  params: Record<string, unknown> = {},
+): Promise<{ id: number; status: string }> {
+  const res = await fetch(`/api/v1/jobs/enqueue/${endpoint}`, {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(params),
+  });
+  if (!res.ok) throw new Error(`Failed to enqueue job: ${endpoint}`);
+  return res.json();
+}
+
 export interface NogaNode {
   code: string;
   label: string;

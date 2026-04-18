@@ -1,8 +1,12 @@
 "use client";
-import { useState, useCallback, useTransition, useEffect, useRef } from "react";
-import { useRouter } from "next/navigation";
+import { useState, useCallback, useTransition, useEffect, useRef, Suspense } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import useSWR from "swr";
-import { Compass, Search, ChevronRight, X, Download, Settings, AlertTriangle, Star, BarChart2 } from "lucide-react";
+import {
+  Compass, Search, X, Download, Settings, AlertTriangle, Star, BarChart2,
+  ArrowLeft, Wand2, ChevronRight, HelpCircle, Sparkles, Grid3x3,
+  TrendingUp, Target, MapPin, Building2,
+} from "lucide-react";
 import { CompanyTable } from "@/components/dashboard/company-table";
 import { CompanyPreview } from "@/components/dashboard/company-preview";
 import { FilterBar } from "@/components/dashboard/filter-bar";
@@ -10,45 +14,43 @@ import { BaloghAdCard } from "@/components/balogh-ad-card";
 import { Pagination } from "@/components/dashboard/pagination";
 import {
   fetchCompanies, fetchStats, fetchCantons, fetchTaxonomy,
-  fetchSavedViews, saveView, deleteView, toggleViewAlert, bulkUpdateCompanies, bulkTagCompanies,
-  fetchCurrentUser, fetchOrgEffectiveSettings,
-  fetchOrg, fetchNogaHierarchy,
+  fetchSavedViews, saveView, deleteView, toggleViewAlert,
+  bulkUpdateCompanies, bulkTagCompanies,
+  fetchCurrentUser, fetchOrgEffectiveSettings, saveOrgWorkspaceSettings,
+  fetchOrg, fetchNogaHierarchy, fetchCategoryStats,
+  enqueueGenericJob,
 } from "@/lib/api";
-import type { NogaNode } from "@/lib/api";
+import type { NogaNode, CategoryStats, OrgEffectiveSettings } from "@/lib/api";
 import type { Company, CompanyFilters, CompanyStats } from "@/lib/types";
-import { cn } from "@/lib/utils";
+import { cn, formatClusterLabel } from "@/lib/utils";
 import { getExportLimit } from "@/lib/entitlements";
 
-// ── Swiss cantons for the guided picker ──────────────────────────────────────
+// ── Constants ─────────────────────────────────────────────────────────────────
 
-const CANTON_LABELS: Record<string, string> = {
-  AG: "Aargau", AI: "Appenzell I.Rh.", AR: "Appenzell A.Rh.", BE: "Bern",
-  BL: "Basel-Land", BS: "Basel-Stadt", FR: "Fribourg", GE: "Genf",
-  GL: "Glarus", GR: "Graubünden", JU: "Jura", LU: "Luzern",
-  NE: "Neuenburg", NW: "Nidwalden", OW: "Obwalden", SG: "St. Gallen",
-  SH: "Schaffhausen", SO: "Solothurn", SZ: "Schwyz", TG: "Thurgau",
-  TI: "Tessin", UR: "Uri", VD: "Waadt", VS: "Wallis",
-  ZG: "Zug", ZH: "Zürich",
+const BROWSE_DEFAULTS: CompanyFilters = { sort: "-combined_score", page: 1, page_size: 50, status: "ACTIVE" };
+
+const SCORE_PRESETS = [
+  { label: "Any", value: 0 },
+  { label: "≥ 40", value: 40 },
+  { label: "≥ 60", value: 60 },
+  { label: "≥ 80", value: 80 },
+];
+
+type CategoryType = "ai_category" | "tfidf_cluster" | "keyword" | "noga_code";
+
+const CAT_TYPE_LABELS: Record<CategoryType, string> = {
+  ai_category: "AI Categories",
+  tfidf_cluster: "Clusters",
+  keyword: "Keywords",
+  noga_code: "NOGA",
 };
 
-// Score preset options for guided mode
-const SCORE_PRESETS = [
-  { label: "Any", value: 0, description: "Show all companies" },
-  { label: "Good", value: 40, description: "Score ≥ 40" },
-  { label: "Strong", value: 60, description: "Score ≥ 60" },
-  { label: "Top", value: 80, description: "Score ≥ 80" },
-];
-
-// Review status quick filter options
-const REVIEW_QUICK_FILTERS = [
-  { label: "Not yet reviewed", value: "_none", description: "No review status set" },
-  { label: "Interesting", value: "interesting", description: "Marked as interesting" },
-  { label: "Potential proposal", value: "potential_proposal", description: "" },
-  { label: "Confirmed", value: "confirmed_proposal", description: "" },
-  { label: "Rejected", value: "rejected", description: "Marked as rejected" },
-];
-
-type Mode = "guided" | "browse";
+const CAT_TYPE_FILTER_KEY: Record<CategoryType, keyof CompanyFilters> = {
+  ai_category: "ai_category",
+  tfidf_cluster: "tfidf_cluster",
+  keyword: "purpose_keywords",
+  noga_code: "noga_code",
+};
 
 function buildExportUrl(filters: CompanyFilters): string {
   const params = new URLSearchParams();
@@ -61,30 +63,18 @@ function buildExportUrl(filters: CompanyFilters): string {
   return `/api/v1/companies/export.csv?${params.toString()}`;
 }
 
-const BROWSE_DEFAULTS: CompanyFilters = { sort: "-combined_score", page: 1, page_size: 50, status: "ACTIVE" };
+// ── SetupGateBanner ───────────────────────────────────────────────────────────
 
-// ── Setup gate banner ─────────────────────────────────────────────────────────
-
-interface SetupGateProps {
-  orgId: number | null;
-  hasApiKey: boolean;
-  hasTargetDescription: boolean;
-}
-
-function SetupGateBanner({ orgId, hasApiKey, hasTargetDescription }: SetupGateProps) {
+function SetupGateBanner({ hasApiKey, hasTargetDescription }: { hasApiKey: boolean; hasTargetDescription: boolean }) {
   if (hasApiKey && hasTargetDescription) return null;
-
   const missing: string[] = [];
   if (!hasApiKey) missing.push("Anthropic API key");
   if (!hasTargetDescription) missing.push("target company description");
-
   return (
     <div className="mx-4 mt-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 flex items-start gap-3">
       <AlertTriangle size={16} className="text-amber-500 shrink-0 mt-0.5" />
       <div className="flex-1 min-w-0">
-        <p className="text-sm font-medium text-amber-800">
-          AI scoring is not configured
-        </p>
+        <p className="text-sm font-medium text-amber-800">AI scoring is not configured</p>
         <p className="text-xs text-amber-700 mt-0.5">
           Set your {missing.join(" and ")} to enable AI-powered lead scoring.
         </p>
@@ -93,64 +83,405 @@ function SetupGateBanner({ orgId, hasApiKey, hasTargetDescription }: SetupGatePr
         href="/app/settings?tab=llm"
         className="shrink-0 flex items-center gap-1 text-xs font-medium text-amber-700 hover:text-amber-900 border border-amber-300 bg-white rounded-lg px-2.5 py-1.5 hover:bg-amber-50 transition-colors"
       >
-        <Settings size={12} />
-        Set up
+        <Settings size={12} /> Set up
       </a>
     </div>
   );
 }
 
-// ── Score distribution mini-bar ───────────────────────────────────────────────
+// ── ScoreBreakdown popover ────────────────────────────────────────────────────
 
-interface ScoreDistributionProps {
-  filters: CompanyFilters;
+interface BreakdownData {
+  clusters: number;
+  keywords: number;
+  distance: number;
+  legal_form: number;
+  data_quality: number;
+  final_score: number;
+  cancelled?: boolean;
 }
 
-function ScoreDistributionBar({ filters }: ScoreDistributionProps) {
-  // Fetch counts for each score band using page_size=1 tricks
-  const makeFilters = (min: number, max?: number): CompanyFilters => ({
+function ScoreBreakdown({ company, onClose }: { company: Company; onClose: () => void }) {
+  let breakdown: BreakdownData | null = null;
+  try {
+    if (company.flex_score_breakdown) breakdown = JSON.parse(company.flex_score_breakdown);
+  } catch { /* ignore */ }
+
+  const fmt = (n: number) => (n > 0 ? `+${n}` : String(n));
+  const sign = (n: number) => n > 0 ? "text-emerald-600" : n < 0 ? "text-red-500" : "text-slate-400";
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30" onClick={onClose}>
+      <div
+        className="bg-white rounded-2xl shadow-xl border border-slate-200 w-80 p-5 space-y-4"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between">
+          <h3 className="text-sm font-semibold text-slate-800 truncate">{company.name}</h3>
+          <button onClick={onClose} className="text-slate-400 hover:text-slate-600"><X size={16} /></button>
+        </div>
+
+        <div className="space-y-3">
+          {/* AI Score */}
+          <div className="flex items-center justify-between text-sm">
+            <span className="text-slate-600 flex items-center gap-1.5">
+              <Sparkles size={13} className="text-violet-500" /> AI Score
+              {company.ai_category && <span className="text-xs text-slate-400">({company.ai_category})</span>}
+            </span>
+            <span className="font-semibold text-slate-800">{company.ai_score ?? "—"}</span>
+          </div>
+
+          {/* Flex Score */}
+          <div className="space-y-1.5">
+            <div className="flex items-center justify-between text-sm">
+              <span className="text-slate-600 flex items-center gap-1.5">
+                <Target size={13} className="text-blue-500" /> Flex Score
+              </span>
+              <span className="font-semibold text-slate-800">{company.flex_score ?? "—"}</span>
+            </div>
+            {breakdown && !breakdown.cancelled && (
+              <div className="pl-5 space-y-1">
+                {[
+                  { label: "Clusters", val: breakdown.clusters },
+                  { label: "Keywords", val: breakdown.keywords },
+                  { label: "Distance", val: breakdown.distance },
+                  { label: "Legal form", val: breakdown.legal_form },
+                  { label: "Data quality", val: breakdown.data_quality },
+                ].map(({ label, val }) => (
+                  <div key={label} className="flex items-center justify-between text-xs">
+                    <span className="text-slate-500">{label}</span>
+                    <span className={cn("font-mono font-medium", sign(val))}>{fmt(val)}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Web Score */}
+          <div className="flex items-center justify-between text-sm">
+            <span className="text-slate-600 flex items-center gap-1.5">
+              <TrendingUp size={13} className="text-emerald-500" /> Web Score
+            </span>
+            <span className="font-semibold text-slate-800">{company.web_score ?? "—"}</span>
+          </div>
+
+          {/* Combined */}
+          <div className="flex items-center justify-between text-sm border-t border-slate-100 pt-2">
+            <span className="font-medium text-slate-700">Combined</span>
+            <span className="font-bold text-slate-900 text-base">{company.combined_score ?? "—"}</span>
+          </div>
+        </div>
+
+        <a
+          href="/app/settings?tab=flex"
+          className="block text-center text-xs text-blue-600 hover:underline"
+          onClick={onClose}
+        >
+          Edit flex scoring settings →
+        </a>
+      </div>
+    </div>
+  );
+}
+
+// ── ScoringWizard ─────────────────────────────────────────────────────────────
+
+function ScoringWizard({
+  taxonomy,
+  settings,
+  orgId,
+  onClose,
+  onSaved,
+}: {
+  taxonomy: Record<string, [string, number][]>;
+  settings: OrgEffectiveSettings | undefined;
+  orgId: number | null;
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const [step, setStep] = useState(1);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  // Step 1: categories + clusters
+  const [selCategories, setSelCategories] = useState<string[]>(() =>
+    (settings?.scoring_target_clusters || "").split("|").filter(Boolean)
+  );
+  const [targetClusters, setTargetClusters] = useState<string>(() =>
+    settings?.scoring_target_clusters || ""
+  );
+
+  // Step 2: keywords
+  const [targetKws, setTargetKws] = useState<string>(() =>
+    settings?.scoring_target_keywords || ""
+  );
+  const [excludeKws, setExcludeKws] = useState<string>(() =>
+    settings?.scoring_exclude_keywords || ""
+  );
+  const [kwHitPts, setKwHitPts] = useState<string>(() =>
+    settings?.scoring_keyword_hit_points || "10"
+  );
+  const [kwExclPts, setKwExclPts] = useState<string>(() =>
+    settings?.scoring_keyword_exclude_points || "10"
+  );
+
+  // Step 3: scoring weights
+  const [wAi, setWAi] = useState<string>(() => String(Math.round(parseFloat(settings?.scoring_weight_ai || "0.70") * 100)));
+  const [wFlex, setWFlex] = useState<string>(() => String(Math.round(parseFloat(settings?.scoring_weight_flex || "0.10") * 100)));
+  const [wWeb, setWWeb] = useState<string>(() => String(Math.round(parseFloat(settings?.scoring_weight_web || "0.20") * 100)));
+
+  const aiCats = (taxonomy["categories"] as [string, number][] | undefined) ?? [];
+  const clusters = (taxonomy["clusters"] as [string, number][] | undefined) ?? [];
+
+  function toggleCat(cat: string) {
+    setSelCategories(prev => prev.includes(cat) ? prev.filter(c => c !== cat) : [...prev, cat]);
+  }
+
+  async function handleSave() {
+    if (!orgId) return;
+    setSaving(true);
+    setError(null);
+    try {
+      const totalW = (parseInt(wAi) || 0) + (parseInt(wFlex) || 0) + (parseInt(wWeb) || 0);
+      await saveOrgWorkspaceSettings(orgId, {
+        scoring_target_clusters: targetClusters,
+        scoring_target_keywords: targetKws,
+        scoring_exclude_keywords: excludeKws,
+        scoring_keyword_hit_points: kwHitPts,
+        scoring_keyword_exclude_points: kwExclPts,
+        scoring_weight_ai: totalW > 0 ? String((parseInt(wAi) || 0) / totalW) : "0.70",
+        scoring_weight_flex: totalW > 0 ? String((parseInt(wFlex) || 0) / totalW) : "0.10",
+        scoring_weight_web: totalW > 0 ? String((parseInt(wWeb) || 0) / totalW) : "0.20",
+      });
+      onSaved();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to save settings");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const totalW = (parseInt(wAi) || 0) + (parseInt(wFlex) || 0) + (parseInt(wWeb) || 0);
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
+      <div
+        className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-lg max-h-[90vh] flex flex-col"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* Header */}
+        <div className="flex items-center justify-between px-6 pt-5 pb-4 border-b border-slate-100">
+          <div className="flex items-center gap-2">
+            <Wand2 size={18} className="text-blue-600" />
+            <h2 className="text-base font-semibold text-slate-800">Scoring Wizard</h2>
+          </div>
+          <button onClick={onClose} className="text-slate-400 hover:text-slate-600"><X size={18} /></button>
+        </div>
+
+        {/* Step indicator */}
+        <div className="flex items-center gap-1 px-6 py-3 bg-slate-50 border-b border-slate-100">
+          {[1, 2, 3, 4].map(s => (
+            <div key={s} className="flex items-center gap-1">
+              <div className={cn(
+                "w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold",
+                step === s ? "bg-blue-600 text-white" : step > s ? "bg-emerald-500 text-white" : "bg-slate-200 text-slate-500"
+              )}>{step > s ? "✓" : s}</div>
+              {s < 4 && <div className={cn("w-8 h-0.5", step > s ? "bg-emerald-300" : "bg-slate-200")} />}
+            </div>
+          ))}
+          <span className="ml-2 text-xs text-slate-500">
+            {["Target categories", "Keywords", "Score weights", "Save"][step - 1]}
+          </span>
+        </div>
+
+        {/* Content */}
+        <div className="flex-1 overflow-y-auto px-6 py-5 space-y-4">
+
+          {step === 1 && (
+            <div className="space-y-4">
+              <p className="text-sm text-slate-600">Which AI categories are your primary targets? Their cluster labels will be used in flex scoring.</p>
+
+              <div>
+                <p className="text-xs font-medium text-slate-500 uppercase tracking-wide mb-2">AI Categories</p>
+                <div className="flex flex-wrap gap-2 max-h-40 overflow-y-auto">
+                  {aiCats.slice(0, 30).map(([cat]) => (
+                    <button
+                      key={cat}
+                      onClick={() => toggleCat(cat)}
+                      className={cn(
+                        "px-2.5 py-1 rounded-full text-xs border transition-colors",
+                        selCategories.includes(cat)
+                          ? "bg-blue-600 text-white border-blue-600"
+                          : "bg-white text-slate-600 border-slate-200 hover:border-blue-300"
+                      )}
+                    >{cat}</button>
+                  ))}
+                  {aiCats.length === 0 && <p className="text-xs text-slate-400">No AI categories yet — run AI classification first.</p>}
+                </div>
+              </div>
+
+              <div>
+                <label className="text-xs font-medium text-slate-500 uppercase tracking-wide block mb-1">
+                  Target cluster keywords (pipe-separated, e.g. <code className="font-mono text-xs">software|beratung|it</code>)
+                </label>
+                <textarea
+                  value={targetClusters}
+                  onChange={(e) => setTargetClusters(e.target.value)}
+                  rows={2}
+                  className="w-full text-xs border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-300"
+                  placeholder="e.g. software|beratung|entwicklung"
+                />
+                <p className="text-xs text-slate-400 mt-1">Companies whose cluster label contains any of these terms score higher.</p>
+              </div>
+            </div>
+          )}
+
+          {step === 2 && (
+            <div className="space-y-4">
+              <p className="text-sm text-slate-600">Set which purpose keywords boost or penalise a company&apos;s flex score.</p>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="text-xs font-medium text-slateald-500 uppercase tracking-wide block mb-1 text-emerald-700">Target keywords (boost)</label>
+                  <textarea
+                    value={targetKws}
+                    onChange={(e) => setTargetKws(e.target.value)}
+                    rows={3}
+                    className="w-full text-xs border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-300"
+                    placeholder="e.g. software|saas|entwicklung"
+                  />
+                  <div className="mt-1 flex items-center gap-1">
+                    <span className="text-xs text-slate-400">Points per hit:</span>
+                    <input type="number" value={kwHitPts} onChange={e => setKwHitPts(e.target.value)}
+                      className="w-14 text-xs border border-slate-200 rounded px-2 py-0.5 text-center" />
+                  </div>
+                </div>
+                <div>
+                  <label className="text-xs font-medium uppercase tracking-wide block mb-1 text-red-600">Exclude keywords (penalty)</label>
+                  <textarea
+                    value={excludeKws}
+                    onChange={(e) => setExcludeKws(e.target.value)}
+                    rows={3}
+                    className="w-full text-xs border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-300"
+                    placeholder="e.g. gastro|handel|bau"
+                  />
+                  <div className="mt-1 flex items-center gap-1">
+                    <span className="text-xs text-slate-400">Points per hit:</span>
+                    <input type="number" value={kwExclPts} onChange={e => setKwExclPts(e.target.value)}
+                      className="w-14 text-xs border border-slate-200 rounded px-2 py-0.5 text-center" />
+                  </div>
+                </div>
+              </div>
+              <p className="text-xs text-slate-400">Use pipe-separated terms. Each matching keyword adds/subtracts the configured points.</p>
+            </div>
+          )}
+
+          {step === 3 && (
+            <div className="space-y-4">
+              <p className="text-sm text-slate-600">How much should each score type contribute to the combined score?</p>
+              <div className="space-y-4">
+                {[
+                  { label: "AI Score", icon: <Sparkles size={14} className="text-violet-500" />, val: wAi, set: setWAi, desc: "Claude classification relevance" },
+                  { label: "Flex Score", icon: <Target size={14} className="text-blue-500" />, val: wFlex, set: setWFlex, desc: "Rule-based scoring (keywords, clusters, distance)" },
+                  { label: "Web Score", icon: <TrendingUp size={14} className="text-emerald-500" />, val: wWeb, set: setWWeb, desc: "Website quality match" },
+                ].map(({ label, icon, val, set, desc }) => (
+                  <div key={label} className="flex items-center gap-3">
+                    <div className="flex items-center gap-1.5 w-24 shrink-0">
+                      {icon}<span className="text-sm text-slate-700">{label}</span>
+                    </div>
+                    <input
+                      type="range" min={0} max={100} value={parseInt(val) || 0}
+                      onChange={e => set(e.target.value)}
+                      className="flex-1"
+                    />
+                    <div className="w-14 text-right">
+                      <span className="text-sm font-semibold text-slate-800">
+                        {totalW > 0 ? Math.round(((parseInt(val) || 0) / totalW) * 100) : 0}%
+                      </span>
+                    </div>
+                  </div>
+                ))}
+                {[
+                  { label: "AI Score", icon: <Sparkles size={14} className="text-violet-500" />, desc: "Claude classification relevance" },
+                  { label: "Flex Score", icon: <Target size={14} className="text-blue-500" />, desc: "Rule-based scoring" },
+                  { label: "Web Score", icon: <TrendingUp size={14} className="text-emerald-500" />, desc: "Website match" },
+                ].slice(0, 0).map(({ label, desc }) => (
+                  <p key={label} className="text-xs text-slate-400">{label}: {desc}</p>
+                ))}
+              </div>
+              <p className="text-xs text-slate-400">Values are normalised to 100%. Change in /settings → Flex tab for precise control.</p>
+            </div>
+          )}
+
+          {step === 4 && (
+            <div className="space-y-4">
+              <div className="bg-slate-50 rounded-xl border border-slate-200 p-4 space-y-3 text-sm">
+                <p className="font-medium text-slate-700">Summary of changes</p>
+                <div className="space-y-1.5 text-xs text-slate-600">
+                  <div><span className="font-medium">Target clusters:</span> {targetClusters || "(none)"}</div>
+                  <div><span className="font-medium">Target keywords:</span> {targetKws || "(none)"} (+{kwHitPts}pts each)</div>
+                  <div><span className="font-medium">Exclude keywords:</span> {excludeKws || "(none)"} (-{kwExclPts}pts each)</div>
+                  <div><span className="font-medium">Score weights:</span> AI {totalW > 0 ? Math.round(((parseInt(wAi) || 0) / totalW) * 100) : 0}% · Flex {totalW > 0 ? Math.round(((parseInt(wFlex) || 0) / totalW) * 100) : 0}% · Web {totalW > 0 ? Math.round(((parseInt(wWeb) || 0) / totalW) * 100) : 0}%</div>
+                </div>
+              </div>
+              <p className="text-xs text-slate-500">After saving, go to <strong>Settings → Admin → Recalculate Scores</strong> to apply new scoring to all companies.</p>
+              {error && <p className="text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">{error}</p>}
+            </div>
+          )}
+        </div>
+
+        {/* Footer */}
+        <div className="flex items-center justify-between px-6 py-4 border-t border-slate-100">
+          <button
+            onClick={() => step > 1 ? setStep(s => s - 1) : onClose()}
+            className="text-sm text-slate-500 hover:text-slate-700"
+          >
+            {step > 1 ? "← Back" : "Cancel"}
+          </button>
+          {step < 4 ? (
+            <button
+              onClick={() => setStep(s => s + 1)}
+              className="flex items-center gap-1.5 px-4 py-2 rounded-lg bg-blue-600 text-white text-sm font-medium hover:bg-blue-700 transition-colors"
+            >
+              Next <ChevronRight size={14} />
+            </button>
+          ) : (
+            <button
+              onClick={handleSave}
+              disabled={saving || !orgId}
+              className="flex items-center gap-1.5 px-4 py-2 rounded-lg bg-emerald-600 text-white text-sm font-medium hover:bg-emerald-700 disabled:opacity-50 transition-colors"
+            >
+              {saving ? "Saving…" : "Save settings"}
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── ScoreDistributionBar (kept from original) ─────────────────────────────────
+
+function ScoreDistributionBar({ filters }: { filters: CompanyFilters }) {
+  const makeF = (min: number, max?: number): CompanyFilters => ({
     ...filters, page: 1, page_size: 1,
     min_combined_score: min,
     ...(max !== undefined ? { max_combined_score: max } : {}),
   });
-
-  const { data: top } = useSWR(
-    ["score-dist-top", filters],
-    () => fetchCompanies(makeFilters(70)),
-    { keepPreviousData: true }
-  );
-  const { data: mid } = useSWR(
-    ["score-dist-mid", filters],
-    () => fetchCompanies(makeFilters(40, 69)),
-    { keepPreviousData: true }
-  );
-  const { data: low } = useSWR(
-    ["score-dist-low", filters],
-    () => fetchCompanies(makeFilters(1, 39)),
-    { keepPreviousData: true }
-  );
-  const { data: zero } = useSWR(
-    ["score-dist-zero", filters],
-    () => fetchCompanies(makeFilters(0, 0)),
-    { keepPreviousData: true }
-  );
-
-  const t = top?.total ?? 0;
-  const m = mid?.total ?? 0;
-  const l = low?.total ?? 0;
-  const z = zero?.total ?? 0;
+  const { data: top } = useSWR(["score-dist-top", filters], () => fetchCompanies(makeF(70)), { keepPreviousData: true });
+  const { data: mid } = useSWR(["score-dist-mid", filters], () => fetchCompanies(makeF(40, 69)), { keepPreviousData: true });
+  const { data: low } = useSWR(["score-dist-low", filters], () => fetchCompanies(makeF(1, 39)), { keepPreviousData: true });
+  const { data: zero } = useSWR(["score-dist-zero", filters], () => fetchCompanies(makeF(0, 0)), { keepPreviousData: true });
+  const t = top?.total ?? 0, m = mid?.total ?? 0, l = low?.total ?? 0, z = zero?.total ?? 0;
   const total = t + m + l + z;
   if (!total) return null;
-
   const pct = (n: number) => Math.round((n / total) * 100);
-
   return (
     <div className="flex items-center gap-2 text-[10px] text-slate-500">
       <span className="hidden sm:inline">Score dist:</span>
       <div className="flex h-2 w-20 rounded-full overflow-hidden gap-px">
-        {t > 0 && <div className="bg-green-500" style={{ width: `${pct(t)}%` }} title={`Top (≥70): ${t}`} />}
-        {m > 0 && <div className="bg-yellow-400" style={{ width: `${pct(m)}%` }} title={`Mid (40–69): ${m}`} />}
-        {l > 0 && <div className="bg-orange-300" style={{ width: `${pct(l)}%` }} title={`Low (1–39): ${l}`} />}
+        {t > 0 && <div className="bg-green-500" style={{ width: `${pct(t)}%` }} title={`Top ≥70: ${t}`} />}
+        {m > 0 && <div className="bg-yellow-400" style={{ width: `${pct(m)}%` }} title={`Mid 40–69: ${m}`} />}
+        {l > 0 && <div className="bg-orange-300" style={{ width: `${pct(l)}%` }} title={`Low 1–39: ${l}`} />}
         {z > 0 && <div className="bg-slate-200" style={{ width: `${pct(z)}%` }} title={`Unscored: ${z}`} />}
       </div>
       <span className="text-green-600">{pct(t)}%</span>
@@ -160,589 +491,531 @@ function ScoreDistributionBar({ filters }: ScoreDistributionProps) {
   );
 }
 
-// ── Pipeline funnel ───────────────────────────────────────────────────────────
+// ── CategoryScoreBar — mini bar for a single category ────────────────────────
 
-function PipelineFunnel({ stats }: { stats: CompanyStats }) {
-  const total = stats.total || 1;
-  const withWebsite = stats.with_website ?? 0;
-  const searched = stats.searched ?? 0;
-  const interesting = stats.review?.interesting ?? 0;
-  const confirmed = stats.review?.confirmed_proposal ?? 0;
-
-  const stages = [
-    { label: "Total", value: stats.total, color: "bg-slate-300" },
-    { label: "Website", value: withWebsite, color: "bg-blue-300" },
-    { label: "Searched", value: searched, color: "bg-indigo-400" },
-    { label: "Interesting", value: interesting, color: "bg-amber-400" },
-    { label: "Confirmed", value: confirmed, color: "bg-emerald-500" },
-  ];
-
+function CategoryScoreBar({ bands }: { bands: CategoryStats["bands"] }) {
+  const total = (bands["80plus"] ?? 0) + (bands["60to80"] ?? 0) + (bands["40to60"] ?? 0) + (bands["below40"] ?? 0) + (bands["unscored"] ?? 0);
+  if (!total) return null;
+  const pct = (n: number) => Math.round((n / total) * 100);
   return (
-    <div className="space-y-2">
-      {stages.map((s) => (
-        <div key={s.label} className="flex items-center gap-2 text-xs">
-          <span className="w-20 text-right text-slate-500 shrink-0">{s.label}</span>
-          <div className="flex-1 h-4 bg-slate-100 rounded-full overflow-hidden">
-            <div
-              className={`h-full ${s.color} rounded-full transition-all`}
-              style={{ width: `${Math.min(100, (s.value / total) * 100)}%` }}
-            />
-          </div>
-          <span className="w-16 tabular-nums text-slate-600 shrink-0">{s.value.toLocaleString()}</span>
-        </div>
-      ))}
+    <div className="flex h-1.5 w-full rounded-full overflow-hidden gap-px">
+      {bands["80plus"] > 0 && <div className="bg-emerald-500" style={{ width: `${pct(bands["80plus"])}%` }} title={`≥80: ${bands["80plus"]}`} />}
+      {bands["60to80"] > 0 && <div className="bg-yellow-400" style={{ width: `${pct(bands["60to80"])}%` }} title={`60–79: ${bands["60to80"]}`} />}
+      {bands["40to60"] > 0 && <div className="bg-orange-300" style={{ width: `${pct(bands["40to60"])}%` }} title={`40–59: ${bands["40to60"]}`} />}
+      {(bands["below40"] > 0 || bands["unscored"] > 0) && (
+        <div className="bg-slate-200 flex-1" title={`<40 or unscored`} />
+      )}
     </div>
   );
 }
 
-// ── Guided mode ───────────────────────────────────────────────────────────────
+// ── ScoreAvgBadge ─────────────────────────────────────────────────────────────
 
-interface GuidedPickerProps {
-  cantons: string[];
-  taxonomy: Record<string, [string, number][]>;
-  stats: CompanyStats;
-  onBrowse: (filters: CompanyFilters) => void;
-  orgId: number | null;
-  hasApiKey: boolean;
-  hasTargetDescription: boolean;
+function ScoreAvgBadge({ score }: { score: number | null | undefined }) {
+  if (score == null) return null;
+  const color = score >= 70 ? "bg-emerald-100 text-emerald-700" : score >= 50 ? "bg-yellow-100 text-yellow-700" : "bg-slate-100 text-slate-500";
+  return <span className={cn("text-[10px] font-semibold px-1.5 py-0.5 rounded-full", color)}>{score}</span>;
 }
 
-type IndustryMode = "category" | "cluster";
+// ── CategoryGrid (Layer 1) ────────────────────────────────────────────────────
 
-const LS_KEY = "firmiq_guided_picker";
+interface CategoryGridProps {
+  taxonomy: Record<string, [string, number][]>;
+  onSelectCategory: (type: CategoryType, value: string) => void;
+  onBrowseAll: () => void;
+  hasApiKey: boolean;
+  hasTargetDescription: boolean;
+  orgId: number | null;
+  settings: OrgEffectiveSettings | undefined;
+  onOpenWizard: () => void;
+}
 
-function GuidedPicker({ cantons, taxonomy, stats, onBrowse, orgId, hasApiKey, hasTargetDescription }: GuidedPickerProps) {
-  const [industryMode, setIndustryMode] = useState<IndustryMode>("category");
-  const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
-  const [selectedCluster, setSelectedCluster] = useState<string | null>(null);
-  const [selectedCanton, setSelectedCanton] = useState<string | null>(null);
-  const [selectedNoga, setSelectedNoga] = useState<string | null>(null);
-  const [selectedLegalForm, setSelectedLegalForm] = useState<string | null>(null);
-  const [scoreMin, setScoreMin] = useState(0);
-  const [selectedReview, setSelectedReview] = useState<string | null>(null);
-  const [bulkMarking, setBulkMarking] = useState(false);
-  const [bulkBanner, setBulkBanner] = useState<string | null>(null);
-  const [industrySearch, setIndustrySearch] = useState("");
-  const [showFunnel, setShowFunnel] = useState(false);
-  const didRestoreRef = useRef(false);
+function CategoryGrid({
+  taxonomy, onSelectCategory, onBrowseAll, hasApiKey, hasTargetDescription, orgId, settings, onOpenWizard,
+}: CategoryGridProps) {
+  const [catType, setCatType] = useState<CategoryType>("ai_category");
+  const [search, setSearch] = useState("");
+  const [minScore, setMinScore] = useState(0);
 
-  const { data: nogaTree = [] } = useSWR("noga-hierarchy", fetchNogaHierarchy);
+  const aiCatsEnriched = (taxonomy["categories_enriched"] as unknown as [string, number, Record<string, number | null>][] | undefined) ?? [];
+  const aiCats = (taxonomy["categories"] as [string, number][] | undefined) ?? [];
+  const clusters = (taxonomy["clusters"] as [string, number][] | undefined) ?? [];
+  const keywords = (taxonomy["keywords"] as [string, number][] | undefined) ?? [];
+  const nogaCodes = (taxonomy["noga_codes"] as [string, number][] | undefined) ?? [];
 
-  // Restore last state from localStorage
-  useEffect(() => {
-    if (didRestoreRef.current) return;
-    didRestoreRef.current = true;
-    try {
-      const saved = localStorage.getItem(LS_KEY);
-      if (saved) {
-        const s = JSON.parse(saved);
-        if (s.industryMode) setIndustryMode(s.industryMode);
-        if (s.selectedCategory) setSelectedCategory(s.selectedCategory);
-        if (s.selectedCluster) setSelectedCluster(s.selectedCluster);
-        if (s.selectedCanton) setSelectedCanton(s.selectedCanton);
-        if (s.selectedNoga) setSelectedNoga(s.selectedNoga);
-        if (s.selectedLegalForm) setSelectedLegalForm(s.selectedLegalForm);
-        if (s.scoreMin !== undefined) setScoreMin(s.scoreMin);
-        if (s.selectedReview) setSelectedReview(s.selectedReview);
-      }
-    } catch { /* ignore */ }
-  }, []);
-
-  // Persist state to localStorage on change
-  useEffect(() => {
-    if (!didRestoreRef.current) return;
-    try {
-      localStorage.setItem(LS_KEY, JSON.stringify({
-        industryMode, selectedCategory, selectedCluster, selectedCanton,
-        selectedNoga, selectedLegalForm, scoreMin, selectedReview,
-      }));
-    } catch { /* ignore */ }
-  }, [industryMode, selectedCategory, selectedCluster, selectedCanton, selectedNoga, selectedLegalForm, scoreMin, selectedReview]);
-
-  const aiCategories: [string, number][] = taxonomy["ai_category"] ?? [];
-  const clusters: [string, number][] = taxonomy["clusters"] ?? [];
-  const legalForms: [string, number][] = taxonomy["legal_forms"] ?? [];
-  const cantonCounts: Record<string, number> = Object.fromEntries((taxonomy["cantons"] ?? []) as [string, number][]);
-
-  // Live count based on current guided filters
-  const guidedFilters: CompanyFilters = {
-    sort: "-combined_score",
-    page: 1,
-    page_size: 1,
-    status: "ACTIVE",
-    ...(selectedCategory ? { ai_category: selectedCategory } : {}),
-    ...(selectedCluster ? { tfidf_cluster: selectedCluster } : {}),
-    ...(selectedCanton ? { canton: selectedCanton } : {}),
-    ...(selectedNoga ? { noga_code: selectedNoga } : {}),
-    ...(selectedLegalForm ? { legal_form: selectedLegalForm } : {}),
-    ...(scoreMin > 0 ? { min_combined_score: scoreMin } : {}),
-    ...(selectedReview === "_none" ? { exclude_review_status: "interesting,potential_proposal,confirmed_proposal,rejected" } : {}),
-    ...(selectedReview && selectedReview !== "_none" ? { review_status: selectedReview } : {}),
-  };
-  const { data: preview } = useSWR(
-    ["companies-preview", guidedFilters],
-    () => fetchCompanies(guidedFilters),
-    { keepPreviousData: true }
-  );
-
-  function handleBrowse() {
-    const filters: CompanyFilters = {
-      ...BROWSE_DEFAULTS,
-      ...(selectedCategory ? { ai_category: selectedCategory } : {}),
-      ...(selectedCluster ? { tfidf_cluster: selectedCluster } : {}),
-      ...(selectedCanton ? { canton: selectedCanton } : {}),
-      ...(selectedNoga ? { noga_code: selectedNoga } : {}),
-      ...(selectedLegalForm ? { legal_form: selectedLegalForm } : {}),
-      ...(scoreMin > 0 ? { min_combined_score: scoreMin } : {}),
-      ...(selectedReview === "_none" ? { exclude_review_status: "interesting,potential_proposal,confirmed_proposal,rejected" } : {}),
-      ...(selectedReview && selectedReview !== "_none" ? { review_status: selectedReview } : {}),
-    };
-    onBrowse(filters);
-  }
-
-  async function handleBulkMark() {
-    const matchCount = preview?.total ?? 0;
-    if (!matchCount) return;
-    const limit = Math.min(matchCount, 200);
-    setBulkMarking(true);
-    setBulkBanner(null);
-    try {
-      // Fetch all matching IDs
-      const result = await fetchCompanies({ ...guidedFilters, page: 1, page_size: limit });
-      const ids = result.items.map((c) => c.id);
-      if (ids.length) {
-        await bulkUpdateCompanies(ids, "review_status", "interesting");
-        setBulkBanner(`Marked ${ids.length} companies as interesting.`);
-        setTimeout(() => setBulkBanner(null), 4000);
-      }
-    } catch {
-      setBulkBanner("Failed to mark companies.");
-    } finally {
-      setBulkMarking(false);
+  function getItems() {
+    const q = search.toLowerCase();
+    if (catType === "ai_category") {
+      const items = aiCatsEnriched.length > 0
+        ? aiCatsEnriched.map(([name, count, scores]) => ({ name, count, avgAi: scores?.avg_ai_score ?? null }))
+        : aiCats.map(([name, count]) => ({ name, count, avgAi: null }));
+      return items.filter(i => !q || i.name.toLowerCase().includes(q));
     }
+    if (catType === "tfidf_cluster") {
+      return clusters
+        .filter(([label]) => !q || label.toLowerCase().includes(q))
+        .map(([label, count]) => ({ name: label, count, avgAi: null }));
+    }
+    if (catType === "keyword") {
+      return keywords
+        .filter(([kw]) => !q || kw.toLowerCase().includes(q))
+        .map(([kw, count]) => ({ name: kw, count, avgAi: null }));
+    }
+    // noga_code
+    return nogaCodes
+      .filter(([code]) => !q || code.toLowerCase().includes(q))
+      .map(([code, count]) => ({ name: code, count, avgAi: null }));
   }
 
-  const matchCount = preview?.total ?? null;
+  const items = getItems();
+
+  function getDisplayName(item: { name: string }) {
+    if (catType === "tfidf_cluster") {
+      return formatClusterLabel(item.name.split("|")[0]);
+    }
+    return item.name;
+  }
+
+  const isEmpty = items.length === 0;
 
   return (
-    <div className="flex flex-col items-center justify-start py-10 px-4 min-h-0 overflow-y-auto">
-      <div className="w-full max-w-2xl space-y-8">
-
-        {/* Hero */}
-        <div className="text-center space-y-2">
-          <div className="flex items-center justify-center gap-2 text-blue-600 mb-3">
-            <Compass size={28} />
-          </div>
-          <h1 className="text-2xl font-semibold text-slate-800">Explore Swiss Companies</h1>
-          <p className="text-slate-500 text-sm">
-            Narrow down by industry, canton, and quality — then browse matching companies.
-          </p>
-          <button
-            onClick={() => setShowFunnel(v => !v)}
-            className="inline-flex items-center gap-1.5 text-xs text-slate-400 hover:text-slate-600 mt-1"
-          >
-            <BarChart2 size={12} />
-            {showFunnel ? "Hide pipeline stats" : "Show pipeline stats"}
-          </button>
-          {showFunnel && (
-            <div className="mt-3 bg-slate-50 rounded-xl border border-slate-200 p-4 text-left">
-              <p className="text-xs font-medium text-slate-600 mb-3">Pipeline Overview</p>
-              <PipelineFunnel stats={stats} />
-            </div>
-          )}
-        </div>
-
-        {/* Step 1: Industry / Cluster */}
-        <div className="space-y-3">
-          <div className="flex items-center gap-2 flex-wrap">
-            <span className="flex items-center justify-center w-5 h-5 rounded-full bg-blue-600 text-white text-xs font-bold shrink-0">1</span>
-            <h2 className="text-sm font-semibold text-slate-700 uppercase tracking-wide">Industry</h2>
-            {/* Mode tabs */}
-            <div className="flex items-center gap-0.5 bg-slate-100 rounded-md p-0.5 ml-2">
-              <button
-                onClick={() => { setIndustryMode("category"); setSelectedCluster(null); setIndustrySearch(""); }}
-                className={cn(
-                  "px-2.5 py-0.5 rounded text-xs font-medium transition-colors",
-                  industryMode === "category" ? "bg-white text-slate-800 shadow-sm" : "text-slate-500 hover:text-slate-700"
-                )}
-              >
-                AI Category
-              </button>
-              <button
-                onClick={() => { setIndustryMode("cluster"); setSelectedCategory(null); setIndustrySearch(""); }}
-                className={cn(
-                  "px-2.5 py-0.5 rounded text-xs font-medium transition-colors",
-                  industryMode === "cluster" ? "bg-white text-slate-800 shadow-sm" : "text-slate-500 hover:text-slate-700"
-                )}
-              >
-                TF-IDF Cluster
-              </button>
-            </div>
-            {/* Inline search */}
-            <div className="relative ml-auto">
-              <Search size={12} className="absolute left-2 top-1.5 text-slate-400 pointer-events-none" />
-              <input
-                type="text"
-                value={industrySearch}
-                onChange={(e) => setIndustrySearch(e.target.value)}
-                placeholder="Search…"
-                className="pl-6 pr-2 py-1 text-xs border border-slate-200 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-300 bg-white w-36"
-              />
-            </div>
-            {(selectedCategory || selectedCluster) && (
-              <button
-                onClick={() => { setSelectedCategory(null); setSelectedCluster(null); }}
-                className="text-xs text-slate-400 hover:text-slate-600 flex items-center gap-0.5"
-              >
-                <X size={11} /> Clear
-              </button>
-            )}
-          </div>
-
-          {industryMode === "category" ? (
-            aiCategories.length > 0 ? (
-              <div className="flex flex-wrap gap-2 max-h-64 overflow-y-auto">
-                {aiCategories
-                  .filter(([cat]) => !industrySearch || cat.toLowerCase().includes(industrySearch.toLowerCase()))
-                  .map(([cat, count]) => (
-                    <button
-                      key={cat}
-                      onClick={() => setSelectedCategory(selectedCategory === cat ? null : cat)}
-                      className={cn(
-                        "px-3 py-1.5 rounded-full text-sm border transition-colors",
-                        selectedCategory === cat
-                          ? "bg-blue-600 text-white border-blue-600 font-medium"
-                          : "bg-white text-slate-600 border-slate-200 hover:border-blue-300 hover:text-blue-600"
-                      )}
-                    >
-                      {cat}
-                      <span className={cn("ml-1.5 text-xs", selectedCategory === cat ? "text-blue-200" : "text-slate-400")}>
-                        {count.toLocaleString()}
-                      </span>
-                    </button>
-                  ))}
-              </div>
-            ) : (
-              <div className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-5 text-center space-y-2">
-                <p className="text-sm text-slate-500">No AI classifications yet.</p>
-                <p className="text-xs text-slate-400">
-                  {hasApiKey
-                    ? "Run the AI classification job from the Pipeline page."
-                    : "Configure your Anthropic API key in workspace settings first."}
-                </p>
-                <a
-                  href={hasApiKey ? "/app/pipeline" : "/app/settings?tab=llm"}
-                  className="inline-block text-xs text-blue-600 hover:underline"
-                >
-                  {hasApiKey ? "Go to Pipeline →" : "Go to Settings →"}
-                </a>
-              </div>
-            )
-          ) : (
-            clusters.length > 0 ? (
-              <div className="flex flex-wrap gap-2 max-h-64 overflow-y-auto">
-                {clusters
-                  .filter(([label]) => !industrySearch || label.toLowerCase().includes(industrySearch.toLowerCase()))
-                  .map(([label, count]) => {
-                    const terms = label.split(",").map(t => t.trim()).filter(Boolean).slice(0, 3).join(", ");
-                    return (
-                      <button
-                        key={label}
-                        onClick={() => setSelectedCluster(selectedCluster === label ? null : label)}
-                        className={cn(
-                          "px-3 py-1.5 rounded-full text-sm border transition-colors",
-                          selectedCluster === label
-                            ? "bg-purple-600 text-white border-purple-600 font-medium"
-                            : "bg-white text-slate-600 border-slate-200 hover:border-purple-300 hover:text-purple-600"
-                        )}
-                      >
-                        {terms}
-                        <span className={cn("ml-1.5 text-xs", selectedCluster === label ? "text-purple-200" : "text-slate-400")}>
-                          {count.toLocaleString()}
-                        </span>
-                      </button>
-                    );
-                  })}
-              </div>
-            ) : (
-              <div className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-5 text-center space-y-2">
-                <p className="text-sm text-slate-500">No TF-IDF clusters yet.</p>
-                <p className="text-xs text-slate-400">Run the clustering job from the Pipeline page.</p>
-                <a href="/app/pipeline" className="inline-block text-xs text-blue-600 hover:underline">Go to Pipeline →</a>
-              </div>
-            )
-          )}
-        </div>
-
-        {/* Step 2: Canton */}
-        <div className="space-y-3">
-          <div className="flex items-center gap-2">
-            <span className="flex items-center justify-center w-5 h-5 rounded-full bg-blue-600 text-white text-xs font-bold shrink-0">2</span>
-            <h2 className="text-sm font-semibold text-slate-700 uppercase tracking-wide">Canton</h2>
-            {selectedCanton && (
-              <button onClick={() => setSelectedCanton(null)} className="ml-auto text-xs text-slate-400 hover:text-slate-600 flex items-center gap-0.5">
-                <X size={11} /> Clear
-              </button>
-            )}
-          </div>
-          {/* Canton heatmap: buttons sized by relative company count */}
-          {(() => {
-            const maxCount = Math.max(1, ...cantons.map(c => cantonCounts[c] ?? 0));
-            return (
-              <div className="flex flex-wrap gap-1.5">
-                {cantons.map((c) => {
-                  const cnt = cantonCounts[c] ?? 0;
-                  const opacity = 0.2 + 0.8 * (cnt / maxCount);
-                  return (
-                    <button
-                      key={c}
-                      onClick={() => setSelectedCanton(selectedCanton === c ? null : c)}
-                      title={`${CANTON_LABELS[c] ?? c}: ${cnt.toLocaleString()} companies`}
-                      className={cn(
-                        "px-2.5 py-1 rounded text-xs font-medium border transition-colors",
-                        selectedCanton === c
-                          ? "bg-blue-600 text-white border-blue-600"
-                          : "bg-white text-slate-600 border-slate-200 hover:border-blue-300 hover:text-blue-600"
-                      )}
-                      style={selectedCanton !== c ? { backgroundColor: `rgba(59,130,246,${opacity * 0.15})` } : undefined}
-                    >
-                      {c}
-                      {cnt > 0 && <span className={cn("ml-1 text-[10px]", selectedCanton === c ? "text-blue-200" : "text-slate-400")}>{cnt >= 1000 ? `${Math.round(cnt / 1000)}k` : cnt}</span>}
-                    </button>
-                  );
-                })}
-              </div>
-            );
-          })()}
-        </div>
-
-        {/* Step 3: NOGA Industry Section */}
-        {nogaTree.length > 0 && (
-          <div className="space-y-3">
-            <div className="flex items-center gap-2">
-              <span className="flex items-center justify-center w-5 h-5 rounded-full bg-blue-600 text-white text-xs font-bold shrink-0">3</span>
-              <h2 className="text-sm font-semibold text-slate-700 uppercase tracking-wide">NOGA Section</h2>
-              <span className="text-xs text-slate-400">Swiss industry classification</span>
-              {selectedNoga && (
-                <button onClick={() => setSelectedNoga(null)} className="ml-auto text-xs text-slate-400 hover:text-slate-600 flex items-center gap-0.5">
-                  <X size={11} /> Clear
-                </button>
-              )}
-            </div>
-            <div className="flex flex-wrap gap-1.5">
-              {nogaTree.map((node: NogaNode) => (
-                <button
-                  key={node.code}
-                  onClick={() => setSelectedNoga(selectedNoga === node.code ? null : node.code)}
-                  title={node.label}
-                  className={cn(
-                    "px-2.5 py-1 rounded text-xs font-medium border transition-colors text-left",
-                    selectedNoga === node.code
-                      ? "bg-blue-600 text-white border-blue-600"
-                      : "bg-white text-slate-600 border-slate-200 hover:border-blue-300 hover:text-blue-600"
-                  )}
-                >
-                  <span className="font-mono mr-1">{node.code}</span>
-                  <span className="hidden sm:inline">{node.label.length > 24 ? node.label.slice(0, 22) + "…" : node.label}</span>
-                  <span className={cn("ml-1 text-[10px]", selectedNoga === node.code ? "text-blue-200" : "text-slate-400")}>{node.count >= 1000 ? `${Math.round(node.count / 1000)}k` : node.count}</span>
-                </button>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* Step 4: Legal form */}
-        {legalForms.length > 0 && (
-          <div className="space-y-3">
-            <div className="flex items-center gap-2">
-              <span className="flex items-center justify-center w-5 h-5 rounded-full bg-blue-600 text-white text-xs font-bold shrink-0">4</span>
-              <h2 className="text-sm font-semibold text-slate-700 uppercase tracking-wide">Legal Form</h2>
-              {selectedLegalForm && (
-                <button onClick={() => setSelectedLegalForm(null)} className="ml-auto text-xs text-slate-400 hover:text-slate-600 flex items-center gap-0.5">
-                  <X size={11} /> Clear
-                </button>
-              )}
-            </div>
-            <div className="flex flex-wrap gap-1.5">
-              {legalForms.slice(0, 16).map(([form, count]) => (
-                <button
-                  key={form}
-                  onClick={() => setSelectedLegalForm(selectedLegalForm === form ? null : form)}
-                  className={cn(
-                    "px-2.5 py-1 rounded text-xs font-medium border transition-colors",
-                    selectedLegalForm === form
-                      ? "bg-blue-600 text-white border-blue-600"
-                      : "bg-white text-slate-600 border-slate-200 hover:border-blue-300 hover:text-blue-600"
-                  )}
-                >
-                  {form}
-                  <span className={cn("ml-1 text-[10px]", selectedLegalForm === form ? "text-blue-200" : "text-slate-400")}>
-                    {count.toLocaleString()}
-                  </span>
-                </button>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* Step 5: Minimum score */}
-        <div className="space-y-3">
-          <div className="flex items-center gap-2">
-            <span className="flex items-center justify-center w-5 h-5 rounded-full bg-blue-600 text-white text-xs font-bold shrink-0">5</span>
-            <h2 className="text-sm font-semibold text-slate-700 uppercase tracking-wide">Minimum Quality Score</h2>
-          </div>
-          <div className="flex gap-2">
-            {SCORE_PRESETS.map((preset) => (
-              <button
-                key={preset.value}
-                onClick={() => setScoreMin(preset.value)}
-                title={preset.description}
-                className={cn(
-                  "px-4 py-2 rounded-lg text-sm border transition-colors",
-                  scoreMin === preset.value
-                    ? "bg-blue-600 text-white border-blue-600 font-medium"
-                    : "bg-white text-slate-600 border-slate-200 hover:border-blue-300 hover:text-blue-600"
-                )}
-              >
-                {preset.label}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        {/* Step 6: Review status filter */}
-        <div className="space-y-3">
-          <div className="flex items-center gap-2">
-            <span className="flex items-center justify-center w-5 h-5 rounded-full bg-blue-600 text-white text-xs font-bold shrink-0">6</span>
-            <h2 className="text-sm font-semibold text-slate-700 uppercase tracking-wide">Review Status</h2>
-            {selectedReview && (
-              <button onClick={() => setSelectedReview(null)} className="ml-auto text-xs text-slate-400 hover:text-slate-600 flex items-center gap-0.5">
-                <X size={11} /> Clear
-              </button>
-            )}
-          </div>
-          <div className="flex flex-wrap gap-2">
-            {REVIEW_QUICK_FILTERS.map((f) => (
-              <button
-                key={f.value}
-                onClick={() => setSelectedReview(selectedReview === f.value ? null : f.value)}
-                title={f.description}
-                className={cn(
-                  "px-3 py-1.5 rounded-full text-sm border transition-colors",
-                  selectedReview === f.value
-                    ? "bg-slate-700 text-white border-slate-700 font-medium"
-                    : "bg-white text-slate-600 border-slate-200 hover:border-slate-400 hover:text-slate-700"
-                )}
-              >
-                {f.label}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        {/* Quick starts */}
-        <div className="space-y-3">
-          <div className="flex items-center gap-2">
-            <span className="flex items-center justify-center w-5 h-5 rounded-full bg-slate-400 text-white text-xs font-bold shrink-0">✦</span>
-            <h2 className="text-sm font-semibold text-slate-700 uppercase tracking-wide">Quick Starts</h2>
-          </div>
-          <div className="flex flex-wrap gap-2">
-            {[
-              {
-                label: "New & Notable",
-                description: "Active companies with a website, score ≥ 40, sorted by newest",
-                filters: { status: "ACTIVE", has_website: true, min_combined_score: 40, sort: "-created" } as Partial<CompanyFilters>,
-              },
-              {
-                label: "Top Scored",
-                description: "Highest combined score across all active companies",
-                filters: { status: "ACTIVE", min_combined_score: 60, sort: "-combined_score" } as Partial<CompanyFilters>,
-              },
-              {
-                label: "Unscored",
-                description: "Active companies not yet classified by AI",
-                filters: { status: "ACTIVE", ai_category: "_none", sort: "-created" } as Partial<CompanyFilters>,
-              },
-              {
-                label: "Not yet reviewed",
-                description: "Active companies with no review status",
-                filters: { status: "ACTIVE", exclude_review_status: "interesting,potential_proposal,confirmed_proposal,rejected", sort: "-combined_score" } as Partial<CompanyFilters>,
-              },
-            ].map((preset) => (
-              <button
-                key={preset.label}
-                onClick={() => onBrowse({ ...BROWSE_DEFAULTS, ...preset.filters })}
-                className="group flex flex-col items-start px-4 py-2.5 rounded-xl border border-slate-200 bg-white hover:border-blue-300 hover:shadow-sm transition-all text-left"
-              >
-                <span className="text-sm font-medium text-slate-700 group-hover:text-blue-700">{preset.label}</span>
-                <span className="text-xs text-slate-400 mt-0.5">{preset.description}</span>
-              </button>
-            ))}
-          </div>
-        </div>
-
-        {/* CTA */}
-        <div className="flex flex-col items-center gap-2 pt-2">
-          <p className="text-sm text-slate-500">
-            {matchCount !== null ? (
-              <span>
-                <span className="font-semibold text-slate-800">{matchCount.toLocaleString()}</span> active companies match
-              </span>
-            ) : (
-              <span className="text-slate-300">Loading…</span>
-            )}
-          </p>
-          <div className="flex items-center gap-2">
-            <button
-              onClick={handleBrowse}
-              disabled={matchCount === 0}
-              className={cn(
-                "flex items-center gap-2 px-6 py-2.5 rounded-lg text-sm font-medium transition-colors",
-                matchCount === 0
-                  ? "bg-slate-100 text-slate-400 cursor-not-allowed"
-                  : "bg-blue-600 text-white hover:bg-blue-700"
-              )}
-            >
-              Browse these companies
-              <ChevronRight size={16} />
+    <div className="flex flex-col h-full overflow-hidden">
+      {/* Top bar */}
+      <div className="flex items-center gap-3 px-4 py-3 bg-white border-b border-slate-100 shrink-0 flex-wrap">
+        {/* Search */}
+        <div className="relative flex-1 min-w-48">
+          <Search size={13} className="absolute left-2.5 top-2.5 text-slate-400 pointer-events-none" />
+          <input
+            type="text"
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            placeholder={`Search ${CAT_TYPE_LABELS[catType].toLowerCase()}…`}
+            className="w-full pl-7 pr-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-300 bg-white"
+          />
+          {search && (
+            <button onClick={() => setSearch("")} className="absolute right-2.5 top-2.5 text-slate-400 hover:text-slate-600">
+              <X size={13} />
             </button>
-            {matchCount !== null && matchCount > 0 && (
-              <button
-                onClick={handleBulkMark}
-                disabled={bulkMarking}
-                title={`Mark up to ${Math.min(matchCount, 200)} matches as interesting`}
-                className="flex items-center gap-1.5 px-4 py-2.5 rounded-lg text-sm font-medium border border-yellow-300 bg-yellow-50 text-yellow-800 hover:bg-yellow-100 transition-colors disabled:opacity-50"
-              >
-                <Star size={14} />
-                Mark interesting
-              </button>
+          )}
+        </div>
+
+        {/* Score filter */}
+        <div className="flex items-center gap-1 bg-slate-100 rounded-lg p-0.5 shrink-0">
+          {SCORE_PRESETS.map(p => (
+            <button
+              key={p.value}
+              onClick={() => setMinScore(p.value)}
+              className={cn(
+                "px-2.5 py-1 rounded-md text-xs font-medium transition-colors",
+                minScore === p.value ? "bg-white text-slate-800 shadow-sm" : "text-slate-500 hover:text-slate-700"
+              )}
+            >{p.label}</button>
+          ))}
+        </div>
+
+        {/* Scoring wizard button */}
+        <button
+          onClick={onOpenWizard}
+          disabled={!orgId}
+          className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium border border-slate-200 bg-white text-slate-600 hover:border-blue-300 hover:text-blue-600 disabled:opacity-40 transition-colors shrink-0"
+          title={!orgId ? "Requires an org workspace" : "Configure scoring"}
+        >
+          <Wand2 size={13} /> Scoring Wizard
+        </button>
+
+        {/* Browse all */}
+        <button
+          onClick={onBrowseAll}
+          className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium bg-blue-600 text-white hover:bg-blue-700 transition-colors shrink-0"
+        >
+          <Grid3x3 size={13} /> Browse all
+        </button>
+      </div>
+
+      {/* Category type tabs */}
+      <div className="flex items-center gap-0 px-4 border-b border-slate-100 bg-white shrink-0">
+        {(Object.keys(CAT_TYPE_LABELS) as CategoryType[]).map(type => (
+          <button
+            key={type}
+            onClick={() => { setCatType(type); setSearch(""); }}
+            className={cn(
+              "px-4 py-2.5 text-sm font-medium border-b-2 transition-colors",
+              catType === type
+                ? "border-blue-600 text-blue-700"
+                : "border-transparent text-slate-500 hover:text-slate-700"
+            )}
+          >
+            {CAT_TYPE_LABELS[type]}
+          </button>
+        ))}
+      </div>
+
+      {/* Setup banners */}
+      {catType === "ai_category" && !hasApiKey && (
+        <div className="mx-4 mt-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 flex items-center gap-3 shrink-0">
+          <AlertTriangle size={14} className="text-amber-500 shrink-0" />
+          <p className="text-xs text-amber-700 flex-1">Configure your Anthropic API key to enable AI classification.</p>
+          <a href="/app/settings?tab=llm" className="text-xs font-medium text-amber-700 hover:underline shrink-0">Set up →</a>
+        </div>
+      )}
+
+      {/* Cards */}
+      <div className="flex-1 overflow-y-auto px-4 py-4">
+        {isEmpty ? (
+          <div className="flex flex-col items-center justify-center h-40 text-center">
+            <p className="text-slate-500 text-sm">
+              {search ? `No ${CAT_TYPE_LABELS[catType].toLowerCase()} match "${search}"` : `No ${CAT_TYPE_LABELS[catType].toLowerCase()} yet.`}
+            </p>
+            {catType === "ai_category" && !search && (
+              <a href="/app/jobs" className="text-xs text-blue-600 hover:underline mt-1">Run AI classification →</a>
+            )}
+            {catType === "tfidf_cluster" && !search && (
+              <a href="/app/jobs" className="text-xs text-blue-600 hover:underline mt-1">Run clustering job →</a>
             )}
           </div>
-          {bulkBanner && (
-            <p className="text-xs text-green-700 bg-green-50 border border-green-200 rounded-lg px-3 py-1.5">{bulkBanner}</p>
-          )}
-          <button
-            onClick={() => onBrowse(BROWSE_DEFAULTS)}
-            className="text-xs text-slate-400 hover:text-slate-600 underline underline-offset-2"
-          >
-            Skip — show all companies
-          </button>
-        </div>
+        ) : (
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3">
+            {items.map((item) => (
+              <button
+                key={item.name}
+                onClick={() => onSelectCategory(catType, item.name)}
+                className="group flex flex-col items-start p-3 rounded-xl border border-slate-200 bg-white hover:border-blue-300 hover:shadow-sm transition-all text-left"
+              >
+                <div className="flex items-start justify-between w-full gap-1 mb-2">
+                  <span className="text-sm font-medium text-slate-700 group-hover:text-blue-700 leading-tight line-clamp-2 flex-1">
+                    {getDisplayName(item)}
+                  </span>
+                  {item.avgAi != null && <ScoreAvgBadge score={item.avgAi} />}
+                </div>
+                <span className="text-xs text-slate-400 mb-2">{item.count.toLocaleString()} companies</span>
+                <div className="w-full">
+                  <CategoryScoreBandLoader catType={catType} catValue={item.name} minScore={minScore} />
+                </div>
+                <div className="mt-2 flex items-center gap-1 text-xs text-blue-600 opacity-0 group-hover:opacity-100 transition-opacity">
+                  Explore <ChevronRight size={11} />
+                </div>
+              </button>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );
 }
 
-// ── Browse mode ────────────────────────────────────────────────────────────────
+// Lazy loader for score bands on category cards
+function CategoryScoreBandLoader({ catType, catValue, minScore }: { catType: CategoryType; catValue: string; minScore: number }) {
+  const { data } = useSWR(
+    ["cat-stats-card", catType, catValue],
+    () => fetchCategoryStats(catType, catValue),
+    { dedupingInterval: 60000 }
+  );
+  if (!data) return <div className="h-1.5 w-full rounded-full bg-slate-100" />;
+  return <CategoryScoreBar bands={data.bands} />;
+}
+
+// ── CategoryDetail (Layer 2) ──────────────────────────────────────────────────
+
+interface CategoryDetailProps {
+  catType: CategoryType;
+  catValue: string;
+  initialTaxonomy: Record<string, [string, number][]>;
+  initialCantons: string[];
+  initialStats: CompanyStats;
+  orgId: number | null;
+  onBack: () => void;
+  onOpenWizard: () => void;
+}
+
+function CategoryDetail({
+  catType, catValue, initialTaxonomy, initialCantons, initialStats, orgId, onBack, onOpenWizard,
+}: CategoryDetailProps) {
+  const router = useRouter();
+  const [selectedBand, setSelectedBand] = useState<string | null>(null);
+  const [breakdownCompany, setBreakdownCompany] = useState<Company | null>(null);
+
+  const { data: stats } = useSWR(["cat-stats", catType, catValue, orgId], () =>
+    fetchCategoryStats(catType, catValue, orgId)
+  );
+
+  // Filters for the company table
+  const baseFilters: CompanyFilters = {
+    ...BROWSE_DEFAULTS,
+    [CAT_TYPE_FILTER_KEY[catType]]: catValue,
+    status: "ACTIVE",
+  };
+
+  const tableFilters: CompanyFilters = {
+    ...baseFilters,
+    ...(selectedBand === "80plus" ? { min_combined_score: 80 } : {}),
+    ...(selectedBand === "60to80" ? { min_combined_score: 60, max_combined_score: 79 } : {}),
+    ...(selectedBand === "40to60" ? { min_combined_score: 40, max_combined_score: 59 } : {}),
+    ...(selectedBand === "below40" ? { max_combined_score: 39 } : {}),
+  };
+
+  const [filters, setFilters] = useState<CompanyFilters>(tableFilters);
+  const [selectedCompany, setSelectedCompany] = useState<Company | null>(null);
+  const [, startTransition] = useTransition();
+
+  const { data: page, isLoading, mutate: mutateCompanies } = useSWR(
+    ["companies", filters],
+    () => fetchCompanies(filters),
+    { keepPreviousData: true }
+  );
+
+  const { data: me } = useSWR("me", fetchCurrentUser);
+  const { data: org } = useSWR(me?.org?.id ? ["org-detail", me.org.id] : null, () => fetchOrg(me!.org!.id));
+
+  const exportLimit = org ? getExportLimit({ tier: org.tier, customFeatures: org.custom_features }) : 100;
+  const matchingCount = page?.total ?? 0;
+
+  function handleBandClick(band: string) {
+    const next = selectedBand === band ? null : band;
+    setSelectedBand(next);
+    setFilters({
+      ...baseFilters,
+      ...(next === "80plus" ? { min_combined_score: 80 } : {}),
+      ...(next === "60to80" ? { min_combined_score: 60, max_combined_score: 79 } : {}),
+      ...(next === "40to60" ? { min_combined_score: 40, max_combined_score: 59 } : {}),
+      ...(next === "below40" ? { max_combined_score: 39 } : {}),
+      page: 1,
+    });
+  }
+
+  function handleBrowseFull() {
+    const params = new URLSearchParams({ browse: "1", [CAT_TYPE_FILTER_KEY[catType]]: catValue });
+    router.push(`/app/explorer?${params.toString()}`);
+  }
+
+  const displayName = catType === "tfidf_cluster" ? formatClusterLabel(catValue.split("|")[0]) : catValue;
+  const unocoredPct = stats ? Math.round((stats.unscored_count / (stats.count || 1)) * 100) : 0;
+
+  return (
+    <div className="flex flex-col h-full overflow-hidden">
+      {/* Header */}
+      <div className="flex items-center gap-3 px-4 py-3 bg-white border-b border-slate-100 shrink-0 flex-wrap">
+        <button onClick={onBack} className="flex items-center gap-1.5 text-sm text-slate-500 hover:text-slate-700 shrink-0">
+          <ArrowLeft size={15} /> Back
+        </button>
+        <div className="flex items-center gap-2 flex-1 min-w-0">
+          <span className="text-xs font-medium text-slate-400 uppercase tracking-wide shrink-0">{CAT_TYPE_LABELS[catType]}</span>
+          <h1 className="text-base font-semibold text-slate-800 truncate">{displayName}</h1>
+          {stats && <span className="text-sm text-slate-400 shrink-0">{stats.count.toLocaleString()} companies</span>}
+        </div>
+        <div className="flex items-center gap-2 ml-auto shrink-0">
+          {orgId && (
+            <button
+              onClick={onOpenWizard}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border border-slate-200 bg-white text-slate-600 hover:border-blue-300 hover:text-blue-600 transition-colors"
+            >
+              <Wand2 size={12} /> Improve scoring
+            </button>
+          )}
+          <button
+            onClick={handleBrowseFull}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-blue-600 text-white hover:bg-blue-700 transition-colors"
+          >
+            Full browse <ChevronRight size={12} />
+          </button>
+        </div>
+      </div>
+
+      <div className="flex-1 overflow-y-auto">
+        {/* ML coverage warning */}
+        {stats && unocoredPct > 50 && (
+          <div className="mx-4 mt-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 flex items-center gap-3">
+            <AlertTriangle size={14} className="text-amber-500 shrink-0" />
+            <p className="text-xs text-amber-700 flex-1">
+              {stats.unscored_count.toLocaleString()} companies ({unocoredPct}%) in this category have not been AI-scored yet.
+            </p>
+            <a href="/app/jobs" className="text-xs font-medium text-amber-700 hover:underline shrink-0">Run AI scoring →</a>
+          </div>
+        )}
+
+        {/* Score Landscape */}
+        <div className="mx-4 mt-4 grid grid-cols-1 lg:grid-cols-2 gap-4">
+          {/* Score distribution */}
+          <div className="rounded-xl border border-slate-200 bg-white p-4">
+            <h3 className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-3">Score Distribution</h3>
+            {stats ? (
+              <div className="space-y-2">
+                {[
+                  { key: "80plus", label: "Top (≥ 80)", color: "bg-emerald-500" },
+                  { key: "60to80", label: "Strong (60–79)", color: "bg-yellow-400" },
+                  { key: "40to60", label: "Good (40–59)", color: "bg-orange-300" },
+                  { key: "below40", label: "Low (< 40)", color: "bg-slate-300" },
+                  { key: "unscored", label: "Unscored", color: "bg-slate-100" },
+                ].map(({ key, label, color }) => {
+                  const val = stats.bands[key as keyof typeof stats.bands] ?? 0;
+                  const pct = Math.round((val / (stats.count || 1)) * 100);
+                  return (
+                    <button
+                      key={key}
+                      onClick={() => key !== "unscored" && handleBandClick(key)}
+                      className={cn(
+                        "w-full flex items-center gap-2 text-xs rounded-lg px-2 py-1.5 transition-colors",
+                        key !== "unscored" ? "hover:bg-slate-50 cursor-pointer" : "cursor-default",
+                        selectedBand === key ? "bg-blue-50 ring-1 ring-blue-200" : ""
+                      )}
+                    >
+                      <div className="w-24 text-right text-slate-500 shrink-0">{label}</div>
+                      <div className="flex-1 h-4 bg-slate-100 rounded-full overflow-hidden">
+                        <div className={cn("h-full rounded-full", color)} style={{ width: `${pct}%` }} />
+                      </div>
+                      <span className="w-12 text-right tabular-nums text-slate-600 shrink-0">{val.toLocaleString()}</span>
+                      <span className="w-8 text-right text-slate-400 shrink-0">{pct}%</span>
+                    </button>
+                  );
+                })}
+                {selectedBand && (
+                  <button onClick={() => { setSelectedBand(null); setFilters({ ...baseFilters, page: 1 }); }}
+                    className="text-xs text-blue-600 hover:underline mt-1 block">
+                    Clear band filter
+                  </button>
+                )}
+              </div>
+            ) : (
+              <div className="h-32 flex items-center justify-center text-slate-400 text-sm">Loading…</div>
+            )}
+          </div>
+
+          {/* Score components + cantons */}
+          <div className="space-y-4">
+            <div className="rounded-xl border border-slate-200 bg-white p-4">
+              <h3 className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-3">Score Components (avg)</h3>
+              {stats ? (
+                <div className="space-y-2.5">
+                  {[
+                    { label: "AI Score", val: stats.avg_ai_score, icon: <Sparkles size={12} className="text-violet-500" /> },
+                    { label: "Flex Score", val: stats.avg_flex_score, icon: <Target size={12} className="text-blue-500" /> },
+                    { label: "Web Score", val: stats.avg_web_score, icon: <TrendingUp size={12} className="text-emerald-500" /> },
+                    { label: "Combined", val: stats.avg_combined_score, icon: <BarChart2 size={12} className="text-slate-500" /> },
+                  ].map(({ label, val, icon }) => (
+                    <div key={label} className="flex items-center gap-2 text-xs">
+                      {icon}
+                      <span className="text-slate-600 w-20 shrink-0">{label}</span>
+                      <div className="flex-1 h-3 bg-slate-100 rounded-full overflow-hidden">
+                        {val != null && <div className="h-full bg-blue-400 rounded-full" style={{ width: `${val}%` }} />}
+                      </div>
+                      <span className="w-6 text-right tabular-nums text-slate-700 font-medium shrink-0">{val ?? "—"}</span>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="h-20 flex items-center justify-center text-slate-400 text-sm">Loading…</div>
+              )}
+            </div>
+
+            {/* Canton breakdown */}
+            {stats && stats.canton_breakdown.length > 0 && (
+              <div className="rounded-xl border border-slate-200 bg-white p-4">
+                <h3 className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-3 flex items-center gap-1.5">
+                  <MapPin size={12} /> Geographic distribution
+                </h3>
+                <div className="flex flex-wrap gap-1.5">
+                  {stats.canton_breakdown.slice(0, 8).map(([canton, cnt]) => (
+                    <span key={canton} className="flex items-center gap-1 text-xs bg-slate-100 rounded-full px-2 py-0.5">
+                      <span className="font-medium">{canton}</span>
+                      <span className="text-slate-400">{cnt.toLocaleString()}</span>
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Company table */}
+        <div className="mx-4 mt-4 mb-4 rounded-xl border border-slate-200 bg-white overflow-hidden">
+          <div className="flex items-center justify-between px-3 py-2 border-b border-slate-100 bg-slate-50">
+            <h3 className="text-xs font-semibold text-slate-600">
+              {selectedBand ? `Filtered: ${selectedBand} band` : "All companies"} — {matchingCount.toLocaleString()} results
+            </h3>
+            <div className="flex items-center gap-2">
+              <a
+                href={matchingCount <= exportLimit ? buildExportUrl(filters) : undefined}
+                download={matchingCount <= exportLimit ? true : undefined}
+                className={cn(
+                  "flex items-center gap-1 text-xs px-2 py-1 rounded border transition-colors",
+                  matchingCount > exportLimit
+                    ? "text-slate-300 border-slate-200 bg-slate-100 cursor-not-allowed pointer-events-none"
+                    : "text-slate-500 hover:text-slate-700 border-slate-200 hover:bg-white"
+                )}
+                title={matchingCount > exportLimit ? `Export limited to ${exportLimit.toLocaleString()} rows` : undefined}
+              >
+                <Download size={11} /> Export CSV
+              </a>
+            </div>
+          </div>
+          <div className="relative">
+            <CompanyTable
+              companies={page?.items ?? []}
+              selectedId={selectedCompany?.id ?? null}
+              onSelect={setSelectedCompany}
+              filters={filters}
+              onSort={(sort) => startTransition(() => setFilters(f => ({ ...f, sort, page: 1 })))}
+              isLoading={isLoading}
+              selectedIds={new Set()}
+              onToggleSelect={() => {}}
+              onSelectAll={() => {}}
+              onUpdateReview={async (id, status) => { await bulkUpdateCompanies([id], "review_status", status); mutateCompanies(); }}
+            />
+            {/* Score breakdown button overlay — rendered as extra info next to each row's score */}
+          </div>
+          <Pagination
+            page={filters.page ?? 1}
+            pages={page?.pages ?? 1}
+            total={page?.total ?? 0}
+            pageSize={filters.page_size ?? 50}
+            onChange={(p) => startTransition(() => setFilters(f => ({ ...f, page: p })))}
+            onPageSizeChange={(s) => startTransition(() => setFilters(f => ({ ...f, page_size: s, page: 1 })))}
+          />
+        </div>
+
+        {/* Score breakdown popover trigger — show a "why?" panel when a company row is clicked */}
+        {selectedCompany && (
+          <div className="fixed bottom-4 right-4 z-40 flex items-center gap-2">
+            <button
+              onClick={() => setBreakdownCompany(selectedCompany)}
+              className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-slate-800 text-white text-xs font-medium shadow-lg hover:bg-slate-700 transition-colors"
+            >
+              <HelpCircle size={13} /> Why this score?
+            </button>
+            <button onClick={() => setSelectedCompany(null)} className="text-slate-400 hover:text-slate-600">
+              <X size={16} />
+            </button>
+          </div>
+        )}
+      </div>
+
+      {/* Company preview panel */}
+      {selectedCompany && (
+        <CompanyPreview
+          company={selectedCompany}
+          onClose={() => setSelectedCompany(null)}
+          onUpdated={(updated) => { setSelectedCompany(updated); mutateCompanies(); }}
+        />
+      )}
+
+      {/* Score breakdown modal */}
+      {breakdownCompany && (
+        <ScoreBreakdown company={breakdownCompany} onClose={() => setBreakdownCompany(null)} />
+      )}
+    </div>
+  );
+}
+
+// ── BrowseView (original, kept for full-featured browsing) ────────────────────
 
 interface BrowseViewProps {
   initialFilters: CompanyFilters;
   initialCantons: string[];
   initialStats: CompanyStats;
   initialTaxonomy: Record<string, [string, number][]>;
+  onBack?: () => void;
 }
 
-function BrowseView({ initialFilters, initialCantons, initialStats, initialTaxonomy }: BrowseViewProps) {
+function BrowseView({ initialFilters, initialCantons, initialStats, initialTaxonomy, onBack }: BrowseViewProps) {
   const router = useRouter();
   const [filters, setFiltersState] = useState<CompanyFilters>(initialFilters);
   const [, startTransition] = useTransition();
@@ -750,8 +1023,7 @@ function BrowseView({ initialFilters, initialCantons, initialStats, initialTaxon
   const setFilters = useCallback((update: CompanyFilters | ((f: CompanyFilters) => CompanyFilters)) => {
     setFiltersState(prev => {
       const next = typeof update === "function" ? update(prev) : update;
-      // sync to URL so back-navigation works
-      const params = new URLSearchParams();
+      const params = new URLSearchParams({ browse: "1" });
       for (const [k, v] of Object.entries(next)) {
         const isDefault =
           (k === "sort" && v === "-combined_score") ||
@@ -760,13 +1032,13 @@ function BrowseView({ initialFilters, initialCantons, initialStats, initialTaxon
           (k === "status" && v === "ACTIVE");
         if (v !== undefined && v !== null && v !== "" && !isDefault) params.set(k, String(v));
       }
-      const qs = params.toString();
-      router.replace(qs ? `/app/explorer?${qs}` : "/app/explorer", { scroll: false });
+      router.replace(`/app/explorer?${params.toString()}`, { scroll: false });
       return next;
     });
   }, [router]);
 
   const [selectedCompany, setSelectedCompany] = useState<Company | null>(null);
+  const [breakdownCompany, setBreakdownCompany] = useState<Company | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   const [batchLoading, setBatchLoading] = useState(false);
   const [tagInput, setTagInput] = useState("");
@@ -786,53 +1058,26 @@ function BrowseView({ initialFilters, initialCantons, initialStats, initialTaxon
   const { data: org } = useSWR(me?.org?.id ? ["org-detail", me.org.id] : null, () => fetchOrg(me!.org!.id));
 
   function toggleSelect(id: number) {
-    setSelectedIds(prev => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id); else next.add(id);
-      return next;
-    });
+    setSelectedIds(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
   }
   function selectAll(ids: number[]) {
-    const allSelected = ids.every(id => selectedIds.has(id));
-    setSelectedIds(prev => {
-      const next = new Set(prev);
-      if (allSelected) ids.forEach(id => next.delete(id));
-      else ids.forEach(id => next.add(id));
-      return next;
-    });
+    const allSel = ids.every(id => selectedIds.has(id));
+    setSelectedIds(prev => { const n = new Set(prev); allSel ? ids.forEach(id => n.delete(id)) : ids.forEach(id => n.add(id)); return n; });
   }
   async function batchUpdate(field: string, value: string | null) {
-    if (selectedIds.size === 0) return;
+    if (!selectedIds.size) return;
     setBatchLoading(true);
-    try {
-      await bulkUpdateCompanies([...selectedIds], field, value);
-      setSelectedIds(new Set());
-      mutateCompanies();
-    } finally {
-      setBatchLoading(false);
-    }
+    try { await bulkUpdateCompanies([...selectedIds], field, value); setSelectedIds(new Set()); mutateCompanies(); }
+    finally { setBatchLoading(false); }
   }
-
   async function handleBulkTag(action: "add" | "remove") {
     const tag = tagInput.trim();
-    if (!tag || selectedIds.size === 0) return;
+    if (!tag || !selectedIds.size) return;
     setTagLoading(true);
-    try {
-      await bulkTagCompanies([...selectedIds], tag, action);
-      setTagInput("");
-      setSelectedIds(new Set());
-      mutateCompanies();
-    } finally {
-      setTagLoading(false);
-    }
+    try { await bulkTagCompanies([...selectedIds], tag, action); setTagInput(""); setSelectedIds(new Set()); mutateCompanies(); }
+    finally { setTagLoading(false); }
   }
 
-  async function handleInlineReview(id: number, status: string | null) {
-    await bulkUpdateCompanies([id], "review_status", status);
-    mutateCompanies();
-  }
-
-  // Active filter chips summary for the browse bar
   const activeFilters: { label: string; key: string }[] = [];
   if (filters.ai_category) activeFilters.push({ label: `Industry: ${filters.ai_category}`, key: "ai_category" });
   if (filters.tfidf_cluster) activeFilters.push({ label: `Cluster: ${filters.tfidf_cluster.split(",").slice(0, 2).join(", ")}`, key: "tfidf_cluster" });
@@ -846,52 +1091,39 @@ function BrowseView({ initialFilters, initialCantons, initialStats, initialTaxon
 
   return (
     <div className="flex flex-col h-[calc(100vh-3rem)] overflow-hidden">
-
       {/* Stats bar */}
       <div className="flex items-center gap-4 px-4 py-2 bg-slate-50 border-b border-slate-100 text-xs text-slate-500 shrink-0 flex-wrap">
+        {onBack && (
+          <button onClick={onBack} className="flex items-center gap-1 text-slate-500 hover:text-slate-700 shrink-0">
+            <ArrowLeft size={12} /> Categories
+          </button>
+        )}
         <span><span className="font-semibold text-slate-700">{(stats?.total ?? 0).toLocaleString()}</span> total</span>
         <span>·</span>
-        <span><span className="font-semibold text-slate-700">{(stats?.with_website ?? 0).toLocaleString()}</span> with website</span>
+        <span><span className="font-semibold text-amber-600">{(stats?.review?.interesting ?? 0).toLocaleString()}</span> interesting</span>
         <span>·</span>
-        <span title="Reviewed as interesting"><span className="font-semibold text-amber-600">{(stats?.review?.interesting ?? 0).toLocaleString()}</span> interesting</span>
-        <span>·</span>
-        <span title="Confirmed proposals"><span className="font-semibold text-emerald-600">{(stats?.review?.confirmed_proposal ?? 0).toLocaleString()}</span> confirmed</span>
+        <span><span className="font-semibold text-emerald-600">{(stats?.review?.confirmed_proposal ?? 0).toLocaleString()}</span> confirmed</span>
         {page?.total !== undefined && (
-          <>
-            <span>·</span>
-            <span>
-              <span className="font-semibold text-blue-600">{page.total.toLocaleString()}</span> matching
-            </span>
-          </>
+          <><span>·</span><span><span className="font-semibold text-blue-600">{page.total.toLocaleString()}</span> matching</span></>
         )}
         {activeFilters.length > 0 && (
           <div className="flex items-center gap-1.5 ml-1">
             {activeFilters.map(({ label, key }) => (
-              <span
-                key={key}
-                className="flex items-center gap-1 bg-blue-50 text-blue-700 border border-blue-200 rounded-full px-2 py-0.5 text-xs"
-              >
+              <span key={key} className="flex items-center gap-1 bg-blue-50 text-blue-700 border border-blue-200 rounded-full px-2 py-0.5">
                 {label}
-                <button
-                  onClick={() => setFilters((f) => { const n = { ...f }; delete (n as Record<string, unknown>)[key]; return n; })}
-                  className="hover:text-blue-900"
-                >
-                  <X size={10} />
-                </button>
+                <button onClick={() => setFilters(f => { const n = { ...f }; delete (n as Record<string, unknown>)[key]; return n; })} className="hover:text-blue-900"><X size={10} /></button>
               </span>
             ))}
           </div>
         )}
-        <div className="ml-auto">
-          <ScoreDistributionBar filters={filters} />
-        </div>
+        <div className="ml-auto"><ScoreDistributionBar filters={filters} /></div>
       </div>
 
       {/* Filter bar */}
       <FilterBar
         filters={filters}
         cantons={cantons}
-        taxonomy={taxonomy}
+        taxonomy={taxonomy as Record<string, [string, number][]>}
         onChange={(f) => startTransition(() => setFilters(f))}
         onClear={() => setFilters(BROWSE_DEFAULTS)}
         resultCount={page?.total ?? 0}
@@ -917,65 +1149,46 @@ function BrowseView({ initialFilters, initialCantons, initialStats, initialTaxon
                 <span className="text-slate-300">|</span>
                 <span className="text-xs text-slate-500">Review:</span>
                 {["interesting", "potential_proposal", "confirmed_proposal"].map(v => (
-                  <button
-                    key={v}
-                    disabled={batchLoading}
-                    onClick={() => batchUpdate("review_status", v)}
-                    className="px-2 py-0.5 text-xs rounded border border-slate-200 bg-white hover:bg-blue-50 hover:border-blue-300 hover:text-blue-700 disabled:opacity-50 transition-colors"
-                  >
+                  <button key={v} disabled={batchLoading} onClick={() => batchUpdate("review_status", v)}
+                    className="px-2 py-0.5 text-xs rounded border border-slate-200 bg-white hover:bg-blue-50 hover:border-blue-300 hover:text-blue-700 disabled:opacity-50 transition-colors">
                     {v.replace(/_/g, " ")}
                   </button>
                 ))}
-                <button
-                  disabled={batchLoading}
-                  onClick={() => batchUpdate("review_status", null)}
-                  className="px-2 py-0.5 text-xs rounded border border-slate-200 bg-white hover:bg-red-50 hover:border-red-300 hover:text-red-700 disabled:opacity-50 transition-colors"
-                >
-                  Clear
-                </button>
+                <button disabled={batchLoading} onClick={() => batchUpdate("review_status", null)}
+                  className="px-2 py-0.5 text-xs rounded border border-slate-200 bg-white hover:bg-red-50 hover:border-red-300 hover:text-red-700 disabled:opacity-50 transition-colors">Clear</button>
                 <span className="text-slate-300">|</span>
                 <span className="text-xs text-slate-500">Tag:</span>
-                <input
-                  type="text"
-                  value={tagInput}
-                  onChange={(e) => setTagInput(e.target.value)}
-                  placeholder="tag name…"
+                <input type="text" value={tagInput} onChange={e => setTagInput(e.target.value)} placeholder="tag name…"
                   className="px-2 py-0.5 text-xs border border-slate-200 rounded focus:outline-none focus:ring-1 focus:ring-blue-300 w-24"
-                  onKeyDown={(e) => { if (e.key === "Enter") handleBulkTag("add"); }}
-                />
-                <button
-                  disabled={tagLoading || !tagInput.trim()}
-                  onClick={() => handleBulkTag("add")}
-                  className="px-2 py-0.5 text-xs rounded border border-slate-200 bg-white hover:bg-emerald-50 hover:border-emerald-300 hover:text-emerald-700 disabled:opacity-50 transition-colors"
-                >
-                  +Tag
-                </button>
-                <button
-                  disabled={tagLoading || !tagInput.trim()}
-                  onClick={() => handleBulkTag("remove")}
-                  className="px-2 py-0.5 text-xs rounded border border-slate-200 bg-white hover:bg-red-50 hover:border-red-300 hover:text-red-700 disabled:opacity-50 transition-colors"
-                >
-                  −Tag
-                </button>
-                <button onClick={() => setSelectedIds(new Set())} className="ml-1 text-xs text-slate-400 hover:text-slate-600">
-                  <X size={12} />
-                </button>
+                  onKeyDown={e => { if (e.key === "Enter") handleBulkTag("add"); }} />
+                <button disabled={tagLoading || !tagInput.trim()} onClick={() => handleBulkTag("add")}
+                  className="px-2 py-0.5 text-xs rounded border border-slate-200 bg-white hover:bg-emerald-50 hover:border-emerald-300 hover:text-emerald-700 disabled:opacity-50 transition-colors">+Tag</button>
+                <button disabled={tagLoading || !tagInput.trim()} onClick={() => handleBulkTag("remove")}
+                  className="px-2 py-0.5 text-xs rounded border border-slate-200 bg-white hover:bg-red-50 hover:border-red-300 hover:text-red-700 disabled:opacity-50 transition-colors">−Tag</button>
+                <button onClick={() => setSelectedIds(new Set())} className="ml-1 text-xs text-slate-400 hover:text-slate-600"><X size={12} /></button>
               </div>
-            ) : (
-              <div />
-            )}
-            <a
-              href={exportBlocked ? undefined : buildExportUrl(filters)}
-              download={exportBlocked ? undefined : true}
-              className={`flex items-center gap-1.5 text-xs px-2.5 py-1 rounded border transition-colors ${
-                exportBlocked
-                  ? "text-slate-300 border-slate-200 bg-slate-100 cursor-not-allowed pointer-events-none"
-                  : "text-slate-500 hover:text-slate-700 border-slate-200 hover:bg-white"
-              }`}
-              title={exportBlocked ? `Your current plan allows up to ${exportLimit.toLocaleString()} rows per CSV export.` : undefined}
-            >
-              <Download size={12} /> Export CSV ({page?.total ?? 0})
-            </a>
+            ) : <div />}
+            <div className="flex items-center gap-2">
+              {selectedCompany && (
+                <button
+                  onClick={() => setBreakdownCompany(selectedCompany)}
+                  className="flex items-center gap-1 text-xs px-2 py-1 rounded border border-slate-200 text-slate-500 hover:bg-white hover:text-slate-700 transition-colors"
+                >
+                  <HelpCircle size={11} /> Why this score?
+                </button>
+              )}
+              <a
+                href={exportBlocked ? undefined : buildExportUrl(filters)}
+                download={exportBlocked ? undefined : true}
+                className={cn(
+                  "flex items-center gap-1.5 text-xs px-2.5 py-1 rounded border transition-colors",
+                  exportBlocked ? "text-slate-300 border-slate-200 bg-slate-100 cursor-not-allowed pointer-events-none" : "text-slate-500 hover:text-slate-700 border-slate-200 hover:bg-white"
+                )}
+                title={exportBlocked ? `Export limited to ${exportLimit.toLocaleString()} rows` : undefined}
+              >
+                <Download size={12} /> Export CSV ({page?.total ?? 0})
+              </a>
+            </div>
           </div>
           {exportBlocked && (
             <div className="px-3 py-1 text-xs text-amber-700 bg-amber-50 border-b border-amber-100">
@@ -987,20 +1200,20 @@ function BrowseView({ initialFilters, initialCantons, initialStats, initialTaxon
             selectedId={selectedCompany?.id ?? null}
             onSelect={setSelectedCompany}
             filters={filters}
-            onSort={(sort) => setFilters((f) => ({ ...f, sort, page: 1 }))}
+            onSort={(sort) => setFilters(f => ({ ...f, sort, page: 1 }))}
             isLoading={isLoading}
             selectedIds={selectedIds}
             onToggleSelect={toggleSelect}
             onSelectAll={selectAll}
-            onUpdateReview={handleInlineReview}
+            onUpdateReview={async (id, status) => { await bulkUpdateCompanies([id], "review_status", status); mutateCompanies(); }}
           />
           <Pagination
             page={page?.page ?? 1}
             pages={page?.pages ?? 1}
             total={page?.total ?? 0}
             pageSize={filters.page_size ?? 50}
-            onChange={(p) => setFilters((f) => ({ ...f, page: p }))}
-            onPageSizeChange={(s) => setFilters((f) => ({ ...f, page_size: s, page: 1 }))}
+            onChange={(p) => setFilters(f => ({ ...f, page: p }))}
+            onPageSizeChange={(s) => setFilters(f => ({ ...f, page_size: s, page: 1 }))}
           />
         </div>
         {selectedCompany && (
@@ -1011,25 +1224,35 @@ function BrowseView({ initialFilters, initialCantons, initialStats, initialTaxon
           />
         )}
       </div>
+
+      {breakdownCompany && (
+        <ScoreBreakdown company={breakdownCompany} onClose={() => setBreakdownCompany(null)} />
+      )}
     </div>
   );
 }
 
-// ── Root component ─────────────────────────────────────────────────────────────
+// ── ExplorerInner (reads URL params) ─────────────────────────────────────────
 
-interface ExplorerClientProps {
+interface ExplorerInnerProps {
   initialCantons: string[];
   initialStats: CompanyStats;
   initialTaxonomy: Record<string, [string, number][]>;
 }
 
-export function ExplorerClient({ initialCantons, initialStats, initialTaxonomy }: ExplorerClientProps) {
-  const [mode, setMode] = useState<Mode>("guided");
-  const [browseFilters, setBrowseFilters] = useState<CompanyFilters>(BROWSE_DEFAULTS);
+function ExplorerInner({ initialCantons, initialStats, initialTaxonomy }: ExplorerInnerProps) {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const [wizardOpen, setWizardOpen] = useState(false);
+
+  const catType = searchParams.get("cat_type") as CategoryType | null;
+  const catValue = searchParams.get("cat_value");
+  const isBrowse = searchParams.get("browse") === "1";
 
   const { data: me } = useSWR("me", fetchCurrentUser);
   const orgId = me?.org_id ?? null;
 
+  const { data: taxonomy = initialTaxonomy } = useSWR("taxonomy", fetchTaxonomy, { fallbackData: initialTaxonomy });
   const { data: effectiveSettings } = useSWR(
     orgId ? ["org-effective-settings", orgId] : null,
     () => fetchOrgEffectiveSettings(orgId!),
@@ -1038,72 +1261,107 @@ export function ExplorerClient({ initialCantons, initialStats, initialTaxonomy }
   const hasApiKey = effectiveSettings?.anthropic_api_key_set ?? false;
   const hasTargetDescription = !!(effectiveSettings?.claude_target_description?.trim());
 
-  function handleBrowse(filters: CompanyFilters) {
-    setBrowseFilters(filters);
-    setMode("browse");
+  function navigateToCategory(type: CategoryType, value: string) {
+    const params = new URLSearchParams({ cat_type: type, cat_value: value });
+    router.push(`/app/explorer?${params.toString()}`);
+  }
+
+  function navigateToBrowse(preFilters?: Partial<CompanyFilters>) {
+    const params = new URLSearchParams({ browse: "1" });
+    if (preFilters) {
+      for (const [k, v] of Object.entries(preFilters)) {
+        if (v !== undefined && v !== null && v !== "") params.set(k, String(v));
+      }
+    }
+    router.push(`/app/explorer?${params.toString()}`);
+  }
+
+  function navigateBack() {
+    router.push("/app/explorer");
+  }
+
+  // Derive initial browse filters from URL params
+  const browseFilters: CompanyFilters = { ...BROWSE_DEFAULTS };
+  for (const [k, v] of Array.from(searchParams.entries())) {
+    if (k !== "browse") (browseFilters as Record<string, unknown>)[k] = v;
   }
 
   return (
     <div className="flex flex-col h-[calc(100vh-3rem)] overflow-hidden">
-      {/* Mode toggle header */}
-      <div className="flex items-center justify-between px-4 py-2 bg-white border-b border-slate-200 shrink-0">
-        <div className="flex items-center gap-1 bg-slate-100 rounded-lg p-0.5">
-          <button
-            onClick={() => setMode("guided")}
-            className={cn(
-              "flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium transition-colors",
-              mode === "guided" ? "bg-white text-slate-800 shadow-sm" : "text-slate-500 hover:text-slate-700"
-            )}
-          >
-            <Compass size={14} />
-            Guided
-          </button>
-          <button
-            onClick={() => setMode("browse")}
-            className={cn(
-              "flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium transition-colors",
-              mode === "browse" ? "bg-white text-slate-800 shadow-sm" : "text-slate-500 hover:text-slate-700"
-            )}
-          >
-            <Search size={14} />
-            Browse
-          </button>
-        </div>
-        {mode === "guided" && (
-          <p className="text-xs text-slate-400 hidden sm:block">Pick your criteria, then click Browse</p>
-        )}
-        {mode === "browse" && (
-          <button
-            onClick={() => setMode("guided")}
-            className="text-xs text-blue-600 hover:underline hidden sm:block"
-          >
-            ← Back to guided selection
-          </button>
+      {/* Setup gate */}
+      <SetupGateBanner hasApiKey={hasApiKey} hasTargetDescription={hasTargetDescription} />
+
+      {/* Content */}
+      <div className="flex-1 overflow-hidden">
+        {isBrowse ? (
+          <BrowseView
+            initialFilters={browseFilters}
+            initialCantons={initialCantons}
+            initialStats={initialStats}
+            initialTaxonomy={taxonomy}
+            onBack={navigateBack}
+          />
+        ) : catType && catValue ? (
+          <CategoryDetail
+            catType={catType}
+            catValue={catValue}
+            initialTaxonomy={taxonomy}
+            initialCantons={initialCantons}
+            initialStats={initialStats}
+            orgId={orgId}
+            onBack={navigateBack}
+            onOpenWizard={() => setWizardOpen(true)}
+          />
+        ) : (
+          <CategoryGrid
+            taxonomy={taxonomy}
+            onSelectCategory={navigateToCategory}
+            onBrowseAll={() => navigateToBrowse()}
+            hasApiKey={hasApiKey}
+            hasTargetDescription={hasTargetDescription}
+            orgId={orgId}
+            settings={effectiveSettings}
+            onOpenWizard={() => setWizardOpen(true)}
+          />
         )}
       </div>
 
-      {/* Setup gate — shown in both modes */}
-      <SetupGateBanner orgId={orgId} hasApiKey={hasApiKey} hasTargetDescription={hasTargetDescription} />
-
-      {/* Content */}
-      {mode === "guided" ? (
-        <GuidedPicker
-          cantons={initialCantons}
-          taxonomy={initialTaxonomy}
-          stats={initialStats}
-          onBrowse={handleBrowse}
+      {/* Scoring Wizard modal */}
+      {wizardOpen && (
+        <ScoringWizard
+          taxonomy={taxonomy}
+          settings={effectiveSettings}
           orgId={orgId}
-          hasApiKey={hasApiKey}
-          hasTargetDescription={hasTargetDescription}
-        />
-      ) : (
-        <BrowseView
-          initialFilters={browseFilters}
-          initialCantons={initialCantons}
-          initialStats={initialStats}
-          initialTaxonomy={initialTaxonomy}
+          onClose={() => setWizardOpen(false)}
+          onSaved={() => {
+            setWizardOpen(false);
+          }}
         />
       )}
     </div>
+  );
+}
+
+// ── ExplorerClient (exported, wraps in Suspense) ──────────────────────────────
+
+export interface ExplorerClientProps {
+  initialCantons: string[];
+  initialStats: CompanyStats;
+  initialTaxonomy: Record<string, [string, number][]>;
+}
+
+export function ExplorerClient({ initialCantons, initialStats, initialTaxonomy }: ExplorerClientProps) {
+  return (
+    <Suspense fallback={
+      <div className="flex items-center justify-center h-[calc(100vh-3rem)] text-slate-400 text-sm">
+        <Compass size={20} className="mr-2 animate-pulse" /> Loading…
+      </div>
+    }>
+      <ExplorerInner
+        initialCantons={initialCantons}
+        initialStats={initialStats}
+        initialTaxonomy={initialTaxonomy}
+      />
+    </Suspense>
   );
 }

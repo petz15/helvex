@@ -34,24 +34,27 @@
 - umami (also keys probably) potentially posthog?
 
 ## Bug Fixes & Known Issues
-- Map Adress search only works with streetname, number and plz. it should work with different configurations
+### Manual fixes:
 - categories:
     - showing weird numbers
     - all users should see purpose ekywords, clusters and noga classifications in the category overview
 - billing/payment/pricing
     - save card not working -> still not working
     - existing subscription then upgrading is not working
+- Move ML Job Reference from Jobs to collection page. 
+- SHAB: rerun 17.04.2026 because there seems to be an issue with the data example: https://helvex.dicy.ch/app/companies/783586 same on zefix
+### Claude fixes:
+- Map Adress search only works with streetname, number and plz. it should work with different configurations
 - Usermanagement for orgs (atleast untested)
 - admin dashboard simple redirects non authorized users, maybe not the safest
 - user logging: 
     - does not include login trough google auth
-- Filters: the found after is not actually for founding but last SHAB entry (would be a potentially new filter though)
 - NOGA: Zweigniederlassung ist falsch zbs: https://helvex.dicy.ch/app/companies/238698
-- Move ML Job Reference from Jobs to collection page. 
 - AI Preview: AI classification is not configured on this server
 - Wire collections for other tiers i.e. finish up the explorer page
 - Tiers:
     - web results are not gated, immediately shown. Should have been atleast 1 week of pause form a simple tier. 
+
 
 
 
@@ -69,6 +72,10 @@
 
 - [ ] **Settings** - set up settings page for LLM, FLEX scoring, etc. Move out of account and improve it
 - [ ] **Categories page** - Needs to be fixed from the existing and integrated into the company explore page. first AI classification should be org specific, currently there is some data which should be changed to org 1.  NOGA classification dumps all levels into the field, instead it should display the hierarchy, always sum by total number also from lower hierarchy. add filtering options where necessary
+    - NOGA classification should be presented in a hierarchy
+    - NOGA, Purpose Keywords and clusters should be visible to all users
+    - Next to each category (NOGA, Purpose, cluster and AI) there is a number which doesnt have any meaning, either remove it or change to the total number of companies in that category
+- 
 - [ ] **NOGA** - NOGA still doesnt quite look correct
 - [ ] **Browse page** - The search bar, when searching for keywords, clusters etc it should search all available not only the top 20 words. 
 - [ ] **More pages(?)** - (?)
