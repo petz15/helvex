@@ -690,10 +690,15 @@ def get_taxonomy_stats(db: Session, org_id: int | None = None) -> dict:
     """Return distinct values + counts for tfidf_cluster and tags (sorted by count desc)."""
     from app.models.org_company_state import OrgCompanyState
 
-    # Base query — optionally scoped to companies with an OrgCompanyState for this org
+    # Global base query — taxonomy counts (categories, clusters, keywords, NOGA) are always
+    # across all companies, not scoped to an org. Only the tags query uses org_id since tags
+    # are org-specific workflow data stored in OrgCompanyState.
     base_q = db.query(Company)
+
+    # Separate org-scoped query used only for tags
+    org_q = db.query(Company)
     if org_id:
-        base_q = base_q.join(
+        org_q = org_q.join(
             OrgCompanyState,
             (OrgCompanyState.company_id == Company.id) & (OrgCompanyState.org_id == org_id),
         )
@@ -727,7 +732,7 @@ def get_taxonomy_stats(db: Session, org_id: int | None = None) -> dict:
     keywords_list = kw_counter.most_common(100)
 
     tags = (
-        base_q.with_entities(Company.tags, func.count(Company.id).label("cnt"))
+        org_q.with_entities(Company.tags, func.count(Company.id).label("cnt"))
         .filter(Company.tags.isnot(None))
         .group_by(Company.tags)
         .order_by(func.count(Company.id).desc())
