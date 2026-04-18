@@ -1,8 +1,11 @@
+import logging
 import threading
 import time
 from collections import Counter
 from datetime import date
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 from sqlalchemy import case, func, nullslast, or_, literal_column
 from sqlalchemy.orm import Session
@@ -690,23 +693,41 @@ def get_noga_hierarchy(db: Session, org_id: int | None = None) -> list[dict]:
 
 
 # ---------------------------------------------------------------------------
-# Taxonomy stats cache
-# Global taxonomy data (clusters, keywords, categories, NOGA, cantons, legal
-# forms) changes only when ML/classify jobs run — cache it for 10 minutes so
-# concurrent explorer loads don't all hammer the DB with full-table scans.
-# Tags are per-org and cheap (indexed GROUP BY), so they are never cached.
+# Taxonomy stats cache — stale-while-revalidate
+# Global data (clusters, keywords, categories, NOGA, cantons, legal forms)
+# is cached process-wide. When the TTL expires, stale data is returned
+# immediately and a background thread silently refreshes the cache so the
+# page never goes blank. Tags are per-org/cheap and always queried live.
 # ---------------------------------------------------------------------------
-_TAX_CACHE_TTL = 7200  # seconds (2 hours — busted explicitly on ML job completion)
+_TAX_CACHE_TTL = 7200  # seconds (2 hours — also busted explicitly on ML job completion)
 _tax_cache_lock = threading.Lock()
 _tax_cache_data: dict[str, Any] | None = None
 _tax_cache_ts: float = 0.0
+_tax_cache_refreshing: bool = False  # true while a background refresh is in flight
 
 
 def invalidate_taxonomy_cache() -> None:
-    """Force next get_taxonomy_stats() call to recompute from DB."""
+    """Force next get_taxonomy_stats() call to trigger a background refresh."""
     global _tax_cache_ts
     with _tax_cache_lock:
         _tax_cache_ts = 0.0
+
+
+def _refresh_taxonomy_cache_bg() -> None:
+    """Background thread: recompute and store taxonomy cache without blocking callers."""
+    global _tax_cache_data, _tax_cache_ts, _tax_cache_refreshing
+    try:
+        from app.database import SessionLocal
+        with SessionLocal() as db:
+            data = _compute_global_taxonomy(db)
+        with _tax_cache_lock:
+            _tax_cache_data = data
+            _tax_cache_ts = time.monotonic()
+    except Exception:
+        logger.exception("taxonomy cache background refresh failed")
+    finally:
+        with _tax_cache_lock:
+            _tax_cache_refreshing = False
 
 
 def _compute_global_taxonomy(db: Session) -> dict[str, Any]:
@@ -803,17 +824,36 @@ def _compute_global_taxonomy(db: Session) -> dict[str, Any]:
 def get_taxonomy_stats(db: Session, org_id: int | None = None) -> dict:
     """Return taxonomy counts for the explorer Layer 1 grid.
 
-    Global fields (clusters, keywords, categories, NOGA, cantons, legal forms)
-    are served from an in-process cache (TTL=10 min) and recomputed only after
-    ML/classify jobs complete. Tags are org-specific and always queried live.
+    Global fields are served from a process-wide cache using stale-while-revalidate:
+    - Cache cold (startup or first call): blocks once, then warms.
+    - Cache stale (TTL expired): returns old data immediately, kicks a background
+      thread to refresh so the page never goes blank mid-session.
+    - Cache warm: instant return, no DB hit.
+    Tags are per-org and always queried live (fast indexed GROUP BY).
     """
-    global _tax_cache_data, _tax_cache_ts
+    global _tax_cache_data, _tax_cache_ts, _tax_cache_refreshing
 
     now = time.monotonic()
     with _tax_cache_lock:
-        if _tax_cache_data is None or (now - _tax_cache_ts) >= _TAX_CACHE_TTL:
-            _tax_cache_data = _compute_global_taxonomy(db)
-            _tax_cache_ts = now
+        stale = _tax_cache_data is None or (now - _tax_cache_ts) >= _TAX_CACHE_TTL
+        cold = _tax_cache_data is None
+        already_refreshing = _tax_cache_refreshing
+
+    if cold:
+        # First ever call — block until we have data (startup warmer prevents this in prod).
+        data = _compute_global_taxonomy(db)
+        with _tax_cache_lock:
+            _tax_cache_data = data
+            _tax_cache_ts = time.monotonic()
+            _tax_cache_refreshing = False
+    elif stale and not already_refreshing:
+        # Stale but not cold — return existing data now, refresh in background.
+        with _tax_cache_lock:
+            _tax_cache_refreshing = True
+        t = threading.Thread(target=_refresh_taxonomy_cache_bg, daemon=True)
+        t.start()
+
+    with _tax_cache_lock:
         global_data = _tax_cache_data
 
     # Tags are per-org workflow data stored in OrgCompanyState — always live.
