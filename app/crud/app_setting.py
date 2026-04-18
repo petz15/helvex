@@ -9,8 +9,18 @@ def get_setting(db: Session, key: str, default: str = "") -> str:
     return row.value if row is not None else default
 
 
+_BASE_ORG_ID = 1  # Org 1 acts as the global default — its settings serve as the fallback
+                  # for all other orgs that have not configured their own overrides.
+
+
 def get_effective_setting(db: Session, key: str, *, org_id: int | None = None, default: str = "") -> str:
-    """Return org-specific override if present, else global setting, else default."""
+    """Return the most specific setting value using a three-tier fallback:
+
+    1. Org-specific OrgSetting (if org_id provided and value set)
+    2. Base-org (org_id=1) OrgSetting — global defaults configured by the platform admin
+    3. Global AppSetting
+    4. Hard-coded default
+    """
     if org_id is not None:
         org_row = (
             db.query(OrgSetting)
@@ -19,6 +29,17 @@ def get_effective_setting(db: Session, key: str, *, org_id: int | None = None, d
         )
         if org_row is not None and org_row.value is not None:
             return org_row.value
+
+    # Fall back to base org (org 1) if the requesting org is not org 1 itself
+    if org_id != _BASE_ORG_ID:
+        base_row = (
+            db.query(OrgSetting)
+            .filter(OrgSetting.org_id == _BASE_ORG_ID, OrgSetting.key == key)
+            .first()
+        )
+        if base_row is not None and base_row.value is not None:
+            return base_row.value
+
     return get_setting(db, key, default)
 
 
