@@ -54,6 +54,7 @@ _db_lock = threading.Lock()
 
 # ── In-memory PLZ table (fallback) ───────────────────────────────────────────
 _plz_table: dict[str, tuple[float, float]] | None = None
+_city_table: dict[str, tuple[float, float]] | None = None
 
 # ── SQLite connection (building lookup) ───────────────────────────────────────
 _db_conn: sqlite3.Connection | None = None
@@ -115,22 +116,31 @@ def _load_plz_table() -> dict[str, tuple[float, float]]:
                 with zf.open("CH.txt") as src:
                     _PLZ_CACHE.write_bytes(src.read())
 
-        table: dict[str, tuple[float, float]] = {}
+        plz_build: dict[str, tuple[float, float]] = {}
+        city_build: dict[str, tuple[float, float]] = {}
         with _PLZ_CACHE.open(encoding="utf-8") as f:
             for line in f:
                 parts = line.rstrip("\n").split("\t")
                 if len(parts) < 11:
                     continue
                 plz = parts[1].strip()
+                city = parts[2].strip() if len(parts) > 2 else ""
                 try:
                     lat = float(parts[9])
                     lon = float(parts[10])
                 except (ValueError, IndexError):
                     continue
-                if plz not in table:
-                    table[plz] = (lat, lon)
+                if plz not in plz_build:
+                    plz_build[plz] = (lat, lon)
+                if city:
+                    key = _norm(city)
+                    if key and key not in city_build:
+                        city_build[key] = (lat, lon)
 
-        _plz_table = table
+        _plz_table = plz_build
+        # Store city table globally so _city_fallback can use it without re-reading
+        global _city_table
+        _city_table = city_build
         return _plz_table
 
 
@@ -154,6 +164,40 @@ def _plz_fallback(address: str) -> tuple[float, float] | None:
         plz = m_any.group(1)
 
     return _load_plz_table().get(plz)
+
+
+def _city_fallback(address: str) -> tuple[float, float] | None:
+    """Look up (lat, lon) by matching a city/municipality name from GeoNames.
+
+    Tries each comma-delimited segment of the address, stripping any leading
+    PLZ digits, so inputs like "Zürich", "8001 Zürich", or "Hauptstrasse, Bern"
+    all resolve to the city centroid.
+    """
+    # Ensure the city table is loaded (triggers PLZ table load as a side-effect)
+    if _city_table is None:
+        _load_plz_table()
+    table = _city_table
+    if not table:
+        return None
+
+    parts = [p.strip() for p in address.split(",") if p.strip()]
+    # Try each comma segment, preferring later (rightmost) segments first
+    for part in reversed(parts):
+        # Strip leading PLZ digits ("3000 Bern" → "Bern")
+        city_part = re.sub(r"^\d{4}\s*", "", part).strip()
+        if city_part:
+            key = _norm(city_part)
+            coords = table.get(key)
+            if coords:
+                logger.debug("geocode.city_fallback address=%r matched=%r", address, city_part)
+                return coords
+
+    # Last resort: treat the whole trimmed address as a city name
+    key = _norm(address.strip())
+    coords = table.get(key)
+    if coords:
+        logger.debug("geocode.city_fallback address=%r matched_whole=True", address)
+    return coords
 
 
 # ── Building-level geocoding DB ───────────────────────────────────────────────
@@ -376,7 +420,9 @@ def geocode_address(address: str) -> tuple[float, float] | None:
             logger.debug("geocode.plz_fallback reason=db_unavailable address=%r", address)
         else:
             logger.debug("geocode.plz_fallback reason=no_street_match address=%r parsed=%r", address, parsed)
-        return plz_coords
+        if plz_coords is not None:
+            return plz_coords
+        return _city_fallback(address)
 
     if plz_coords is None:
         logger.debug("geocode.building_only address=%r result=%r", address, building_result)

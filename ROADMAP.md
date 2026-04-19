@@ -35,9 +35,6 @@
 
 ## Bug Fixes & Known Issues
 ### Manual fixes:
-- categories:
-    - showing weird numbers
-    - all users should see purpose ekywords, clusters and noga classifications in the category overview
 - billing/payment/pricing
     - save card not working -> still not working
     - existing subscription then upgrading is not working
@@ -47,11 +44,8 @@
 - Map Adress search only works with streetname, number and plz. it should work with different configurations
 - Usermanagement for orgs (atleast untested)
 - admin dashboard simple redirects non authorized users, maybe not the safest
-- user logging: 
-    - does not include login trough google auth
 - NOGA: Zweigniederlassung ist falsch zbs: https://helvex.dicy.ch/app/companies/238698
 - AI Preview: AI classification is not configured on this server
-- Wire collections for other tiers i.e. finish up the explorer page
 - Tiers:
     - web results are not gated, immediately shown. Should have been atleast 1 week of pause form a simple tier. 
 
@@ -65,7 +59,7 @@
 
 - [ ] **Fix Branding** — potentially change the icon to have a red cross in the middle (change google and linkedin app connection icons)
 - [ ] **Add dark mode** — add dark mode
-- [ ] **Options for Emails** - Create an options for emails and also probably need to configure how the email looks includingbbbbbbbbbbbbbbbbbbbbbbbb
+
 
 
 ## Company Explore page
@@ -253,3 +247,4 @@
 - [X] **Improve colors** - improve some of the colors, look and feel for the website
 - [X] **Cookie banner settings** - adjust the cookie banner so users by default choose all
 - [X] **Mobile optimization** - Optimize the website for mobile traffic (maybe limit some features)
+- [X] **Options for Emails** - Create an options for emails and also probably need to configure how the email looks including

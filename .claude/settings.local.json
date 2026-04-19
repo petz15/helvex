@@ -200,7 +200,15 @@
       "Bash(grep -n \"cnt\\\\|count.*toLocale\\\\|\\\\\\\\.toLocale\" c:/D/coding_projects/zefix_analyzer/frontend/src/components/dashboard/multi-select-filter.tsx)",
       "Bash(python -m py_compile app/services/business_model.py app/services/job_worker.py app/api/routes/jobs.py app/schemas/company.py app/crud/company.py app/api/routes/companies.py app/services/csv_export.py)",
       "Bash(ls *.sh *.yml *.yaml)",
-      "Bash(python -m py_compile app/crud/app_setting.py app/crud/company.py)"
+      "Bash(python -m py_compile app/crud/app_setting.py app/crud/company.py)",
+      "Bash(cd c:\\\\\\\\D\\\\\\\\coding_projects\\\\\\\\zefix_analyzer)",
+      "Bash(grep -E \"\\\\.\\(ts|tsx|js|json\\)$\")",
+      "Bash(grep -v \"^$\")",
+      "Bash(grep -v \"^\\\\s*$\")",
+      "Bash(sed -n '218,226p' \"c:/D/coding_projects/zefix_analyzer/frontend/src/app/[locale]/app/categories/categories-client.tsx\")",
+      "Bash(sed -n '326,334p' \"c:/D/coding_projects/zefix_analyzer/frontend/src/app/[locale]/app/jobs/jobs-client.tsx\")",
+      "Bash(sed -n '68,76p' \"c:/D/coding_projects/zefix_analyzer/frontend/src/app/[locale]/app/collection/collection-client.tsx\")",
+      "Bash(sed -n '94,105p' \"c:/D/coding_projects/zefix_analyzer/frontend/src/app/[locale]/app/jobs/jobs-client.tsx\")"
     ]
   }
 }

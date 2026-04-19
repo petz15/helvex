@@ -1,0 +1,283 @@
+{
+  "nav": {
+    "search": "Ricerca",
+    "explorer": "Esplora",
+    "categories": "Categorie",
+    "map": "Mappa",
+    "jobs": "Lavori",
+    "collection": "Raccolta",
+    "settings": "Impostazioni",
+    "admin": "Admin",
+    "adminPanel": "Pannello admin",
+    "billing": "Fatturazione",
+    "account": "Account",
+    "signOut": "Esci",
+    "signIn": "Accedi",
+    "signUpFree": "Registrati gratuitamente",
+    "pricing": "Prezzi",
+    "features": "Funzionalità",
+    "switchOrg": "Cambia organizzazione"
+  },
+  "cookie": {
+    "title": "Informativa sui cookie",
+    "description": "Utilizziamo cookie necessari per il login, la sicurezza e il funzionamento tecnico del sito. I cookie analitici facoltativi vengono impostati solo con il vostro consenso. I dettagli si trovano nella nostra",
+    "privacyLink": "informativa sulla privacy",
+    "analyticsLabel": "Consentire i cookie analitici facoltativi (PostHog, Umami)",
+    "saveChoice": "Salva selezione",
+    "acceptAll": "Accetta tutto"
+  },
+  "landing": {
+    "hero": {
+      "title": "Intelligenza sulle",
+      "titleAccent": "aziende svizzere",
+      "subtitle": "Cerca, qualifica e monitora le aziende dal registro di commercio svizzero. Alimentato da dati FUSC in tempo reale, machine learning e classificazione IA — per mantenere la tua pipeline sempre rilevante.",
+      "cta": "Inizia subito! →",
+      "demo": "Vedi la demo dal vivo",
+      "noCreditCard": "Nessuna carta di credito richiesta."
+    },
+    "mock": {
+      "back": "← Ricerca",
+      "active": "ATTIVO",
+      "seat": "Sede",
+      "legalForm": "Forma giuridica",
+      "capital": "Capitale",
+      "shabHistory": "Storico FUSC"
+    },
+    "features": {
+      "badge": "Capacità della piattaforma",
+      "title": "Tutto per la ricerca sul mercato svizzero",
+      "subtitle": "Dai dati del registro in tempo reale alla scoperta di nuovi lead — Helvex copre ogni fase della ricerca e qualificazione di aziende svizzere.",
+      "cta": "Inizia gratuitamente →",
+      "data": {
+        "title": "Base dati",
+        "tagline": "Dati live dal registro di commercio svizzero con la cronologia completa delle mutazioni FUSC.",
+        "f1": "Ingestione automatica FUSC mantiene i dati aggiornati",
+        "f2": "Ancoraggio UID-CHE per join ed esportazioni affidabili",
+        "f3": "Cronologia mutazioni — nome, firmatario, cambiamenti di indirizzo",
+        "f4": "Filtro regionale per sede, cantone e località",
+        "f5": "Testo dello scopo normalizzato per scoring e clustering"
+      },
+      "ai": {
+        "title": "IA & Scoring",
+        "tagline": "Qualifica migliaia di aziende con classificazione LLM e punteggio di idoneità.",
+        "f1": "Punteggio di idoneità IA — rilevanza numerica per una rapida selezione",
+        "f2": "Flussi di classificazione LLM in batch o immediati",
+        "f3": "Rescoring flessibile quando cambiano i criteri di targeting",
+        "f4": "Punteggio automatico delle nuove aziende al momento dell'inserimento",
+        "f5": "Stopword ML personalizzate per un clustering più pulito"
+      },
+      "search": {
+        "title": "Ricerca & Scoperta",
+        "tagline": "Trova e monitora le aziende giuste con filtri, raccolte e digest.",
+        "f1": "Combina stato, geografia, punteggio e filtri scopo",
+        "f2": "Organizza i target in raccolte riutilizzabili con nome",
+        "f3": "E-mail di digest giornalieri per le nuove aziende corrispondenti",
+        "f4": "Arricchimento tramite ricerca web per segnali aggiuntivi",
+        "f5": "Vista mappa con lat/lon e ispezione dei cluster"
+      },
+      "workspace": {
+        "title": "Workspace & Scalabilità",
+        "tagline": "Workspace di squadra, fatturazione trasparente e controlli di livello enterprise.",
+        "f1": "Org condivisa con dati comuni e saldo crediti",
+        "f2": "Esportazioni CSV — base (UID/Nome) o dettagliate",
+        "f3": "Economia di crediti per azione con conversione CHF",
+        "f4": "Bonus di ricarica che crescono con il tuo piano",
+        "f5": "Chiavi LLM proprie, priorità della coda e cronologia audit"
+      }
+    },
+    "pricing": {
+      "title": "Piani e prezzi attuali",
+      "subtitle": "Inizia gratuitamente, poi scala in base alle tue esigenze. Nessuna tariffa nascosta — paga solo quello che usi.",
+      "free": "Gratuito",
+      "perMonth": "/mese",
+      "perYearBilled": "CHF {yearly}/anno fatturato annualmente",
+      "consumption": {
+        "title": "Prezzi di consumo",
+        "subtitle": "Le azioni di utilizzo condividono le stesse tariffe di credito su tutti i piani.",
+        "creditRate": "1 credito = CHF {rate}",
+        "colAction": "Azione",
+        "colUnit": "Unità",
+        "colCredits": "Crediti",
+        "colChf": "CHF"
+      },
+      "cta": "Crea il tuo account gratuito →",
+      "actions": {
+        "batchClassify": { "label": "Classificazione LLM batch", "unit": "per azienda" },
+        "immediateClassify": { "label": "Classificazione LLM immediata", "unit": "per azienda" },
+        "webSearch": { "label": "Ricerca web", "unit": "per azienda" },
+        "flexRescore": { "label": "Rescoring flessibile", "unit": "per azienda" },
+        "fullRecluster": { "label": "Reclusterizzazione completa", "unit": "forfait" },
+        "exportBasic": { "label": "Esportazione massiva – base (UID/Nome/Cantone)", "unit": "per 10k righe" },
+        "exportDetailed": { "label": "Esportazione massiva – dettagliata", "unit": "per 10k righe" }
+      }
+    },
+    "footer": {
+      "copyright": "© {year} Helvex · Balogh Consulting",
+      "impressum": "Informazioni legali",
+      "datenschutz": "Privacy",
+      "agb": "Termini",
+      "cookieSettings": "Impostazioni cookie",
+      "signIn": "Accedi"
+    }
+  },
+  "auth": {
+    "login": {
+      "title": "Accedi a Helvex",
+      "email": "E-mail",
+      "password": "Password",
+      "forgotPassword": "Password dimenticata?",
+      "signIn": "Accedi",
+      "signingIn": "Accesso in corso…",
+      "noAccount": "Non hai un account?",
+      "createOne": "Creane uno",
+      "orContinueWith": "o continua con",
+      "oauthError": "L'accesso è stato annullato o non è riuscito. Riprova."
+    },
+    "register": {
+      "title": "Crea un account",
+      "email": "E-mail",
+      "password": "Password",
+      "name": "Nome",
+      "submit": "Registrati",
+      "submitting": "Registrazione in corso…",
+      "hasAccount": "Hai già un account?",
+      "signIn": "Accedi",
+      "orContinueWith": "o continua con"
+    },
+    "forgotPassword": {
+      "title": "Reimposta la password",
+      "email": "E-mail",
+      "submit": "Invia link",
+      "submitting": "Invio in corso…",
+      "backToLogin": "Torna al login",
+      "successMessage": "Se questo indirizzo e-mail è registrato, ti abbiamo inviato un link per reimpostare la password."
+    },
+    "resetPassword": {
+      "title": "Imposta una nuova password",
+      "hint": "Scegli una password di almeno 8 caratteri.",
+      "password": "Nuova password",
+      "confirm": "Conferma password",
+      "minChars": "Min. 8 caratteri",
+      "submit": "Cambia password",
+      "submitting": "Modifica in corso…",
+      "mismatch": "Le password non corrispondono.",
+      "invalidLink": "Link non valido",
+      "noToken": "Nessun token di reimpostazione trovato nell'URL.",
+      "requestNewLink": "Richiedi un nuovo link",
+      "successTitle": "Password aggiornata",
+      "successMessage": "Ora puoi accedere con la tua nuova password.",
+      "signIn": "Accedi →"
+    },
+    "verifyEmail": {
+      "verifying": "Verifica del tuo indirizzo e-mail…",
+      "successTitle": "E-mail verificata!",
+      "successMessage": "Il tuo account è ora attivo.",
+      "openSearch": "Apri la ricerca →",
+      "failTitle": "Verifica non riuscita",
+      "backToLogin": "Torna al login",
+      "noToken": "Nessun token di verifica fornito.",
+      "networkError": "Errore di rete. Riprova.",
+      "failed": "Verifica non riuscita."
+    },
+    "acceptInvite": {
+      "title": "Invito all'organizzazione",
+      "joined": "Unito!",
+      "redirecting": "Reindirizzamento alla dashboard…",
+      "invitedToJoin": "Sei stato/a invitato/a a unirti a {orgName}.",
+      "setupAccount": "Crea una password per configurare il tuo account e unirti immediatamente.",
+      "email": "E-mail",
+      "choosePassword": "Scegli una password",
+      "minChars": "Min. 8 caratteri",
+      "createAndJoin": "Crea account & unisciti a {orgName}",
+      "creating": "Creazione account…",
+      "alreadyHaveAccount": "Hai già un account?",
+      "signIn": "Accedi",
+      "signInToAccept": "Accedi per accettare",
+      "invitedTo": "Invitato/a come:",
+      "orgSwitchWarning": "Sei attualmente in {currentOrg}. Accettando passerai a {orgName}.",
+      "switchWarning": "Sei in {currentOrg}. Accettando questo invito passerai a {orgName}. Perderai l'accesso ai tuoi dati in {currentOrg}.",
+      "leaveAndJoin": "Lascia {currentOrg} & unisciti a {orgName}",
+      "join": "Unisciti a {orgName}",
+      "cancel": "Annulla",
+      "acceptAndSwitch": "Accetta & cambia",
+      "noToken": "Nessun token di invito trovato nell'URL.",
+      "loadingDetails": "Caricamento dettagli invito…"
+    },
+    "confirmEmailChange": {
+      "confirming": "Conferma del tuo indirizzo e-mail…",
+      "successTitle": "Indirizzo e-mail aggiornato",
+      "successMessage": "Il tuo indirizzo e-mail è stato modificato con successo.",
+      "goToAccount": "Vai all'account",
+      "failTitle": "Conferma non riuscita",
+      "backToAccount": "Torna all'account",
+      "noToken": "Nessun token di conferma trovato nel link.",
+      "networkError": "Errore di rete. Riprova."
+    }
+  },
+  "app": {
+    "footer": {
+      "impressum": "Informazioni legali",
+      "datenschutz": "Privacy",
+      "agb": "Termini",
+      "cookieSettings": "Impostazioni cookie"
+    },
+    "search": {
+      "aiPreview": "Anteprima IA",
+      "queueExport": "Export in coda",
+      "exportQueued": "Export in coda — scaricare dalla pagina Lavori quando pronto.",
+      "scoring": "Valutazione di fino a 5 aziende…",
+      "previewsUsed": "{count} aziende valutate · {used}/{total} anteprime usate oggi",
+      "dailyLimit": "Limite giornaliero raggiunto. Si azzera domani."
+    },
+    "dashboard": {
+      "queueExport": "Export in coda",
+      "exportCsv": "Esporta CSV ({count})",
+      "exportLimited": "Export limitato a {limit} righe per il tuo piano attuale.",
+      "exportQueued": "Export in coda — scaricare dalla pagina Lavori quando pronto."
+    },
+    "map": {
+      "goToAddress": "Vai all'indirizzo",
+      "placeholder": "CAP, nome città o indirizzo",
+      "go": "Vai",
+      "centeredOn": "Centrato su {address}",
+      "searchHint": "Inserisci un indirizzo, CAP o città.",
+      "noGeocoded": "nessuna azienda geocodificata nella vista",
+      "clickToZoom": "clicca su una bolla per ingrandire",
+      "capped": "limitato a 20 000",
+      "inView": "nella vista",
+      "mapError": "Errore mappa: {error}",
+      "loading": "Caricamento…"
+    },
+    "addresses": {
+      "title": "Indirizzi di fatturazione",
+      "subtitle": "Salva più indirizzi e scegli quale usare come predefinito al checkout.",
+      "backToCheckout": "Torna al checkout"
+    },
+    "jobs": {
+      "title": "Lavori",
+      "mlDocsTitle": "Riferimento job ML",
+      "mlDocsSubtitle": "Panoramica di ogni tipo di job ML, utilizzo e prerequisiti."
+    },
+    "categories": {
+      "title": "Categorie",
+      "companies": "aziende"
+    },
+    "billing": {
+      "title": "Fatturazione",
+      "subtitle": "Gestisci piano, crediti e cronologia pagamenti."
+    },
+    "account": {
+      "title": "Il mio account",
+      "subtitle": "Profilo, sicurezza, organizzazione e team"
+    },
+    "pricing": {
+      "title": "Piani & prezzi"
+    },
+    "collection": {
+      "title": "Raccolta"
+    },
+    "explorer": {
+      "title": "Esplora"
+    }
+  }
+}

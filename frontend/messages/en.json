@@ -1,0 +1,283 @@
+{
+  "nav": {
+    "search": "Search",
+    "explorer": "Explorer",
+    "categories": "Categories",
+    "map": "Map",
+    "jobs": "Jobs",
+    "collection": "Collection",
+    "settings": "Settings",
+    "admin": "Admin",
+    "adminPanel": "Admin panel",
+    "billing": "Billing",
+    "account": "Account",
+    "signOut": "Sign out",
+    "signIn": "Sign in",
+    "signUpFree": "Sign up free",
+    "pricing": "Pricing",
+    "features": "Features",
+    "switchOrg": "Switch organization"
+  },
+  "cookie": {
+    "title": "Cookie Notice",
+    "description": "We use necessary cookies for login, security, and the technical operation of the website. Optional analytics cookies are only set with your consent. Details can be found in our",
+    "privacyLink": "Privacy Policy",
+    "analyticsLabel": "Allow optional analytics cookies (PostHog, Umami)",
+    "saveChoice": "Save selection",
+    "acceptAll": "Accept all"
+  },
+  "landing": {
+    "hero": {
+      "title": "Swiss company",
+      "titleAccent": "intelligence",
+      "subtitle": "Search, qualify, and track companies from the Swiss commercial register. Powered by live SHAB data, Machine Learning and AI classification — so your pipeline stays relevant.",
+      "cta": "Start right now! →",
+      "demo": "View live demo",
+      "noCreditCard": "No credit card required."
+    },
+    "mock": {
+      "back": "← Search",
+      "active": "ACTIVE",
+      "seat": "Seat",
+      "legalForm": "Legal form",
+      "capital": "Capital",
+      "shabHistory": "SHAB History"
+    },
+    "features": {
+      "badge": "Platform capabilities",
+      "title": "Everything for Swiss market research",
+      "subtitle": "From live register data to finding undiscovered leads — Helvex covers every step of finding and qualifying Swiss companies.",
+      "cta": "Start for free →",
+      "data": {
+        "title": "Data Foundation",
+        "tagline": "Live Swiss commercial register data with full SHAB mutation history.",
+        "f1": "Automated SHAB ingestion keeps records current",
+        "f2": "CHE UID anchoring for reliable joins and exports",
+        "f3": "Mutation timeline — name, signer, address changes",
+        "f4": "Regional filtering by seat, canton, and locality",
+        "f5": "Normalized purpose text for scoring and clustering"
+      },
+      "ai": {
+        "title": "AI & Scoring",
+        "tagline": "Qualify thousands of companies with LLM classification and fit scoring.",
+        "f1": "AI fit score — numeric relevance for fast triage",
+        "f2": "Batch and immediate LLM classification flows",
+        "f3": "Flex rescoring whenever targeting criteria change",
+        "f4": "Auto-score newly discovered companies on entry",
+        "f5": "Custom ML stopwords for cleaner clustering"
+      },
+      "search": {
+        "title": "Search & Discovery",
+        "tagline": "Find and track the right companies with filters, collections, and digests.",
+        "f1": "Combine status, geography, score, and purpose filters",
+        "f2": "Organize targets into reusable named collections",
+        "f3": "Daily digest emails for newly matched companies",
+        "f4": "Web search enrichment for additional signal",
+        "f5": "Map view with lat/lon and cluster inspection"
+      },
+      "workspace": {
+        "title": "Workspace & Scale",
+        "tagline": "Team workspace, transparent billing, and enterprise-grade controls.",
+        "f1": "Shared org with common data and credit balance",
+        "f2": "CSV exports — basic (UID/Name) or full detail",
+        "f3": "Per-action credit economy with CHF conversion",
+        "f4": "Top-up bonuses that scale with your plan tier",
+        "f5": "BYO LLM keys, queue priority, and audit history"
+      }
+    },
+    "pricing": {
+      "title": "Current plans and pricing",
+      "subtitle": "Start for free, then scale up as your needs grow. No hidden fees — only pay for what you use.",
+      "free": "Free",
+      "perMonth": "/mo",
+      "perYearBilled": "CHF {yearly}/yr billed yearly",
+      "consumption": {
+        "title": "Consumption pricing",
+        "subtitle": "Usage actions share the same credit rates across every plan.",
+        "creditRate": "1 credit = CHF {rate}",
+        "colAction": "Action",
+        "colUnit": "Unit",
+        "colCredits": "Credits",
+        "colChf": "CHF"
+      },
+      "cta": "Create your free account →",
+      "actions": {
+        "batchClassify": { "label": "Batch LLM classify", "unit": "per company" },
+        "immediateClassify": { "label": "Immediate LLM classify", "unit": "per company" },
+        "webSearch": { "label": "Web search", "unit": "per company" },
+        "flexRescore": { "label": "Flex rescore", "unit": "per company" },
+        "fullRecluster": { "label": "Full reclustering", "unit": "flat" },
+        "exportBasic": { "label": "Bulk export – basic (UID/Name/Canton)", "unit": "per 10k rows" },
+        "exportDetailed": { "label": "Bulk export – detailed", "unit": "per 10k rows" }
+      }
+    },
+    "footer": {
+      "copyright": "© {year} Helvex · Balogh Consulting",
+      "impressum": "Impressum",
+      "datenschutz": "Privacy Policy",
+      "agb": "Terms",
+      "cookieSettings": "Cookie Settings",
+      "signIn": "Sign in"
+    }
+  },
+  "auth": {
+    "login": {
+      "title": "Sign in to Helvex",
+      "email": "Email",
+      "password": "Password",
+      "forgotPassword": "Forgot password?",
+      "signIn": "Sign in",
+      "signingIn": "Signing in…",
+      "noAccount": "Don't have an account?",
+      "createOne": "Create one",
+      "orContinueWith": "or continue with",
+      "oauthError": "Sign-in was cancelled or failed. Please try again."
+    },
+    "register": {
+      "title": "Create your account",
+      "email": "Email",
+      "password": "Password",
+      "name": "Name",
+      "submit": "Sign up",
+      "submitting": "Signing up…",
+      "hasAccount": "Already have an account?",
+      "signIn": "Sign in",
+      "orContinueWith": "or continue with"
+    },
+    "forgotPassword": {
+      "title": "Reset your password",
+      "email": "Email",
+      "submit": "Send link",
+      "submitting": "Sending…",
+      "backToLogin": "Back to sign in",
+      "successMessage": "If that email address is registered, we've sent you a reset link."
+    },
+    "resetPassword": {
+      "title": "Set a new password",
+      "hint": "Choose a password with at least 8 characters.",
+      "password": "New password",
+      "confirm": "Confirm password",
+      "minChars": "Min. 8 characters",
+      "submit": "Change password",
+      "submitting": "Changing…",
+      "mismatch": "Passwords do not match.",
+      "invalidLink": "Invalid link",
+      "noToken": "No reset token found in the URL.",
+      "requestNewLink": "Request a new link",
+      "successTitle": "Password updated",
+      "successMessage": "You can now sign in with your new password.",
+      "signIn": "Sign in →"
+    },
+    "verifyEmail": {
+      "verifying": "Verifying your email…",
+      "successTitle": "Email verified!",
+      "successMessage": "Your account is now active.",
+      "openSearch": "Open search →",
+      "failTitle": "Verification failed",
+      "backToLogin": "Back to login",
+      "noToken": "No verification token provided.",
+      "networkError": "Network error. Please try again.",
+      "failed": "Verification failed."
+    },
+    "acceptInvite": {
+      "title": "Organization Invite",
+      "joined": "Joined!",
+      "redirecting": "Redirecting to dashboard…",
+      "invitedToJoin": "You've been invited to join {orgName}.",
+      "setupAccount": "Create a password to set up your account and join immediately.",
+      "email": "Email",
+      "choosePassword": "Choose a password",
+      "minChars": "Min. 8 characters",
+      "createAndJoin": "Create account & join {orgName}",
+      "creating": "Creating account…",
+      "alreadyHaveAccount": "Already have an account?",
+      "signIn": "Sign in",
+      "signInToAccept": "Sign in to accept",
+      "invitedTo": "Invited to:",
+      "orgSwitchWarning": "You're currently in {currentOrg}. Accepting will move you to {orgName}.",
+      "switchWarning": "You are currently in {currentOrg}. Accepting this invite will move you to {orgName}. You'll lose access to your data in {currentOrg}.",
+      "leaveAndJoin": "Leave {currentOrg} & join {orgName}",
+      "join": "Join {orgName}",
+      "cancel": "Cancel",
+      "acceptAndSwitch": "Accept & switch",
+      "noToken": "No invite token found in URL.",
+      "loadingDetails": "Loading invite details…"
+    },
+    "confirmEmailChange": {
+      "confirming": "Confirming your email address…",
+      "successTitle": "Email address updated",
+      "successMessage": "Your email address has been changed successfully.",
+      "goToAccount": "Go to Account",
+      "failTitle": "Confirmation failed",
+      "backToAccount": "Back to Account",
+      "noToken": "No confirmation token found in the link.",
+      "networkError": "Network error. Please try again."
+    }
+  },
+  "app": {
+    "footer": {
+      "impressum": "Impressum",
+      "datenschutz": "Privacy Policy",
+      "agb": "Terms",
+      "cookieSettings": "Cookie Settings"
+    },
+    "search": {
+      "aiPreview": "AI preview",
+      "queueExport": "Queue full export",
+      "exportQueued": "Export queued — download from Jobs page when ready.",
+      "scoring": "Scoring up to 5 companies…",
+      "previewsUsed": "{count} companies scored · {used}/{total} previews used today",
+      "dailyLimit": "Daily preview limit reached. Resets tomorrow."
+    },
+    "dashboard": {
+      "queueExport": "Queue full export",
+      "exportCsv": "Export CSV ({count})",
+      "exportLimited": "Export limited to {limit} rows for your current plan.",
+      "exportQueued": "Export queued — download from Jobs page when ready."
+    },
+    "map": {
+      "goToAddress": "Go to address",
+      "placeholder": "ZIP, city name, or street address",
+      "go": "Go",
+      "centeredOn": "Centered on {address}",
+      "searchHint": "Enter an address, ZIP, or city name.",
+      "noGeocoded": "no geocoded companies in view",
+      "clickToZoom": "click a bubble to zoom in",
+      "capped": "capped at 20 000",
+      "inView": "in view",
+      "mapError": "Map error: {error}",
+      "loading": "Loading…"
+    },
+    "addresses": {
+      "title": "Billing Addresses",
+      "subtitle": "Save multiple addresses and choose which one to use by default at checkout.",
+      "backToCheckout": "Back to checkout"
+    },
+    "jobs": {
+      "title": "Jobs",
+      "mlDocsTitle": "ML Job Reference",
+      "mlDocsSubtitle": "Overview of each ML job type, its use, and prerequisites."
+    },
+    "categories": {
+      "title": "Categories",
+      "companies": "companies"
+    },
+    "billing": {
+      "title": "Billing",
+      "subtitle": "Manage your plan, credits, and payment history."
+    },
+    "account": {
+      "title": "My Account",
+      "subtitle": "Profile, security, organization, and team"
+    },
+    "pricing": {
+      "title": "Plans & Pricing"
+    },
+    "collection": {
+      "title": "Collection"
+    },
+    "explorer": {
+      "title": "Explorer"
+    }
+  }
+}

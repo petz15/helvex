@@ -1,0 +1,283 @@
+{
+  "nav": {
+    "search": "Suche",
+    "explorer": "Explorer",
+    "categories": "Kategorien",
+    "map": "Karte",
+    "jobs": "Jobs",
+    "collection": "Sammlung",
+    "settings": "Einstellungen",
+    "admin": "Admin",
+    "adminPanel": "Admin-Panel",
+    "billing": "Abrechnung",
+    "account": "Konto",
+    "signOut": "Abmelden",
+    "signIn": "Anmelden",
+    "signUpFree": "Kostenlos registrieren",
+    "pricing": "Preise",
+    "features": "Funktionen",
+    "switchOrg": "Organisation wechseln"
+  },
+  "cookie": {
+    "title": "Cookie-Hinweis",
+    "description": "Wir verwenden notwendige Cookies für Login, Sicherheit und den technischen Betrieb der Website. Optionale Analyse-Cookies setzen wir nur mit Ihrer Zustimmung. Details finden Sie in unserem",
+    "privacyLink": "Datenschutz",
+    "analyticsLabel": "Optionale Analyse-Cookies (PostHog, Umami) erlauben",
+    "saveChoice": "Auswahl speichern",
+    "acceptAll": "Alle akzeptieren"
+  },
+  "landing": {
+    "hero": {
+      "title": "Schweizer Firmen",
+      "titleAccent": "intelligenz",
+      "subtitle": "Schweizer Handelsregisterdaten durchsuchen, qualifizieren und verfolgen. Unterstützt durch Live-SHAB-Daten, Machine Learning und KI-Klassifizierung — damit Ihre Pipeline stets aktuell bleibt.",
+      "cta": "Jetzt starten! →",
+      "demo": "Live-Demo ansehen",
+      "noCreditCard": "Keine Kreditkarte erforderlich."
+    },
+    "mock": {
+      "back": "← Suche",
+      "active": "AKTIV",
+      "seat": "Sitz",
+      "legalForm": "Rechtsform",
+      "capital": "Kapital",
+      "shabHistory": "SHAB-Verlauf"
+    },
+    "features": {
+      "badge": "Plattformfunktionen",
+      "title": "Alles für die Schweizer Marktrecherche",
+      "subtitle": "Von Live-Registerdaten bis zur Entdeckung neuer Leads — Helvex deckt jeden Schritt bei der Suche und Qualifizierung Schweizer Unternehmen ab.",
+      "cta": "Kostenlos starten →",
+      "data": {
+        "title": "Datenbasis",
+        "tagline": "Live-Daten aus dem Schweizer Handelsregister mit vollständiger SHAB-Mutationshistorie.",
+        "f1": "Automatische SHAB-Einspeisung hält Daten aktuell",
+        "f2": "CHE-UID-Anker für zuverlässige Joins und Exporte",
+        "f3": "Mutationstimeline — Name, Unterzeichner, Adressänderungen",
+        "f4": "Regionale Filterung nach Sitz, Kanton und Ort",
+        "f5": "Normalisierter Zwecktext für Scoring und Clustering"
+      },
+      "ai": {
+        "title": "KI & Scoring",
+        "tagline": "Tausende Unternehmen mit LLM-Klassifizierung und Fit-Scoring qualifizieren.",
+        "f1": "KI-Fit-Score — numerische Relevanz für schnelle Triage",
+        "f2": "Batch- und sofortige LLM-Klassifizierungsabläufe",
+        "f3": "Flex-Rescoring bei Änderung der Zielkriterien",
+        "f4": "Neu entdeckte Unternehmen werden automatisch bewertet",
+        "f5": "Benutzerdefinierte ML-Stoppwörter für sauberes Clustering"
+      },
+      "search": {
+        "title": "Suche & Entdeckung",
+        "tagline": "Die richtigen Unternehmen mit Filtern, Sammlungen und Digests finden und verfolgen.",
+        "f1": "Status, Geografie, Score und Zweck kombinieren",
+        "f2": "Ziele in wiederverwendbare Sammlungen organisieren",
+        "f3": "Tägliche Digest-E-Mails für neu passende Unternehmen",
+        "f4": "Web-Suchanreicherung für zusätzliche Signale",
+        "f5": "Kartenansicht mit Lat/Lon und Cluster-Inspektion"
+      },
+      "workspace": {
+        "title": "Workspace & Skalierung",
+        "tagline": "Team-Workspace, transparente Abrechnung und unternehmenstaugliche Kontrollen.",
+        "f1": "Gemeinsame Org mit gemeinsamen Daten und Guthaben",
+        "f2": "CSV-Exporte — einfach (UID/Name) oder vollständig",
+        "f3": "Pro-Aktion Kreditwirtschaft mit CHF-Umrechnung",
+        "f4": "Aufladeboni skalieren mit Ihrem Plan-Tier",
+        "f5": "Eigene LLM-Schlüssel, Warteschlangenpriorität und Audithistorie"
+      }
+    },
+    "pricing": {
+      "title": "Aktuelle Pläne und Preise",
+      "subtitle": "Kostenlos starten, dann nach Bedarf skalieren. Keine versteckten Gebühren — zahlen Sie nur, was Sie nutzen.",
+      "free": "Kostenlos",
+      "perMonth": "/Monat",
+      "perYearBilled": "CHF {yearly}/Jahr, jährlich abgerechnet",
+      "consumption": {
+        "title": "Verbrauchspreise",
+        "subtitle": "Nutzungsaktionen haben dieselben Kreditraten über alle Pläne hinweg.",
+        "creditRate": "1 Credit = CHF {rate}",
+        "colAction": "Aktion",
+        "colUnit": "Einheit",
+        "colCredits": "Credits",
+        "colChf": "CHF"
+      },
+      "cta": "Kostenloses Konto erstellen →",
+      "actions": {
+        "batchClassify": { "label": "Batch-LLM-Klassifizierung", "unit": "pro Unternehmen" },
+        "immediateClassify": { "label": "Sofortige LLM-Klassifizierung", "unit": "pro Unternehmen" },
+        "webSearch": { "label": "Web-Suche", "unit": "pro Unternehmen" },
+        "flexRescore": { "label": "Flex-Rescoring", "unit": "pro Unternehmen" },
+        "fullRecluster": { "label": "Vollständiges Reclustering", "unit": "pauschal" },
+        "exportBasic": { "label": "Massenexport – einfach (UID/Name/Kanton)", "unit": "pro 10k Zeilen" },
+        "exportDetailed": { "label": "Massenexport – detailliert", "unit": "pro 10k Zeilen" }
+      }
+    },
+    "footer": {
+      "copyright": "© {year} Helvex · Balogh Consulting",
+      "impressum": "Impressum",
+      "datenschutz": "Datenschutz",
+      "agb": "AGB",
+      "cookieSettings": "Cookie-Einstellungen",
+      "signIn": "Anmelden"
+    }
+  },
+  "auth": {
+    "login": {
+      "title": "Bei Helvex anmelden",
+      "email": "E-Mail",
+      "password": "Passwort",
+      "forgotPassword": "Passwort vergessen?",
+      "signIn": "Anmelden",
+      "signingIn": "Anmeldung läuft…",
+      "noAccount": "Noch kein Konto?",
+      "createOne": "Konto erstellen",
+      "orContinueWith": "oder weiterfahren mit",
+      "oauthError": "Anmeldung wurde abgebrochen oder ist fehlgeschlagen. Bitte erneut versuchen."
+    },
+    "register": {
+      "title": "Konto erstellen",
+      "email": "E-Mail",
+      "password": "Passwort",
+      "name": "Name",
+      "submit": "Registrieren",
+      "submitting": "Registrierung läuft…",
+      "hasAccount": "Bereits ein Konto?",
+      "signIn": "Anmelden",
+      "orContinueWith": "oder weiterfahren mit"
+    },
+    "forgotPassword": {
+      "title": "Passwort zurücksetzen",
+      "email": "E-Mail",
+      "submit": "Link senden",
+      "submitting": "Link wird gesendet…",
+      "backToLogin": "Zurück zur Anmeldung",
+      "successMessage": "Wenn diese E-Mail-Adresse registriert ist, haben wir Ihnen einen Link zum Zurücksetzen des Passworts gesendet."
+    },
+    "resetPassword": {
+      "title": "Neues Passwort festlegen",
+      "hint": "Wählen Sie ein Passwort mit mindestens 8 Zeichen.",
+      "password": "Neues Passwort",
+      "confirm": "Passwort bestätigen",
+      "minChars": "Min. 8 Zeichen",
+      "submit": "Passwort ändern",
+      "submitting": "Passwort wird geändert…",
+      "mismatch": "Passwörter stimmen nicht überein.",
+      "invalidLink": "Ungültiger Link",
+      "noToken": "Kein Reset-Token in der URL gefunden.",
+      "requestNewLink": "Neuen Link anfordern",
+      "successTitle": "Passwort aktualisiert",
+      "successMessage": "Sie können sich jetzt mit Ihrem neuen Passwort anmelden.",
+      "signIn": "Anmelden →"
+    },
+    "verifyEmail": {
+      "verifying": "E-Mail-Adresse wird verifiziert…",
+      "successTitle": "E-Mail verifiziert!",
+      "successMessage": "Ihr Konto ist jetzt aktiv.",
+      "openSearch": "Suche öffnen →",
+      "failTitle": "Verifizierung fehlgeschlagen",
+      "backToLogin": "Zurück zur Anmeldung",
+      "noToken": "Kein Verifizierungstoken angegeben.",
+      "networkError": "Netzwerkfehler. Bitte erneut versuchen.",
+      "failed": "Verifizierung fehlgeschlagen."
+    },
+    "acceptInvite": {
+      "title": "Organisationseinladung",
+      "joined": "Beigetreten!",
+      "redirecting": "Weiterleitung zum Dashboard…",
+      "invitedToJoin": "Sie wurden eingeladen, {orgName} beizutreten.",
+      "setupAccount": "Erstellen Sie ein Passwort, um Ihr Konto einzurichten und sofort beizutreten.",
+      "email": "E-Mail",
+      "choosePassword": "Passwort wählen",
+      "minChars": "Min. 8 Zeichen",
+      "createAndJoin": "Konto erstellen & {orgName} beitreten",
+      "creating": "Konto wird erstellt…",
+      "alreadyHaveAccount": "Bereits ein Konto?",
+      "signIn": "Anmelden",
+      "signInToAccept": "Anmelden zum Annehmen",
+      "invitedTo": "Eingeladen als:",
+      "orgSwitchWarning": "Sie sind derzeit in {currentOrg}. Durch Annehmen wechseln Sie zu {orgName}.",
+      "switchWarning": "Sie sind in {currentOrg}. Durch Annehmen dieser Einladung wechseln Sie zu {orgName}. Sie verlieren den Zugriff auf Ihre Daten in {currentOrg}.",
+      "leaveAndJoin": "{currentOrg} verlassen & {orgName} beitreten",
+      "join": "{orgName} beitreten",
+      "cancel": "Abbrechen",
+      "acceptAndSwitch": "Annehmen & wechseln",
+      "noToken": "Kein Einladungstoken in der URL gefunden.",
+      "loadingDetails": "Einladungsdetails werden geladen…"
+    },
+    "confirmEmailChange": {
+      "confirming": "E-Mail-Adresse wird bestätigt…",
+      "successTitle": "E-Mail-Adresse aktualisiert",
+      "successMessage": "Ihre E-Mail-Adresse wurde erfolgreich geändert.",
+      "goToAccount": "Zum Konto",
+      "failTitle": "Bestätigung fehlgeschlagen",
+      "backToAccount": "Zurück zum Konto",
+      "noToken": "Kein Bestätigungstoken im Link gefunden.",
+      "networkError": "Netzwerkfehler. Bitte erneut versuchen."
+    }
+  },
+  "app": {
+    "footer": {
+      "impressum": "Impressum",
+      "datenschutz": "Datenschutz",
+      "agb": "AGB",
+      "cookieSettings": "Cookie-Einstellungen"
+    },
+    "search": {
+      "aiPreview": "KI-Vorschau",
+      "queueExport": "Vollexport in Warteschlange",
+      "exportQueued": "Export in Warteschlange — auf Jobs-Seite herunterladen wenn bereit.",
+      "scoring": "Bis zu 5 Unternehmen werden bewertet…",
+      "previewsUsed": "{count} Unternehmen bewertet · {used}/{total} Vorschauen heute genutzt",
+      "dailyLimit": "Tageslimit erreicht. Wird morgen zurückgesetzt."
+    },
+    "dashboard": {
+      "queueExport": "Vollexport in Warteschlange",
+      "exportCsv": "CSV exportieren ({count})",
+      "exportLimited": "Export auf {limit} Zeilen für Ihren aktuellen Plan begrenzt.",
+      "exportQueued": "Export in Warteschlange — auf Jobs-Seite herunterladen wenn bereit."
+    },
+    "map": {
+      "goToAddress": "Adresse anspringen",
+      "placeholder": "PLZ, Stadtname oder Adresse",
+      "go": "Los",
+      "centeredOn": "Zentriert auf {address}",
+      "searchHint": "Adresse, PLZ oder Stadt eingeben.",
+      "noGeocoded": "keine geokodierten Unternehmen in der Ansicht",
+      "clickToZoom": "auf Blase klicken zum Hineinzoomen",
+      "capped": "auf 20 000 begrenzt",
+      "inView": "in der Ansicht",
+      "mapError": "Kartenfehler: {error}",
+      "loading": "Wird geladen…"
+    },
+    "addresses": {
+      "title": "Rechnungsadressen",
+      "subtitle": "Mehrere Adressen speichern und eine als Standard für den Checkout festlegen.",
+      "backToCheckout": "Zurück zum Checkout"
+    },
+    "jobs": {
+      "title": "Jobs",
+      "mlDocsTitle": "ML-Job-Referenz",
+      "mlDocsSubtitle": "Überblick über jeden ML-Job-Typ, seine Verwendung und Voraussetzungen."
+    },
+    "categories": {
+      "title": "Kategorien",
+      "companies": "Unternehmen"
+    },
+    "billing": {
+      "title": "Abrechnung",
+      "subtitle": "Plan, Guthaben und Zahlungshistorie verwalten."
+    },
+    "account": {
+      "title": "Mein Konto",
+      "subtitle": "Profil, Sicherheit, Organisation und Team"
+    },
+    "pricing": {
+      "title": "Pläne & Preise"
+    },
+    "collection": {
+      "title": "Sammlung"
+    },
+    "explorer": {
+      "title": "Explorer"
+    }
+  }
+}

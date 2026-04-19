@@ -3,36 +3,39 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import useSWR, { useSWRConfig } from "swr";
 import { cn } from "@/lib/utils";
-import { Search, Compass, Map, Cog, Database, Activity, UserCircle, Shield, LayoutGrid, CreditCard, Menu, X, Tag } from "lucide-react";
+import { Search, Compass, Map, Cog, Database, Activity, UserCircle, Shield, LayoutGrid, CreditCard, Menu, X, Tag, Globe } from "lucide-react";
 import { fetchCurrentUser, fetchMyOrgs, switchOrg } from "@/lib/api";
 import { HelvexMark } from "@/components/helvex-logo";
+import { useI18n } from "@/i18n/context";
+import { SUPPORTED_LOCALES } from "@/i18n/locales";
 import { useState } from "react";
 
-const NAV_MAIN = [
-  { href: "/app/search", label: "Search", icon: Search },
-  { href: "/app/explorer", label: "Explorer", icon: Compass },
-  { href: "/app/categories", label: "Categories", icon: LayoutGrid },
-  { href: "/app/map", label: "Map", icon: Map },
-  { href: "/app/jobs", label: "Jobs", icon: Activity },
-];
-
-const NAV_ADMIN = [
-  { href: "/app/collection", label: "Collection", icon: Database },
-  { href: "/app/settings", label: "Settings", icon: Cog },
-];
-
-const MARKETING_NAV = [
-  { href: "/#features", label: "Features" },
-  { href: "/#pricing", label: "Pricing" },
-];
-
 const AUTH_PATHS = ["/login", "/register", "/verify-email", "/forgot-password", "/reset-password", "/accept-invite"];
+
+function useLocale() {
+  const pathname = usePathname();
+  const segment = pathname.split("/")[1];
+  return SUPPORTED_LOCALES.includes(segment as (typeof SUPPORTED_LOCALES)[number])
+    ? (segment as (typeof SUPPORTED_LOCALES)[number])
+    : "de" as const;
+}
+
+function useLocalePath(path: string) {
+  const locale = useLocale();
+  return `/${locale}${path}`;
+}
+
+const LOCALE_LABELS: Record<string, string> = { de: "DE", fr: "FR", it: "IT", en: "EN" };
 
 export function NavBar() {
   const pathname = usePathname();
   const router = useRouter();
   const { mutate } = useSWRConfig();
   const [mobileOpen, setMobileOpen] = useState(false);
+  const locale = useLocale();
+  const { dict } = useI18n();
+  const t = dict.nav;
+
   const { data: me, isLoading } = useSWR("me", fetchCurrentUser, {
     shouldRetryOnError: false,
     revalidateOnMount: true,
@@ -43,10 +46,30 @@ export function NavBar() {
     revalidateOnFocus: false,
   });
 
-  if (AUTH_PATHS.some((p) => pathname.startsWith(p))) return null;
+  // Strip locale prefix for AUTH_PATHS check
+  const strippedPath = pathname.replace(/^\/(de|fr|it|en)/, "");
+  if (AUTH_PATHS.some((p) => strippedPath.startsWith(p))) return null;
 
   const loggedIn = !isLoading && !!me;
   const loggedOut = !isLoading && !me;
+
+  const NAV_MAIN = [
+    { href: `/${locale}/app/search`, label: t.search, icon: Search },
+    { href: `/${locale}/app/explorer`, label: t.explorer, icon: Compass },
+    { href: `/${locale}/app/categories`, label: t.categories, icon: LayoutGrid },
+    { href: `/${locale}/app/map`, label: t.map, icon: Map },
+    { href: `/${locale}/app/jobs`, label: t.jobs, icon: Activity },
+  ];
+
+  const NAV_ADMIN = [
+    { href: `/${locale}/app/collection`, label: t.collection, icon: Database },
+    { href: `/${locale}/app/settings`, label: t.settings, icon: Cog },
+  ];
+
+  const MARKETING_NAV = [
+    { href: `/${locale}/#features`, label: t.features },
+    { href: `/${locale}/#pricing`, label: t.pricing },
+  ];
 
   async function handleOrgSwitch(nextOrgId: number) {
     if (!me || !nextOrgId || nextOrgId === me.org_id) return;
@@ -56,6 +79,12 @@ export function NavBar() {
     router.refresh();
   }
 
+  function switchLocale(newLocale: string) {
+    // Replace the locale segment in the current path
+    const newPath = pathname.replace(/^\/(de|fr|it|en)/, `/${newLocale}`);
+    router.push(newPath || `/${newLocale}`);
+  }
+
   const closeMobile = () => setMobileOpen(false);
 
   return (
@@ -63,7 +92,7 @@ export function NavBar() {
       <header className="h-12 bg-white border-b border-slate-200 flex items-center px-4 shrink-0 z-40 shadow-sm">
         {/* Logo */}
         <Link
-          href={loggedIn ? "/app/search" : "/"}
+          href={loggedIn ? `/${locale}/app/search` : `/${locale}`}
           className="flex items-center gap-2 font-bold text-blue-600 mr-6 tracking-tight shrink-0"
           onClick={closeMobile}
         >
@@ -94,16 +123,16 @@ export function NavBar() {
             })}
             {me?.org?.tier === "free" && (
               <Link
-                href="/app/pricing"
+                href={`/${locale}/app/pricing`}
                 className={cn(
                   "flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm transition-colors",
-                  pathname === "/app/pricing"
+                  pathname === `/${locale}/app/pricing`
                     ? "bg-blue-600 text-white font-medium"
                     : "text-slate-600 hover:bg-slate-100 hover:text-slate-900"
                 )}
               >
                 <Tag size={14} />
-                Pricing
+                {t.pricing}
               </Link>
             )}
             {me?.is_superadmin && (
@@ -148,21 +177,40 @@ export function NavBar() {
         )}
 
         <div className="ml-auto flex items-center gap-1">
+          {/* Language switcher */}
+          <div className="hidden md:flex items-center gap-0.5 mr-1">
+            <Globe size={13} className="text-slate-400 mr-0.5" />
+            {SUPPORTED_LOCALES.map((loc) => (
+              <button
+                key={loc}
+                onClick={() => switchLocale(loc)}
+                className={cn(
+                  "px-1.5 py-0.5 rounded text-xs font-medium transition-colors",
+                  loc === locale
+                    ? "bg-slate-100 text-slate-800"
+                    : "text-slate-400 hover:text-slate-700"
+                )}
+              >
+                {LOCALE_LABELS[loc]}
+              </button>
+            ))}
+          </div>
+
           {/* Logged-in: admin + user — desktop only */}
           {loggedIn && (
             <div className="hidden md:flex items-center gap-1">
               {me?.is_superadmin && (
                 <Link
-                  href="/app/admin"
+                  href={`/${locale}/app/admin`}
                   className={cn(
                     "flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-sm transition-colors",
-                    pathname.startsWith("/app/admin")
+                    pathname.startsWith(`/${locale}/app/admin`)
                       ? "bg-purple-600 text-white font-medium"
                       : "text-purple-600 hover:bg-purple-50"
                   )}
                 >
                   <Shield size={14} />
-                  Admin
+                  {t.admin}
                 </Link>
               )}
               {me?.email && (
@@ -175,7 +223,7 @@ export function NavBar() {
                   className="text-xs border border-slate-200 rounded-md px-2 py-1 bg-white text-slate-600 max-w-[170px]"
                   value={String(me.org_id)}
                   onChange={(e) => handleOrgSwitch(Number(e.target.value))}
-                  title="Switch organization"
+                  title={t.switchOrg}
                 >
                   {orgs.map((org) => (
                     <option key={org.id} value={org.id}>
@@ -185,31 +233,31 @@ export function NavBar() {
                 </select>
               )}
               <Link
-                href="/app/billing"
+                href={`/${locale}/app/billing`}
                 className={cn(
                   "flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-sm transition-colors",
-                  pathname.startsWith("/app/billing")
+                  pathname.startsWith(`/${locale}/app/billing`)
                     ? "bg-blue-600 text-white font-medium"
                     : "text-slate-600 hover:bg-slate-100 hover:text-slate-900"
                 )}
               >
                 <CreditCard size={14} />
-                Billing
+                {t.billing}
               </Link>
               <Link
-                href="/app/account"
+                href={`/${locale}/app/account`}
                 className={cn(
                   "flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-sm transition-colors",
-                  pathname.startsWith("/app/account")
+                  pathname.startsWith(`/${locale}/app/account`)
                     ? "bg-blue-600 text-white font-medium"
                     : "text-slate-600 hover:bg-slate-100 hover:text-slate-900"
                 )}
               >
                 <UserCircle size={14} />
-                Account
+                {t.account}
               </Link>
               <a href="/logout" className="text-sm text-slate-600 hover:text-slate-800 px-2.5 py-1.5 rounded-lg hover:bg-slate-100 transition-colors">
-                Sign out
+                {t.signOut}
               </a>
             </div>
           )}
@@ -218,16 +266,16 @@ export function NavBar() {
           {loggedOut && (
             <div className="hidden md:flex items-center gap-1">
               <Link
-                href="/login"
+                href={`/${locale}/login`}
                 className="px-3 py-1.5 rounded-lg text-sm text-slate-600 hover:bg-slate-100 hover:text-slate-900 transition-colors"
               >
-                Sign in
+                {t.signIn}
               </Link>
               <Link
-                href="/register"
+                href={`/${locale}/register`}
                 className="px-3 py-1.5 rounded-lg text-sm font-medium bg-blue-600 text-white hover:bg-blue-700 transition-colors"
               >
-                Sign up free
+                {t.signUpFree}
               </Link>
             </div>
           )}
@@ -269,22 +317,22 @@ export function NavBar() {
               })}
               {me?.org?.tier === "free" && (
                 <Link
-                  href="/app/pricing"
+                  href={`/${locale}/app/pricing`}
                   onClick={closeMobile}
                   className={cn(
                     "flex items-center gap-3 px-5 py-3.5 text-sm border-b border-slate-50 transition-colors",
-                    pathname === "/app/pricing" ? "bg-blue-50 text-blue-700 font-medium" : "text-slate-700 hover:bg-slate-50"
+                    pathname === `/${locale}/app/pricing` ? "bg-blue-50 text-blue-700 font-medium" : "text-slate-700 hover:bg-slate-50"
                   )}
                 >
                   <Tag size={18} />
-                  Pricing
+                  {t.pricing}
                 </Link>
               )}
 
               {me?.is_superadmin && (
                 <>
                   <div className="px-5 py-2 text-xs font-semibold text-slate-400 uppercase tracking-widest bg-slate-50 border-b border-slate-100">
-                    Admin
+                    {t.admin}
                   </div>
                   {NAV_ADMIN.map(({ href, label, icon: Icon }) => (
                     <Link
@@ -301,15 +349,15 @@ export function NavBar() {
                     </Link>
                   ))}
                   <Link
-                    href="/app/admin"
+                    href={`/${locale}/app/admin`}
                     onClick={closeMobile}
                     className={cn(
                       "flex items-center gap-3 px-5 py-3.5 text-sm border-b border-slate-50 transition-colors",
-                      pathname.startsWith("/app/admin") ? "bg-purple-50 text-purple-700 font-medium" : "text-purple-600 hover:bg-purple-50"
+                      pathname.startsWith(`/${locale}/app/admin`) ? "bg-purple-50 text-purple-700 font-medium" : "text-purple-600 hover:bg-purple-50"
                     )}
                   >
                     <Shield size={18} />
-                    Admin panel
+                    {t.adminPanel}
                   </Link>
                 </>
               )}
@@ -331,26 +379,26 @@ export function NavBar() {
                 <div className="px-5 py-3 text-sm text-slate-500 border-b border-slate-50">{me.email}</div>
               )}
               <Link
-                href="/app/billing"
+                href={`/${locale}/app/billing`}
                 onClick={closeMobile}
                 className="flex items-center gap-3 px-5 py-3.5 text-sm text-slate-700 hover:bg-slate-50 border-b border-slate-50 transition-colors"
               >
                 <CreditCard size={18} />
-                Billing
+                {t.billing}
               </Link>
               <Link
-                href="/app/account"
+                href={`/${locale}/app/account`}
                 onClick={closeMobile}
                 className="flex items-center gap-3 px-5 py-3.5 text-sm text-slate-700 hover:bg-slate-50 border-b border-slate-50 transition-colors"
               >
                 <UserCircle size={18} />
-                Account
+                {t.account}
               </Link>
               <a
                 href="/logout"
                 className="flex items-center gap-3 px-5 py-3.5 text-sm text-slate-500 hover:bg-slate-50 transition-colors"
               >
-                Sign out
+                {t.signOut}
               </a>
             </div>
           )}
@@ -369,19 +417,35 @@ export function NavBar() {
               ))}
               <div className="px-5 py-4 flex flex-col gap-2">
                 <Link
-                  href="/login"
+                  href={`/${locale}/login`}
                   onClick={closeMobile}
                   className="w-full text-center py-2.5 rounded-lg border border-slate-200 text-sm text-slate-700 hover:bg-slate-50 transition-colors"
                 >
-                  Sign in
+                  {t.signIn}
                 </Link>
                 <Link
-                  href="/register"
+                  href={`/${locale}/register`}
                   onClick={closeMobile}
                   className="w-full text-center py-2.5 rounded-lg bg-blue-600 text-white text-sm font-medium hover:bg-blue-700 transition-colors"
                 >
-                  Sign up free
+                  {t.signUpFree}
                 </Link>
+              </div>
+              {/* Mobile locale switcher */}
+              <div className="px-5 py-3 border-t border-slate-100 flex items-center gap-2">
+                <Globe size={14} className="text-slate-400" />
+                {SUPPORTED_LOCALES.map((loc) => (
+                  <button
+                    key={loc}
+                    onClick={() => { switchLocale(loc); closeMobile(); }}
+                    className={cn(
+                      "px-2 py-1 rounded text-xs font-medium transition-colors",
+                      loc === locale ? "bg-slate-100 text-slate-800" : "text-slate-400 hover:text-slate-700"
+                    )}
+                  >
+                    {LOCALE_LABELS[loc]}
+                  </button>
+                ))}
               </div>
             </div>
           )}

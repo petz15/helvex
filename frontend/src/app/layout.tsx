@@ -1,8 +1,6 @@
 import type { Metadata } from "next";
 import "./globals.css";
-import { NavBar } from "@/components/nav-bar";
-import { CookieBanner } from "../components/cookie-banner";
-import { CookieAwareTracking } from "@/components/cookie-aware-tracking";
+import { headers } from "next/headers";
 
 const googleSiteVerification = (process.env.NEXT_PUBLIC_GOOGLE_SITE_VERIFICATION || "").trim();
 
@@ -19,14 +17,14 @@ export const metadata: Metadata = {
   },
 };
 
-export default function RootLayout({ children }: { children: React.ReactNode }) {
+export default async function RootLayout({ children }: { children: React.ReactNode }) {
+  const headersList = await headers();
+  const locale = headersList.get("x-locale") ?? "de";
+
   return (
-    <html lang="en" className="h-full antialiased">
+    <html lang={locale} className="h-full antialiased">
       <body className="min-h-full flex flex-col bg-slate-50 text-slate-900">
-        <CookieAwareTracking />
-        <NavBar />
-        <main className="flex-1">{children}</main>
-        <CookieBanner />
+        {children}
       </body>
     </html>
   );

@@ -1071,6 +1071,89 @@ npm run build
 
 The Next.js image is separate (`helvex-frontend`) and served behind the same Ingress as the backend.
 
+### Internationalization (i18n) — DE / FR / IT / EN
+
+**Architecture:** Custom React context + JSON dictionaries (no third-party library).
+
+**Structure:**
+- `frontend/src/i18n/` — locale config + hooks
+  - `locales.ts` — list of supported locales: `de`, `fr`, `it`, `en` (default `de`)
+  - `context.tsx` — React context provider `I18nProvider` + `useI18n()` hook
+  - `request.ts` — server-side `getDictionary(locale)` for server components
+- `frontend/messages/` — JSON translation files
+  - `de.json`, `fr.json`, `it.json`, `en.json` — organized by namespace
+- `frontend/src/app/[locale]/` — all routes under locale-prefixed dynamic segment
+
+**Routing:**
+- URL pattern: `/{locale}/path` (e.g. `/de/app/search`, `/fr/login`, `/en/impressum`)
+- Default locale (no locale prefix): redirected by `proxy.ts` (Next.js 16 middleware)
+- Redirect: `/ → /de/`, `/?lang=fr → /fr/`, etc.
+
+**Usage:**
+
+*Server components:*
+```tsx
+import { getDictionary } from "@/i18n/request";
+export default async function Page({ params }: { params: Promise<{ locale: string }> }) {
+  const { locale } = await params;
+  const dict = await getDictionary(locale);
+  return <h1>{dict.app.search.title}</h1>;
+}
+```
+
+*Client components:*
+```tsx
+"use client";
+import { useI18n } from "@/i18n/context";
+export function MyComponent() {
+  const { dict, locale } = useI18n();
+  return <button>{dict.app.search.aiPreview}</button>;
+}
+```
+
+**String interpolation — `sub()` helper:**
+For dynamic values in translation strings (e.g. `"Join {orgName}"`):
+```tsx
+function sub(template: string, vars: Record<string, string>): string {
+  return Object.entries(vars).reduce((s, [k, v]) => s.replace(new RegExp(`\\{${k}\\}`, "g"), v), template);
+}
+const msg = sub(dict.auth.acceptInvite.invitedToJoin, { orgName: "Acme Inc." });
+```
+
+**Namespace organization (de.json structure):**
+```json
+{
+  "nav": { "search": "Suche", ... },
+  "app": {
+    "search": { "title": "Suche", "aiPreview": "KI Vorschau", ... },
+    "map": { "goToAddress": "Zu Adresse gehen", ... },
+    "account": { "title": "Konto", ... },
+    ...
+  },
+  "auth": {
+    "login": { "title": "Anmelden", ... },
+    "resetPassword": { ... },
+    "acceptInvite": { ... },
+    ...
+  },
+  "cookie": { ... },
+  "legal": { ... }
+}
+```
+
+**Covered pages:**
+- Landing page (`/[locale]/page.tsx`)
+- Auth flows: login, register, forgot-password, reset-password, verify-email, accept-invite, confirm-email-change
+- Dashboard pages: search, map, addresses, jobs, categories, billing, account, collection, pricing
+- Legal pages: `/impressum`, `/datenschutz`, `/agb`
+
+**Language switcher:**
+Dropdown in `nav-bar.tsx` — navigates to same path with different `locale` prefix, preserving query params.
+
+**SEO notes:**
+- `<html lang={locale}>` set in root layout
+- `hreflang` alternates links (if needed, can be added to `generateMetadata`)
+
 ---
 
 ## 10. Configuration & Secrets

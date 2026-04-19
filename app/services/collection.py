@@ -540,6 +540,7 @@ def _extract_company_fields(
         address=address_str,
         flex_score=flex_score,
         flex_score_breakdown=json.dumps(score_breakdown),
+        combined_score=Company.compute_combined_score(None, None, flex_score),
         ehraid=ehraid,
         chid=chid,
         legal_seat_id=legal_seat_id,
@@ -1442,6 +1443,7 @@ def bulk_import_zefix(
                     purpose=result.purpose,
                     flex_score=int(_score_bd["final_score"]),
                     flex_score_breakdown=json.dumps(_score_bd),
+                    combined_score=Company.compute_combined_score(None, None, int(_score_bd["final_score"])),
                     ehraid=result.ehraid,
                     chid=result.chid,
                     legal_seat_id=result.legal_seat_id,
@@ -1734,6 +1736,7 @@ def reclassify_noga(
         "skipped_existing": 0,
         "skipped_not_detailed": 0,
         "skipped_no_match": 0,
+        "skipped_branch": 0,
         "errors": [],
     }
 
@@ -1774,6 +1777,20 @@ def reclassify_noga(
                     if not isinstance(raw, dict) or not _is_detailed_zefix_raw_payload(raw):
                         stats["skipped_not_detailed"] += 1
                         continue
+
+                # Skip branch offices — they replicate a parent's purpose and
+                # assigning NOGA based on their text yields the wrong code.
+                _name_lower = (company.name or "").lower()
+                _purpose_lower = (company.purpose or "").lower()
+                if (
+                    "zweigniederlassung" in _name_lower
+                    or "zweigniederlassung" in _purpose_lower
+                    or "succursale" in _purpose_lower
+                    or "succursale" in _name_lower
+                    or "filiale di" in _purpose_lower
+                ):
+                    stats["skipped_branch"] = stats.get("skipped_branch", 0) + 1
+                    continue
 
                 update = apply_noga_classification(db, company)
                 if update is None:

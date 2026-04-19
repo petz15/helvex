@@ -2,6 +2,8 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
+import { usePathname } from "next/navigation";
+import { useI18n } from "@/i18n/context";
 
 import {
   defaultCookieConsent,
@@ -14,6 +16,11 @@ export function CookieBanner() {
   const [ready, setReady] = useState(false);
   const [visible, setVisible] = useState(false);
   const [analytics, setAnalytics] = useState(defaultCookieConsent().analytics);
+  const { dict } = useI18n();
+  const t = dict.cookie;
+
+  const pathname = usePathname();
+  const locale = pathname.split("/")[1] ?? "de";
 
   const consent = useMemo<CookieConsent>(
     () => ({
@@ -62,11 +69,13 @@ export function CookieBanner() {
       <div className="p-4 sm:p-5">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
           <div className="space-y-2">
-            <h2 className="text-sm font-semibold text-slate-900">Cookie-Hinweis</h2>
+            <h2 className="text-sm font-semibold text-slate-900">{t.title}</h2>
             <p className="text-xs sm:text-sm text-slate-600 max-w-2xl">
-              Wir verwenden notwendige Cookies für Login, Sicherheit und den technischen Betrieb der Website.
-              Optionale Analyse-Cookies setzen wir nur mit Ihrer Zustimmung.
-              Details finden Sie in unserem <Link href="/datenschutz" className="text-blue-700 hover:text-blue-900 underline">Datenschutz</Link>.
+              {t.description}{" "}
+              <Link href={`/${locale}/datenschutz`} className="text-blue-700 hover:text-blue-900 underline">
+                {t.privacyLink}
+              </Link>
+              .
             </p>
             <div className="space-y-1">
               <div className="flex items-center gap-2 text-xs text-slate-600">
@@ -77,7 +86,7 @@ export function CookieBanner() {
                   onChange={(e) => setAnalytics(e.target.checked)}
                   className="h-3.5 w-3.5 rounded border-slate-300"
                 />
-                <label htmlFor="analytics-consent">Optionale Analyse-Cookies (PostHog, Umami) erlauben</label>
+                <label htmlFor="analytics-consent">{t.analyticsLabel}</label>
               </div>
             </div>
           </div>
@@ -87,14 +96,14 @@ export function CookieBanner() {
               onClick={() => saveAndClose(consent)}
               className="px-3 py-1.5 rounded-lg bg-blue-600 text-white text-xs sm:text-sm hover:bg-blue-700 transition-colors"
             >
-              Auswahl speichern
+              {t.saveChoice}
             </button>
             <button
               type="button"
               onClick={() => saveAndClose({ essential: true, analytics: true, updatedAt: new Date().toISOString() })}
               className="px-3 py-1.5 rounded-lg bg-slate-900 text-white text-xs sm:text-sm hover:bg-slate-800 transition-colors"
             >
-              Alle akzeptieren
+              {t.acceptAll}
             </button>
           </div>
         </div>

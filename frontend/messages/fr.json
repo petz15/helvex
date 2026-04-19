@@ -1,0 +1,283 @@
+{
+  "nav": {
+    "search": "Recherche",
+    "explorer": "Explorer",
+    "categories": "Catégories",
+    "map": "Carte",
+    "jobs": "Emplois",
+    "collection": "Collection",
+    "settings": "Paramètres",
+    "admin": "Admin",
+    "adminPanel": "Panneau admin",
+    "billing": "Facturation",
+    "account": "Compte",
+    "signOut": "Déconnexion",
+    "signIn": "Connexion",
+    "signUpFree": "S'inscrire gratuitement",
+    "pricing": "Tarifs",
+    "features": "Fonctionnalités",
+    "switchOrg": "Changer d'organisation"
+  },
+  "cookie": {
+    "title": "Avis sur les cookies",
+    "description": "Nous utilisons des cookies nécessaires pour la connexion, la sécurité et le bon fonctionnement technique du site. Les cookies d'analyse optionnels ne sont définis qu'avec votre consentement. Vous trouverez des détails dans notre",
+    "privacyLink": "politique de confidentialité",
+    "analyticsLabel": "Autoriser les cookies d'analyse optionnels (PostHog, Umami)",
+    "saveChoice": "Enregistrer la sélection",
+    "acceptAll": "Tout accepter"
+  },
+  "landing": {
+    "hero": {
+      "title": "Intelligence sur les",
+      "titleAccent": "entreprises suisses",
+      "subtitle": "Recherchez, qualifiez et suivez les entreprises du registre du commerce suisse. Propulsé par des données FOSC en direct, l'apprentissage automatique et la classification IA — pour que votre pipeline reste pertinent.",
+      "cta": "Commencer maintenant ! →",
+      "demo": "Voir la démo en direct",
+      "noCreditCard": "Aucune carte de crédit requise."
+    },
+    "mock": {
+      "back": "← Recherche",
+      "active": "ACTIF",
+      "seat": "Siège",
+      "legalForm": "Forme juridique",
+      "capital": "Capital",
+      "shabHistory": "Historique FOSC"
+    },
+    "features": {
+      "badge": "Capacités de la plateforme",
+      "title": "Tout pour la recherche sur le marché suisse",
+      "subtitle": "Des données du registre en direct jusqu'à la découverte de nouveaux prospects — Helvex couvre chaque étape pour trouver et qualifier des entreprises suisses.",
+      "cta": "Commencer gratuitement →",
+      "data": {
+        "title": "Base de données",
+        "tagline": "Données en direct du registre du commerce suisse avec l'historique complet des mutations FOSC.",
+        "f1": "Ingestion FOSC automatisée pour des enregistrements à jour",
+        "f2": "Ancrage UID-CHE pour des jointures et exports fiables",
+        "f3": "Chronologie des mutations — nom, signataire, changements d'adresse",
+        "f4": "Filtrage régional par siège, canton et localité",
+        "f5": "Texte d'objet normalisé pour le scoring et le clustering"
+      },
+      "ai": {
+        "title": "IA & Scoring",
+        "tagline": "Qualifiez des milliers d'entreprises avec la classification LLM et le scoring d'adéquation.",
+        "f1": "Score d'adéquation IA — pertinence numérique pour un tri rapide",
+        "f2": "Flux de classification LLM en lot ou immédiat",
+        "f3": "Rescoring flexible lorsque les critères de ciblage changent",
+        "f4": "Notation automatique des nouvelles entreprises à l'entrée",
+        "f5": "Mots d'arrêt ML personnalisés pour un clustering plus propre"
+      },
+      "search": {
+        "title": "Recherche & Découverte",
+        "tagline": "Trouvez et suivez les bonnes entreprises avec des filtres, des collections et des résumés.",
+        "f1": "Combiner statut, géographie, score et filtres d'objet",
+        "f2": "Organiser les cibles en collections réutilisables nommées",
+        "f3": "E-mails de résumé quotidiens pour les nouvelles entreprises correspondantes",
+        "f4": "Enrichissement par recherche web pour des signaux supplémentaires",
+        "f5": "Vue carte avec lat/lon et inspection des clusters"
+      },
+      "workspace": {
+        "title": "Espace de travail & Échelle",
+        "tagline": "Espace de travail d'équipe, facturation transparente et contrôles de niveau entreprise.",
+        "f1": "Organisation partagée avec données communes et solde de crédits",
+        "f2": "Exports CSV — basique (UID/Nom) ou complet",
+        "f3": "Économie de crédits par action avec conversion CHF",
+        "f4": "Bonus de recharge qui s'adaptent à votre niveau de plan",
+        "f5": "Vos propres clés LLM, priorité de file d'attente et historique d'audit"
+      }
+    },
+    "pricing": {
+      "title": "Plans et tarifs actuels",
+      "subtitle": "Commencez gratuitement, puis évoluez selon vos besoins. Pas de frais cachés — payez uniquement ce que vous utilisez.",
+      "free": "Gratuit",
+      "perMonth": "/mois",
+      "perYearBilled": "CHF {yearly}/an facturé annuellement",
+      "consumption": {
+        "title": "Tarification à l'usage",
+        "subtitle": "Les actions d'utilisation partagent les mêmes taux de crédit sur tous les plans.",
+        "creditRate": "1 crédit = CHF {rate}",
+        "colAction": "Action",
+        "colUnit": "Unité",
+        "colCredits": "Crédits",
+        "colChf": "CHF"
+      },
+      "cta": "Créer votre compte gratuit →",
+      "actions": {
+        "batchClassify": { "label": "Classification LLM par lot", "unit": "par entreprise" },
+        "immediateClassify": { "label": "Classification LLM immédiate", "unit": "par entreprise" },
+        "webSearch": { "label": "Recherche web", "unit": "par entreprise" },
+        "flexRescore": { "label": "Rescoring flexible", "unit": "par entreprise" },
+        "fullRecluster": { "label": "Reclassement complet", "unit": "forfait" },
+        "exportBasic": { "label": "Export en masse – basique (UID/Nom/Canton)", "unit": "par 10k lignes" },
+        "exportDetailed": { "label": "Export en masse – détaillé", "unit": "par 10k lignes" }
+      }
+    },
+    "footer": {
+      "copyright": "© {year} Helvex · Balogh Consulting",
+      "impressum": "Mentions légales",
+      "datenschutz": "Confidentialité",
+      "agb": "CGU",
+      "cookieSettings": "Paramètres des cookies",
+      "signIn": "Connexion"
+    }
+  },
+  "auth": {
+    "login": {
+      "title": "Se connecter à Helvex",
+      "email": "E-mail",
+      "password": "Mot de passe",
+      "forgotPassword": "Mot de passe oublié ?",
+      "signIn": "Se connecter",
+      "signingIn": "Connexion en cours…",
+      "noAccount": "Pas encore de compte ?",
+      "createOne": "En créer un",
+      "orContinueWith": "ou continuer avec",
+      "oauthError": "La connexion a été annulée ou a échoué. Veuillez réessayer."
+    },
+    "register": {
+      "title": "Créer un compte",
+      "email": "E-mail",
+      "password": "Mot de passe",
+      "name": "Nom",
+      "submit": "S'inscrire",
+      "submitting": "Inscription en cours…",
+      "hasAccount": "Déjà un compte ?",
+      "signIn": "Se connecter",
+      "orContinueWith": "ou continuer avec"
+    },
+    "forgotPassword": {
+      "title": "Réinitialiser le mot de passe",
+      "email": "E-mail",
+      "submit": "Envoyer le lien",
+      "submitting": "Envoi en cours…",
+      "backToLogin": "Retour à la connexion",
+      "successMessage": "Si cette adresse e-mail est enregistrée, nous vous avons envoyé un lien de réinitialisation."
+    },
+    "resetPassword": {
+      "title": "Définir un nouveau mot de passe",
+      "hint": "Choisissez un mot de passe d'au moins 8 caractères.",
+      "password": "Nouveau mot de passe",
+      "confirm": "Confirmer le mot de passe",
+      "minChars": "Min. 8 caractères",
+      "submit": "Changer le mot de passe",
+      "submitting": "Changement en cours…",
+      "mismatch": "Les mots de passe ne correspondent pas.",
+      "invalidLink": "Lien invalide",
+      "noToken": "Aucun jeton de réinitialisation trouvé dans l'URL.",
+      "requestNewLink": "Demander un nouveau lien",
+      "successTitle": "Mot de passe mis à jour",
+      "successMessage": "Vous pouvez maintenant vous connecter avec votre nouveau mot de passe.",
+      "signIn": "Se connecter →"
+    },
+    "verifyEmail": {
+      "verifying": "Vérification de votre adresse e-mail…",
+      "successTitle": "E-mail vérifié !",
+      "successMessage": "Votre compte est maintenant actif.",
+      "openSearch": "Ouvrir la recherche →",
+      "failTitle": "Échec de la vérification",
+      "backToLogin": "Retour à la connexion",
+      "noToken": "Aucun jeton de vérification fourni.",
+      "networkError": "Erreur réseau. Veuillez réessayer.",
+      "failed": "Échec de la vérification."
+    },
+    "acceptInvite": {
+      "title": "Invitation à l'organisation",
+      "joined": "Rejoint !",
+      "redirecting": "Redirection vers le tableau de bord…",
+      "invitedToJoin": "Vous avez été invité(e) à rejoindre {orgName}.",
+      "setupAccount": "Créez un mot de passe pour configurer votre compte et rejoindre immédiatement.",
+      "email": "E-mail",
+      "choosePassword": "Choisir un mot de passe",
+      "minChars": "Min. 8 caractères",
+      "createAndJoin": "Créer un compte & rejoindre {orgName}",
+      "creating": "Création du compte…",
+      "alreadyHaveAccount": "Vous avez déjà un compte ?",
+      "signIn": "Se connecter",
+      "signInToAccept": "Se connecter pour accepter",
+      "invitedTo": "Invité(e) en tant que :",
+      "orgSwitchWarning": "Vous êtes actuellement dans {currentOrg}. Accepter vous fera passer à {orgName}.",
+      "switchWarning": "Vous êtes dans {currentOrg}. En acceptant cette invitation, vous passerez à {orgName}. Vous perdrez l'accès à vos données dans {currentOrg}.",
+      "leaveAndJoin": "Quitter {currentOrg} & rejoindre {orgName}",
+      "join": "Rejoindre {orgName}",
+      "cancel": "Annuler",
+      "acceptAndSwitch": "Accepter & changer",
+      "noToken": "Aucun jeton d'invitation trouvé dans l'URL.",
+      "loadingDetails": "Chargement des détails de l'invitation…"
+    },
+    "confirmEmailChange": {
+      "confirming": "Confirmation de votre adresse e-mail…",
+      "successTitle": "Adresse e-mail mise à jour",
+      "successMessage": "Votre adresse e-mail a été modifiée avec succès.",
+      "goToAccount": "Aller au compte",
+      "failTitle": "Échec de la confirmation",
+      "backToAccount": "Retour au compte",
+      "noToken": "Aucun jeton de confirmation trouvé dans le lien.",
+      "networkError": "Erreur réseau. Veuillez réessayer."
+    }
+  },
+  "app": {
+    "footer": {
+      "impressum": "Mentions légales",
+      "datenschutz": "Confidentialité",
+      "agb": "CGU",
+      "cookieSettings": "Paramètres des cookies"
+    },
+    "search": {
+      "aiPreview": "Aperçu IA",
+      "queueExport": "Export en file d'attente",
+      "exportQueued": "Export en file — télécharger depuis la page Emplois quand prêt.",
+      "scoring": "Évaluation de jusqu'à 5 entreprises…",
+      "previewsUsed": "{count} entreprises évaluées · {used}/{total} aperçus utilisés aujourd'hui",
+      "dailyLimit": "Limite quotidienne atteinte. Réinitialisé demain."
+    },
+    "dashboard": {
+      "queueExport": "Export en file d'attente",
+      "exportCsv": "Exporter CSV ({count})",
+      "exportLimited": "Export limité à {limit} lignes pour votre plan actuel.",
+      "exportQueued": "Export en file — télécharger depuis la page Emplois quand prêt."
+    },
+    "map": {
+      "goToAddress": "Aller à l'adresse",
+      "placeholder": "NPA, nom de ville ou adresse",
+      "go": "Y aller",
+      "centeredOn": "Centré sur {address}",
+      "searchHint": "Entrez une adresse, NPA ou ville.",
+      "noGeocoded": "aucune entreprise géocodée dans la vue",
+      "clickToZoom": "cliquer sur une bulle pour zoomer",
+      "capped": "limité à 20 000",
+      "inView": "dans la vue",
+      "mapError": "Erreur de carte : {error}",
+      "loading": "Chargement…"
+    },
+    "addresses": {
+      "title": "Adresses de facturation",
+      "subtitle": "Enregistrez plusieurs adresses et définissez celle par défaut pour le paiement.",
+      "backToCheckout": "Retour au paiement"
+    },
+    "jobs": {
+      "title": "Emplois",
+      "mlDocsTitle": "Référence des jobs ML",
+      "mlDocsSubtitle": "Aperçu de chaque type de job ML, son utilisation et ses prérequis."
+    },
+    "categories": {
+      "title": "Catégories",
+      "companies": "entreprises"
+    },
+    "billing": {
+      "title": "Facturation",
+      "subtitle": "Gérez votre plan, vos crédits et l'historique des paiements."
+    },
+    "account": {
+      "title": "Mon compte",
+      "subtitle": "Profil, sécurité, organisation et équipe"
+    },
+    "pricing": {
+      "title": "Plans & tarifs"
+    },
+    "collection": {
+      "title": "Collection"
+    },
+    "explorer": {
+      "title": "Explorer"
+    }
+  }
+}

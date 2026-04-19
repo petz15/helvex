@@ -158,6 +158,15 @@ def _seed_settings(app_state) -> None:
     except Exception as exc:
         raise RuntimeError(f"Failed to seed settings: {exc}") from exc
 
+    app_state.startup_message = "Seeding multilingual boilerplate patterns…"
+    try:
+        from app.services.boilerplate_analysis import seed_multilang_boilerplate
+        with SessionLocal() as db:
+            result = seed_multilang_boilerplate(db)
+        _app_logger.info("boilerplate seed: inserted=%d skipped=%d", result["inserted"], result["skipped"])
+    except Exception as exc:
+        _app_logger.warning("boilerplate seed failed (non-fatal): %s", exc)
+
 
 def _maybe_enqueue_geocode_upgrade(app, app_state) -> None:
     from app.crud import create_event, create_job, get_setting, list_jobs
