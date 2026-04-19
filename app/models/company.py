@@ -1,6 +1,7 @@
 from datetime import datetime
 
 from sqlalchemy import Boolean, DateTime, Float, Integer, String, Text, func
+from sqlalchemy.dialects.postgresql import ARRAY
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
@@ -77,6 +78,8 @@ class Company(Base):
     tfidf_cluster: Mapped[str | None] = mapped_column(Text, nullable=True)
     # Per-company top TF-IDF keywords extracted from this company's own purpose text
     purpose_keywords: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Array form of purpose_keywords (GIN-indexed for exact-match membership queries)
+    purpose_keywords_arr: Mapped[list[str] | None] = mapped_column(ARRAY(Text), nullable=True)
     # AI classification score, category, and optional free-form text
     ai_score: Mapped[int | None] = mapped_column(Integer, nullable=True)
     ai_category: Mapped[str | None] = mapped_column(String(128), nullable=True)
@@ -94,6 +97,9 @@ class Company(Base):
     # Rule-based business model classification: 'b2b' | 'b2c' | 'b2g' | 'mixed' | NULL
     business_model: Mapped[str | None] = mapped_column(String(16), nullable=True, index=True)
     flex_scored_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Stored combined score: weighted avg(ai*0.7, web*0.2, flex*0.1) with renormalisation.
+    # Written by scoring jobs whenever any component score changes. Enables indexed filtering.
+    combined_score: Mapped[float | None] = mapped_column(Float, nullable=True)
     # Raw JSON from Zefix API stored for reference
     zefix_raw: Mapped[str | None] = mapped_column(Text, nullable=True)
 
@@ -104,18 +110,21 @@ class Company(Base):
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
     )
 
-    @property
-    def combined_score(self) -> int | None:
-        """Weighted average of available scores.
+    @staticmethod
+    def compute_combined_score(
+        ai_score: int | None,
+        web_score: int | None,
+        flex_score: int | None,
+        w_ai: float = 0.70,
+        w_web: float = 0.20,
+        w_flex: float = 0.10,
+    ) -> float | None:
+        """Weighted average of whichever component scores are present.
 
-        Weights: ai 70 %, web 20 %, flex 10 %.
-        Only present scores contribute; weights are renormalised accordingly.
-        Returns None if all three are absent.
+        Weights renormalised so missing scores don't drag the result down.
+        Returns None when all three are absent.
         """
-        return self._combined_score(0.70, 0.20, 0.10)
-
-    def _combined_score(self, w_ai: float, w_web: float, w_flex: float) -> int | None:
-        _WEIGHTS = ((self.ai_score, w_ai), (self.web_score, w_web), (self.flex_score, w_flex))
+        _WEIGHTS = ((ai_score, w_ai), (web_score, w_web), (flex_score, w_flex))
         present = [(s, w) for s, w in _WEIGHTS if s is not None]
         if not present:
             return None

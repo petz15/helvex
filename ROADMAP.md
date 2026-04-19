@@ -65,7 +65,7 @@
 
 - [ ] **Fix Branding** — potentially change the icon to have a red cross in the middle (change google and linkedin app connection icons)
 - [ ] **Add dark mode** — add dark mode
-- [ ] **Options for Emails** - Create an options for emails and also probably need to configure how the email looks including unsubscribe button
+- [ ] **Options for Emails** - Create an options for emails and also probably need to configure how the email looks includingbbbbbbbbbbbbbbbbbbbbbbbb
 
 
 ## Company Explore page

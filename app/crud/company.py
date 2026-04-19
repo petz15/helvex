@@ -7,7 +7,7 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
-from sqlalchemy import case, func, nullslast, or_, literal_column
+from sqlalchemy import case, func, nullslast, or_
 from sqlalchemy.orm import Session
 
 from app.models.company import Company
@@ -53,9 +53,8 @@ _SORT_MAP = {
     "-sogc_date":           (Company.sogc_date,           False),
     "first_sogc_date":      (Company.first_sogc_date,     True),
     "-first_sogc_date":     (Company.first_sogc_date,     False),
-    # combined_score is a Python @property — express it as a SQL literal for ORDER BY
-    "combined_score":       (literal_column("(COALESCE(ai_score*0.70,0)+COALESCE(web_score*0.20,0)+COALESCE(flex_score*0.10,0))"), True),
-    "-combined_score":      (literal_column("(COALESCE(ai_score*0.70,0)+COALESCE(web_score*0.20,0)+COALESCE(flex_score*0.10,0))"), False),
+    "combined_score":       (Company.combined_score,      True),
+    "-combined_score":      (Company.combined_score,      False),
 }
 _DEFAULT_SORT = "-updated"
 
@@ -159,16 +158,10 @@ def _apply_filters(query, *, name_filter, uid_filter=None, canton, review_status
         query = query.filter(Company.ai_score >= min_ai_score)
     if max_ai_score is not None:
         query = query.filter(Company.ai_score <= max_ai_score)
-    if min_combined_score is not None or max_combined_score is not None:
-        _comb_expr = (
-            func.coalesce(Company.ai_score * 0.70, 0)
-            + func.coalesce(Company.web_score * 0.20, 0)
-            + func.coalesce(Company.flex_score * 0.10, 0)
-        )
-        if min_combined_score is not None:
-            query = query.filter(_comb_expr >= min_combined_score)
-        if max_combined_score is not None:
-            query = query.filter(_comb_expr <= max_combined_score)
+    if min_combined_score is not None:
+        query = query.filter(Company.combined_score >= min_combined_score)
+    if max_combined_score is not None:
+        query = query.filter(Company.combined_score <= max_combined_score)
     if ai_category == "_none":
         query = query.filter(Company.ai_category.is_(None))
     elif ai_category:
@@ -182,10 +175,32 @@ def _apply_filters(query, *, name_filter, uid_filter=None, canton, review_status
         query = query.filter(Company.tfidf_cluster.isnot(None))
     elif tfidf_cluster:
         terms = [t.strip() for t in tfidf_cluster.split(",") if t.strip()]
-        query = query.filter(or_(*[Company.tfidf_cluster.ilike(f"%{t}%") for t in terms]))
+        # Pipe-boundary matching: exact label or appears between | separators
+        def _cluster_match(t: str):
+            return or_(
+                Company.tfidf_cluster == t,
+                Company.tfidf_cluster.ilike(f"{t}|%"),
+                Company.tfidf_cluster.ilike(f"%|{t}"),
+                Company.tfidf_cluster.ilike(f"%|{t}|%"),
+            )
+        query = query.filter(or_(*[_cluster_match(t) for t in terms]))
     if purpose_keywords:
         terms = [t.strip() for t in purpose_keywords.split(",") if t.strip()]
-        query = query.filter(or_(*[Company.purpose_keywords.ilike(f"%{t}%") for t in terms]))
+        # Use GIN-indexed array column when available; fall back to text boundary match.
+        from sqlalchemy import text as _sqlt
+        query = query.filter(or_(
+            Company.purpose_keywords_arr.overlap(terms),   # uses GIN index
+            # Fallback for rows not yet backfilled (purpose_keywords_arr IS NULL)
+            *[
+                or_(
+                    Company.purpose_keywords == t,
+                    Company.purpose_keywords.ilike(f"{t},%"),
+                    Company.purpose_keywords.ilike(f"%, {t}"),
+                    Company.purpose_keywords.ilike(f"%, {t},%"),
+                )
+                for t in terms
+            ]
+        ))
     if noga_code == "_none":
         query = query.filter(Company.noga_code.is_(None))
     elif noga_code == "_any":
@@ -222,12 +237,19 @@ def _apply_filters(query, *, name_filter, uid_filter=None, canton, review_status
     if exclude_tfidf_cluster:
         for term in [t.strip() for t in exclude_tfidf_cluster.split(",") if t.strip()]:
             query = query.filter(
-                (Company.tfidf_cluster.is_(None)) | (Company.tfidf_cluster.notilike(f"%{term}%"))
+                Company.tfidf_cluster.is_(None)
+                | (
+                    (Company.tfidf_cluster != term)
+                    & Company.tfidf_cluster.notilike(f"{term}|%")
+                    & Company.tfidf_cluster.notilike(f"%|{term}")
+                    & Company.tfidf_cluster.notilike(f"%|{term}|%")
+                )
             )
     if exclude_purpose_keywords:
         for term in [t.strip() for t in exclude_purpose_keywords.split(",") if t.strip()]:
             query = query.filter(
-                (Company.purpose_keywords.is_(None)) | (Company.purpose_keywords.notilike(f"%{term}%"))
+                Company.purpose_keywords_arr.is_(None)
+                | ~Company.purpose_keywords_arr.any(term)
             )
     if exclude_ai_category:
         for term in [t.strip() for t in exclude_ai_category.split(",") if t.strip()]:
@@ -484,29 +506,17 @@ def get_company_stats(db: Session) -> dict:
     for label in ("sent", "responded", "converted", "rejected"):
         contact_counts[label] = db.query(Company).filter(Company.contact_status == label).count()
 
-    # Score distribution: bucket combined_score into 10-point bands 0-9, 10-19, ..., 90-100
-    score_rows = (
-        db.query(
-            Company.ai_score,
-            Company.web_score,
-            Company.flex_score,
-        )
-        .filter(
-            Company.ai_score.isnot(None) | Company.web_score.isnot(None) | Company.flex_score.isnot(None)
-        )
-        .all()
-    )
+    # Score distribution: bucket stored combined_score into 10-point bands
+    from sqlalchemy import text as _stext
+    dist_rows = db.execute(_stext(
+        "SELECT LEAST(FLOOR(combined_score / 10)::int, 9) AS bucket, COUNT(*) AS cnt"
+        " FROM companies WHERE combined_score IS NOT NULL GROUP BY bucket"
+    )).fetchall()
     score_dist = {f"{i*10}-{i*10+9}": 0 for i in range(10)}
     score_dist["100"] = 0
-    for row in score_rows:
-        combined = (
-            (row.ai_score or 0) * 0.70
-            + (row.web_score or 0) * 0.20
-            + (row.flex_score or 0) * 0.10
-        )
-        bucket = min(int(combined // 10), 9)
-        key = f"{bucket*10}-{bucket*10+9}"
-        score_dist[key] += 1
+    for row in dist_rows:
+        key = f"{row.bucket*10}-{row.bucket*10+9}"
+        score_dist[key] = row.cnt
 
     return {
         "total": total,
@@ -881,7 +891,67 @@ def get_taxonomy_stats(db: Session, org_id: int | None = None) -> dict:
     }
 
 
+# ---------------------------------------------------------------------------
+# Category stats cache — stale-while-revalidate (same pattern as taxonomy)
+# Keyed by (category_type, value, org_id). TTL 2h; busted on ML job completion.
+# ---------------------------------------------------------------------------
+_CAT_CACHE_TTL = 7200
+_cat_cache_lock = threading.Lock()
+_cat_cache: dict[tuple, dict[str, Any]] = {}  # key → {"data": ..., "ts": float, "refreshing": bool}
+
+
+def invalidate_category_stats_cache() -> None:
+    """Bust all cached category stats (called after ML/classify jobs)."""
+    with _cat_cache_lock:
+        _cat_cache.clear()
+
+
+def _refresh_cat_cache_bg(category_type: str, value: str, org_id: int | None) -> None:
+    global _cat_cache
+    key = (category_type, value, org_id)
+    try:
+        from app.database import SessionLocal
+        with SessionLocal() as db:
+            data = _compute_category_stats(db, category_type, value, org_id)
+        with _cat_cache_lock:
+            _cat_cache[key] = {"data": data, "ts": time.monotonic(), "refreshing": False}
+    except Exception:
+        logger.exception("category stats cache background refresh failed for %s=%s", category_type, value)
+        with _cat_cache_lock:
+            if key in _cat_cache:
+                _cat_cache[key]["refreshing"] = False
+
+
 def get_category_stats(
+    db: Session,
+    category_type: str,
+    value: str,
+    org_id: int | None = None,
+) -> dict:
+    """Stale-while-revalidate wrapper around _compute_category_stats."""
+    key = (category_type, value, org_id)
+    now = time.monotonic()
+    with _cat_cache_lock:
+        entry = _cat_cache.get(key)
+        cold = entry is None
+        stale = cold or (now - entry["ts"]) >= _CAT_CACHE_TTL
+        already_refreshing = (not cold) and entry.get("refreshing", False)
+
+    if cold:
+        data = _compute_category_stats(db, category_type, value, org_id)
+        with _cat_cache_lock:
+            _cat_cache[key] = {"data": data, "ts": time.monotonic(), "refreshing": False}
+        return data
+    if stale and not already_refreshing:
+        with _cat_cache_lock:
+            _cat_cache[key]["refreshing"] = True
+        t = threading.Thread(target=_refresh_cat_cache_bg, args=(category_type, value, org_id), daemon=True)
+        t.start()
+    with _cat_cache_lock:
+        return _cat_cache[key]["data"]
+
+
+def _compute_category_stats(
     db: Session,
     category_type: str,
     value: str,
@@ -890,7 +960,7 @@ def get_category_stats(
     """Return score landscape stats for a specific category value.
 
     All aggregation is done in a single SQL query — no rows fetched into Python.
-    combined_score = weighted avg(ai*0.7, web*0.2, flex*0.1) mirrored in SQL.
+    Uses the stored combined_score column for band counts and averages.
     """
     from sqlalchemy import text as _text
 
@@ -904,104 +974,41 @@ def get_category_stats(
         return {"error": f"Unknown category_type: {category_type}"}
 
     col = _TYPE_TO_COL[category_type]
-    # tfidf_cluster and keyword are multi-value fields — use LIKE for membership.
+    sep = "|" if category_type == "tfidf_cluster" else ","
     if category_type in ("tfidf_cluster", "keyword"):
-        where_clause = f"{col} LIKE :pattern"
-        bind = {"pattern": f"%{value}%"}
+        # Boundary matching: exact value, or value between separators (no false positives
+        # from substring overlap, e.g. "Beratung" matching "Rechtsberatung").
+        where_clause = (
+            f"({col} = :v"
+            f" OR {col} LIKE :pat_prefix"
+            f" OR {col} LIKE :pat_suffix"
+            f" OR {col} LIKE :pat_mid)"
+        )
+        bind = {
+            "v": value,
+            "pat_prefix": f"{value}{sep}%",
+            "pat_suffix": f"%{sep}{value}",
+            "pat_mid": f"%{sep}{value}{sep}%",
+        }
     else:
         where_clause = f"{col} = :value"
         bind = {"value": value}
 
-    # Single query: all aggregates + score bands via SQL CASE.
-    # combined = weighted avg of whichever scores are present, matching the
-    # Python @property logic (weights renormalised to present scores).
-    # Because renormalisation is complex in SQL, we use the stored scores
-    # directly: combined ≈ (0.7*ai + 0.2*web + 0.1*flex) / (sum of weights present).
-    # This is exact for companies with all three scores; an approximation otherwise.
+    # All aggregates use the stored combined_score column — no complex CASE expressions.
     agg_sql = _text(f"""
         SELECT
             COUNT(*)                                                    AS total,
             AVG(ai_score)                                               AS avg_ai,
             AVG(flex_score)                                             AS avg_flex,
             AVG(web_score)                                              AS avg_web,
-            AVG(
-                CASE
-                    WHEN ai_score IS NOT NULL AND web_score IS NOT NULL AND flex_score IS NOT NULL
-                        THEN (0.70 * ai_score + 0.20 * web_score + 0.10 * flex_score)
-                    WHEN ai_score IS NOT NULL AND web_score IS NOT NULL
-                        THEN (0.70 * ai_score + 0.20 * web_score) / 0.90
-                    WHEN ai_score IS NOT NULL AND flex_score IS NOT NULL
-                        THEN (0.70 * ai_score + 0.10 * flex_score) / 0.80
-                    WHEN web_score IS NOT NULL AND flex_score IS NOT NULL
-                        THEN (0.20 * web_score + 0.10 * flex_score) / 0.30
-                    WHEN ai_score IS NOT NULL  THEN ai_score
-                    WHEN web_score IS NOT NULL THEN web_score
-                    WHEN flex_score IS NOT NULL THEN flex_score
-                    ELSE NULL
-                END
-            )                                                           AS avg_combined,
-            COUNT(CASE WHEN ai_score IS NULL AND web_score IS NULL
-                            AND flex_score IS NULL THEN 1 END)         AS unscored,
-            COUNT(CASE WHEN (
-                    CASE
-                        WHEN ai_score IS NOT NULL AND web_score IS NOT NULL AND flex_score IS NOT NULL
-                            THEN (0.70*ai_score + 0.20*web_score + 0.10*flex_score)
-                        WHEN ai_score IS NOT NULL AND web_score IS NOT NULL
-                            THEN (0.70*ai_score + 0.20*web_score) / 0.90
-                        WHEN ai_score IS NOT NULL AND flex_score IS NOT NULL
-                            THEN (0.70*ai_score + 0.10*flex_score) / 0.80
-                        WHEN web_score IS NOT NULL AND flex_score IS NOT NULL
-                            THEN (0.20*web_score + 0.10*flex_score) / 0.30
-                        WHEN ai_score IS NOT NULL  THEN ai_score
-                        WHEN web_score IS NOT NULL THEN web_score
-                        ELSE flex_score
-                    END
-                ) >= 80 THEN 1 END)                                    AS band_80plus,
-            COUNT(CASE WHEN (
-                    CASE
-                        WHEN ai_score IS NOT NULL AND web_score IS NOT NULL AND flex_score IS NOT NULL
-                            THEN (0.70*ai_score + 0.20*web_score + 0.10*flex_score)
-                        WHEN ai_score IS NOT NULL AND web_score IS NOT NULL
-                            THEN (0.70*ai_score + 0.20*web_score) / 0.90
-                        WHEN ai_score IS NOT NULL AND flex_score IS NOT NULL
-                            THEN (0.70*ai_score + 0.10*flex_score) / 0.80
-                        WHEN web_score IS NOT NULL AND flex_score IS NOT NULL
-                            THEN (0.20*web_score + 0.10*flex_score) / 0.30
-                        WHEN ai_score IS NOT NULL  THEN ai_score
-                        WHEN web_score IS NOT NULL THEN web_score
-                        ELSE flex_score
-                    END
-                ) BETWEEN 60 AND 79.999 THEN 1 END)                   AS band_60to80,
-            COUNT(CASE WHEN (
-                    CASE
-                        WHEN ai_score IS NOT NULL AND web_score IS NOT NULL AND flex_score IS NOT NULL
-                            THEN (0.70*ai_score + 0.20*web_score + 0.10*flex_score)
-                        WHEN ai_score IS NOT NULL AND web_score IS NOT NULL
-                            THEN (0.70*ai_score + 0.20*web_score) / 0.90
-                        WHEN ai_score IS NOT NULL AND flex_score IS NOT NULL
-                            THEN (0.70*ai_score + 0.10*flex_score) / 0.80
-                        WHEN web_score IS NOT NULL AND flex_score IS NOT NULL
-                            THEN (0.20*web_score + 0.10*flex_score) / 0.30
-                        WHEN ai_score IS NOT NULL  THEN ai_score
-                        WHEN web_score IS NOT NULL THEN web_score
-                        ELSE flex_score
-                    END
-                ) BETWEEN 40 AND 59.999 THEN 1 END)                   AS band_40to60,
-            COUNT(CASE WHEN (
-                    CASE
-                        WHEN ai_score IS NOT NULL AND web_score IS NOT NULL AND flex_score IS NOT NULL
-                            THEN (0.70*ai_score + 0.20*web_score + 0.10*flex_score)
-                        WHEN ai_score IS NOT NULL AND web_score IS NOT NULL
-                            THEN (0.70*ai_score + 0.20*web_score) / 0.90
-                        WHEN ai_score IS NOT NULL AND flex_score IS NOT NULL
-                            THEN (0.70*ai_score + 0.10*flex_score) / 0.80
-                        WHEN web_score IS NOT NULL AND flex_score IS NOT NULL
-                            THEN (0.20*web_score + 0.10*flex_score) / 0.30
-                        WHEN ai_score IS NOT NULL  THEN ai_score
-                        WHEN web_score IS NOT NULL THEN web_score
-                        ELSE flex_score
-                    END
-                ) < 40 THEN 1 END)                                     AS band_below40
+            AVG(combined_score)                                         AS avg_combined,
+            COUNT(CASE WHEN combined_score IS NULL THEN 1 END)          AS unscored,
+            COUNT(CASE WHEN combined_score >= 80   THEN 1 END)          AS band_80plus,
+            COUNT(CASE WHEN combined_score >= 60
+                        AND combined_score < 80    THEN 1 END)          AS band_60to80,
+            COUNT(CASE WHEN combined_score >= 40
+                        AND combined_score < 60    THEN 1 END)          AS band_40to60,
+            COUNT(CASE WHEN combined_score < 40    THEN 1 END)          AS band_below40
         FROM companies
         WHERE {where_clause}
     """)

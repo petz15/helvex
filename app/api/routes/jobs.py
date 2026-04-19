@@ -910,6 +910,36 @@ def trigger_classify_business_model(
     return JobOut.from_orm_obj(job)
 
 
+class AnalyzeBoilerplateBody(BaseModel):
+    min_match_count: int = 500
+    max_candidates: int = 200
+    sample_limit: int = 200_000
+
+
+@router.post("/scoring/analyze-boilerplate", response_model=JobOut, status_code=status.HTTP_202_ACCEPTED)
+def trigger_analyze_boilerplate(
+    body: AnalyzeBoilerplateBody,
+    request: Request,
+    db: Session = Depends(get_db),
+    _: User = Depends(require_superadmin),
+):
+    """Analyse purpose text corpus to find new boilerplate pattern candidates.
+
+    Results are written as inactive BoilerplatePattern rows for admin review.
+    Also seeds the standard FR/IT patterns before running the corpus scan.
+    """
+    from app.services.boilerplate_analysis import seed_multilang_boilerplate
+    seed_multilang_boilerplate(db)
+    job = _enqueue_or_http_error(
+        request,
+        job_type="analyze_boilerplate",
+        label="Boilerplate pattern analysis",
+        params=body.model_dump(),
+        db=db,
+    )
+    return JobOut.from_orm_obj(job)
+
+
 @router.post("/scoring/cluster-drift-check", response_model=JobOut, status_code=status.HTTP_202_ACCEPTED)
 def trigger_cluster_drift_check(body: ClusterDriftCheckBody, request: Request, db: Session = Depends(get_db), _: User = Depends(require_superadmin)):
     job = _enqueue_or_http_error(

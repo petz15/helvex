@@ -83,6 +83,7 @@ _QUEUE_FOR_JOB_TYPE: dict[str, str] = {
     "cluster_analysis":          "helvex-ml",
     "cluster_drift_check":       "helvex-ml",
     "classify_business_model":   "helvex-api",
+    "analyze_boilerplate":       "helvex-api",
     "billing_renewal":           "helvex-api",
     "saved_view_alerts":         "helvex-api",
 }
@@ -589,6 +590,31 @@ def _run_job(app, job_id: int) -> None:  # noqa: C901
                 done_msg = (
                     f"Done — {stats['updated']} processed, {stats['classified']} classified, "
                     f"{stats['skipped']} skipped (no signal)"
+                )
+
+            elif job.job_type == "analyze_boilerplate":
+                from app.services.boilerplate_analysis import run_boilerplate_analysis
+
+                def _progress(done: int, total: int, bstats: dict) -> None:
+                    _assert_not_cancelled()
+                    msg = (
+                        f"Scanned {done}/{total} purposes — "
+                        f"{bstats.get('unique_sentences', 0)} unique sentences found"
+                    )
+                    crud.update_progress(db, job, message=msg, done=done, total=total, stats=bstats)
+                    _heartbeat()
+
+                stats = run_boilerplate_analysis(
+                    db,
+                    min_match_count=params.get("min_match_count") or 500,
+                    max_candidates=params.get("max_candidates") or 200,
+                    sample_limit=params.get("sample_limit") or 200_000,
+                    progress_cb=_progress,
+                )
+                done_msg = (
+                    f"Done — {stats['total_purposes_scanned']} purposes scanned, "
+                    f"{stats['candidates_found']} candidates, "
+                    f"{stats['new_patterns_saved']} new inactive patterns saved for review"
                 )
 
             elif job.job_type == "bulk":
@@ -1243,8 +1269,9 @@ def _run_job(app, job_id: int) -> None:  # noqa: C901
                 "recalculate_google_scores", "reextract_purpose", "classify_business_model",
             }
             if job.job_type in _TAXONOMY_INVALIDATING:
-                from app.crud.company import invalidate_taxonomy_cache
+                from app.crud.company import invalidate_taxonomy_cache, invalidate_category_stats_cache
                 invalidate_taxonomy_cache()
+                invalidate_category_stats_cache()
 
         except _JobWaitingExternalSignal:
             # Job transitioned to waiting_external — already committed above; nothing else needed.

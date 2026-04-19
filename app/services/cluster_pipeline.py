@@ -492,7 +492,13 @@ def save_results(
                 else:
                     tfidf_cluster = None
                     stats["low_quality"] += 1
-            mappings.append({"id": company.id, "tfidf_cluster": tfidf_cluster, "purpose_keywords": kw})
+            kw_arr = [k.strip() for k in kw.split(",") if k.strip()] if kw else None
+            mappings.append({
+                "id": company.id,
+                "tfidf_cluster": tfidf_cluster,
+                "purpose_keywords": kw,
+                "purpose_keywords_arr": kw_arr,
+            })
         except Exception as exc:  # noqa: BLE001
             stats["errors"].append(f"{company.uid}: {exc}")
             stats["skipped"] += 1
@@ -649,7 +655,8 @@ def recompute_keywords(
     mappings: list[dict] = []
     for company, kw in zip(companies, company_keywords):
         try:
-            mappings.append({"id": company.id, "purpose_keywords": kw})
+            kw_arr = [k.strip() for k in kw.split(",") if k.strip()] if kw else None
+            mappings.append({"id": company.id, "purpose_keywords": kw, "purpose_keywords_arr": kw_arr})
             stats["updated"] += 1
         except Exception as exc:  # noqa: BLE001
             stats["errors"].append(f"{company.uid}: {exc}")
@@ -2165,7 +2172,8 @@ def reextract_keywords_all(
             if kw is None:
                 stats["skipped_no_purpose"] += 1
             else:
-                mappings.append({"id": company.id, "purpose_keywords": kw})
+                kw_arr = [k.strip() for k in kw.split(",") if k.strip()] if kw else None
+                mappings.append({"id": company.id, "purpose_keywords": kw, "purpose_keywords_arr": kw_arr})
                 stats["updated"] += 1
         except Exception as exc:  # noqa: BLE001
             stats["errors"].append(f"{company.uid}: {exc}")

@@ -26,6 +26,13 @@ from app.api.zefix_client import (
 )
 from app.models.company import Company
 from app.schemas.company import CompanyCreate, CompanyUpdate
+
+
+def _refresh_combined(company: Company) -> None:
+    """Recompute and store combined_score from the three component scores."""
+    company.combined_score = Company.compute_combined_score(
+        company.ai_score, company.web_score, company.flex_score
+    )
 from app.services.scoring import (
     compute_flex_score_breakdown,
     distance_to_muri_km,
@@ -639,15 +646,17 @@ def geocode_and_update_company(db: Session, company: Company) -> bool:
         noga_level=company.noga_level,
         config=scoring_config,
     )
+    new_flex = int(score_breakdown["final_score"])
     crud.update_company(
         db,
         company,
         CompanyUpdate(
             lat=lat,
             lon=lon,
-            flex_score=int(score_breakdown["final_score"]),
+            flex_score=new_flex,
             flex_score_breakdown=json.dumps(score_breakdown),
             flex_scored_at=datetime.now(tz=timezone.utc),
+            combined_score=Company.compute_combined_score(company.ai_score, company.web_score, new_flex),
         ),
     )
     return True
@@ -734,6 +743,7 @@ def recalculate_flex_scores(
             company.flex_score = normalised[company.id]
             company.flex_score_breakdown = json.dumps(bd)
             company.flex_scored_at = datetime.now(tz=timezone.utc)
+            _refresh_combined(company)
             stats["updated"] += 1
             write_done += 1
         db.commit()
@@ -902,6 +912,7 @@ def recalculate_google_scores(
                 company.web_score = best["score"]
                 company.social_media_only = is_social_lead_domain(best["link"])
                 company.google_search_results_raw = json.dumps(rescored)
+                _refresh_combined(company)
                 stats["updated"] += 1
             except Exception as exc:  # noqa: BLE001
                 stats["errors"].append(f"{company.uid} [{type(exc).__name__}]: {exc}")
@@ -2117,6 +2128,7 @@ def claude_classify_batch(
         company.ai_category = str(data.get("category", ""))[:128] if data.get("category") else None
         company.ai_freeform = str(data["freeform"]) if data.get("freeform") else None
         company.ai_scored_at = datetime.now(tz=timezone.utc)
+        _refresh_combined(company)
 
     def _apply_chunk(chunk: list[Company], response_text: str) -> None:
         data = json.loads(_strip_fences(response_text))
@@ -2128,6 +2140,7 @@ def claude_classify_batch(
             company.ai_category = str(item.get("category", ""))[:128] if item.get("category") else None
             company.ai_freeform = str(item["freeform"]) if item.get("freeform") else None
             company.ai_scored_at = now
+            _refresh_combined(company)
 
     def _chunk_ids(chunk: list[Company]) -> str:
         return ", ".join(c.uid for c in chunk)
