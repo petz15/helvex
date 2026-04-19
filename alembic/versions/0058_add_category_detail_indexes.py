@@ -7,7 +7,7 @@ Create Date: 2026-04-18
 from alembic import op
 
 revision = "0058"
-down_revision = "0057"
+down_revision = "0057_add_business_model"
 branch_labels = None
 depends_on = None
 
