@@ -524,7 +524,7 @@ export interface NogaNode {
 
 export async function fetchNogaHierarchy(): Promise<NogaNode[]> {
   const res = await fetch("/api/v1/companies/noga-hierarchy", { credentials: "include" });
-  if (!res.ok) return [];
+  if (!res.ok) throw new ApiError(res.statusText, res.status);
   return res.json();
 }
 

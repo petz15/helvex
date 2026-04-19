@@ -3,12 +3,12 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import useSWR, { useSWRConfig } from "swr";
 import { cn } from "@/lib/utils";
-import { Search, Compass, Map, Cog, Database, Activity, UserCircle, Shield, LayoutGrid, CreditCard, Menu, X, Tag, Globe } from "lucide-react";
+import { Search, Compass, Map, Cog, Database, Activity, UserCircle, Shield, CreditCard, Menu, X, Tag, Globe, ChevronDown } from "lucide-react";
 import { fetchCurrentUser, fetchMyOrgs, switchOrg } from "@/lib/api";
 import { HelvexMark } from "@/components/helvex-logo";
 import { useI18n } from "@/i18n/context";
 import { SUPPORTED_LOCALES } from "@/i18n/locales";
-import { useState } from "react";
+import { useState, useRef, useEffect } from "react";
 
 const AUTH_PATHS = ["/login", "/register", "/verify-email", "/forgot-password", "/reset-password", "/accept-invite"];
 
@@ -32,9 +32,21 @@ export function NavBar() {
   const router = useRouter();
   const { mutate } = useSWRConfig();
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [accountMenuOpen, setAccountMenuOpen] = useState(false);
+  const accountMenuRef = useRef<HTMLDivElement>(null);
   const locale = useLocale();
   const { dict } = useI18n();
   const t = dict.nav;
+
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (accountMenuRef.current && !accountMenuRef.current.contains(event.target as Node)) {
+        setAccountMenuOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
 
   const { data: me, isLoading } = useSWR("me", fetchCurrentUser, {
     shouldRetryOnError: false,
@@ -56,7 +68,6 @@ export function NavBar() {
   const NAV_MAIN = [
     { href: `/${locale}/app/search`, label: t.search, icon: Search },
     { href: `/${locale}/app/explorer`, label: t.explorer, icon: Compass },
-    { href: `/${locale}/app/categories`, label: t.categories, icon: LayoutGrid },
     { href: `/${locale}/app/map`, label: t.map, icon: Map },
     { href: `/${locale}/app/jobs`, label: t.jobs, icon: Activity },
   ];
@@ -89,15 +100,15 @@ export function NavBar() {
 
   return (
     <>
-      <header className="h-12 bg-white border-b border-slate-200 flex items-center px-4 shrink-0 z-40 shadow-sm">
+      <header className="h-20 bg-white border-b border-slate-200 flex items-center px-6 shrink-0 z-40 shadow-sm">
         {/* Logo */}
         <Link
           href={loggedIn ? `/${locale}/app/search` : `/${locale}`}
-          className="flex items-center gap-2 font-bold text-blue-600 mr-6 tracking-tight shrink-0"
+          className="flex items-center gap-2 font-bold text-blue-600 mr-8 tracking-tight shrink-0"
           onClick={closeMobile}
         >
-          <HelvexMark size={18} />
-          Helvex
+          <HelvexMark size={28} />
+          <span className="text-2xl">Helvex</span>
         </Link>
 
         {/* Logged-in: app nav — desktop only */}
@@ -176,51 +187,50 @@ export function NavBar() {
           </nav>
         )}
 
-        <div className="ml-auto flex items-center gap-1">
-          {/* Language switcher */}
-          <div className="hidden md:flex items-center gap-0.5 mr-1">
-            <Globe size={13} className="text-slate-400 mr-0.5" />
-            {SUPPORTED_LOCALES.map((loc) => (
-              <button
-                key={loc}
-                onClick={() => switchLocale(loc)}
-                className={cn(
-                  "px-1.5 py-0.5 rounded text-xs font-medium transition-colors",
-                  loc === locale
-                    ? "bg-slate-100 text-slate-800"
-                    : "text-slate-400 hover:text-slate-700"
-                )}
-              >
-                {LOCALE_LABELS[loc]}
-              </button>
-            ))}
+        <div className="ml-auto flex items-center gap-3">
+          {/* Language switcher — symbol only, dropdown on hover */}
+          <div className="hidden md:block relative group">
+            <button className="p-2 text-slate-600 hover:text-slate-900 rounded-lg hover:bg-slate-100 transition-colors">
+              <Globe size={18} />
+            </button>
+            <div className="absolute right-0 top-full mt-1 hidden group-hover:flex flex-col bg-white border border-slate-200 rounded-lg shadow-lg z-50">
+              {SUPPORTED_LOCALES.map((loc) => (
+                <button
+                  key={loc}
+                  onClick={() => switchLocale(loc)}
+                  className={cn(
+                    "px-4 py-2 text-sm text-left transition-colors whitespace-nowrap",
+                    loc === locale
+                      ? "bg-blue-100 text-blue-700 font-medium"
+                      : "text-slate-700 hover:bg-slate-100"
+                  )}
+                >
+                  {LOCALE_LABELS[loc]}
+                </button>
+              ))}
+            </div>
           </div>
 
-          {/* Logged-in: admin + user — desktop only */}
+          {/* Logged-in: admin + account menu — desktop only */}
           {loggedIn && (
-            <div className="hidden md:flex items-center gap-1">
+            <>
               {me?.is_superadmin && (
                 <Link
                   href={`/${locale}/app/admin`}
                   className={cn(
-                    "flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-sm transition-colors",
+                    "hidden md:flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm transition-colors",
                     pathname.startsWith(`/${locale}/app/admin`)
                       ? "bg-purple-600 text-white font-medium"
                       : "text-purple-600 hover:bg-purple-50"
                   )}
                 >
-                  <Shield size={14} />
+                  <Shield size={16} />
                   {t.admin}
                 </Link>
               )}
-              {me?.email && (
-                <span className="text-xs text-slate-600 px-2 truncate max-w-[180px]" title={me.email}>
-                  {me.email}
-                </span>
-              )}
               {orgs.length > 1 && me?.org_id && (
                 <select
-                  className="text-xs border border-slate-200 rounded-md px-2 py-1 bg-white text-slate-600 max-w-[170px]"
+                  className="hidden md:block text-sm border border-slate-200 rounded-lg px-3 py-2 bg-white text-slate-600 max-w-[180px]"
                   value={String(me.org_id)}
                   onChange={(e) => handleOrgSwitch(Number(e.target.value))}
                   title={t.switchOrg}
@@ -232,34 +242,46 @@ export function NavBar() {
                   ))}
                 </select>
               )}
-              <Link
-                href={`/${locale}/app/billing`}
-                className={cn(
-                  "flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-sm transition-colors",
-                  pathname.startsWith(`/${locale}/app/billing`)
-                    ? "bg-blue-600 text-white font-medium"
-                    : "text-slate-600 hover:bg-slate-100 hover:text-slate-900"
+              {/* Account dropdown */}
+              <div className="hidden md:block relative" ref={accountMenuRef}>
+                <button
+                  onClick={() => setAccountMenuOpen(!accountMenuOpen)}
+                  className="flex items-center gap-2 px-3 py-2 text-slate-600 hover:text-slate-900 rounded-lg hover:bg-slate-100 transition-colors"
+                >
+                  <UserCircle size={18} />
+                  <span className="text-sm font-medium truncate max-w-[140px]">{me?.email}</span>
+                  <ChevronDown size={14} className={cn("transition-transform", accountMenuOpen && "rotate-180")} />
+                </button>
+                {accountMenuOpen && (
+                  <div className="absolute right-0 top-full mt-1 bg-white border border-slate-200 rounded-lg shadow-lg z-50 min-w-[220px]">
+                    <Link
+                      href={`/${locale}/app/account`}
+                      onClick={() => setAccountMenuOpen(false)}
+                      className="flex items-center gap-2 px-4 py-2.5 text-sm text-slate-700 hover:bg-slate-50 border-b border-slate-100 transition-colors"
+                    >
+                      <Cog size={16} />
+                      {t.general || "General"}
+                    </Link>
+                    <Link
+                      href={`/${locale}/app/billing`}
+                      onClick={() => setAccountMenuOpen(false)}
+                      className="flex items-center gap-2 px-4 py-2.5 text-sm text-slate-700 hover:bg-slate-50 border-b border-slate-100 transition-colors"
+                    >
+                      <CreditCard size={16} />
+                      {t.billing}
+                    </Link>
+                    <a
+                      href="/logout"
+                      onClick={() => setAccountMenuOpen(false)}
+                      className="flex items-center gap-2 px-4 py-2.5 text-sm text-slate-700 hover:bg-slate-50 transition-colors"
+                    >
+                      <span>→</span>
+                      {t.signOut}
+                    </a>
+                  </div>
                 )}
-              >
-                <CreditCard size={14} />
-                {t.billing}
-              </Link>
-              <Link
-                href={`/${locale}/app/account`}
-                className={cn(
-                  "flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-sm transition-colors",
-                  pathname.startsWith(`/${locale}/app/account`)
-                    ? "bg-blue-600 text-white font-medium"
-                    : "text-slate-600 hover:bg-slate-100 hover:text-slate-900"
-                )}
-              >
-                <UserCircle size={14} />
-                {t.account}
-              </Link>
-              <a href="/logout" className="text-sm text-slate-600 hover:text-slate-800 px-2.5 py-1.5 rounded-lg hover:bg-slate-100 transition-colors">
-                {t.signOut}
-              </a>
-            </div>
+              </div>
+            </>
           )}
 
           {/* Logged-out: sign in + sign up — desktop only */}
