@@ -95,8 +95,21 @@ spec:
                     echo "ERROR: STORAGEBOX_SSH_PRIVATE_KEY is missing/empty" >&2
                     exit 1
                   fi
-                  cp "$key_src" "$key_dst"
+                  # Kubernetes secrets should preserve newlines, but some setups
+                  # accidentally store the key as a single line with literal "\\n".
+                  # Normalise both that case and Windows CRLF before use.
+                  if grep -q '\\n' "$key_src" && ! grep -q '^-----BEGIN .*PRIVATE KEY-----$' "$key_src"; then
+                    key_raw=$(tr -d '\r' < "$key_src")
+                    printf '%b' "$key_raw" > "$key_dst"
+                  else
+                    tr -d '\r' < "$key_src" > "$key_dst"
+                  fi
                   chmod 600 "$key_dst"
+
+                  if ! grep -q '^-----BEGIN .*PRIVATE KEY-----$' "$key_dst" || ! grep -q '^-----END .*PRIVATE KEY-----$' "$key_dst"; then
+                    echo "ERROR: STORAGEBOX_SSH_PRIVATE_KEY does not look like a valid PEM/OpenSSH private key" >&2
+                    exit 1
+                  fi
 
                   cat > /work/rclone.conf <<EOF
                   [box]

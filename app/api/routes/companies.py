@@ -3,8 +3,9 @@
 import json
 import math
 from datetime import datetime, timedelta, timezone
+from functools import lru_cache
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
@@ -39,6 +40,17 @@ _ORG_FIELDS = frozenset({
     "contact_name", "contact_email", "contact_phone",
     "tags",
 })
+
+# NOGA hierarchy cache: {org_id: hierarchy}. Cache is cleared on company changes.
+_noga_hierarchy_cache: dict[int | None, list] = {}
+
+
+def _clear_noga_cache(org_id: int | None = None) -> None:
+    """Clear NOGA hierarchy cache for given org (or all orgs if None)."""
+    if org_id is None:
+        _noga_hierarchy_cache.clear()
+    else:
+        _noga_hierarchy_cache.pop(org_id, None)
 
 
 def _overlay(
@@ -214,8 +226,12 @@ def import_from_zefix(uid: str, db: Session = Depends(get_db), _: User = Depends
 
     existing = crud.get_company_by_uid(db, uid_normalised)
     if existing:
-        return crud.update_company(db, existing, CompanyUpdate(**company_data.model_dump(exclude={"uid"})))
-    return crud.create_company(db, company_data)
+        result = crud.update_company(db, existing, CompanyUpdate(**company_data.model_dump(exclude={"uid"})))
+        _clear_noga_cache()
+        return result
+    result = crud.create_company(db, company_data)
+    _clear_noga_cache()
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -355,6 +371,7 @@ def select_company_website(
             social_media_only=social_media_only,
         ),
     )
+    _clear_noga_cache()
     new_values = {
         "website_url": wanted,
         "web_score": web_score,
@@ -415,14 +432,26 @@ def get_category_stats(
     return crud.get_category_stats(db, category_type=type, value=value, org_id=effective_org_id)
 
 
-@router.get("/noga-hierarchy", response_model=list, summary="NOGA codes as a collapsible hierarchy with aggregated counts")
+@router.get("/noga-hierarchy", summary="NOGA codes as a collapsible hierarchy with aggregated counts")
 def get_noga_hierarchy(
     org_id: int | None = Query(None),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     effective_org_id = org_id or current_user.org_id
-    return crud.get_noga_hierarchy(db, org_id=effective_org_id)
+
+    # Check in-memory cache first
+    if effective_org_id in _noga_hierarchy_cache:
+        hierarchy = _noga_hierarchy_cache[effective_org_id]
+    else:
+        hierarchy = crud.get_noga_hierarchy(db, org_id=effective_org_id)
+        _noga_hierarchy_cache[effective_org_id] = hierarchy
+
+    # Return with HTTP cache headers: stable data, cache for 1 hour in browser, 24h in CDN
+    response = Response(content=json.dumps(hierarchy), media_type="application/json")
+    response.headers["Cache-Control"] = "public, max-age=3600, s-maxage=86400"
+    response.headers["ETag"] = f'"{hash(str(hierarchy)) & 0x7fffffff}"'
+    return response
 
 
 @router.get("/keywords/search", response_model=list, summary="Autocomplete search across all purpose keywords")
@@ -758,7 +787,9 @@ def create_company(company_in: CompanyCreate, db: Session = Depends(get_db)):
     existing = crud.get_company_by_uid(db, company_in.uid)
     if existing:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Company with this UID already exists")
-    return crud.create_company(db, company_in)
+    result = crud.create_company(db, company_in)
+    _clear_noga_cache()
+    return result
 
 
 @router.get("/{company_id}", response_model=CompanyRead, summary="Get company by ID")
@@ -819,6 +850,7 @@ def update_company(
 
     if catalog:
         crud.update_company(db, db_company, CompanyUpdate(**catalog))
+        _clear_noga_cache()
 
     crud.record_company_changes(
         db, company_id=company_id, user_id=current_user.id,

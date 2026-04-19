@@ -208,7 +208,10 @@
       "Bash(sed -n '218,226p' \"c:/D/coding_projects/zefix_analyzer/frontend/src/app/[locale]/app/categories/categories-client.tsx\")",
       "Bash(sed -n '326,334p' \"c:/D/coding_projects/zefix_analyzer/frontend/src/app/[locale]/app/jobs/jobs-client.tsx\")",
       "Bash(sed -n '68,76p' \"c:/D/coding_projects/zefix_analyzer/frontend/src/app/[locale]/app/collection/collection-client.tsx\")",
-      "Bash(sed -n '94,105p' \"c:/D/coding_projects/zefix_analyzer/frontend/src/app/[locale]/app/jobs/jobs-client.tsx\")"
+      "Bash(sed -n '94,105p' \"c:/D/coding_projects/zefix_analyzer/frontend/src/app/[locale]/app/jobs/jobs-client.tsx\")",
+      "Bash(python -m py_compile \"c:/D/coding_projects/zefix_analyzer/app/api/routes/companies.py\")",
+      "Bash(cat)",
+      "Bash(python /tmp/test_noga_cache.py)"
     ]
   }
 }

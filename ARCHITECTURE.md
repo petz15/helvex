@@ -290,11 +290,59 @@ The `/api/v1/jobs/csv-export/status` response now includes nudge fields:
 | `total_matching` | int | Total companies that matched the filters |
 | `upgrade_to` | str | First higher tier that would lift the cap |
 
+#### Map Geocoding — `app/api/routes/map.py`
+
+| Method | Path | Description |
+|---|---|---|
+| POST | `/api/v1/map/geocode-address` | Geocode a user-supplied address string → lat/lon |
+| GET | `/api/v1/map/bounds` | Leaflet map data within viewport bounds (clustered or detailed) |
+
+**Geocoding flow** (`app/api/geocoding_client.py`):
+
+The `geocode_address(address)` function attempts three fallback strategies in order:
+
+1. **Building-level lookup** (swisstopo Amtliches Gebäudeadressverzeichnis)
+   - Requires comma-separated address with PLZ segment (e.g. `"Bahnhofstrasse 1, 3011 Bern"`)
+   - Returns sub-meter precision (~5m)
+   - Normalized string matching (whitespace + case-insensitive)
+
+2. **PLZ centroid fallback** (`_plz_fallback`)
+   - Extracts any 4-digit Swiss postal code from the address
+   - Returns GeoNames centroid for that PLZ (~2 km precision)
+   - Supports minimal input: `"3000"` or `"3000 Bern"`
+
+3. **City name fallback** (`_city_fallback`) — **NEW**
+   - Builds city-name → centroid index from GeoNames col 2 (place names) at startup
+   - Tries each comma-separated segment as a city name (right-to-left, most specific first)
+   - Falls back to whole address if no comma-separated parts match
+   - Supports: `"Zürich"`, `"Bern"`, `"3000 Bern"` (city name extracted after PLZ)
+   - Normalization: whitespace stripped, diacritics removed, lowercased
+
+**Data sources:**
+- `swisstopo_addresses.db` — SQLite index built at Docker build time from zipped shapefile
+- `geonames.txt` — tab-delimited GeoNames CH subset (PLZ + place name + lat/lon)
+- Both downloaded and compiled into memory at first request (lazy loading)
+
+**City index structure:**
+```python
+_city_table: dict[str, tuple[float, float]] = {
+    "zurich": (47.3769, 8.5472),
+    "bern": (46.9479, 7.4474),
+    "basel": (47.5596, 7.5886),
+    ...
+}
+```
+
+**Normalization function** (`_norm`):
+- Remove accents (é → e, ü → u)
+- Convert to lowercase
+- Strip whitespace
+- Skip if empty
+
 #### Other routes
 
 | Route module | Path prefix | Summary |
 |---|---|---|
-| `map.py` | `/api/v1/map/bounds` | Leaflet map data (clustered, filtered) |
 | `notes.py` | `/api/v1/notes` | CRUD notes linked to companies |
 | `ops_settings.py` | `/api/v1/settings` | Read/write `app_settings` table |
 
@@ -631,6 +679,11 @@ Two offline data sources (no API key):
 | GeoNames PLZ centroids | ~2 km | CH postcodes |
 
 Both are downloaded and compiled into SQLite databases **at Docker build time**. No runtime downloads.
+
+**Improvements (Feb 2026):**
+- **City name fallback:** Added `_city_fallback()` function to match city names (GeoNames col 2) when building lookup fails and no PLZ is present. Enables queries like `"Zürich"`, `"Bern"`, `"Lausanne"` without requiring a PLZ or full address. Normalization (accent removal, lowercase, whitespace trim) ensures matches work across language variants (e.g. "Zurich" → "zürich").
+- **Resolution order:** building lookup → PLZ fallback → **city fallback** (new) → return None
+- **GeoNames index:** Now built at app startup with both PLZ and city names cached for O(1) lookup
 
 ### Claude (Anthropic) — `app/services/collection.py` + `app/crud/app_setting.py`
 
