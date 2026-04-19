@@ -150,14 +150,15 @@ function nodeMatchesFilter(node: NogaNode, q: string): boolean {
 
 export function CategoriesClient() {
   const { dict } = useI18n();
-  const { data: taxonomy, isLoading, error } = useSWR("taxonomy", fetchTaxonomy);
-  const { data: nogaTree = [], isLoading: nogaLoading } = useSWR("noga-hierarchy", fetchNogaHierarchy);
-  const { data: me } = useSWR("me", fetchCurrentUser);
+  const { data: taxonomy, isLoading, error } = useSWR("taxonomy", fetchTaxonomy, { revalidateOnFocus: false, dedupingInterval: 60000 });
+  const { data: nogaTree = [], isLoading: nogaLoading } = useSWR("noga-hierarchy", fetchNogaHierarchy, { revalidateOnFocus: false, dedupingInterval: 60000 });
+  const { data: me } = useSWR("me", fetchCurrentUser, { revalidateOnFocus: false, dedupingInterval: 60000 });
   const orgId = me?.org?.id;
   const isAdmin = me?.org_role === "admin" || me?.org_role === "owner" || me?.is_superadmin;
   const { data: orgSettings = {}, mutate: reloadOrgSettings } = useSWR(
     orgId ? ["org-settings", orgId] : null,
     () => fetchOrgSettings(orgId!),
+    { revalidateOnFocus: false, dedupingInterval: 60000 },
   );
 
   const categories: [string, number][] = taxonomy?.categories ?? [];

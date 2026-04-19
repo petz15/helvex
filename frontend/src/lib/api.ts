@@ -16,6 +16,21 @@ import type {
 
 const BASE = process.env.NEXT_PUBLIC_API_BASE ?? "";
 
+class ApiError extends Error {
+  status: number;
+  constructor(message: string, status: number) {
+    super(message);
+    this.status = status;
+  }
+}
+
+export function createFetcher(url: string): Promise<any> {
+  return fetch(url, { credentials: "include" }).then((res) => {
+    if (!res.ok) throw new ApiError(res.statusText, res.status);
+    return res.json();
+  });
+}
+
 // ── Org context ────────────────────────────────────────────────────────────────
 
 export interface OrgInfo {
@@ -41,7 +56,7 @@ export interface CurrentUser {
 
 export async function fetchCurrentUser(): Promise<CurrentUser> {
   const res = await fetch("/api/v1/auth/me", { credentials: "include" });
-  if (!res.ok) throw new Error("Not authenticated");
+  if (!res.ok) throw new ApiError("Not authenticated", res.status);
   return res.json();
 }
 

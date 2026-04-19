@@ -994,24 +994,43 @@ def _compute_category_stats(
         where_clause = f"{col} = :value"
         bind = {"value": value}
 
-    # All aggregates use the stored combined_score column — no complex CASE expressions.
-    agg_sql = _text(f"""
+    computed_score_expr = (
+        "CASE "
+        "WHEN ai_score IS NOT NULL AND web_score IS NOT NULL AND flex_score IS NOT NULL "
+        "THEN (0.70 * ai_score + 0.20 * web_score + 0.10 * flex_score) "
+        "WHEN ai_score IS NOT NULL AND web_score IS NOT NULL "
+        "THEN (0.70 * ai_score + 0.20 * web_score) / 0.90 "
+        "WHEN ai_score IS NOT NULL AND flex_score IS NOT NULL "
+        "THEN (0.70 * ai_score + 0.10 * flex_score) / 0.80 "
+        "WHEN web_score IS NOT NULL AND flex_score IS NOT NULL "
+        "THEN (0.20 * web_score + 0.10 * flex_score) / 0.30 "
+        "WHEN ai_score IS NOT NULL THEN ai_score::float "
+        "WHEN web_score IS NOT NULL THEN web_score::float "
+        "WHEN flex_score IS NOT NULL THEN flex_score::float "
+        "ELSE NULL END"
+    )
+
+    def _build_agg_sql(score_expr: str):
+        return _text(f"""
         SELECT
             COUNT(*)                                                    AS total,
             AVG(ai_score)                                               AS avg_ai,
             AVG(flex_score)                                             AS avg_flex,
             AVG(web_score)                                              AS avg_web,
-            AVG(combined_score)                                         AS avg_combined,
-            COUNT(CASE WHEN combined_score IS NULL THEN 1 END)          AS unscored,
-            COUNT(CASE WHEN combined_score >= 80   THEN 1 END)          AS band_80plus,
-            COUNT(CASE WHEN combined_score >= 60
-                        AND combined_score < 80    THEN 1 END)          AS band_60to80,
-            COUNT(CASE WHEN combined_score >= 40
-                        AND combined_score < 60    THEN 1 END)          AS band_40to60,
-            COUNT(CASE WHEN combined_score < 40    THEN 1 END)          AS band_below40
+            AVG({score_expr})                                           AS avg_combined,
+            COUNT(CASE WHEN {score_expr} IS NULL THEN 1 END)            AS unscored,
+            COUNT(CASE WHEN {score_expr} >= 80   THEN 1 END)            AS band_80plus,
+            COUNT(CASE WHEN {score_expr} >= 60
+                        AND {score_expr} < 80    THEN 1 END)            AS band_60to80,
+            COUNT(CASE WHEN {score_expr} >= 40
+                        AND {score_expr} < 60    THEN 1 END)            AS band_40to60,
+            COUNT(CASE WHEN {score_expr} < 40    THEN 1 END)            AS band_below40
         FROM companies
         WHERE {where_clause}
     """)
+
+    # All aggregates use the stored combined_score column — no complex CASE expressions.
+    agg_sql = _build_agg_sql("combined_score")
 
     canton_sql = _text(f"""
         SELECT canton, COUNT(*) AS cnt
@@ -1022,7 +1041,18 @@ def _compute_category_stats(
         LIMIT 10
     """)
 
-    r = db.execute(agg_sql, bind).fetchone()
+    try:
+        r = db.execute(agg_sql, bind).fetchone()
+    except Exception as exc:
+        # During rolling deploys, some databases may not yet have combined_score.
+        # Retry using the legacy computed expression to avoid 500s.
+        msg = str(exc).lower()
+        pgcode = getattr(getattr(exc, "orig", None), "pgcode", None)
+        if pgcode != "42703" and "combined_score" not in msg:
+            raise
+        logger.warning("combined_score missing in category stats query; using computed fallback")
+        db.rollback()
+        r = db.execute(_build_agg_sql(computed_score_expr), bind).fetchone()
     cantons = db.execute(canton_sql, bind).fetchall()
 
     if not r or r.total == 0:

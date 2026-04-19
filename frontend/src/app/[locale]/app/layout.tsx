@@ -2,6 +2,7 @@ import Link from "next/link";
 import { CookieSettingsButton } from "@/components/cookie-settings-button";
 import { AdBanner } from "@/components/ad-banner";
 import { PageViewTracker } from "@/components/page-view-tracker";
+import { AuthErrorProvider } from "@/components/auth-error-provider";
 import { getDictionary, isLocale } from "@/i18n/dictionaries";
 import { notFound } from "next/navigation";
 
@@ -18,10 +19,11 @@ export default async function AppLayout({
   const t = dict.app.footer;
 
   return (
-    <div className="flex min-h-full flex-col">
-      <PageViewTracker />
-      <AdBanner />
-      <div className="flex-1">{children}</div>
+    <AuthErrorProvider>
+      <div className="flex min-h-full flex-col">
+        <PageViewTracker />
+        <AdBanner />
+        <div className="flex-1">{children}</div>
       <footer className="border-t border-slate-200 bg-white px-4 py-3 text-xs text-slate-500">
         <div className="mx-auto flex max-w-7xl flex-wrap items-center justify-center gap-3">
           <Link href={`/${locale}/impressum`} className="hover:text-slate-700 hover:underline">{t.impressum}</Link>
@@ -33,6 +35,7 @@ export default async function AppLayout({
           <CookieSettingsButton className="hover:text-slate-700 hover:underline" label={t.cookieSettings} />
         </div>
       </footer>
-    </div>
+      </div>
+    </AuthErrorProvider>
   );
 }
