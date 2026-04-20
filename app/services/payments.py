@@ -13,6 +13,7 @@ import hmac
 import json
 import logging
 import secrets
+import threading
 import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -31,6 +32,10 @@ from app.services.tiers import calculate_custom_tier_price
 logger = logging.getLogger(__name__)
 
 ProviderName = Literal["worldline", "stripe"]
+
+_PENDING_CARD_ALIAS_TTL_SECONDS = 15 * 60
+_pending_card_alias_lock = threading.Lock()
+_pending_card_alias_tokens: dict[str, dict[str, Any]] = {}
 
 
 class PaymentConfigurationError(RuntimeError):
@@ -132,6 +137,85 @@ def _worldline_callback_serializer() -> URLSafeSerializer:
     return URLSafeSerializer(settings.secret_key, salt="worldline-callback-v1")
 
 
+def _prune_pending_card_alias_tokens(now_ts: float | None = None) -> None:
+    now = now_ts if now_ts is not None else time.time()
+    expired = [
+        order_ref
+        for order_ref, entry in _pending_card_alias_tokens.items()
+        if float(entry.get("expires_at", 0.0)) <= now
+    ]
+    for order_ref in expired:
+        _pending_card_alias_tokens.pop(order_ref, None)
+
+
+def register_pending_card_alias_token(*, order_reference: str, token: str, org_id: int, user_id: int | None = None) -> None:
+    order_ref = str(order_reference or "").strip()
+    alias_token = str(token or "").strip()
+    if not order_ref or not alias_token:
+        return
+
+    now = time.time()
+    with _pending_card_alias_lock:
+        _prune_pending_card_alias_tokens(now)
+        _pending_card_alias_tokens[order_ref] = {
+            "token": alias_token,
+            "org_id": int(org_id),
+            "user_id": int(user_id) if user_id is not None else None,
+            "expires_at": now + _PENDING_CARD_ALIAS_TTL_SECONDS,
+        }
+
+
+def get_pending_card_alias_token(
+    *,
+    order_reference: str,
+    org_id: int | None = None,
+    user_id: int | None = None,
+) -> str | None:
+    order_ref = str(order_reference or "").strip()
+    if not order_ref:
+        return None
+
+    now = time.time()
+    with _pending_card_alias_lock:
+        _prune_pending_card_alias_tokens(now)
+        entry = _pending_card_alias_tokens.get(order_ref)
+        if not entry:
+            return None
+
+        if org_id is not None and int(entry.get("org_id") or 0) != int(org_id):
+            return None
+
+        entry_user_id = entry.get("user_id")
+        if user_id is not None and entry_user_id is not None and int(entry_user_id) != int(user_id):
+            return None
+
+        token = str(entry.get("token") or "").strip()
+        return token or None
+
+
+def clear_pending_card_alias_token(*, order_reference: str) -> None:
+    order_ref = str(order_reference or "").strip()
+    if not order_ref:
+        return
+    with _pending_card_alias_lock:
+        _pending_card_alias_tokens.pop(order_ref, None)
+
+
+def _is_retryable_alias_assert_error(message: str) -> bool:
+    upper = str(message or "").upper()
+    retry_markers = (
+        "TRANSACTION_IN_WRONG_STATE",
+        "IN_WRONG_STATE",
+        "TOKEN_INVALID",
+        "TOKEN_NOT_FOUND",
+        "ALIAS_NOT_FOUND",
+        "PENDING",
+        "PROCESSING",
+        "NOT READY",
+    )
+    return any(marker in upper for marker in retry_markers)
+
+
 def create_worldline_callback_context(
     *,
     org_id: int | None,
@@ -140,6 +224,7 @@ def create_worldline_callback_context(
     order_reference: str,
     success_url: str,
     cancel_url: str,
+    save_payment_method: bool = False,
 ) -> str:
     payload = {
         "org_id": str(org_id) if org_id is not None else "",
@@ -148,6 +233,7 @@ def create_worldline_callback_context(
         "order_reference": order_reference,
         "success_url": success_url,
         "cancel_url": cancel_url,
+        "save_payment_method": "1" if save_payment_method else "0",
     }
     return str(_worldline_callback_serializer().dumps(payload))
 
@@ -167,6 +253,8 @@ def decode_worldline_callback_context(ctx: str | None) -> dict[str, str]:
     order_reference = str(data.get("order_reference") or "").strip()
     success_url = str(data.get("success_url") or "").strip()
     cancel_url = str(data.get("cancel_url") or "").strip()
+    save_payment_method = str(data.get("save_payment_method") or "").strip().lower()
+    save_payment_method = "1" if save_payment_method in {"1", "true", "yes", "on"} else "0"
     if kind not in {"subscription", "topup", "alias", "card_alias"}:
         return {}
     if not order_reference or not success_url or not cancel_url:
@@ -178,10 +266,21 @@ def decode_worldline_callback_context(ctx: str | None) -> dict[str, str]:
         "order_reference": order_reference,
         "success_url": success_url,
         "cancel_url": cancel_url,
+        "save_payment_method": save_payment_method,
     }
 
 
-def _worldline_callback_url(*, org_id: int, user_id: int | None, kind: str, order_reference: str, success_url: str, cancel_url: str, source: str) -> str:
+def _worldline_callback_url(
+    *,
+    org_id: int,
+    user_id: int | None,
+    kind: str,
+    order_reference: str,
+    success_url: str,
+    cancel_url: str,
+    source: str,
+    save_payment_method: bool = False,
+) -> str:
     # Alias/card-registration callbacks must go to the card-specific endpoint.
     # Payment (subscription/topup) callbacks go to the generic return endpoint.
     if kind in {"alias", "card_alias"}:
@@ -195,6 +294,7 @@ def _worldline_callback_url(*, org_id: int, user_id: int | None, kind: str, orde
         order_reference=order_reference,
         success_url=success_url,
         cancel_url=cancel_url,
+        save_payment_method=save_payment_method,
     )
     fixed = urlencode(
         {
@@ -465,8 +565,8 @@ class WorldlineProvider:
             payload["Styling"] = {"CssUrl": css_url}
         if payment_alias_id:
             payload["PaymentMeans"] = {"Card": {"Alias": {"Id": payment_alias_id}}}
-        elif save_payment_method:
-            payload["RegisterAlias"] = {"IdGenerator": "RANDOM", "Type": "CARD"}
+        # Alias registration is requested during Authorize with the Initialize token.
+        # Do not request alias registration here.
         # Add billing address if provided (required by Worldline for chargeback evidence)
         if billing_address:
             payload["Payer"]["FirstName"] = billing_address.get("first_name", "")
@@ -483,7 +583,7 @@ class WorldlineProvider:
         session = self._create_transaction_initialize(payload)
         return session
 
-    def authorize_transaction(self, *, token: str) -> dict[str, Any]:
+    def authorize_transaction(self, *, token: str, save_payment_method: bool = False) -> dict[str, Any]:
         customer_id = _worldline_customer_id()
         payload = {
             "RequestHeader": {
@@ -494,6 +594,8 @@ class WorldlineProvider:
             },
             "Token": token,
         }
+        if save_payment_method:
+            payload["RegisterAlias"] = {"IdGenerator": "RANDOM", "Type": "CARD"}
         return self._post_worldline_json(
             endpoint_path="/Payment/v1/Transaction/Authorize",
             payload=payload,
@@ -738,6 +840,13 @@ class WorldlineProvider:
         if not redirect:
             raise RuntimeError("Worldline alias registration response did not include a redirect URL")
 
+        register_pending_card_alias_token(
+            order_reference=order_reference,
+            token=token,
+            org_id=org_id,
+            user_id=user_id,
+        )
+
         return CheckoutSession(
             provider=self.name,
             checkout_url=str(redirect),
@@ -760,6 +869,39 @@ class WorldlineProvider:
             payload=payload,
             operation="Worldline alias assertion",
             timeout=100.0,
+        )
+
+    def wait_for_alias_registration(
+        self,
+        *,
+        token: str,
+        max_attempts: int = 15,
+        poll_interval_seconds: int = 60,
+    ) -> dict[str, Any]:
+        attempts = max(1, int(max_attempts))
+        interval = max(1, int(poll_interval_seconds))
+        last_error: str | None = None
+
+        for attempt in range(1, attempts + 1):
+            try:
+                result = self.assert_alias_insert(token=token)
+                alias = result.get("Alias") if isinstance(result, dict) else {}
+                alias_id = str(alias.get("Id") or "") if isinstance(alias, dict) else ""
+                if alias_id:
+                    return result
+                last_error = "Worldline alias assertion did not include alias id"
+            except RuntimeError as exc:
+                last_error = str(exc)
+                if not _is_retryable_alias_assert_error(last_error) or attempt >= attempts:
+                    raise
+
+            if attempt < attempts:
+                time.sleep(interval)
+
+        raise RuntimeError(
+            "Worldline alias registration did not complete within "
+            f"{attempts} attempts at {interval}s intervals"
+            + (f" (last_error={last_error})" if last_error else "")
         )
 
     def create_subscription_checkout(
@@ -790,6 +932,7 @@ class WorldlineProvider:
             success_url=success_url,
             cancel_url=cancel_url,
             source="return",
+            save_payment_method=save_payment_method,
         )
         notify_url = _worldline_callback_url(
             org_id=org_id,
@@ -799,6 +942,7 @@ class WorldlineProvider:
             success_url=success_url,
             cancel_url=cancel_url,
             source="notify",
+            save_payment_method=save_payment_method,
         )
         return self._initialize_request(
             org_id=org_id,
@@ -842,6 +986,7 @@ class WorldlineProvider:
             success_url=success_url,
             cancel_url=cancel_url,
             source="return",
+            save_payment_method=save_payment_method,
         )
         notify_url = _worldline_callback_url(
             org_id=org_id,
@@ -851,6 +996,7 @@ class WorldlineProvider:
             success_url=success_url,
             cancel_url=cancel_url,
             source="notify",
+            save_payment_method=save_payment_method,
         )
         return self._initialize_request(
             org_id=org_id,

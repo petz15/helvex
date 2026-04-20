@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import threading
 from datetime import datetime, timedelta, timezone
 from typing import Literal
 from urllib.parse import urlencode, urlparse
@@ -25,7 +26,7 @@ def _emit(level: str, message: str, *args: object) -> None:
 from app.api.deps import get_current_org
 from app.api.deps import require_org_role
 from app.auth import get_current_user
-from app.database import get_db
+from app.database import SessionLocal, get_db
 from app.models.org_credit_transaction import OrgCreditTransaction
 from app.models.org_member import OrgMember
 from app.models.organization import Organization
@@ -142,6 +143,71 @@ def _cancel_provider_transaction(tx: PaymentTransaction) -> None:
             provider_tx_id[:30],
             str(exc),
         )
+
+
+def _start_worldline_alias_polling(*, org_id: int, user_id: int, order_reference: str, token: str) -> None:
+    worker = threading.Thread(
+        target=_poll_worldline_alias_registration,
+        kwargs={
+            "org_id": org_id,
+            "user_id": user_id,
+            "order_reference": order_reference,
+            "token": token,
+        },
+        daemon=True,
+        name=f"worldline-alias-poll-{org_id}-{user_id}",
+    )
+    worker.start()
+
+
+def _poll_worldline_alias_registration(*, org_id: int, user_id: int, order_reference: str, token: str) -> None:
+    _emit(
+        "info",
+        "billing.worldline_alias_poll_start org_id=%s user_id=%s order_ref=%s token=%s",
+        org_id,
+        user_id,
+        order_reference[:50],
+        token[:20],
+    )
+    try:
+        result = payments.WorldlineProvider().wait_for_alias_registration(
+            token=token,
+            max_attempts=15,
+            poll_interval_seconds=60,
+        )
+        alias = result.get("Alias") if isinstance(result, dict) else {}
+        alias_id = str(alias.get("Id") or "") if isinstance(alias, dict) else ""
+        if not alias_id:
+            raise RuntimeError("Worldline alias assertion did not include an alias id")
+
+        db = SessionLocal()
+        try:
+            owner = db.get(User, user_id)
+            if owner is None:
+                raise RuntimeError("User not found")
+            owner.payment_customer_id = alias_id
+            db.commit()
+        finally:
+            db.close()
+
+        _emit(
+            "info",
+            "billing.worldline_alias_poll_saved org_id=%s user_id=%s alias_id=%s",
+            org_id,
+            user_id,
+            alias_id,
+        )
+    except (payments.PaymentConfigurationError, RuntimeError) as exc:
+        _emit(
+            "warning",
+            "billing.worldline_alias_poll_failed org_id=%s user_id=%s order_ref=%s error=%s",
+            org_id,
+            user_id,
+            order_reference[:50],
+            str(exc),
+        )
+    finally:
+        payments.clear_pending_card_alias_token(order_reference=order_reference)
 
 
 def _safe_redirect_target(url: str | None) -> str:
@@ -471,6 +537,7 @@ async def worldline_return(
     source = str(params.get("source") or "").strip().lower()
     order_reference = str(callback_ctx.get("order_reference") or params.get("order_reference") or "").strip()
     kind = str(callback_ctx.get("kind") or params.get("kind") or "").strip().lower()
+    save_payment_method = str(callback_ctx.get("save_payment_method") or "").strip().lower() in {"1", "true", "yes", "on"}
     query_string = request.url.query or ""
 
     _emit(
@@ -583,7 +650,10 @@ async def worldline_return(
     try:
         # Contact Saferpay to verify the token and get authoritative status.
         # This is the key security check — tokens not in Saferpay are rejected here.
-        result = payments.WorldlineProvider().authorize_transaction(token=token)
+        result = payments.WorldlineProvider().authorize_transaction(
+            token=token,
+            save_payment_method=save_payment_method,
+        )
         transaction = result.get("Transaction") if isinstance(result, dict) else {}
         transaction_status = str(transaction.get("Status") or "").upper() if isinstance(transaction, dict) else ""
         transaction_id = str(transaction.get("Id") or "") if isinstance(transaction, dict) else ""
@@ -824,6 +894,15 @@ def create_worldline_card_registration(
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
     except RuntimeError as exc:
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
+
+    if session.external_id and session.order_reference:
+        _start_worldline_alias_polling(
+            org_id=org.id,
+            user_id=_user.id,
+            order_reference=session.order_reference,
+            token=session.external_id,
+        )
+
     return PaymentMethodRegistrationResponse(provider=session.provider, checkout_url=session.checkout_url, external_id=session.external_id)
 
 
@@ -842,6 +921,9 @@ async def worldline_card_return(
 
     success_url = str(callback_ctx.get("success_url") or params.get("success_url") or "").strip()
     cancel_url = str(callback_ctx.get("cancel_url") or params.get("cancel_url") or "").strip()
+    order_reference = str(callback_ctx.get("order_reference") or params.get("order_reference") or "").strip()
+    org_id = int(callback_ctx.get("org_id") or 0)
+    user_id = int(callback_ctx.get("user_id") or 0)
     source = str(params.get("source") or "").strip().lower()
     query_string = request.url.query or ""
 
@@ -858,13 +940,35 @@ async def worldline_card_return(
         target = _append_query_params(cancel_url, {"reason": "invalid_callback_context"})
         return _iframe_redirect(_safe_redirect_target(target))
 
+    if not token and order_reference:
+        pending_token = payments.get_pending_card_alias_token(
+            order_reference=order_reference,
+            org_id=(org_id if org_id > 0 else None),
+            user_id=(user_id if user_id > 0 else None),
+        )
+        if pending_token:
+            token = pending_token
+            _emit(
+                "info",
+                "billing.worldline_card_token_from_pending source=%s order_ref=%s token=%s",
+                source,
+                order_reference[:50],
+                token[:20],
+            )
+
+    if not token and user_id > 0:
+        owner = db.get(User, user_id)
+        # Background polling may have already completed and persisted the alias.
+        if owner is not None and str(owner.payment_customer_id or "").strip():
+            return _iframe_redirect(
+                _safe_redirect_target(_append_query_params(success_url, {"payment_method": "saved"}))
+            )
+
     if not token:
         target = _append_query_params(cancel_url, {"reason": "missing_token"})
         return _iframe_redirect(_safe_redirect_target(target))
 
     try:
-        org_id = int(callback_ctx.get("org_id") or 0)
-        user_id = int(callback_ctx.get("user_id") or 0)
         if org_id <= 0:
             raise RuntimeError("Worldline alias callback missing org_id")
         if user_id <= 0:
@@ -872,7 +976,11 @@ async def worldline_card_return(
         owner = db.get(User, user_id)
         if owner is None:
             raise RuntimeError("User not found")
-        result = payments.WorldlineProvider().assert_alias_insert(token=token)
+        result = payments.WorldlineProvider().wait_for_alias_registration(
+            token=token,
+            max_attempts=15,
+            poll_interval_seconds=60,
+        )
         alias = result.get("Alias") if isinstance(result, dict) else {}
         alias_id = str(alias.get("Id") or "") if isinstance(alias, dict) else ""
         payment_means = result.get("PaymentMeans") if isinstance(result, dict) else {}
@@ -884,6 +992,8 @@ async def worldline_card_return(
 
         owner.payment_customer_id = alias_id
         db.commit()
+        if order_reference:
+            payments.clear_pending_card_alias_token(order_reference=order_reference)
 
         _emit(
             "info",
@@ -900,7 +1010,17 @@ async def worldline_card_return(
     except payments.PaymentConfigurationError as exc:
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
     except RuntimeError as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+        _emit(
+            "warning",
+            "billing.worldline_card_alias_failed source=%s org_id=%s user_id=%s order_ref=%s error=%s",
+            source,
+            org_id,
+            user_id,
+            order_reference[:50] if order_reference else "NONE",
+            str(exc),
+        )
+        target = _append_query_params(cancel_url, {"reason": "alias_registration_failed"})
+        return _iframe_redirect(_safe_redirect_target(target))
 
 
 @router.get("/providers")

@@ -12,6 +12,7 @@ import ipaddress
 import time
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
+from threading import Lock
 from typing import Annotated
 from urllib.parse import quote
 
@@ -110,6 +111,29 @@ def _user_id_from_request(request: Request) -> int | None:
 # FastAPI dependency
 # ---------------------------------------------------------------------------
 
+_user_cache: dict[int, tuple[User, float]] = {}
+_user_cache_lock = Lock()
+_USER_CACHE_TTL = 30.0  # seconds
+
+
+def _get_cached_user(db: Session, user_id: int) -> User | None:
+    now = time.monotonic()
+    with _user_cache_lock:
+        entry = _user_cache.get(user_id)
+        if entry and now - entry[1] < _USER_CACHE_TTL:
+            return entry[0]
+    user = crud.get_user(db, user_id)
+    if user:
+        with _user_cache_lock:
+            _user_cache[user_id] = (user, now)
+    return user
+
+
+def invalidate_user_cache(user_id: int) -> None:
+    with _user_cache_lock:
+        _user_cache.pop(user_id, None)
+
+
 def get_current_user(
     request: Request,
     db: Session = Depends(get_db),
@@ -122,7 +146,7 @@ def get_current_user(
             detail="Not authenticated",
             headers={"WWW-Authenticate": "Bearer"},
         )
-    user = crud.get_user(db, user_id)
+    user = _get_cached_user(db, user_id)
     if not user or not user.is_active:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,

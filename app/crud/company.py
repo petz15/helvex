@@ -797,13 +797,13 @@ def get_noga_hierarchy(db: Session, org_id: int | None = None) -> list[dict]:
             roots.append(node)
 
     def _sort_children(node: dict) -> None:
-        node["children"].sort(key=lambda x: -x["count"])
+        node["children"].sort(key=lambda x: x["code"])
         for child in node["children"]:
             _sort_children(child)
 
     for root in roots:
         _sort_children(root)
-    roots.sort(key=lambda x: -x["count"])
+    roots.sort(key=lambda x: x["code"])
     return roots
 
 
@@ -1019,6 +1019,7 @@ def get_taxonomy_stats(db: Session, org_id: int | None = None) -> dict:
 _CAT_CACHE_TTL = 7200
 _cat_cache_lock = threading.Lock()
 _cat_cache: dict[tuple, dict[str, Any]] = {}  # key → {"data": ..., "ts": float, "refreshing": bool}
+_cat_refresh_sem = threading.Semaphore(5)  # max 5 concurrent background refreshes
 
 
 def invalidate_category_stats_cache() -> None:
@@ -1030,6 +1031,11 @@ def invalidate_category_stats_cache() -> None:
 def _refresh_cat_cache_bg(category_type: str, value: str, org_id: int | None) -> None:
     global _cat_cache
     key = (category_type, value, org_id)
+    if not _cat_refresh_sem.acquire(blocking=False):
+        with _cat_cache_lock:
+            if key in _cat_cache:
+                _cat_cache[key]["refreshing"] = False
+        return
     try:
         from app.database import SessionLocal
         with SessionLocal() as db:
@@ -1041,6 +1047,8 @@ def _refresh_cat_cache_bg(category_type: str, value: str, org_id: int | None) ->
         with _cat_cache_lock:
             if key in _cat_cache:
                 _cat_cache[key]["refreshing"] = False
+    finally:
+        _cat_refresh_sem.release()
 
 
 def get_category_stats(
@@ -1119,15 +1127,24 @@ def _compute_category_stats(
         "ELSE NULL END"
     )
 
+    org_join = ""
+    org_where = ""
+    if org_id:
+        org_join = "INNER JOIN org_company_state ocs ON ocs.company_id = c.id AND ocs.org_id = :org_id"
+        bind_org: dict = {"value": value, "org_id": org_id}
+    else:
+        bind_org = {"value": value}
+
     def _build_agg_sql(score_expr: str):
         if junction_table:
             from_clause = f"""
                 companies c
                 INNER JOIN {junction_table} j ON c.id = j.company_id
+                {org_join}
             """
             where_cond = f"j.{junction_col} = :value"
         else:
-            from_clause = "companies c"
+            from_clause = f"companies c {org_join}"
             where_cond = f"c.{col} = :value"
 
         return _text(f"""
@@ -1149,17 +1166,18 @@ def _compute_category_stats(
     """)
 
     agg_sql = _build_agg_sql("c.combined_score")
-    bind = {"value": value}
+    bind = bind_org
 
     def _build_canton_sql():
         if junction_table:
             from_clause = f"""
                 companies c
                 INNER JOIN {junction_table} j ON c.id = j.company_id
+                {org_join}
             """
             where_cond = f"j.{junction_col} = :value AND c.canton IS NOT NULL"
         else:
-            from_clause = "companies c"
+            from_clause = f"companies c {org_join}"
             where_cond = f"c.{col} = :value AND c.canton IS NOT NULL"
 
         return _text(f"""

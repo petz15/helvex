@@ -307,7 +307,7 @@ export function PaymentGatewayClient() {
       {cardSaved && (
         <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800 flex items-center gap-2">
           <CheckCircle2 size={15} className="shrink-0" />
-          Card saved successfully. You can now proceed with your saved card.
+          Payment method saved successfully. You can now proceed with your saved payment method.
         </div>
       )}
 
@@ -399,22 +399,22 @@ export function PaymentGatewayClient() {
           <div className="flex items-center justify-between rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2.5">
             <div className="flex items-center gap-2 text-sm text-emerald-700">
               <CreditCard size={14} className="shrink-0" />
-              <span className="font-medium">Saved card on file</span>
+              <span className="font-medium">Saved payment method on file</span>
             </div>
             <button
               onClick={() => setUseNewCard(true)}
               className="text-xs text-blue-600 hover:underline"
             >
-              Use a different card
+              Use a different payment method
             </button>
           </div>
         ) : (
           <div className="space-y-2">
             {hasSavedCard && (
               <div className="flex items-center justify-between">
-                <span className="text-xs text-slate-500">Entering a new card</span>
+                <span className="text-xs text-slate-500">Entering a new payment method</span>
                 <button onClick={() => setUseNewCard(false)} className="text-xs text-blue-600 hover:underline">
-                  Use saved card instead
+                  Use saved payment method instead
                 </button>
               </div>
             )}
@@ -425,12 +425,12 @@ export function PaymentGatewayClient() {
                 onChange={e => setSaveCard(e.target.checked)}
                 className="h-3.5 w-3.5 rounded border-slate-300 text-blue-600 accent-blue-600"
               />
-              Save card for future payments
+              Save payment method for future transactions (optional)
             </label>
           </div>
         )}
 
-        {/* Save card button (standalone, no payment) */}
+        {/* Save payment method button (standalone, no payment) */}
         <div className="pt-1 border-t border-slate-100">
           <button
             onClick={() => void handleSaveCard()}
@@ -438,7 +438,7 @@ export function PaymentGatewayClient() {
             className="text-xs text-slate-500 hover:text-slate-700 disabled:opacity-50 flex items-center gap-1"
           >
             {cardLoading ? <Loader2 size={11} className="animate-spin" /> : <CreditCard size={11} />}
-            {hasSavedCard ? "Replace saved card" : "Save a card without paying now"}
+            {hasSavedCard ? "Replace saved payment method" : "Save a payment method without paying now"}
           </button>
         </div>
       </div>
