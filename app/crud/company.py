@@ -632,11 +632,13 @@ def search_clusters(db: Session, q: str, limit: int = 20) -> list[tuple[str, int
 
 
 def get_noga_hierarchy(db: Session, org_id: int | None = None) -> list[dict]:
-    """Return NOGA codes as a tree with aggregated counts.
+    """Return NOGA codes as a tree with aggregated counts using the real NOGA hierarchy.
 
     Each node: {code, label, level, own_count, count (aggregated), children}.
     Top-level sections are returned as the root list.
     """
+    import json
+    from pathlib import Path
     from app.models.org_company_state import OrgCompanyState
 
     query = db.query(Company.noga_code, Company.noga_label, Company.noga_level, func.count(Company.id).label("cnt"))
@@ -645,45 +647,52 @@ def get_noga_hierarchy(db: Session, org_id: int | None = None) -> list[dict]:
         query = query.join(OrgCompanyState, (OrgCompanyState.company_id == Company.id) & (OrgCompanyState.org_id == org_id), isouter=False)
     rows = query.group_by(Company.noga_code, Company.noga_label, Company.noga_level).all()
 
+    code_counts = {r.noga_code: r.cnt for r in rows}
+
+    lookup_path = Path(__file__).resolve().parents[2] / "noga_lookup.json"
+    try:
+        with lookup_path.open("r", encoding="utf-8") as f:
+            noga_data = json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        logger.warning("Could not load noga_lookup.json, returning empty hierarchy")
+        return []
+
+    parent_map: dict[str, str] = {}
+    for code, node in noga_data.items():
+        if isinstance(node, dict) and "parentCode" in node:
+            parent_map[str(code)] = str(node["parentCode"])
+
     nodes: dict[str, dict] = {}
-    for r in rows:
-        code = r.noga_code or ""
-        nodes[code] = {
-            "code": code,
-            "label": r.noga_label or "",
-            "level": r.noga_level or "",
-            "own_count": r.cnt,
-            "count": r.cnt,
-            "children": [],
-        }
+    for code, node in noga_data.items():
+        code_str = str(code)
+        if isinstance(node, dict):
+            count = code_counts.get(code_str, 0)
+            name = node.get("name", {})
+            label = ""
+            if isinstance(name, dict):
+                label = name.get("de") or name.get("fr") or name.get("it") or name.get("en") or ""
+            elif isinstance(name, str):
+                label = name
+            level = node.get("level", "")
+            nodes[code_str] = {
+                "code": code_str,
+                "label": label,
+                "level": level,
+                "own_count": count,
+                "count": count,
+                "children": [],
+            }
 
-    def _parent_code(code: str) -> str | None:
-        """Derive parent code: 68.20 → 68.2 → 68 → section letter → None."""
-        if "." in code:
-            parts = code.split(".")
-            sub = parts[-1]
-            if len(sub) > 1:
-                return ".".join(parts[:-1] + [sub[:-1]])
-            return parts[0]
-        if len(code) == 2 and code.isdigit():
-            # division code like "68" — no known parent in flat data, skip
-            return None
-        if len(code) > 1:
-            return code[:-1]
-        return None
-
-    # Propagate counts upward and wire children
-    for code in sorted(nodes.keys(), key=len, reverse=True):
-        parent = _parent_code(code)
-        while parent is not None:
+    for code in nodes:
+        parent = parent_map.get(code)
+        while parent and parent != code:
             if parent in nodes:
                 nodes[parent]["count"] += nodes[code]["count"]
                 if nodes[code] not in nodes[parent]["children"]:
                     nodes[parent]["children"].append(nodes[code])
                 break
-            parent = _parent_code(parent)
+            parent = parent_map.get(parent)
 
-    # Return only root nodes (those with no parent in our node set)
     roots = []
     all_child_codes: set[str] = set()
     for node in nodes.values():
@@ -693,7 +702,6 @@ def get_noga_hierarchy(db: Session, org_id: int | None = None) -> list[dict]:
         if code not in all_child_codes:
             roots.append(node)
 
-    # Sort children by count desc at each level
     def _sort_children(node: dict) -> None:
         node["children"].sort(key=lambda x: -x["count"])
         for child in node["children"]:
@@ -974,10 +982,7 @@ def _compute_category_stats(
         return {"error": f"Unknown category_type: {category_type}"}
 
     col = _TYPE_TO_COL[category_type]
-    sep = "|" if category_type == "tfidf_cluster" else ","
-    if category_type in ("tfidf_cluster", "keyword"):
-        # Boundary matching: exact value, or value between separators (no false positives
-        # from substring overlap, e.g. "Beratung" matching "Rechtsberatung").
+    if category_type == "tfidf_cluster":
         where_clause = (
             f"({col} = :v"
             f" OR {col} LIKE :pat_prefix"
@@ -986,9 +991,22 @@ def _compute_category_stats(
         )
         bind = {
             "v": value,
-            "pat_prefix": f"{value}{sep}%",
-            "pat_suffix": f"%{sep}{value}",
-            "pat_mid": f"%{sep}{value}{sep}%",
+            "pat_prefix": f"{value}|%",
+            "pat_suffix": f"%|{value}",
+            "pat_mid": f"%|{value}|%",
+        }
+    elif category_type == "keyword":
+        where_clause = (
+            f"({col} = :v"
+            f" OR {col} LIKE :pat_prefix"
+            f" OR {col} LIKE :pat_suffix"
+            f" OR {col} LIKE :pat_mid)"
+        )
+        bind = {
+            "v": value,
+            "pat_prefix": f"{value},%",
+            "pat_suffix": f"%,{value}",
+            "pat_mid": f"%,{value},%",
         }
     else:
         where_clause = f"{col} = :value"
@@ -1011,6 +1029,19 @@ def _compute_category_stats(
     )
 
     def _build_agg_sql(score_expr: str):
+        if category_type == "tfidf_cluster":
+            where_cond = (
+                f"(string_to_array({col}, '|') @> ARRAY[:v]"
+                f" OR {col} = :v)"
+            )
+        elif category_type == "keyword":
+            where_cond = (
+                f"(string_to_array({col}, ',') @> ARRAY[:v]"
+                f" OR {col} = :v)"
+            )
+        else:
+            where_cond = where_clause
+
         return _text(f"""
         SELECT
             COUNT(*)                                                    AS total,
@@ -1026,20 +1057,36 @@ def _compute_category_stats(
                         AND {score_expr} < 60    THEN 1 END)            AS band_40to60,
             COUNT(CASE WHEN {score_expr} < 40    THEN 1 END)            AS band_below40
         FROM companies
-        WHERE {where_clause}
+        WHERE {where_cond}
     """)
 
     # All aggregates use the stored combined_score column — no complex CASE expressions.
     agg_sql = _build_agg_sql("combined_score")
 
-    canton_sql = _text(f"""
-        SELECT canton, COUNT(*) AS cnt
-        FROM companies
-        WHERE {where_clause} AND canton IS NOT NULL
-        GROUP BY canton
-        ORDER BY cnt DESC
-        LIMIT 10
-    """)
+    def _build_canton_sql():
+        if category_type == "tfidf_cluster":
+            where_cond = (
+                f"(string_to_array({col}, '|') @> ARRAY[:v]"
+                f" OR {col} = :v)"
+            )
+        elif category_type == "keyword":
+            where_cond = (
+                f"(string_to_array({col}, ',') @> ARRAY[:v]"
+                f" OR {col} = :v)"
+            )
+        else:
+            where_cond = where_clause
+
+        return _text(f"""
+            SELECT canton, COUNT(*) AS cnt
+            FROM companies
+            WHERE {where_cond} AND canton IS NOT NULL
+            GROUP BY canton
+            ORDER BY cnt DESC
+            LIMIT 10
+        """)
+
+    canton_sql = _build_canton_sql()
 
     try:
         r = db.execute(agg_sql, bind).fetchone()
