@@ -209,6 +209,7 @@ def _is_retryable_alias_assert_error(message: str) -> bool:
         "TOKEN_INVALID",
         "TOKEN_NOT_FOUND",
         "ALIAS_NOT_FOUND",
+        "ALIAS_INVALID",   # customer hasn't completed the form yet
         "PENDING",
         "PROCESSING",
         "NOT READY",

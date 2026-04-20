@@ -121,7 +121,9 @@ def _get_cached_user(db: Session, user_id: int) -> User | None:
     with _user_cache_lock:
         entry = _user_cache.get(user_id)
         if entry and now - entry[1] < _USER_CACHE_TTL:
-            return entry[0]
+            # Re-attach to the current session without a SELECT so lazy loads
+            # work and DetachedInstanceError cannot occur across request boundaries.
+            return db.merge(entry[0], load=False)
     user = crud.get_user(db, user_id)
     if user:
         with _user_cache_lock:

@@ -184,6 +184,7 @@ def _start_worldline_alias_polling(*, org_id: int, user_id: int, order_reference
 
 
 def _poll_worldline_alias_registration(*, org_id: int, user_id: int, order_reference: str, token: str) -> None:
+    import time as _time
     _emit(
         "info",
         "billing.worldline_alias_poll_start org_id=%s user_id=%s order_ref=%s token=%s",
@@ -192,6 +193,8 @@ def _poll_worldline_alias_registration(*, org_id: int, user_id: int, order_refer
         order_reference[:50],
         token[:20],
     )
+    # Wait before first attempt — customer needs time to fill the card form.
+    _time.sleep(30)
     try:
         result = payments.WorldlineProvider().wait_for_alias_registration(
             token=token,
@@ -214,6 +217,9 @@ def _poll_worldline_alias_registration(*, org_id: int, user_id: int, order_refer
         finally:
             db.close()
 
+        # Only clear the pending token on success so the return-URL callback
+        # can still use it if it arrives before the poll completes.
+        payments.clear_pending_card_alias_token(order_reference=order_reference)
         _emit(
             "info",
             "billing.worldline_alias_poll_saved org_id=%s user_id=%s alias_id=%s",
@@ -230,8 +236,6 @@ def _poll_worldline_alias_registration(*, org_id: int, user_id: int, order_refer
             order_reference[:50],
             str(exc),
         )
-    finally:
-        payments.clear_pending_card_alias_token(order_reference=order_reference)
 
 
 def _safe_redirect_target(url: str | None) -> str:
@@ -1000,10 +1004,12 @@ async def worldline_card_return(
         owner = db.get(User, user_id)
         if owner is None:
             raise RuntimeError("User not found")
+        # Customer just completed the form — alias should be ready within seconds.
+        # Use short retries; the 15-min poll is only for the background fallback thread.
         result = payments.WorldlineProvider().wait_for_alias_registration(
             token=token,
-            max_attempts=15,
-            poll_interval_seconds=60,
+            max_attempts=5,
+            poll_interval_seconds=2,
         )
         alias = result.get("Alias") if isinstance(result, dict) else {}
         alias_id = str(alias.get("Id") or "") if isinstance(alias, dict) else ""
