@@ -137,12 +137,14 @@ def run_billing_renewal(db: Session) -> dict[str, Any]:
         "capture_retry": capture_stats,
     }
 
-    # Find all paid orgs whose subscription_period_end is in the past (or within 1h).
+    # Find all paid orgs whose subscription_period_end is in the past.
+    # Include a 1-minute buffer to catch subscriptions that just expired (handles clock skew).
     due_orgs = (
         db.query(Organization)
         .filter(
             Organization.tier_id > 0,  # not free
-            Organization.subscription_period_end <= now + timedelta(hours=1),
+            Organization.subscription_period_end.isnot(None),
+            Organization.subscription_period_end <= now + timedelta(minutes=1),
         )
         .all()
     )
