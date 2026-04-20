@@ -47,7 +47,7 @@
 - NOGA: Zweigniederlassung ist falsch zbs: https://helvex.dicy.ch/app/companies/238698
 - AI Preview: AI classification is not configured on this server
 - Tiers:
-    - web results are not gated, immediately shown. Should have been atleast 1 week of pause form a simple tier. 
+    - web results are not gated, immediately shown. Should have been atleast 1 week of pause form a simple tier. f
 - DB currently very slow: simple request about 2-3 seconds if first request
 
 

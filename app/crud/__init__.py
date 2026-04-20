@@ -1,4 +1,4 @@
-from app.crud.app_setting import get_all_settings, get_effective_setting, get_setting, seed_defaults, set_setting
+from app.crud.app_setting import get_all_settings, get_effective_setting, get_effective_settings_batch, get_setting, seed_defaults, set_setting
 from app.crud.boilerplate import (
     create_boilerplate_pattern,
     delete_boilerplate_pattern,
@@ -155,6 +155,7 @@ __all__ = [
     # app settings
     "get_setting",
     "get_effective_setting",
+    "get_effective_settings_batch",
     "set_setting",
     "get_all_settings",
     "seed_defaults",

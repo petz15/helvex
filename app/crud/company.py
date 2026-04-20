@@ -9,7 +9,7 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
-from sqlalchemy import case, func, nullslast, or_, and_
+from sqlalchemy import case, func, nullslast, or_, and_, text as _text
 from sqlalchemy.orm import Session
 
 from app.models.company import Company
@@ -563,8 +563,7 @@ def get_company_stats(db: Session) -> dict:
         contact_counts[label] = db.query(Company).filter(Company.contact_status == label).count()
 
     # Score distribution: bucket stored combined_score into 10-point bands
-    from sqlalchemy import text as _stext
-    dist_rows = db.execute(_stext(
+    dist_rows = db.execute(_text(
         "SELECT LEAST(FLOOR(combined_score / 10)::int, 9) AS bucket, COUNT(*) AS cnt"
         " FROM companies WHERE combined_score IS NOT NULL GROUP BY bucket"
     )).fetchall()
@@ -593,10 +592,49 @@ def create_company(db: Session, company_in: CompanyCreate) -> Company:
     return db_company
 
 
+def _sync_junction_tables(db: Session, company_id: int, update_data: dict) -> None:
+    """Keep company_tfidf_clusters and company_purpose_keywords in sync when their source fields change."""
+    if not HAS_JUNCTION_TABLES:
+        return
+    if "tfidf_cluster" in update_data:
+        db.execute(
+            _text("DELETE FROM company_tfidf_clusters WHERE company_id = :cid"),
+            {"cid": company_id},
+        )
+        raw = update_data["tfidf_cluster"] or ""
+        terms = [t.strip() for t in raw.split("|") if t.strip()]
+        if terms:
+            db.execute(
+                _text(
+                    "INSERT INTO company_tfidf_clusters (company_id, cluster) "
+                    "SELECT :cid, UNNEST(:terms::text[]) "
+                    "ON CONFLICT DO NOTHING"
+                ),
+                {"cid": company_id, "terms": terms},
+            )
+    if "purpose_keywords" in update_data:
+        db.execute(
+            _text("DELETE FROM company_purpose_keywords WHERE company_id = :cid"),
+            {"cid": company_id},
+        )
+        raw = update_data["purpose_keywords"] or ""
+        terms = [t.strip() for t in raw.split(",") if t.strip()]
+        if terms:
+            db.execute(
+                _text(
+                    "INSERT INTO company_purpose_keywords (company_id, keyword) "
+                    "SELECT :cid, UNNEST(:terms::text[]) "
+                    "ON CONFLICT DO NOTHING"
+                ),
+                {"cid": company_id, "terms": terms},
+            )
+
+
 def update_company(db: Session, db_company: Company, company_in: CompanyUpdate) -> Company:
     update_data = company_in.model_dump(exclude_unset=True)
     for field, value in update_data.items():
         setattr(db_company, field, value)
+    _sync_junction_tables(db, db_company.id, update_data)
     db.commit()
     db.refresh(db_company)
     return db_company
@@ -809,8 +847,6 @@ def _refresh_taxonomy_cache_bg() -> None:
 
 def _compute_global_taxonomy(db: Session) -> dict[str, Any]:
     """Run all expensive global taxonomy queries. Result is cached."""
-    from sqlalchemy import text as _text
-
     base_q = db.query(Company)
 
     try:
@@ -1047,8 +1083,6 @@ def _compute_category_stats(
     All aggregation is done in a single SQL query — no rows fetched into Python.
     Uses the stored combined_score column for band counts and averages.
     """
-    from sqlalchemy import text as _text
-
     _TYPE_TO_COL = {
         "ai_category": "ai_category",
         "tfidf_cluster": "tfidf_cluster",
@@ -1140,9 +1174,8 @@ def _compute_category_stats(
     canton_sql = _build_canton_sql()
 
     try:
-        db.execute("SET work_mem = '256MB'")
+        db.execute(_text("SET LOCAL work_mem = '256MB'"))
         r = db.execute(agg_sql, bind).fetchone()
-        db.execute("RESET work_mem")
     except Exception as exc:
         # During rolling deploys, some databases may not yet have combined_score.
         # Retry using the legacy computed expression to avoid 500s.

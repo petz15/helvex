@@ -150,6 +150,16 @@ def rename_cluster(db: Session, registry_id: int, new_name: str) -> ClusterRegis
             updated_companies += 1
 
     entry.canonical_name = new_name
+    # Keep junction table in sync with the rename
+    if updated_companies:
+        from sqlalchemy import text as _text
+        db.execute(
+            _text(
+                "UPDATE company_tfidf_clusters SET cluster = :new_name "
+                "WHERE cluster = :old_name"
+            ),
+            {"new_name": new_name, "old_name": old_name},
+        )
     db.commit()
     logger.info(
         "Cluster renamed: '%s' → '%s' (registry_id=%d, %d companies updated)",
