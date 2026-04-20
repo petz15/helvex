@@ -212,7 +212,8 @@
       "Bash(python -m py_compile \"c:/D/coding_projects/zefix_analyzer/app/api/routes/companies.py\")",
       "Bash(cat)",
       "Bash(python /tmp/test_noga_cache.py)",
-      "Bash(grep -E \"\\\\.\\(tsx|ts\\)$\")"
+      "Bash(grep -E \"\\\\.\\(tsx|ts\\)$\")",
+      "Bash(grep -r \"db.query.*\\\\\\\\.all\\(\\)\\\\|session.execute.*fetchall\\(\\)\" c:/D/coding_projects/zefix_analyzer/app --include=\"*.py\" -A 2)"
     ]
   }
 }

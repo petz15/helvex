@@ -106,21 +106,22 @@ def get_analytics(
     top_rows = (
         db.query(
             OrgCreditTx.org_id,
+            Organization.name,
             func.sum(-OrgCreditTx.amount).label("net_spend"),
         )
+        .join(Organization, Organization.id == OrgCreditTx.org_id, isouter=True)
         .filter(OrgCreditTx.created_at >= cutoff, OrgCreditTx.amount < 0)
-        .group_by(OrgCreditTx.org_id)
+        .group_by(OrgCreditTx.org_id, Organization.name)
         .order_by(func.sum(-OrgCreditTx.amount).desc())
         .limit(10)
         .all()
     )
     top_credit_consumers = []
-    for org_id, net_spend in top_rows:
-        org = db.get(Organization, org_id)
+    for org_id, org_name, net_spend in top_rows:
         net = int(net_spend or 0)
         top_credit_consumers.append({
             "org_id": org_id,
-            "org_name": org.name if org else f"org:{org_id}",
+            "org_name": org_name if org_name else f"org:{org_id}",
             "net_spend_credits": net,
             "net_spend_chf": round(net * 0.0001, 4),
         })

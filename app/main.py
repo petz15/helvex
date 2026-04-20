@@ -41,6 +41,7 @@ if sys.version_info >= (3, 12):
 from alembic import command as alembic_command
 from alembic.config import Config as AlembicConfig
 from fastapi import Depends, FastAPI, Form, Query, Request, status
+from fastapi.middleware.gzip import GZIPMiddleware
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import inspect as sa_inspect
@@ -166,6 +167,13 @@ def _seed_settings(app_state) -> None:
         _app_logger.info("boilerplate seed: inserted=%d skipped=%d", result["inserted"], result["skipped"])
     except Exception as exc:
         _app_logger.warning("boilerplate seed failed (non-fatal): %s", exc)
+
+    app_state.startup_message = "Loading NOGA hierarchy cache…"
+    try:
+        from app.crud.company import _load_noga_hierarchy
+        _load_noga_hierarchy()
+    except Exception as exc:
+        _app_logger.warning("NOGA hierarchy cache failed (non-fatal): %s", exc)
 
 
 def _maybe_enqueue_geocode_upgrade(app, app_state) -> None:
@@ -423,6 +431,9 @@ app = FastAPI(
     version=APP_VERSION,
     lifespan=lifespan,
 )
+
+# Add response compression middleware for large JSON payloads (5-10x compression typical)
+app.add_middleware(GZIPMiddleware, minimum_size=1000)
 
 app.mount("/static", StaticFiles(directory="app/static"), name="static")
 

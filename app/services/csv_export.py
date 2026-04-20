@@ -42,7 +42,7 @@ _HEADERS = [
     "created_at", "updated_at",
 ]
 
-_BATCH = 5000  # rows per DB page (avoids loading entire table in memory)
+_BATCH = 1000  # rows per DB page (avoids loading entire table in memory, reduced for large exports)
 
 
 def _row(c: Any) -> list:
@@ -192,6 +192,7 @@ def run_csv_export(
                 writer.writerow(_row(c))
                 written += 1
 
+            fh.flush()
             if progress_cb:
                 progress_cb(written, total, {"written": written})
 

@@ -13,6 +13,38 @@ _BASE_ORG_ID = 1  # Org 1 acts as the global default — its settings serve as t
                   # for all other orgs that have not configured their own overrides.
 
 
+def get_effective_settings_batch(db: Session, keys: list[str], *, org_id: int | None = None) -> dict[str, str]:
+    """Batch-load multiple settings at once. More efficient than calling get_effective_setting() repeatedly."""
+    result = {}
+
+    if org_id is not None:
+        org_rows = (
+            db.query(OrgSetting)
+            .filter(OrgSetting.org_id == org_id, OrgSetting.key.in_(keys))
+            .all()
+        )
+        for row in org_rows:
+            result[row.key] = row.value
+
+    missing_keys = [k for k in keys if k not in result]
+    if missing_keys and org_id != _BASE_ORG_ID:
+        base_rows = (
+            db.query(OrgSetting)
+            .filter(OrgSetting.org_id == _BASE_ORG_ID, OrgSetting.key.in_(missing_keys))
+            .all()
+        )
+        for row in base_rows:
+            result[row.key] = row.value
+
+    missing_keys = [k for k in keys if k not in result]
+    if missing_keys:
+        global_rows = db.query(AppSetting).filter(AppSetting.key.in_(missing_keys)).all()
+        for row in global_rows:
+            result[row.key] = row.value
+
+    return result
+
+
 def get_effective_setting(db: Session, key: str, *, org_id: int | None = None, default: str = "") -> str:
     """Return the most specific setting value using a three-tier fallback:
 

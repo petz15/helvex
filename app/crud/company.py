@@ -1,17 +1,67 @@
+import json
 import logging
 import threading
 import time
 from collections import Counter
 from datetime import date
+from pathlib import Path
 from typing import Any
 
 logger = logging.getLogger(__name__)
 
-from sqlalchemy import case, func, nullslast, or_
+from sqlalchemy import case, func, nullslast, or_, and_
 from sqlalchemy.orm import Session
 
 from app.models.company import Company
 from app.schemas.company import CompanyCreate, CompanyUpdate
+
+try:
+    from app.models.company_tfidf_cluster import CompanyTfidfCluster
+    from app.models.company_purpose_keyword import CompanyPurposeKeyword
+    HAS_JUNCTION_TABLES = True
+except ImportError:
+    HAS_JUNCTION_TABLES = False
+
+_NOGA_CACHE: dict[str, Any] | None = None
+
+
+def _load_noga_hierarchy() -> dict[str, Any]:
+    """Load and cache NOGA hierarchy from noga_lookup.json. Called once at startup."""
+    global _NOGA_CACHE
+    if _NOGA_CACHE is not None:
+        return _NOGA_CACHE
+
+    lookup_path = Path(__file__).resolve().parents[2] / "noga_lookup.json"
+    try:
+        with lookup_path.open("r", encoding="utf-8") as f:
+            noga_data = json.load(f)
+    except Exception as e:
+        logger.warning("Could not load noga_lookup.json: %s, returning empty hierarchy", e)
+        _NOGA_CACHE = {}
+        return _NOGA_CACHE
+
+    parent_map: dict[str, str] = {}
+    for code, node in noga_data.items():
+        if isinstance(node, dict) and "parentCode" in node:
+            parent_map[str(code)] = str(node["parentCode"])
+
+    nodes: dict[str, dict] = {}
+    for code, node in noga_data.items():
+        if isinstance(node, dict):
+            parent = parent_map.get(str(code))
+            nodes[str(code)] = {
+                "label": node.get("label", str(code)),
+                "parent": parent,
+            }
+        else:
+            nodes[str(code)] = {"label": str(code), "parent": None}
+
+    _NOGA_CACHE = {
+        "nodes": nodes,
+        "parent_map": parent_map,
+        "noga_data": noga_data,
+    }
+    return _NOGA_CACHE
 
 # Valid sort keys → (column_attr, ascending)
 _SORT_MAP = {
@@ -173,9 +223,11 @@ def _apply_filters(query, *, name_filter, uid_filter=None, canton, review_status
         query = query.filter(Company.tfidf_cluster.is_(None))
     elif tfidf_cluster == "_any":
         query = query.filter(Company.tfidf_cluster.isnot(None))
+    elif tfidf_cluster and HAS_JUNCTION_TABLES:
+        terms = [t.strip() for t in tfidf_cluster.split(",") if t.strip()]
+        query = query.join(CompanyTfidfCluster).filter(CompanyTfidfCluster.cluster.in_(terms))
     elif tfidf_cluster:
         terms = [t.strip() for t in tfidf_cluster.split(",") if t.strip()]
-        # Pipe-boundary matching: exact label or appears between | separators
         def _cluster_match(t: str):
             return or_(
                 Company.tfidf_cluster == t,
@@ -186,21 +238,22 @@ def _apply_filters(query, *, name_filter, uid_filter=None, canton, review_status
         query = query.filter(or_(*[_cluster_match(t) for t in terms]))
     if purpose_keywords:
         terms = [t.strip() for t in purpose_keywords.split(",") if t.strip()]
-        # Use GIN-indexed array column when available; fall back to text boundary match.
-        from sqlalchemy import text as _sqlt
-        query = query.filter(or_(
-            Company.purpose_keywords_arr.overlap(terms),   # uses GIN index
-            # Fallback for rows not yet backfilled (purpose_keywords_arr IS NULL)
-            *[
-                or_(
-                    Company.purpose_keywords == t,
-                    Company.purpose_keywords.ilike(f"{t},%"),
-                    Company.purpose_keywords.ilike(f"%, {t}"),
-                    Company.purpose_keywords.ilike(f"%, {t},%"),
-                )
-                for t in terms
-            ]
-        ))
+        if HAS_JUNCTION_TABLES:
+            query = query.join(CompanyPurposeKeyword).filter(CompanyPurposeKeyword.keyword.in_(terms))
+        else:
+            from sqlalchemy import text as _sqlt
+            query = query.filter(or_(
+                Company.purpose_keywords_arr.overlap(terms),   # uses GIN index
+                *[
+                    or_(
+                        Company.purpose_keywords == t,
+                        Company.purpose_keywords.ilike(f"{t},%"),
+                        Company.purpose_keywords.ilike(f"%, {t}"),
+                        Company.purpose_keywords.ilike(f"%, {t},%"),
+                    )
+                    for t in terms
+                ]
+            ))
     if noga_code == "_none":
         query = query.filter(Company.noga_code.is_(None))
     elif noga_code == "_any":
@@ -491,9 +544,12 @@ def get_company_stats(db: Session) -> dict:
     with_website = db.query(Company).filter(Company.website_url.isnot(None)).count()
 
     # Google searches used today (by website_checked_at date)
+    from datetime import datetime
+    today_start = datetime.combine(date.today(), datetime.min.time())
+    today_end = datetime.combine(date.today(), datetime.max.time())
     searches_today = (
         db.query(Company)
-        .filter(func.date(Company.website_checked_at) == date.today())
+        .filter(Company.website_checked_at >= today_start, Company.website_checked_at <= today_end)
         .count()
     )
 
@@ -579,32 +635,39 @@ def bulk_update_tags(
     tag = tag.strip()
     if not tag or not company_ids:
         return 0
-    rows = db.query(Company).filter(Company.id.in_(company_ids)).all()
+
+    batch_size = 500
     updated = 0
-    for company in rows:
-        current_tags = [t.strip() for t in (company.tags or "").split(",") if t.strip()]
-        if action == "add" and tag not in current_tags:
-            current_tags.append(tag)
-            company.tags = ", ".join(current_tags)
-            updated += 1
-        elif action == "remove" and tag in current_tags:
-            current_tags.remove(tag)
-            company.tags = ", ".join(current_tags) or None
-            updated += 1
-    db.commit()
+    for i in range(0, len(company_ids), batch_size):
+        batch = company_ids[i : i + batch_size]
+        rows = db.query(Company).filter(Company.id.in_(batch)).all()
+        for company in rows:
+            current_tags = [t.strip() for t in (company.tags or "").split(",") if t.strip()]
+            if action == "add" and tag not in current_tags:
+                current_tags.append(tag)
+                company.tags = ", ".join(current_tags)
+                updated += 1
+            elif action == "remove" and tag in current_tags:
+                current_tags.remove(tag)
+                company.tags = ", ".join(current_tags) or None
+                updated += 1
+        if rows:
+            db.commit()
+
     return updated
 
 
 def search_keywords(db: Session, q: str, limit: int = 20) -> list[tuple[str, int]]:
     """Return individual keywords from purpose_keywords matching q, sorted by frequency."""
+    q_lower = q.lower()
     raw = (
         db.query(Company.purpose_keywords)
         .filter(Company.purpose_keywords.isnot(None))
         .filter(Company.purpose_keywords.ilike(f"%{q}%"))
+        .limit(1000)
         .all()
     )
     counter: Counter = Counter()
-    q_lower = q.lower()
     for (val,) in raw:
         for kw in val.split(","):
             kw = kw.strip()
@@ -615,14 +678,15 @@ def search_keywords(db: Session, q: str, limit: int = 20) -> list[tuple[str, int
 
 def search_clusters(db: Session, q: str, limit: int = 20) -> list[tuple[str, int]]:
     """Return cluster labels matching q, sorted by frequency."""
+    q_lower = q.lower()
     raw = (
         db.query(Company.tfidf_cluster)
         .filter(Company.tfidf_cluster.isnot(None))
         .filter(Company.tfidf_cluster.ilike(f"%{q}%"))
+        .limit(1000)
         .all()
     )
     counter: Counter = Counter()
-    q_lower = q.lower()
     for (val,) in raw:
         for label in val.split("|"):
             label = label.strip()
@@ -637,9 +701,14 @@ def get_noga_hierarchy(db: Session, org_id: int | None = None) -> list[dict]:
     Each node: {code, label, level, own_count, count (aggregated), children}.
     Top-level sections are returned as the root list.
     """
-    import json
-    from pathlib import Path
     from app.models.org_company_state import OrgCompanyState
+
+    noga_cache = _load_noga_hierarchy()
+    if not noga_cache:
+        return []
+
+    noga_data = noga_cache["noga_data"]
+    parent_map = noga_cache["parent_map"]
 
     query = db.query(Company.noga_code, Company.noga_label, Company.noga_level, func.count(Company.id).label("cnt"))
     query = query.filter(Company.noga_code.isnot(None))
@@ -648,19 +717,6 @@ def get_noga_hierarchy(db: Session, org_id: int | None = None) -> list[dict]:
     rows = query.group_by(Company.noga_code, Company.noga_label, Company.noga_level).all()
 
     code_counts = {r.noga_code: r.cnt for r in rows}
-
-    lookup_path = Path(__file__).resolve().parents[2] / "noga_lookup.json"
-    try:
-        with lookup_path.open("r", encoding="utf-8") as f:
-            noga_data = json.load(f)
-    except (FileNotFoundError, json.JSONDecodeError):
-        logger.warning("Could not load noga_lookup.json, returning empty hierarchy")
-        return []
-
-    parent_map: dict[str, str] = {}
-    for code, node in noga_data.items():
-        if isinstance(node, dict) and "parentCode" in node:
-            parent_map[str(code)] = str(node["parentCode"])
 
     nodes: dict[str, dict] = {}
     for code, node in noga_data.items():
@@ -757,21 +813,40 @@ def _compute_global_taxonomy(db: Session) -> dict[str, Any]:
 
     base_q = db.query(Company)
 
-    cluster_rows = db.execute(_text(
-        "SELECT trim(unnest(string_to_array(tfidf_cluster, '|'))) AS label, COUNT(*) AS cnt"
-        " FROM companies"
-        " WHERE tfidf_cluster IS NOT NULL AND tfidf_cluster != 'Undefined'"
-        " GROUP BY label ORDER BY cnt DESC"
-    )).fetchall()
-    clusters_list = [(r.label, r.cnt) for r in cluster_rows if r.label]
+    try:
+        cluster_rows = db.execute(_text(
+            "SELECT cluster AS label, COUNT(DISTINCT company_id) AS cnt"
+            " FROM company_tfidf_clusters"
+            " WHERE cluster != 'Undefined'"
+            " GROUP BY cluster ORDER BY cnt DESC"
+        )).fetchall()
+        clusters_list = [(r.label, r.cnt) for r in cluster_rows if r.label]
+    except Exception:
+        logger.warning("company_tfidf_clusters not yet available, falling back to UNNEST")
+        cluster_rows = db.execute(_text(
+            "SELECT trim(unnest(string_to_array(tfidf_cluster, '|'))) AS label, COUNT(*) AS cnt"
+            " FROM companies"
+            " WHERE tfidf_cluster IS NOT NULL AND tfidf_cluster != 'Undefined'"
+            " GROUP BY label ORDER BY cnt DESC"
+        )).fetchall()
+        clusters_list = [(r.label, r.cnt) for r in cluster_rows if r.label]
 
-    kw_rows = db.execute(_text(
-        "SELECT trim(unnest(string_to_array(purpose_keywords, ','))) AS kw, COUNT(*) AS cnt"
-        " FROM companies"
-        " WHERE purpose_keywords IS NOT NULL"
-        " GROUP BY kw ORDER BY cnt DESC LIMIT 100"
-    )).fetchall()
-    keywords_list = [(r.kw, r.cnt) for r in kw_rows if r.kw]
+    try:
+        kw_rows = db.execute(_text(
+            "SELECT keyword AS kw, COUNT(DISTINCT company_id) AS cnt"
+            " FROM company_purpose_keywords"
+            " GROUP BY keyword ORDER BY cnt DESC LIMIT 100"
+        )).fetchall()
+        keywords_list = [(r.kw, r.cnt) for r in kw_rows if r.kw]
+    except Exception:
+        logger.warning("company_purpose_keywords not yet available, falling back to UNNEST")
+        kw_rows = db.execute(_text(
+            "SELECT trim(unnest(string_to_array(purpose_keywords, ','))) AS kw, COUNT(*) AS cnt"
+            " FROM companies"
+            " WHERE purpose_keywords IS NOT NULL"
+            " GROUP BY kw ORDER BY cnt DESC LIMIT 100"
+        )).fetchall()
+        keywords_list = [(r.kw, r.cnt) for r in kw_rows if r.kw]
 
     categories = (
         base_q.with_entities(Company.ai_category, func.count(Company.id).label("cnt"))
@@ -780,6 +855,18 @@ def _compute_global_taxonomy(db: Session) -> dict[str, Any]:
         .order_by(func.count(Company.id).desc())
         .all()
     )
+
+    cat_scores = (
+        base_q.with_entities(
+            Company.ai_category,
+            func.avg(Company.ai_score).label("avg_ai"),
+            func.avg(Company.flex_score).label("avg_flex"),
+        )
+        .filter(Company.ai_category.isnot(None))
+        .group_by(Company.ai_category)
+        .all()
+    )
+
     noga_codes = (
         base_q.with_entities(Company.noga_code, Company.noga_label, func.count(Company.id).label("cnt"))
         .filter(Company.noga_code.isnot(None))
@@ -806,16 +893,6 @@ def _compute_global_taxonomy(db: Session) -> dict[str, Any]:
         .filter(Company.canton.isnot(None))
         .group_by(Company.canton)
         .order_by(func.count(Company.id).desc())
-        .all()
-    )
-    cat_scores = (
-        base_q.with_entities(
-            Company.ai_category,
-            func.avg(Company.ai_score).label("avg_ai"),
-            func.avg(Company.flex_score).label("avg_flex"),
-        )
-        .filter(Company.ai_category.isnot(None))
-        .group_by(Company.ai_category)
         .all()
     )
     cat_score_map = {
@@ -982,106 +1059,80 @@ def _compute_category_stats(
         return {"error": f"Unknown category_type: {category_type}"}
 
     col = _TYPE_TO_COL[category_type]
+
     if category_type == "tfidf_cluster":
-        where_clause = (
-            f"({col} = :v"
-            f" OR {col} LIKE :pat_prefix"
-            f" OR {col} LIKE :pat_suffix"
-            f" OR {col} LIKE :pat_mid)"
-        )
-        bind = {
-            "v": value,
-            "pat_prefix": f"{value}|%",
-            "pat_suffix": f"%|{value}",
-            "pat_mid": f"%|{value}|%",
-        }
+        junction_table = "company_tfidf_clusters"
+        junction_col = "cluster"
     elif category_type == "keyword":
-        where_clause = (
-            f"({col} = :v"
-            f" OR {col} LIKE :pat_prefix"
-            f" OR {col} LIKE :pat_suffix"
-            f" OR {col} LIKE :pat_mid)"
-        )
-        bind = {
-            "v": value,
-            "pat_prefix": f"{value},%",
-            "pat_suffix": f"%,{value}",
-            "pat_mid": f"%,{value},%",
-        }
+        junction_table = "company_purpose_keywords"
+        junction_col = "keyword"
     else:
-        where_clause = f"{col} = :value"
-        bind = {"value": value}
+        junction_table = None
 
     computed_score_expr = (
         "CASE "
-        "WHEN ai_score IS NOT NULL AND web_score IS NOT NULL AND flex_score IS NOT NULL "
-        "THEN (0.70 * ai_score + 0.20 * web_score + 0.10 * flex_score) "
-        "WHEN ai_score IS NOT NULL AND web_score IS NOT NULL "
-        "THEN (0.70 * ai_score + 0.20 * web_score) / 0.90 "
-        "WHEN ai_score IS NOT NULL AND flex_score IS NOT NULL "
-        "THEN (0.70 * ai_score + 0.10 * flex_score) / 0.80 "
-        "WHEN web_score IS NOT NULL AND flex_score IS NOT NULL "
-        "THEN (0.20 * web_score + 0.10 * flex_score) / 0.30 "
-        "WHEN ai_score IS NOT NULL THEN ai_score::float "
-        "WHEN web_score IS NOT NULL THEN web_score::float "
-        "WHEN flex_score IS NOT NULL THEN flex_score::float "
+        "WHEN c.ai_score IS NOT NULL AND c.web_score IS NOT NULL AND c.flex_score IS NOT NULL "
+        "THEN (0.70 * c.ai_score + 0.20 * c.web_score + 0.10 * c.flex_score) "
+        "WHEN c.ai_score IS NOT NULL AND c.web_score IS NOT NULL "
+        "THEN (0.70 * c.ai_score + 0.20 * c.web_score) / 0.90 "
+        "WHEN c.ai_score IS NOT NULL AND c.flex_score IS NOT NULL "
+        "THEN (0.70 * c.ai_score + 0.10 * c.flex_score) / 0.80 "
+        "WHEN c.web_score IS NOT NULL AND c.flex_score IS NOT NULL "
+        "THEN (0.20 * c.web_score + 0.10 * c.flex_score) / 0.30 "
+        "WHEN c.ai_score IS NOT NULL THEN c.ai_score::float "
+        "WHEN c.web_score IS NOT NULL THEN c.web_score::float "
+        "WHEN c.flex_score IS NOT NULL THEN c.flex_score::float "
         "ELSE NULL END"
     )
 
     def _build_agg_sql(score_expr: str):
-        if category_type == "tfidf_cluster":
-            where_cond = (
-                f"(string_to_array({col}, '|') @> ARRAY[:v]"
-                f" OR {col} = :v)"
-            )
-        elif category_type == "keyword":
-            where_cond = (
-                f"(string_to_array({col}, ',') @> ARRAY[:v]"
-                f" OR {col} = :v)"
-            )
+        if junction_table:
+            from_clause = f"""
+                companies c
+                INNER JOIN {junction_table} j ON c.id = j.company_id
+            """
+            where_cond = f"j.{junction_col} = :value"
         else:
-            where_cond = where_clause
+            from_clause = "companies c"
+            where_cond = f"c.{col} = :value"
 
         return _text(f"""
         SELECT
-            COUNT(*)                                                    AS total,
-            AVG(ai_score)                                               AS avg_ai,
-            AVG(flex_score)                                             AS avg_flex,
-            AVG(web_score)                                              AS avg_web,
-            AVG({score_expr})                                           AS avg_combined,
-            COUNT(CASE WHEN {score_expr} IS NULL THEN 1 END)            AS unscored,
-            COUNT(CASE WHEN {score_expr} >= 80   THEN 1 END)            AS band_80plus,
+            COUNT(DISTINCT c.id)                                         AS total,
+            AVG(c.ai_score)                                              AS avg_ai,
+            AVG(c.flex_score)                                            AS avg_flex,
+            AVG(c.web_score)                                             AS avg_web,
+            AVG({score_expr})                                            AS avg_combined,
+            COUNT(CASE WHEN {score_expr} IS NULL THEN 1 END)             AS unscored,
+            COUNT(CASE WHEN {score_expr} >= 80   THEN 1 END)             AS band_80plus,
             COUNT(CASE WHEN {score_expr} >= 60
-                        AND {score_expr} < 80    THEN 1 END)            AS band_60to80,
+                        AND {score_expr} < 80    THEN 1 END)             AS band_60to80,
             COUNT(CASE WHEN {score_expr} >= 40
-                        AND {score_expr} < 60    THEN 1 END)            AS band_40to60,
-            COUNT(CASE WHEN {score_expr} < 40    THEN 1 END)            AS band_below40
-        FROM companies
+                        AND {score_expr} < 60    THEN 1 END)             AS band_40to60,
+            COUNT(CASE WHEN {score_expr} < 40    THEN 1 END)             AS band_below40
+        FROM {from_clause}
         WHERE {where_cond}
     """)
 
-    # All aggregates use the stored combined_score column — no complex CASE expressions.
-    agg_sql = _build_agg_sql("combined_score")
+    agg_sql = _build_agg_sql("c.combined_score")
+    bind = {"value": value}
 
     def _build_canton_sql():
-        if category_type == "tfidf_cluster":
-            where_cond = (
-                f"(string_to_array({col}, '|') @> ARRAY[:v]"
-                f" OR {col} = :v)"
-            )
-        elif category_type == "keyword":
-            where_cond = (
-                f"(string_to_array({col}, ',') @> ARRAY[:v]"
-                f" OR {col} = :v)"
-            )
+        if junction_table:
+            from_clause = f"""
+                companies c
+                INNER JOIN {junction_table} j ON c.id = j.company_id
+            """
+            where_cond = f"j.{junction_col} = :value AND c.canton IS NOT NULL"
         else:
-            where_cond = where_clause
+            from_clause = "companies c"
+            where_cond = f"c.{col} = :value AND c.canton IS NOT NULL"
 
         return _text(f"""
-            SELECT canton, COUNT(*) AS cnt
-            FROM companies
-            WHERE {where_cond} AND canton IS NOT NULL
-            GROUP BY canton
+            SELECT c.canton, COUNT(DISTINCT c.id) AS cnt
+            FROM {from_clause}
+            WHERE {where_cond}
+            GROUP BY c.canton
             ORDER BY cnt DESC
             LIMIT 10
         """)
@@ -1089,7 +1140,9 @@ def _compute_category_stats(
     canton_sql = _build_canton_sql()
 
     try:
+        db.execute("SET work_mem = '256MB'")
         r = db.execute(agg_sql, bind).fetchone()
+        db.execute("RESET work_mem")
     except Exception as exc:
         # During rolling deploys, some databases may not yet have combined_score.
         # Retry using the legacy computed expression to avoid 500s.

@@ -499,7 +499,7 @@ def get_demo_company(db: Session = Depends(get_db)):
 @router.get("", response_model=CompanyPage, summary="List companies (paginated, filterable)")
 def list_companies(
     page: int = Query(1, ge=1),
-    page_size: int = Query(50, ge=1, le=500),
+    page_size: int = Query(50, ge=1, le=100),
     sort: str = Query("-updated", description="Sort key, e.g. -combined_score, name, -updated"),
     q: str | None = Query(None, description="Filter by name (case-insensitive)"),
     uid: str | None = Query(None, description="Filter by UID (partial match)"),
@@ -589,15 +589,21 @@ def list_companies(
     total = crud.count_companies(db, **filter_kwargs)
     items = crud.list_companies(db, page=page, page_size=page_size, sort=sort, **filter_kwargs)
     org: Organization | None = db.get(Organization, current_user.org_id) if current_user.org_id else None
+
     if current_user.org_id:
         ids = [c.id for c in items]
         org_states = _bulk_org_states(db, ids, current_user.org_id)
-        _eff = lambda key, default: crud.get_effective_setting(db, key, org_id=current_user.org_id, default=default)
-        w_ai = float(_eff("scoring_weight_ai", "0.70"))
-        w_web = float(_eff("scoring_weight_web", "0.20"))
-        w_flex = float(_eff("scoring_weight_flex", "0.10"))
-        items = [_overlay(c, org_states.get(c.id), w_ai=w_ai, w_web=w_web, w_flex=w_flex) for c in items]
-    items = [_apply_web_results_gate(c if isinstance(c, CompanyRead) else _overlay(c, None), org, current_user.is_superadmin) for c in items]
+        settings = crud.get_effective_settings_batch(
+            db,
+            ["scoring_weight_ai", "scoring_weight_web", "scoring_weight_flex"],
+            org_id=current_user.org_id
+        )
+        w_ai = float(settings.get("scoring_weight_ai", "0.70"))
+        w_web = float(settings.get("scoring_weight_web", "0.20"))
+        w_flex = float(settings.get("scoring_weight_flex", "0.10"))
+        items = [_apply_web_results_gate(_overlay(c, org_states.get(c.id), w_ai=w_ai, w_web=w_web, w_flex=w_flex), org, current_user.is_superadmin) for c in items]
+    else:
+        items = [_apply_web_results_gate(_overlay(c, None), org, current_user.is_superadmin) for c in items]
     return CompanyPage(
         items=items,
         total=total,
