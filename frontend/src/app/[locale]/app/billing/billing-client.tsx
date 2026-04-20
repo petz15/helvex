@@ -21,11 +21,13 @@ import {
   createWorldlineCardRegistration,
   parseBillingAddressJson,
   getPaymentInvoiceUrl,
+  fetchPaymentMethods,
   type BillingAddressPayload,
   type CreditTransaction,
   type CreditUsage,
   type PaymentRecord,
   type NotificationPreferences,
+  type PaymentMethod,
 } from "@/lib/api";
 import { creditsToChf } from "@/lib/entitlements";
 import { CREDIT_ACTIONS, creditsToChf as fmtCreditsToChf } from "@/lib/marketing-data";
@@ -534,7 +536,47 @@ function TopupSection() {
   );
 }
 
-function SavedCardSection({ billingAddress, hasSavedPaymentMethod }: { billingAddress: BillingAddressPayload | null; hasSavedPaymentMethod: boolean }) {
+const BRAND_COLORS: Record<string, string> = {
+  VISA:       "bg-blue-600",
+  MASTERCARD: "bg-orange-500",
+  AMEX:       "bg-sky-600",
+  MAESTRO:    "bg-red-600",
+};
+
+function CardChip({ method }: { method: PaymentMethod }) {
+  const brand = (method.brand ?? "").toUpperCase();
+  const brandColor = BRAND_COLORS[brand] ?? "bg-slate-500";
+  const last4 = method.masked_number ? method.masked_number.slice(-4) : null;
+  const expiry = method.exp_month && method.exp_year
+    ? `${String(method.exp_month).padStart(2, "0")}/${String(method.exp_year).slice(-2)}`
+    : null;
+
+  return (
+    <div className="flex items-center gap-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5">
+      <div className={`flex h-8 w-12 items-center justify-center rounded-md text-[10px] font-bold text-white ${brandColor}`}>
+        {brand || "CARD"}
+      </div>
+      <div className="flex-1 min-w-0">
+        <div className="text-sm font-medium text-slate-800">
+          {last4 ? `•••• ${last4}` : "Saved card"}
+        </div>
+        <div className="flex items-center gap-2 text-xs text-slate-400">
+          {method.holder_name && <span className="truncate max-w-[120px]">{method.holder_name}</span>}
+          {expiry && <span>Exp {expiry}</span>}
+          {!method.holder_name && !expiry && <span>Card on file</span>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function SavedCardSection({
+  billingAddress,
+  paymentMethod,
+}: {
+  billingAddress: BillingAddressPayload | null;
+  paymentMethod: PaymentMethod | null;
+}) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -577,17 +619,22 @@ function SavedCardSection({ billingAddress, hasSavedPaymentMethod }: { billingAd
       {error && (
         <div className="mt-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">{error}</div>
       )}
-      <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div className="text-sm text-slate-700">
-          {hasSavedPaymentMethod ? "Your account has a saved payment method." : "No saved payment method on your account yet."}
+      <div className="mt-4 space-y-3">
+        {paymentMethod ? (
+          <CardChip method={paymentMethod} />
+        ) : (
+          <div className="text-sm text-slate-500">No saved payment method on your account yet.</div>
+        )}
+        <div className="flex items-center justify-between gap-3">
+          <div />
+          <button
+            onClick={handleRegisterCard}
+            disabled={loading}
+            className="rounded-lg bg-slate-900 px-3 py-2 text-xs font-medium text-white transition-colors hover:bg-slate-800 disabled:opacity-60"
+          >
+            {loading ? "Opening Saferpay…" : paymentMethod ? "Replace saved card" : "Save a card"}
+          </button>
         </div>
-        <button
-          onClick={handleRegisterCard}
-          disabled={loading}
-          className="rounded-lg bg-slate-900 px-3 py-2 text-xs font-medium text-white transition-colors hover:bg-slate-800 disabled:opacity-60"
-        >
-          {loading ? "Opening Saferpay…" : hasSavedPaymentMethod ? "Replace saved card" : "Save a card"}
-        </button>
       </div>
       {!billingAddress && (
         <p className="mt-3 text-xs text-amber-600">Add a billing address first to continue.</p>
@@ -601,6 +648,7 @@ function DefaultCardSection({
   currentUserId,
   currentDefaultUserId,
   members,
+  paymentMethodsByUserId,
   canManage,
   onUpdated,
 }: {
@@ -608,6 +656,7 @@ function DefaultCardSection({
   currentUserId: number;
   currentDefaultUserId: number | null;
   members: Array<{ id: number; email: string; has_saved_payment_method: boolean }>;
+  paymentMethodsByUserId: Record<number, PaymentMethod>;
   canManage: boolean;
   onUpdated: () => void;
 }) {
@@ -659,21 +708,25 @@ function DefaultCardSection({
         ) : (
           eligibleMembers.map((member) => {
             const active = member.id === currentDefaultUserId;
+            const method = paymentMethodsByUserId[member.id] ?? null;
             return (
-              <div key={member.id} className="flex items-center justify-between gap-3 rounded-xl border border-slate-200 px-3 py-2">
-                <div>
-                  <div className="text-sm font-medium text-slate-800">{member.email}</div>
-                  <div className="text-xs text-slate-400">{active ? "Current default" : member.id === currentUserId ? "You" : "Saved card available"}</div>
+              <div key={member.id} className="rounded-xl border border-slate-200 px-3 py-2.5 space-y-2">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <div className="text-sm font-medium text-slate-800">{member.email}</div>
+                    <div className="text-xs text-slate-400">{active ? "Current default" : member.id === currentUserId ? "You" : "Saved card available"}</div>
+                  </div>
+                  <button
+                    onClick={() => selectDefault(member.id)}
+                    disabled={savingUserId !== null}
+                    className={`shrink-0 rounded-lg px-3 py-2 text-xs font-medium transition-colors disabled:opacity-60 ${
+                      active ? "bg-emerald-600 text-white" : "bg-slate-900 text-white hover:bg-slate-800"
+                    }`}
+                  >
+                    {savingUserId === member.id ? "Saving…" : active ? "Selected" : "Use by default"}
+                  </button>
                 </div>
-                <button
-                  onClick={() => selectDefault(member.id)}
-                  disabled={savingUserId !== null}
-                  className={`rounded-lg px-3 py-2 text-xs font-medium transition-colors disabled:opacity-60 ${
-                    active ? "bg-emerald-600 text-white" : "bg-slate-900 text-white hover:bg-slate-800"
-                  }`}
-                >
-                  {savingUserId === member.id ? "Saving…" : active ? "Selected" : "Use by default"}
-                </button>
+                {method && <CardChip method={method} />}
               </div>
             );
           })
@@ -895,8 +948,15 @@ export function BillingClient() {
   const { data: org } = useSWR(summary ? `org-${summary.org_id}` : null, () => fetchOrg(summary!.org_id));
   const { data: members, mutate: mutateMembers } = useSWR(summary ? `org-members-${summary.org_id}` : null, () => fetchOrgMembers(summary!.org_id));
   const { mutate: mutateOrg } = useSWR(summary ? `org-${summary.org_id}` : null, () => fetchOrg(summary!.org_id));
+  const { data: paymentMethodsData, mutate: mutatePaymentMethods } = useSWR("payment-methods", fetchPaymentMethods);
   const [returnBanner, setReturnBanner] = useState<{ kind: "success" | "error"; message: string } | null>(null);
   const billingAddress = parseBillingAddressJson(me?.billing_address_json);
+
+  const paymentMethodsByUserId: Record<number, PaymentMethod> = {};
+  for (const m of paymentMethodsData?.items ?? []) {
+    paymentMethodsByUserId[m.user_id] = m;
+  }
+  const myPaymentMethod = me ? (paymentMethodsByUserId[me.id] ?? null) : null;
 
   // Show banner when returning from payment provider
   useEffect(() => {
@@ -926,6 +986,7 @@ export function BillingClient() {
       setReturnBanner({ kind: "success", message: "Saved card registered successfully." });
       void mutateSummary();
       void mutateMembers();
+      void mutatePaymentMethods();
     } else if (checkout === "success") {
       if (kind === "topup") {
         setReturnBanner({
@@ -1004,8 +1065,8 @@ export function BillingClient() {
 
       <div id="topup-section"><TopupSection /></div>
       <ConsumptionPricesSection />
-      {summary && (
-        <SavedCardSection billingAddress={billingAddress} hasSavedPaymentMethod={summary.has_saved_payment_method} />
+      {me && (
+        <SavedCardSection billingAddress={billingAddress} paymentMethod={myPaymentMethod} />
       )}
       {summary && me && org && members && (
         <DefaultCardSection
@@ -1013,6 +1074,7 @@ export function BillingClient() {
           currentUserId={me.id}
           currentDefaultUserId={org.default_payment_user_id}
           members={members}
+          paymentMethodsByUserId={paymentMethodsByUserId}
           canManage={me.org_role === "admin" || me.org_role === "owner"}
           onUpdated={() => {
             void mutateMembers();

@@ -133,6 +133,24 @@ export interface PaginatedResult<T> {
   items: T[];
 }
 
+export interface PaymentMethod {
+  user_id: number;
+  provider: string;
+  alias_id: string;
+  masked_number: string | null;
+  brand: string | null;
+  holder_name: string | null;
+  exp_year: number | null;
+  exp_month: number | null;
+  is_default: boolean;
+}
+
+export async function fetchPaymentMethods(): Promise<{ items: PaymentMethod[] }> {
+  const res = await fetch("/api/v1/billing/payment-methods", { credentials: "include" });
+  if (!res.ok) throw new Error("Failed to fetch payment methods");
+  return res.json();
+}
+
 export async function fetchBillingSummary(): Promise<BillingSummary> {
   const res = await fetch("/api/v1/billing/summary", { credentials: "include" });
   if (!res.ok) throw new Error("Failed to fetch billing summary");
