@@ -19,6 +19,7 @@ from urllib.parse import quote
 from fastapi import Cookie, Depends, HTTPException, Request, status
 from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
 import jwt
+from sqlalchemy import inspect as sa_inspect
 from sqlalchemy.orm import Session
 
 from app import crud
@@ -121,14 +122,20 @@ def _get_cached_user(db: Session, user_id: int) -> User | None:
     with _user_cache_lock:
         entry = _user_cache.get(user_id)
         if entry and now - entry[1] < _USER_CACHE_TTL:
-            # Re-attach to the current session without a SELECT so lazy loads
-            # work and DetachedInstanceError cannot occur across request boundaries.
-            return db.merge(entry[0], load=False)
+            # Only merge(load=False) when the cached object is clean; if it
+            # became dirty (attribute set while detached), fall through to
+            # re-fetch so we never hit the InvalidRequestError.
+            if not sa_inspect(entry[0]).modified:
+                return db.merge(entry[0], load=False)
     user = crud.get_user(db, user_id)
     if user:
+        # Expunge before caching: merge() returns a new in-session instance,
+        # so handler modifications won't dirty the cached detached copy.
+        db.expunge(user)
         with _user_cache_lock:
             _user_cache[user_id] = (user, now)
-    return user
+        return db.merge(user, load=False)
+    return None
 
 
 def invalidate_user_cache(user_id: int) -> None:

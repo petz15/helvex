@@ -33,6 +33,44 @@
 - DNS eintrag auf balogh consulting bei hostpoint
 - umami (also keys probably) potentially posthog?
 
+## Infrastructure & Architecture Decisions
+
+### Core Architecture
+- **Job queueing: Redis Streams + RQ vs Procrastinate** — Current Phase 2/3 uses Redis Streams + RQ with two-tier queues. Alternative: Procrastinate (Python async-first, uses Postgres native `SELECT...FOR UPDATE SKIP LOCKED`) would eliminate Redis dependency, simplify stack to single Postgres, and handle B2B SaaS scale. **Decision point:** Revisit if Phase 2 not yet started (high rework cost if Phase 2 in progress).
+- **Caching & rate-limiting strategy** — If Procrastinate adopted, Redis becomes optional. Current state: not documented. Options: Postgres + PgBouncer connection pooling (may be sufficient), Postgres token-bucket table for rate-limiting, lightweight in-app caching. **Action:** Deferred pending Procrastinate decision.
+
+### Infrastructure & Storage
+- [ ] **File storage strategy** — User uploads, exports, static Next.js assets: confirm S3-compatible (Hetzner Object Storage) path, direct-to-client signed URLs vs server-side upload, CDN for static asset delivery. Currently not documented.
+- [ ] **Session management** — Where user sessions are stored not yet documented. Options: Postgres table (preferred, integrates with RLS), in-memory (loses sessions on pod restart), Redis (if retained). **Action:** Document before Phase 0 completion.
+- [ ] **Email delivery service** — Transactional emails (signup verification, password reset, invoices). Options: managed service (SendGrid, Postmark, Mailgun — recommended for SaaS), in-house SMTP (higher ops burden). **Action:** Confirm before Phase 0 (auth emails required).
+
+### Observability & Monitoring
+- [ ] **Observability stack (CRITICAL GAP)** — No logging, distributed tracing, or metrics strategy documented. Required for production SaaS:
+  - **Structured logging:** JSON to stdout, K3s log aggregator (ELK, Grafana Loki, or S3 bucket)
+  - **Distributed tracing:** Jaeger or Tempo for request tracing across api/ml/zefix workers
+  - **Metrics:** Prometheus scrapes app metrics (request rate, job queue depth, error rate, P95 latency), K3s node/pod metrics, PostgreSQL/Redis exporters; visualized in Grafana
+  - **Alerting:** Alert thresholds for pod restarts, high memory, queue stalls, replication lag, slow queries
+  - **Web analytics:** Google Tag Manager + GA4 (or privacy-first: Plausible/Umami); track signup/first-job/first-export funnels, feature usage
+  - **Action:** Define and implement before Phase 1 prod deployment.
+
+### Database & Multi-tenancy
+- [ ] **Multi-tenancy isolation (Phase 4)** — Currently using PostgreSQL RLS (row-level security). Schema-based isolation rejected as higher operational complexity. RLS requires careful app-level tenant filtering; ensure `app.current_org_id` context passed through all queries.
+- [ ] **Full-text search engine** — Current: Postgres native FTS (sufficient for doc search). Elasticsearch/Meilisearch deferred unless typo-tolerance or vector search needed.
+
+### Secrets & Configuration
+- [ ] **Secrets rotation & K8s integration** — Doppler chosen for Phase 1; evaluate K8s native bridge: external-secrets-operator to sync Doppler secrets or sealed-secrets for GitOps-native encryption. **Action:** Document compliance requirements and choose before Phase 1.
+
+### Known Gaps Requiring Decisions
+| Component | Current State | Options | Owner |
+|-----------|---------------|---------|-------|
+| Job queue | Redis Streams + RQ | Procrastinate (Postgres-native) | Peter |
+| Caching | Not documented | Postgres pooling, in-app cache, Redis | Peter |
+| Session store | Not documented | Postgres table (preferred), in-memory, Redis | Peter |
+| Email service | Not documented | Managed (SendGrid/Postmark) vs in-house SMTP | Peter |
+| Observability | **GAP** | Prometheus + Grafana + Loki (recommended) | Peter |
+| File storage | Hetzner Object Storage | Confirm signed URLs, CDN, direct-to-client | Peter |
+| Secrets backend | Doppler + K8s bridge | external-secrets-operator or sealed-secrets | Peter |
+
 ## Bug Fixes & Known Issues
 ### Manual fixes:
 - billing/payment/pricing

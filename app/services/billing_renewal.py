@@ -257,6 +257,22 @@ def run_billing_renewal(db: Session) -> dict[str, Any]:
         tx_status = str(transaction.get("Status") or "").upper() if isinstance(transaction, dict) else ""
         normalized = payment_transactions.validate_transaction_status(tx_status)
 
+        # AuthorizeReferenced returns AUTHORIZED; we must capture explicitly.
+        if normalized == "authorized" and new_tx_id:
+            try:
+                provider.capture_transaction(transaction_id=new_tx_id)
+                normalized = "captured"
+                logger.info(
+                    "billing_renewal.capture_ok org_id=%s new_tx_id=%s",
+                    org_id, new_tx_id[:20],
+                )
+            except RuntimeError as cap_exc:
+                logger.warning(
+                    "billing_renewal.capture_pending org_id=%s new_tx_id=%s error=%s — retry next run",
+                    org_id, new_tx_id[:20], cap_exc,
+                )
+                # normalized stays "authorized" so retry_failed_captures picks it up tonight
+
         # Log the renewal transaction
         try:
             payment_transactions.log_payment_transaction(
@@ -279,13 +295,14 @@ def run_billing_renewal(db: Session) -> dict[str, Any]:
             # Renew: advance period_end
             current_end = org.subscription_period_end or now
             org.subscription_period_end = _next_period_end(current_end, cycle)
-            # Update recurring reference to the new transaction for future renewals
-            if new_tx_id:
+            # Only advance the recurring reference when capture is confirmed —
+            # an uncaptured tx_id as reference will make the next AuthorizeReferenced fail.
+            if normalized == "captured" and new_tx_id:
                 org.recurring_transaction_id = new_tx_id
             db.commit()
             logger.info(
-                "billing_renewal.renewed org_id=%s tier=%s new_period_end=%s",
-                org_id, tier, org.subscription_period_end.isoformat(),
+                "billing_renewal.renewed org_id=%s tier=%s new_period_end=%s captured=%s",
+                org_id, tier, org.subscription_period_end.isoformat(), normalized == "captured",
             )
             stats["renewed"] += 1
         else:

@@ -762,13 +762,6 @@ class WorldlineProvider:
             org_id, new_tx_id[:20] if new_tx_id else "NONE", tx_status,
         )
 
-        if tx_status == "AUTHORIZED" and new_tx_id:
-            try:
-                self.capture_transaction(transaction_id=new_tx_id)
-                logger.info("saferpay.capture_ok org_id=%s new_tx_id=%s", org_id, new_tx_id[:20])
-            except RuntimeError as exc:
-                logger.warning("saferpay.capture_failed org_id=%s new_tx_id=%s error=%s", org_id, new_tx_id[:20], exc)
-
         return data
 
     def create_card_alias_registration(

@@ -536,35 +536,24 @@ function TopupSection() {
   );
 }
 
-const BRAND_COLORS: Record<string, string> = {
-  VISA:       "bg-blue-600",
-  MASTERCARD: "bg-orange-500",
-  AMEX:       "bg-sky-600",
-  MAESTRO:    "bg-red-600",
-};
-
 function CardChip({ method }: { method: PaymentMethod }) {
-  const brand = (method.brand ?? "").toUpperCase();
-  const brandColor = BRAND_COLORS[brand] ?? "bg-slate-500";
+  const brand = method.brand
+    ? method.brand.charAt(0).toUpperCase() + method.brand.slice(1).toLowerCase()
+    : null;
   const last4 = method.masked_number ? method.masked_number.slice(-4) : null;
   const expiry = method.exp_month && method.exp_year
     ? `${String(method.exp_month).padStart(2, "0")}/${String(method.exp_year).slice(-2)}`
     : null;
+  const meta = [brand, method.holder_name, expiry ? `exp. ${expiry}` : null].filter(Boolean).join(" · ");
 
   return (
-    <div className="flex items-center gap-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5">
-      <div className={`flex h-8 w-12 items-center justify-center rounded-md text-[10px] font-bold text-white ${brandColor}`}>
-        {brand || "CARD"}
-      </div>
-      <div className="flex-1 min-w-0">
+    <div className="flex items-center gap-2.5 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 min-w-0">
+      <CreditCard size={15} className="shrink-0 text-slate-400" />
+      <div className="min-w-0 flex-1">
         <div className="text-sm font-medium text-slate-800">
           {last4 ? `•••• ${last4}` : "Saved card"}
         </div>
-        <div className="flex items-center gap-2 text-xs text-slate-400">
-          {method.holder_name && <span className="truncate max-w-[120px]">{method.holder_name}</span>}
-          {expiry && <span>Exp {expiry}</span>}
-          {!method.holder_name && !expiry && <span>Card on file</span>}
-        </div>
+        {meta && <div className="text-xs text-slate-400 truncate">{meta}</div>}
       </div>
     </div>
   );
