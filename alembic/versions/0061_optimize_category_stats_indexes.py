@@ -2,8 +2,8 @@
 from alembic import op
 
 # revision identifiers, used by Alembic.
-revision = '0061_optimize_category_stats_indexes'
-down_revision = '0060_purpose_keywords_array'
+revision = '0061'
+down_revision = '0060'
 branch_labels = None
 depends_on = None
 

@@ -48,7 +48,7 @@
 - AI Preview: AI classification is not configured on this server
 - Tiers:
     - web results are not gated, immediately shown. Should have been atleast 1 week of pause form a simple tier. 
-
+- DB currently very slow: simple request about 2-3 seconds if first request
 
 
 
