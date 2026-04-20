@@ -41,7 +41,7 @@ if sys.version_info >= (3, 12):
 from alembic import command as alembic_command
 from alembic.config import Config as AlembicConfig
 from fastapi import Depends, FastAPI, Form, Query, Request, status
-from fastapi.middleware.gzip import GZIPMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import inspect as sa_inspect
@@ -433,7 +433,7 @@ app = FastAPI(
 )
 
 # Add response compression middleware for large JSON payloads (5-10x compression typical)
-app.add_middleware(GZIPMiddleware, minimum_size=1000)
+app.add_middleware(GZipMiddleware, minimum_size=1000)
 
 app.mount("/static", StaticFiles(directory="app/static"), name="static")
 
