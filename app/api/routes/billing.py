@@ -96,6 +96,29 @@ class WebhookResponse(BaseModel):
     ignored: bool = False
 
 
+def _extract_card_info_from_worldline(result: dict) -> dict:
+    """Pull masked card details from a Worldline Authorize or AliasInsert response."""
+    pm = result.get("PaymentMeans") if isinstance(result, dict) else {}
+    card = pm.get("Card") if isinstance(pm, dict) else {}
+    if not isinstance(card, dict):
+        card = {}
+    return {
+        "masked_number": str(card.get("MaskedNumber") or ""),
+        "brand": str(card.get("Brand") or pm.get("Brand") if isinstance(pm, dict) else ""),
+        "holder_name": str(card.get("HolderName") or ""),
+        "exp_year": card.get("ExpYear"),
+        "exp_month": card.get("ExpMonth"),
+    }
+
+
+def _save_alias(db: Session, *, user: User, alias_id: str, card_info: dict, org: Organization | None) -> None:
+    """Persist alias + card info on user and auto-set org default when none exists."""
+    user.payment_customer_id = alias_id
+    user.payment_card_info_json = json.dumps(card_info)
+    if org is not None and not getattr(org, "default_payment_user_id", None):
+        org.default_payment_user_id = user.id
+
+
 def _resolve_worldline_payment_alias(db: Session, org: Organization, current_user: User | None = None) -> str | None:
     if current_user is not None:
         current_user_alias = str(current_user.payment_customer_id or "").strip()
@@ -185,7 +208,8 @@ def _poll_worldline_alias_registration(*, org_id: int, user_id: int, order_refer
             owner = db.get(User, user_id)
             if owner is None:
                 raise RuntimeError("User not found")
-            owner.payment_customer_id = alias_id
+            poll_org = db.get(Organization, org_id)
+            _save_alias(db, user=owner, alias_id=alias_id, card_info=_extract_card_info_from_worldline(result), org=poll_org)
             db.commit()
         finally:
             db.close()
@@ -675,7 +699,7 @@ async def worldline_return(
         if alias_id and parsed_ref.get("user_id"):
             alias_owner = db.get(User, int(parsed_ref["user_id"]))
             if alias_owner is not None:
-                alias_owner.payment_customer_id = alias_id
+                _save_alias(db, user=alias_owner, alias_id=alias_id, card_info=_extract_card_info_from_worldline(result), org=org)
                 db.flush()
 
         # Normalize status from provider-specific values to our internal enum.
@@ -990,7 +1014,8 @@ async def worldline_card_return(
         if not alias_id:
             raise RuntimeError("Worldline alias assertion did not include an alias id")
 
-        owner.payment_customer_id = alias_id
+        card_reg_org = db.get(Organization, org_id) if org_id > 0 else None
+        _save_alias(db, user=owner, alias_id=alias_id, card_info=_extract_card_info_from_worldline(result), org=card_reg_org)
         db.commit()
         if order_reference:
             payments.clear_pending_card_alias_token(order_reference=order_reference)
@@ -1026,6 +1051,42 @@ async def worldline_card_return(
 @router.get("/providers")
 def list_enabled_providers(_: User = Depends(get_current_user)) -> dict:
     return {"mode": payments.settings.payment_provider_mode, "enabled": payments.get_enabled_provider_order()}
+
+
+@router.get("/payment-methods")
+def list_payment_methods(
+    user_org: tuple[User, object] = Depends(get_current_org),
+    db: Session = Depends(get_db),
+) -> dict:
+    """Return saved payment methods for the org with masked card details."""
+    from app.models.org_member import OrgMember as _OrgMember
+    _, org = user_org
+    members = (
+        db.query(User)
+        .join(_OrgMember, _OrgMember.user_id == User.id)
+        .filter(_OrgMember.org_id == org.id, User.payment_customer_id.isnot(None))
+        .all()
+    )
+    items = []
+    for m in members:
+        card_info: dict = {}
+        if m.payment_card_info_json:
+            try:
+                card_info = json.loads(m.payment_card_info_json)
+            except (ValueError, TypeError):
+                pass
+        items.append({
+            "user_id": m.id,
+            "provider": "worldline",
+            "alias_id": m.payment_customer_id,
+            "masked_number": card_info.get("masked_number") or None,
+            "brand": card_info.get("brand") or None,
+            "holder_name": card_info.get("holder_name") or None,
+            "exp_year": card_info.get("exp_year"),
+            "exp_month": card_info.get("exp_month"),
+            "is_default": org.default_payment_user_id == m.id,
+        })
+    return {"items": items}
 
 
 @router.get("/tiers", response_model=list[BillingTierRead])

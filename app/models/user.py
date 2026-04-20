@@ -27,6 +27,7 @@ class User(Base):
 
     # Payment (vendor-neutral — currently Worldline)
     payment_customer_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    payment_card_info_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     payment_subscription_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
     subscription_status: Mapped[str | None] = mapped_column(String(32), nullable=True)
 

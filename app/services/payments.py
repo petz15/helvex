@@ -564,7 +564,7 @@ class WorldlineProvider:
         if css_url:
             payload["Styling"] = {"CssUrl": css_url}
         if payment_alias_id:
-            payload["PaymentMeans"] = {"Card": {"Alias": {"Id": payment_alias_id}}}
+            payload["PaymentMeans"] = {"Alias": {"Id": payment_alias_id}}
         # Alias registration is requested during Authorize with the Initialize token.
         # Do not request alias registration here.
         # Add billing address if provided (required by Worldline for chargeback evidence)

@@ -777,25 +777,24 @@ def get_noga_hierarchy(db: Session, org_id: int | None = None) -> list[dict]:
                 "children": [],
             }
 
+    # Pass 1: build parent→child links only, no count mutation
     for code in nodes:
         parent = parent_map.get(code)
         while parent and parent != code:
             if parent in nodes:
-                nodes[parent]["count"] += nodes[code]["count"]
                 if nodes[code] not in nodes[parent]["children"]:
                     nodes[parent]["children"].append(nodes[code])
                 break
             parent = parent_map.get(parent)
 
-    roots = []
+    # Pass 2: find root nodes (not a child of any other node)
     all_child_codes: set[str] = set()
     for node in nodes.values():
         for child in node["children"]:
             all_child_codes.add(child["code"])
-    for code, node in sorted(nodes.items()):
-        if code not in all_child_codes:
-            roots.append(node)
+    roots = [node for code, node in sorted(nodes.items()) if code not in all_child_codes]
 
+    # Pass 3: sort children by code (hierarchy order)
     def _sort_children(node: dict) -> None:
         node["children"].sort(key=lambda x: x["code"])
         for child in node["children"]:
@@ -804,6 +803,18 @@ def get_noga_hierarchy(db: Session, org_id: int | None = None) -> list[dict]:
     for root in roots:
         _sort_children(root)
     roots.sort(key=lambda x: x["code"])
+
+    # Pass 4: aggregate counts bottom-up so each node = own + all descendants
+    def _aggregate(node: dict) -> int:
+        total = node["own_count"]
+        for child in node["children"]:
+            total += _aggregate(child)
+        node["count"] = total
+        return total
+
+    for root in roots:
+        _aggregate(root)
+
     return roots
 
 
