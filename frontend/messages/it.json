@@ -122,6 +122,14 @@
       "signIn": "Accedi"
     }
   },
+  "footer": {
+    "copyright": "© {year} Helvex · Balogh Consulting",
+    "impressum": "Informazioni legali",
+    "datenschutz": "Privacy",
+    "agb": "Termini",
+    "cookieSettings": "Impostazioni cookie",
+    "signIn": "Accedi"
+  },
   "auth": {
     "login": {
       "title": "Accedi a Helvex",
