@@ -87,6 +87,7 @@
         "f5": "Chiavi LLM proprie, priorità della coda e cronologia audit"
       }
     },
+    },
     "pricing": {
       "title": "Piani e prezzi attuali",
       "subtitle": "Inizia gratuitamente, poi scala in base alle tue esigenze. Nessuna tariffa nascosta — paga solo quello che usi.",
@@ -113,14 +114,13 @@
         "exportDetailed": { "label": "Esportazione massiva – dettagliata", "unit": "per 10k righe" }
       }
     },
-    "footer": {
-      "copyright": "© {year} Helvex · Balogh Consulting",
-      "impressum": "Informazioni legali",
-      "datenschutz": "Privacy",
-      "agb": "Termini",
-      "cookieSettings": "Impostazioni cookie",
-      "signIn": "Accedi"
-    }
+  "footer": {
+    "copyright": "© {year} Helvex · Balogh Consulting",
+    "impressum": "Informazioni legali",
+    "datenschutz": "Privacy",
+    "agb": "Termini",
+    "cookieSettings": "Impostazioni cookie",
+    "signIn": "Accedi"
   },
   "auth": {
     "login": {
