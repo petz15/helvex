@@ -55,6 +55,7 @@
 - Page size is not working on company overview
 - superadmin payment transactions does not show payment method
 
+
 ### UI fixes:
 - Email notifications remove from billing
 - Move ML Job Reference from Jobs to collection page. 
