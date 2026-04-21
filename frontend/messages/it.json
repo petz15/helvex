@@ -73,10 +73,10 @@
         "tagline": "Trova e monitora le aziende giuste con filtri, raccolte e digest.",
         "f1": "Combina stato, geografia, punteggio e filtri scopo",
         "f2": "Organizza i target in raccolte riutilizzabili con nome",
-        "f3": "E-mail di digest giornalieri per le nuove aziende corrispondenti",
-        "f4": "Arricchimento tramite ricerca web per segnali aggiuntivi",
-        "f5": "Vista mappa con lat/lon e ispezione dei cluster"
-      },
+          "f3": "E-mail di digest giornalieri per le nuove aziende corrispondenti",
+          "f4": "Arricchimento tramite ricerca web per segnali aggiuntivi",
+          "f5": "Vista mappa con lat/lon e ispezione dei cluster",
+        },
       "workspace": {
         "title": "Workspace & Scalabilità",
         "tagline": "Workspace di squadra, fatturazione trasparente e controlli di livello enterprise.",

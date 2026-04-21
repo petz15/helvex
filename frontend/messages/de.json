@@ -268,7 +268,9 @@
       "max": "Max",
       "collapsefilters": "Filter einklappen",
       "search": "Suchen {input}…"
-    }
+      },
+      "map": {
+        "goToAddress": "Adresse anspringen",
     "map": {
       "goToAddress": "Adresse anspringen",
       "placeholder": "PLZ, Stadtname oder Adresse",
