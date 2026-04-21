@@ -1,5 +1,6 @@
 """Client for the Zefix REST API (https://www.zefix.admin.ch/ZefixREST/api/v1)."""
 
+import json
 from typing import Any
 
 import httpx
@@ -60,7 +61,7 @@ def search_companies(
         response = client.post(url, json=payload, auth=_get_auth())
         response.raise_for_status()
 
-    data = response.json()
+    data = json.loads(response.content.decode("utf-8"))
     items = data if isinstance(data, list) else data.get("list", [])
     return [_parse_company(item) for item in items]
 
@@ -87,7 +88,7 @@ def fetch_companies_by_canton(
         response = client.post(url, json=payload, auth=_get_auth())
         response.raise_for_status()
 
-    data = response.json()
+    data = json.loads(response.content.decode("utf-8"))
     items = data if isinstance(data, list) else data.get("list", [])
     return [_parse_company(item) for item in items]
 
@@ -114,7 +115,7 @@ def fetch_companies_by_prefix(
         response = client.post(url, json=payload, auth=_get_auth())
         response.raise_for_status()
 
-    data = response.json()
+    data = json.loads(response.content.decode("utf-8"))
     items = data if isinstance(data, list) else data.get("list", [])
     return [_parse_company(item) for item in items]
 
@@ -129,7 +130,7 @@ def get_company(uid: str | list[Any]) -> dict[str, Any]:
         response = client.get(url, auth=_get_auth())
         response.raise_for_status()
 
-    data = response.json()
+    data = json.loads(response.content.decode("utf-8"))
     if isinstance(data, list):
         if not data:
             raise ValueError(f"No company found for UID {uid_str}")

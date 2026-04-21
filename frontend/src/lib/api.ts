@@ -134,7 +134,8 @@ export interface PaginatedResult<T> {
 }
 
 export interface PaymentMethod {
-  user_id: number;
+  id: string;
+  scope: "org" | "personal";
   provider: string;
   alias_id: string;
   masked_number: string | null;
@@ -143,12 +144,35 @@ export interface PaymentMethod {
   exp_year: number | null;
   exp_month: number | null;
   is_default: boolean;
+  label: string | null;
 }
 
 export async function fetchPaymentMethods(): Promise<{ items: PaymentMethod[] }> {
   const res = await fetch("/api/v1/billing/payment-methods", { credentials: "include" });
   if (!res.ok) throw new Error("Failed to fetch payment methods");
   return res.json();
+}
+
+export async function deletePaymentMethod(aliasId: string, scope: "org" | "personal"): Promise<void> {
+  const res = await fetch(
+    `/api/v1/billing/payment-methods/${encodeURIComponent(aliasId)}?scope=${scope}`,
+    { method: "DELETE", credentials: "include" },
+  );
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error((body as { detail?: string }).detail ?? "Failed to remove payment method");
+  }
+}
+
+export async function setPaymentMethodDefault(aliasId: string): Promise<void> {
+  const res = await fetch(
+    `/api/v1/billing/payment-methods/${encodeURIComponent(aliasId)}/set-default`,
+    { method: "PUT", credentials: "include" },
+  );
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error((body as { detail?: string }).detail ?? "Failed to set default");
+  }
 }
 
 export async function fetchBillingSummary(): Promise<BillingSummary> {
@@ -365,6 +389,7 @@ export async function createSubscriptionCheckout(data: {
   save_payment_method?: boolean;
   provider?: "worldline" | "stripe" | null;
   upgrade_proration_credits?: number | null;
+  selected_alias_id?: string | null;
 }): Promise<BillingCheckoutResponse> {
   const res = await fetch("/api/v1/billing/checkout/subscription", {
     method: "POST",
@@ -394,6 +419,7 @@ export async function createTopupCheckout(data: {
   save_payment_method?: boolean;
   use_new_card?: boolean;
   provider?: "worldline" | "stripe" | null;
+  selected_alias_id?: string | null;
 }): Promise<BillingCheckoutResponse> {
   const res = await fetch("/api/v1/billing/checkout/topup", {
     method: "POST",
@@ -419,6 +445,7 @@ export async function createWorldlineCardRegistration(data: {
   success_url: string;
   cancel_url: string;
   billing_address?: BillingAddressPayload | null;
+  scope?: "org" | "personal";
 }): Promise<PaymentMethodRegistrationResponse> {
   const res = await fetch("/api/v1/billing/payment-methods/worldline/register", {
     method: "POST",

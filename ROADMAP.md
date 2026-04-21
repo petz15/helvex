@@ -33,60 +33,25 @@
 - DNS eintrag auf balogh consulting bei hostpoint
 - umami (also keys probably) potentially posthog?
 
-## Infrastructure & Architecture Decisions
-
-### Core Architecture
-- **Job queueing: Redis Streams + RQ vs Procrastinate** — Current Phase 2/3 uses Redis Streams + RQ with two-tier queues. Alternative: Procrastinate (Python async-first, uses Postgres native `SELECT...FOR UPDATE SKIP LOCKED`) would eliminate Redis dependency, simplify stack to single Postgres, and handle B2B SaaS scale. **Decision point:** Revisit if Phase 2 not yet started (high rework cost if Phase 2 in progress).
-- **Caching & rate-limiting strategy** — If Procrastinate adopted, Redis becomes optional. Current state: not documented. Options: Postgres + PgBouncer connection pooling (may be sufficient), Postgres token-bucket table for rate-limiting, lightweight in-app caching. **Action:** Deferred pending Procrastinate decision.
-
-### Infrastructure & Storage
-- [ ] **File storage strategy** — User uploads, exports, static Next.js assets: confirm S3-compatible (Hetzner Object Storage) path, direct-to-client signed URLs vs server-side upload, CDN for static asset delivery. Currently not documented.
-- [ ] **Session management** — Where user sessions are stored not yet documented. Options: Postgres table (preferred, integrates with RLS), in-memory (loses sessions on pod restart), Redis (if retained). **Action:** Document before Phase 0 completion.
-- [ ] **Email delivery service** — Transactional emails (signup verification, password reset, invoices). Options: managed service (SendGrid, Postmark, Mailgun — recommended for SaaS), in-house SMTP (higher ops burden). **Action:** Confirm before Phase 0 (auth emails required).
-
-### Observability & Monitoring
-- [ ] **Observability stack (CRITICAL GAP)** — No logging, distributed tracing, or metrics strategy documented. Required for production SaaS:
-  - **Structured logging:** JSON to stdout, K3s log aggregator (ELK, Grafana Loki, or S3 bucket)
-  - **Distributed tracing:** Jaeger or Tempo for request tracing across api/ml/zefix workers
-  - **Metrics:** Prometheus scrapes app metrics (request rate, job queue depth, error rate, P95 latency), K3s node/pod metrics, PostgreSQL/Redis exporters; visualized in Grafana
-  - **Alerting:** Alert thresholds for pod restarts, high memory, queue stalls, replication lag, slow queries
-  - **Web analytics:** Google Tag Manager + GA4 (or privacy-first: Plausible/Umami); track signup/first-job/first-export funnels, feature usage
-  - **Action:** Define and implement before Phase 1 prod deployment.
-
-### Database & Multi-tenancy
-- [ ] **Multi-tenancy isolation (Phase 4)** — Currently using PostgreSQL RLS (row-level security). Schema-based isolation rejected as higher operational complexity. RLS requires careful app-level tenant filtering; ensure `app.current_org_id` context passed through all queries.
-- [ ] **Full-text search engine** — Current: Postgres native FTS (sufficient for doc search). Elasticsearch/Meilisearch deferred unless typo-tolerance or vector search needed.
-
-### Secrets & Configuration
-- [ ] **Secrets rotation & K8s integration** — Doppler chosen for Phase 1; evaluate K8s native bridge: external-secrets-operator to sync Doppler secrets or sealed-secrets for GitOps-native encryption. **Action:** Document compliance requirements and choose before Phase 1.
-
-### Known Gaps Requiring Decisions
-| Component | Current State | Options | Owner |
-|-----------|---------------|---------|-------|
-| Job queue | Redis Streams + RQ | Procrastinate (Postgres-native) | Peter |
-| Caching | Not documented | Postgres pooling, in-app cache, Redis | Peter |
-| Session store | Not documented | Postgres table (preferred), in-memory, Redis | Peter |
-| Email service | Not documented | Managed (SendGrid/Postmark) vs in-house SMTP | Peter |
-| Observability | **GAP** | Prometheus + Grafana + Loki (recommended) | Peter |
-| File storage | Hetzner Object Storage | Confirm signed URLs, CDN, direct-to-client | Peter |
-| Secrets backend | Doppler + K8s bridge | external-secrets-operator or sealed-secrets | Peter |
 
 ## Bug Fixes & Known Issues
 ### Manual fixes:
 - billing/payment/pricing
-    - save card not working -> still not working
     - existing subscription then upgrading is not working
-- Move ML Job Reference from Jobs to collection page. 
 - SHAB: rerun 17.04.2026 because there seems to be an issue with the data example: https://helvex.dicy.ch/app/companies/783586 same on zefix
 ### Claude fixes:
-- Map Adress search only works with streetname, number and plz. it should work with different configurations
-- Usermanagement for orgs (atleast untested)
 - admin dashboard simple redirects non authorized users, maybe not the safest
 - NOGA: Zweigniederlassung ist falsch zbs: https://helvex.dicy.ch/app/companies/238698
-- AI Preview: AI classification is not configured on this server
+
+- Fix translations for all pages (only headers etc done, needs more)
 - Tiers:
-    - web results are not gated, immediately shown. Should have been atleast 1 week of pause form a simple tier. f
-- DB currently very slow: simple request about 2-3 seconds if first request
+    - web results are not gated, immediately shown. Should have been atleast 1 week of pause form a simple tier. 
+### UI fixes:
+- Email notifications remove from billing
+- Move ML Job Reference from Jobs to collection page. 
+- Remove AI preview
+- Show settings in explore page regardless if 
+
 
 
 
@@ -162,6 +127,10 @@
 - [ ] **Change postgres backup/recovery** - 1) Maintain an explicit latest backup pointer After each successful backup, write a small object like latest.json in the same bucket/prefix. 2) Manual restore source override as first-class input Add a workflow dispatch input or repo variable like POSTGRES_RESTORE_SOURCE. If set, workflow uses it exactly. If not set, then run auto-discovery.
 - [ ] **Middleware** - my middleware python program has a chokehold on the whole architecture, if that is down nothing works! Either change that, i.e. review changes or when deploying and something fails, make sure this one can revert to a stable build. 
 - [ ] **DEV/INT env** - for save deployment checks
+- [ ] **Job queueing: Redis Streams + RQ vs Procrastinate** — Current Phase 2/3 uses Redis Streams + RQ with two-tier queues. Alternative: Procrastinate (Python async-first, uses Postgres native `SELECT...FOR UPDATE SKIP LOCKED`) would eliminate Redis dependency, simplify stack to single Postgres, and handle B2B SaaS scale. **Decision point:** Revisit if Phase 2 not yet started (high rework cost if Phase 2 in progress).
+- [ ] **Caching & rate-limiting strategy** — If Procrastinate adopted, Redis becomes optional. Current state: not documented. Options: Postgres + PgBouncer connection pooling (may be sufficient), Postgres token-bucket table for rate-limiting, lightweight in-app caching. **Action:** Deferred pending Procrastinate decision.
+- [ ] **File storage strategy** — User uploads, exports, static Next.js assets: confirm S3-compatible (Hetzner Object Storage) path, direct-to-client signed URLs vs server-side upload, CDN for static asset delivery. Currently not documented.
+- [ ] **Session management** — Where user sessions are stored not yet documented. Options: Postgres table (preferred, integrates with RLS), in-memory (loses sessions on pod restart), Redis (if retained). **Action:** Document before Phase 0 completion.
 
 
 
@@ -173,16 +142,11 @@
 
 
 ## Monetisation & Tiers
-- [X] **Adress flow** - improve the adress flow, use default choosing one etc
+
 - [ ] **Adjustments to pricing** - More adjustments to pricing page: remove flex rescore from, some consumptions are not available for certain tiers and the question marks are not filled in. also for first time org accounts, give about 1k credits or even more
-- [X] **Billing admin panel** — superadmin view of all orgs' tiers, subscription status, credit balance, transaction history; tier/credit adjustment UI
-- [X] **Invoice & receipt generation** — PDF invoices for annual subscriptions; receipts for top-up purchases; email delivery -> could be improved
 - [ ] **Verified business discount** — 20% extra discount (on top of tier bonus) for verified business orgs; applied at Stripe price calculation
 - [ ] **Check Free tier limitations enforcement** — export limit enforcement in CSV export endpoint; API rate limits (once API access is gated)
 - [ ] **Ad banner integration** — Ads embed for free tier; currently renders fake ads -> get real ad agency once I have users
-- [X] **Credit grant system** — admin interface to grant/refund credits with reason; used for migration credits, promotions, support refunds
-- [ ] **Credit expiry automation** — background job to expire grant-type credits after 1 year; topup credits never expire
-- [ ] **automatic reocurring billing** on saferpay (worldline) I need to use the secure card data interface to save card data at saferpay which I can then utilize for later payments (reocurring payments like subscriptions or automatic topups). https://saferpay.github.io/jsonapi/#ChapterAliasStore
 - [ ] **refund and other admin function** - check QOL of billing such as refunds and other methods. What happens when an automatic payment fails? -> subscription upgrades not working correctly, other functions not fully tested, definitely not complete. 
     - What happens to other users when an account is downgraded to free?
     - Subscription upgrade and downgrade flow
@@ -286,3 +250,8 @@
 - [X] **Cookie banner settings** - adjust the cookie banner so users by default choose all
 - [X] **Mobile optimization** - Optimize the website for mobile traffic (maybe limit some features)
 - [X] **Options for Emails** - Create an options for emails and also probably need to configure how the email looks including
+- [X] **Billing admin panel** — superadmin view of all orgs' tiers, subscription status, credit balance, transaction history; tier/credit adjustment UI
+- [X] **Invoice & receipt generation** — PDF invoices for annual subscriptions; receipts for top-up purchases; email delivery -> could be improved
+- [X] **Adress flow** - improve the adress flow, use default choosing one etc
+- [X] **Credit grant system** — admin interface to grant/refund credits with reason; used for migration credits, promotions, support refunds
+- [X] **automatic reocurring billing** on saferpay (worldline) I need to use the secure card data interface to save card data at saferpay which I can then utilize for later payments (reocurring payments like subscriptions or automatic topups). https://saferpay.github.io/jsonapi/#ChapterAliasStore

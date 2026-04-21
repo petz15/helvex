@@ -56,6 +56,7 @@ class SubscriptionCheckoutRequest(BaseModel):
     save_payment_method: bool = False
     provider: Literal["worldline", "stripe"] | None = None
     upgrade_proration_credits: int | None = None
+    selected_alias_id: str | None = None
 
 
 class TopupCheckoutRequest(BaseModel):
@@ -66,12 +67,14 @@ class TopupCheckoutRequest(BaseModel):
     save_payment_method: bool = True
     use_new_card: bool = False
     provider: Literal["worldline", "stripe"] | None = None
+    selected_alias_id: str | None = None
 
 
 class CardRegistrationRequest(BaseModel):
     success_url: str
     cancel_url: str
     billing_address: BillingAddress | None = None
+    scope: Literal["org", "personal"] = "personal"
 
 
 class DefaultPaymentMethodRequest(BaseModel):
@@ -111,28 +114,56 @@ def _extract_card_info_from_worldline(result: dict) -> dict:
     }
 
 
-def _save_alias(db: Session, *, user: User, alias_id: str, card_info: dict, org: Organization | None) -> None:
-    """Persist alias + card info on user and auto-set org default when none exists."""
-    user.payment_customer_id = alias_id
-    user.payment_card_info_json = json.dumps(card_info)
-    if org is not None and not getattr(org, "default_payment_user_id", None):
-        org.default_payment_user_id = user.id
+def _save_alias(db: Session, *, user: User, alias_id: str, card_info: dict, org: Organization | None, scope: str = "personal") -> None:
+    """Persist alias + card info. scope='org' saves to org_payment_methods, 'personal' saves to user."""
+    from app.models.org_payment_method import OrgPaymentMethod
+    if scope == "org" and org is not None:
+        existing = db.query(OrgPaymentMethod).filter(
+            OrgPaymentMethod.org_id == org.id,
+            OrgPaymentMethod.alias_id == alias_id,
+        ).first()
+        has_default = db.query(OrgPaymentMethod).filter(
+            OrgPaymentMethod.org_id == org.id,
+            OrgPaymentMethod.is_default == True,  # noqa: E712
+        ).first() is not None
+        if existing:
+            existing.card_info_json = json.dumps(card_info)
+        else:
+            db.add(OrgPaymentMethod(
+                org_id=org.id,
+                alias_id=alias_id,
+                card_info_json=json.dumps(card_info),
+                is_default=not has_default,
+                added_by_user_id=user.id,
+            ))
+    else:
+        user.payment_customer_id = alias_id
+        user.payment_card_info_json = json.dumps(card_info)
+        if org is not None and not getattr(org, "default_payment_user_id", None):
+            org.default_payment_user_id = user.id
 
 
-def _resolve_worldline_payment_alias(db: Session, org: Organization, current_user: User | None = None) -> str | None:
+def _resolve_worldline_payment_alias(db: Session, org: Organization, current_user: User | None = None, selected_alias_id: str | None = None) -> str | None:
+    from app.models.org_payment_method import OrgPaymentMethod
+    if selected_alias_id:
+        return selected_alias_id.strip() or None
+    default_org = db.query(OrgPaymentMethod).filter(
+        OrgPaymentMethod.org_id == org.id,
+        OrgPaymentMethod.is_default == True,  # noqa: E712
+    ).first()
+    if default_org:
+        return default_org.alias_id
     if current_user is not None:
-        current_user_alias = str(current_user.payment_customer_id or "").strip()
-        if current_user_alias:
-            return current_user_alias
-
+        alias = str(current_user.payment_customer_id or "").strip()
+        if alias:
+            return alias
     owner_id = getattr(org, "default_payment_user_id", None)
     if not owner_id:
         return None
     owner = db.get(User, int(owner_id))
     if owner is None:
         return None
-    alias_id = str(owner.payment_customer_id or "").strip()
-    return alias_id or None
+    return str(owner.payment_customer_id or "").strip() or None
 
 
 def _cancel_provider_transaction(tx: PaymentTransaction) -> None:
@@ -168,7 +199,7 @@ def _cancel_provider_transaction(tx: PaymentTransaction) -> None:
         )
 
 
-def _start_worldline_alias_polling(*, org_id: int, user_id: int, order_reference: str, token: str) -> None:
+def _start_worldline_alias_polling(*, org_id: int, user_id: int, order_reference: str, token: str, scope: str = "personal") -> None:
     worker = threading.Thread(
         target=_poll_worldline_alias_registration,
         kwargs={
@@ -176,6 +207,7 @@ def _start_worldline_alias_polling(*, org_id: int, user_id: int, order_reference
             "user_id": user_id,
             "order_reference": order_reference,
             "token": token,
+            "scope": scope,
         },
         daemon=True,
         name=f"worldline-alias-poll-{org_id}-{user_id}",
@@ -183,7 +215,7 @@ def _start_worldline_alias_polling(*, org_id: int, user_id: int, order_reference
     worker.start()
 
 
-def _poll_worldline_alias_registration(*, org_id: int, user_id: int, order_reference: str, token: str) -> None:
+def _poll_worldline_alias_registration(*, org_id: int, user_id: int, order_reference: str, token: str, scope: str = "personal") -> None:
     import time as _time
     _emit(
         "info",
@@ -212,7 +244,7 @@ def _poll_worldline_alias_registration(*, org_id: int, user_id: int, order_refer
             if owner is None:
                 raise RuntimeError("User not found")
             poll_org = db.get(Organization, org_id)
-            _save_alias(db, user=owner, alias_id=alias_id, card_info=_extract_card_info_from_worldline(result), org=poll_org)
+            _save_alias(db, user=owner, alias_id=alias_id, card_info=_extract_card_info_from_worldline(result), org=poll_org, scope=scope)
             db.commit()
         finally:
             db.close()
@@ -348,10 +380,11 @@ def create_subscription_checkout(
             "billing.subscription_checkout calling_provider provider=%s org_id=%s",
             body.provider or "default", org.id,
         )
+        _sub_alias = _resolve_worldline_payment_alias(db, org, _user, body.selected_alias_id) if body.provider in {None, "worldline"} else None
         session = payments.create_subscription_checkout(
             org_id=org.id,
             user_id=_user.id,
-            payment_alias_id=(_resolve_worldline_payment_alias(db, org, _user) if body.provider in {None, "worldline"} else None),
+            payment_alias_id=_sub_alias,
             save_payment_method=body.save_payment_method,
             tier=body.tier,
             billing_cycle=body.billing_cycle,
@@ -430,14 +463,13 @@ def create_topup_checkout(
             "billing.topup_checkout calling_provider provider=%s org_id=%s",
             body.provider or "default", org.id,
         )
+        _topup_alias = None
+        if body.provider in {None, "worldline"} and not body.use_new_card:
+            _topup_alias = _resolve_worldline_payment_alias(db, org, _user, body.selected_alias_id)
         session = payments.create_topup_checkout(
             org_id=org.id,
             user_id=_user.id,
-            payment_alias_id=(
-                _resolve_worldline_payment_alias(db, org, _user)
-                if body.provider in {None, "worldline"} and not body.use_new_card
-                else None
-            ),
+            payment_alias_id=_topup_alias,
             save_payment_method=body.save_payment_method,
             credits=body.credits,
             success_url=body.success_url,
@@ -700,6 +732,8 @@ async def worldline_return(
         if not alias_id and isinstance(result, dict):
             top_level_alias = result.get("Alias")
             alias_id = str(top_level_alias.get("Id") or "") if isinstance(top_level_alias, dict) else ""
+        org = db.query(Organization).filter(Organization.id == int(parsed_ref["org_id"])).first()
+
         if alias_id and parsed_ref.get("user_id"):
             alias_owner = db.get(User, int(parsed_ref["user_id"]))
             if alias_owner is not None:
@@ -724,7 +758,6 @@ async def worldline_return(
         # Log the transaction. The UNIQUE constraint on external_id is the DB-level
         # idempotency safeguard against races; the SELECT above handles the common case.
         # Retrieve billing address from the initiating user when available.
-        org = db.query(Organization).filter(Organization.id == int(parsed_ref["org_id"])).first()
         # Determine CHF amount from the order reference, not user-supplied params.
         # Fall back to a non-zero placeholder so logging never rejects the transaction.
         amount_chf: float = 0.01
@@ -909,13 +942,27 @@ def create_worldline_card_registration(
     db: Session = Depends(get_db),
 ) -> PaymentMethodRegistrationResponse:
     _user, org = user_org
+    if body.scope == "org" and _user.org_role not in ("admin", "owner"):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin access required to add org cards")
     billing_address = _resolve_billing_address(_user, body.billing_address, db)
+
+    # Embed scope in success/cancel URLs so the return handler can read it back.
+    from urllib.parse import urlparse, urlencode, parse_qs, urlunparse
+    def _inject_scope(url: str) -> str:
+        p = urlparse(url)
+        qs = parse_qs(p.query, keep_blank_values=True)
+        qs["card_scope"] = [body.scope]
+        return urlunparse(p._replace(query=urlencode(qs, doseq=True)))
+
+    success_url = _inject_scope(body.success_url)
+    cancel_url = _inject_scope(body.cancel_url)
+
     try:
         session = payments.WorldlineProvider().create_card_alias_registration(
             org_id=org.id,
             user_id=_user.id,
-            success_url=body.success_url,
-            cancel_url=body.cancel_url,
+            success_url=success_url,
+            cancel_url=cancel_url,
             billing_address=billing_address,
         )
     except payments.PaymentConfigurationError as exc:
@@ -929,6 +976,7 @@ def create_worldline_card_registration(
             user_id=_user.id,
             order_reference=session.order_reference,
             token=session.external_id,
+            scope=body.scope,
         )
 
     return PaymentMethodRegistrationResponse(provider=session.provider, checkout_url=session.checkout_url, external_id=session.external_id)
@@ -1021,7 +1069,9 @@ async def worldline_card_return(
             raise RuntimeError("Worldline alias assertion did not include an alias id")
 
         card_reg_org = db.get(Organization, org_id) if org_id > 0 else None
-        _save_alias(db, user=owner, alias_id=alias_id, card_info=_extract_card_info_from_worldline(result), org=card_reg_org)
+        from urllib.parse import urlparse, parse_qs as _parse_qs
+        _card_scope = _parse_qs(urlparse(success_url).query).get("card_scope", ["personal"])[0]
+        _save_alias(db, user=owner, alias_id=alias_id, card_info=_extract_card_info_from_worldline(result), org=card_reg_org, scope=_card_scope)
         db.commit()
         if order_reference:
             payments.clear_pending_card_alias_token(order_reference=order_reference)
@@ -1064,35 +1114,119 @@ def list_payment_methods(
     user_org: tuple[User, object] = Depends(get_current_org),
     db: Session = Depends(get_db),
 ) -> dict:
-    """Return saved payment methods for the org with masked card details."""
-    from app.models.org_member import OrgMember as _OrgMember
-    _, org = user_org
-    members = (
-        db.query(User)
-        .join(_OrgMember, _OrgMember.user_id == User.id)
-        .filter(_OrgMember.org_id == org.id, User.payment_customer_id.isnot(None))
+    """Return org-scoped and caller's personal payment methods."""
+    from app.models.org_payment_method import OrgPaymentMethod
+    user, org = user_org
+    items = []
+
+    org_methods = (
+        db.query(OrgPaymentMethod)
+        .filter(OrgPaymentMethod.org_id == org.id)
+        .order_by(OrgPaymentMethod.created_at.asc())
         .all()
     )
-    items = []
-    for m in members:
+    for m in org_methods:
         card_info: dict = {}
-        if m.payment_card_info_json:
+        if m.card_info_json:
             try:
-                card_info = json.loads(m.payment_card_info_json)
+                card_info = json.loads(m.card_info_json)
             except (ValueError, TypeError):
                 pass
         items.append({
-            "user_id": m.id,
+            "id": f"org:{m.alias_id}",
+            "scope": "org",
             "provider": "worldline",
-            "alias_id": m.payment_customer_id,
+            "alias_id": m.alias_id,
             "masked_number": card_info.get("masked_number") or None,
             "brand": card_info.get("brand") or None,
             "holder_name": card_info.get("holder_name") or None,
             "exp_year": card_info.get("exp_year"),
             "exp_month": card_info.get("exp_month"),
-            "is_default": org.default_payment_user_id == m.id,
+            "is_default": bool(m.is_default),
+            "label": m.label,
         })
+
+    if user.payment_customer_id:
+        card_info = {}
+        if user.payment_card_info_json:
+            try:
+                card_info = json.loads(user.payment_card_info_json)
+            except (ValueError, TypeError):
+                pass
+        items.append({
+            "id": f"personal:{user.payment_customer_id}",
+            "scope": "personal",
+            "provider": "worldline",
+            "alias_id": user.payment_customer_id,
+            "masked_number": card_info.get("masked_number") or None,
+            "brand": card_info.get("brand") or None,
+            "holder_name": card_info.get("holder_name") or None,
+            "exp_year": card_info.get("exp_year"),
+            "exp_month": card_info.get("exp_month"),
+            "is_default": False,
+            "label": None,
+        })
+
     return {"items": items}
+
+
+@router.delete("/payment-methods/{alias_id}")
+def delete_payment_method(
+    alias_id: str,
+    scope: str = Query("org"),
+    user_org: tuple[User, object] = Depends(get_current_org),
+    db: Session = Depends(get_db),
+) -> dict:
+    from app.models.org_payment_method import OrgPaymentMethod
+    user, org = user_org
+
+    if scope == "personal":
+        if user.payment_customer_id != alias_id:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Payment method not found")
+        user.payment_customer_id = None
+        user.payment_card_info_json = None
+        db.commit()
+        return {"ok": True}
+
+    if user.org_role not in ("admin", "owner"):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin access required")
+    method = db.query(OrgPaymentMethod).filter(
+        OrgPaymentMethod.org_id == org.id,
+        OrgPaymentMethod.alias_id == alias_id,
+    ).first()
+    if not method:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Payment method not found")
+    was_default = method.is_default
+    db.delete(method)
+    db.flush()
+    if was_default:
+        next_method = db.query(OrgPaymentMethod).filter(OrgPaymentMethod.org_id == org.id).order_by(OrgPaymentMethod.created_at.asc()).first()
+        if next_method:
+            next_method.is_default = True
+    db.commit()
+    return {"ok": True}
+
+
+@router.put("/payment-methods/{alias_id}/set-default")
+def set_payment_method_default(
+    alias_id: str,
+    user_org: tuple[User, object] = Depends(get_current_org),
+    db: Session = Depends(get_db),
+) -> dict:
+    from app.models.org_payment_method import OrgPaymentMethod
+    user, org = user_org
+    if user.org_role not in ("admin", "owner"):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin access required")
+    db.query(OrgPaymentMethod).filter(OrgPaymentMethod.org_id == org.id).update({"is_default": False})
+    method = db.query(OrgPaymentMethod).filter(
+        OrgPaymentMethod.org_id == org.id,
+        OrgPaymentMethod.alias_id == alias_id,
+    ).first()
+    if not method:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Org payment method not found")
+    method.is_default = True
+    db.commit()
+    return {"ok": True}
 
 
 @router.get("/tiers", response_model=list[BillingTierRead])

@@ -13,6 +13,7 @@ from app.models.oauth_account import OAuthAccount
 from app.models.org_company_state import OrgCompanyState
 from app.models.org_credit_transaction import OrgCreditTransaction
 from app.models.org_member import OrgMember
+from app.models.org_payment_method import OrgPaymentMethod
 from app.models.org_setting import OrgSetting
 from app.models.organization import Organization
 from app.models.payment_transaction import PaymentTransaction
@@ -24,6 +25,6 @@ __all__ = [
     "AppSetting", "AuditLog", "BillingTier", "BoilerplatePattern", "Company", "CollectionRun",
     "GoogleDirectoryDomain", "GoogleStopword",
     "JobRun", "JobRunEvent", "Note", "OAuthAccount", "OrgCompanyState",
-    "OrgCreditTransaction", "OrgMember", "OrgSetting",
+    "OrgCreditTransaction", "OrgMember", "OrgPaymentMethod", "OrgSetting",
     "Organization", "PaymentTransaction", "TfidfStopword", "User", "UserCompanyState",
 ]

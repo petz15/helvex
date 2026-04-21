@@ -26,6 +26,7 @@ import { CreditCard, Zap, ArrowRight, CheckCircle2, Loader2, Info, ShieldCheck }
 import {
   fetchCurrentUser,
   fetchBillingSummary,
+  fetchPaymentMethods,
   createSubscriptionCheckout,
   createTopupCheckout,
   createWorldlineCardRegistration,
@@ -35,6 +36,7 @@ import {
   parseBillingAddressJson,
   type BillingAddressPayload,
   type UpgradeProration,
+  type PaymentMethod,
 } from "@/lib/api";
 import { AddressBookManager } from "@/components/billing/address-book-manager";
 import { creditsToChf } from "@/lib/entitlements";
@@ -75,15 +77,25 @@ export function PaymentGatewayClient() {
 
   const { data: me, mutate: mutateMe } = useSWR("me", fetchCurrentUser);
   const { data: summary, mutate: mutateSummary } = useSWR("billing-summary", fetchBillingSummary);
+  const { data: paymentMethodsData } = useSWR("payment-methods", fetchPaymentMethods);
 
   const billingAddress: BillingAddressPayload | null = parseBillingAddressJson(me?.billing_address_json ?? null);
-  const hasSavedCard = Boolean(summary?.has_saved_payment_method);
+  const savedMethods: PaymentMethod[] = paymentMethodsData?.items ?? [];
 
-  const [useNewCard, setUseNewCard] = useState(false);
+  // "new" = use a new card; any other value = alias_id of a saved card
+  const [selectedCard, setSelectedCard] = useState<string>("new");
   const [saveCard, setSaveCard] = useState(true);
   const [termsAccepted, setTermsAccepted] = useState(false);
 
-  const willUseSavedCard = hasSavedCard && !useNewCard;
+  // Auto-select the org default card once methods load
+  const hasLoaded = paymentMethodsData !== undefined;
+  useEffect(() => {
+    if (!hasLoaded) return;
+    const def = savedMethods.find(m => m.scope === "org" && m.is_default) ?? savedMethods[0];
+    if (def) setSelectedCard(def.alias_id);
+  }, [hasLoaded]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const usingNewCard = selectedCard === "new";
 
   const [loading, setLoading] = useState(false);
   const [cardLoading, setCardLoading] = useState(false);
@@ -205,7 +217,8 @@ export function PaymentGatewayClient() {
           success_url: successUrl.toString(),
           cancel_url: cancelUrl.toString(),
           billing_address: billingAddress,
-          save_payment_method: willUseSavedCard ? false : saveCard,
+          save_payment_method: usingNewCard ? saveCard : false,
+          selected_alias_id: usingNewCard ? null : selectedCard,
           upgrade_proration_credits: proration?.credits_granted ?? null,
         });
         setIframeUrl(session.checkout_url);
@@ -215,8 +228,9 @@ export function PaymentGatewayClient() {
           success_url: successUrl.toString(),
           cancel_url: cancelUrl.toString(),
           billing_address: billingAddress,
-          save_payment_method: willUseSavedCard ? false : saveCard,
-          use_new_card: useNewCard,
+          save_payment_method: usingNewCard ? saveCard : false,
+          use_new_card: usingNewCard,
+          selected_alias_id: usingNewCard ? null : selectedCard,
         });
         setIframeUrl(session.checkout_url);
       }
@@ -395,42 +409,54 @@ export function PaymentGatewayClient() {
       <div className="rounded-2xl border border-slate-200 bg-white p-5 space-y-3">
         <h2 className="text-sm font-semibold text-slate-700">Payment method</h2>
 
-        {hasSavedCard && !useNewCard ? (
-          <div className="flex items-center justify-between rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2.5">
-            <div className="flex items-center gap-2 text-sm text-emerald-700">
-              <CreditCard size={14} className="shrink-0" />
-              <span className="font-medium">Saved payment method on file</span>
-            </div>
-            <button
-              onClick={() => setUseNewCard(true)}
-              className="text-xs text-blue-600 hover:underline"
-            >
-              Use a different payment method
-            </button>
-          </div>
-        ) : (
-          <div className="space-y-2">
-            {hasSavedCard && (
-              <div className="flex items-center justify-between">
-                <span className="text-xs text-slate-500">Entering a new payment method</span>
-                <button onClick={() => setUseNewCard(false)} className="text-xs text-blue-600 hover:underline">
-                  Use saved payment method instead
-                </button>
-              </div>
-            )}
-            <label className="flex items-center gap-2 text-xs text-slate-600 cursor-pointer select-none">
-              <input
-                type="checkbox"
-                checked={saveCard}
-                onChange={e => setSaveCard(e.target.checked)}
-                className="h-3.5 w-3.5 rounded border-slate-300 text-blue-600 accent-blue-600"
-              />
-              Save payment method for future transactions (optional)
-            </label>
-          </div>
+        {/* Saved card selector */}
+        <div className="space-y-2">
+          {savedMethods.map(m => {
+            const last4 = m.masked_number ? m.masked_number.slice(-4) : null;
+            const brand = m.brand ? m.brand.charAt(0).toUpperCase() + m.brand.slice(1).toLowerCase() : null;
+            const scopeLabel = m.scope === "org" ? (m.is_default ? "Org · Default" : "Org") : "Personal";
+            const label = [brand, last4 ? `•••• ${last4}` : null, scopeLabel].filter(Boolean).join(" · ");
+            const active = selectedCard === m.alias_id;
+            return (
+              <button
+                key={m.id}
+                onClick={() => setSelectedCard(m.alias_id)}
+                className={`w-full flex items-center gap-2.5 rounded-xl border px-3 py-2.5 text-left transition-colors ${
+                  active ? "border-blue-400 bg-blue-50" : "border-slate-200 hover:border-slate-300"
+                }`}
+              >
+                <CreditCard size={14} className={active ? "text-blue-500" : "text-slate-400"} />
+                <span className={`text-sm ${active ? "font-medium text-blue-800" : "text-slate-700"}`}>{label}</span>
+              </button>
+            );
+          })}
+          <button
+            onClick={() => setSelectedCard("new")}
+            className={`w-full flex items-center gap-2.5 rounded-xl border px-3 py-2.5 text-left transition-colors ${
+              usingNewCard ? "border-blue-400 bg-blue-50" : "border-slate-200 hover:border-slate-300"
+            }`}
+          >
+            <CreditCard size={14} className={usingNewCard ? "text-blue-500" : "text-slate-400"} />
+            <span className={`text-sm ${usingNewCard ? "font-medium text-blue-800" : "text-slate-500"}`}>
+              Enter new card
+            </span>
+          </button>
+        </div>
+
+        {/* Save checkbox — only when entering a new card */}
+        {usingNewCard && (
+          <label className="flex items-center gap-2 text-xs text-slate-600 cursor-pointer select-none">
+            <input
+              type="checkbox"
+              checked={saveCard}
+              onChange={e => setSaveCard(e.target.checked)}
+              className="h-3.5 w-3.5 rounded border-slate-300 text-blue-600 accent-blue-600"
+            />
+            Save this card for future transactions (optional)
+          </label>
         )}
 
-        {/* Save payment method button (standalone, no payment) */}
+        {/* Standalone save card link */}
         <div className="pt-1 border-t border-slate-100">
           <button
             onClick={() => void handleSaveCard()}
@@ -438,7 +464,7 @@ export function PaymentGatewayClient() {
             className="text-xs text-slate-500 hover:text-slate-700 disabled:opacity-50 flex items-center gap-1"
           >
             {cardLoading ? <Loader2 size={11} className="animate-spin" /> : <CreditCard size={11} />}
-            {hasSavedCard ? "Replace saved payment method" : "Save a payment method without paying now"}
+            {savedMethods.length > 0 ? "Add another payment method" : "Save a payment method without paying now"}
           </button>
         </div>
       </div>
