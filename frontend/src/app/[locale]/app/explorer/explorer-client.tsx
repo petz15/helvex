@@ -29,13 +29,6 @@ import { getExportLimit } from "@/lib/entitlements";
 
 const BROWSE_DEFAULTS: CompanyFilters = { sort: "-combined_score", page: 1, page_size: 50, status: "ACTIVE" };
 
-const SCORE_PRESETS = [
-  { label: "Any", value: 0 },
-  { label: "≥ 40", value: 40 },
-  { label: "≥ 60", value: 60 },
-  { label: "≥ 80", value: 80 },
-];
-
 type CategoryType = "ai_category" | "tfidf_cluster" | "keyword" | "noga_code";
 
 const BUSINESS_MODEL_CHIPS = [
@@ -572,7 +565,6 @@ function CategoryGrid({
 }: CategoryGridProps) {
   const [catType, setCatType] = useState<CategoryType>("ai_category");
   const [search, setSearch] = useState("");
-  const [minScore, setMinScore] = useState(0);
 
   const { data: nogaTree } = useSWR(
     catType === "noga_code" ? "noga-hierarchy" : null,
@@ -665,20 +657,6 @@ function CategoryGrid({
               <X size={13} />
             </button>
           )}
-        </div>
-
-        {/* Score filter */}
-        <div className="flex items-center gap-1 bg-slate-100 rounded-lg p-0.5 shrink-0">
-          {SCORE_PRESETS.map(p => (
-            <button
-              key={p.value}
-              onClick={() => setMinScore(p.value)}
-              className={cn(
-                "px-2.5 py-1 rounded-md text-xs font-medium transition-colors",
-                minScore === p.value ? "bg-white text-slate-800 shadow-sm" : "text-slate-500 hover:text-slate-700"
-              )}
-            >{p.label}</button>
-          ))}
         </div>
 
         {/* Scoring wizard button */}
@@ -788,10 +766,7 @@ function CategoryGrid({
                       {item.avgAi != null && <ScoreAvgBadge score={item.avgAi} />}
                     </div>
                   </div>
-                  <span className="text-xs text-slate-400 mb-2">{item.count.toLocaleString()} companies</span>
-                  <div className="w-full">
-                    <CategoryScoreBandLoader catType={catType} catValue={item.name} minScore={minScore} />
-                  </div>
+                  <span className="text-xs text-slate-400">{item.count.toLocaleString()} companies</span>
                   <div className="mt-2 flex items-center gap-1 text-xs text-blue-600 opacity-0 group-hover:opacity-100 transition-opacity">
                     Explore <ChevronRight size={11} />
                   </div>
@@ -872,17 +847,6 @@ function NogaTreeNode({
       )}
     </div>
   );
-}
-
-// Lazy loader for score bands on category cards
-function CategoryScoreBandLoader({ catType, catValue, minScore }: { catType: CategoryType; catValue: string; minScore: number }) {
-  const { data } = useSWR(
-    ["cat-stats-card", catType, catValue],
-    () => fetchCategoryStats(catType, catValue),
-    { dedupingInterval: 60000 }
-  );
-  if (!data) return <div className="h-1.5 w-full rounded-full bg-slate-100" />;
-  return <CategoryScoreBar bands={data.bands} />;
 }
 
 // ── CategoryDetail (Layer 2) ──────────────────────────────────────────────────

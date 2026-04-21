@@ -7,6 +7,7 @@ import { MultiSelectFilter } from "./multi-select-filter";
 import { searchKeywords, searchClusters } from "@/lib/api";
 import type { CompanyFilters, SavedView } from "@/lib/types";
 import { REVIEW_STATUSES, CONTACT_STATUSES } from "@/lib/types";
+import { useI18n } from "@/i18n/context";
 
 interface FilterBarProps {
   filters: CompanyFilters;
@@ -110,6 +111,9 @@ export function FilterBar({
   const nogaLevels = taxonomy?.noga_levels ?? [];
   const legalForms = taxonomy?.legal_forms ?? [];
 
+  const { dict } = useI18n();
+  const t = dict.app.filters;
+
   const set = useCallback(
     (key: keyof CompanyFilters, value: string | number | undefined) =>
       onChange({ ...filters, [key]: value || undefined, page: 1 }),
@@ -147,14 +151,14 @@ export function FilterBar({
         <input
           type="text"
           className={cn(inputCls, "flex-1 min-w-[7rem] sm:flex-none sm:w-36")}
-          placeholder="Company name…"
+          placeholder={t.companyname}
           value={filters.q ?? ""}
           onChange={(e) => set("q", e.target.value)}
         />
         <div className="relative flex-1 min-w-[5.5rem] sm:flex-none">
           <select className={cn(selectCls, "w-full sm:w-32")} value={filters.canton ?? ""}
             onChange={(e) => set("canton", e.target.value)}>
-            <option value="">All cantons</option>
+            <option value="">{t.canton}</option>
             {cantons.map((c) => <option key={c} value={c}>{c}</option>)}
           </select>
           <ChevronDown size={13} className="pointer-events-none absolute right-2 top-2 text-slate-400" />
@@ -162,7 +166,7 @@ export function FilterBar({
         <div className="relative flex-1 min-w-[7rem] sm:flex-none">
           <select className={cn(selectCls, "w-full sm:w-36")} value={filters.status ?? ""}
             onChange={(e) => set("status" as keyof CompanyFilters, e.target.value)}>
-            <option value="">All statuses</option>
+            <option value="">{t.status}</option>
             {ZEFIX_STATUSES.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
           </select>
           <ChevronDown size={13} className="pointer-events-none absolute right-2 top-2 text-slate-400" />
@@ -170,7 +174,7 @@ export function FilterBar({
         <input
           type="text"
           className={cn(inputCls, "flex-1 min-w-[5.5rem] sm:flex-none sm:w-36")}
-          placeholder="UID…"
+          placeholder={t.cheuid}
           value={filters.uid ?? ""}
           onChange={(e) => set("uid", e.target.value)}
         />
@@ -261,7 +265,7 @@ export function FilterBar({
             })}
           {activeCount > 0 && (
             <button onClick={onClear} className="text-xs text-slate-500 hover:text-slate-700 flex items-center gap-0.5">
-              <X size={11} /> Clear all
+              <X size={11} /> {t.clearAll}
             </button>
           )}
         </div>
@@ -357,10 +361,10 @@ export function FilterBar({
         <div className="px-3 pb-3 border-t border-slate-200 bg-white">
 
           {/* ── WORKFLOW ── */}
-          <SectionLabel>Workflow</SectionLabel>
+          <SectionLabel>{t.workflow}</SectionLabel>
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-x-4 gap-y-3">
             <div>
-              <Label>Review status</Label>
+              <Label>{t.reviewstatus}</Label>
               <div className="relative">
                 <select className={cn(selectCls)} value={filters.review_status ?? ""}
                   onChange={(e) => set("review_status", e.target.value)}>
@@ -372,7 +376,7 @@ export function FilterBar({
               </div>
             </div>
             <div>
-              <Label>Contact status</Label>
+              <Label>{t.contactstatus}</Label>
               <div className="relative">
                 <select className={cn(selectCls)} value={filters.contact_status ?? ""}
                   onChange={(e) => set("contact_status", e.target.value)}>
@@ -386,14 +390,14 @@ export function FilterBar({
           </div>
 
           {/* ── CATEGORY (INCLUDE) ── */}
-          <SectionLabel>Category (include)</SectionLabel>
+          <SectionLabel>{t.categoryinclude}</SectionLabel>
           <div className="grid grid-cols-1 sm:grid-cols-3 lg:grid-cols-6 gap-x-4 gap-y-3">
             <div>
-              <Label>Cluster</Label>
+              <Label>{t.cluster}</Label>
               <MultiSelectFilter
                 value={filters.tfidf_cluster === "_none" || filters.tfidf_cluster === "_any" ? undefined : filters.tfidf_cluster}
                 onChange={(v) => set("tfidf_cluster", v)}
-                placeholder="Search clusters…"
+                placeholder={t.search.replace("{input}", t.cluster)}
                 options={clusters}
                 onSearch={async (q) => { const r = await searchClusters(q); return r.map(x => ({ label: x.cluster, count: x.count })); }}
                 extraOptions={[{ value: "_none", label: "None (unset)" }, { value: "_any", label: "Any (set)" }]}
@@ -402,11 +406,11 @@ export function FilterBar({
               />
             </div>
             <div>
-              <Label>Purpose keyword</Label>
+              <Label>{t.purposekeyword}</Label>
               <MultiSelectFilter
                 value={filters.purpose_keywords === "_none" ? undefined : filters.purpose_keywords}
                 onChange={(v) => set("purpose_keywords", v)}
-                placeholder="Search keywords…"
+                placeholder={t.search.replace("{input}", t.purposekeyword)}
                 options={keywords}
                 onSearch={async (q) => { const r = await searchKeywords(q); return r.map(x => ({ label: x.keyword, count: x.count })); }}
                 extraOptions={[{ value: "_none", label: "None (unset)" }]}
@@ -414,59 +418,38 @@ export function FilterBar({
               />
             </div>
             <div>
-              <Label>AI Classification</Label>
+              <Label>{t.aiclassification}</Label>
               <MultiSelectFilter
                 value={filters.ai_category === "_none" ? undefined : filters.ai_category}
                 onChange={(v) => set("ai_category", v)}
-                placeholder="Search categories…"
+                placeholder={t.search.replace("{input}", t.aiclassification)}
                 options={categories}
                 extraOptions={[{ value: "_none", label: "None (unset)" }]}
                 variant="include"
               />
             </div>
             <div>
-              <Label>NOGA code</Label>
+              <Label>{t.noga}</Label>
               <MultiSelectFilter
                 value={filters.noga_code === "_none" || filters.noga_code === "_any" ? undefined : filters.noga_code}
                 onChange={(v) => set("noga_code", v)}
-                placeholder="Search NOGA code…"
+                placeholder={t.search.replace("{input}", t.noga)}
                 options={nogaCodes.map(([entry, cnt]) => [entry.split(" — ")[0]?.trim() ?? entry, cnt] as [string, number])}
                 extraOptions={[{ value: "_none", label: "None (unset)" }, { value: "_any", label: "Any (set)" }]}
                 variant="include"
               />
             </div>
             <div>
-              <Label>NOGA level</Label>
-              <MultiSelectFilter
-                value={filters.noga_level}
-                onChange={(v) => set("noga_level", v)}
-                placeholder="Search NOGA level…"
-                options={nogaLevels}
-                variant="include"
-              />
-            </div>
-            <div>
-              <Label>Legal form</Label>
+              <Label>{t.legalform}</Label>
               <Combobox
                 options={legalForms}
                 value={filters.legal_form}
                 onChange={(v) => set("legal_form", v)}
-                placeholder="Search legal form…"
+                placeholder={t.search.replace("{input}", t.legalform)}
               />
             </div>
             <div>
-              <Label>Business model</Label>
-              <MultiSelectFilter
-                value={filters.business_model}
-                onChange={(v) => set("business_model", v)}
-                placeholder="B2B, B2C, B2G…"
-                options={[["b2b", 0], ["b2c", 0], ["b2g", 0], ["mixed", 0]]}
-                extraOptions={[{ value: "_none", label: "None (unclassified)" }]}
-                variant="include"
-              />
-            </div>
-            <div>
-              <Label>First SOGC after</Label>
+              <Label>{t.firstsogcafter}</Label>
               <input
                 type="date"
                 className={inputCls}
@@ -475,7 +458,7 @@ export function FilterBar({
               />
             </div>
             <div>
-              <Label>First SOGC before</Label>
+              <Label>{t.firstsogcbefore}</Label>
               <input
                 type="date"
                 className={inputCls}
@@ -486,23 +469,23 @@ export function FilterBar({
           </div>
 
           {/* ── SCORES ── */}
-          <SectionLabel>Scores</SectionLabel>
+          <SectionLabel>{t.scores}</SectionLabel>
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-x-4 gap-y-3">
-            <ScoreRange label="Web Score" minKey="min_web_score" maxKey="max_web_score" filters={filters} set={setNum} />
-            <ScoreRange label="Flex Score" minKey="min_flex_score" maxKey="max_flex_score" filters={filters} set={setNum} />
-            <ScoreRange label="AI Score" minKey="min_ai_score" maxKey="max_ai_score" filters={filters} set={setNum} />
-            <ScoreRange label="Combined Score" minKey="min_combined_score" maxKey="max_combined_score" filters={filters} set={setNum} />
+            <ScoreRange label={t.webscore} minKey="min_web_score" maxKey="max_web_score" filters={filters} set={setNum} />
+            <ScoreRange label={t.flexscore} minKey="min_flex_score" maxKey="max_flex_score" filters={filters} set={setNum} />
+            <ScoreRange label={t.aiscore} minKey="min_ai_score" maxKey="max_ai_score" filters={filters} set={setNum} />
+            <ScoreRange label={t.combinedscore} minKey="min_combined_score" maxKey="max_combined_score" filters={filters} set={setNum} />
           </div>
 
           {/* ── CATEGORY (EXCLUDE) ── */}
-          <SectionLabel>Category (exclude)</SectionLabel>
+          <SectionLabel>{t.categoryexclude}</SectionLabel>
           <div className="grid grid-cols-1 sm:grid-cols-3 lg:grid-cols-6 gap-x-4 gap-y-3">
             <div>
-              <Label>Excl. cluster</Label>
+              <Label>{t.cluster}</Label>
               <MultiSelectFilter
                 value={filters.exclude_tfidf_cluster}
                 onChange={(v) => set("exclude_tfidf_cluster", v)}
-                placeholder="Search clusters…"
+                placeholder={t.search.replace("{input}", t.cluster)}
                 options={clusters}
                 onSearch={async (q) => { const r = await searchClusters(q); return r.map(x => ({ label: x.cluster, count: x.count })); }}
                 formatValue={formatClusterLabel}
@@ -510,43 +493,33 @@ export function FilterBar({
               />
             </div>
             <div>
-              <Label>Excl. purpose keyword</Label>
+              <Label>{t.purposekeyword}</Label>
               <MultiSelectFilter
                 value={filters.exclude_purpose_keywords}
                 onChange={(v) => set("exclude_purpose_keywords", v)}
-                placeholder="Search keywords…"
+                placeholder={t.search.replace("{input}", t.purposekeyword)}
                 options={keywords}
                 onSearch={async (q) => { const r = await searchKeywords(q); return r.map(x => ({ label: x.keyword, count: x.count })); }}
                 variant="exclude"
               />
             </div>
             <div>
-              <Label>Excl. AI classification</Label>
+              <Label>{t.aiclassification}</Label>
               <MultiSelectFilter
                 value={filters.exclude_ai_category}
                 onChange={(v) => set("exclude_ai_category", v)}
-                placeholder="Search categories…"
+                placeholder={t.search.replace("{input}", t.aiclassification)}
                 options={categories}
                 variant="exclude"
               />
             </div>
             <div>
-              <Label>Excl. NOGA code</Label>
+              <Label>{t.noga}</Label>
               <MultiSelectFilter
                 value={filters.exclude_noga_code}
                 onChange={(v) => set("exclude_noga_code", v)}
-                placeholder="Search NOGA code…"
+                placeholder={t.search.replace("{input}", t.noga)}
                 options={nogaCodes.map(([entry, cnt]) => [entry.split(" — ")[0]?.trim() ?? entry, cnt] as [string, number])}
-                variant="exclude"
-              />
-            </div>
-            <div>
-              <Label>Excl. NOGA level</Label>
-              <MultiSelectFilter
-                value={filters.exclude_noga_level}
-                onChange={(v) => set("exclude_noga_level", v)}
-                placeholder="Search NOGA level…"
-                options={nogaLevels}
                 variant="exclude"
               />
             </div>
@@ -559,7 +532,7 @@ export function FilterBar({
               onClick={() => setExpanded(false)}
               className="w-full flex items-center justify-center gap-1.5 rounded-lg border border-slate-200 bg-slate-50 py-2 text-xs font-medium text-slate-500 hover:bg-slate-100 hover:text-slate-700 transition-colors"
             >
-              <ChevronDown size={13} className="rotate-180" /> Collapse filters
+              <ChevronDown size={13} className="rotate-180" /> {t.collapsefilters}
             </button>
           </div>
         </div>

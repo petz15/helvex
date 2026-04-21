@@ -35,22 +35,45 @@
 
 
 ## Bug Fixes & Known Issues
-### Manual fixes:
+### General fixes:
 - billing/payment/pricing
     - existing subscription then upgrading is not working
 - SHAB: rerun 17.04.2026 because there seems to be an issue with the data example: https://helvex.dicy.ch/app/companies/783586 same on zefix
-### Claude fixes:
+- NOGA auf unternehmensseite falsch dargestellt und meistens nicht korrekt!
+- NOGA auf filter, sollte auch hierarchisch darstellen und mit richtiger bezeichnung
+- Remove business model -> not useful and not correctly implemented (category detail page)
 - admin dashboard simple redirects non authorized users, maybe not the safest
 - NOGA: Zweigniederlassung ist falsch zbs: https://helvex.dicy.ch/app/companies/238698
-
+- Make sure that users without access to BYOL API keys, always use the one provided by me (hidden not shown visible to the user)
 - Fix translations for all pages (only headers etc done, needs more)
+    - Such as filters
+    - information on pages
+    - Columns selection
+    - hover over effects are all in english
 - Tiers:
     - web results are not gated, immediately shown. Should have been atleast 1 week of pause form a simple tier. 
+- Page size is not working on company overview
+- superadmin payment transactions does not show payment method
+
 ### UI fixes:
 - Email notifications remove from billing
 - Move ML Job Reference from Jobs to collection page. 
 - Remove AI preview
-- Show settings in explore page regardless if 
+- Show settings in explore page (currently only shown when there is no data but there is always data)
+- create a seperate section for organization. in general show all organizations the user is a part of. Add a button to move to new organization and remove the one in the header - chaning org takes a long time to load? or does it even. remove it any way
+- Company profile page improve the AD banner, too small!
+- Checkbox on the category detail page is not working
+- Category detail page has a number next to the title which is meaningless
+- Category detail page, an overlay how many companies have no scoring. which is weird that companies which have ai classification dont have a score...is it 0?
+- Settings page, move to explore or elsewhere -> technically org settings right? need to check if these are per org or per user
+- Move recaculate scores, jobs etc from settings to jobs? or elsewhere but not here. also these should only be available to certain orgs
+- updated at in company overview should represent when the last sogc update was. potentially generally overhaul company search/overview for a cleaner search for one company. in company search, remove the small preview of a company profile. not really necessary in my opinion or atleast remove the scores as those are meant for explorer
+- larger symbols and text in header
+- as soon as explorer has been opend, opening any other page requires atleast 10 seconds to load if not more if it loads at all
+
+
+
+
 
 
 
@@ -62,29 +85,22 @@
 
 - [ ] **Fix Branding** — potentially change the icon to have a red cross in the middle (change google and linkedin app connection icons)
 - [ ] **Add dark mode** — add dark mode
-
+- [ ] **Map Adress search slow** - map adress search is slow atleast on the first adress. cold warm issue?
 
 
 ## Company Explore page
 
-- [ ] **Settings** - set up settings page for LLM, FLEX scoring, etc. Move out of account and improve it
-- [ ] **Categories page** - Needs to be fixed from the existing and integrated into the company explore page. first AI classification should be org specific, currently there is some data which should be changed to org 1.  NOGA classification dumps all levels into the field, instead it should display the hierarchy, always sum by total number also from lower hierarchy. add filtering options where necessary
-    - NOGA classification should be presented in a hierarchy
-    - NOGA, Purpose Keywords and clusters should be visible to all users
-    - Next to each category (NOGA, Purpose, cluster and AI) there is a number which doesnt have any meaning, either remove it or change to the total number of companies in that category
-- 
-- [ ] **NOGA** - NOGA still doesnt quite look correct
-- [ ] **Browse page** - The search bar, when searching for keywords, clusters etc it should search all available not only the top 20 words. 
-- [ ] **More pages(?)** - (?)
-- [ ] **Remove default flex score and categories** - Remove my default flex scores and categories only 
-- [ ] **ML Classifications** - Not sure that all of them are implemented quite correctly also explanations, drawbacks, multi org support for different tiers needs to be implemented, etc. 
+
 - [ ] **Create a mutation Timeline page** - A place where users can scroll through the daily company mutations with filters. Basically the company data but sorted by date instead of grouped by company and displayed on individual pages. This will probably require some preprocessing and then daily processing. 
+- [ ] **scoring wizard general overhaul** - currently pretty useless as it only shows AI categories not all. the flow should be different
+- [ ] **NOGA numbers** - NOGA is not showing up any numbers
+- [ ] **Introduction to new users** - currently new users just get thrown into explore without any guide
 
 
 ## Company Data
 
 
-- [ ] **Daily SHAB imports** — automated daily job pulling new/changed/deleted companies from SHAB to keep DB current without full re-import -> not fully implemented, multiple bugs. Should go over it myself because I think the API is misconfigured and AI is not solving it very well. my suspicion is that either wrong endpoint of the zefix is being used or not correctly added to the DB. 
+- [ ] **Daily SHAB imports** — works but zefix has a utf problem, I might have to switch to SHAB and maybe even use their pdfs
 - [ ] **CSV export** — export current filtered/sorted dashboard view as CSV; include all visible columns; respect active filters and column selection -> somewhat exists but not fully operational yet. No way to set which columns the CSV exports currently!
 - [ ] **Web crawler** — crawl company websites to extract description, contact info, product/service keywords; store as structured fields; feed into scoring and classification; replace/supplement current Google scrape
 - [ ] **Google results & scoring** — Improve the selection and scoring of google results
@@ -136,8 +152,9 @@
 
 ## Org-/Usermanagement
 
-- [ ] **User Management for Orgs** - Set what users are allowed to do (read only or also execute)
+- [ ] **Seperate org management page** - seperate page for org management between general and billing
 - [ ] **Flow for account deletion** - GDPR compliant flow for account deletion
+- [ ] **Possibility to create new orgs** - users should be able to create as many orgs as they want to 
 
 
 
@@ -255,3 +272,10 @@
 - [X] **Adress flow** - improve the adress flow, use default choosing one etc
 - [X] **Credit grant system** — admin interface to grant/refund credits with reason; used for migration credits, promotions, support refunds
 - [X] **automatic reocurring billing** on saferpay (worldline) I need to use the secure card data interface to save card data at saferpay which I can then utilize for later payments (reocurring payments like subscriptions or automatic topups). https://saferpay.github.io/jsonapi/#ChapterAliasStore
+- [X] **Settings** - set up settings page for LLM, FLEX scoring, etc. Move out of account and improve it
+- [X] **Categories page** - Needs to be fixed from the existing and integrated into the company explore page. first AI classification should be org specific, currently there is some data which should be changed to org 1.  NOGA classification dumps all levels into the field, instead it should display the hierarchy, always sum by total number also from lower hierarchy. add filtering options where necessary
+- [X] **NOGA** - NOGA still doesnt quite look correct
+- [X] **Browse page** - The search bar, when searching for keywords, clusters etc it should search all available not only the top 20 words. 
+- [X] **Remove default flex score and categories** - Remove my default flex scores and categories only 
+- [X] **ML Classifications** - Not sure that all of them are implemented quite correctly also explanations, drawbacks, multi org support for different tiers needs to be implemented, etc. 
+- [X] **User Management for Orgs** - Set what users are allowed to do (read only or also execute)

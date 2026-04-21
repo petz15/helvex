@@ -10,6 +10,7 @@ import type { Company, Note, GoogleScoredResult } from "@/lib/types";
 import "leaflet/dist/leaflet.css";
 import { SogcTimeline, SignersPanel } from "@/components/sogc-history";
 import { BaloghAdCard } from "@/components/balogh-ad-card";
+import { useI18n } from "@/i18n/context";
 
 interface Props {
   company: Company;
@@ -84,6 +85,9 @@ export function CompanyDetailClient({ company: initial, readOnlyDemo = false }: 
   const [showWebsitePicker, setShowWebsitePicker] = useState(false);
   const [selectingWebsite, setSelectingWebsite] = useState<string | null>(null);
   const [searchingWeb, setSearchingWeb] = useState(false);
+
+  const { dict } = useI18n();
+  const t = dict.app.companydetail;
 
   const mapRef = useRef<HTMLDivElement>(null);
   const mapInstanceRef = useRef<import("leaflet").Map | null>(null);
@@ -216,9 +220,9 @@ export function CompanyDetailClient({ company: initial, readOnlyDemo = false }: 
   return (
     <div className="flex w-full px-4 py-6 gap-4">
       {/* Left ad column */}
-      <div className="hidden xl:flex flex-col items-center w-44 shrink-0 pt-10">
+      <div className="hidden xl:flex flex-col items-center w-108 shrink-0 pt-10">
         <div className="sticky top-6">
-          <BaloghAdCard className="w-44" />
+          <BaloghAdCard className="w-108" />
         </div>
       </div>
 
@@ -262,7 +266,7 @@ export function CompanyDetailClient({ company: initial, readOnlyDemo = false }: 
                 className="flex items-center gap-1.5 text-sm text-emerald-700 hover:text-emerald-900 px-3 py-1.5 rounded-lg border border-emerald-200 hover:bg-emerald-50 transition-colors disabled:opacity-60"
               >
                 {searchingWeb ? <Loader2 size={13} className="animate-spin" /> : <Search size={13} />}
-                {searchingWeb ? "Queuing…" : "Run web search"}
+                {searchingWeb ? "Queuing…" : t.runwebsearch}
               </button>
             )}
             {company.website_url && (
@@ -291,7 +295,7 @@ export function CompanyDetailClient({ company: initial, readOnlyDemo = false }: 
                 rel="noopener noreferrer"
                 className="flex items-center gap-1.5 text-sm text-slate-700 hover:text-slate-900 px-3 py-1.5 rounded-lg border border-slate-200 hover:bg-slate-50 transition-colors"
               >
-                Cantonal excerpt <ExternalLink size={11} />
+                {t.cantonalexcerpt} <ExternalLink size={11} />
               </a>
             )}
           </div>
@@ -301,13 +305,13 @@ export function CompanyDetailClient({ company: initial, readOnlyDemo = false }: 
       {!readOnlyDemo && showWebsitePicker && (
         <div className="bg-white rounded-xl border border-slate-200 p-5 shadow-sm">
           <div className="flex items-center justify-between">
-            <h2 className="text-base font-semibold text-slate-800">Select a different website</h2>
+            <h2 className="text-base font-semibold text-slate-800">{t.selectdifferentwebsite}</h2>
             <button
               type="button"
               onClick={() => setShowWebsitePicker(false)}
               className="text-sm text-slate-600 hover:text-slate-900"
             >
-              Close
+              {t.close}
             </button>
           </div>
           <div className="mt-3 space-y-2">
@@ -345,13 +349,13 @@ export function CompanyDetailClient({ company: initial, readOnlyDemo = false }: 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Classification */}
         <div className="bg-white rounded-xl border border-slate-200 p-5 space-y-4 shadow-sm">
-          <h2 className="text-base font-semibold text-slate-800">Classification</h2>
+          <h2 className="text-base font-semibold text-slate-800">{t.classification}</h2>
           
           {(company.tfidf_cluster || company.purpose_keywords) && (
             <div className="pt-2 border-t border-slate-100 space-y-2">
               {company.tfidf_cluster && (
                 <div>
-                  <span className="text-xs font-medium text-slate-600 block mb-1">Flex Cluster</span>
+                  <span className="text-xs font-medium text-slate-600 block mb-1">{t.flexcluster}</span>
                   <div className="flex flex-wrap gap-1">
                     {company.tfidf_cluster.split("|").map(cluster => cluster.trim()).filter(Boolean).map(cluster => (
                       <Link key={cluster} href={`/app/search?tfidf_cluster=${encodeURIComponent(cluster)}`}>
@@ -363,7 +367,7 @@ export function CompanyDetailClient({ company: initial, readOnlyDemo = false }: 
               )}
               {company.purpose_keywords && (
                 <div>
-                  <span className="text-xs font-medium text-slate-600 block mb-1">Purpose Keywords</span>
+                  <span className="text-xs font-medium text-slate-600 block mb-1">{t.purposekeywords}</span>
                   <div className="flex flex-wrap gap-1">
                     {company.purpose_keywords.split(",").map(k => (
                       <Link key={k.trim()} href={`/app/search?purpose_keywords=${encodeURIComponent(k.trim())}`}>
@@ -377,7 +381,7 @@ export function CompanyDetailClient({ company: initial, readOnlyDemo = false }: 
           )}
           {(company.noga_code || company.noga_label || company.noga_level) && (
             <div className="pt-2 border-t border-slate-100 space-y-2">
-              <span className="text-xs font-medium text-slate-600 block">NOGA Classification</span>
+              <span className="text-xs font-medium text-slate-600 block">{t.noga}</span>
               {company.noga_code && (
                 <Link href={`/app/search?noga_code=${encodeURIComponent(company.noga_code)}`}>
                   <Badge className="bg-emerald-50 text-emerald-700 text-xs cursor-pointer hover:bg-emerald-100">Code: {company.noga_code}</Badge>
@@ -400,7 +404,7 @@ export function CompanyDetailClient({ company: initial, readOnlyDemo = false }: 
           )}
           {company.ai_category && (
             <div className="pt-2 border-t border-slate-100">
-              <span className="text-xs font-medium text-slate-600 block mb-1">AI Category</span>
+              <span className="text-xs font-medium text-slate-600 block mb-1">{t.aiclassification}</span>
               <Link href={`/app/search?ai_category=${encodeURIComponent(company.ai_category)}`}>
                 <Badge className="bg-slate-100 text-slate-700 text-xs cursor-pointer hover:bg-slate-200">{company.ai_category}</Badge>
               </Link>
@@ -408,7 +412,7 @@ export function CompanyDetailClient({ company: initial, readOnlyDemo = false }: 
           )}
           {company.ai_freeform && (
             <div>
-              <span className="text-xs font-medium text-slate-600 block mb-1">AI notes</span>
+              <span className="text-xs font-medium text-slate-600 block mb-1">{t.ainotes}</span>
               <p className="text-xs text-slate-600 whitespace-pre-wrap">{company.ai_freeform}</p>
             </div>
           )}
@@ -416,7 +420,7 @@ export function CompanyDetailClient({ company: initial, readOnlyDemo = false }: 
 
         {/* Company info */}
         <div className="bg-white rounded-xl border border-slate-200 p-5 space-y-3 shadow-sm lg:col-span-2">
-          <h2 className="text-base font-semibold text-slate-800">Company Info</h2>
+          <h2 className="text-base font-semibold text-slate-800">{t.companyinfo}</h2>
 
           {company.lat != null && company.lon != null && (
             <div className="rounded-lg border border-slate-200 overflow-hidden">
@@ -426,10 +430,10 @@ export function CompanyDetailClient({ company: initial, readOnlyDemo = false }: 
 
           <dl className="space-y-2 text-sm">
             {[
-              { label: "UID", value: company.uid },
-              { label: "Legal form", value: company.legal_form },
-              { label: "Canton", value: company.canton },
-              { label: "Municipality", value: company.municipality },
+              { label: t.cheuid, value: company.uid },
+              { label: t.legalform, value: company.legal_form },
+              { label: t.canton, value: company.canton },
+              { label: t.municipality, value: company.municipality },
             ].map(({ label, value }) => value && (
               <div key={label} className="flex gap-2">
                 <dt className="text-slate-600 w-24 shrink-0">{label}</dt>
@@ -438,25 +442,25 @@ export function CompanyDetailClient({ company: initial, readOnlyDemo = false }: 
             ))}
             {company.address && (
               <div className="flex gap-2">
-                <dt className="text-slate-600 w-24 shrink-0 flex items-center gap-1"><MapPin size={11} /> Address</dt>
+                <dt className="text-slate-600 w-24 shrink-0 flex items-center gap-1"><MapPin size={11} /> {t.address}</dt>
                 <dd className="text-slate-700">{company.address}</dd>
               </div>
             )}
             {company.capital_nominal && (
               <div className="flex gap-2">
-                <dt className="text-slate-600 w-24 shrink-0">Capital</dt>
+                <dt className="text-slate-600 w-24 shrink-0">{t.capital}</dt>
                 <dd className="text-slate-700">{company.capital_nominal} {company.capital_currency}</dd>
               </div>
             )}
             {company.sogc_date && (
               <div className="flex gap-2">
-                <dt className="text-slate-600 w-24 shrink-0">SOGC date</dt>
+                <dt className="text-slate-600 w-24 shrink-0">{t.firstsogcafter}</dt>
                 <dd className="text-slate-700">{company.sogc_date}</dd>
               </div>
             )}
             {company.deletion_date && (
               <div className="flex gap-2">
-                <dt className="text-slate-600 w-24 shrink-0">Deleted</dt>
+                <dt className="text-slate-600 w-24 shrink-0">{t.deletiondate}</dt>
                 <dd className="text-red-700 font-medium">{company.deletion_date}</dd>
               </div>
             )}
@@ -488,7 +492,7 @@ export function CompanyDetailClient({ company: initial, readOnlyDemo = false }: 
       {company.purpose && (
         <div className="bg-white rounded-xl border border-slate-200 p-5 shadow-sm">
           <h2 className="text-base font-semibold text-slate-800 mb-2 flex items-center gap-1.5">
-            <FileText size={14} /> Purpose
+            <FileText size={14} /> {t.purpose}
           </h2>
           <div className="relative">
             <p className={cn("text-sm text-slate-700 leading-relaxed whitespace-pre-wrap", !purposeExpanded && "max-h-40 overflow-hidden")}>
@@ -500,7 +504,7 @@ export function CompanyDetailClient({ company: initial, readOnlyDemo = false }: 
           </div>
           {company.purpose.length > 500 && (
             <button type="button" onClick={() => setPurposeExpanded(v => !v)} className="mt-2 text-xs text-blue-600 hover:underline">
-              {purposeExpanded ? "Show less" : "Show more"}
+              {purposeExpanded ? t.showless : t.showmore}
             </button>
           )}
         </div>
@@ -510,11 +514,11 @@ export function CompanyDetailClient({ company: initial, readOnlyDemo = false }: 
       {/* Corporate Structure */}
       {hasStructureData && (
         <div className="bg-white rounded-xl border border-slate-200 p-5 shadow-sm">
-          <h2 className="text-base font-semibold text-slate-800 mb-4">Corporate Structure</h2>
+          <h2 className="text-base font-semibold text-slate-800 mb-4">{t.corporatestructure}</h2>
           <dl className="space-y-4">
             {translations.length > 0 && (
               <div>
-                <dt className="text-xs font-medium text-slate-600 mb-1">Also known as</dt>
+                <dt className="text-xs font-medium text-slate-600 mb-1">{t.aliasname}</dt>
                 <dd className="flex flex-wrap gap-1.5">
                   {translations.map((t, i) => (
                     <Badge key={i} className="bg-slate-100 text-slate-600 text-xs">{t}</Badge>
@@ -524,7 +528,7 @@ export function CompanyDetailClient({ company: initial, readOnlyDemo = false }: 
             )}
             {oldNames.length > 0 && (
               <div>
-                <dt className="text-xs font-medium text-slate-600 mb-1">Previous names</dt>
+                <dt className="text-xs font-medium text-slate-600 mb-1">{t.previousnames}</dt>
                 <dd className="space-y-0.5">
                   {oldNames
                     .sort((a, b) => (b.sequenceNr ?? 0) - (a.sequenceNr ?? 0))
@@ -539,12 +543,12 @@ export function CompanyDetailClient({ company: initial, readOnlyDemo = false }: 
                 </dd>
               </div>
             )}
-            <RelatedCompaniesList items={headOffices} label="Head office" />
-            <RelatedCompaniesList items={furtherHeadOffices} label="Further head offices" />
-            <RelatedCompaniesList items={branchOffices} label="Branch offices" />
-            <RelatedCompaniesList items={hasTakenOver} label="Has taken over" />
-            <RelatedCompaniesList items={wasTakenOverBy} label="Was taken over by" />
-            <RelatedCompaniesList items={auditCompanies} label="Audit companies" />
+            <RelatedCompaniesList items={headOffices} label={t.headoffice} />
+            <RelatedCompaniesList items={furtherHeadOffices} label={t.furtherheadoffices} />
+            <RelatedCompaniesList items={branchOffices} label={t.branchoffices} />
+            <RelatedCompaniesList items={hasTakenOver} label={t.hastakenover} />
+            <RelatedCompaniesList items={wasTakenOverBy} label={t.wastakenoverby} />
+            <RelatedCompaniesList items={auditCompanies} label={t.auditcompanies} />
           </dl>
         </div>
       )}
@@ -558,13 +562,13 @@ export function CompanyDetailClient({ company: initial, readOnlyDemo = false }: 
 
       {/* Notes */}
       {!readOnlyDemo && <div className="bg-white rounded-xl border border-slate-200 p-5 shadow-sm">
-        <h2 className="text-base font-semibold text-slate-800 mb-4">Notes ({notes.length})</h2>
+        <h2 className="text-base font-semibold text-slate-800 mb-4">{t.notes} ({notes.length})</h2>
         <form onSubmit={handleAddNote} className="mb-4">
           <div className="flex gap-2">
             <textarea
               value={noteText}
               onChange={e => setNoteText(e.target.value)}
-              placeholder="Add a note…"
+              placeholder={t.addnote}
               rows={2}
               className="flex-1 px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-300 resize-none"
             />
@@ -574,7 +578,7 @@ export function CompanyDetailClient({ company: initial, readOnlyDemo = false }: 
               className="flex items-center gap-1.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white px-3 py-2 rounded-lg text-sm font-medium transition-colors self-start"
             >
               {addingNote ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} />}
-              Add
+              {t.addnote}
             </button>
           </div>
           <div className="mt-1 flex justify-end">
@@ -582,7 +586,7 @@ export function CompanyDetailClient({ company: initial, readOnlyDemo = false }: 
           </div>
         </form>
         {notes.length === 0 && (
-          <p className="text-sm text-slate-500 text-center py-4">No notes yet</p>
+          <p className="text-sm text-slate-500 text-center py-4">{t.nonotes}</p>
         )}
         <div className="space-y-2">
           {notes.map(n => (
@@ -618,9 +622,9 @@ export function CompanyDetailClient({ company: initial, readOnlyDemo = false }: 
     </div>
 
       {/* Right ad column */}
-      <div className="hidden xl:flex flex-col items-center w-44 shrink-0 pt-10">
+      <div className="hidden xl:flex flex-col items-center w-108 shrink-0 pt-10">
         <div className="sticky top-6">
-          <BaloghAdCard className="w-44" />
+          <BaloghAdCard className="w-108" />
         </div>
       </div>
     </div>

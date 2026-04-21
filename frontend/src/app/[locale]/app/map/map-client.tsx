@@ -34,6 +34,10 @@ function clusterColor(count: number): string {
   return "#60a5fa";
 }
 
+function fmtNum(n: number): string {
+  return Math.trunc(n).toString().replace(/\B(?=(\d{3})+(?!\d))/g, " ");
+}
+
 function buildPopup(f: MapFeature): string {
   const parts = [
     `<strong><a href="/app/companies/${f.id}" style="color:#3b82f6;text-decoration:none">${f.name}</a></strong>`,
@@ -297,21 +301,6 @@ export function MapClient() {
                   {t.go}
                 </button>
               </div>
-            </div>
-            <div className="flex min-w-[220px] flex-1 items-center justify-between gap-3 text-xs text-slate-500">
-              <span>
-                {addressLabel ? t.centeredOn.replace("{address}", addressLabel) : t.searchHint}
-              </span>
-              <span>
-                {count.toLocaleString()} ·{" "}
-                {count === 0 && !loading
-                  ? t.noGeocoded
-                  : clustered
-                  ? t.clickToZoom
-                  : truncated
-                  ? t.capped
-                  : t.inView}
-              </span>
             </div>
           </form>
           {addressError && <p className="mt-2 text-xs text-red-600">{addressError}</p>}

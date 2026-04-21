@@ -1,6 +1,7 @@
 "use client";
 import { useState } from "react";
 import { ChevronDown, ChevronUp, UserPlus, UserMinus, UserCog } from "lucide-react";
+import { useI18n } from "@/i18n/context";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -370,6 +371,10 @@ function TimelineEntry({ entry }: { entry: SogcEntry }) {
 // ─── Public components ────────────────────────────────────────────────────────
 
 export function SogcTimeline({ sogcPubJson }: { sogcPubJson: string | null }) {
+
+  const { dict } = useI18n();
+  const t = dict.app.companydetail;
+
   const entries: SogcEntry[] = (() => {
     if (!sogcPubJson) return [];
     try {
@@ -389,7 +394,7 @@ export function SogcTimeline({ sogcPubJson }: { sogcPubJson: string | null }) {
 
   return (
     <div className="bg-white rounded-xl border border-slate-200 p-5 shadow-sm">
-      <h2 className="text-sm font-semibold text-slate-700 mb-4">SHAB-Verlauf ({entries.length})</h2>
+      <h2 className="text-sm font-semibold text-slate-700 mb-4">{t.shabhistory}</h2>
       <div className="relative border-l border-slate-200 ml-1.5 space-y-5">
         {sorted.map((entry) => (
           <TimelineEntry key={entry.sogcId} entry={entry} />
@@ -400,6 +405,9 @@ export function SogcTimeline({ sogcPubJson }: { sogcPubJson: string | null }) {
 }
 
 export function SignersPanel({ sogcPubJson }: { sogcPubJson: string | null }) {
+  const { dict } = useI18n();
+  const t = dict.app.companydetail;
+
   const entries: SogcEntry[] = (() => {
     if (!sogcPubJson) return [];
     try {
@@ -419,7 +427,7 @@ export function SignersPanel({ sogcPubJson }: { sogcPubJson: string | null }) {
 
   return (
     <div className="bg-white rounded-xl border border-slate-200 p-5 shadow-sm">
-      <h2 className="text-sm font-semibold text-slate-700 mb-4">Aktuelle Zeichnungsberechtigte</h2>
+      <h2 className="text-sm font-semibold text-slate-700 mb-4">{t.currentsigners}</h2>
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
         {currentSigners.map((p, i) => (
           <PersonCard key={i} person={p} variant="current" />
