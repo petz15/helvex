@@ -268,7 +268,7 @@
       "max": "Max",
       "collapsefilters": "Comprimi filtri",
       "search": "Cerca {input}…"
-    }
+    },
     "map": {
       "goToAddress": "Vai all'indirizzo",
       "placeholder": "CAP, nome città o indirizzo",
