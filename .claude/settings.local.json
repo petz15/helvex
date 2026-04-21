@@ -215,7 +215,9 @@
       "Bash(grep -E \"\\\\.\\(tsx|ts\\)$\")",
       "Bash(grep -r \"db.query.*\\\\\\\\.all\\(\\)\\\\|session.execute.*fetchall\\(\\)\" c:/D/coding_projects/zefix_analyzer/app --include=\"*.py\" -A 2)",
       "Bash(python -c \"import ast; ast.parse\\(open\\('app/crud/company.py'\\).read\\(\\)\\); print\\('OK'\\)\")",
-      "Bash(python -c \"import ast; ast.parse\\(open\\('app/crud/cluster_registry.py'\\).read\\(\\)\\); print\\('OK'\\)\")"
+      "Bash(python -c \"import ast; ast.parse\\(open\\('app/crud/cluster_registry.py'\\).read\\(\\)\\); print\\('OK'\\)\")",
+      "Bash(find /c/D/coding_projects/zefix_analyzer/frontend/src/app/[locale]/app/admin/orgs -type f)",
+      "Bash(find /c/D/coding_projects/zefix_analyzer/frontend/src/app/[locale]/app -type f -name \"layout.tsx\")"
     ]
   }
 }

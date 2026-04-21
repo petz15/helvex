@@ -1,20 +1,29 @@
 "use client";
-import { useEffect, useState } from "react";
-import useSWR from "swr";
+import { useState } from "react";
+import useSWR, { useSWRConfig } from "swr";
 import { useI18n } from "@/i18n/context";
+import { useRouter } from "next/navigation";
+import Link from "next/link";
 import {
-  Mail, Building2, Loader2, Check, Plus,
+  Mail, Building2, Loader2, Check, Plus, ArrowRight, Users,
 } from "lucide-react";
 import {
   fetchCurrentUser,
+  fetchMyOrgs,
   requestEmailChange,
   createOrg,
+  switchOrg,
   leaveOrg,
-  fetchOrg,
 } from "@/lib/api";
-import { OrgClient } from "@/app/[locale]/app/org/org-client";
 
 type AccountClientProps = Record<string, never>;
+
+const ROLE_COLORS: Record<string, string> = {
+  owner: "bg-purple-100 text-purple-700",
+  admin: "bg-blue-100 text-blue-700",
+  member: "bg-slate-100 text-slate-700",
+  viewer: "bg-slate-50 text-slate-500",
+};
 
 const inputCls =
   "w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-300 focus:border-transparent bg-white";
@@ -116,8 +125,10 @@ function ChangePasswordForm() {
 
 export function AccountClient({}: AccountClientProps) {
   const { dict } = useI18n();
+  const router = useRouter();
+  const { mutate } = useSWRConfig();
   const { data: me, mutate: reloadMe } = useSWR("me", fetchCurrentUser);
-  const { data: orgDetail, mutate: reloadOrgDetail } = useSWR(me?.org?.id ? ["org-detail", me.org.id] : null, () => fetchOrg(me!.org!.id));
+  const { data: orgs = [], mutate: reloadOrgs } = useSWR(me ? "my-orgs" : null, fetchMyOrgs);
 
   // Email change
   const [showEmailForm, setShowEmailForm] = useState(false);
@@ -132,8 +143,9 @@ export function AccountClient({}: AccountClientProps) {
   const [creatingOrg, setCreatingOrg] = useState(false);
   const [orgBanner, setOrgBanner] = useState<{ kind: "success" | "error"; message: string } | null>(null);
 
-  // Leave org
+  // Leave org / switch org
   const [leavingOrg, setLeavingOrg] = useState(false);
+  const [switchingOrgId, setSwitchingOrgId] = useState<number | null>(null);
   const profileTier = me?.org?.tier ?? "free";
 
   function flash(
@@ -169,13 +181,34 @@ export function AccountClient({}: AccountClientProps) {
     try {
       await createOrg(orgName);
       await reloadMe();
+      await reloadOrgs();
+      await mutate("my-orgs");
       setShowCreateOrg(false);
       setOrgName("");
       flash(setOrgBanner, "success", "Organization created! You are now the owner.");
+      router.refresh();
     } catch (err) {
       flash(setOrgBanner, "error", err instanceof Error ? err.message : "Failed to create org");
     } finally {
       setCreatingOrg(false);
+    }
+  }
+
+  async function handleSwitchOrg(orgId: number) {
+    if (!me || orgId === me.org_id) return;
+    setSwitchingOrgId(orgId);
+    try {
+      await switchOrg(orgId);
+      await mutate("me");
+      await mutate("my-orgs");
+      await reloadMe();
+      await reloadOrgs();
+      flash(setOrgBanner, "success", "Switched organization.");
+      router.refresh();
+    } catch (err) {
+      flash(setOrgBanner, "error", err instanceof Error ? err.message : "Failed to switch organization");
+    } finally {
+      setSwitchingOrgId(null);
     }
   }
 
@@ -186,7 +219,10 @@ export function AccountClient({}: AccountClientProps) {
     try {
       await leaveOrg(me.org_id);
       await reloadMe();
+      await reloadOrgs();
+      await mutate("my-orgs");
       flash(setOrgBanner, "success", "You have left the organization.");
+      router.refresh();
     } catch (err) {
       flash(setOrgBanner, "error", err instanceof Error ? err.message : "Failed to leave org");
     } finally {
@@ -197,13 +233,6 @@ export function AccountClient({}: AccountClientProps) {
 
 
   if (!me) return <div className="p-6 text-slate-400 text-sm">Loading…</div>;
-
-  const ROLE_COLORS: Record<string, string> = {
-    owner: "bg-purple-100 text-purple-700",
-    admin: "bg-blue-100 text-blue-700",
-    member: "bg-slate-100 text-slate-700",
-    viewer: "bg-slate-50 text-slate-500",
-  };
 
   return (
     <div className="p-6 max-w-2xl mx-auto space-y-5">
@@ -301,29 +330,109 @@ export function AccountClient({}: AccountClientProps) {
       {orgBanner && <Banner {...orgBanner} />}
 
       {me.org ? (
-        <div className="rounded-xl border border-slate-200 bg-white p-5 space-y-3">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <Building2 size={16} className="text-blue-600" />
-              <span className="text-sm font-semibold text-slate-800">{me.org.name}</span>
-              <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium capitalize ${
-                ROLE_COLORS[me.org_role] ?? "bg-slate-100 text-slate-600"
-              }`}>
-                {me.org_role}
-              </span>
-            </div>
-            <span className="text-xs text-slate-400">Team settings below</span>
+        <div className="rounded-xl border border-slate-200 bg-white p-5 space-y-4">
+          {/* Active org info */}
+          <div className="flex items-center gap-2">
+            <Building2 size={16} className="text-blue-600" />
+            <span className="text-sm font-semibold text-slate-800">{me.org.name}</span>
+            <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium capitalize ${
+              ROLE_COLORS[me.org_role] ?? "bg-slate-100 text-slate-600"
+            }`}>
+              {me.org_role}
+            </span>
           </div>
           <p className="text-xs text-slate-400 font-mono">{me.org.slug}</p>
-          <div className="border-t border-slate-100 pt-3">
-            <button
-              onClick={handleLeaveOrg}
-              disabled={leavingOrg}
-              className="text-xs text-red-500 hover:text-red-700 font-medium disabled:opacity-50 transition-colors"
-            >
-              {leavingOrg ? "Leaving…" : "Leave organization"}
-            </button>
-          </div>
+
+          {/* Switch between orgs if multiple */}
+          {orgs.length > 1 && (
+            <div className="border-t border-slate-100 pt-3 space-y-2">
+              <p className="text-xs font-medium text-slate-500">Switch workspace</p>
+              <div className="flex flex-wrap gap-2">
+                {orgs.map((org) => (
+                  <button
+                    key={org.id}
+                    onClick={() => handleSwitchOrg(org.id)}
+                    disabled={org.id === me.org_id || switchingOrgId !== null}
+                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors disabled:cursor-default ${
+                      org.id === me.org_id
+                        ? "bg-blue-50 border-blue-200 text-blue-700"
+                        : "bg-white border-slate-200 text-slate-600 hover:border-blue-300 hover:text-blue-600"
+                    }`}
+                  >
+                    {switchingOrgId === org.id ? (
+                      <Loader2 size={11} className="animate-spin" />
+                    ) : org.id === me.org_id ? (
+                      <Check size={11} />
+                    ) : (
+                      <ArrowRight size={11} />
+                    )}
+                    {org.name}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Create new org */}
+          {!showCreateOrg ? (
+            <div className="border-t border-slate-100 pt-3 flex items-center justify-between">
+              <button
+                onClick={() => setShowCreateOrg(true)}
+                className="flex items-center gap-1.5 text-xs text-blue-600 hover:text-blue-800 font-medium transition-colors"
+              >
+                <Plus size={12} />
+                Create another organization
+              </button>
+              <div className="flex items-center gap-3">
+                <Link
+                  href="organizations"
+                  className="flex items-center gap-1 text-xs text-slate-500 hover:text-slate-700 font-medium transition-colors"
+                >
+                  <Users size={12} />
+                  Manage team
+                  <ArrowRight size={11} />
+                </Link>
+                {me.org_role !== "owner" && (
+                  <button
+                    onClick={handleLeaveOrg}
+                    disabled={leavingOrg}
+                    className="text-xs text-red-400 hover:text-red-600 font-medium disabled:opacity-50 transition-colors"
+                  >
+                    {leavingOrg ? "Leaving…" : "Leave"}
+                  </button>
+                )}
+              </div>
+            </div>
+          ) : (
+            <form onSubmit={handleCreateOrg} className="border-t border-slate-100 pt-3 space-y-3">
+              <p className="text-xs font-medium text-slate-600">New organization name</p>
+              <div className="flex gap-2">
+                <input
+                  autoFocus
+                  required
+                  value={orgName}
+                  onChange={(e) => setOrgName(e.target.value)}
+                  className={inputCls}
+                  placeholder="Acme Corp"
+                />
+                <button
+                  type="submit"
+                  disabled={creatingOrg || !orgName.trim()}
+                  className="flex items-center gap-1.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-60 text-white px-3 py-2 rounded-lg text-xs font-medium transition-colors shrink-0"
+                >
+                  {creatingOrg ? <Loader2 size={12} className="animate-spin" /> : <Building2 size={12} />}
+                  Create
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { setShowCreateOrg(false); setOrgName(""); }}
+                  className="px-3 py-2 text-xs text-slate-500 hover:text-slate-700 rounded-lg hover:bg-slate-100 transition-colors"
+                >
+                  Cancel
+                </button>
+              </div>
+            </form>
+          )}
         </div>
       ) : (
         <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50 p-5 space-y-3">
@@ -374,12 +483,6 @@ export function AccountClient({}: AccountClientProps) {
           )}
         </div>
       )}
-
-      {/* Team */}
-      <SectionTitle title="Team" />
-      <div id="team" className="rounded-xl border border-slate-200 bg-white p-4">
-        <OrgClient embedded />
-      </div>
 
     </div>
   );

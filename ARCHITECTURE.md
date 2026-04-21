@@ -1090,6 +1090,27 @@ check_and_deduct(db, org_id, action, count=1) → (ok: bool, balance: int)
 
 The frontend reads these on status poll and shows an upgrade nudge banner when `capped=true`.
 
+### Organizations Management UI (frontend)
+
+`/app/organizations` — a dedicated page for multi-org workspace management, accessible from the account dropdown between **General** and **Billing**.
+
+**What it provides:**
+- Grid of all organizations the user belongs to, each displayed as a card with name, slug, role badge, and tier
+- The currently active workspace is highlighted; a chip confirms the active state
+- **Switch workspace** — clicking "Switch to this org" calls `POST /api/v1/orgs/switch/{id}`, revalidates SWR `"me"` + `"my-orgs"`, and refreshes the router
+- **Create new organization** — unlimited; the inline form calls `POST /api/v1/orgs`; after creation the new org becomes active and the card grid updates
+- **Leave organization** — available for non-owner roles; calls `POST /api/v1/orgs/{id}/leave`
+- **Team management** — the `OrgClient` (embedded) for member CRUD is rendered below the org grid for the currently active org
+
+**Account page (`/app/account`) changes:**
+- The Organization section now shows the active org with inline workspace-switcher pills (if the user belongs to multiple orgs) and a "Create another organization" inline form
+- A "Manage team →" shortcut links to `/app/organizations`
+- The former **Team** section (embedded `OrgClient`) has been removed from this page — it now lives exclusively in `/app/organizations`
+
+**Header (`nav-bar.tsx`) changes:**
+- The `<select>` org-switcher dropdown that previously appeared in the navbar when a user belonged to multiple orgs has been removed
+- The account dropdown now includes **Organizations** between General and Billing (desktop) and in the mobile menu
+
 ### Billing UI (frontend)
 
 `/app/billing` shows:

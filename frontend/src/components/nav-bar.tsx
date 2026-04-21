@@ -1,10 +1,10 @@
 "use client";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import useSWR, { useSWRConfig } from "swr";
+import useSWR from "swr";
 import { cn } from "@/lib/utils";
-import { Search, Compass, Map, Cog, Database, Activity, UserCircle, Shield, CreditCard, Menu, X, Tag, Globe, ChevronDown } from "lucide-react";
-import { fetchCurrentUser, fetchMyOrgs, switchOrg } from "@/lib/api";
+import { Search, Compass, Map, Cog, Database, Activity, UserCircle, Shield, CreditCard, Menu, X, Tag, Globe, ChevronDown, Building2 } from "lucide-react";
+import { fetchCurrentUser } from "@/lib/api";
 import { HelvexMark } from "@/components/helvex-logo";
 import { useI18n } from "@/i18n/context";
 import { SUPPORTED_LOCALES } from "@/i18n/locales";
@@ -30,7 +30,6 @@ const LOCALE_LABELS: Record<string, string> = { de: "DE", fr: "FR", it: "IT", en
 export function NavBar() {
   const pathname = usePathname();
   const router = useRouter();
-  const { mutate } = useSWRConfig();
   const [mobileOpen, setMobileOpen] = useState(false);
   const [accountMenuOpen, setAccountMenuOpen] = useState(false);
   const accountMenuRef = useRef<HTMLDivElement>(null);
@@ -51,10 +50,6 @@ export function NavBar() {
   const { data: me, isLoading } = useSWR("me", fetchCurrentUser, {
     shouldRetryOnError: false,
     revalidateOnMount: true,
-    revalidateOnFocus: false,
-  });
-  const { data: orgs = [] } = useSWR(me ? "my-orgs" : null, fetchMyOrgs, {
-    shouldRetryOnError: false,
     revalidateOnFocus: false,
   });
 
@@ -81,14 +76,6 @@ export function NavBar() {
     { href: `/${locale}/#features`, label: t.features },
     { href: `/${locale}/#pricing`, label: t.pricing },
   ];
-
-  async function handleOrgSwitch(nextOrgId: number) {
-    if (!me || !nextOrgId || nextOrgId === me.org_id) return;
-    await switchOrg(nextOrgId);
-    await mutate("me");
-    await mutate("my-orgs");
-    router.refresh();
-  }
 
   function switchLocale(newLocale: string) {
     // Replace the locale segment in the current path
@@ -228,20 +215,6 @@ export function NavBar() {
                   {t.admin}
                 </Link>
               )}
-              {orgs.length > 1 && me?.org_id && (
-                <select
-                  className="hidden md:block text-sm border border-slate-200 rounded-lg px-3 py-2 bg-white text-slate-600 max-w-[180px]"
-                  value={String(me.org_id)}
-                  onChange={(e) => handleOrgSwitch(Number(e.target.value))}
-                  title={t.switchOrg}
-                >
-                  {orgs.map((org) => (
-                    <option key={org.id} value={org.id}>
-                      {org.name}
-                    </option>
-                  ))}
-                </select>
-              )}
               {/* Account dropdown */}
               <div className="hidden md:block relative" ref={accountMenuRef}>
                 <button
@@ -261,6 +234,14 @@ export function NavBar() {
                     >
                       <Cog size={16} />
                       {t.general || "General"}
+                    </Link>
+                    <Link
+                      href={`/${locale}/app/organizations`}
+                      onClick={() => setAccountMenuOpen(false)}
+                      className="flex items-center gap-2 px-4 py-2.5 text-sm text-slate-700 hover:bg-slate-50 border-b border-slate-100 transition-colors"
+                    >
+                      <Building2 size={16} />
+                      {t.organizations || "Organizations"}
                     </Link>
                     <Link
                       href={`/${locale}/app/billing`}
@@ -386,28 +367,9 @@ export function NavBar() {
 
               <div className="mt-2 border-t border-slate-200" />
 
-              {orgs.length > 1 && me?.org_id && (
-                <div className="px-5 py-3 border-b border-slate-50">
-                  <select
-                    className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 bg-white text-slate-600"
-                    value={String(me.org_id)}
-                    onChange={(e) => { handleOrgSwitch(Number(e.target.value)); closeMobile(); }}
-                  >
-                    {orgs.map((org) => <option key={org.id} value={org.id}>{org.name}</option>)}
-                  </select>
-                </div>
-              )}
               {me?.email && (
                 <div className="px-5 py-3 text-sm text-slate-500 border-b border-slate-50">{me.email}</div>
               )}
-              <Link
-                href={`/${locale}/app/billing`}
-                onClick={closeMobile}
-                className="flex items-center gap-3 px-5 py-3.5 text-sm text-slate-700 hover:bg-slate-50 border-b border-slate-50 transition-colors"
-              >
-                <CreditCard size={18} />
-                {t.billing}
-              </Link>
               <Link
                 href={`/${locale}/app/account`}
                 onClick={closeMobile}
@@ -415,6 +377,22 @@ export function NavBar() {
               >
                 <UserCircle size={18} />
                 {t.account}
+              </Link>
+              <Link
+                href={`/${locale}/app/organizations`}
+                onClick={closeMobile}
+                className="flex items-center gap-3 px-5 py-3.5 text-sm text-slate-700 hover:bg-slate-50 border-b border-slate-50 transition-colors"
+              >
+                <Building2 size={18} />
+                {t.organizations || "Organizations"}
+              </Link>
+              <Link
+                href={`/${locale}/app/billing`}
+                onClick={closeMobile}
+                className="flex items-center gap-3 px-5 py-3.5 text-sm text-slate-700 hover:bg-slate-50 border-b border-slate-50 transition-colors"
+              >
+                <CreditCard size={18} />
+                {t.billing}
               </Link>
               <a
                 href="/logout"

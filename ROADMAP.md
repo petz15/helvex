@@ -70,12 +70,7 @@
 - updated at in company overview should represent when the last sogc update was. potentially generally overhaul company search/overview for a cleaner search for one company. in company search, remove the small preview of a company profile. not really necessary in my opinion or atleast remove the scores as those are meant for explorer
 - larger symbols and text in header
 - as soon as explorer has been opend, opening any other page requires atleast 10 seconds to load if not more if it loads at all
-
-
-
-
-
-
+- Add translations to pricing page and unify the public one and the private one
 
 
 

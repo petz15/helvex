@@ -1,0 +1,322 @@
+"use client";
+import { useState } from "react";
+import useSWR, { useSWRConfig } from "swr";
+import { useRouter } from "next/navigation";
+import {
+  Building2, Plus, Loader2, Check, ArrowRight, Users, Crown, Shield, Eye, User, X,
+} from "lucide-react";
+import {
+  fetchCurrentUser,
+  fetchMyOrgs,
+  createOrg,
+  switchOrg,
+  leaveOrg,
+  type OrgInfo,
+} from "@/lib/api";
+import { OrgClient } from "@/app/[locale]/app/org/org-client";
+
+const inputCls =
+  "w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-300 focus:border-transparent bg-white";
+
+const ROLE_META: Record<string, { label: string; icon: React.ElementType; cls: string }> = {
+  owner:  { label: "Owner",  icon: Crown,  cls: "text-purple-600 bg-purple-50 border-purple-200" },
+  admin:  { label: "Admin",  icon: Shield, cls: "text-blue-600 bg-blue-50 border-blue-200" },
+  member: { label: "Member", icon: User,   cls: "text-slate-600 bg-slate-50 border-slate-200" },
+  viewer: { label: "Viewer", icon: Eye,    cls: "text-slate-400 bg-slate-50 border-slate-100" },
+};
+
+const TIER_COLORS: Record<string, string> = {
+  free:        "bg-slate-100 text-slate-600",
+  simple:      "bg-slate-100 text-slate-700",
+  explorer:    "bg-blue-100 text-blue-700",
+  researcher:  "bg-violet-100 text-violet-700",
+  strategist:  "bg-slate-800 text-white",
+};
+
+function Banner({ kind, message, onClose }: { kind: "success" | "error"; message: string; onClose: () => void }) {
+  return (
+    <div className={`rounded-lg border px-4 py-3 text-sm flex items-center justify-between gap-3 ${
+      kind === "success" ? "border-green-200 bg-green-50 text-green-800" : "border-red-200 bg-red-50 text-red-800"
+    }`}>
+      <span>{message}</span>
+      <button onClick={onClose} className="shrink-0 opacity-60 hover:opacity-100 transition-opacity">
+        <X size={14} />
+      </button>
+    </div>
+  );
+}
+
+function OrgCard({
+  org,
+  isActive,
+  onSwitch,
+  onLeave,
+  switching,
+  leaving,
+}: {
+  org: OrgInfo;
+  isActive: boolean;
+  onSwitch: () => void;
+  onLeave: () => void;
+  switching: boolean;
+  leaving: boolean;
+}) {
+  const role = org.role ?? "member";
+  const meta = ROLE_META[role] ?? ROLE_META.member;
+  const RoleIcon = meta.icon;
+
+  return (
+    <div className={`relative rounded-xl border p-5 transition-all duration-200 ${
+      isActive
+        ? "border-blue-300 bg-blue-50/60 shadow-sm shadow-blue-100"
+        : "border-slate-200 bg-white hover:border-slate-300 hover:shadow-sm"
+    }`}>
+      {isActive && (
+        <div className="absolute top-3 right-3 flex items-center gap-1 text-xs font-medium text-blue-600 bg-blue-100 px-2 py-0.5 rounded-full">
+          <Check size={10} />
+          Active
+        </div>
+      )}
+
+      <div className="flex items-start gap-3 pr-16">
+        <div className={`w-9 h-9 rounded-lg flex items-center justify-center shrink-0 ${
+          isActive ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-500"
+        }`}>
+          <Building2 size={18} />
+        </div>
+        <div className="min-w-0 flex-1">
+          <p className="font-semibold text-slate-900 truncate">{org.name}</p>
+          <p className="text-xs text-slate-400 font-mono mt-0.5">{org.slug}</p>
+        </div>
+      </div>
+
+      <div className="mt-4 flex items-center gap-2 flex-wrap">
+        <span className={`inline-flex items-center gap-1 border text-xs font-medium px-2 py-0.5 rounded-full ${meta.cls}`}>
+          <RoleIcon size={10} />
+          {meta.label}
+        </span>
+        <span className={`inline-flex items-center text-xs font-medium px-2 py-0.5 rounded-full capitalize ${TIER_COLORS[org.tier] ?? "bg-slate-100 text-slate-600"}`}>
+          {org.tier}
+        </span>
+      </div>
+
+      <div className="mt-4 pt-4 border-t border-slate-100 flex items-center gap-2">
+        {!isActive && (
+          <button
+            onClick={onSwitch}
+            disabled={switching}
+            className="flex items-center gap-1.5 text-sm font-medium text-blue-600 hover:text-blue-800 disabled:opacity-50 transition-colors"
+          >
+            {switching ? <Loader2 size={13} className="animate-spin" /> : <ArrowRight size={13} />}
+            Switch to this org
+          </button>
+        )}
+        {isActive && (
+          <span className="text-xs text-slate-400">Currently active workspace</span>
+        )}
+        <div className="ml-auto">
+          {role !== "owner" && (
+            <button
+              onClick={onLeave}
+              disabled={leaving}
+              className="text-xs text-red-400 hover:text-red-600 font-medium disabled:opacity-50 transition-colors"
+            >
+              {leaving ? "Leaving…" : "Leave"}
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export function OrganizationsClient() {
+  const router = useRouter();
+  const { mutate } = useSWRConfig();
+  const { data: me, mutate: reloadMe } = useSWR("me", fetchCurrentUser);
+  const { data: orgs = [], mutate: reloadOrgs } = useSWR(me ? "my-orgs" : null, fetchMyOrgs);
+
+  const [showCreate, setShowCreate] = useState(false);
+  const [orgName, setOrgName] = useState("");
+  const [creating, setCreating] = useState(false);
+  const [switchingId, setSwitchingId] = useState<number | null>(null);
+  const [leavingId, setLeavingId] = useState<number | null>(null);
+  const [banner, setBanner] = useState<{ kind: "success" | "error"; message: string } | null>(null);
+
+  function flash(kind: "success" | "error", message: string) {
+    setBanner({ kind, message });
+    setTimeout(() => setBanner(null), 5000);
+  }
+
+  async function handleCreate(e: React.FormEvent) {
+    e.preventDefault();
+    if (!orgName.trim()) return;
+    setCreating(true);
+    try {
+      await createOrg(orgName.trim());
+      await reloadMe();
+      await reloadOrgs();
+      await mutate("my-orgs");
+      setOrgName("");
+      setShowCreate(false);
+      flash("success", "Organization created. You are now the owner.");
+      router.refresh();
+    } catch (err) {
+      flash("error", err instanceof Error ? err.message : "Failed to create organization");
+    } finally {
+      setCreating(false);
+    }
+  }
+
+  async function handleSwitch(orgId: number) {
+    if (!me || orgId === me.org_id) return;
+    setSwitchingId(orgId);
+    try {
+      await switchOrg(orgId);
+      await mutate("me");
+      await mutate("my-orgs");
+      await reloadMe();
+      await reloadOrgs();
+      flash("success", "Switched organization.");
+      router.refresh();
+    } catch (err) {
+      flash("error", err instanceof Error ? err.message : "Failed to switch organization");
+    } finally {
+      setSwitchingId(null);
+    }
+  }
+
+  async function handleLeave(org: OrgInfo) {
+    if (!confirm(`Leave "${org.name}"? You will lose access to its data.`)) return;
+    setLeavingId(org.id);
+    try {
+      await leaveOrg(org.id);
+      await reloadMe();
+      await reloadOrgs();
+      await mutate("me");
+      await mutate("my-orgs");
+      flash("success", `You have left "${org.name}".`);
+      router.refresh();
+    } catch (err) {
+      flash("error", err instanceof Error ? err.message : "Failed to leave organization");
+    } finally {
+      setLeavingId(null);
+    }
+  }
+
+  if (!me) return <div className="p-6 text-slate-400 text-sm">Loading…</div>;
+
+  const activeOrgId = me.org_id;
+
+  return (
+    <div className="p-6 max-w-3xl mx-auto space-y-8">
+      {/* Header */}
+      <div>
+        <h1 className="text-xl font-semibold text-slate-900">Organizations</h1>
+        <p className="text-sm text-slate-500 mt-0.5">
+          Manage the workspaces you belong to. Each organization is an independent workspace with its own members, settings, and billing.
+        </p>
+      </div>
+
+      {banner && <Banner {...banner} onClose={() => setBanner(null)} />}
+
+      {/* Org grid */}
+      <div className="space-y-4">
+        <div className="flex items-center justify-between">
+          <h2 className="text-sm font-semibold text-slate-500 uppercase tracking-wider">
+            Your organizations <span className="normal-case font-normal text-slate-400 ml-1">({orgs.length})</span>
+          </h2>
+          <button
+            onClick={() => setShowCreate((v) => !v)}
+            className="flex items-center gap-1.5 text-sm font-medium text-blue-600 hover:text-blue-800 transition-colors"
+          >
+            <Plus size={14} />
+            New organization
+          </button>
+        </div>
+
+        {/* Create form */}
+        {showCreate && (
+          <form
+            onSubmit={handleCreate}
+            className="rounded-xl border border-blue-200 bg-blue-50 p-5 space-y-4"
+          >
+            <div className="flex items-center gap-2 text-sm font-semibold text-blue-700">
+              <Building2 size={15} />
+              Create a new organization
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-slate-600 mb-1">Organization name</label>
+              <input
+                autoFocus
+                required
+                value={orgName}
+                onChange={(e) => setOrgName(e.target.value)}
+                className={inputCls}
+                placeholder="e.g. Acme Corp"
+              />
+            </div>
+            <div className="flex gap-2">
+              <button
+                type="submit"
+                disabled={creating || !orgName.trim()}
+                className="flex items-center gap-1.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-60 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors"
+              >
+                {creating ? <Loader2 size={14} className="animate-spin" /> : <Building2 size={14} />}
+                Create
+              </button>
+              <button
+                type="button"
+                onClick={() => { setShowCreate(false); setOrgName(""); }}
+                className="px-4 py-2 text-sm text-slate-500 hover:text-slate-700 rounded-lg hover:bg-white/60 transition-colors"
+              >
+                Cancel
+              </button>
+            </div>
+          </form>
+        )}
+
+        {/* Org cards */}
+        {orgs.length === 0 ? (
+          <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50 p-8 text-center">
+            <Building2 size={28} className="text-slate-300 mx-auto mb-3" />
+            <p className="text-sm text-slate-500">You are not part of any organization.</p>
+            <p className="text-xs text-slate-400 mt-1">Create one above or ask a team owner for an invite.</p>
+          </div>
+        ) : (
+          <div className="grid gap-3 sm:grid-cols-2">
+            {orgs.map((org) => (
+              <OrgCard
+                key={org.id}
+                org={org}
+                isActive={org.id === activeOrgId}
+                onSwitch={() => handleSwitch(org.id)}
+                onLeave={() => handleLeave(org)}
+                switching={switchingId === org.id}
+                leaving={leavingId === org.id}
+              />
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Team management for active org */}
+      {activeOrgId && (
+        <div className="space-y-4">
+          <div className="border-t border-slate-100 pt-6">
+            <div className="flex items-center gap-2 mb-1">
+              <Users size={16} className="text-slate-500" />
+              <h2 className="text-sm font-semibold text-slate-500 uppercase tracking-wider">Team</h2>
+            </div>
+            <p className="text-xs text-slate-400">
+              Manage members of your active organization.
+            </p>
+          </div>
+          <div className="rounded-xl border border-slate-200 bg-white p-4">
+            <OrgClient embedded />
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
