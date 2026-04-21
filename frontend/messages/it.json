@@ -112,7 +112,7 @@
         "exportBasic": { "label": "Esportazione massiva – base (UID/Nome/Cantone)", "unit": "per 10k righe" },
         "exportDetailed": { "label": "Esportazione massiva – dettagliata", "unit": "per 10k righe" }
       }
-    },
+    }
   },
   "footer": {
     "copyright": "© {year} Helvex · Balogh Consulting",
