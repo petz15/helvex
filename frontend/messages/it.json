@@ -75,7 +75,7 @@
         "f2": "Organizza i target in raccolte riutilizzabili con nome",
           "f3": "E-mail di digest giornalieri per le nuove aziende corrispondenti",
           "f4": "Arricchimento tramite ricerca web per segnali aggiuntivi",
-          "f5": "Vista mappa con lat/lon e ispezione dei cluster",
+          "f5": "Vista mappa con lat/lon e ispezione dei cluster"
         },
       "workspace": {
         "title": "Workspace & Scalabilità",
