@@ -441,6 +441,19 @@ export async function createTopupCheckout(data: {
   return res.json();
 }
 
+export async function addPersonalCardToOrg(): Promise<void> {
+  const res = await fetch("/api/v1/billing/payment-methods/add-personal-to-org", {
+    method: "POST",
+    credentials: "include",
+  });
+  if (!res.ok) {
+    const raw = await res.text();
+    let detail: string | undefined;
+    try { detail = (JSON.parse(raw) as { detail?: string })?.detail; } catch { detail = raw.trim() || undefined; }
+    throw new Error(detail ?? `Failed to add card (HTTP ${res.status})`);
+  }
+}
+
 export async function createWorldlineCardRegistration(data: {
   success_url: string;
   cancel_url: string;
@@ -569,6 +582,29 @@ export interface NogaNode {
 
 export async function fetchNogaHierarchy(): Promise<NogaNode[]> {
   const res = await fetch("/api/v1/companies/noga-hierarchy", { credentials: "include" });
+  if (!res.ok) throw new ApiError(res.statusText, res.status);
+  return res.json();
+}
+
+export interface SemanticSearchResult {
+  value: string;
+  count: number;
+  similarity: number;
+}
+
+export interface SemanticSearchResponse {
+  query: string;
+  clusters: SemanticSearchResult[];
+  categories: SemanticSearchResult[];
+  keywords: SemanticSearchResult[];
+  noga_codes: SemanticSearchResult[];
+}
+
+export async function semanticSearch(q: string, topK = 8): Promise<SemanticSearchResponse> {
+  const res = await fetch(
+    `/api/v1/companies/semantic-search?q=${encodeURIComponent(q)}&top_k=${topK}`,
+    { credentials: "include" },
+  );
   if (!res.ok) throw new ApiError(res.statusText, res.status);
   return res.json();
 }

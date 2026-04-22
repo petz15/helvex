@@ -1,11 +1,11 @@
 "use client";
-import { useState, useCallback, useTransition, Suspense } from "react";
+import { useState, useCallback, useTransition, Suspense, useEffect, useRef } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import useSWR from "swr";
 import {
   Compass, Search, X, Download, Settings, AlertTriangle, BarChart2,
   ArrowLeft, Wand2, ChevronRight, HelpCircle, Sparkles, Grid3x3,
-  TrendingUp, Target, MapPin,
+  TrendingUp, Target, MapPin, Zap, Hash, Building2, Copy, Check,
 } from "lucide-react";
 import { CompanyTable } from "@/components/dashboard/company-table";
 import { CompanyPreview } from "@/components/dashboard/company-preview";
@@ -18,9 +18,9 @@ import {
   bulkUpdateCompanies, bulkTagCompanies,
   fetchCurrentUser, fetchOrgEffectiveSettings, saveOrgWorkspaceSettings,
   fetchOrg, fetchNogaHierarchy, fetchCategoryStats,
-  enqueueGenericJob,
+  enqueueGenericJob, semanticSearch,
 } from "@/lib/api";
-import type { NogaNode, CategoryStats, OrgEffectiveSettings } from "@/lib/api";
+import type { NogaNode, CategoryStats, OrgEffectiveSettings, SemanticSearchResponse } from "@/lib/api";
 import type { Company, CompanyFilters, CompanyStats } from "@/lib/types";
 import { cn, formatClusterLabel } from "@/lib/utils";
 import { getExportLimit } from "@/lib/entitlements";
@@ -547,6 +547,208 @@ function ScoreAvgBadge({ score }: { score: number | null | undefined }) {
   return <span className={cn("text-[10px] font-semibold px-1.5 py-0.5 rounded-full", color)}>{score}</span>;
 }
 
+// ── Type → accent color map ───────────────────────────────────────────────────
+
+const CAT_TYPE_ACCENT: Record<CategoryType, string> = {
+  tfidf_cluster: "border-blue-400",
+  ai_category: "border-violet-400",
+  keyword: "border-emerald-400",
+  noga_code: "border-amber-400",
+};
+
+const CAT_TYPE_ICON: Record<CategoryType, React.ReactNode> = {
+  tfidf_cluster: <Grid3x3 size={11} />,
+  ai_category: <Sparkles size={11} />,
+  keyword: <Hash size={11} />,
+  noga_code: <Building2 size={11} />,
+};
+
+// ── SemanticSearchBar ─────────────────────────────────────────────────────────
+
+interface SemanticSearchBarProps {
+  onSelect: (type: CategoryType, value: string) => void;
+}
+
+function SemanticSearchBar({ onSelect }: SemanticSearchBarProps) {
+  const [query, setQuery] = useState("");
+  const [results, setResults] = useState<SemanticSearchResponse | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [open, setOpen] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, []);
+
+  useEffect(() => {
+    if (timerRef.current) clearTimeout(timerRef.current);
+    if (!query.trim() || query.length < 2) { setResults(null); setOpen(false); return; }
+    timerRef.current = setTimeout(async () => {
+      setLoading(true);
+      try {
+        const r = await semanticSearch(query, 6);
+        setResults(r);
+        setOpen(true);
+      } catch { setResults(null); }
+      finally { setLoading(false); }
+    }, 300);
+    return () => { if (timerRef.current) clearTimeout(timerRef.current); };
+  }, [query]);
+
+  const sections: { label: string; type: CategoryType; items: SemanticSearchResponse[keyof SemanticSearchResponse] }[] = results ? [
+    { label: "Clusters", type: "tfidf_cluster", items: results.clusters },
+    { label: "AI Categories", type: "ai_category", items: results.categories },
+    { label: "Keywords", type: "keyword", items: results.keywords },
+    { label: "NOGA codes", type: "noga_code", items: results.noga_codes },
+  ].filter(s => Array.isArray(s.items) && s.items.length > 0) : [];
+
+  return (
+    <div ref={containerRef} className="relative w-full">
+      <div className="relative">
+        <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+        <input
+          type="text"
+          value={query}
+          onChange={e => setQuery(e.target.value)}
+          onFocus={() => results && setOpen(true)}
+          onKeyDown={e => e.key === "Escape" && setOpen(false)}
+          placeholder="Search clusters, categories, keywords, NOGA… (DE/FR/IT/EN)"
+          className="w-full pl-9 pr-10 py-2.5 text-sm border border-slate-200 rounded-xl bg-slate-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-300 focus:border-blue-300 transition-colors placeholder:text-slate-400"
+        />
+        {loading && (
+          <div className="absolute right-3 top-1/2 -translate-y-1/2">
+            <div className="w-4 h-4 border-2 border-blue-300 border-t-blue-600 rounded-full animate-spin" />
+          </div>
+        )}
+        {query && !loading && (
+          <button onClick={() => { setQuery(""); setResults(null); setOpen(false); }}
+            className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600">
+            <X size={13} />
+          </button>
+        )}
+      </div>
+
+      {open && sections.length > 0 && (
+        <div className="absolute z-50 top-full mt-1.5 left-0 right-0 bg-white border border-slate-200 rounded-xl shadow-lg overflow-hidden max-h-80 overflow-y-auto">
+          {sections.map(({ label, type, items }) => (
+            <div key={type}>
+              <div className="flex items-center gap-1.5 px-3 pt-2.5 pb-1">
+                <span className={cn("p-0.5 rounded text-white", {
+                  "bg-blue-500": type === "tfidf_cluster",
+                  "bg-violet-500": type === "ai_category",
+                  "bg-emerald-500": type === "keyword",
+                  "bg-amber-500": type === "noga_code",
+                })}>{CAT_TYPE_ICON[type]}</span>
+                <span className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">{label}</span>
+              </div>
+              {(items as Array<{ value: string; count: number; similarity: number }>).map(item => (
+                <button
+                  key={item.value}
+                  onMouseDown={() => { onSelect(type, item.value); setQuery(""); setOpen(false); }}
+                  className="w-full flex items-center gap-2 px-3 py-2 hover:bg-slate-50 text-left group"
+                >
+                  <span className="flex-1 text-sm text-slate-700 truncate group-hover:text-blue-700">
+                    {type === "tfidf_cluster" ? formatClusterLabel(item.value.split("|")[0]) : item.value}
+                  </span>
+                  <span className="text-[10px] text-slate-400 shrink-0">{item.count.toLocaleString()}</span>
+                  <div className="w-10 h-1 bg-slate-100 rounded-full overflow-hidden shrink-0">
+                    <div className="h-full bg-blue-400 rounded-full" style={{ width: `${Math.round(item.similarity * 100)}%` }} />
+                  </div>
+                </button>
+              ))}
+            </div>
+          ))}
+          <div className="px-3 py-2 border-t border-slate-100 text-[10px] text-slate-400 text-center">
+            Results ranked by semantic similarity · {results?.query}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── RecommendedStrip ──────────────────────────────────────────────────────────
+
+interface RecommendedStripProps {
+  taxonomy: Record<string, [string, number][]>;
+  settings: OrgEffectiveSettings | undefined;
+  onSelect: (type: CategoryType, value: string) => void;
+}
+
+function RecommendedStrip({ taxonomy, settings, onSelect }: RecommendedStripProps) {
+  type Pick = { type: CategoryType; value: string; label: string; count: number; hint: string };
+  const picks: Pick[] = [];
+
+  // 1. Cluster with most companies
+  const clusters = (taxonomy["clusters"] as [string, number][] | undefined) ?? [];
+  if (clusters[0]) {
+    picks.push({ type: "tfidf_cluster", value: clusters[0][0], label: formatClusterLabel(clusters[0][0].split("|")[0]), count: clusters[0][1], hint: "Largest cluster" });
+  }
+
+  // 2. AI category with highest avg_ai score
+  const catsEnriched = (taxonomy["categories_enriched"] as unknown as [string, number, Record<string, number | null>][] | undefined) ?? [];
+  const topAi = catsEnriched.sort((a, b) => (b[2]?.avg_ai_score ?? 0) - (a[2]?.avg_ai_score ?? 0))[0];
+  if (topAi) {
+    picks.push({ type: "ai_category", value: topAi[0], label: topAi[0], count: topAi[1], hint: `Avg AI ${topAi[2]?.avg_ai_score ?? "–"}` });
+  }
+
+  // 3. NOGA code with most companies
+  const noga = (taxonomy["noga_codes"] as [string, number][] | undefined) ?? [];
+  if (noga[0]) {
+    const [code, label] = noga[0][0].split(" — ");
+    picks.push({ type: "noga_code", value: code?.trim() ?? noga[0][0], label: label?.trim() ?? noga[0][0], count: noga[0][1], hint: "Top NOGA" });
+  }
+
+  // 4. Org scoring target if set
+  const orgTarget = (settings?.scoring_target_clusters || "").split("|").filter(Boolean)[0];
+  const orgMatch = orgTarget ? clusters.find(([l]) => l.toLowerCase().includes(orgTarget.toLowerCase())) : null;
+  if (orgMatch) {
+    picks.push({ type: "tfidf_cluster", value: orgMatch[0], label: formatClusterLabel(orgMatch[0].split("|")[0]), count: orgMatch[1], hint: "Your target" });
+  } else {
+    // Fall back to top keyword
+    const kws = (taxonomy["keywords"] as [string, number][] | undefined) ?? [];
+    if (kws[0]) picks.push({ type: "keyword", value: kws[0][0], label: kws[0][0], count: kws[0][1], hint: "Top keyword" });
+  }
+
+  if (picks.length === 0) return null;
+
+  const accentBg: Record<CategoryType, string> = {
+    tfidf_cluster: "bg-blue-50 border-blue-200 text-blue-700 hover:bg-blue-100",
+    ai_category: "bg-violet-50 border-violet-200 text-violet-700 hover:bg-violet-100",
+    keyword: "bg-emerald-50 border-emerald-200 text-emerald-700 hover:bg-emerald-100",
+    noga_code: "bg-amber-50 border-amber-200 text-amber-700 hover:bg-amber-100",
+  };
+
+  return (
+    <div className="px-4 py-2 border-b border-slate-100 bg-slate-50/50 shrink-0">
+      <div className="flex items-center gap-2 flex-wrap">
+        <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider shrink-0 flex items-center gap-1">
+          <Zap size={9} /> Suggested
+        </span>
+        {picks.slice(0, 4).map((pick, i) => (
+          <button
+            key={i}
+            onClick={() => onSelect(pick.type, pick.value)}
+            className={cn("flex items-center gap-1.5 px-2.5 py-1 rounded-full border text-xs font-medium transition-colors", accentBg[pick.type])}
+            title={pick.hint}
+          >
+            <span className="opacity-70">{CAT_TYPE_ICON[pick.type]}</span>
+            <span className="truncate max-w-[120px]">{pick.label}</span>
+            <span className="opacity-60 text-[10px]">{pick.count.toLocaleString()}</span>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 // ── CategoryGrid (Layer 1) ────────────────────────────────────────────────────
 
 interface CategoryGridProps {
@@ -642,21 +844,9 @@ function CategoryGrid({
     <div className="flex flex-col h-full overflow-hidden">
       {/* Top bar */}
       <div className="flex items-center gap-3 px-4 py-3 bg-white border-b border-slate-100 shrink-0 flex-wrap">
-        {/* Search */}
-        <div className="relative flex-1 min-w-48">
-          <Search size={13} className="absolute left-2.5 top-2.5 text-slate-400 pointer-events-none" />
-          <input
-            type="text"
-            value={search}
-            onChange={e => setSearch(e.target.value)}
-            placeholder={`Search ${CAT_TYPE_LABELS[catType].toLowerCase()}…`}
-            className="w-full pl-7 pr-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-300 bg-white"
-          />
-          {search && (
-            <button onClick={() => setSearch("")} className="absolute right-2.5 top-2.5 text-slate-400 hover:text-slate-600">
-              <X size={13} />
-            </button>
-          )}
+        {/* Semantic search — spans full width, displaces tab-local search */}
+        <div className="flex-1 min-w-64">
+          <SemanticSearchBar onSelect={(type, value) => { onSelectCategory(type, value); }} />
         </div>
 
         {/* Scoring wizard button */}
@@ -678,6 +868,9 @@ function CategoryGrid({
         </button>
       </div>
 
+      {/* Recommended starting points */}
+      <RecommendedStrip taxonomy={taxonomy} settings={settings} onSelect={onSelectCategory} />
+
       {/* Category type tabs */}
       <div className="flex items-center gap-0 px-4 border-b border-slate-100 bg-white shrink-0">
         {(Object.keys(CAT_TYPE_LABELS) as CategoryType[]).map(type => (
@@ -694,6 +887,22 @@ function CategoryGrid({
             {CAT_TYPE_LABELS[type]}
           </button>
         ))}
+        {/* Per-tab filter search (kept for tab-specific filtering) */}
+        <div className="ml-auto relative py-1">
+          <Search size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+          <input
+            type="text"
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            placeholder={`Filter ${CAT_TYPE_LABELS[catType].toLowerCase()}…`}
+            className="pl-7 pr-7 py-1.5 text-xs border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-300 bg-white w-44"
+          />
+          {search && (
+            <button onClick={() => setSearch("")} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600">
+              <X size={11} />
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Setup banners */}
@@ -746,13 +955,15 @@ function CategoryGrid({
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3">
             {items.map((item) => {
               const isTarget = isOrgTarget(item);
+              const accent = CAT_TYPE_ACCENT[catType];
               return (
                 <button
                   key={item.name}
                   onClick={() => onSelectCategory(catType, item.name)}
                   className={cn(
-                    "group flex flex-col items-start p-3 rounded-xl border bg-white hover:border-blue-300 hover:shadow-sm transition-all text-left",
-                    isTarget ? "border-amber-300 bg-amber-50/30" : "border-slate-200"
+                    "group flex flex-col items-start p-3 rounded-xl border-l-[3px] border border-slate-200 bg-white hover:border-blue-200 hover:shadow-sm transition-all text-left",
+                    accent,
+                    isTarget ? "bg-amber-50/40" : ""
                   )}
                 >
                   <div className="flex items-start justify-between w-full gap-1 mb-2">
@@ -767,6 +978,12 @@ function CategoryGrid({
                     </div>
                   </div>
                   <span className="text-xs text-slate-400">{item.count.toLocaleString()} companies</span>
+                  {item.avgAi != null && (
+                    <div className="mt-1.5 w-full h-1 bg-slate-100 rounded-full overflow-hidden">
+                      <div className={cn("h-full rounded-full transition-all", item.avgAi >= 70 ? "bg-emerald-400" : item.avgAi >= 50 ? "bg-yellow-400" : "bg-slate-300")}
+                        style={{ width: `${item.avgAi}%` }} />
+                    </div>
+                  )}
                   <div className="mt-2 flex items-center gap-1 text-xs text-blue-600 opacity-0 group-hover:opacity-100 transition-opacity">
                     Explore <ChevronRight size={11} />
                   </div>
@@ -869,6 +1086,16 @@ function CategoryDetail({
   const [selectedBand, setSelectedBand] = useState<string | null>(null);
   const [selectedBm, setSelectedBm] = useState<string | null>(null);
   const [breakdownCompany, setBreakdownCompany] = useState<Company | null>(null);
+  const [copied, setCopied] = useState(false);
+
+  function handleCopyFilterUrl() {
+    const params = new URLSearchParams({ browse: "1", [CAT_TYPE_FILTER_KEY[catType]]: catValue });
+    const url = `${window.location.origin}/app/explorer?${params.toString()}`;
+    navigator.clipboard.writeText(url).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    });
+  }
 
   const { data: stats } = useSWR(
     ["cat-stats", catType, catValue, orgId],
@@ -965,6 +1192,19 @@ function CategoryDetail({
               <Wand2 size={12} /> Improve scoring
             </button>
           )}
+          <button
+            onClick={handleCopyFilterUrl}
+            className={cn(
+              "flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors",
+              copied
+                ? "border-emerald-300 bg-emerald-50 text-emerald-700"
+                : "border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:text-slate-800"
+            )}
+            title="Copy filter URL to clipboard"
+          >
+            {copied ? <Check size={12} /> : <Copy size={12} />}
+            {copied ? "Copied!" : "Copy URL"}
+          </button>
           <button
             onClick={handleBrowseFull}
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-blue-600 text-white hover:bg-blue-700 transition-colors"
@@ -1078,6 +1318,38 @@ function CategoryDetail({
             )}
           </div>
         </div>
+
+        {/* Top companies preview pills */}
+        {page?.items && page.items.length > 0 && (
+          <div className="mx-4 mt-4 shrink-0">
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider shrink-0 flex items-center gap-1">
+                <Sparkles size={9} /> Top leads
+              </span>
+              {page.items.slice(0, 3).map(company => (
+                <button
+                  key={company.id}
+                  onClick={() => setSelectedCompany(company)}
+                  className="flex items-center gap-1.5 px-2.5 py-1 rounded-full border border-slate-200 bg-white hover:border-blue-300 hover:bg-blue-50 transition-colors group"
+                >
+                  <span className="text-xs text-slate-700 font-medium group-hover:text-blue-700 truncate max-w-[160px]">
+                    {company.name}
+                  </span>
+                  {company.combined_score != null && (
+                    <span className={cn(
+                      "text-[10px] font-bold px-1.5 py-0.5 rounded-full shrink-0",
+                      company.combined_score >= 70
+                        ? "bg-emerald-100 text-emerald-700"
+                        : company.combined_score >= 50
+                        ? "bg-yellow-100 text-yellow-700"
+                        : "bg-slate-100 text-slate-500"
+                    )}>{company.combined_score}</span>
+                  )}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
 
         {/* Company table */}
         <div className="mx-4 mt-4 mb-4 rounded-xl border border-slate-200 bg-white overflow-hidden">

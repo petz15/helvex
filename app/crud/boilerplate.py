@@ -129,3 +129,125 @@ def delete_boilerplate_pattern(db: Session, row: BoilerplatePattern) -> None:
 
 def get_boilerplate_pattern(db: Session, pattern_id: int) -> BoilerplatePattern | None:
     return db.query(BoilerplatePattern).filter(BoilerplatePattern.id == pattern_id).first()
+
+
+# ── Boilerplate candidates (auto-mined) ───────────────────────────────────────
+
+from app.models.boilerplate_candidate import BoilerplateCandidate  # noqa: E402
+
+
+def upsert_boilerplate_candidates(
+    db: Session,
+    candidates: list[dict],
+) -> int:
+    """Upsert a list of candidate dicts. Returns the number of rows written.
+
+    Each dict may have: term, doc_frequency, cluster_entropy,
+    cluster_label_frequency, confidence, source_type, language.
+    Existing rows are updated if the new confidence is higher.
+    """
+    from sqlalchemy.dialects.postgresql import insert as pg_insert
+
+    if not candidates:
+        return 0
+
+    stmt = pg_insert(BoilerplateCandidate).values(candidates)
+    stmt = stmt.on_conflict_do_update(
+        index_elements=["term"],
+        set_={
+            "doc_frequency": stmt.excluded.doc_frequency,
+            "cluster_entropy": stmt.excluded.cluster_entropy,
+            "cluster_label_frequency": stmt.excluded.cluster_label_frequency,
+            "confidence": stmt.excluded.confidence,
+            "source_type": stmt.excluded.source_type,
+            "language": stmt.excluded.language,
+            "updated_at": sa.func.now(),
+        },
+        where=stmt.excluded.confidence > BoilerplateCandidate.confidence,
+    )
+    result = db.execute(stmt)
+    db.commit()
+    return result.rowcount
+
+
+def list_boilerplate_candidates(
+    db: Session,
+    *,
+    promoted: bool | None = None,
+    min_confidence: float | None = None,
+    source_type: str | None = None,
+    limit: int = 200,
+) -> list[BoilerplateCandidate]:
+    q = db.query(BoilerplateCandidate)
+    if promoted is not None:
+        q = q.filter(BoilerplateCandidate.promoted == promoted)
+    if min_confidence is not None:
+        q = q.filter(BoilerplateCandidate.confidence >= min_confidence)
+    if source_type:
+        q = q.filter(BoilerplateCandidate.source_type == source_type)
+    return q.order_by(BoilerplateCandidate.confidence.desc()).limit(limit).all()
+
+
+def promote_boilerplate_candidate(
+    db: Session,
+    candidate: BoilerplateCandidate,
+    *,
+    confidence_threshold: float = 0.85,
+) -> BoilerplatePattern | None:
+    """Convert a high-confidence candidate into an active BoilerplatePattern.
+
+    Skips if already promoted or confidence below threshold.
+    """
+    if candidate.promoted:
+        return None
+    if candidate.confidence is not None and candidate.confidence < confidence_threshold:
+        return None
+
+    # Build a safe word-boundary regex from the term
+    escaped = re.escape(candidate.term.strip())
+    pattern_str = r"\b" + escaped + r"\b"
+
+    existing = db.query(BoilerplatePattern).filter(BoilerplatePattern.pattern == pattern_str).first()
+    if existing:
+        candidate.promoted = True
+        candidate.promoted_pattern_id = existing.id
+        db.commit()
+        return existing
+
+    row = BoilerplatePattern(
+        pattern=pattern_str,
+        description=f"Auto-promoted from candidate (confidence={candidate.confidence:.2f}, source={candidate.source_type})",
+        active=True,
+    )
+    db.add(row)
+    db.flush()
+    candidate.promoted = True
+    candidate.promoted_pattern_id = row.id
+    db.commit()
+    db.refresh(row)
+    invalidate_boilerplate_cache()
+    return row
+
+
+def auto_promote_candidates(db: Session, *, threshold: float = 0.85) -> int:
+    """Promote all un-promoted candidates above threshold. Returns count promoted."""
+    candidates = (
+        db.query(BoilerplateCandidate)
+        .filter(
+            BoilerplateCandidate.promoted.is_(False),
+            BoilerplateCandidate.confidence >= threshold,
+        )
+        .all()
+    )
+    promoted = 0
+    for c in candidates:
+        if promote_boilerplate_candidate(db, c, confidence_threshold=threshold):
+            promoted += 1
+    return promoted
+
+
+def invalidate_boilerplate_cache() -> None:
+    _boilerplate_cache.clear()
+
+
+import sqlalchemy as sa  # noqa: E402  (already imported above, but needed for upsert)

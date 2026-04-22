@@ -1229,6 +1229,37 @@ def set_payment_method_default(
     return {"ok": True}
 
 
+@router.post("/payment-methods/add-personal-to-org")
+def add_personal_card_to_org(
+    user_org: tuple[User, object] = Depends(get_current_org),
+    db: Session = Depends(get_db),
+) -> dict:
+    """Copy the caller's personal saved card into the org payment methods."""
+    from app.models.org_payment_method import OrgPaymentMethod
+    user, org = user_org
+    if user.org_role not in ("admin", "owner"):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin access required")
+    if not user.payment_customer_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No personal payment method saved")
+    existing = db.query(OrgPaymentMethod).filter(
+        OrgPaymentMethod.org_id == org.id,
+        OrgPaymentMethod.alias_id == user.payment_customer_id,
+    ).first()
+    if existing:
+        return {"ok": True}
+    is_default = db.query(OrgPaymentMethod).filter(OrgPaymentMethod.org_id == org.id).count() == 0
+    method = OrgPaymentMethod(
+        org_id=org.id,
+        alias_id=user.payment_customer_id,
+        card_info_json=user.payment_card_info_json,
+        is_default=is_default,
+        added_by_user_id=user.id,
+    )
+    db.add(method)
+    db.commit()
+    return {"ok": True}
+
+
 @router.get("/tiers", response_model=list[BillingTierRead])
 def list_billing_tiers(db: Session = Depends(get_db), _: User = Depends(get_current_user)) -> list[BillingTierRead]:
     tiers = get_billing_tiers(db)

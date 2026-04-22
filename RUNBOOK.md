@@ -2009,5 +2009,142 @@ ON CONFLICT (org_id, key) DO UPDATE SET value = '0';
 
 This affects **all** transactional emails for the org: low-credit alerts, export-ready, job-failed, and saved-view alerts.
 
+---
 
+## 22. Boilerplate Candidate Maintenance
+
+The auto-mining pipeline (`mine_boilerplate_entropy`) runs after every clustering job and writes candidates to `boilerplate_candidates`. High-confidence ones are auto-promoted; the rest queue for review.
+
+### Weekly: Review pending candidates
+
+```sql
+-- Candidates waiting for review (confidence 0.70-0.89)
+SELECT term, confidence, doc_frequency, cluster_entropy, source_type
+FROM boilerplate_candidates
+WHERE promoted = false AND confidence >= 0.70
+ORDER BY confidence DESC
+LIMIT 50;
+
+-- What was auto-promoted this week
+SELECT term, confidence, source_type, updated_at
+FROM boilerplate_candidates
+WHERE promoted = true AND updated_at > now() - interval '7 days'
+ORDER BY confidence DESC;
+```
+
+To manually promote a candidate:
+```python
+from app.database import SessionLocal
+from app.models.boilerplate_candidate import BoilerplateCandidate
+from app.crud.boilerplate import promote_boilerplate_candidate
+
+db = SessionLocal()
+c = db.query(BoilerplateCandidate).filter_by(term="die gesellschaft bezweckt").first()
+promote_boilerplate_candidate(db, c)
+db.commit()
+db.close()
+```
+
+### Quarterly: LLM seeding run
+
+Send ambiguous candidates to Claude for BOILERPLATE/SIGNAL/AMBIGUOUS classification:
+
+```bash
+# Dry-run to see what would be sent (no API calls made)
+python scripts/seed_boilerplate_llm.py --dry-run --limit 50
+
+# Real run (requires ANTHROPIC_API_KEY)
+ANTHROPIC_API_KEY=<key> python scripts/seed_boilerplate_llm.py --limit 500
+```
+
+Results are written with `source_type='llm_seeded'`. Candidates labelled `BOILERPLATE` with `confidence >= 0.85` are auto-promoted to active patterns. After the script runs, invalidate the boilerplate cache and re-run keyword extraction to pick up new patterns.
+
+### After adding new patterns: refresh keywords
+
+```bash
+POST /api/v1/scoring/recompute-keywords
+# Then re-cluster:
+POST /api/v1/scoring/semantic-cluster   # or tfidf-cluster
+```
+
+---
+
+## 23. New Company Classification (Incremental)
+
+New companies added via Zefix daily SHAB import are classified automatically by `enrich_company()` in `collection.py`. This covers cluster assignment and business model detection.
+
+NOGA classification for new companies runs via the batch `reclassify_noga` job (not inline) because it depends on cluster labels being set first.
+
+### Verify new companies are being classified
+
+```sql
+-- Companies added in the last 7 days without cluster assignment
+SELECT count(*) FROM companies
+WHERE created_at > now() - interval '7 days'
+  AND purpose IS NOT NULL
+  AND tfidf_cluster IS NULL;
+
+-- Companies added in the last 7 days without NOGA
+SELECT count(*) FROM companies
+WHERE created_at > now() - interval '7 days'
+  AND purpose IS NOT NULL
+  AND noga_code IS NULL;
+```
+
+If many new companies lack clusters, S3 artifacts are likely missing (run a full clustering job first). If NOGA is missing, run `reclassify_noga`.
+
+### Backfill all unclassified companies
+
+Use this after upgrading the classification pipeline or after any batch import that bypassed `enrich_company()`:
+
+```python
+from app.database import SessionLocal
+from app.services.incremental_classify import backfill_unclassified
+
+db = SessionLocal()
+stats = backfill_unclassified(
+    db,
+    batch_size=500,
+    run_noga=True,
+    run_clusters=True,
+    run_business_model=True,
+)
+print(stats)
+db.close()
+```
+
+Expected runtime: ~5–10 min per 50K companies. S3 artifacts must exist for cluster assignment.
+
+### Fix "0 companies" in Explorer
+
+**Clusters:**
+1. Check logs: `kubectl logs -n helvex-prod deploy/helvex | grep "Junction table stale"`
+2. If stale warning appears: run a full clustering job to repopulate `company_tfidf_clusters`
+3. The fallback path (denormalized `tfidf_cluster` column) is active automatically while stale
+
+**NOGA codes:**
+1. Verify `noga_path` populated: `SELECT count(*) FROM companies WHERE noga_path IS NOT NULL;`
+2. If 0: run `reclassify_noga` — NOGA hierarchy browsing requires `noga_path`
+3. NOGA stats use path-based matching (`noga_path LIKE 'J|%'`); `noga_code` alone is insufficient for hierarchy aggregation
+
+---
+
+## 24. Semantic Search Tuning
+
+The semantic search endpoint (`GET /api/v1/companies/semantic-search`) uses the shared multilingual embedding model to rank taxonomy entries by cosine similarity.
+
+**Model:** `paraphrase-multilingual-mpnet-base-v2` (loaded lazily, cached in memory)
+**Threshold:** Results with `similarity < 0.20` are filtered out
+
+### If search results are poor
+
+1. **Check model is loaded:** `kubectl logs -n helvex-prod deploy/helvex | grep "Loaded SentenceTransformer"` — model loads on first search request.
+2. **Query language mismatch:** The model handles DE/FR/IT/EN natively. Very short queries (<3 chars) may produce low similarity scores — this is expected.
+3. **Taxonomy stale:** The endpoint scores the in-memory taxonomy snapshot. If new clusters were added in the last 2 hours, they may not appear in search results until the 2-hour cache refreshes.
+
+### Force taxonomy cache refresh
+
+```bash
+kubectl rollout restart -n helvex-prod deployment/helvex
+```
 

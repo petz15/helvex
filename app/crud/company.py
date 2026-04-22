@@ -260,7 +260,17 @@ def _apply_filters(query, *, name_filter, uid_filter=None, canton, review_status
         query = query.filter(Company.noga_code.isnot(None))
     elif noga_code:
         terms = [t.strip() for t in noga_code.split(",") if t.strip()]
-        query = query.filter(or_(*[Company.noga_code.ilike(f"%{t}%") for t in terms]))
+        # Match exact code OR any ancestor/descendant via noga_path (pipe-delimited root→leaf)
+        conditions = []
+        for t in terms:
+            conditions.append(or_(
+                Company.noga_code == t,
+                Company.noga_path == t,
+                Company.noga_path.like(f"{t}|%"),
+                Company.noga_path.like(f"%|{t}|%"),
+                Company.noga_path.like(f"%|{t}"),
+            ))
+        query = query.filter(or_(*conditions))
     if noga_label:
         query = query.filter(Company.noga_label.ilike(f"%{noga_label}%"))
     if noga_level:
@@ -1122,6 +1132,16 @@ def _compute_category_stats(
     else:
         junction_table = None
 
+    # For NOGA: build path-aware WHERE clause to match hierarchy (sections, divisions, groups)
+    noga_where_extra = ""
+    if category_type == "noga_code":
+        noga_where_extra = (
+            " OR c.noga_path = :value"
+            " OR c.noga_path LIKE :noga_pfx"
+            " OR c.noga_path LIKE :noga_mid"
+            " OR c.noga_path LIKE :noga_sfx"
+        )
+
     computed_score_expr = (
         "CASE "
         "WHEN c.ai_score IS NOT NULL AND c.web_score IS NOT NULL AND c.flex_score IS NOT NULL "
@@ -1146,8 +1166,11 @@ def _compute_category_stats(
     else:
         bind_org = {"value": value}
 
-    def _build_agg_sql(score_expr: str):
-        if junction_table:
+    if category_type == "noga_code":
+        bind_org = {**bind_org, "noga_pfx": f"{value}|%", "noga_mid": f"%|{value}|%", "noga_sfx": f"%|{value}"}
+
+    def _build_agg_sql(score_expr: str, *, fallback_string_match: bool = False):
+        if junction_table and not fallback_string_match:
             from_clause = f"""
                 companies c
                 INNER JOIN {junction_table} j ON c.id = j.company_id
@@ -1156,7 +1179,18 @@ def _compute_category_stats(
             where_cond = f"j.{junction_col} = :value"
         else:
             from_clause = f"companies c {org_join}"
-            where_cond = f"c.{col} = :value"
+            if category_type == "noga_code":
+                where_cond = f"(c.{col} = :value{noga_where_extra})"
+            elif junction_table and fallback_string_match:
+                # Cluster/keyword fallback: match denormalized pipe/comma delimited column
+                if category_type == "tfidf_cluster":
+                    where_cond = (
+                        f"(c.{col} = :value OR c.{col} LIKE :pfx OR c.{col} LIKE :mid OR c.{col} LIKE :sfx)"
+                    )
+                else:
+                    where_cond = f"c.{col} LIKE :mid"
+            else:
+                where_cond = f"c.{col} = :value"
 
         return _text(f"""
         SELECT
@@ -1179,8 +1213,8 @@ def _compute_category_stats(
     agg_sql = _build_agg_sql("c.combined_score")
     bind = bind_org
 
-    def _build_canton_sql():
-        if junction_table:
+    def _build_canton_sql(*, fallback_string_match: bool = False):
+        if junction_table and not fallback_string_match:
             from_clause = f"""
                 companies c
                 INNER JOIN {junction_table} j ON c.id = j.company_id
@@ -1189,7 +1223,16 @@ def _compute_category_stats(
             where_cond = f"j.{junction_col} = :value AND c.canton IS NOT NULL"
         else:
             from_clause = f"companies c {org_join}"
-            where_cond = f"c.{col} = :value AND c.canton IS NOT NULL"
+            if category_type == "noga_code":
+                where_cond = f"(c.{col} = :value{noga_where_extra}) AND c.canton IS NOT NULL"
+            elif junction_table and fallback_string_match and category_type == "tfidf_cluster":
+                where_cond = (
+                    "(c.tfidf_cluster = :value OR c.tfidf_cluster LIKE :pfx"
+                    " OR c.tfidf_cluster LIKE :mid OR c.tfidf_cluster LIKE :sfx)"
+                    " AND c.canton IS NOT NULL"
+                )
+            else:
+                where_cond = f"c.{col} = :value AND c.canton IS NOT NULL"
 
         return _text(f"""
             SELECT c.canton, COUNT(DISTINCT c.id) AS cnt
@@ -1200,21 +1243,50 @@ def _compute_category_stats(
             LIMIT 10
         """)
 
+    # For cluster/keyword fallback: provide pipe/comma match bind params
+    fallback_bind = {
+        **bind_org,
+        "pfx": f"{value}|%",
+        "mid": f"%|{value}|%",
+        "sfx": f"%|{value}",
+    }
+
+    agg_sql = _build_agg_sql("c.combined_score")
     canton_sql = _build_canton_sql()
+    bind = bind_org
+    _use_fallback = False
 
     try:
         db.execute(_text("SET LOCAL work_mem = '256MB'"))
         r = db.execute(agg_sql, bind).fetchone()
+
+        # If junction table returned 0 but the string column may have data, use fallback
+        if junction_table and (r is None or r.total == 0):
+            logger.debug(
+                "category_stats junction table returned 0 for %s=%s; checking string fallback",
+                category_type, value,
+            )
+            _use_fallback = True
+            agg_sql_fb = _build_agg_sql("c.combined_score", fallback_string_match=True)
+            r_fb = db.execute(agg_sql_fb, fallback_bind).fetchone()
+            if r_fb and r_fb.total > 0:
+                logger.warning(
+                    "Junction table stale for %s=%s: 0 rows but string column has %d; using string fallback",
+                    category_type, value, r_fb.total,
+                )
+                r = r_fb
+                canton_sql = _build_canton_sql(fallback_string_match=True)
+                bind = fallback_bind
+
     except Exception as exc:
-        # During rolling deploys, some databases may not yet have combined_score.
-        # Retry using the legacy computed expression to avoid 500s.
         msg = str(exc).lower()
         pgcode = getattr(getattr(exc, "orig", None), "pgcode", None)
         if pgcode != "42703" and "combined_score" not in msg:
             raise
         logger.warning("combined_score missing in category stats query; using computed fallback")
         db.rollback()
-        r = db.execute(_build_agg_sql(computed_score_expr), bind).fetchone()
+        r = db.execute(_build_agg_sql(computed_score_expr), bind_org).fetchone()
+
     cantons = db.execute(canton_sql, bind).fetchall()
 
     if not r or r.total == 0:

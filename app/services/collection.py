@@ -1568,15 +1568,20 @@ def rescore_from_stored_results(db: Session, company: Company) -> bool:
     return True
 
 
-def enrich_company(db: Session, company: Company, *, noga: bool = True) -> dict[str, int]:
-    """Geocode, extract keywords, and apply NOGA for a single company.
+def enrich_company(
+    db: Session,
+    company: Company,
+    *,
+    noga: bool = True,
+    clusters: bool = True,
+) -> dict[str, int]:
+    """Geocode, extract keywords, apply NOGA, and assign clusters for a single company.
 
     Each step is skipped if already done or prerequisites are missing.
-    Pass noga=False to skip NOGA (e.g. when model artifacts are unavailable).
-    Returns counts: {"geocoded": 0|1, "keywords": 0|1, "noga_classified": 0|1}.
-    Raises FileNotFoundError if NOGA model artifacts are missing (noga=True only).
+    Pass noga=False / clusters=False to skip those steps.
+    Returns counts: {"geocoded": 0|1, "keywords": 0|1, "noga_classified": 0|1, "cluster_assigned": 0|1}.
     """
-    result = {"geocoded": 0, "keywords": 0, "noga_classified": 0}
+    result = {"geocoded": 0, "keywords": 0, "noga_classified": 0, "cluster_assigned": 0}
 
     if geocode_and_update_company(db, company):
         result["geocoded"] = 1
@@ -1597,6 +1602,20 @@ def enrich_company(db: Session, company: Company, *, noga: bool = True) -> dict[
         if noga_update is not None:
             crud.update_company(db, company, noga_update)
             result["noga_classified"] = 1
+
+    # Assign to existing clusters if company has no cluster assignment yet
+    if clusters and company.tfidf_cluster is None and company.purpose:
+        try:
+            from app.services.incremental_classify import classify_new_companies_inline
+            r = classify_new_companies_inline(
+                db, [company.id],
+                run_noga=False,          # already done above
+                run_clusters=True,
+                run_business_model=True,
+            )
+            result["cluster_assigned"] = r.get("cluster_assigned", 0)
+        except Exception:
+            pass
 
     return result
 

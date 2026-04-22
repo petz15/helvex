@@ -1809,3 +1809,164 @@ In Redis mode a **2 s periodic DB poll** runs alongside pub/sub to deliver progr
 **Trade-offs:**
 - **Advantage:** Prevents unbounded table growth; keeps query performance stable.
 - **Disadvantage:** Job history older than 30 days is permanently lost. If longer retention is needed, adjust `keep_days` or move old rows to a separate archive table instead of deleting.
+
+---
+
+## 19. ML Pipeline Improvements (Apr 2026)
+
+This section documents the new ML services, bug fixes, and explorer redesign shipped in the Apr 2026 sprint.
+
+### New Files
+
+| File | Purpose |
+|---|---|
+| `app/services/embeddings.py` | Shared multilingual embedding backbone (singleton SentenceTransformer) |
+| `app/services/incremental_classify.py` | Classify newly imported companies inline (NOGA + clusters + business model) |
+| `app/models/boilerplate_candidate.py` | Auto-mined boilerplate candidate table |
+| `app/crud/boilerplate.py` (extended) | Candidate upsert, promote, auto-promote, cache invalidation |
+| `alembic/versions/0067_add_boilerplate_candidates.py` | Migration: `boilerplate_candidates` table |
+| `scripts/seed_boilerplate_llm.py` | One-time LLM bootstrap: labels top-500 terms BOILERPLATE/SIGNAL/AMBIGUOUS |
+
+### Shared Embedding Backbone — `app/services/embeddings.py`
+
+All ML code that needs sentence embeddings now shares a single lazy-loaded model instance:
+
+```python
+DEFAULT_MODEL = "paraphrase-multilingual-mpnet-base-v2"
+
+embed_texts(texts, *, model_name, batch_size=256)  → np.ndarray  # (N, D) float32
+embed_single(text, *, model_name)                  → np.ndarray  # (D,) float32
+build_company_text(company)                        → str          # purpose + keywords
+nearest_neighbours(query_vec, index_matrix, top_k) → list[(idx, cosine)]
+```
+
+`_get_model()` is `lru_cache(maxsize=1)` — the model loads once and stays in memory. This prevents loading the 420 MB model multiple times when NOGA classification, semantic search, and cluster assignment run in the same process.
+
+### Incremental Classification — `app/services/incremental_classify.py`
+
+When new companies arrive via Zefix import they need three classification steps. This service runs all three inline, fast enough to call synchronously during `enrich_company()`.
+
+**Entry point:**
+```python
+classify_new_companies_inline(db, company_ids, *, run_noga=True, run_clusters=True, run_business_model=True)
+→ {"total": N, "noga_classified": X, "cluster_assigned": Y, "business_model_set": Z, "errors": [...]}
+```
+
+**Three steps:**
+1. `_run_noga_batch` — calls `apply_noga_classification()` per company, bulk-updates in batches of 200.
+2. `_run_cluster_batch` — calls `assign_new_companies_to_clusters()` using cached S3 artifacts (vectorizer + SVD + centroids). Fast after first artifact load.
+3. `_run_business_model_batch` — rule-based DE/FR/IT/EN signal matching → `b2b`/`b2c`/`b2g`/`mixed`/None. Only sets if currently NULL.
+
+**Integration with collection pipeline:**
+`enrich_company()` in `collection.py` calls this service after keyword extraction:
+```python
+if clusters and company.tfidf_cluster is None and company.purpose:
+    classify_new_companies_inline(db, [company.id], run_noga=False, run_clusters=True, run_business_model=True)
+```
+
+NOGA classification is skipped here because it relies on `tfidf_cluster` being set — the `reclassify_noga` batch job is the correct path for NOGA on new companies.
+
+**Backfill (one-time):**
+```python
+backfill_unclassified(db, *, batch_size=500, run_noga, run_clusters, run_business_model, limit)
+```
+Processes all companies missing NOGA, cluster, or business_model in batches. Call from a Python shell or a one-off job.
+
+### Boilerplate Candidate Mining — `app/services/cluster_pipeline.py`
+
+`mine_boilerplate_entropy()` runs automatically at the end of every `run_pipeline()` call. It combines three signals to score candidate boilerplate terms:
+
+| Signal | Weight | How computed |
+|---|---|---|
+| `doc_frequency` | 40% | 1 − IDF_sklearn normalized (high doc freq → high boilerplate signal) |
+| `entropy` | 40% | Shannon entropy across cluster c-TF-IDF weights, normalized to [0,1] |
+| `label_frequency` | 20% | Fraction of clusters where term appears in top-5 labels |
+
+Combined: `0.40 * doc_freq + 0.40 * entropy + 0.20 * label_freq`
+
+Terms above `min_confidence=0.30` are upserted into `boilerplate_candidates`. Terms above `auto_promote_threshold=0.90` are immediately promoted to `boilerplate_patterns` (the active filter table).
+
+### Boilerplate Candidates Table — migration `0067`
+
+```sql
+boilerplate_candidates (
+    id, term (unique), doc_frequency, cluster_entropy,
+    cluster_label_frequency, confidence,
+    source_type ('corpus_mined' | 'cluster_feedback' | 'llm_seeded'),
+    language, llm_label ('BOILERPLATE' | 'SIGNAL' | 'AMBIGUOUS'),
+    promoted (bool), promoted_pattern_id → boilerplate_patterns(id),
+    created_at, updated_at
+)
+```
+
+**Workflow:**
+1. Clustering job runs → `mine_boilerplate_entropy()` upserts candidates
+2. Candidates with `confidence ≥ 0.90` are auto-promoted to `boilerplate_patterns`
+3. Candidates with `confidence 0.70–0.89` queue for LLM/human review
+4. `scripts/seed_boilerplate_llm.py` can batch-classify ambiguous candidates via Claude
+5. Admin UI (future) can manually promote/reject candidates
+
+### Semantic Search Endpoint
+
+`GET /api/v1/companies/semantic-search?q=<query>&top_k=8`
+
+Embeds the query with the shared multilingual model, scores all taxonomy entries (clusters, categories, keywords, NOGA codes) by cosine similarity, and returns grouped results:
+
+```json
+{
+  "query": "Softwareentwicklung",
+  "clusters":    [{"value": "software,entwicklung,cloud", "count": 1234, "similarity": 0.92}],
+  "categories":  [...],
+  "keywords":    [...],
+  "noga_codes":  [...]
+}
+```
+
+Results with `similarity < 0.20` are filtered out. The frontend's `SemanticSearchBar` component calls this endpoint with 300 ms debounce and shows a grouped dropdown. Supports DE/FR/IT/EN queries because the model is multilingual.
+
+### NOGA Category Stats Fix
+
+**Bug:** `fetchCategoryStats("noga_code", "J")` returned 0 companies even though 68,256 companies had `noga_code` under the J section.
+
+**Root cause:** `_compute_category_stats` used `WHERE noga_code = :value` (exact match). Clicking on section "J" passed the section code, but companies store the leaf code (e.g. `"6202"`). The path column `noga_path` stores ancestry as `"J|62|620|6202"`.
+
+**Fix:** Added path-based matching using OR conditions:
+```sql
+noga_code = :value
+OR noga_path = :value
+OR noga_path LIKE :noga_pfx   -- 'J|%'
+OR noga_path LIKE :noga_mid   -- '%|J|%'
+OR noga_path LIKE :noga_sfx   -- '%|J'
+```
+
+### Cluster Junction Table Staleness Fix
+
+**Bug:** Cluster cards showed company counts from the taxonomy cache but clicking them showed 0 companies.
+
+**Root cause:** `_compute_category_stats` always JOINed on `company_tfidf_clusters` (junction table), which may be empty/stale from a prior pipeline run. The taxonomy cache fell back to the denormalized `tfidf_cluster` column.
+
+**Fix:** If the junction table returns 0 companies, fall back to string-match on the denormalized column. A warning is logged to indicate stale junction data:
+```
+WARNING: Junction table stale for tfidf_cluster=X, {N} companies in denormalized column
+```
+
+The junction table is repopulated by the next full clustering run.
+
+### Explorer Redesign (frontend)
+
+Key changes in `frontend/src/app/[locale]/app/explorer/explorer-client.tsx`:
+
+| Component | Change |
+|---|---|
+| `SemanticSearchBar` | NEW — full-width search bar at top of CategoryGrid; 300 ms debounced, grouped dropdown with similarity bars |
+| `RecommendedStrip` | NEW — 4 smart picks (largest cluster, top AI category, top NOGA code, org target) as coloured pills above the tab bar |
+| Category cards | Coloured left border by type; mini score bar if avgAi available; hover "Explore →" reveal |
+| `CategoryDetail` header | Copy-filter URL button (copies `?browse=1&<filter>=<value>`) |
+| `CategoryDetail` top | "Top leads" pills — first 3 companies from the loaded page, clickable to open preview |
+| Per-tab filter | Kept as compact inline input in the tab bar, no longer the primary search |
+
+**Type → accent colour map:**
+- `tfidf_cluster` → blue (`border-blue-400`, `bg-blue-50`)
+- `ai_category` → violet (`border-violet-400`, `bg-violet-50`)
+- `keyword` → emerald (`border-emerald-400`, `bg-emerald-50`)
+- `noga_code` → amber (`border-amber-400`, `bg-amber-50`)

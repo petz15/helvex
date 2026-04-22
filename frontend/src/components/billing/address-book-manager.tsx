@@ -54,15 +54,14 @@ export function AddressBookManager({ returnTo }: { returnTo?: string | null }) {
         company_name: form.company_name.trim() || undefined,
         make_default: true,
       });
+      if (returnTo) {
+        window.location.href = returnTo;
+        return;
+      }
       await mutate();
       await mutateGlobal("me");
       setForm(emptyForm);
       flash("success", "Address saved. It is now the default for checkout.");
-      if (returnTo) {
-        window.setTimeout(() => {
-          window.location.assign(returnTo);
-        }, 250);
-      }
     } catch (err) {
       flash("error", err instanceof Error ? err.message : "Failed to save address");
     } finally {

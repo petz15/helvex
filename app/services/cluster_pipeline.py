@@ -679,6 +679,213 @@ def recompute_keywords(
     return stats
 
 
+# ── Boilerplate entropy mining ────────────────────────────────────────────────
+
+def mine_boilerplate_entropy(
+    db,
+    *,
+    c_tfidf_matrix=None,
+    feature_names=None,
+    labels_map: dict | None = None,
+    vectorizer=None,
+    n_companies: int = 0,
+    doc_freq_threshold: float = 0.15,
+    entropy_threshold: float = 0.85,
+    label_freq_threshold: float = 0.30,
+) -> int:
+    """Compute cross-cluster term entropy and upsert high-entropy terms as boilerplate candidates.
+
+    Three signals are combined into a single confidence score:
+      - doc_frequency: fraction of companies containing this term (high = generic)
+      - cluster_entropy: Shannon entropy across cluster c-TF-IDF weights (high = uniform = generic)
+      - cluster_label_frequency: fraction of cluster labels that include this term (high = generic)
+
+    Returns the number of candidate rows written to the DB.
+    """
+    import numpy as np
+    from app import crud
+
+    if feature_names is None or labels_map is None or vectorizer is None:
+        logger.debug("mine_boilerplate_entropy: missing inputs, skipping")
+        return 0
+
+    feature_names = list(feature_names)
+    n_features = len(feature_names)
+    if n_features == 0:
+        return 0
+
+    # ── Signal 1: document frequency from vectorizer IDF ──────────────────────
+    # IDF = log((1 + n) / (1 + df)) + 1 → invert: df ≈ n / exp(IDF - 1) - 1
+    # Simpler: use sklearn's raw df via the inverse transform of IDF.
+    # sklearn TfidfVectorizer stores idf_ = log((1+n)/(1+df)) + 1
+    idf_ = np.array(vectorizer.idf_)
+    if n_companies > 0:
+        # df_smooth = (1+n) / exp(idf_ - 1) - 1  (inverse of sklearn formula)
+        df_approx = (1.0 + n_companies) / np.exp(idf_ - 1.0) - 1.0
+        doc_freq = np.clip(df_approx / max(n_companies, 1), 0.0, 1.0)
+    else:
+        doc_freq = np.zeros(n_features, dtype=float)
+
+    # ── Signal 2: cross-cluster entropy ───────────────────────────────────────
+    # Build a per-cluster × per-feature weight matrix from labels_map.
+    # Each cluster label contains comma-separated top terms; treat weight = 1/rank.
+    n_clusters = len(labels_map)
+    cluster_term_weights = np.zeros((n_clusters, n_features), dtype=float)
+    feat_idx = {f: i for i, f in enumerate(feature_names)}
+
+    for rank_idx, (cid, label) in enumerate(labels_map.items()):
+        terms = [t.strip() for t in label.split(",") if t.strip()]
+        for term_rank, term in enumerate(terms):
+            fi = feat_idx.get(term)
+            if fi is not None:
+                cluster_term_weights[rank_idx, fi] = 1.0 / (term_rank + 1)
+
+    # Shannon entropy per feature across clusters (uniform distribution = high entropy)
+    col_sums = cluster_term_weights.sum(axis=0)
+    nonzero_mask = col_sums > 0
+    entropy = np.zeros(n_features, dtype=float)
+    if nonzero_mask.any():
+        p = cluster_term_weights[:, nonzero_mask] / col_sums[nonzero_mask]
+        p_safe = np.where(p > 0, p, 1e-12)
+        raw_entropy = -(p_safe * np.log2(p_safe)).sum(axis=0)
+        max_entropy = np.log2(max(n_clusters, 1))
+        entropy[nonzero_mask] = raw_entropy / max_entropy if max_entropy > 0 else 0.0
+
+    # ── Signal 3: cluster label frequency ─────────────────────────────────────
+    term_in_label_count = np.zeros(n_features, dtype=float)
+    for label in labels_map.values():
+        for term in [t.strip() for t in label.split(",") if t.strip()]:
+            fi = feat_idx.get(term)
+            if fi is not None:
+                term_in_label_count[fi] += 1
+    label_freq = term_in_label_count / max(n_clusters, 1)
+
+    # ── Combined confidence ────────────────────────────────────────────────────
+    # Weight: 40% doc_freq, 40% entropy, 20% label_freq
+    confidence = 0.40 * doc_freq + 0.40 * entropy + 0.20 * label_freq
+
+    # ── Filter to candidates worth storing ────────────────────────────────────
+    mask = (
+        (doc_freq >= doc_freq_threshold) |
+        (entropy >= entropy_threshold) |
+        (label_freq >= label_freq_threshold)
+    )
+    candidate_indices = np.where(mask)[0]
+
+    if len(candidate_indices) == 0:
+        return 0
+
+    candidates = []
+    for fi in candidate_indices:
+        term = feature_names[fi]
+        # Skip very short or purely numeric terms
+        if len(term) < 4 or term.isdigit():
+            continue
+        candidates.append({
+            "term": term,
+            "doc_frequency": float(doc_freq[fi]),
+            "cluster_entropy": float(entropy[fi]),
+            "cluster_label_frequency": float(label_freq[fi]),
+            "confidence": float(confidence[fi]),
+            "source_type": "corpus_mined",
+            "language": None,
+        })
+
+    if not candidates:
+        return 0
+
+    written = crud.upsert_boilerplate_candidates(db, candidates)
+
+    # Auto-promote high-confidence candidates
+    crud.auto_promote_candidates(db, threshold=0.90)
+
+    return written
+
+
+# ── Incremental cluster assignment for new companies ──────────────────────────
+
+def assign_new_companies_to_clusters(
+    db,
+    company_ids: list[int],
+    cfg: PipelineConfig | None = None,
+) -> dict[str, Any]:
+    """Assign a batch of newly added companies to existing clusters.
+
+    Uses the trained pipeline artifacts from S3 (vectorizer, SVD, K-Means).
+    Companies that don't meet the similarity threshold get tfidf_cluster=None.
+    Returns a stats dict.
+    """
+    from app.models.company import Company
+
+    if cfg is None:
+        cfg = PipelineConfig()
+
+    stats: dict[str, Any] = {"assigned": 0, "undefined": 0, "skipped": 0, "errors": [], "missing_artifacts": False}
+
+    artifacts = _load_pipeline_artifacts()
+    if artifacts is None:
+        logger.warning("assign_new_companies: no pipeline artifacts in S3; skipping")
+        stats["missing_artifacts"] = True
+        return stats
+
+    vectorizer, svd, km, canonical_labels_map = artifacts
+
+    companies = (
+        db.query(Company)
+        .filter(Company.id.in_(company_ids), Company.purpose.isnot(None))
+        .all()
+    )
+    if not companies:
+        return stats
+
+    purposes = [c.purpose or "" for c in companies]
+    cleaned = strip_boilerplate(purposes)
+
+    # No spaCy: use the same vectorizer the pipeline was trained with
+    try:
+        X_tfidf = vectorizer.transform(cleaned)
+    except Exception as exc:
+        logger.error("Vectorizer transform failed for new companies: %s", exc)
+        stats["errors"].append(str(exc))
+        return stats
+
+    from sklearn.preprocessing import normalize
+    X_svd = normalize(svd.transform(X_tfidf))
+    assignments = assign_multi_label(X_svd, km, cfg)
+    feature_names = vectorizer.get_feature_names_out()
+    company_keywords = extract_company_keywords(X_tfidf, feature_names, cfg)
+
+    mappings = []
+    for company, cluster_ids, kw in zip(companies, assignments, company_keywords):
+        try:
+            if not cluster_ids:
+                tfidf_cluster = None
+                stats["undefined"] += 1
+            else:
+                parts = [canonical_labels_map[cid] for cid in cluster_ids if cid in canonical_labels_map]
+                tfidf_cluster = "|".join(parts) if parts else None
+                if tfidf_cluster:
+                    stats["assigned"] += 1
+                else:
+                    stats["undefined"] += 1
+            kw_arr = [k.strip() for k in kw.split(",") if k.strip()] if kw else None
+            mappings.append({
+                "id": company.id,
+                "tfidf_cluster": tfidf_cluster,
+                "purpose_keywords": kw,
+                "purpose_keywords_arr": kw_arr,
+            })
+        except Exception as exc:  # noqa: BLE001
+            stats["errors"].append(f"{company.uid}: {exc}")
+            stats["skipped"] += 1
+
+    if mappings:
+        db.bulk_update_mappings(Company, mappings)
+        db.commit()
+
+    return stats
+
+
 # ── Main Pipeline ─────────────────────────────────────────────────────────────
 
 def run_pipeline(
@@ -863,6 +1070,21 @@ def run_pipeline(
     except Exception as exc:  # noqa: BLE001
         logger.warning(f"Cross-cluster analysis failed: {exc}")
         stats["analysis_file"] = None
+
+    # ── Automatic boilerplate entropy mining ──
+    try:
+        n_candidates = mine_boilerplate_entropy(
+            db,
+            c_tfidf_matrix=None,  # recompute internally from saved vectorizer/km
+            feature_names=feature_names,
+            labels_map=canonical_labels_map,
+            vectorizer=vectorizer,
+            n_companies=len(companies),
+        )
+        stats["boilerplate_candidates"] = n_candidates
+        logger.info("Boilerplate entropy mining wrote %d candidates", n_candidates)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Boilerplate entropy mining failed: %s", exc)
 
     logger.info(f"Total pipeline time: {time.time()-t_total:.1f}s")
     return stats

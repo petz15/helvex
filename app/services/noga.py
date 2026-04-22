@@ -180,20 +180,19 @@ def _load_noga_embeddings() -> _NogaEmbeddings | None:
         return None
 
 
-@lru_cache(maxsize=1)
-def _load_sentence_model():
-    """Load the sentence-transformers model (lazy, cached)."""
-    from sentence_transformers import SentenceTransformer
-    return SentenceTransformer("paraphrase-multilingual-MiniLM-L12-v2")
-
-
 def _embed_query(text: str):
-    """Return a normalized float32 embedding vector for the given text, or None."""
+    """Return a normalized float32 embedding vector for the given text, or None.
+
+    Delegates to the shared multilingual embedding service so the same model
+    is reused across NOGA classification, semantic search, and clustering.
+    """
     try:
+        from app.services.embeddings import embed_single
+        vec = embed_single(text)
         import numpy as np
-        model = _load_sentence_model()
-        vec = model.encode([text], normalize_embeddings=True, convert_to_numpy=True)
-        return vec[0].astype("float32")
+        if np.linalg.norm(vec) < 1e-6:
+            return None
+        return vec
     except Exception as exc:
         logger.warning("Embedding query failed: %s", exc)
         return None
@@ -294,9 +293,15 @@ def classify_company_noga(db: Session, company: Company) -> NogaClassification |
     norm_token: dict[str, float] = {c: s / max_tok for c, s in token_scores.items()}
 
     # --- Embedding re-rank (Phase 1a) ---
+    # Use full purpose text + keywords for richer embedding coverage.
+    # Keywords alone miss context; purpose alone includes boilerplate.
     emb_data = _load_noga_embeddings()
-    if emb_data is not None and company.purpose_keywords:
-        query_vec = _embed_query(company.purpose_keywords.replace(",", " "))
+    embed_text = " ".join(filter(None, [
+        company.purpose or "",
+        (company.purpose_keywords or "").replace(",", " "),
+    ])).strip()
+    if emb_data is not None and embed_text:
+        query_vec = _embed_query(embed_text)
         if query_vec is not None:
             import numpy as np
             # Cosine similarity (matrix is already normalised, query is normalised)

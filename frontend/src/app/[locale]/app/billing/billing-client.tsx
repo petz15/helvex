@@ -14,6 +14,7 @@ import {
   cancelSubscription,
   reactivateSubscription,
   createWorldlineCardRegistration,
+  addPersonalCardToOrg,
   deletePaymentMethod,
   setPaymentMethodDefault,
   parseBillingAddressJson,
@@ -513,6 +514,8 @@ function PaymentMethodsSection({
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [settingDefaultId, setSettingDefaultId] = useState<string | null>(null);
   const [registeringScope, setRegisteringScope] = useState<"org" | "personal" | null>(null);
+  const [addingPersonalToOrg, setAddingPersonalToOrg] = useState(false);
+  const [showUsePersonalPrompt, setShowUsePersonalPrompt] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const orgMethods = paymentMethods.filter(m => m.scope === "org");
@@ -549,6 +552,14 @@ function PaymentMethodsSection({
       setError("Add a billing address first.");
       return;
     }
+    if (scope === "org" && personalMethods.length > 0) {
+      setShowUsePersonalPrompt(true);
+      return;
+    }
+    await doRegister(scope);
+  }
+
+  async function doRegister(scope: "org" | "personal") {
     setRegisteringScope(scope);
     setError(null);
     try {
@@ -574,6 +585,20 @@ function PaymentMethodsSection({
     }
   }
 
+  async function handleUsePersonalForOrg() {
+    setAddingPersonalToOrg(true);
+    setError(null);
+    try {
+      await addPersonalCardToOrg();
+      setShowUsePersonalPrompt(false);
+      onUpdated();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to add card to org");
+    } finally {
+      setAddingPersonalToOrg(false);
+    }
+  }
+
   return (
     <div className="rounded-2xl border border-slate-200 bg-white p-5 space-y-5">
       <h2 className="text-sm font-semibold text-slate-700">Payment methods</h2>
@@ -591,12 +616,43 @@ function PaymentMethodsSection({
             <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">Org cards</p>
             <button
               onClick={() => void handleRegister("org")}
-              disabled={registeringScope !== null}
+              disabled={registeringScope !== null || addingPersonalToOrg}
               className="text-xs text-blue-600 hover:underline disabled:opacity-50"
             >
               {registeringScope === "org" ? "Opening Saferpay…" : "+ Add org card"}
             </button>
           </div>
+          {showUsePersonalPrompt && personalMethods[0] && (
+            <div className="rounded-xl border border-blue-200 bg-blue-50 px-3 py-3 space-y-2">
+              <p className="text-xs font-semibold text-blue-900">Use your saved personal card for the org?</p>
+              <p className="text-xs text-blue-700">
+                <CardChip method={personalMethods[0]} /> can be added to the org without re-entering card details.
+              </p>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => void handleUsePersonalForOrg()}
+                  disabled={addingPersonalToOrg}
+                  className="rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-blue-700 disabled:opacity-60 flex items-center gap-1"
+                >
+                  {addingPersonalToOrg && <Loader2 size={11} className="animate-spin" />}
+                  {addingPersonalToOrg ? "Adding…" : "Use this card"}
+                </button>
+                <button
+                  onClick={() => { setShowUsePersonalPrompt(false); void doRegister("org"); }}
+                  disabled={addingPersonalToOrg}
+                  className="rounded-lg border border-blue-200 px-3 py-1.5 text-xs text-blue-800 hover:bg-blue-100 disabled:opacity-60"
+                >
+                  Register different card
+                </button>
+                <button
+                  onClick={() => { setShowUsePersonalPrompt(false); window.location.href = "/app/billing"; }}
+                  className="ml-auto text-xs text-slate-500 hover:text-slate-700"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          )}
           {orgMethods.length === 0 ? (
             <p className="text-xs text-slate-400">No org cards saved yet.</p>
           ) : (
