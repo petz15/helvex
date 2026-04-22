@@ -19,7 +19,9 @@ Design principles:
 from __future__ import annotations
 
 import logging
+import os
 from functools import lru_cache
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 import numpy as np
@@ -34,10 +36,32 @@ logger = logging.getLogger(__name__)
 DEFAULT_MODEL = "paraphrase-multilingual-mpnet-base-v2"
 
 
+def _prepare_torch_runtime_env() -> None:
+    """Set deterministic torch cache paths for minimal containers.
+
+    Some runtime images run as an arbitrary UID without a passwd entry.
+    In that case, torch may fail while resolving cache directories via
+    getpass/pwd. Predefining cache paths avoids that code path.
+    """
+    cache_root = Path(os.getenv("HELVEX_TORCH_CACHE_DIR", "/tmp/helvex-torch-cache"))
+    inductor_dir = cache_root / "inductor"
+    hf_home = cache_root / "hf"
+    for p in (cache_root, inductor_dir, hf_home):
+        p.mkdir(parents=True, exist_ok=True)
+
+    os.environ.setdefault("TORCHINDUCTOR_CACHE_DIR", str(inductor_dir))
+    os.environ.setdefault("TRITON_CACHE_DIR", str(cache_root / "triton"))
+    os.environ.setdefault("HF_HOME", str(hf_home))
+    os.environ.setdefault("XDG_CACHE_HOME", str(cache_root))
+    os.environ.setdefault("USER", "helvex")
+    os.environ.setdefault("LOGNAME", os.environ["USER"])
+
+
 @lru_cache(maxsize=1)
 def _get_model(model_name: str = DEFAULT_MODEL):
     """Load and cache the sentence-transformers model (lazy, one download)."""
     try:
+        _prepare_torch_runtime_env()
         from sentence_transformers import SentenceTransformer
         logger.info("Loading sentence-transformers model: %s", model_name)
         model = SentenceTransformer(model_name)

@@ -2007,26 +2007,25 @@ def run_semantic_pipeline(
         for c in companies
     ]
 
-    # ── Step 3: Embed with sentence-transformers ──
+    # ── Step 3: Embed with sentence-transformers (via shared safe loader) ──
     t2 = time.time()
-    try:
-        from sentence_transformers import SentenceTransformer
-    except ImportError as exc:
-        raise ImportError(
-            "sentence-transformers is required for semantic_kmeans_cluster. "
-            "It should already be installed — check requirements.backend.txt."
-        ) from exc
+    from app.services.embeddings import embed_texts
 
     if progress_cb:
         progress_cb(0, n_total, {**stats, "step": "embedding"})
 
     logger.info(f"[3/7] Embedding {n_total} texts with paraphrase-multilingual-MiniLM-L12-v2 ...")
-    model = SentenceTransformer("paraphrase-multilingual-MiniLM-L12-v2")
+    model_name = "paraphrase-multilingual-MiniLM-L12-v2"
 
     embeddings_list: list = []
     for batch_start in range(0, n_total, embedding_batch_size):
         batch = input_texts[batch_start: batch_start + embedding_batch_size]
-        vecs = model.encode(batch, normalize_embeddings=True, convert_to_numpy=True, show_progress_bar=False)
+        vecs = embed_texts(
+            batch,
+            model_name=model_name,
+            batch_size=embedding_batch_size,
+            show_progress=False,
+        )
         embeddings_list.append(vecs)
         if progress_cb and batch_start % (embedding_batch_size * 4) == 0:
             progress_cb(batch_start, n_total, {**stats, "step": "embedding"})
