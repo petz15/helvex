@@ -54,8 +54,7 @@
 
 
 ### UI fixes:
-- Email notifications remove from billing
-- Move ML Job Reference from Jobs to collection page. 
+- Email notifications remove from billing -> should be fixed but untested
 - Remove AI preview
 - Show settings in explore page (currently only shown when there is no data but there is always data)
 - create a seperate section for organization. in general show all organizations the user is a part of. Add a button to move to new organization and remove the one in the header - chaning org takes a long time to load? or does it even. remove it any way

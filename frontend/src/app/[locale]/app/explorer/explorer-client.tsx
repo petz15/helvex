@@ -602,12 +602,20 @@ function SemanticSearchBar({ onSelect }: SemanticSearchBarProps) {
     return () => { if (timerRef.current) clearTimeout(timerRef.current); };
   }, [query]);
 
-  const sections: { label: string; type: CategoryType; items: SemanticSearchResponse[keyof SemanticSearchResponse] }[] = results ? [
-    { label: "Clusters", type: "tfidf_cluster", items: results.clusters },
-    { label: "AI Categories", type: "ai_category", items: results.categories },
-    { label: "Keywords", type: "keyword", items: results.keywords },
-    { label: "NOGA codes", type: "noga_code", items: results.noga_codes },
-  ].filter(s => Array.isArray(s.items) && s.items.length > 0) : [];
+  const makeSection = (
+    label: string,
+    type: CategoryType,
+    items: SemanticSearchResponse["clusters"],
+  ) => ({ label, type, items });
+
+  const sections: Array<{ label: string; type: CategoryType; items: SemanticSearchResponse["clusters"] }> = results
+    ? [
+      makeSection("Clusters", "tfidf_cluster", results.clusters),
+      makeSection("AI Categories", "ai_category", results.categories),
+      makeSection("Keywords", "keyword", results.keywords),
+      makeSection("NOGA codes", "noga_code", results.noga_codes),
+    ].filter((s) => s.items.length > 0)
+    : [];
 
   return (
     <div ref={containerRef} className="relative w-full">
