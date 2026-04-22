@@ -34,6 +34,14 @@ const ML_JOB_DOCS: { job_type: string; label: string; description: string; when:
     prereq: "Requires purpose_keywords. Run recompute_keywords first.",
   },
   {
+    job_type: "recompute_keywords",
+    label: "Recompute Keywords",
+    description:
+      "Extracts fresh TF-IDF keywords from purpose text and writes them to purpose_keywords. This is the prerequisite for semantic clustering and the best input for NOGA and cluster-based scoring.",
+    when: "Run after a fresh import or whenever purpose text has changed significantly.",
+    prereq: "Use this before semantic_kmeans_cluster.",
+  },
+  {
     job_type: "tfidf_kmeans_cluster",
     label: "TF-IDF K-Means",
     description:
@@ -225,6 +233,104 @@ export function CollectionClient() {
             Only companies missing purpose text
           </label>
           <SubmitBtn loading={loading === "scoring/reextract-purpose"} />
+        </form>
+      </Section>
+
+      <Section title="Recompute Keywords">
+        <form onSubmit={async e => {
+          e.preventDefault();
+          const fd = new FormData(e.currentTarget);
+          await submit("scoring/recompute-keywords", {
+            top_keywords_per_company: parseInt(fd.get("recompute_top_keywords") as string) || 10,
+            canton: (fd.get("recompute_canton") as string)?.trim().toUpperCase() || null,
+            limit: parseInt(fd.get("recompute_limit") as string) || null,
+          });
+        }} className="space-y-4">
+          <div>
+            <h2 className="text-sm font-semibold text-slate-800">Recompute keywords from purpose text</h2>
+            <p className="mt-1 text-xs text-slate-500">
+              Refresh purpose_keywords from the current corpus. This is the recommended prerequisite before Semantic K-Means.
+            </p>
+          </div>
+          <div className="grid grid-cols-2 gap-4">
+            <Field label="Top keywords/company">
+              <input name="recompute_top_keywords" type="number" min="1" defaultValue="10" className={inputCls} />
+            </Field>
+            <Field label="Limit">
+              <input name="recompute_limit" type="number" min="1" className={inputCls} placeholder="All" />
+            </Field>
+          </div>
+          <Field label="Canton" hint="Optional: restrict recomputation to one canton">
+            <input name="recompute_canton" className={inputCls} placeholder="Any" />
+          </Field>
+          <SubmitBtn loading={loading === "scoring/recompute-keywords"} />
+        </form>
+      </Section>
+
+      <Section title="Semantic K-Means clustering">
+        <form onSubmit={async e => {
+          e.preventDefault();
+          const fd = new FormData(e.currentTarget);
+          await submit("scoring/semantic-cluster", {
+            n_clusters: parseInt(fd.get("semantic_n_clusters") as string) || 150,
+            max_clusters_per_company: parseInt(fd.get("semantic_max_clusters_per_company") as string) || 3,
+            min_similarity: parseFloat(fd.get("semantic_min_similarity") as string) || 0.2,
+            n_components: parseInt(fd.get("semantic_n_components") as string) || 50,
+            top_terms: parseInt(fd.get("semantic_top_terms") as string) || 5,
+            canton: (fd.get("semantic_canton") as string)?.trim().toUpperCase() || null,
+            min_zefix_score: parseInt(fd.get("semantic_min_zefix_score") as string) || null,
+            max_zefix_score: parseInt(fd.get("semantic_max_zefix_score") as string) || null,
+            limit: parseInt(fd.get("semantic_limit") as string) || null,
+            embedding_batch_size: parseInt(fd.get("semantic_embedding_batch_size") as string) || 512,
+          });
+        }} className="space-y-4">
+          <div>
+            <h2 className="text-sm font-semibold text-slate-800">Semantic K-Means clustering</h2>
+            <p className="mt-1 text-xs text-slate-500">
+              Clusters companies by meaning using multilingual embeddings. Run Recompute Keywords first so the model has clean inputs.
+            </p>
+          </div>
+          <div className="grid grid-cols-2 gap-4">
+            <Field label="Clusters">
+              <input name="semantic_n_clusters" type="number" min="1" defaultValue="150" className={inputCls} />
+            </Field>
+            <Field label="Max clusters/company">
+              <input name="semantic_max_clusters_per_company" type="number" min="1" defaultValue="3" className={inputCls} />
+            </Field>
+          </div>
+          <div className="grid grid-cols-2 gap-4">
+            <Field label="Min similarity">
+              <input name="semantic_min_similarity" type="number" min="0" max="1" step="0.01" defaultValue="0.2" className={inputCls} />
+            </Field>
+            <Field label="Components">
+              <input name="semantic_n_components" type="number" min="2" defaultValue="50" className={inputCls} />
+            </Field>
+          </div>
+          <div className="grid grid-cols-2 gap-4">
+            <Field label="Top cluster terms">
+              <input name="semantic_top_terms" type="number" min="1" defaultValue="5" className={inputCls} />
+            </Field>
+            <Field label="Embedding batch size">
+              <input name="semantic_embedding_batch_size" type="number" min="1" defaultValue="512" className={inputCls} />
+            </Field>
+          </div>
+          <div className="grid grid-cols-2 gap-4">
+            <Field label="Canton">
+              <input name="semantic_canton" className={inputCls} placeholder="Any" />
+            </Field>
+            <Field label="Limit">
+              <input name="semantic_limit" type="number" min="1" className={inputCls} placeholder="All" />
+            </Field>
+          </div>
+          <div className="grid grid-cols-2 gap-4">
+            <Field label="Min Zefix score">
+              <input name="semantic_min_zefix_score" type="number" min="0" max="100" className={inputCls} placeholder="—" />
+            </Field>
+            <Field label="Max Zefix score">
+              <input name="semantic_max_zefix_score" type="number" min="0" max="100" className={inputCls} placeholder="—" />
+            </Field>
+          </div>
+          <SubmitBtn loading={loading === "scoring/semantic-cluster"} />
         </form>
       </Section>
 

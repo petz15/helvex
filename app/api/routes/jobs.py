@@ -459,6 +459,12 @@ class ReextractKeywordsBody(BaseModel):
     limit: int | None = None
 
 
+class RecomputeKeywordsBody(BaseModel):
+    top_keywords_per_company: int = 10
+    canton: str | None = None
+    limit: int | None = None
+
+
 class SemanticClusterBody(BaseModel):
     """Semantic K-Means clustering using sentence-transformer embeddings.
 
@@ -866,6 +872,23 @@ def trigger_reextract_keywords(body: ReextractKeywordsBody, request: Request, db
     job = _enqueue_or_http_error(
         request,
         job_type="reextract_keywords",
+        label=label,
+        params=body.model_dump(),
+        db=db,
+    )
+    return JobOut.from_orm_obj(job)
+
+
+@router.post("/scoring/recompute-keywords", response_model=JobOut, status_code=status.HTTP_202_ACCEPTED)
+def trigger_recompute_keywords(body: RecomputeKeywordsBody, request: Request, db: Session = Depends(get_db), _: User = Depends(require_superadmin)):
+    label = "Recompute keywords from purpose text"
+    if body.canton:
+        label += f" — canton {body.canton.upper()}"
+    if body.limit:
+        label += f" — limit {body.limit}"
+    job = _enqueue_or_http_error(
+        request,
+        job_type="recompute_keywords",
         label=label,
         params=body.model_dump(),
         db=db,
