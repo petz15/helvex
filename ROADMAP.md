@@ -50,6 +50,7 @@
     - web results are not gated, immediately shown. Should have been atleast 1 week of pause form a simple tier. 
 - Page size is not working on company overview
 - superadmin payment transactions does not show payment method
+- more improvements to stopping words
 
 
 ### UI fixes:
@@ -68,6 +69,13 @@
 - larger symbols and text in header
 - as soon as explorer has been opend, opening any other page requires atleast 10 seconds to load if not more if it loads at all
 - Add translations to pricing page and unify the public one and the private one
+
+# Questions
+
+- should websearches be gated? or should they always remain private unless released by me (periodically?)?
+    - if always private, some other organization updates a link, notify other orgs that their companies link has been updated (for free)
+- flex rescore free or monthly etc?
+- other features?
 
 
 

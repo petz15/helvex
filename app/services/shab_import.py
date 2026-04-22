@@ -26,7 +26,7 @@ from app.api.shab_client import (
     fetch_publication_detail,
 )
 from app.schemas.company import CompanyUpdate
-from app.services.collection import import_company_from_zefix_uid
+from app.services.collection import enrich_company, import_company_from_zefix_uid
 
 # UIDs queued for detail fetch are collected during import and submitted
 # as a single job at the end to avoid enqueuing hundreds of tiny jobs.
@@ -97,6 +97,9 @@ def import_shab_publications(
         "updated": 0,
         "deleted": 0,
         "skipped": 0,
+        "geocoded": 0,
+        "keywords": 0,
+        "noga_classified": 0,
         "errors": [],
         "warnings": [],
         "detail_jobs_queued": 0,
@@ -161,7 +164,7 @@ def import_shab_publications(
 
         try:
             if sub_rubric in (SUBR_NEW, SUBR_MUTATION):
-                _company, created = import_company_from_zefix_uid(
+                company, created = import_company_from_zefix_uid(
                     db,
                     uid,
                     pause_on_zefix_500=True,
@@ -170,10 +173,17 @@ def import_shab_publications(
                 )
                 if created:
                     stats["created"] += 1
-                    # Queue for detail fetch — new companies don't have full data yet.
                     new_uids.append(uid)
                 else:
                     stats["updated"] += 1
+
+                try:
+                    enriched = enrich_company(db, company)
+                    stats["geocoded"] += enriched["geocoded"]
+                    stats["keywords"] += enriched["keywords"]
+                    stats["noga_classified"] += enriched["noga_classified"]
+                except Exception:  # noqa: BLE001
+                    pass
 
             elif sub_rubric == SUBR_DELETION:
                 existing = crud.get_company_by_uid(db, uid)
@@ -222,7 +232,7 @@ def import_shab_publications(
                     app,
                     job_type="detail",
                     label=f"SHAB auto detail fetch — {len(batch)} new UID(s) ({from_date}–{to_date})",
-                    params={"uids": batch, "only_missing_details": True, "score_if_missing": True},
+                    params={"uids": batch, "score_if_missing": True},
                     db=db,
                 )
                 stats["detail_jobs_queued"] += 1

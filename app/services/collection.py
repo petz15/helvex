@@ -1568,6 +1568,39 @@ def rescore_from_stored_results(db: Session, company: Company) -> bool:
     return True
 
 
+def enrich_company(db: Session, company: Company, *, noga: bool = True) -> dict[str, int]:
+    """Geocode, extract keywords, and apply NOGA for a single company.
+
+    Each step is skipped if already done or prerequisites are missing.
+    Pass noga=False to skip NOGA (e.g. when model artifacts are unavailable).
+    Returns counts: {"geocoded": 0|1, "keywords": 0|1, "noga_classified": 0|1}.
+    Raises FileNotFoundError if NOGA model artifacts are missing (noga=True only).
+    """
+    result = {"geocoded": 0, "keywords": 0, "noga_classified": 0}
+
+    if geocode_and_update_company(db, company):
+        result["geocoded"] = 1
+
+    if company.purpose and not company.purpose_keywords:
+        try:
+            from app.services.cluster_pipeline import extract_keywords_incremental
+            kw = extract_keywords_incremental(company)
+            if kw:
+                crud.update_company(db, company, CompanyUpdate(purpose_keywords=kw))
+                company.purpose_keywords = kw
+                result["keywords"] = 1
+        except Exception:
+            pass
+
+    if noga:
+        noga_update = apply_noga_classification(db, company)
+        if noga_update is not None:
+            crud.update_company(db, company, noga_update)
+            result["noga_classified"] = 1
+
+    return result
+
+
 def run_zefix_detail_collect(
     db: Session,
     *,
@@ -1672,35 +1705,22 @@ def run_zefix_detail_collect(
             )
             stats["updated"] += 1
 
-            # Geocode address → lat/lon (skipped if already set; Nominatim rate-limits itself)
-            if geocode_and_update_company(db, updated):
-                stats["geocoded"] += 1
-
             # Re-score only when no score exists yet and stored results are available
             if score_if_missing and updated.web_score is None:
                 if rescore_from_stored_results(db, updated):
                     stats["scored"] += 1
 
-            # Extract purpose_keywords incrementally if purpose changed or keywords missing
-            if updated.purpose and not updated.purpose_keywords:
-                try:
-                    from app.services.cluster_pipeline import extract_keywords_incremental
-                    kw = extract_keywords_incremental(updated)
-                    if kw:
-                        crud.update_company(db, updated, CompanyUpdate(purpose_keywords=kw))
-                        updated.purpose_keywords = kw  # keep in-memory for NOGA below
-                except Exception:
-                    pass  # S3 artifacts may not exist yet; non-fatal
-
             if noga_enabled:
                 try:
-                    noga_update = apply_noga_classification(db, updated)
-                    if noga_update is not None:
-                        crud.update_company(db, updated, noga_update)
-                        stats["noga_classified"] += 1
+                    enriched = enrich_company(db, updated)
+                    stats["geocoded"] += enriched["geocoded"]
+                    stats["noga_classified"] += enriched["noga_classified"]
                 except FileNotFoundError as exc:
                     stats["errors"].append(f"NOGA classification disabled: {exc}")
                     noga_enabled = False
+            else:
+                enriched = enrich_company(db, updated, noga=False)
+                stats["geocoded"] += enriched["geocoded"]
 
         except Exception as exc:  # noqa: BLE001
             if _is_control_signal_exception(exc):
