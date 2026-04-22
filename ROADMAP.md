@@ -19,11 +19,7 @@
     - other industry specific directories
 
 ### MVP before public PROD
-- Save cards happens automatically
-- Billing QOL
-- Tiers are enforced
-- Daily SHAB - partially done. 
-- Multilang (?)
+- Tiers are enforced - partially done (not fully checked and web searches are not gated yet + always uses api instead of checking if data already exists)
 
 ## PROD CHANGES
 - wordline notification url
@@ -108,11 +104,11 @@
 ## Company Profile
 
 
-- [X] **History overview** —  Old names and taken over is already visible but not SOGC publications, which needs to be custom handled in order to display changes such as people and other changes. -> nicer overview and improvements, there are still some mistakes sometimes in the displayment of people (preprocessing might be necessary)
+- [ ] **Pre-processing company timeline** - process all shab timeline with a seperate table which then can be used for more features such as cleaner overview of changes, connections of people over multiple companies etc. past changes also with cancelled companies etc!
 - [ ] **Graph overview of relationships** — based on past SHAB changes and name changes, take overs etc -> create nicer visuals for timeline. evaluate js on the fly calculations vs backend/DB
 - [ ] **Cross-company person graph** — normalize sogcPub organ changes into `persons` / `company_persons` tables via a pipeline job; build a graph UI showing where signers appear across multiple companies, what roles they held, and when — enabling network analysis of directors, beneficial owners, and corporate groups -> could use a graph DB for that
 - [ ] **Do not immediatly show scoring unless explore has been setup for org or user** —
-- [ ] **Free tier**- show some limited or teaser data for free tier
+
 
 
 ## Classification & Scoring
@@ -130,27 +126,25 @@
 
 - [ ] **ML Worker autoscaling with KEDA** — install KEDA; configure ScaledObject to scale ml-worker pods (0 → N) based on Redis queue depth; requires KEDA + Hetzner Cluster Autoscaler for node-level scaling; enables true "cost to zero" idle state and efficient burst capacity (replaces current fixed replicas: 1 approach)
 - [ ] **Monitoring & Logging stack** — deploy Prometheus + Grafana on K3s; scrape app metrics (request rate, job queue depth, error rate), Kubernetes node/pod metrics, and Redis/PostgreSQL exporters; alert on pod restarts, high memory, queue stalls -> started but not fully done yet probably not going to continue with prometheus or grafana for a while
-- [ ] **Web analytics** — integrate Google Tag Manager + GA4 (or privacy-first alternative like Plausible/Umami); track page views, funnel steps (signup, first job, first export), feature usage; cookie consent banner for GDPR compliance
+- [X] **Web analytics** — integrate Google Tag Manager + GA4 (or privacy-first alternative like Plausible/Umami); track page views, funnel steps (signup, first job, first export), feature usage; cookie consent banner for GDPR compliance
 - [ ] **Cluster autoscaler (node-level)** — KEDA handles pod-level; Hetzner Cluster Autoscaler handles node provisioning for ML workload node pool; requires `hcloud-cloud-controller-manager` + CA Helm chart + node group config mapping `workload=ml` label to specific server type (cx41 or cx51); Terraform manages control-plane + DB nodes only; CA manages ML worker node pool separately
 - [ ] **Hetzner ML node provisioning flow** - finalize documented/manual flow + helper scripts to create and join dedicated Hetzner ML nodes with private IP networking
-- [ ] **Hetzner ML fallback node class** - define cloud fallback ML node class with labels `workload=ml`, `location=cloud` and matching taints/tolerations
 - [ ] **ML scheduling policy** - implement Helm affinity policy: required `workload=ml`, preferred primary ML node class, cloud fallback when unavailable
 - [ ] **ML capacity mode policy** - define default behavior when no ML node is available (queue-only vs temporary fallback)
 - [ ] **Change postgres backup/recovery** - 1) Maintain an explicit latest backup pointer After each successful backup, write a small object like latest.json in the same bucket/prefix. 2) Manual restore source override as first-class input Add a workflow dispatch input or repo variable like POSTGRES_RESTORE_SOURCE. If set, workflow uses it exactly. If not set, then run auto-discovery.
 - [ ] **Middleware** - my middleware python program has a chokehold on the whole architecture, if that is down nothing works! Either change that, i.e. review changes or when deploying and something fails, make sure this one can revert to a stable build. 
 - [ ] **DEV/INT env** - for save deployment checks
-- [ ] **Job queueing: Redis Streams + RQ vs Procrastinate** — Current Phase 2/3 uses Redis Streams + RQ with two-tier queues. Alternative: Procrastinate (Python async-first, uses Postgres native `SELECT...FOR UPDATE SKIP LOCKED`) would eliminate Redis dependency, simplify stack to single Postgres, and handle B2B SaaS scale. **Decision point:** Revisit if Phase 2 not yet started (high rework cost if Phase 2 in progress).
+- [ ] **Job queueing: Redis Streams + RQ vs Procrastinate** — Currently uses Redis Streams + RQ with two-tier queues. Alternative: Procrastinate (Python async-first, uses Postgres native `SELECT...FOR UPDATE SKIP LOCKED`) would eliminate Redis dependency, simplify stack to single Postgres, and handle B2B SaaS scale.
 - [ ] **Caching & rate-limiting strategy** — If Procrastinate adopted, Redis becomes optional. Current state: not documented. Options: Postgres + PgBouncer connection pooling (may be sufficient), Postgres token-bucket table for rate-limiting, lightweight in-app caching. **Action:** Deferred pending Procrastinate decision.
 - [ ] **File storage strategy** — User uploads, exports, static Next.js assets: confirm S3-compatible (Hetzner Object Storage) path, direct-to-client signed URLs vs server-side upload, CDN for static asset delivery. Currently not documented.
-- [ ] **Session management** — Where user sessions are stored not yet documented. Options: Postgres table (preferred, integrates with RLS), in-memory (loses sessions on pod restart), Redis (if retained). **Action:** Document before Phase 0 completion.
+- [ ] **Session management** — Where user sessions are stored not yet documented. Options: Postgres table (preferred, integrates with RLS), in-memory (loses sessions on pod restart), Redis (if retained). 
 
 
 
 ## Org-/Usermanagement
 
-- [ ] **Seperate org management page** - seperate page for org management between general and billing
 - [ ] **Flow for account deletion** - GDPR compliant flow for account deletion
-- [ ] **Possibility to create new orgs** - users should be able to create as many orgs as they want to 
+
 
 
 
@@ -170,31 +164,25 @@
 
 - [ ] **Cloudflare evaluation** — assess Cloudflare for DDoS protection, CDN/caching of static assets, bot management, and WAF rules; compare cost vs current Hetzner LB + cert-manager setup; consider Workers for edge auth or rate limiting
 - [ ] **CAPTCHA evaluation** — evaluate CAPTCHA (hCaptcha / Cloudflare Turnstile / reCAPTCHA v3) for signup, login, and scraping-triggering actions; weigh friction cost against bot/abuse risk at current and projected traffic
-- [ ] **Mobile optimization** - Optimize the website for mobile traffic (maybe limit some features)
 - [ ] **verify api security** - Test and verify the security of the API  which is pretty open (how is it secured against attackers, bots and crawlers/unofficial APIs). 
 - [ ] **A General pass over security not jsut api** - WAF, bot protection etc
 - [ ] **Testing suite** — introduce consistent testing suite
 
 
 
-
-
-
-
 ## Architecture & Refactoring
 
 
-- [ ] **Org member audit log** — track all role changes, additions, removals with user/timestamp
-- [ ] **Rename users.tier → deprecated_user_tier** — `users.tier` is legacy (pre-org migration); once all routes use `org.tier`, rename the column and add a deprecation comment
 - [ ] **API key management** — token creation/revocation UI for org admins to manage their API credentials; currently only available via admin panel
 - [ ] **uvicorn async** - Each open SSE connection holds one synchronous uvicorn worker thread (blocking I/O). At current scale (<50 concurrent users) this is fine; at higher scale the endpoint should be rewritten as `async def` with `anyio.sleep` and an async Redis client.
 - [ ] **Github Action Secrets Mess** - Currently many github action secrets are thrown in there which are my ENV variables, this should be managed and documented much better. Especially when I implement a DEV/INT env I should seperate a lot of these variables
 - [ ] **reduce clutter** - reduce the spagetthi code and make it all much cleaner. e.g. multiple places for prices instead of one localised one, or how data is show to orgs/users
+- [ ] **remove Redis** - replace with postgres addon instead of having a seperate service which I dont really use tbh
 
 
 ## Other & QOL
 
-- [ ] **DE / FR / IT support** — UI strings, labels, tooltips; Zefix data already multilingual by canton
+
 - [ ] **Report Bug** - easy report Bug somewhere
 - [ ] **Site version in UI**- the version of the site somewhere in the UI
 
@@ -275,3 +263,9 @@
 - [X] **Remove default flex score and categories** - Remove my default flex scores and categories only 
 - [X] **ML Classifications** - Not sure that all of them are implemented quite correctly also explanations, drawbacks, multi org support for different tiers needs to be implemented, etc. 
 - [X] **User Management for Orgs** - Set what users are allowed to do (read only or also execute)
+- [X] **DE / FR / IT support** — UI strings, labels, tooltips; Zefix data already multilingual by canton
+- [X] **Org member audit log** — track all role changes, additions, removals with user/timestamp
+- [X] **Mobile optimization** - Optimize the website for mobile traffic (maybe limit some features)
+- [X] **Seperate org management page** - seperate page for org management between general and billing
+- [X] **Possibility to create new orgs** - users should be able to create as many orgs as they want to 
+- [X] **History overview** —  Old names and taken over is already visible but not SOGC publications, which needs to be custom handled in order to display changes such as people and other changes. -> nicer overview and improvements, there are still some mistakes sometimes in the displayment of people (preprocessing might be necessary)
