@@ -9,8 +9,6 @@ import {
   fetchBillingSummary,
   fetchCreditTransactions,
   fetchCreditUsage,
-  fetchNotificationPreferences,
-  updateNotificationPreferences,
   fetchPaymentHistory,
   cancelPendingPayment,
   cancelSubscription,
@@ -25,7 +23,6 @@ import {
   type CreditTransaction,
   type CreditUsage,
   type PaymentRecord,
-  type NotificationPreferences,
   type PaymentMethod,
 } from "@/lib/api";
 import { creditsToChf } from "@/lib/entitlements";
@@ -210,12 +207,7 @@ function CreditUsageSection() {
   );
 }
 
-const NOTIF_ITEMS: { key: keyof NotificationPreferences; label: string; description: string }[] = [
-  { key: "notif_low_credit",   label: "Low credit balance",   description: "Alert when your credit balance drops below the threshold." },
-  { key: "notif_export_ready", label: "Export completed",     description: "Notify when a CSV export finishes and is ready to download." },
-  { key: "notif_job_failed",   label: "Job failed",           description: "Notify when a background job encounters an error." },
-  { key: "notif_saved_view",   label: "Saved search matches", description: "Alert when new companies match a saved search." },
-];
+
 
 function Toggle({ checked, onChange, disabled }: { checked: boolean; onChange: () => void; disabled: boolean }) {
   return (
@@ -234,59 +226,6 @@ function Toggle({ checked, onChange, disabled }: { checked: boolean; onChange: (
         }`}
       />
     </button>
-  );
-}
-
-function NotificationSection({ orgId }: { orgId: number }) {
-  const { data, mutate } = useSWR(`notifications-${orgId}`, () => fetchNotificationPreferences(orgId));
-  const [saving, setSaving] = useState(false);
-
-  async function handleChange(patch: Partial<NotificationPreferences>) {
-    if (!data) return;
-    const next: NotificationPreferences = { ...data, ...patch };
-    setSaving(true);
-    try {
-      const updated = await updateNotificationPreferences(orgId, next);
-      void mutate(updated, false);
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  const masterOn = data?.email_notifications ?? true;
-
-  return (
-    <div className="rounded-xl border border-slate-200 bg-white divide-y divide-slate-100">
-      {/* Master toggle */}
-      <div className="px-4 py-3 flex items-center justify-between">
-        <div>
-          <p className="text-sm font-medium text-slate-800">Email notifications</p>
-          <p className="text-xs text-slate-400 mt-0.5">
-            Turn off to stop all notification emails from Helvex.
-          </p>
-        </div>
-        <Toggle
-          checked={masterOn}
-          onChange={() => handleChange({ email_notifications: !masterOn })}
-          disabled={saving || !data}
-        />
-      </div>
-
-      {/* Per-type toggles — only shown when master is on */}
-      {masterOn && NOTIF_ITEMS.map(({ key, label, description }) => (
-        <div key={key} className="px-4 py-3 flex items-center justify-between pl-7">
-          <div>
-            <p className="text-sm text-slate-700">{label}</p>
-            <p className="text-xs text-slate-400 mt-0.5">{description}</p>
-          </div>
-          <Toggle
-            checked={data ? (data[key] as boolean) : true}
-            onChange={() => handleChange({ [key]: !(data?.[key] ?? true) })}
-            disabled={saving || !data}
-          />
-        </div>
-      ))}
-    </div>
   );
 }
 
@@ -1045,7 +984,6 @@ export function BillingClient() {
         />
       )}
       <CreditUsageSection />
-      {summary && <NotificationSection orgId={summary.org_id} />}
       <CreditHistory />
       <PaymentHistory />
     </div>

@@ -102,6 +102,74 @@ export const CREDIT_ACTIONS: readonly CreditAction[] = [
   },
 ] as const;
 
+export type ComparisonRowKey =
+  | "creditRate" | "csvExportRows" | "queuePriority" | "webPrivacy" | "topupBonus"
+  | "noAds" | "multiUserOrg" | "dailyDigest"
+  | "flexRescore" | "flexAutoScore" | "immediateLlm" | "llmAutoScore" | "customStopwords" | "byoKeys"
+  | "apiAccess";
+
+export type ComparisonGroupKey = "consumption" | "usage" | "workspace" | "scoring" | "developer";
+
+export type CellValue = "yes" | "no" | string;
+
+export interface ComparisonRow {
+  labelKey: ComparisonRowKey;
+  hasTip: boolean;
+  values: [CellValue, CellValue, CellValue, CellValue, CellValue];
+}
+
+export interface ComparisonGroup {
+  headingKey: ComparisonGroupKey;
+  rows: ComparisonRow[];
+}
+
+export const PLAN_COMPARISON_GROUPS: readonly ComparisonGroup[] = [
+  {
+    headingKey: "consumption",
+    rows: [
+      {
+        labelKey: "creditRate",
+        hasTip: true,
+        values: ["CHF 0.0001 / credit", "CHF 0.0001 / credit", "CHF 0.0001 / credit", "CHF 0.0001 / credit", "CHF 0.0001 / credit"],
+      },
+    ],
+  },
+  {
+    headingKey: "usage",
+    rows: [
+      { labelKey: "csvExportRows", hasTip: false, values: ["100", "1 000", "5 000", "20 000", "100 000"] },
+      { labelKey: "queuePriority", hasTip: true, values: ["Lowest", "Low", "Medium", "High", "Highest"] },
+      { labelKey: "webPrivacy", hasTip: true, values: ["None", "1 week", "1 month", "3 months", "Held + 6 mo"] },
+      { labelKey: "topupBonus", hasTip: true, values: ["None", "+5%", "+10%", "+15%", "+20%"] },
+    ],
+  },
+  {
+    headingKey: "workspace",
+    rows: [
+      { labelKey: "noAds", hasTip: false, values: ["no", "yes", "yes", "yes", "yes"] },
+      { labelKey: "multiUserOrg", hasTip: true, values: ["no", "yes", "yes", "yes", "yes"] },
+      { labelKey: "dailyDigest", hasTip: true, values: ["no", "yes", "yes", "yes", "yes"] },
+    ],
+  },
+  {
+    headingKey: "scoring",
+    rows: [
+      { labelKey: "flexRescore", hasTip: true, values: ["no", "no", "Unlimited", "Unlimited", "Unlimited"] },
+      { labelKey: "flexAutoScore", hasTip: true, values: ["no", "no", "yes", "yes", "yes"] },
+      { labelKey: "immediateLlm", hasTip: true, values: ["no", "no", "yes", "yes", "yes"] },
+      { labelKey: "llmAutoScore", hasTip: true, values: ["no", "no", "no", "yes", "yes"] },
+      { labelKey: "customStopwords", hasTip: true, values: ["no", "no", "no", "yes", "yes"] },
+      { labelKey: "byoKeys", hasTip: true, values: ["no", "no", "no", "no", "yes"] },
+    ],
+  },
+  {
+    headingKey: "developer",
+    rows: [
+      { labelKey: "apiAccess", hasTip: true, values: ["no", "no", "no", "no", "yes"] },
+    ],
+  },
+] as const;
+
 export function creditsToChf(credits: number): string {
   return (credits * 0.0001).toFixed(credits >= 1000 ? 2 : 4);
 }

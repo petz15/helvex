@@ -8,6 +8,7 @@ Runs every night (scheduled via main.py) to:
 """
 from __future__ import annotations
 
+import calendar
 import logging
 import secrets
 from datetime import datetime, timedelta, timezone
@@ -95,12 +96,10 @@ def _next_period_end(current_end: datetime, billing_cycle: str) -> datetime:
         except ValueError:
             # Feb 29 → Feb 28 of next year
             return current_end.replace(year=current_end.year + 1, day=28)
-    # monthly: add ~30 days then anchor to same day-of-month
+    # monthly: advance to the next calendar month, clamping to the last valid day
     candidate = current_end + timedelta(days=31)
-    try:
-        return candidate.replace(day=current_end.day)
-    except ValueError:
-        return candidate
+    last_day = calendar.monthrange(candidate.year, candidate.month)[1]
+    return candidate.replace(day=min(current_end.day, last_day))
 
 
 def run_billing_renewal(db: Session) -> dict[str, Any]:

@@ -7,6 +7,7 @@ import {
   fetchCurrentUser,
 } from "@/lib/api";
 import { CREDIT_ACTIONS, PRICING_TIERS, creditsToChf } from "@/lib/marketing-data";
+import { PlanComparisonTable } from "@/components/plan-comparison-table";
 import { useI18n } from "@/i18n/context";
 
 // ── Data ──────────────────────────────────────────────────────────────────────
@@ -15,122 +16,6 @@ const TIERS = PRICING_TIERS;
 
 type TierId = typeof TIERS[number]["id"];
 
-// Feature rows: label, tooltip (optional), value per tier index [free,simple,explorer,researcher,strategist]
-type CellValue = "yes" | "no" | string;
-
-interface FeatureRow {
-  label: string;
-  tip?: string;
-  values: [CellValue, CellValue, CellValue, CellValue, CellValue];
-}
-
-interface FeatureGroup {
-  heading: string;
-  rows: FeatureRow[];
-}
-
-const CREDIT_RATE_LABEL = `CHF ${creditsToChf(1)} / credit`;
-
-const CONSUMPTION_GROUP: FeatureGroup = {
-  heading: "Consumption pricing",
-  rows: [
-    {
-      label: "Credit rate",
-      tip: "Consumption actions use the same credit rate across every plan.",
-      values: [CREDIT_RATE_LABEL, CREDIT_RATE_LABEL, CREDIT_RATE_LABEL, CREDIT_RATE_LABEL, CREDIT_RATE_LABEL],
-    },
-  ],
-};
-
-const FEATURE_GROUPS: FeatureGroup[] = [
-  CONSUMPTION_GROUP,
-  {
-    heading: "Usage limits",
-    rows: [
-      {
-        label: "CSV export rows",
-        values: ["100", "1 000", "5 000", "20 000", "100 000"],
-      },
-      {
-        label: "Queue priority",
-        tip: "Jobs from higher tiers are always processed first.",
-        values: ["Lowest", "Low", "Medium", "High", "Highest"],
-      },
-      {
-        label: "Web result privacy",
-        tip: "How long your web-search results stay private before being visible to others.",
-        values: ["None", "1 week", "1 month", "3 months", "Held + 6 mo"],
-      },
-      {
-        label: "Topup credit bonus",
-        tip: "Extra credits granted on top of every credit purchase. E.g. Explorer buying 10 000 credits receives 1 000 bonus credits.",
-        values: ["None", "+5%", "+10%", "+15%", "+20%"],
-      },
-    ],
-  },
-  {
-    heading: "Workspace",
-    rows: [
-      { label: "No ads", values: ["no", "yes", "yes", "yes", "yes"] },
-      {
-        label: "Multi-user org",
-        tip: "Invite teammates to share the same workspace, collection, and credit balance.",
-        values: ["no", "yes", "yes", "yes", "yes"],
-      },
-      {
-        label: "Daily digest notifications",
-        tip: "Receive a daily email summary of newly discovered companies matching your criteria.",
-        values: ["no", "yes", "yes", "yes", "yes"],
-      },
-    ],
-  },
-  {
-    heading: "Scoring & AI",
-    rows: [
-      {
-        label: "Flex rescore",
-        tip: "Explorer+ tiers get unlimited flex rescores at no credit cost. Free and Simple tiers pay per rescore from their credit balance.",
-        values: ["no", "no", "Unlimited", "Unlimited", "Unlimited"],
-      },
-      {
-        label: "Flex auto-score new companies",
-        tip: "Automatically rescores newly discovered companies against your Flex criteria.",
-        values: ["no", "no", "yes", "yes", "yes"],
-      },
-      {
-        label: "Immediate LLM scoring",
-        tip: "Uses the Anthropic API synchronously instead of the batch queue — results appear instantly.",
-        values: ["no", "no", "yes", "yes", "yes"],
-      },
-      {
-        label: "LLM auto-score new companies",
-        tip: "Automatically runs LLM scoring on newly discovered companies. Uses credits from your balance.",
-        values: ["no", "no", "no", "yes", "yes"],
-      },
-      {
-        label: "Custom ML stopwords",
-        tip: "Define words to exclude from ML-based company name clustering and matching.",
-        values: ["no", "no", "no", "yes", "yes"],
-      },
-      {
-        label: "Bring your own LLM keys",
-        tip: "Use your own Anthropic API key so LLM scoring costs go directly to your account.",
-        values: ["no", "no", "no", "no", "yes"],
-      },
-    ],
-  },
-  {
-    heading: "Developer",
-    rows: [
-      {
-        label: "API access",
-        tip: "Programmatic access to your workspace (coming soon).",
-        values: ["no", "no", "no", "no", "yes"],
-      },
-    ],
-  },
-];
-
 const TIER_BONUS_RATE: Record<TierId, number> = {
   free: 0,
   simple: 0.05,
@@ -138,45 +23,6 @@ const TIER_BONUS_RATE: Record<TierId, number> = {
   researcher: 0.15,
   strategist: 0.20,
 };
-
-// ── Sub-components ─────────────────────────────────────────────────────────────
-
-function Check() {
-  return (
-    <svg className="mx-auto h-5 w-5 text-emerald-500" viewBox="0 0 20 20" fill="currentColor">
-      <path fillRule="evenodd" d="M16.704 4.153a.75.75 0 0 1 .143 1.052l-8 10.5a.75.75 0 0 1-1.127.075l-4.5-4.5a.75.75 0 0 1 1.06-1.06l3.894 3.893 7.48-9.817a.75.75 0 0 1 1.05-.143Z" clipRule="evenodd" />
-    </svg>
-  );
-}
-
-function Cross() {
-  return (
-    <svg className="mx-auto h-4 w-4 text-slate-300" viewBox="0 0 20 20" fill="currentColor">
-      <path d="M6.28 5.22a.75.75 0 0 0-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 1 0 1.06 1.06L10 11.06l3.72 3.72a.75.75 0 1 0 1.06-1.06L11.06 10l3.72-3.72a.75.75 0 0 0-1.06-1.06L10 8.94 6.28 5.22Z" />
-    </svg>
-  );
-}
-
-function Cell({ value, dark }: { value: CellValue; dark?: boolean }) {
-  if (value === "yes") return <Check />;
-  if (value === "no") return <Cross />;
-  return (
-    <span className={`text-xs font-medium ${dark ? "text-slate-300" : "text-slate-600"}`}>
-      {value}
-    </span>
-  );
-}
-
-function Tooltip({ text }: { text: string }) {
-  return (
-    <span
-      title={text}
-      className="ml-1 inline-flex h-3.5 w-3.5 cursor-help items-center justify-center rounded-full bg-slate-200 text-[9px] font-bold text-slate-500 leading-none"
-    >
-      ?
-    </span>
-  );
-}
 
 // ── Main component ─────────────────────────────────────────────────────────────
 
@@ -349,71 +195,7 @@ export function PricingClient() {
         )}
 
         {/* ── Feature comparison table ── */}
-        <div className="space-y-3">
-          <h2 className="text-xl font-semibold text-slate-900">Compare plans</h2>
-          <div className="overflow-x-auto rounded-xl border border-slate-200 shadow-sm">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-slate-200 bg-slate-100">
-                  <th className="px-4 py-3 text-left font-semibold text-slate-600 w-52">Feature</th>
-                  {TIERS.map((t) => (
-                    <th
-                      key={t.id}
-                      className={`px-3 py-3 text-center font-semibold text-sm w-28 ${
-                        "dark" in t && t.dark
-                          ? "bg-slate-900 text-white"
-                          : t.popular
-                          ? "bg-blue-50 text-blue-800"
-                          : "text-slate-700"
-                      }`}
-                    >
-                      {t.name}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {FEATURE_GROUPS.map((group) => (
-                  <>
-                    <tr key={`group-${group.heading}`} className="bg-slate-50 border-y border-slate-200">
-                      <td
-                        colSpan={6}
-                        className="px-4 py-2 text-xs font-semibold uppercase tracking-wider text-slate-400"
-                      >
-                        {group.heading}
-                      </td>
-                    </tr>
-                    {group.rows.map((row, rowIdx) => (
-                      <tr
-                        key={row.label}
-                        className={`border-b border-slate-100 ${rowIdx % 2 === 0 ? "bg-white" : "bg-slate-50/50"}`}
-                      >
-                        <td className="px-4 py-3 text-slate-700 font-medium">
-                          {row.label}
-                          {row.tip && <Tooltip text={row.tip} />}
-                        </td>
-                        {row.values.map((val, colIdx) => {
-                          const tier = TIERS[colIdx];
-                          const isDark = "dark" in tier && tier.dark;
-                          return (
-                            <td
-                              key={colIdx}
-                              className={`px-3 py-3 text-center ${
-                                isDark ? "bg-slate-900" : tier.popular ? "bg-blue-100/40" : ""
-                              }`}
-                            >
-                              <Cell value={val} dark={isDark} />
-                            </td>
-                          );
-                        })}
-                      </tr>
-                    ))}
-                  </>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
+        <PlanComparisonTable comparison={dict.app.pricing.comparison} />
 
         {/* ── Consumption-based pricing ── */}
         <div className="space-y-5">

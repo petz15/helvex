@@ -310,10 +310,75 @@
     },
     "account": {
       "title": "Mein Konto",
-      "subtitle": "Profil, Sicherheit, Organisation und Team"
+      "subtitle": "Profil, Sicherheit, Organisation und Team",
+      "profile": "Profil",
+      "security": "Sicherheit",
+      "currentpassword": "Aktuelles Passwort",
+      "newpassword": "Neues Passwort",
+      "confirmnewpassword": "Neues Passwort bestätigen",
+      "minchars": "Mind. 8 Zeichen",
+      "changepassword": "Passwort ändern",
+      "changemail": "E-Mail ändern",
+      "newemail": "Neue E-Mail",
+      "verifymailmessage": "Wir haben einen Bestätigungslink an Ihre neue E-Mail gesendet. Bitte klicken Sie auf den Link in dieser E-Mail, um Ihre neue Adresse zu bestätigen.",
+      "sendverification": "Bestätigung senden",
+      "cancel": "Abbrechen",
+      "emailverified": "verifiziert",
+      "emailnotverified": "nicht verifiziert",
+      "organization": "Organisation",
+      "switchorganization": "Organisation wechseln",
+      "createneworganization": "Neue Organisation erstellen",
+      "manageteam": "Team verwalten",
+      "neworgname": "Neuer Organisationsname",
+      "create": "Erstellen",
+      "orgswitched": "Organisation gewechselt zu {orgName}",
+      "leaveorgconfirm": "Sind Sie sicher, dass Sie {orgName} verlassen möchten? Sie verlieren den Zugriff auf deren Daten.",
+      "errormsgleaveorg": "Das Verlassen der Organisation ist fehlgeschlagen. Bitte versuchen Sie es erneut.",
+      "successmsgleaveorg": "Sie haben {orgName} verlassen."
     },
     "pricing": {
-      "title": "Pläne & Preise"
+      "title": "Pläne & Preise",
+      "comparison": {
+        "heading": "Pläne vergleichen",
+        "featureCol": "Funktion",
+        "groups": {
+          "consumption": "Verbrauchspreise",
+          "usage": "Nutzungslimits",
+          "workspace": "Arbeitsbereich",
+          "scoring": "Bewertung & KI",
+          "developer": "Entwickler"
+        },
+        "rows": {
+          "creditRate": "Kreditpreis",
+          "creditRateTip": "Verbrauchsaktionen verwenden für alle Pläne den gleichen Kreditpreis.",
+          "csvExportRows": "CSV-Exportzeilen",
+          "queuePriority": "Warteschlangenpriorität",
+          "queuePriorityTip": "Jobs aus höheren Tarifstufen werden immer zuerst verarbeitet.",
+          "webPrivacy": "Web-Ergebnisprivatsphäre",
+          "webPrivacyTip": "Wie lange Ihre Web-Suchergebnisse privat bleiben, bevor sie für andere sichtbar werden.",
+          "topupBonus": "Auflade-Bonus",
+          "topupBonusTip": "Zusätzliche Credits werden auf jeden Kreditkauf gewährt. Z.B. erhält ein Explorer-Nutzer bei 10 000 Credits 1 000 Bonus-Credits.",
+          "noAds": "Keine Werbung",
+          "multiUserOrg": "Mehrbenutzer-Organisation",
+          "multiUserOrgTip": "Laden Sie Teammitglieder ein, denselben Arbeitsbereich, dieselbe Sammlung und das Credit-Guthaben zu teilen.",
+          "dailyDigest": "Tägliche Zusammenfassungen",
+          "dailyDigestTip": "Erhalten Sie täglich eine E-Mail-Zusammenfassung neu entdeckter Unternehmen, die Ihren Kriterien entsprechen.",
+          "flexRescore": "Flex-Neubewertung",
+          "flexRescoreTip": "Explorer+ erhalten unbegrenzte Flex-Neubewertungen ohne Kreditkosten. Free und Simple zahlen pro Neubewertung.",
+          "flexAutoScore": "Flex Auto-Bewertung neuer Unternehmen",
+          "flexAutoScoreTip": "Bewertet neu entdeckte Unternehmen automatisch anhand Ihrer Flex-Kriterien.",
+          "immediateLlm": "Sofortige KI-Bewertung",
+          "immediateLlmTip": "Nutzt die Anthropic-API synchron statt der Batch-Warteschlange — Ergebnisse erscheinen sofort.",
+          "llmAutoScore": "KI Auto-Bewertung neuer Unternehmen",
+          "llmAutoScoreTip": "Führt automatisch KI-Bewertungen für neu entdeckte Unternehmen durch. Verbraucht Credits aus Ihrem Guthaben.",
+          "customStopwords": "Benutzerdefinierte ML-Stoppwörter",
+          "customStopwordsTip": "Definieren Sie Wörter, die vom ML-basierten Clustering und Matching ausgeschlossen werden.",
+          "byoKeys": "Eigene KI-API-Schlüssel",
+          "byoKeysTip": "Verwenden Sie Ihren eigenen Anthropic-API-Schlüssel, sodass die KI-Kosten direkt Ihrem Konto belastet werden.",
+          "apiAccess": "API-Zugang",
+          "apiAccessTip": "Programmatischer Zugriff auf Ihren Arbeitsbereich (demnächst verfügbar)."
+        }
+      }
     },
     "collection": {
       "title": "Sammlung"

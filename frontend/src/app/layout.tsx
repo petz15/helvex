@@ -9,7 +9,10 @@ export const metadata: Metadata = {
   description: "Search, qualify, and track Swiss companies from the commercial register. Powered by live SHAB data and AI classification.",
   verification: googleSiteVerification ? { google: [googleSiteVerification] } : undefined,
   icons: {
-    icon: { url: "/favicon.svg", type: "image/svg+xml" },
+    icon: [
+      { url: "/favicon.ico", sizes: "any" },
+      { url: "/favicon.svg", type: "image/svg+xml" },
+    ],
   },
 };
 

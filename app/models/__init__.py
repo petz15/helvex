@@ -16,6 +16,7 @@ from app.models.org_member import OrgMember
 from app.models.org_payment_method import OrgPaymentMethod
 from app.models.org_setting import OrgSetting
 from app.models.organization import Organization
+from app.models.user_org_setting import UserOrgSetting
 from app.models.payment_transaction import PaymentTransaction
 from app.models.tfidf_stopword import TfidfStopword
 from app.models.user import User
@@ -26,5 +27,5 @@ __all__ = [
     "GoogleDirectoryDomain", "GoogleStopword",
     "JobRun", "JobRunEvent", "Note", "OAuthAccount", "OrgCompanyState",
     "OrgCreditTransaction", "OrgMember", "OrgPaymentMethod", "OrgSetting",
-    "Organization", "PaymentTransaction", "TfidfStopword", "User", "UserCompanyState",
+    "Organization", "PaymentTransaction", "TfidfStopword", "User", "UserCompanyState", "UserOrgSetting",
 ]

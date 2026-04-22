@@ -1,6 +1,6 @@
 "use client";
 import { useState } from "react";
-import useSWR, { useSWRConfig } from "swr";
+import useSWR from "swr";
 import { useI18n } from "@/i18n/context";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
@@ -51,11 +51,15 @@ function Banner({ kind, message }: { kind: "success" | "error"; message: string 
   );
 }
 
+
 function ChangePasswordForm() {
   const [current, setCurrent] = useState("");
   const [next, setNext] = useState("");
   const [saving, setSaving] = useState(false);
   const [banner, setBanner] = useState<{ kind: "success" | "error"; message: string } | null>(null);
+
+  const { dict } = useI18n();
+  const t = dict.app.account;
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -86,7 +90,7 @@ function ChangePasswordForm() {
       {banner && <Banner {...banner} />}
       <div className="grid grid-cols-2 gap-4">
         <div>
-          <label className="block text-sm font-medium text-slate-700 mb-1">Current password</label>
+          <label className="block text-sm font-medium text-slate-700 mb-1">{t.currentpassword}</label>
           <input
             type="password"
             required
@@ -97,8 +101,8 @@ function ChangePasswordForm() {
           />
         </div>
         <div>
-          <label className="block text-sm font-medium text-slate-700 mb-1">New password
-            <span className="text-slate-400 font-normal ml-1 text-xs">Min. 8 characters</span>
+          <label className="block text-sm font-medium text-slate-700 mb-1">{t.newpassword}
+            <span className="text-slate-400 font-normal ml-1 text-xs">{t.minchars}</span>
           </label>
           <input
             type="password"
@@ -117,7 +121,7 @@ function ChangePasswordForm() {
         className="flex items-center gap-2 bg-slate-100 hover:bg-slate-200 disabled:opacity-60 text-slate-700 px-4 py-2 rounded-lg text-sm font-medium transition-colors"
       >
         {saving ? <Loader2 size={14} className="animate-spin" /> : <Check size={14} />}
-        Change password
+        {t.changepassword}
       </button>
     </form>
   );
@@ -125,8 +129,9 @@ function ChangePasswordForm() {
 
 export function AccountClient({}: AccountClientProps) {
   const { dict } = useI18n();
+  const t = dict.app.account;
+
   const router = useRouter();
-  const { mutate } = useSWRConfig();
   const { data: me, mutate: reloadMe } = useSWR("me", fetchCurrentUser);
   const { data: orgs = [], mutate: reloadOrgs } = useSWR(me ? "my-orgs" : null, fetchMyOrgs);
 
@@ -180,9 +185,7 @@ export function AccountClient({}: AccountClientProps) {
     setOrgBanner(null);
     try {
       await createOrg(orgName);
-      await reloadMe();
-      await reloadOrgs();
-      await mutate("my-orgs");
+      await Promise.all([reloadMe(), reloadOrgs()]);
       setShowCreateOrg(false);
       setOrgName("");
       flash(setOrgBanner, "success", "Organization created! You are now the owner.");
@@ -195,15 +198,13 @@ export function AccountClient({}: AccountClientProps) {
   }
 
   async function handleSwitchOrg(orgId: number) {
+
     if (!me || orgId === me.org_id) return;
     setSwitchingOrgId(orgId);
     try {
       await switchOrg(orgId);
-      await mutate("me");
-      await mutate("my-orgs");
-      await reloadMe();
-      await reloadOrgs();
-      flash(setOrgBanner, "success", "Switched organization.");
+      await Promise.all([reloadMe(), reloadOrgs()]);
+      flash(setOrgBanner, "success", t.orgswitched.replace("{orgName}", me.org?.name || ""));
       router.refresh();
     } catch (err) {
       flash(setOrgBanner, "error", err instanceof Error ? err.message : "Failed to switch organization");
@@ -213,18 +214,17 @@ export function AccountClient({}: AccountClientProps) {
   }
 
   async function handleLeaveOrg() {
+
     if (!me?.org_id) return;
-    if (!confirm(`Leave "${me.org?.name}"? You will lose access to its data.`)) return;
+    if (!confirm(t.leaveorgconfirm.replace("{orgName}", me.org?.name || ""))) return;
     setLeavingOrg(true);
     try {
       await leaveOrg(me.org_id);
-      await reloadMe();
-      await reloadOrgs();
-      await mutate("my-orgs");
-      flash(setOrgBanner, "success", "You have left the organization.");
+      await Promise.all([reloadMe(), reloadOrgs()]);
+      flash(setOrgBanner, "success", t.successmsgleaveorg.replace("{orgName}", me.org?.name || ""));
       router.refresh();
     } catch (err) {
-      flash(setOrgBanner, "error", err instanceof Error ? err.message : "Failed to leave org");
+      flash(setOrgBanner, "error", err instanceof Error ? err.message : t.errormsgleaveorg);
     } finally {
       setLeavingOrg(false);
     }
@@ -237,12 +237,12 @@ export function AccountClient({}: AccountClientProps) {
   return (
     <div className="p-6 max-w-2xl mx-auto space-y-5">
       <div>
-        <h1 className="text-xl font-semibold text-slate-900">{dict.app.account.title}</h1>
-        <p className="text-sm text-slate-500 mt-0.5">{dict.app.account.subtitle}</p>
+        <h1 className="text-xl font-semibold text-slate-900">{t.title}</h1>
+        <p className="text-sm text-slate-500 mt-0.5">{t.subtitle}</p>
       </div>
 
       {/* Profile */}
-      <SectionTitle title="Profile" />
+      <SectionTitle title={t.profile} />
       {emailBanner && <Banner {...emailBanner} />}
       <div className="rounded-xl border border-slate-200 bg-white p-5 space-y-3">
         <div className="flex items-center justify-between">
@@ -255,17 +255,17 @@ export function AccountClient({}: AccountClientProps) {
               onClick={() => setShowEmailForm(true)}
               className="text-xs text-blue-600 hover:text-blue-800 font-medium"
             >
-              Change email
+              {t.changemail}
             </button>
           )}
         </div>
 
         {showEmailForm && (
           <form onSubmit={handleRequestEmailChange} className="border-t border-slate-100 pt-3 space-y-3">
-            <p className="text-xs text-slate-500">A verification link will be sent to the new address.</p>
+            <p className="text-xs text-slate-500">{t.verifymailmessage}</p>
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <label className="block text-xs font-medium text-slate-600 mb-1">New email</label>
+                <label className="block text-xs font-medium text-slate-600 mb-1">{t.newemail}</label>
                 <input
                   type="email"
                   required
@@ -276,7 +276,7 @@ export function AccountClient({}: AccountClientProps) {
                 />
               </div>
               <div>
-                <label className="block text-xs font-medium text-slate-600 mb-1">Current password</label>
+                <label className="block text-xs font-medium text-slate-600 mb-1">{t.currentpassword}</label>
                 <input
                   type="password"
                   required
@@ -294,14 +294,14 @@ export function AccountClient({}: AccountClientProps) {
                 className="flex items-center gap-1.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-60 text-white px-3 py-1.5 rounded-lg text-xs font-medium transition-colors"
               >
                 {savingEmail ? <Loader2 size={12} className="animate-spin" /> : <Mail size={12} />}
-                Send verification
+                {t.sendverification}
               </button>
               <button
                 type="button"
                 onClick={() => setShowEmailForm(false)}
                 className="px-3 py-1.5 text-xs text-slate-500 hover:text-slate-700 transition-colors"
               >
-                Cancel
+                {t.cancel}
               </button>
             </div>
           </form>
@@ -314,19 +314,19 @@ export function AccountClient({}: AccountClientProps) {
             {profileTier}
           </span>
           {me.email_verified ? (
-            <span className="text-green-600 flex items-center gap-1"><Check size={11} /> Verified</span>
+            <span className="text-green-600 flex items-center gap-1"><Check size={11} /> {t.emailverified}</span>
           ) : (
-            <span className="text-amber-600">Email not verified</span>
+            <span className="text-amber-600">{t.emailnotverified}</span>
           )}
         </div>
       </div>
 
       {/* Security */}
-      <SectionTitle title="Security" />
+      <SectionTitle title={t.security} />
       <ChangePasswordForm />
 
       {/* Organization */}
-      <SectionTitle title="Organization" />
+      <SectionTitle title={t.organization} />
       {orgBanner && <Banner {...orgBanner} />}
 
       {me.org ? (
@@ -346,7 +346,7 @@ export function AccountClient({}: AccountClientProps) {
           {/* Switch between orgs if multiple */}
           {orgs.length > 1 && (
             <div className="border-t border-slate-100 pt-3 space-y-2">
-              <p className="text-xs font-medium text-slate-500">Switch workspace</p>
+              <p className="text-xs font-medium text-slate-500">{t.switchorganization}</p>
               <div className="flex flex-wrap gap-2">
                 {orgs.map((org) => (
                   <button
@@ -381,7 +381,7 @@ export function AccountClient({}: AccountClientProps) {
                 className="flex items-center gap-1.5 text-xs text-blue-600 hover:text-blue-800 font-medium transition-colors"
               >
                 <Plus size={12} />
-                Create another organization
+                {t.createneworganization}
               </button>
               <div className="flex items-center gap-3">
                 <Link
@@ -389,7 +389,7 @@ export function AccountClient({}: AccountClientProps) {
                   className="flex items-center gap-1 text-xs text-slate-500 hover:text-slate-700 font-medium transition-colors"
                 >
                   <Users size={12} />
-                  Manage team
+                  {t.manageteam}
                   <ArrowRight size={11} />
                 </Link>
                 {me.org_role !== "owner" && (
@@ -405,7 +405,7 @@ export function AccountClient({}: AccountClientProps) {
             </div>
           ) : (
             <form onSubmit={handleCreateOrg} className="border-t border-slate-100 pt-3 space-y-3">
-              <p className="text-xs font-medium text-slate-600">New organization name</p>
+              <p className="text-xs font-medium text-slate-600">{t.neworgname}</p>
               <div className="flex gap-2">
                 <input
                   autoFocus
@@ -421,14 +421,14 @@ export function AccountClient({}: AccountClientProps) {
                   className="flex items-center gap-1.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-60 text-white px-3 py-2 rounded-lg text-xs font-medium transition-colors shrink-0"
                 >
                   {creatingOrg ? <Loader2 size={12} className="animate-spin" /> : <Building2 size={12} />}
-                  Create
+                  {t.create}
                 </button>
                 <button
                   type="button"
                   onClick={() => { setShowCreateOrg(false); setOrgName(""); }}
                   className="px-3 py-2 text-xs text-slate-500 hover:text-slate-700 rounded-lg hover:bg-slate-100 transition-colors"
                 >
-                  Cancel
+                  {t.cancel}
                 </button>
               </div>
             </form>

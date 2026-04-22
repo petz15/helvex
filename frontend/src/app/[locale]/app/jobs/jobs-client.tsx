@@ -1,133 +1,12 @@
 "use client";
 import { useState, useEffect, useRef } from "react";
 import useSWR from "swr"; // still used for CSV export status
-import { CheckCircle2, XCircle, Clock, Loader2, PauseCircle, Play, Square, ChevronDown, ChevronUp, RefreshCw, Download, FileText, BrainCircuit } from "lucide-react";
+import { CheckCircle2, XCircle, Clock, Loader2, PauseCircle, Play, Square, ChevronDown, ChevronUp, RefreshCw, Download, FileText } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { cancelJob, fetchCSVExportStatus, fetchJobEvents, fetchJobs, pauseJob, resumeJob } from "@/lib/api";
 import type { Job, JobEvent } from "@/lib/types";
 import { useI18n } from "@/i18n/context";
 
-// ── ML Job Reference ──────────────────────────────────────────────────────────
-
-const ML_JOB_DOCS: { job_type: string; label: string; description: string; when: string; prereq?: string }[] = [
-  {
-    job_type: "semantic_kmeans_cluster",
-    label: "Semantic K-Means",
-    description:
-      "Clusters companies by semantic meaning using sentence-transformer embeddings. Companies with similar business purposes end up together even when they use different words. This is the recommended clustering method — produces the most coherent, intuitive clusters.",
-    when: "Run after recompute_keywords. Use this as your primary clustering job.",
-    prereq: "Requires purpose_keywords. Run recompute_keywords first.",
-  },
-  {
-    job_type: "tfidf_kmeans_cluster",
-    label: "TF-IDF K-Means",
-    description:
-      "Clusters companies by shared vocabulary using TF-IDF bag-of-words. Fast and reliable baseline. With use_keywords=true (default) it clusters on pre-extracted keywords rather than raw purpose text, which improves coherence significantly.",
-    when: "Good fallback if semantic clustering is too slow or embeddings are unavailable.",
-  },
-  {
-    job_type: "hdbscan_cluster",
-    label: "HDBSCAN",
-    description:
-      "Density-based clustering that discovers the optimal number of clusters automatically. Marks true outliers as unclassified rather than forcing them into a cluster. More precise but requires O(n²) memory — use batch+merge mode for datasets > 50K companies.",
-    when: "Use for exploratory analysis on a filtered subset (e.g. one canton or score band) where cluster count is unknown.",
-    prereq: "Enable batch+merge for full dataset. High memory usage.",
-  },
-  {
-    job_type: "birch_cluster",
-    label: "BIRCH",
-    description:
-      "Memory-efficient incremental clustering that processes the full dataset in a single pass with ~O(n) memory. Slightly lower quality than K-Means but scales without limits.",
-    when: "Use when memory is constrained and you need to cluster the full 700K+ company dataset.",
-  },
-  {
-    job_type: "recompute_keywords",
-    label: "Recompute Keywords",
-    description:
-      "Extracts TF-IDF keywords from each company's purpose text and writes them to purpose_keywords. These keywords are the input for semantic clustering and NOGA classification. Run this first after a fresh import.",
-    when: "Run after bulk import or when purpose text is updated. Always run before semantic_kmeans_cluster.",
-  },
-  {
-    job_type: "reextract_keywords",
-    label: "Re-extract Keywords",
-    description:
-      "Re-extracts keywords using the cached TF-IDF vectorizer from S3 artifacts. Faster than recompute_keywords because it skips lemmatization. Only useful when the model artifacts are still valid.",
-    when: "Use to backfill purpose_keywords for newly imported companies without rerunning the full pipeline.",
-    prereq: "Requires S3 artifacts from a previous cluster run.",
-  },
-  {
-    job_type: "reclassify_noga",
-    label: "NOGA Classification",
-    description:
-      "Classifies each company into the official Swiss NOGA industry taxonomy using a hybrid of token matching and sentence-transformer embedding similarity. Produces noga_code, noga_label, noga_confidence, and a full ancestry path.",
-    when: "Run after purpose_keywords are populated. NOGA uses keywords + clusters as signals.",
-    prereq: "Requires purpose_keywords. Works better after clustering.",
-  },
-  {
-    job_type: "claude_classify",
-    label: "Claude AI Classification",
-    description:
-      "Sends company data to Claude (Haiku model) to assign a short, human-readable business category and a quality score (0–100). Categories and system prompt are customisable per org.",
-    when: "Run after scoring to enrich the browse/filter experience with readable categories.",
-  },
-  {
-    job_type: "cluster_analysis",
-    label: "Cluster Analysis",
-    description:
-      "Finds terms that appear across many different cluster labels — these are stopword candidates that dilute cluster specificity. Writes results to a .txt file for review.",
-    when: "Run after clustering to audit label quality and discover new stopwords to add.",
-  },
-  {
-    job_type: "cluster_drift_check",
-    label: "Cluster Drift Check",
-    description:
-      "Checks what fraction of recently imported companies lack a cluster assignment. If the ratio exceeds 30% it raises a warning, indicating the clustering models may be stale.",
-    when: "Run periodically (e.g. weekly) or after bulk imports to verify model freshness.",
-  },
-];
-
-function MlJobReference() {
-  const { dict } = useI18n();
-  const [open, setOpen] = useState(false);
-  return (
-    <section className="rounded-xl border border-slate-200 bg-white p-4">
-      <button
-        type="button"
-        onClick={() => setOpen((v) => !v)}
-        className="w-full flex items-center justify-between text-left"
-      >
-        <div className="flex items-center gap-2">
-          <BrainCircuit size={15} className="text-violet-500" />
-          <span className="text-sm font-medium text-slate-800">{dict.app.jobs.mlDocsTitle}</span>
-          <span className="text-xs text-slate-400">— what each job does and when to use it</span>
-        </div>
-        {open ? <ChevronUp size={14} className="text-slate-400" /> : <ChevronDown size={14} className="text-slate-400" />}
-      </button>
-
-      {open && (
-        <div className="mt-4 grid gap-3 sm:grid-cols-2">
-          {ML_JOB_DOCS.map((doc) => (
-            <div key={doc.job_type} className="rounded-lg border border-slate-100 bg-slate-50 p-3 space-y-1">
-              <div className="flex items-center gap-2">
-                <span className="font-medium text-slate-800 text-sm">{doc.label}</span>
-                <code className="text-[10px] text-slate-400 bg-slate-200 px-1.5 py-0.5 rounded font-mono">{doc.job_type}</code>
-              </div>
-              <p className="text-xs text-slate-600 leading-relaxed">{doc.description}</p>
-              <p className="text-xs text-slate-400 italic">
-                <span className="font-medium not-italic text-slate-500">When: </span>{doc.when}
-              </p>
-              {doc.prereq && (
-                <p className="text-xs text-amber-600">
-                  <span className="font-medium">Requires: </span>{doc.prereq}
-                </p>
-              )}
-            </div>
-          ))}
-        </div>
-      )}
-    </section>
-  );
-}
 
 function useJobsSSE(): { jobs: Job[]; setJobs: (j: Job[]) => void; isLoading: boolean; reload: () => void } {
   const [jobs, setJobs] = useState<Job[]>([]);
@@ -343,7 +222,7 @@ export function JobsClient() {
 
       {isLoading && <p className="text-slate-400 text-sm">Loading…</p>}
 
-      <MlJobReference />
+      
 
       <section className="rounded-xl border border-slate-200 bg-white p-4 space-y-3">
         <div className="flex items-start justify-between gap-4">

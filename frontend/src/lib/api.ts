@@ -1638,6 +1638,26 @@ export async function updateNotificationPreferences(
   return res.json();
 }
 
+export async function fetchMyNotificationPreferences(orgId: number): Promise<NotificationPreferences> {
+  const res = await fetch(`/api/v1/orgs/${orgId}/my-notifications`, { credentials: "include" });
+  if (!res.ok) throw new Error("Failed to fetch notification preferences");
+  return res.json();
+}
+
+export async function updateMyNotificationPreferences(
+  orgId: number,
+  prefs: NotificationPreferences,
+): Promise<NotificationPreferences> {
+  const res = await fetch(`/api/v1/orgs/${orgId}/my-notifications`, {
+    method: "PATCH",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(prefs),
+  });
+  if (!res.ok) throw new Error("Failed to update notification preferences");
+  return res.json();
+}
+
 // ── Admin analytics ───────────────────────────────────────────────────────────
 
 export interface AdminAnalytics {

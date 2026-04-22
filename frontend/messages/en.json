@@ -310,10 +310,75 @@
     },
     "account": {
       "title": "My Account",
-      "subtitle": "Profile, security, organization, and team"
+      "subtitle": "Profile, security, organization, and team",
+      "profile": "Profile",
+      "security": "Security",
+      "currentpassword": "Current password",
+      "newpassword": "New password",
+      "confirmnewpassword": "Confirm new password",
+      "minchars": "Min. 8 characters",
+      "changepassword": "Change password",
+      "changemail": "Change email",
+      "newemail": "New email",
+      "verifymailmessage": "We've sent a verification link to your new email. Please click the link in that email to confirm your new address.",
+      "sendverification": "Send verification",
+      "cancel": "Cancel",
+      "emailverified": "verified",
+      "emailnotverified": "not verified",
+      "organization": "Organization",
+      "switchorganization": "Switch Organization",
+      "createneworganization": "Create new organization",
+      "manageteam": "Manage team",
+      "neworgname": "New organization name",
+      "create": "Create",
+      "orgswitched": "Organization switched to {orgName}",
+      "leaveorgconfirm": "Are you sure you want to leave {orgName}? You will lose access to its data.",
+      "errormsgleaveorg": "Failed to leave organization. Please try again.",
+      "successmsgleaveorg": "You have left {orgName}."
     },
     "pricing": {
-      "title": "Plans & Pricing"
+      "title": "Plans & Pricing",
+      "comparison": {
+        "heading": "Compare plans",
+        "featureCol": "Feature",
+        "groups": {
+          "consumption": "Consumption pricing",
+          "usage": "Usage limits",
+          "workspace": "Workspace",
+          "scoring": "Scoring & AI",
+          "developer": "Developer"
+        },
+        "rows": {
+          "creditRate": "Credit rate",
+          "creditRateTip": "Consumption actions use the same credit rate across every plan.",
+          "csvExportRows": "CSV export rows",
+          "queuePriority": "Queue priority",
+          "queuePriorityTip": "Jobs from higher tiers are always processed first.",
+          "webPrivacy": "Web result privacy",
+          "webPrivacyTip": "How long your web-search results stay private before being visible to others.",
+          "topupBonus": "Topup credit bonus",
+          "topupBonusTip": "Extra credits granted on top of every credit purchase. E.g. Explorer buying 10 000 credits receives 1 000 bonus credits.",
+          "noAds": "No ads",
+          "multiUserOrg": "Multi-user org",
+          "multiUserOrgTip": "Invite teammates to share the same workspace, collection, and credit balance.",
+          "dailyDigest": "Daily digest notifications",
+          "dailyDigestTip": "Receive a daily email summary of newly discovered companies matching your criteria.",
+          "flexRescore": "Flex rescore",
+          "flexRescoreTip": "Explorer+ tiers get unlimited flex rescores at no credit cost. Free and Simple tiers pay per rescore from their credit balance.",
+          "flexAutoScore": "Flex auto-score new companies",
+          "flexAutoScoreTip": "Automatically rescores newly discovered companies against your Flex criteria.",
+          "immediateLlm": "Immediate LLM scoring",
+          "immediateLlmTip": "Uses the Anthropic API synchronously instead of the batch queue — results appear instantly.",
+          "llmAutoScore": "LLM auto-score new companies",
+          "llmAutoScoreTip": "Automatically runs LLM scoring on newly discovered companies. Uses credits from your balance.",
+          "customStopwords": "Custom ML stopwords",
+          "customStopwordsTip": "Define words to exclude from ML-based company name clustering and matching.",
+          "byoKeys": "Bring your own LLM keys",
+          "byoKeysTip": "Use your own Anthropic API key so LLM scoring costs go directly to your account.",
+          "apiAccess": "API access",
+          "apiAccessTip": "Programmatic access to your workspace (coming soon)."
+        }
+      }
     },
     "collection": {
       "title": "Collection"

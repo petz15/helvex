@@ -1,9 +1,9 @@
 "use client";
 import { useState } from "react";
-import useSWR, { useSWRConfig } from "swr";
+import useSWR from "swr";
 import { useRouter } from "next/navigation";
 import {
-  Building2, Plus, Loader2, Check, ArrowRight, Users, Crown, Shield, Eye, User, X,
+  Building2, Plus, Loader2, Check, ArrowRight, Users, Crown, Shield, Eye, User, X, Bell,
 } from "lucide-react";
 import {
   fetchCurrentUser,
@@ -11,7 +11,10 @@ import {
   createOrg,
   switchOrg,
   leaveOrg,
+  fetchMyNotificationPreferences,
+  updateMyNotificationPreferences,
   type OrgInfo,
+  type NotificationPreferences,
 } from "@/lib/api";
 import { OrgClient } from "@/app/[locale]/app/org/org-client";
 
@@ -130,9 +133,108 @@ function OrgCard({
   );
 }
 
+const NOTIF_ITEMS: { key: keyof NotificationPreferences; label: string; description: string }[] = [
+  { key: "notif_low_credit",   label: "Low credit alert",    description: "When your credit balance is running low" },
+  { key: "notif_export_ready", label: "Export ready",         description: "When a CSV export has finished" },
+  { key: "notif_job_failed",   label: "Job failures",         description: "When a background job fails" },
+  { key: "notif_saved_view",   label: "Saved view matches",   description: "When new companies match a saved search" },
+];
+
+function Toggle({ checked, onChange, disabled }: { checked: boolean; onChange: (v: boolean) => void; disabled?: boolean }) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={checked}
+      disabled={disabled}
+      onClick={() => onChange(!checked)}
+      className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 disabled:opacity-40 disabled:cursor-not-allowed ${
+        checked ? "bg-blue-600" : "bg-slate-200"
+      }`}
+    >
+      <span
+        className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition-transform duration-200 ${
+          checked ? "translate-x-4" : "translate-x-0"
+        }`}
+      />
+    </button>
+  );
+}
+
+function NotificationSettings({ orgId }: { orgId: number }) {
+  const { data: prefs, mutate } = useSWR(
+    `my-notifications-${orgId}`,
+    () => fetchMyNotificationPreferences(orgId),
+  );
+  const [saving, setSaving] = useState(false);
+  const [savingKey, setSavingKey] = useState<string | null>(null);
+
+  async function handleToggle(key: keyof NotificationPreferences, value: boolean) {
+    if (!prefs) return;
+    const next = { ...prefs, [key]: value };
+    // If master switch turned off, disable all others too
+    if (key === "email_notifications" && !value) {
+      Object.keys(next).forEach((k) => { (next as Record<string, boolean>)[k] = false; });
+    }
+    setSavingKey(key);
+    setSaving(true);
+    try {
+      const updated = await updateMyNotificationPreferences(orgId, next);
+      await mutate(updated, false);
+    } finally {
+      setSaving(false);
+      setSavingKey(null);
+    }
+  }
+
+  if (!prefs) {
+    return (
+      <div className="flex items-center gap-2 text-xs text-slate-400 py-2">
+        <Loader2 size={12} className="animate-spin" />
+        Loading preferences…
+      </div>
+    );
+  }
+
+  const masterOn = prefs.email_notifications;
+
+  return (
+    <div className="space-y-1">
+      {/* Master toggle */}
+      <div className="flex items-center justify-between py-2.5 border-b border-slate-100">
+        <div>
+          <p className="text-sm font-medium text-slate-800">Email notifications</p>
+          <p className="text-xs text-slate-400 mt-0.5">Master switch for all email alerts</p>
+        </div>
+        <Toggle
+          checked={masterOn}
+          onChange={(v) => handleToggle("email_notifications", v)}
+          disabled={saving}
+        />
+      </div>
+
+      {/* Individual toggles */}
+      <div className={`space-y-0 transition-opacity duration-200 ${masterOn ? "opacity-100" : "opacity-40 pointer-events-none"}`}>
+        {NOTIF_ITEMS.map(({ key, label, description }) => (
+          <div key={key} className="flex items-center justify-between py-2.5">
+            <div>
+              <p className="text-sm text-slate-700">{label}</p>
+              <p className="text-xs text-slate-400">{description}</p>
+            </div>
+            <Toggle
+              checked={prefs[key] as boolean}
+              onChange={(v) => handleToggle(key, v)}
+              disabled={saving || savingKey === key}
+            />
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export function OrganizationsClient() {
   const router = useRouter();
-  const { mutate } = useSWRConfig();
   const { data: me, mutate: reloadMe } = useSWR("me", fetchCurrentUser);
   const { data: orgs = [], mutate: reloadOrgs } = useSWR(me ? "my-orgs" : null, fetchMyOrgs);
 
@@ -154,9 +256,7 @@ export function OrganizationsClient() {
     setCreating(true);
     try {
       await createOrg(orgName.trim());
-      await reloadMe();
-      await reloadOrgs();
-      await mutate("my-orgs");
+      await Promise.all([reloadMe(), reloadOrgs()]);
       setOrgName("");
       setShowCreate(false);
       flash("success", "Organization created. You are now the owner.");
@@ -173,10 +273,7 @@ export function OrganizationsClient() {
     setSwitchingId(orgId);
     try {
       await switchOrg(orgId);
-      await mutate("me");
-      await mutate("my-orgs");
-      await reloadMe();
-      await reloadOrgs();
+      await Promise.all([reloadMe(), reloadOrgs()]);
       flash("success", "Switched organization.");
       router.refresh();
     } catch (err) {
@@ -191,10 +288,7 @@ export function OrganizationsClient() {
     setLeavingId(org.id);
     try {
       await leaveOrg(org.id);
-      await reloadMe();
-      await reloadOrgs();
-      await mutate("me");
-      await mutate("my-orgs");
+      await Promise.all([reloadMe(), reloadOrgs()]);
       flash("success", `You have left "${org.name}".`);
       router.refresh();
     } catch (err) {
@@ -314,6 +408,24 @@ export function OrganizationsClient() {
           </div>
           <div className="rounded-xl border border-slate-200 bg-white p-4">
             <OrgClient embedded />
+          </div>
+        </div>
+      )}
+
+      {/* Per-user notification preferences for active org */}
+      {activeOrgId && (
+        <div className="space-y-4">
+          <div className="border-t border-slate-100 pt-6">
+            <div className="flex items-center gap-2 mb-1">
+              <Bell size={16} className="text-slate-500" />
+              <h2 className="text-sm font-semibold text-slate-500 uppercase tracking-wider">Notifications</h2>
+            </div>
+            <p className="text-xs text-slate-400">
+              Your personal email notification preferences for this organization.
+            </p>
+          </div>
+          <div className="rounded-xl border border-slate-200 bg-white px-5 py-3">
+            <NotificationSettings orgId={activeOrgId} />
           </div>
         </div>
       )}

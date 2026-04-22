@@ -38,7 +38,7 @@
 ### General fixes:
 - billing/payment/pricing
     - existing subscription then upgrading is not working
-- SHAB: rerun 17.04.2026 because there seems to be an issue with the data example: https://helvex.dicy.ch/app/companies/783586 same on zefix
+- SHAB: rerun 17.04.2026 because there seems to be an issue with the data example: https://helvex.dicy.ch/app/companies/783586 same on zefix fix utf encoding
 - NOGA auf unternehmensseite falsch dargestellt und meistens nicht korrekt!
 - NOGA auf filter, sollte auch hierarchisch darstellen und mit richtiger bezeichnung
 - Remove business model -> not useful and not correctly implemented (category detail page)

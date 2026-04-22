@@ -310,10 +310,75 @@
     },
     "account": {
       "title": "Il mio account",
-      "subtitle": "Profilo, sicurezza, organizzazione e team"
+      "subtitle": "Profilo, sicurezza, organizzazione e team",
+      "profile": "Profilo",
+      "security": "Sicurezza",
+      "currentpassword": "Password attuale",
+      "newpassword": "Nuova password",
+      "confirmnewpassword": "Conferma nuova password",
+      "minchars": "Min. 8 caratteri",
+      "changepassword": "Cambia password",
+      "changemail": "Cambia e-mail",
+      "newemail": "Nuova e-mail",
+      "verifymailmessage": "Abbiamo inviato un link di verifica alla tua nuova e-mail. Clicca sul link in quella e-mail per confermare il nuovo indirizzo.",
+      "sendverification": "Invia verifica",
+      "cancel": "Annulla",
+      "emailverified": "verificato",
+      "emailnotverified": "non verificato",
+      "organization": "Organizzazione",
+      "switchorganization": "Cambia organizzazione",
+      "createneworganization": "Crea nuova organizzazione",
+      "manageteam": "Gestisci team",
+      "neworgname": "Nuovo nome organizzazione",
+      "create": "Crea",
+      "orgswitched": "Organizzazione cambiata in {orgName}",
+      "leaveorgconfirm": "Sei sicuro di voler lasciare {orgName}? Perderai l'accesso ai suoi dati.",
+      "errormsgleaveorg": "Impossibile lasciare l'organizzazione. Riprova.",
+      "successmsgleaveorg": "Hai lasciato {orgName}."
     },
     "pricing": {
-      "title": "Piani & prezzi"
+      "title": "Piani & prezzi",
+      "comparison": {
+        "heading": "Confronta i piani",
+        "featureCol": "Funzionalità",
+        "groups": {
+          "consumption": "Prezzi a consumo",
+          "usage": "Limiti di utilizzo",
+          "workspace": "Area di lavoro",
+          "scoring": "Valutazione & IA",
+          "developer": "Sviluppatore"
+        },
+        "rows": {
+          "creditRate": "Tasso crediti",
+          "creditRateTip": "Le azioni a consumo usano lo stesso tasso di crediti per tutti i piani.",
+          "csvExportRows": "Righe esportazione CSV",
+          "queuePriority": "Priorità coda",
+          "queuePriorityTip": "I lavori dei livelli superiori vengono sempre elaborati per primi.",
+          "webPrivacy": "Privacy risultati web",
+          "webPrivacyTip": "Per quanto tempo i risultati della tua ricerca web rimangono privati prima di essere visibili ad altri.",
+          "topupBonus": "Bonus ricarica",
+          "topupBonusTip": "Crediti extra concessi su ogni acquisto. Es. Explorer che acquista 10 000 crediti riceve 1 000 crediti bonus.",
+          "noAds": "Senza pubblicità",
+          "multiUserOrg": "Organizzazione multi-utente",
+          "multiUserOrgTip": "Invita i colleghi a condividere lo stesso spazio di lavoro, la stessa raccolta e il saldo crediti.",
+          "dailyDigest": "Notifiche digest giornaliere",
+          "dailyDigestTip": "Ricevi un riepilogo giornaliero via e-mail delle nuove aziende che corrispondono ai tuoi criteri.",
+          "flexRescore": "Rivalutazione Flex",
+          "flexRescoreTip": "I livelli Explorer+ ottengono rivalutazioni Flex illimitate senza costi in crediti. Free e Simple pagano per rivalutazione.",
+          "flexAutoScore": "Auto-valutazione Flex nuove aziende",
+          "flexAutoScoreTip": "Rivaluta automaticamente le nuove aziende secondo i tuoi criteri Flex.",
+          "immediateLlm": "Valutazione IA immediata",
+          "immediateLlmTip": "Usa l'API Anthropic in modo sincrono — i risultati appaiono istantaneamente.",
+          "llmAutoScore": "Auto-valutazione IA nuove aziende",
+          "llmAutoScoreTip": "Esegue automaticamente la valutazione IA sulle nuove aziende. Utilizza crediti dal tuo saldo.",
+          "customStopwords": "Stopword ML personalizzate",
+          "customStopwordsTip": "Definisci parole da escludere dal clustering e dalla corrispondenza ML.",
+          "byoKeys": "Le tue chiavi IA",
+          "byoKeysTip": "Usa la tua chiave API Anthropic per addebitare i costi di valutazione IA direttamente al tuo account.",
+          "apiAccess": "Accesso API",
+          "apiAccessTip": "Accesso programmatico al tuo spazio di lavoro (prossimamente)."
+        }
+      }
     },
     "collection": {
       "title": "Raccolta"
@@ -363,6 +428,11 @@
       "nonotes": "Nessuna nota ancora. Aggiungine alcune per tenere traccia dei tuoi pensieri e delle tue interazioni con questa azienda.",
       "addnote": "Aggiungi nota",
       "add": "Aggiungi"
+    },
+    "accountclient": {
+      "profile": "Profilo",
+      "security": "Sicurezza",
+      
     }
   }
 }

@@ -871,3 +871,86 @@ def update_notification_preferences(
     _set_org_setting(db, org_id=org.id, key="notif_saved_view",    value=_v(body.notif_saved_view))
 
     return body.model_dump()
+
+
+# ── Per-user notification preferences ────────────────────────────────────────
+
+def _get_user_org_setting(db: Session, user_id: int, org_id: int, key: str) -> str | None:
+    from app.models.user_org_setting import UserOrgSetting
+    row = db.query(UserOrgSetting).filter(
+        UserOrgSetting.user_id == user_id,
+        UserOrgSetting.org_id == org_id,
+        UserOrgSetting.key == key,
+    ).first()
+    return row.value if row else None
+
+
+def _set_user_org_setting(db: Session, user_id: int, org_id: int, key: str, value: str) -> None:
+    from app.models.user_org_setting import UserOrgSetting
+    row = db.query(UserOrgSetting).filter(
+        UserOrgSetting.user_id == user_id,
+        UserOrgSetting.org_id == org_id,
+        UserOrgSetting.key == key,
+    ).first()
+    if row is None:
+        db.add(UserOrgSetting(user_id=user_id, org_id=org_id, key=key, value=value))
+    else:
+        row.value = value
+    db.commit()
+
+
+def _resolve_notif(db: Session, key: str, user_id: int, org_id: int) -> bool:
+    """Resolve a notification flag: user-level → org-level → global default (on)."""
+    user_val = _get_user_org_setting(db, user_id, org_id, key)
+    if user_val is not None:
+        return user_val != "0"
+    from app.crud.app_setting import get_effective_setting
+    return get_effective_setting(db, key, org_id=org_id, default="1") != "0"
+
+
+@router.get(
+    "/my-notifications",
+    summary="Get my notification preferences for this org",
+)
+def get_my_notification_preferences(
+    org_id: int,
+    db: Session = Depends(get_db),
+    user_org: tuple[User, Organization] = Depends(require_org_role("viewer", "contributor", "member", "admin", "owner")),
+):
+    _validate_org_access(org_id, user_org)
+    user, org = user_org
+    return {
+        "email_notifications": _resolve_notif(db, "email_notifications", user.id, org.id),
+        "notif_low_credit":    _resolve_notif(db, "notif_low_credit",    user.id, org.id),
+        "notif_export_ready":  _resolve_notif(db, "notif_export_ready",  user.id, org.id),
+        "notif_job_failed":    _resolve_notif(db, "notif_job_failed",    user.id, org.id),
+        "notif_saved_view":    _resolve_notif(db, "notif_saved_view",    user.id, org.id),
+    }
+
+
+@router.patch(
+    "/my-notifications",
+    summary="Update my notification preferences for this org",
+)
+def update_my_notification_preferences(
+    org_id: int,
+    body: NotificationPreferences,
+    db: Session = Depends(get_db),
+    user_org: tuple[User, Organization] = Depends(require_org_role("viewer", "contributor", "member", "admin", "owner")),
+):
+    _validate_org_access(org_id, user_org)
+    user, org = user_org
+
+    def _v(flag: bool) -> str:
+        return "1" if flag else "0"
+
+    for key, val in {
+        "email_notifications": body.email_notifications,
+        "notif_low_credit":    body.notif_low_credit,
+        "notif_export_ready":  body.notif_export_ready,
+        "notif_job_failed":    body.notif_job_failed,
+        "notif_saved_view":    body.notif_saved_view,
+    }.items():
+        _set_user_org_setting(db, user_id=user.id, org_id=org.id, key=key, value=_v(val))
+
+    return body.model_dump()

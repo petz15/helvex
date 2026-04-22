@@ -7,6 +7,7 @@ normalizes responses to that shape.
 
 from __future__ import annotations
 
+import json
 from datetime import date, timedelta
 from typing import Any
 
@@ -128,7 +129,7 @@ def fetch_hr_publications(
             )
             resp.raise_for_status()
 
-            data = resp.json()
+            data = json.loads(resp.content.decode("utf-8"))
             items = data if isinstance(data, list) else []
             for item in items:
                 if not isinstance(item, dict):
@@ -151,7 +152,7 @@ def fetch_publication_detail(publication_id: str, *, timeout: float = 30.0) -> d
             auth=_get_auth(),
         )
         resp.raise_for_status()
-    data = resp.json()
+    data = json.loads(resp.content.decode("utf-8"))
     if isinstance(data, dict):
         return _to_shab_like_item(data)
     return {"meta": {"id": str(publication_id)}}
