@@ -50,7 +50,8 @@
     - web results are not gated, immediately shown. Should have been atleast 1 week of pause form a simple tier. 
 - Page size is not working on company overview
 - superadmin payment transactions does not show payment method
-- more improvements to stopping words
+- more improvements to stopping words -> the LLM improvement i.e. script is not integrated into the website as far as I can tell. 
+- 
 
 
 ### UI fixes:
@@ -106,6 +107,7 @@
 - [ ] **NOGA Data** — add NOGA data (or similar) which is something other sites have such as business-monitor.ch or moneyhouse.ch -> first implementation done via AI classification; needs improvement preferably without AI or optional with AI; displaying is not looking too good yet; only shows the level it is confident in but not the full hierarchy
 - [ ] **Free tier**- show some limited or teaser data for free tier
 - [ ] **Flex Rescore** - Needs to be implemented differently. Should be 1x rescore or maybe 2x rescore per month for all available companies. then like 1000 credits per rescore. Depends how much actual computation power it needs
+- [ ] **Multiple scores** - allow for different set of scores in case users are looking for different types of companies. e.g. for a specific campaign or promotion etc
 
 
 ## Company Profile

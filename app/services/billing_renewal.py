@@ -26,6 +26,43 @@ logger = logging.getLogger(__name__)
 _ALERT_EMAIL = "peter@balogh-consulting.ch"
 
 
+def _is_non_initial_recurring_reference_error(message: str) -> bool:
+    upper = str(message or "").upper()
+    return (
+        "ACTION_NOT_SUPPORTED" in upper
+        and "INITIAL RECURRING PAYMENT" in upper
+    )
+
+
+def _find_latest_initial_subscription_reference(
+    db: Session,
+    *,
+    org_id: int,
+    exclude_tx_id: str | None = None,
+) -> str | None:
+    """Find the most recent checkout subscription tx usable as recurring anchor."""
+    excluded = str(exclude_tx_id or "").strip()
+    candidates = (
+        db.query(PaymentTransaction)
+        .filter(
+            PaymentTransaction.org_id == org_id,
+            PaymentTransaction.provider == "worldline",
+            PaymentTransaction.kind == "subscription",
+            PaymentTransaction.order_reference.like("wl_sub_%"),
+            PaymentTransaction.status.in_(["authorized", "captured"]),
+            PaymentTransaction.provider_transaction_id.isnot(None),
+        )
+        .order_by(PaymentTransaction.id.desc())
+        .all()
+    )
+
+    for tx in candidates:
+        tx_id = str(tx.provider_transaction_id or "").strip()
+        if tx_id and tx_id != excluded:
+            return tx_id
+    return None
+
+
 def retry_failed_captures(db: Session) -> dict[str, Any]:
     """Retry Worldline captures for transactions stuck in 'authorized' status.
 
@@ -228,8 +265,9 @@ def run_billing_renewal(db: Session) -> dict[str, Any]:
         description = f"Helvex {tier.title()} ({cycle}) renewal"
 
         # --- Charge via AuthorizeReferenced ---
+        provider = payments.WorldlineProvider()
+        charge_error: RuntimeError | None = None
         try:
-            provider = payments.WorldlineProvider()
             result = provider.authorize_referenced_transaction(
                 org_id=org_id,
                 transaction_id=ref_tx_id,
@@ -238,9 +276,43 @@ def run_billing_renewal(db: Session) -> dict[str, Any]:
                 description=description,
             )
         except RuntimeError as exc:
+            charge_error = exc
+
+        if charge_error is not None and _is_non_initial_recurring_reference_error(str(charge_error)):
+            # Recovery path for legacy bad references: old code rotated
+            # recurring_transaction_id to non-initial recurring transactions.
+            # Worldline requires an initial recurring transaction as reference.
+            recovered_ref = _find_latest_initial_subscription_reference(
+                db,
+                org_id=org_id,
+                exclude_tx_id=ref_tx_id,
+            )
+            if recovered_ref:
+                logger.warning(
+                    "billing_renewal.recover_reference org_id=%s old_ref=%s new_ref=%s",
+                    org_id,
+                    ref_tx_id[:20],
+                    recovered_ref[:20],
+                )
+                org.recurring_transaction_id = recovered_ref
+                db.commit()
+                ref_tx_id = recovered_ref
+                try:
+                    result = provider.authorize_referenced_transaction(
+                        org_id=org_id,
+                        transaction_id=ref_tx_id,
+                        amount_chf=amount_chf,
+                        order_reference=order_reference,
+                        description=description,
+                    )
+                    charge_error = None
+                except RuntimeError as retry_exc:
+                    charge_error = retry_exc
+
+        if charge_error is not None:
             logger.error(
                 "billing_renewal.charge_failed org_id=%s tier=%s error=%s",
-                org_id, tier, exc,
+                org_id, tier, charge_error,
             )
             # Downgrade on payment failure
             org.tier = "free"
@@ -248,7 +320,7 @@ def run_billing_renewal(db: Session) -> dict[str, Any]:
             org.subscription_period_end = None
             db.commit()
             stats["failed"] += 1
-            stats["errors"].append(f"org_id={org_id}: charge failed: {exc}")
+            stats["errors"].append(f"org_id={org_id}: charge failed: {charge_error}")
             continue
 
         transaction = result.get("Transaction") if isinstance(result, dict) else {}
@@ -294,10 +366,9 @@ def run_billing_renewal(db: Session) -> dict[str, Any]:
             # Renew: advance period_end
             current_end = org.subscription_period_end or now
             org.subscription_period_end = _next_period_end(current_end, cycle)
-            # Only advance the recurring reference when capture is confirmed —
-            # an uncaptured tx_id as reference will make the next AuthorizeReferenced fail.
-            if normalized == "captured" and new_tx_id:
-                org.recurring_transaction_id = new_tx_id
+            # Keep the original initial recurring reference from checkout.
+            # Worldline expects an initial recurring tx as the long-lived anchor
+            # for future AuthorizeReferenced calls.
             db.commit()
             logger.info(
                 "billing_renewal.renewed org_id=%s tier=%s new_period_end=%s captured=%s",

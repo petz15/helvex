@@ -41,6 +41,21 @@ QUEUE_MAP: dict[str, list[str]] = {
 LLM_POLL_INTERVAL = 300  # 5 minutes
 
 
+def _is_abandoned_job_error(exc: Exception) -> bool:
+    """Return True for any RQ abandoned-job error variant.
+
+    Different RQ versions/modules may expose the same error class from
+    different import paths. We match by class name/module in addition to
+    isinstance checks done at call-sites.
+    """
+    cls = exc.__class__
+    name = getattr(cls, "__name__", "")
+    module = getattr(cls, "__module__", "")
+    if name != "AbandonedJobError":
+        return False
+    return module.startswith("rq.") or module == "rq"
+
+
 class ResilientWorker:  # Thin wrapper to avoid importing rq at module import time.
     """Worker factory that tolerates stale-job cleanup races.
 
@@ -52,14 +67,22 @@ class ResilientWorker:  # Thin wrapper to avoid importing rq at module import ti
     @staticmethod
     def create(queues, *, connection):
         from rq import Worker as _Worker
-        from rq.exceptions import AbandonedJobError
+        from rq.exceptions import AbandonedJobError as _AbandonedFromExceptions
+        try:
+            from rq.registry import AbandonedJobError as _AbandonedFromRegistry
+            _abandoned_error_types = (_AbandonedFromExceptions, _AbandonedFromRegistry)
+        except Exception:  # noqa: BLE001
+            _abandoned_error_types = (_AbandonedFromExceptions,)
 
         class _SafeWorker(_Worker):
             def run_maintenance_tasks(self):
                 try:
                     super().run_maintenance_tasks()
-                except AbandonedJobError as exc:
-                    logger.warning("Ignored RQ abandoned job during maintenance cleanup: %s", exc)
+                except Exception as exc:  # noqa: BLE001
+                    if isinstance(exc, _abandoned_error_types) or _is_abandoned_job_error(exc):
+                        logger.warning("Ignored RQ abandoned job during maintenance cleanup: %s", exc)
+                        return
+                    raise
 
             def handle_warm_shutdown_request(self):
                 """On SIGTERM: pause running jobs cleanly before the pod is killed."""
@@ -115,7 +138,17 @@ def main() -> None:
         t.start()
 
     worker = ResilientWorker.create(queues, connection=conn)
-    worker.work(with_scheduler=False)
+    # Keep worker alive if a non-fatal abandoned-job cleanup race escapes
+    # from RQ internals in some versions.
+    while True:
+        try:
+            worker.work(with_scheduler=False)
+            break
+        except Exception as exc:  # noqa: BLE001
+            if _is_abandoned_job_error(exc):
+                logger.warning("Ignored top-level RQ abandoned job error: %s", exc)
+                continue
+            raise
 
 
 if __name__ == "__main__":
