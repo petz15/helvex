@@ -900,6 +900,49 @@ def compute_zefix_score(**kwargs) -> int:
     return compute_flex_score(**kwargs)
 
 
+def compute_relevance_score(company) -> float | None:
+    """Relevance score formula: ai×0.60 + noga_confidence×100×0.25 + keyword_density×100×0.15.
+
+    If ai_score is absent, renormalise remaining weights to 0.625 / 0.375.
+    Returns None when all components are absent.
+    """
+    ai = company.ai_score
+    noga_conf = company.noga_confidence  # float 0-1
+    purpose_kw = company.purpose_keywords  # comma-separated string or None
+
+    # keyword_density: 10+ keywords → 1.0, 0 keywords → 0.0
+    if purpose_kw and purpose_kw.strip():
+        kw_count = purpose_kw.count(",") + 1
+        kw_density = min(kw_count, 10) / 10.0
+    else:
+        kw_density = 0.0
+
+    noga_score = float(noga_conf) * 100.0 if noga_conf is not None else None
+
+    if ai is None:
+        # No AI score — renormalise the remaining two components
+        if noga_score is None and kw_density == 0.0:
+            return None
+        w_noga, w_kw = 0.625, 0.375
+        total_w = (w_noga if noga_score is not None else 0.0) + (w_kw if kw_density > 0.0 else 0.0)
+        if total_w == 0.0:
+            return None
+        val = (
+            ((noga_score or 0.0) * w_noga if noga_score is not None else 0.0)
+            + (kw_density * 100.0 * w_kw if kw_density > 0.0 else 0.0)
+        ) / total_w
+        return round(max(0.0, min(100.0, val)), 1)
+    else:
+        # AI score present — full formula
+        if noga_score is None and kw_density == 0.0:
+            return round(max(0.0, min(100.0, float(ai) * 0.60 / 0.60)), 1)
+        noga_part = (noga_score or 0.0) * 0.25
+        kw_part = kw_density * 100.0 * 0.15
+        ai_part = float(ai) * 0.60
+        val = ai_part + noga_part + kw_part
+        return round(max(0.0, min(100.0, val)), 1)
+
+
 def normalize_raw_scores(
     raw_scores: dict[int, int | None],
     cancelled_score: int = 5,

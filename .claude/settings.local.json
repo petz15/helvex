@@ -219,7 +219,10 @@
       "Bash(find /c/D/coding_projects/zefix_analyzer/frontend/src/app/[locale]/app/admin/orgs -type f)",
       "Bash(find /c/D/coding_projects/zefix_analyzer/frontend/src/app/[locale]/app -type f -name \"layout.tsx\")",
       "Bash(node -e ' *)",
-      "Bash(python3 -c ' *)"
+      "Bash(python3 -c ' *)",
+      "Bash(python -m alembic revision --autogenerate -m \"add purpose_language to companies\")",
+      "Bash(python -c ' *)",
+      "Bash(python -m pytest tests/ -q --ignore=tests/test_auth_register.py)"
     ]
   }
 }

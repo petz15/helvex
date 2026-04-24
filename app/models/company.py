@@ -97,9 +97,11 @@ class Company(Base):
     # Rule-based business model classification: 'b2b' | 'b2c' | 'b2g' | 'mixed' | NULL
     business_model: Mapped[str | None] = mapped_column(String(16), nullable=True, index=True)
     flex_scored_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    # Stored combined score: weighted avg(ai*0.7, web*0.2, flex*0.1) with renormalisation.
+    # Stored combined score: relevance formula (ai*0.60 + noga_confidence*0.25 + keyword_density*0.15).
     # Written by scoring jobs whenever any component score changes. Enables indexed filtering.
     combined_score: Mapped[float | None] = mapped_column(Float, nullable=True)
+    # Detected language of purpose text: 'de' | 'fr' | 'it' | 'en' | 'rm' | NULL
+    purpose_language: Mapped[str | None] = mapped_column(String(8), nullable=True, index=True)
     # Raw JSON from Zefix API stored for reference
     zefix_raw: Mapped[str | None] = mapped_column(Text, nullable=True)
 
@@ -113,22 +115,29 @@ class Company(Base):
     @staticmethod
     def compute_combined_score(
         ai_score: int | None,
-        web_score: int | None,
-        flex_score: int | None,
-        w_ai: float = 0.70,
-        w_web: float = 0.20,
-        w_flex: float = 0.10,
+        noga_confidence: float | None = None,
+        purpose_keywords: str | None = None,
+        # Legacy params kept for backward-compat with old call sites
+        web_score: int | None = None,
+        flex_score: int | None = None,
+        w_ai: float = 0.60,
+        w_web: float = 0.0,
+        w_flex: float = 0.0,
     ) -> float | None:
-        """Weighted average of whichever component scores are present.
+        """Relevance score: ai_score×0.60 + noga_confidence×100×0.25 + keyword_density×100×0.15.
 
-        Weights renormalised so missing scores don't drag the result down.
-        Returns None when all three are absent.
+        If ai_score is absent, remaining weights renormalise to 0.62/0.38.
+        Returns None when all components are absent.
         """
-        _WEIGHTS = ((ai_score, w_ai), (web_score, w_web), (flex_score, w_flex))
-        present = [(s, w) for s, w in _WEIGHTS if s is not None]
-        if not present:
-            return None
-        total_w = sum(w for _, w in present)
-        return round(sum(s * w for s, w in present) / total_w)
+        from app.services.scoring import compute_relevance_score as _compute
+
+        class _FakeCompany:
+            pass
+
+        c = _FakeCompany()
+        c.ai_score = ai_score
+        c.noga_confidence = noga_confidence
+        c.purpose_keywords = purpose_keywords
+        return _compute(c)
 
     notes: Mapped[list["Note"]] = relationship("Note", back_populates="company", cascade="all, delete-orphan")  # noqa: F821

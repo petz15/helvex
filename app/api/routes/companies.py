@@ -56,18 +56,12 @@ def _clear_noga_cache(org_id: int | None = None) -> None:
 def _overlay(
     company: Company,
     org_state: OrgCompanyState | None,
-    w_ai: float = 0.70,
-    w_web: float = 0.20,
-    w_flex: float = 0.10,
 ) -> CompanyRead:
     """Build CompanyRead, overlaying org-specific workflow fields from OrgCompanyState."""
     base = CompanyRead.model_validate(company)
     overrides: dict = {}
     if org_state is not None:
         overrides.update({f: getattr(org_state, f) for f in _ORG_FIELDS if getattr(org_state, f) is not None})
-    # Apply custom combined_score weights if non-default
-    if (w_ai, w_web, w_flex) != (0.70, 0.20, 0.10):
-        overrides["combined_score"] = company._combined_score(w_ai, w_web, w_flex)
     return base.model_copy(update=overrides) if overrides else base
 
 
@@ -454,6 +448,124 @@ def get_noga_hierarchy(
     return response
 
 
+_market_segments_cache: dict | None = None
+_market_segments_cache_ts: float = 0.0
+_MARKET_SEGMENTS_TTL = 3600.0
+
+
+@router.get("/market-segments", summary="NOGA section stats for the market map treemap")
+def get_market_segments(
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+):
+    """Return per-NOGA-section aggregates: company count, avg relevance, top keywords, growth.
+
+    Labels are multilingual (DE/FR/IT/EN) derived from noga_lookup.json.
+    Response is cached in-process for 1 hour.
+    """
+    import time
+    global _market_segments_cache, _market_segments_cache_ts
+
+    now = time.monotonic()
+    if _market_segments_cache is not None and (now - _market_segments_cache_ts) < _MARKET_SEGMENTS_TTL:
+        response = Response(content=json.dumps(_market_segments_cache), media_type="application/json")
+        response.headers["Cache-Control"] = "public, max-age=3600"
+        return response
+
+    segments = _build_market_segments(db)
+    _market_segments_cache = segments
+    _market_segments_cache_ts = now
+
+    response = Response(content=json.dumps(segments), media_type="application/json")
+    response.headers["Cache-Control"] = "public, max-age=3600"
+    return response
+
+
+def _build_market_segments(db: Session) -> list[dict]:
+    from pathlib import Path
+    from sqlalchemy import text as sa_text
+
+    # Load section labels from noga_lookup.json (multilingual)
+    from app.services.noga import _collect_multilang_text, _repo_root
+    lookup_path = _repo_root() / "noga_lookup.json"
+    section_labels: dict[str, dict[str, str]] = {}
+    if lookup_path.exists():
+        import json as _json
+        with lookup_path.open("r", encoding="utf-8") as f:
+            payload: dict = _json.load(f)
+        for code, node in payload.items():
+            if not isinstance(node, dict):
+                continue
+            # Single-letter codes are NOGA sections (A-U)
+            if len(str(code)) == 1 and str(code).isalpha():
+                name = node.get("name")
+                if isinstance(name, dict):
+                    labels: dict[str, str] = {}
+                    for lang in ("de", "fr", "it", "en"):
+                        v = name.get(lang)
+                        if isinstance(v, str) and v.strip():
+                            labels[lang] = v.strip()
+                    section_labels[str(code).upper()] = labels
+                elif isinstance(name, str) and name.strip():
+                    section_labels[str(code).upper()] = {"de": name.strip()}
+
+    from datetime import date
+    cutoff_18m = (date.today().replace(year=date.today().year - 1) if date.today().month <= 6
+                  else date.today().replace(month=date.today().month - 6))
+
+    rows = db.execute(sa_text("""
+        SELECT
+            LEFT(noga_path, 1)                          AS section,
+            COUNT(*)                                    AS company_count,
+            AVG(combined_score)                         AS avg_relevance,
+            COUNT(CASE WHEN first_sogc_date >= :cutoff THEN 1 END) AS growth_recent,
+            MODE() WITHIN GROUP (ORDER BY canton)       AS canton_top,
+            COUNT(canton)                               AS canton_total
+        FROM companies
+        WHERE noga_path IS NOT NULL
+          AND LEFT(noga_path, 1) ~ '^[A-Za-z]$'
+        GROUP BY LEFT(noga_path, 1)
+        ORDER BY company_count DESC
+    """), {"cutoff": cutoff_18m}).fetchall()
+
+    # Aggregate top keywords per section
+    kw_rows = db.execute(sa_text("""
+        SELECT LEFT(noga_path, 1) AS section, kw, COUNT(*) AS cnt
+        FROM companies,
+             LATERAL unnest(string_to_array(purpose_keywords, ',')) AS kw
+        WHERE noga_path IS NOT NULL
+          AND purpose_keywords IS NOT NULL
+          AND LEFT(noga_path, 1) ~ '^[A-Za-z]$'
+        GROUP BY LEFT(noga_path, 1), kw
+    """)).fetchall()
+
+    from collections import defaultdict
+    kw_by_section: dict[str, list[tuple[str, int]]] = defaultdict(list)
+    for r in kw_rows:
+        kw_by_section[r.section.upper()].append((r.kw.strip(), r.cnt))
+
+    segments = []
+    for row in rows:
+        section = (row.section or "").upper()
+        if not section:
+            continue
+        top_kws = sorted(kw_by_section.get(section, []), key=lambda x: x[1], reverse=True)
+        canton_pct = round(100 * (row.canton_top is not None) / max(row.canton_total, 1)) if row.canton_total else 0
+
+        segments.append({
+            "section": section,
+            "labels": section_labels.get(section, {}),
+            "company_count": row.company_count,
+            "avg_relevance": round(float(row.avg_relevance), 1) if row.avg_relevance is not None else None,
+            "top_keywords": [kw for kw, _ in top_kws[:5]],
+            "canton_top": row.canton_top,
+            "canton_pct": canton_pct,
+            "growth_recent": row.growth_recent,
+        })
+
+    return segments
+
+
 @router.get("/semantic-search", summary="Cross-category semantic search using multilingual embeddings")
 def semantic_search(
     q: str = Query(..., min_length=2, description="Natural-language search query (DE/FR/IT/EN)"),
@@ -602,6 +714,7 @@ def list_companies(
     sogc_before: str | None = Query(None, description="Most recent SOGC date <= (YYYY-MM-DD)"),
     shab_type: str | None = Query(None, description="SHAB entry type: 'new' (HR01), 'mutation' (HR02), 'deleted' (HR03)"),
     business_model: str | None = Query(None, description="Filter by business model: b2b, b2c, b2g, mixed, or _none"),
+    purpose_language: str | None = Query(None, description="Filter by detected purpose language: de, fr, it, en"),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> CompanyPage:
@@ -646,6 +759,7 @@ def list_companies(
         sogc_before=sogc_before,
         shab_type=shab_type,
         business_model=business_model,
+        purpose_language=purpose_language,
     )
     total = crud.count_companies(db, **filter_kwargs)
     items = crud.list_companies(db, page=page, page_size=page_size, sort=sort, **filter_kwargs)
@@ -654,15 +768,7 @@ def list_companies(
     if current_user.org_id:
         ids = [c.id for c in items]
         org_states = _bulk_org_states(db, ids, current_user.org_id)
-        settings = crud.get_effective_settings_batch(
-            db,
-            ["scoring_weight_ai", "scoring_weight_web", "scoring_weight_flex"],
-            org_id=current_user.org_id
-        )
-        w_ai = float(settings.get("scoring_weight_ai", "0.70"))
-        w_web = float(settings.get("scoring_weight_web", "0.20"))
-        w_flex = float(settings.get("scoring_weight_flex", "0.10"))
-        items = [_apply_web_results_gate(_overlay(c, org_states.get(c.id), w_ai=w_ai, w_web=w_web, w_flex=w_flex), org, current_user.is_superadmin) for c in items]
+        items = [_apply_web_results_gate(_overlay(c, org_states.get(c.id)), org, current_user.is_superadmin) for c in items]
     else:
         items = [_apply_web_results_gate(_overlay(c, None), org, current_user.is_superadmin) for c in items]
     return CompanyPage(

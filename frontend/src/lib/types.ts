@@ -129,6 +129,7 @@ export interface CompanyFilters {
   exclude_noga_label?: string;
   exclude_noga_level?: string;
   business_model?: string;
+  purpose_language?: string;
   legal_form?: string;
   registered_after?: string;
   registered_before?: string;

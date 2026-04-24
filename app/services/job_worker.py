@@ -75,14 +75,10 @@ _QUEUE_FOR_JOB_TYPE: dict[str, str] = {
     "claude_classify":           "helvex-api",
     "csv_export":                "helvex-api",
     "tfidf_kmeans_cluster":      "helvex-ml",
-    "hdbscan_cluster":           "helvex-ml",
-    "birch_cluster":             "helvex-ml",
-    "semantic_kmeans_cluster":   "helvex-ml",
     "recompute_keywords":        "helvex-ml",
     "reextract_keywords":        "helvex-ml",
     "cluster_analysis":          "helvex-ml",
-    "cluster_drift_check":       "helvex-ml",
-    "classify_business_model":   "helvex-api",
+    "discover_stopwords":        "helvex-ml",
     "analyze_boilerplate":       "helvex-api",
     "billing_renewal":           "helvex-api",
     "saved_view_alerts":         "helvex-api",
@@ -102,10 +98,10 @@ def _compute_dedup_key(job_type: str, org_id: int | None, params: dict) -> str |
         "shab_daily", "shab_backfill",
         "recalculate_scores", "recalculate_google_scores",
         "reextract_purpose", "reclassify_noga",
-        "re_geocode", "classify_business_model",
-        "tfidf_kmeans_cluster", "hdbscan_cluster", "birch_cluster", "semantic_kmeans_cluster",
+        "re_geocode",
+        "tfidf_kmeans_cluster",
         "recompute_keywords", "reextract_keywords",
-        "cluster_analysis", "cluster_drift_check",
+        "cluster_analysis", "discover_stopwords",
         "saved_view_alerts",  # global singleton — org_id=None gives key "saved_view_alerts:None"
     }
     # No dedup: every trigger creates a fresh independent job.
@@ -245,7 +241,7 @@ def _resolve_credit_action_and_count(db: Session, *, job_type: str, params: dict
     if job_type == "recalculate_scores":
         return "flex_rescore", max(1, int(crud.count_companies(db)))
 
-    if job_type in {"tfidf_kmeans_cluster", "hdbscan_cluster", "birch_cluster", "semantic_kmeans_cluster"}:
+    if job_type == "tfidf_kmeans_cluster":
         return "recluster", 1
 
     if job_type == "csv_export":
@@ -568,28 +564,24 @@ def _run_job(app, job_id: int) -> None:  # noqa: C901
                 if resume_from:
                     done_msg += f" (resumed from {resume_from})"
 
-            elif job.job_type == "classify_business_model":
-                from app.services.business_model import run_classify_business_model
+            elif job.job_type == "discover_stopwords":
+                from app.services.stopword_discovery import discover_stopwords
+                from app.config import settings as _dsettings
 
                 def _progress(done: int, total: int, stats: dict) -> None:
                     _assert_not_cancelled()
-                    msg = (
-                        f"Classified {done}/{total} — {stats.get('classified', 0)} assigned, "
-                        f"{stats.get('skipped', 0)} skipped"
-                    )
+                    msg = f"Phase {done}/{total} complete"
                     crud.update_progress(db, job, message=msg, done=done, total=total, stats=stats)
-                    crud.create_event(db, job_id=job.id, level="debug", message=msg)
-                    _maybe_sync(app, job_type=job.job_type, label=job.label, message=msg, stats=dict(stats), error=None, done=False)
                     _heartbeat()
 
-                stats = run_classify_business_model(
-                    db,
-                    limit=params.get("limit") or None,
-                    progress_cb=_progress,
-                )
+                use_ai = bool(params.get("use_ai", False))
+                api_key = _dsettings.anthropic_api_key if use_ai else None
+                stats = discover_stopwords(db, use_ai=use_ai, anthropic_api_key=api_key, progress_cb=_progress)
                 done_msg = (
-                    f"Done — {stats['updated']} processed, {stats['classified']} classified, "
-                    f"{stats['skipped']} skipped (no signal)"
+                    f"Done — phase1:{stats['phase1_stopwords_staged']} staged, "
+                    f"phase2:{stats['phase2_boilerplate_staged']} boilerplate, "
+                    f"phase3:{stats['phase3_stopwords_staged']} cross-cluster, "
+                    f"phase4:{stats['phase4_auto_approved']} auto-approved"
                 )
 
             elif job.job_type == "analyze_boilerplate":
@@ -795,146 +787,19 @@ def _run_job(app, job_id: int) -> None:  # noqa: C901
                 noise = stats.get("noise", 0)
                 done_msg = f"Done — {n_c} clusters, {classified} companies labelled, {noise} noise"
 
-            elif job.job_type == "hdbscan_cluster":
-                from app.services.cluster_pipeline import PipelineConfig, run_hdbscan_pipeline, run_batch_merge_hdbscan_pipeline
-                from sqlalchemy import func
-
-                # Check dataset size and auto-warn if batch merge recommended
-                from app.models.company import Company
-                count_q = db.query(func.count(Company.id)).filter(Company.purpose.isnot(None))
-                if params.get("canton"):
-                    count_q = count_q.filter(Company.canton == params["canton"].upper())
-                if params.get("min_zefix_score"):
-                    count_q = count_q.filter(Company.zefix_score >= params["min_zefix_score"])
-                if params.get("max_zefix_score"):
-                    count_q = count_q.filter(Company.zefix_score <= params["max_zefix_score"])
-                if params.get("limit"):
-                    predicted_size = min(params["limit"], count_q.scalar() or 0)
-                else:
-                    predicted_size = count_q.scalar() or 0
-
-                use_batch_merge = bool(params.get("use_batch_merge", False))
-                if predicted_size > 50000 and not use_batch_merge:
-                    # Auto-suggest batch merge but don't force it
-                    msg = f"Dataset size: ~{predicted_size:,} companies. Consider enabling 'Batch+Merge' option for better memory efficiency."
-                    logger.warning(f"[job {job.id}] {msg}")
-                    crud.create_event(db, job_id=job.id, level="warn", message=msg)
-
-                def _progress(done: int, total: int, stats: dict) -> None:
-                    _assert_not_cancelled()
-                    step = stats.get("step", "clustering")
-                    n_batches = stats.get("n_batches", 0)
-                    batch_str = f" [{stats.get('n_batches', 0)}/{stats.get('n_batches', 1)} batches]" if n_batches > 1 else ""
-                    msg = f"[{step}] {done}/{total} — {stats.get('classified', 0)} clustered, {stats.get('noise', 0)} noise{batch_str}"
-                    crud.update_progress(db, job, message=msg, done=done, total=total, stats=stats)
-                    crud.create_event(db, job_id=job.id, level="debug", message=msg)
-                    _maybe_sync(app, job_type=job.job_type, label=job.label, message=msg, stats=dict(stats), error=None, done=False)
-                    _heartbeat()
-
-                cfg = PipelineConfig(
-                    hdbscan_min_cluster_size=int(params.get("min_cluster_size", 30)),
-                    hdbscan_min_samples=(
-                        int(params["min_samples"])
-                        if params.get("min_samples") not in (None, "")
-                        else None
-                    ),
-                    hdbscan_cluster_selection_epsilon=float(params.get("cluster_selection_epsilon", 0.0)),
-                    n_components=int(params.get("n_components", 50)),
-                    top_terms_per_cluster=int(params.get("top_terms", 5)),
-                    top_keywords_per_company=int(params.get("top_keywords_per_company", 10)),
-                )
-
-                if use_batch_merge:
-                    logger.info(f"[job {job.id}] Using batch+merge HDBSCAN (~5-8 min per 100K batch)")
-                    stats = run_batch_merge_hdbscan_pipeline(
-                        db, cfg,
-                        canton=params.get("canton") or None,
-                        min_zefix_score=int(params["min_zefix_score"]) if params.get("min_zefix_score") else None,
-                        max_zefix_score=int(params["max_zefix_score"]) if params.get("max_zefix_score") else None,
-                        limit=int(params["limit"]) if params.get("limit") else None,
-                        use_keywords=bool(params.get("use_keywords", False)),
-                        progress_cb=_progress,
+                # Auto-enqueue stopword discovery after every successful clustering run
+                try:
+                    sw_job = enqueue_job(
+                        app,
+                        job_type="discover_stopwords",
+                        label="Stopword & boilerplate discovery (auto — post cluster)",
+                        params={"use_ai": False},
+                        db=db,
                     )
-                else:
-                    stats = run_hdbscan_pipeline(
-                        db, cfg,
-                        canton=params.get("canton") or None,
-                        min_zefix_score=int(params["min_zefix_score"]) if params.get("min_zefix_score") else None,
-                        max_zefix_score=int(params["max_zefix_score"]) if params.get("max_zefix_score") else None,
-                        limit=int(params["limit"]) if params.get("limit") else None,
-                        use_keywords=bool(params.get("use_keywords", False)),
-                        progress_cb=_progress,
-                    )
-                n_c = stats.get("n_clusters", 0)
-                classified = stats.get("classified", 0)
-                noise = stats.get("noise", 0)
-                n_batches = stats.get("n_batches", 0)
-                batch_info = f", {n_batches} batches merged" if n_batches > 1 else ""
-                done_msg = f"Done — {n_c} clusters, {classified} companies labelled, {noise} noise{batch_info}"
-
-            elif job.job_type == "birch_cluster":
-                from app.services.cluster_pipeline import PipelineConfig, run_birch_pipeline
-
-                def _progress(done: int, total: int, stats: dict) -> None:
-                    _assert_not_cancelled()
-                    step = stats.get("step", "clustering")
-                    msg = f"[{step}] {done}/{total} — {stats.get('classified', 0)} clustered"
-                    crud.update_progress(db, job, message=msg, done=done, total=total, stats=stats)
-                    crud.create_event(db, job_id=job.id, level="debug", message=msg)
-                    _maybe_sync(app, job_type=job.job_type, label=job.label, message=msg, stats=dict(stats), error=None, done=False)
-                    _heartbeat()
-
-                cfg = PipelineConfig(
-                    n_components=int(params.get("n_components", 50)),
-                    n_clusters=int(params.get("n_clusters", 150)),
-                    top_terms_per_cluster=int(params.get("top_terms", 5)),
-                    top_keywords_per_company=int(params.get("top_keywords_per_company", 10)),
-                )
-                stats = run_birch_pipeline(
-                    db, cfg,
-                    canton=params.get("canton") or None,
-                    min_zefix_score=int(params["min_zefix_score"]) if params.get("min_zefix_score") else None,
-                    max_zefix_score=int(params["max_zefix_score"]) if params.get("max_zefix_score") else None,
-                    limit=int(params["limit"]) if params.get("limit") else None,
-                    use_keywords=bool(params.get("use_keywords", False)),
-                    progress_cb=_progress,
-                )
-                n_c = stats.get("n_clusters", 0)
-                classified = stats.get("classified", 0)
-                done_msg = f"Done — {n_c} clusters, {classified} companies labelled"
-
-            elif job.job_type == "semantic_kmeans_cluster":
-                from app.services.cluster_pipeline import PipelineConfig, run_semantic_pipeline
-
-                def _progress(done: int, total: int, stats: dict) -> None:
-                    _assert_not_cancelled()
-                    step = stats.get("step", "clustering")
-                    msg = f"[{step}] {done}/{total} — {stats.get('classified', 0)} clustered, {stats.get('undefined', 0)} unmatched"
-                    crud.update_progress(db, job, message=msg, done=done, total=total, stats=stats)
-                    crud.create_event(db, job_id=job.id, level="debug", message=msg)
-                    _maybe_sync(app, job_type=job.job_type, label=job.label, message=msg, stats=dict(stats), error=None, done=False)
-                    _heartbeat()
-
-                cfg = PipelineConfig(
-                    n_clusters=int(params.get("n_clusters", 150)),
-                    max_clusters_per_company=int(params.get("max_clusters_per_company", 3)),
-                    min_similarity=float(params.get("min_similarity", 0.20)),
-                    n_components=int(params.get("n_components", 50)),
-                    top_terms_per_cluster=int(params.get("top_terms", 5)),
-                    top_keywords_per_company=int(params.get("top_keywords_per_company", 10)),
-                )
-                stats = run_semantic_pipeline(
-                    db, cfg,
-                    canton=params.get("canton") or None,
-                    min_zefix_score=int(params["min_zefix_score"]) if params.get("min_zefix_score") else None,
-                    max_zefix_score=int(params["max_zefix_score"]) if params.get("max_zefix_score") else None,
-                    limit=int(params["limit"]) if params.get("limit") else None,
-                    embedding_batch_size=int(params.get("embedding_batch_size", 512)),
-                    progress_cb=_progress,
-                )
-                n_c = stats.get("n_clusters", 0)
-                classified = stats.get("classified", 0)
-                done_msg = f"Done — {n_c} semantic clusters, {classified} companies labelled"
+                    crud.create_event(db, job_id=job.id, level="info",
+                                      message=f"Auto-enqueued discover_stopwords (job #{sw_job.id})")
+                except Exception as _sw_exc:  # noqa: BLE001
+                    logger.warning("Could not auto-enqueue discover_stopwords: %s", _sw_exc)
 
             elif job.job_type == "recompute_keywords":
                 from app.services.cluster_pipeline import PipelineConfig, recompute_keywords
@@ -997,52 +862,6 @@ def _run_job(app, job_id: int) -> None:  # noqa: C901
                 analyze_cross_cluster_terms(db, cfg)
                 stats = {"errors": []}
                 done_msg = "Cross-cluster analysis written — download at /static/cluster_analysis.txt"
-
-            elif job.job_type == "cluster_drift_check":
-                # Check what fraction of companies created in the last N days have
-                # tfidf_cluster = NULL; warn if above threshold (Phase 2c).
-                from datetime import datetime, timedelta, timezone
-                from app.models.company import Company as _Company
-
-                days = int(params.get("days", 7))
-                threshold = float(params.get("warn_threshold", 0.30))
-                cutoff = datetime.now(tz=timezone.utc) - timedelta(days=days)
-
-                total_recent = (
-                    db.query(_Company)
-                    .filter(_Company.created_at >= cutoff)
-                    .count()
-                )
-                unclassified_recent = (
-                    db.query(_Company)
-                    .filter(_Company.created_at >= cutoff)
-                    .filter(_Company.tfidf_cluster.is_(None))
-                    .count()
-                )
-                fraction = unclassified_recent / total_recent if total_recent > 0 else 0.0
-                stats = {
-                    "days": days,
-                    "total_recent": total_recent,
-                    "unclassified_recent": unclassified_recent,
-                    "fraction_unclassified": round(fraction, 4),
-                    "threshold": threshold,
-                    "drift_detected": fraction > threshold,
-                    "errors": [],
-                }
-                if fraction > threshold:
-                    msg = (
-                        f"DRIFT DETECTED: {unclassified_recent}/{total_recent} "
-                        f"({fraction:.1%}) of companies from the last {days} days "
-                        f"have no cluster (threshold {threshold:.0%}). "
-                        f"Consider triggering a full tfidf_kmeans_cluster run."
-                    )
-                    logger.warning(msg)
-                    crud.create_event(db, job_id=job.id, level="warning", message=msg)
-                done_msg = (
-                    f"Drift check: {unclassified_recent}/{total_recent} unclassified "
-                    f"({fraction:.1%}) in last {days} days — "
-                    f"{'DRIFT DETECTED' if fraction > threshold else 'OK'}"
-                )
 
             elif job.job_type == "claude_classify":
                 from app.config import settings as app_settings
@@ -1188,22 +1007,6 @@ def _run_job(app, job_id: int) -> None:  # noqa: C901
                 if resume_from:
                     done_msg += f" (resumed from {resume_from})"
 
-                # Auto-enqueue cluster drift check after every SHAB import.
-                # New companies from SHAB may lack cluster assignments if the
-                # model artifacts are stale. The drift check flags this proactively.
-                try:
-                    drift_job = enqueue_job(
-                        app,
-                        job_type="cluster_drift_check",
-                        label=f"Cluster drift check (auto — post {job.job_type})",
-                        params={"days": 7, "warn_threshold": 0.30},
-                        db=db,
-                    )
-                    crud.create_event(db, job_id=job.id, level="info",
-                                      message=f"Auto-enqueued cluster drift check (job #{drift_job.id})")
-                except Exception as _drift_exc:  # noqa: BLE001
-                    logger.warning("Could not enqueue post-SHAB drift check: %s", _drift_exc)
-
             elif job.job_type == "csv_export":
                 from app.services.csv_export import run_csv_export
                 from app.services.s3_client import is_configured
@@ -1266,7 +1069,7 @@ def _run_job(app, job_id: int) -> None:  # noqa: C901
             # Bust taxonomy cache when any job that changes category/score data finishes.
             _TAXONOMY_INVALIDATING = {
                 "claude_classify", "reclassify_noga", "recalculate_scores",
-                "recalculate_google_scores", "reextract_purpose", "classify_business_model",
+                "recalculate_google_scores", "reextract_purpose",
             }
             if job.job_type in _TAXONOMY_INVALIDATING:
                 from app.crud.company import invalidate_taxonomy_cache, invalidate_category_stats_cache

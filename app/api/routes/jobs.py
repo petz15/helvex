@@ -408,7 +408,7 @@ class ClaudeClassifyBody(BaseModel):
 
 
 class ClusterPipelineBody(BaseModel):
-    n_clusters: int = 150
+    n_clusters: int = 50
     max_clusters_per_company: int = 7
     min_similarity: float = 0.10
     n_components: int = 50
@@ -419,38 +419,6 @@ class ClusterPipelineBody(BaseModel):
     max_zefix_score: int | None = None
     limit: int | None = None
     use_keywords: bool = True  # Cluster on pre-extracted purpose_keywords (recommended)
-
-
-class HdbscanClusterBody(BaseModel):
-    min_cluster_size: int = 30
-    min_samples: int | None = None
-    cluster_selection_epsilon: float = 0.0
-    n_components: int = 50
-    top_terms: int = 5
-    top_keywords_per_company: int = 10
-    canton: str | None = None
-    min_zefix_score: int | None = None
-    max_zefix_score: int | None = None
-    limit: int | None = None
-    use_keywords: bool = False
-    use_batch_merge: bool = False  # Enable batch+merge mode for large datasets
-
-
-class BirchClusterBody(BaseModel):
-    """BIRCH clustering body (memory-efficient for full dataset).
-    
-    BIRCH (Balanced Iterative Reducing and Clustering) is single-pass and trains
-    on 763K+ companies with ~500MB memory. No parameters needed for quality control.
-    """
-    n_components: int = 50
-    n_clusters: int = 150
-    top_terms: int = 5
-    top_keywords_per_company: int = 10
-    canton: str | None = None
-    min_zefix_score: int | None = None
-    max_zefix_score: int | None = None
-    limit: int | None = None
-    use_keywords: bool = False
 
 
 class ReextractKeywordsBody(BaseModel):
@@ -465,32 +433,13 @@ class RecomputeKeywordsBody(BaseModel):
     limit: int | None = None
 
 
-class SemanticClusterBody(BaseModel):
-    """Semantic K-Means clustering using sentence-transformer embeddings.
-
-    Requires purpose_keywords to be already extracted.
-    Run recompute_keywords first if purpose_keywords are missing.
-    """
-    n_clusters: int = 150
-    max_clusters_per_company: int = 3
-    min_similarity: float = 0.20
-    n_components: int = 50
-    top_terms: int = 5
-    canton: str | None = None
-    min_zefix_score: int | None = None
-    max_zefix_score: int | None = None
-    limit: int | None = None
-    embedding_batch_size: int = 512
-
-
 class ClusterAnalysisBody(BaseModel):
     top_n_clusters: int = 20
     top_n_terms: int = 10
 
 
-class ClusterDriftCheckBody(BaseModel):
-    days: int = 7
-    warn_threshold: float = 0.30
+class DiscoverStopwordsBody(BaseModel):
+    use_ai: bool = False
 
 
 @router.post("/collection/bulk", response_model=JobOut, status_code=status.HTTP_202_ACCEPTED)
@@ -819,47 +768,6 @@ def trigger_cluster_pipeline(body: ClusterPipelineBody, request: Request, db: Se
     return JobOut.from_orm_obj(job)
 
 
-@router.post("/scoring/hdbscan", response_model=JobOut, status_code=status.HTTP_202_ACCEPTED)
-def trigger_hdbscan_cluster(body: HdbscanClusterBody, request: Request, db: Session = Depends(get_db), _: User = Depends(require_superadmin)):
-    job = _enqueue_or_http_error(
-        request,
-        job_type="hdbscan_cluster",
-        label="HDBSCAN cluster pipeline",
-        params=body.model_dump(),
-        db=db,
-    )
-    return JobOut.from_orm_obj(job)
-
-
-@router.post("/scoring/birch", response_model=JobOut, status_code=status.HTTP_202_ACCEPTED)
-def trigger_birch_cluster(body: BirchClusterBody, request: Request, db: Session = Depends(get_db), _: User = Depends(require_superadmin)):
-    job = _enqueue_or_http_error(
-        request,
-        job_type="birch_cluster",
-        label="BIRCH cluster pipeline (memory-efficient)",
-        params=body.model_dump(),
-        db=db,
-    )
-    return JobOut.from_orm_obj(job)
-
-
-@router.post("/scoring/semantic-cluster", response_model=JobOut, status_code=status.HTTP_202_ACCEPTED)
-def trigger_semantic_cluster(body: SemanticClusterBody, request: Request, db: Session = Depends(get_db), _: User = Depends(require_superadmin)):
-    """Semantic K-Means clustering via sentence-transformer embeddings.
-
-    Groups companies by semantic meaning rather than shared vocabulary.
-    Requires purpose_keywords — run recompute_keywords first.
-    """
-    job = _enqueue_or_http_error(
-        request,
-        job_type="semantic_kmeans_cluster",
-        label=f"Semantic K-Means clustering — {body.n_clusters} clusters",
-        params=body.model_dump(),
-        db=db,
-    )
-    return JobOut.from_orm_obj(job)
-
-
 @router.post("/scoring/reextract-keywords", response_model=JobOut, status_code=status.HTTP_202_ACCEPTED)
 def trigger_reextract_keywords(body: ReextractKeywordsBody, request: Request, db: Session = Depends(get_db), _: User = Depends(require_superadmin)):
     label = "Re-extract keywords from cached cluster artifacts"
@@ -908,31 +816,6 @@ def trigger_cluster_analysis(body: ClusterAnalysisBody, request: Request, db: Se
     return JobOut.from_orm_obj(job)
 
 
-class ClassifyBusinessModelBody(BaseModel):
-    limit: int | None = None
-
-
-@router.post("/scoring/classify-business-model", response_model=JobOut, status_code=status.HTTP_202_ACCEPTED)
-def trigger_classify_business_model(
-    body: ClassifyBusinessModelBody,
-    request: Request,
-    db: Session = Depends(get_db),
-    _: User = Depends(require_superadmin),
-):
-    """Run rule-based B2B/B2C/B2G classification on all companies."""
-    label = "Business model classification"
-    if body.limit:
-        label += f" — limit {body.limit}"
-    job = _enqueue_or_http_error(
-        request,
-        job_type="classify_business_model",
-        label=label,
-        params=body.model_dump(),
-        db=db,
-    )
-    return JobOut.from_orm_obj(job)
-
-
 class AnalyzeBoilerplateBody(BaseModel):
     min_match_count: int = 500
     max_candidates: int = 200
@@ -963,12 +846,24 @@ def trigger_analyze_boilerplate(
     return JobOut.from_orm_obj(job)
 
 
-@router.post("/scoring/cluster-drift-check", response_model=JobOut, status_code=status.HTTP_202_ACCEPTED)
-def trigger_cluster_drift_check(body: ClusterDriftCheckBody, request: Request, db: Session = Depends(get_db), _: User = Depends(require_superadmin)):
+@router.post("/scoring/discover-stopwords", response_model=JobOut, status_code=status.HTTP_202_ACCEPTED)
+def trigger_discover_stopwords(
+    body: DiscoverStopwordsBody,
+    request: Request,
+    db: Session = Depends(get_db),
+    _: User = Depends(require_superadmin),
+):
+    """Run the 4-phase automated stopword/boilerplate discovery pipeline.
+
+    Phase 1: IDF-based term frequency analysis (free).
+    Phase 2: Sentence-level hash deduplication (free, multilingual).
+    Phase 3: Cross-cluster stopword auto-staging (free).
+    Phase 4: Optional Claude Haiku review (use_ai=true, credit-consuming).
+    """
     job = _enqueue_or_http_error(
         request,
-        job_type="cluster_drift_check",
-        label=f"Cluster drift check — last {body.days} day(s)",
+        job_type="discover_stopwords",
+        label="Stopword & boilerplate discovery" + (" + Claude review" if body.use_ai else ""),
         params=body.model_dump(),
         db=db,
     )

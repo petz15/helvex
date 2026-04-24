@@ -19,16 +19,6 @@ logger = logging.getLogger(__name__)
 _WORD_RE = re.compile(r"[A-Za-zÀ-ÖØ-öø-ÿ0-9]{3,}")
 _SENTENCE_SPLIT = re.compile(r"(?<=\.)\s+(?=[A-ZÄÖÜ])")
 
-# Compact stopword set for classification token quality.
-_NOGA_STOPWORDS: set[str] = {
-    "die", "der", "das", "und", "oder", "mit", "von", "für", "des", "dem", "den",
-    "ein", "eine", "einer", "eines", "sich", "auf", "zu", "ist", "sowie", "als",
-    "auch", "nicht", "nach", "bei", "alle", "durch", "wird", "im", "an", "am",
-    "company", "companies", "services", "general", "related", "activities",
-    "gesellschaft", "gesellschaften", "zweck", "bezweckt", "dienstleistungen", "dienstleistung",
-    "erbringung", "tätigkeit", "tätigkeiten", "handel", "waren", "art", "insbesondere",
-}
-
 # S3 keys for embedding artifacts (written by scripts/build_noga_embeddings.py)
 _S3_EMBEDDINGS_KEY = "models/noga_embeddings.npy"
 _S3_IDS_KEY = "models/noga_embedding_ids.json"
@@ -85,9 +75,8 @@ def _tokens_from_texts(texts: list[str]) -> set[str]:
     for t in texts:
         for m in _WORD_RE.findall(t.lower()):
             tok = m.strip().lower()
-            if not tok or tok in _NOGA_STOPWORDS:
-                continue
-            tokens.add(tok)
+            if tok:
+                tokens.add(tok)
     return tokens
 
 
@@ -272,6 +261,47 @@ def _company_tokens(db: Session, company: Company) -> set[str]:
     return _tokens_from_texts(texts)
 
 
+_NOGA_MIN_CONFIDENCE: float = 0.50
+
+
+def _pick_best_code(
+    scores: dict[str, float],
+    section_filter: str | None = None,
+) -> str:
+    """Return the highest-scoring code, preferring leaf codes (len 6 > 4 > 3 > 2 > 1).
+
+    If section_filter is provided, only consider codes whose noga_path starts with that section.
+    """
+    candidates = scores
+    if section_filter:
+        idx = _load_noga_index()
+        parent_map = _load_parent_map()
+        filtered: dict[str, float] = {}
+        for code, score in scores.items():
+            # Walk ancestry to find section letter
+            cur = code
+            visited: set[str] = set()
+            while cur and cur not in visited:
+                visited.add(cur)
+                parent = parent_map.get(cur, "")
+                if not parent:
+                    break
+                cur = parent
+            section = list(visited)[-1] if visited else code
+            if section.upper() == section_filter.upper():
+                filtered[code] = score
+        if filtered:
+            candidates = filtered
+
+    return max(
+        candidates,
+        key=lambda c: (
+            candidates[c],
+            len(c) == 6, len(c) == 4, len(c) == 3, len(c) == 2, len(c) == 1, c,
+        ),
+    )
+
+
 def classify_company_noga(db: Session, company: Company) -> NogaClassification | None:
     tokens = _company_tokens(db, company)
     if not tokens:
@@ -292,23 +322,57 @@ def classify_company_noga(db: Session, company: Company) -> NogaClassification |
     max_tok = max(token_scores.values())
     norm_token: dict[str, float] = {c: s / max_tok for c, s in token_scores.items()}
 
-    # --- Embedding re-rank (Phase 1a) ---
-    # Use full purpose text + keywords for richer embedding coverage.
-    # Keywords alone miss context; purpose alone includes boilerplate.
+    # --- Embedding re-rank with 2-stage classification ---
     emb_data = _load_noga_embeddings()
     embed_text = " ".join(filter(None, [
         company.purpose or "",
         (company.purpose_keywords or "").replace(",", " "),
     ])).strip()
+
+    best_code: str
+    confidence: float
+
     if emb_data is not None and embed_text:
         query_vec = _embed_query(embed_text)
         if query_vec is not None:
             import numpy as np
-            # Cosine similarity (matrix is already normalised, query is normalised)
             sims: np.ndarray = emb_data.matrix @ query_vec  # shape (N,)
             top_k_idx = np.argpartition(sims, -_EMB_TOP_K)[-_EMB_TOP_K:]
 
-            # Hybrid score only over top-K embedding candidates
+            # --- Stage 1: vote for NOGA section (1-letter code) from top-K ---
+            parent_map = _load_parent_map()
+            section_votes: dict[str, float] = {}
+            for i in top_k_idx:
+                code = emb_data.codes[i]
+                emb_sim = float(sims[i])
+                # Walk to root to find section
+                cur = code
+                visited: set[str] = set()
+                while cur and cur not in visited:
+                    visited.add(cur)
+                    parent = parent_map.get(cur, "")
+                    if not parent:
+                        break
+                    cur = parent
+                section = cur if (not parent_map.get(cur, "")) else code
+                # The section is the root-level ancestor
+                root = code
+                prev = code
+                c2 = code
+                v2: set[str] = set()
+                while c2 and c2 not in v2:
+                    v2.add(c2)
+                    p2 = parent_map.get(c2, "")
+                    if not p2:
+                        root = c2
+                        break
+                    prev = c2
+                    c2 = p2
+                section_votes[root] = section_votes.get(root, 0.0) + emb_sim
+
+            best_section = max(section_votes, key=lambda s: section_votes[s]) if section_votes else None
+
+            # --- Stage 2: re-rank within winning section ---
             hybrid_scores: dict[str, float] = {}
             for i in top_k_idx:
                 c = emb_data.codes[i]
@@ -316,45 +380,50 @@ def classify_company_noga(db: Session, company: Company) -> NogaClassification |
                 tok_sim = norm_token.get(c, 0.0)
                 hybrid_scores[c] = _W_EMB * emb_sim + _W_TOK * tok_sim
 
-            # For codes not in top-K, fall back to token-only score (scaled down)
             for c, s in norm_token.items():
                 if c not in hybrid_scores:
                     hybrid_scores[c] = _W_TOK * s
 
-            final_scores = hybrid_scores
-            # noga_confidence = embedding similarity of best result
-            best_code = max(
-                final_scores,
-                key=lambda c: (
-                    final_scores[c],
-                    len(c) == 6, len(c) == 4, len(c) == 3, len(c) == 2, len(c) == 1, c,
-                ),
-            )
-            # Find embedding sim for best code
+            # Try best code within winning section first, fall back to global best
+            if best_section:
+                section_hybrid: dict[str, float] = {}
+                for code, score in hybrid_scores.items():
+                    cur = code
+                    v3: set[str] = set()
+                    root3 = code
+                    while cur and cur not in v3:
+                        v3.add(cur)
+                        p3 = parent_map.get(cur, "")
+                        if not p3:
+                            root3 = cur
+                            break
+                        cur = p3
+                    if root3 == best_section:
+                        section_hybrid[code] = score
+                final_scores = section_hybrid if section_hybrid else hybrid_scores
+            else:
+                final_scores = hybrid_scores
+
+            best_code = _pick_best_code(final_scores)
             try:
                 best_emb_sim = float(emb_data.matrix[emb_data.codes.index(best_code)] @ query_vec)
             except (ValueError, IndexError):
                 best_emb_sim = final_scores[best_code]
             confidence = max(0.0, min(1.0, best_emb_sim))
         else:
-            # Embedding failed; fall through to token-only
-            final_scores = norm_token
-            best_code = max(
-                final_scores,
-                key=lambda c: (final_scores[c], len(c) == 6, len(c) == 4, len(c) == 3, len(c) == 2, len(c) == 1, c),
-            )
+            # Embedding failed; token-only
+            best_code = _pick_best_code(norm_token)
             total = sum(token_scores.values())
             confidence = token_scores.get(best_code, 0.0) / total if total > 0 else 0.0
     else:
-        # Token-only path (no embeddings available / no keywords)
-        ranked = sorted(
-            token_scores.items(),
-            key=lambda kv: (kv[1], len(kv[0]) == 6, len(kv[0]) == 4, len(kv[0]) == 3, len(kv[0]) == 2, len(kv[0]) == 1, kv[0]),
-            reverse=True,
-        )
-        best_code, best_score = ranked[0]
+        # No embeddings / no text
+        best_code = _pick_best_code(token_scores)
         total = sum(token_scores.values())
-        confidence = float(best_score / total) if total > 0 else 0.0
+        confidence = float(token_scores.get(best_code, 0.0) / total) if total > 0 else 0.0
+
+    # Confidence threshold — reject low-confidence assignments
+    if confidence < _NOGA_MIN_CONFIDENCE:
+        return None
 
     meta = idx.code_meta.get(best_code, {})
     name = meta.get("name")

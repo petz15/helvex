@@ -3,7 +3,7 @@
 When new companies arrive via Zefix bulk import, they need:
   1. NOGA classification       (embedding + token hybrid, same as full pipeline)
   2. Cluster + keyword assignment (embedding-based soft assignment to existing clusters)
-  3. Business model detection  (rule-based, instant)
+  3. Language detection         (fast, offline — detects DE/FR/IT/EN/RM from purpose text)
 
 This module is called from the collection pipeline after each import batch.
 It is designed to be fast (<1s per company on CPU) so it can run inline.
@@ -15,14 +15,12 @@ job rather than calling classify_new_companies_inline().
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
 from typing import Any
 
 from sqlalchemy.orm import Session
 
 logger = logging.getLogger(__name__)
 
-# Batch size for DB writes
 _WRITE_BATCH = 200
 
 
@@ -32,17 +30,16 @@ def classify_new_companies_inline(
     *,
     run_noga: bool = True,
     run_clusters: bool = True,
-    run_business_model: bool = True,
+    run_language: bool = True,
 ) -> dict[str, Any]:
     """Classify a batch of company IDs that were just imported.
 
-    Runs NOGA, cluster/keyword assignment, and business-model detection.
+    Runs NOGA, cluster/keyword assignment, and language detection.
     All three are independent and can be toggled via flags.
 
     Returns a summary dict with counts per step.
     """
     from app.models.company import Company
-    from app.schemas.company import CompanyUpdate
 
     stats: dict[str, Any] = {
         "total": len(company_ids),
@@ -50,7 +47,7 @@ def classify_new_companies_inline(
         "noga_skipped": 0,
         "cluster_assigned": 0,
         "cluster_skipped": 0,
-        "business_model_set": 0,
+        "language_detected": 0,
         "errors": [],
     }
 
@@ -63,17 +60,14 @@ def classify_new_companies_inline(
         .all()
     )
 
-    # ── Step 1: NOGA classification ───────────────────────────────────────────
     if run_noga:
         _run_noga_batch(db, companies, stats)
 
-    # ── Step 2: Cluster + keyword assignment ─────────────────────────────────
     if run_clusters:
         _run_cluster_batch(db, company_ids, stats)
 
-    # ── Step 3: Business model ────────────────────────────────────────────────
-    if run_business_model:
-        _run_business_model_batch(db, companies, stats)
+    if run_language:
+        _run_language_batch(db, companies, stats)
 
     return stats
 
@@ -130,63 +124,60 @@ def _run_cluster_batch(db: Session, company_ids: list[int], stats: dict) -> None
         stats["errors"].append(f"clusters:{exc}")
 
 
-# ── Business model detection ──────────────────────────────────────────────────
-# Rule-based heuristic over company name + purpose text.
-# Good enough for a first pass; AI scoring provides the refinement layer.
+def _detect_language(text: str) -> str | None:
+    """Return ISO 639-1 language code for the given text, or None if uncertain.
 
-_B2B_SIGNALS = frozenset([
-    "b2b", "unternehmensberatung", "dienstleistungen für unternehmen",
-    "firmen", "geschäftskunden", "geschäftsreisen", "gewerbe",
-    "services aux entreprises", "conseil aux entreprises",
-    "enterprise", "business solutions", "corporate",
-])
-_B2C_SIGNALS = frozenset([
-    "b2c", "einzelhandel", "detailhandel", "konsumenten",
-    "retail", "privatkunden", "endkunden", "haushalte",
-    "vente au détail", "particuliers",
-    "consumers", "residential",
-])
-_B2G_SIGNALS = frozenset([
-    "b2g", "öffentliche hand", "bund", "kanton", "gemeinde",
-    "eidgenossenschaft", "bundesbehörde", "verwaltung",
-    "secteur public", "administrations publiques",
-    "government", "public sector",
-])
-
-
-def detect_business_model(name: str | None, purpose: str | None) -> str | None:
-    """Return 'b2b' | 'b2c' | 'b2g' | 'mixed' | None based on text signals."""
-    text = " ".join(filter(None, [name, purpose])).lower()
-    if not text:
+    Tries lingua first (higher accuracy for short/Swiss texts including Romansh),
+    falls back to langdetect. Both are optional — returns None if neither is installed.
+    """
+    if not text or len(text.strip()) < 20:
         return None
 
-    b2b = any(s in text for s in _B2B_SIGNALS)
-    b2c = any(s in text for s in _B2C_SIGNALS)
-    b2g = any(s in text for s in _B2G_SIGNALS)
+    # Try lingua (preferred)
+    try:
+        from lingua import Language, LanguageDetectorBuilder
+        _LINGUA_LANGS = [
+            Language.GERMAN, Language.FRENCH, Language.ITALIAN,
+            Language.ENGLISH,
+        ]
+        detector = LanguageDetectorBuilder.from_languages(*_LINGUA_LANGS).build()
+        result = detector.detect_language_of(text)
+        if result is None:
+            return None
+        mapping = {
+            Language.GERMAN: "de",
+            Language.FRENCH: "fr",
+            Language.ITALIAN: "it",
+            Language.ENGLISH: "en",
+        }
+        return mapping.get(result)
+    except ImportError:
+        pass
 
-    matches = sum([b2b, b2c, b2g])
-    if matches == 0:
+    # Fall back to langdetect
+    try:
+        from langdetect import detect, LangDetectException
+        lang = detect(text)
+        # Normalise: keep only the base code (e.g. "de" from "de-AT")
+        base = lang.split("-")[0].lower() if lang else None
+        if base in ("de", "fr", "it", "en"):
+            return base
         return None
-    if matches > 1:
-        return "mixed"
-    if b2b:
-        return "b2b"
-    if b2c:
-        return "b2c"
-    return "b2g"
+    except Exception:  # noqa: BLE001
+        return None
 
 
-def _run_business_model_batch(db: Session, companies: list, stats: dict) -> None:
+def _run_language_batch(db: Session, companies: list, stats: dict) -> None:
     from app.models.company import Company as CompanyModel
 
     mappings = []
     for company in companies:
-        if company.business_model is not None:
+        if company.purpose_language is not None:
             continue
-        model = detect_business_model(company.name, company.purpose)
-        if model:
-            mappings.append({"id": company.id, "business_model": model})
-            stats["business_model_set"] += 1
+        lang = _detect_language(company.purpose or "")
+        if lang:
+            mappings.append({"id": company.id, "purpose_language": lang})
+            stats["language_detected"] += 1
 
         if len(mappings) >= _WRITE_BATCH:
             db.bulk_update_mappings(CompanyModel, mappings)
@@ -198,19 +189,17 @@ def _run_business_model_batch(db: Session, companies: list, stats: dict) -> None
         db.commit()
 
 
-# ── Backfill: classify all unclassified companies ─────────────────────────────
-
 def backfill_unclassified(
     db: Session,
     *,
     batch_size: int = 500,
     run_noga: bool = True,
     run_clusters: bool = True,
-    run_business_model: bool = True,
+    run_language: bool = True,
     limit: int | None = None,
     progress_cb=None,
 ) -> dict[str, Any]:
-    """Classify all companies that are missing NOGA, clusters, or business_model.
+    """Classify all companies that are missing NOGA, clusters, or language.
 
     Used for one-time backfill after upgrading the classification pipeline.
     """
@@ -222,8 +211,8 @@ def backfill_unclassified(
         filters.append(Company.noga_code.is_(None))
     if run_clusters:
         filters.append(Company.tfidf_cluster.is_(None))
-    if run_business_model:
-        filters.append(Company.business_model.is_(None))
+    if run_language:
+        filters.append(Company.purpose_language.is_(None))
 
     if not filters:
         return {"total": 0}
@@ -248,7 +237,7 @@ def backfill_unclassified(
             batch,
             run_noga=run_noga,
             run_clusters=run_clusters,
-            run_business_model=run_business_model,
+            run_language=run_language,
         )
         for k, v in result.items():
             if k == "total":

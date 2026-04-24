@@ -10,7 +10,6 @@ General fixes, recovery procedures, and operational checklists.
 2. [Database: Point-in-Time Recovery (PITR)](#2-database-point-in-time-recovery-pitr)
 3. [Database: Verify Backups Are Actually Running](#3-database-verify-backups-are-actually-running)
 4. [Jobs: Stuck in `running` State](#4-jobs-stuck-in-running-state)
-4b. [ML Jobs: HDBSCAN Clustering Timeout (AbandonedJobError)](#4b-ml-jobs-hdbscan-clustering-timeout-abandonedjobeerror)
 5. [Auth: Tokens Rejected After Redeploy](#5-auth-tokens-rejected-after-redeploy)
 6. [Email: Verification Not Sending](#6-email-verification-not-sending)
 7. [Google Search: Quota Exhausted](#7-google-search-quota-exhausted)
@@ -364,87 +363,6 @@ curl -s -X PATCH -H "Authorization: Bearer <token>" \
   -d '{"google_daily_quota": "500"}' \
   https://helvex.dicy.ch/api/v1/settings
 ```
-
----
-
-## 4b. ML Jobs: HDBSCAN Clustering Timeout (AbandonedJobError)
-
-**Symptom:** HDBSCAN clustering job hangs for ~1 hour then fails with `AbandonedJobError`. Logs show lemmatization + TF-IDF + SVD completed, but clustering never started:
-
-```
-2026-04-07 19:51:40,333 INFO app.services.cluster_pipeline — [4/7] SVD done in 24.7s — shape: (763041, 50)
-<silence for ~1 hour>
-[Job marked AbandonedJobError by RQ worker timeout or pod OOMKilled]
-```
-
-**Root Cause:** HDBSCAN computes O(n²) pairwise distances to build a minimum spanning tree. With **763K companies**, this requires:
-- Distance matrix: 763K × 763K × 4 bytes (float32) = **2.3 TB**
-- Pod memory limit: **16 GB**
-- Result: **OOM kill** during `fit_predict()`
-
-**Solutions (in priority order):**
-
-### 1. Use K-Means instead (Recommended)
-K-Means clustering already works perfectly and has **no size constraints**. It's much faster and more scalable:
-
-```bash
-# Instead of:
-curl -X POST https://helvex.dicy.ch/api/v1/jobs/scoring/hdbscan
-
-# Use:
-curl -X POST https://helvex.dicy.ch/api/v1/jobs/scoring/tfidf_kmeans_cluster
-```
-
-K-Means performs equally well (150 clusters, soft multi-label assignment + labeling) and produces identical downstream results.
-
-### 2. Batch the dataset (if HDBSCAN required)
-Run HDBSCAN on smaller subsets:
-
-```bash
-# Cluster companies by canton (26 batches, ~28K each)
-for canton in ZH BE LU UR SZ GL ZG FR SO BL BS SH AR AI SG GR AG TG TI VD VS NE GE JU; do
-  curl -X POST https://helvex.dicy.ch/api/v1/jobs/scoring/hdbscan \
-    -d "{\"canton\": \"$canton\"}"
-done
-```
-
-Each batched clustering is fast (~3 min) and fits in memory easily.
-
-### 3. Reduce dataset size
-```bash
-curl -X POST https://helvex.dicy.ch/api/v1/jobs/scoring/hdbscan \
-  -d '{"limit": 100000}'
-```
-
-### 4. Increase pod memory (Expensive, temporary)
-Edit `infra/environments/prod.yaml`:
-```yaml
-mlWorker:
-  resources:
-    limits:
-      memory: 64Gi  # was 16Gi (expensive on Hetzner)
-```
-
-Then retry HDBSCAN. **Cost impact:** 4× memory = ~4× cost increase.
-
-### 5. Build a HDBSCAN alternative for large datasets
-- Implement **approximate HDBSCAN** (sample-based distance matrix)
-- Or fallback to **DBSCAN** (simpler but still O(n²), more memory-efficient implementation)
-- **Not recommended** — K-Means already solves the problem better.
-
-### Monitoring
-HDBSCAN startup now logs memory estimates. Watch ml-worker logs during retry:
-```bash
-kubectl logs -n helvex-prod deploy/helvex-ml-worker -f | grep -i "hdbscan\|distance memory"
-```
-
-If you see:
-```
-HDBSCAN clustering.fit_predict() will need ~2300 GB for distance matrix (n=763041). 
-Pod limit is 16GB; this may cause OOM or timeout.
-```
-
-**→ Stop the job and switch to K-Means or batch by canton.**
 
 ---
 
@@ -1270,23 +1188,22 @@ Expected:
 
 ## 16. ML Pipeline: Clustering, Keywords, and NOGA
 
-Four complementary ML pipelines enrich company data. They share the same text preprocessing stack; only the clustering step differs.
+Three complementary ML pipelines enrich company data. They share the same text preprocessing stack.
 
 ### Correct execution order
 
 ```
-recompute_keywords            ← extract purpose_keywords from raw purpose text
+recompute_keywords       ← extract purpose_keywords from raw purpose text
        ↓
-semantic_kmeans_cluster       ← RECOMMENDED: cluster by meaning, not vocabulary
-  or tfidf_kmeans_cluster     ← TF-IDF baseline (use_keywords=True, fast)
-  or hdbscan_cluster          ← exploration / calibration on small subsets only
-  or birch_cluster            ← full corpus, memory-efficient, single-label
+tfidf_kmeans_cluster     ← TF-IDF K-Means (n_clusters=50, use_keywords=True)
+       ↓ (auto-triggers)
+discover_stopwords       ← 4-phase boilerplate/stopword discovery
        ↓
-reclassify_noga               ← needs keywords + cluster labels for best accuracy
+reclassify_noga          ← needs keywords + cluster labels for best accuracy
        ↓
-claude_classify               ← AI scoring (needs org API key)
+claude_classify          ← AI scoring (needs org API key)
        ↓
-recalculate_scores            ← recompute combined_score
+recalculate_scores       ← recompute combined_score (new formula: AI×0.60 + NOGA×0.25 + keywords×0.15)
 ```
 
 NOGA uses `purpose_keywords` and `tfidf_cluster` as input signals. Running it before clustering degrades accuracy.
@@ -1299,11 +1216,9 @@ NOGA uses `purpose_keywords` and `tfidf_cluster` as input signals. Running it be
 |---|---|---|---|
 | `recompute_keywords` | **Fit new TF-IDF** on full corpus + extract keywords. No S3 needed. Uploads new vectorizer. | ~20 min | Writes vectorizer |
 | `reextract_keywords` | Extract keywords using **frozen S3 vectorizer** (no refit). Consistent IDF with existing corpus. | ~3–5 min | Reads + requires vectorizer |
-| `semantic_kmeans_cluster` | **Semantic K-Means** — embeds purpose_keywords with sentence-transformers, K-Means in embedding space. Most coherent clusters. | ~35–50 min | Writes vectorizer + SVD + centroids |
-| `tfidf_kmeans_cluster` | TF-IDF K-Means clustering, multi-label soft assignment. Fast, vocabulary-based. | ~25 min | Writes vectorizer + SVD + centroids |
-| `hdbscan_cluster` | HDBSCAN density clustering (sample only recommended) | ~40 min batch-merge; OOM if single-pass >50K | Writes vectorizer + SVD + centroids |
-| `birch_cluster` | BIRCH clustering, single-label, memory-efficient | ~20 min | Writes vectorizer + SVD + centroids |
-| `reclassify_noga` | NOGA taxonomy + embedding classification | ~10–30 min | Reads NOGA embeddings |
+| `tfidf_kmeans_cluster` | TF-IDF K-Means clustering, multi-label soft assignment. 50 clusters (default). | ~25 min | Writes vectorizer + SVD + centroids |
+| `discover_stopwords` | 4-phase boilerplate/stopword discovery (IDF analysis, sentence dedup, cross-cluster staging, optional Claude review). Auto-triggered after each clustering run. | ~5 min + optional Claude call | — |
+| `reclassify_noga` | NOGA taxonomy + 2-stage embedding classification (section vote → within-section re-rank). Confidence threshold ≥ 0.50. | ~10–30 min | Reads NOGA embeddings |
 | `cluster_analysis` | Write cross-cluster stopword candidates to file | ~1 min | — |
 
 ---
@@ -1317,132 +1232,39 @@ Body: {}
 ```
 Writes `purpose_keywords` (comma-separated domain terms) for every company with a `purpose` text. Takes ~20 min for 700K.
 
-**Step 2 — Cluster (Semantic K-Means recommended)**
+**Step 2 — Cluster (TF-IDF K-Means)**
 ```bash
-POST /api/v1/scoring/semantic-cluster
+POST /api/v1/jobs/enqueue/tfidf-cluster
 Body: {
-  "n_clusters": 150
-}
-```
-Embeds each company's `purpose_keywords` using `paraphrase-multilingual-MiniLM-L12-v2` and clusters in semantic space. Companies with the same business activity land in the same cluster even if they use different words. Takes ~35–50 min for 700K.
-
-**TF-IDF K-Means fallback** (faster, vocabulary-based):
-```bash
-POST /api/v1/scoring/cluster
-Body: {
-  "n_clusters": 150,
+  "n_clusters": 50,
   "use_keywords": true
 }
 ```
-`use_keywords=true` (default) uses the extracted keywords from Step 1 instead of raw purpose text — cleaner than raw purpose because boilerplate is already stripped. Takes ~25 min.
+`use_keywords=true` (default) uses the extracted keywords from Step 1 instead of raw purpose text — cleaner because boilerplate is already stripped. Takes ~25 min for 700K. After completion, `discover_stopwords` is automatically enqueued to mine the fitted vectorizer for boilerplate candidates.
 
-After clustering, check the cluster_analysis output (`app/static/cluster_analysis.txt`) for stopword candidates.
+After clustering, check the cluster_analysis output (`app/static/cluster_analysis.txt`) for additional stopword candidates.
 
 **Step 3 — NOGA classification**
 ```bash
 POST /api/v1/jobs/enqueue/reclassify-noga
 Body: {}
 ```
-Maps each company to Swiss NOGA industry code using a hybrid embedding + token match. Uses `purpose_keywords` and `tfidf_cluster` as input. Takes ~10–30 min depending on whether S3 NOGA embeddings are built (see §4b-NOGA below).
+Maps each company to Swiss NOGA industry code using a 2-stage embedding approach: first votes on the NOGA section letter (A–U) from top-K candidates, then re-ranks within the winning section. Confidence threshold ≥ 0.50 — companies below threshold get no NOGA code rather than a low-quality assignment. Takes ~10–30 min depending on whether S3 NOGA embeddings are built (see §4b-NOGA below).
 
 ---
 
-### Choosing a Clustering Algorithm
+### TF-IDF K-Means (`tfidf_kmeans_cluster`)
 
-#### Semantic K-Means (`semantic_kmeans_cluster`) — **recommended for best cluster quality**
-
-**Use when:** You want coherent, meaningful clusters where companies with the same business purpose group together regardless of vocabulary. This is the preferred method.
-
-**Key properties:**
-- Embeds `purpose_keywords` with a multilingual sentence-transformer model (384-dim vectors)
-- Clusters in semantic space — synonymous terms are treated as similar, not different
-- Multi-label soft assignment: each company gets 1–3 clusters
-- Labels are still generated via c-TF-IDF for readability
-- Requires `purpose_keywords` to be populated — run `recompute_keywords` first
-- ~35–50 min for 700K companies (embedding is the bottleneck)
-
-```bash
-POST /api/v1/scoring/semantic-cluster
-Body: {
-  "n_clusters": 150,
-  "max_clusters_per_company": 3,
-  "min_similarity": 0.20
-}
-```
-
----
-
-#### K-Means (`tfidf_kmeans_cluster`) — **fast vocabulary-based baseline**
-
-**Use when:** Full corpus, all companies should be assigned, multi-label matters (one company in 2–3 relevant clusters).
-
-**Key properties:**
-- You specify `n_clusters` (target: 100–180 for Swiss corpus)
+**Properties:**
+- Default `n_clusters=50` — targeted at a clean, non-fragmented cluster set for the Swiss corpus
 - Soft multi-label: each company gets 1–3 clusters via cosine similarity threshold
 - All companies assigned (except those filtered by `min_cluster_specificity`)
+- After labeling, near-duplicate cluster labels (cosine similarity > 0.88) are merged
 - Uploads S3 artifacts → incremental assignment for new companies works automatically
 
 **Tuning `n_clusters`:**
-- Too few (< 80): Over-broad clusters ("IT Dienstleistungen" absorbs everything tech)
-- Too many (> 250): Fragmented near-duplicate clusters; UI clutter
-- **Calibration tip:** Run HDBSCAN on a 30K sample first (`limit=30000`), note how many natural clusters it discovers, use that as your K-Means `n_clusters`
-
-#### HDBSCAN (`hdbscan_cluster`) — **exploration and calibration only**
-
-**Use when:** Discovering natural cluster structure; calibrating K-Means `n_clusters`; high-quality clustering on a bounded subset (e.g. one canton or industry).
-
-**Do NOT use** for full corpus (single-pass requires O(n²) memory — 700K → ~2.3 TB, instant OOM).
-
-```bash
-POST /api/v1/jobs/enqueue/hdbscan-cluster
-Body: {
-  "limit": 30000,                   # ← REQUIRED: keep well below 50K
-  "use_keywords": true,
-  "min_cluster_size": 30,
-  "cluster_selection_epsilon": 0.0,
-  "use_batch_merge": false
-}
-```
-
-**Why HDBSCAN gives "messy" results on purpose text / keywords:**
-Swiss company purposes are formulaic legal text. Even after keyword extraction, the vector space is diffuse — companies don't form tight dense blobs. HDBSCAN marks these diffuse points as noise (label −1 → NULL cluster), which is correct but unhelpful if you need every company assigned. A noise rate of 20–40% is normal. K-Means forces an assignment regardless of density and then filters low-quality clusters separately — this is usually the better tradeoff for this corpus.
-
-**Full-corpus HDBSCAN via batch-merge:**
-```bash
-Body: {
-  "use_batch_merge": true,    # processes 100K-company batches, merges centroids
-  "min_cluster_size": 30
-}
-```
-This avoids OOM but loses global density estimation. Quality is similar to K-Means with more NULLs. Not recommended unless you specifically need density-based clustering on the full corpus.
-
-**Interpreting HDBSCAN results:**
-- `stats.n_clusters`: natural cluster count found (use as K-Means target)
-- `stats.noise`: companies with no cluster (expected: 20–40%)
-- High noise rate → lower `min_cluster_size` or use K-Means instead
-- Low cluster count → lower `min_cluster_size` or `cluster_selection_epsilon > 0`
-
-#### BIRCH (`birch_cluster`) — **fast full-corpus alternative**
-
-**Use when:** Full corpus, memory-constrained, single-label is acceptable, speed matters.
-
-```bash
-POST /api/v1/jobs/enqueue/birch-cluster
-Body: {
-  "n_clusters": 150,
-  "use_keywords": true
-}
-```
-
-**Properties:**
-- O(n) memory — runs comfortably on full corpus with 16 GB pod
-- Single pass (no iteration) — faster than K-Means
-- Hard single-label assignment — each company gets exactly one cluster
-- No soft multi-label — if multi-label matters (user filtering by cluster), use K-Means
-
-**When NOT to use BIRCH:**
-- When users need to find companies across multiple related clusters (multi-label K-Means is better)
-- When cluster quality matters more than speed
+- Too few (< 30): Over-broad clusters
+- Too many (> 80): Fragmented near-duplicate clusters; UI clutter
 
 ---
 
@@ -1451,8 +1273,7 @@ Body: {
 **After large import batches (100K+ new companies):**
 ```
 recompute_keywords        (all companies, ~20 min)
-semantic_kmeans_cluster   (recommended — embeds keywords, ~35–50 min)
-  or tfidf_kmeans_cluster (faster fallback, use_keywords=True, ~25 min)
+tfidf_kmeans_cluster      (use_keywords=True, ~25 min) → triggers discover_stopwords
 reclassify_noga           (all companies)
 ```
 
@@ -1460,6 +1281,7 @@ reclassify_noga           (all companies)
 No action needed. The `initial` detail-fetch job automatically:
 1. Extracts keywords for new companies using S3-cached vectorizer
 2. Assigns the nearest cluster using S3-cached centroids
+3. Detects `purpose_language` (DE/FR/IT/EN) via lingua/langdetect
 
 Only re-run full pipeline when S3 artifacts are stale (corpus has shifted significantly).
 
@@ -1479,29 +1301,30 @@ POST /api/v1/jobs/enqueue/cluster-analysis
 ```
 Output: `app/static/cluster_analysis.txt` — terms appearing across many cluster labels.
 
-**2. Identify stopword candidates**
-Terms appearing in 5+ cluster labels are candidates (e.g. "dienstleistung", "handel", "beratung"). These inflate cluster labels with generic terms.
+**2. Automated boilerplate discovery** (auto-triggered after every clustering run)
+The `discover_stopwords` job runs 4 phases:
+- **Phase 1 (IDF analysis):** Terms with IDF < 0.92 (appearing in >40% of docs) staged as stopword candidates in `tfidf_stopwords` with `enabled=False`.
+- **Phase 2 (sentence dedup):** Sentences appearing in >300 companies are staged as boilerplate patterns (`enabled=False`). Works across all languages.
+- **Phase 3 (cross-cluster staging):** Terms in labels of >60% of clusters are staged.
+- **Phase 4 (optional Claude review):** `POST /api/v1/jobs/enqueue/discover-stopwords` with `{"use_ai": true}` sends top candidates to Claude Haiku, which classifies them per language and auto-promotes `always_boilerplate` ones immediately.
 
-**3. Add to DB stopwords** (Admin → Settings → TF-IDF Stopwords):
+Approved patterns (`enabled=True`) take effect on the next clustering run automatically via `_strip_purpose_boilerplate()`.
+
+**3. Add to DB stopwords manually** (Admin → Settings → TF-IDF Stopwords):
 ```
 POST /api/v1/settings
 Body: {"key": "tfidf_stopwords", "value": "beratung\nhandel\ndienstleistung"}
 ```
 
-**4. Add boilerplate patterns** for recurring legal sentence templates that appear in keywords (Admin → Boilerplate Settings).
-
-**5. Re-run** `recompute_keywords` + `semantic_kmeans_cluster` (or `tfidf_kmeans_cluster`) to apply changes.
+**4. Re-run** `recompute_keywords` + `tfidf_kmeans_cluster` to apply changes.
 
 **Common symptoms and fixes:**
 
 | Symptom | Cause | Fix |
 |---|---|---|
-| All clusters labelled "verwaltung gesellschaft holding" | Boilerplate not stripped | Add boilerplate patterns; add terms to stopwords |
-| Many similar-sounding duplicate clusters | `n_clusters` too high | Reduce to 100–120 |
+| All clusters labelled "verwaltung gesellschaft holding" | Boilerplate not stripped | Run `discover_stopwords --use_ai`; add patterns manually |
+| Many similar-sounding duplicate clusters | `n_clusters` too high | Reduce below 50 |
 | One giant cluster containing everything | `n_clusters` too low | Increase; or increase TF-IDF `min_df` |
-| Clusters feel disjointed / vocabulary mismatch | TF-IDF grouping by word, not meaning | Switch to `semantic_kmeans_cluster` |
-| Semantic clustering too slow | Embedding 700K docs is the bottleneck | Reduce `embedding_batch_size`; run on GPU pod |
-| >40% companies have NULL cluster (HDBSCAN) | Too-sparse vector space / `min_cluster_size` too high | Lower `min_cluster_size`; or switch to K-Means |
 | `purpose_keywords` contains "bezweckt", "insbesondere" | Missing stopwords | Run cluster_analysis, add candidates |
 
 ---
@@ -1525,17 +1348,6 @@ curl -X PATCH https://helvex.dicy.ch/api/v1/clusters/registry/42 \
 ```
 
 **Note:** Rename updates company rows with a `LIKE %old_name%` query. For very large datasets (>100K matching companies) this may take a few seconds. Always rename in the UI or via API, never directly in the database.
-
----
-
-### Cluster Drift Check (auto-triggered)
-
-After every `shab_daily` or `shab_backfill` job, a `cluster_drift_check` job is automatically enqueued. It checks what fraction of companies created in the last 7 days have no cluster assignment. If > 30% are unclassified, it logs a warning.
-
-**What to do when drift is detected:**
-1. Check if `purpose_keywords` are populated for new companies (`recompute_keywords` or incremental from S3 artifacts)
-2. Check if S3 artifacts are current — if the model is stale, new companies can't be assigned incrementally
-3. Re-run `semantic_kmeans_cluster` or `tfidf_kmeans_cluster` to rebuild and re-assign everything
 
 ---
 
@@ -1598,40 +1410,27 @@ TF-IDF IDF scores are corpus-relative: a term's importance is measured against a
 
 1. Load companies + preprocess (same as keywords)
 2. TF-IDF + SVD (50 components) + L2 normalise
-3. MiniBatchKMeans (default 150 clusters)
+3. MiniBatchKMeans (default 50 clusters)
 4. c-TF-IDF cluster labeling with bigram deduplication
-5. Quality filter: suppress clusters with low mean IDF of top terms
-6. Cluster registry: match labels to canonical names (Jaccard similarity) for label stability across runs
-7. Soft multi-label assignment: cosine similarity to each centroid, assign top-3 above threshold
-8. Extract per-company keywords (unless `use_keywords=True`, which preserves existing keywords)
-9. Write `tfidf_cluster` + `purpose_keywords` to DB
-10. Upload artifacts to S3
-
-#### `hdbscan_cluster`
-
-Same as K-Means through step 2 (TF-IDF + SVD), then:
-3. HDBSCAN (`min_cluster_size`, `min_samples`, `cluster_selection_epsilon`)
-4–10. Same labeling, registry, keyword extraction, DB write, S3 upload
-
-Noise points (label −1) get `tfidf_cluster = NULL`.
-
-#### `birch_cluster`
-
-Same as K-Means through step 2, then:
-3. BIRCH single-pass CF-tree (`n_clusters`, `branching_factor=50`)
-4–10. Same labeling, registry, keyword extraction, DB write, S3 upload
-
-Hard single-label: each company gets exactly one cluster.
+5. Merge near-duplicate cluster labels (cosine similarity > 0.88)
+6. Quality filter: suppress clusters with low mean IDF of top terms
+7. Cluster registry: match labels to canonical names (Jaccard similarity) for label stability across runs
+8. Soft multi-label assignment: cosine similarity to each centroid, assign top-3 above threshold
+9. Extract per-company keywords (unless `use_keywords=True`, which preserves existing keywords)
+10. Write `tfidf_cluster` + `purpose_keywords` to DB
+11. Upload artifacts to S3
+12. Auto-enqueue `discover_stopwords` job
 
 #### `reclassify_noga`
 
 1. Load NOGA taxonomy from repo-resident JSON
 2. Load S3 NOGA embeddings (float32, shape N_codes × 384)
-3. For each company: token-match name + purpose + keywords against all NOGA descriptions
-4. Embed `purpose_keywords` with `paraphrase-multilingual-MiniLM-L12-v2`
-5. Re-rank top-50 token candidates by embedding cosine (final = 60% embedding + 40% token)
-6. Walk NOGA hierarchy to build full path
-7. Write `noga_code`, `noga_label`, `noga_level`, `noga_confidence`, `noga_path` to DB
+3. For each company: embed `purpose_keywords` with `paraphrase-multilingual-MiniLM-L12-v2`
+4. **Stage 1:** Score all NOGA codes, group top-K candidates by section letter (A–U), pick the section with most votes
+5. **Stage 2:** Re-rank only the codes within the winning section by embedding cosine similarity
+6. Skip classification if best confidence < 0.50 (avoids low-quality code assignment)
+7. Walk NOGA hierarchy to build full path
+8. Write `noga_code`, `noga_label`, `noga_level`, `noga_confidence`, `noga_path` to DB
 
 ---
 
@@ -2011,60 +1810,49 @@ This affects **all** transactional emails for the org: low-credit alerts, export
 
 ---
 
-## 22. Boilerplate Candidate Maintenance
+## 22. Boilerplate & Stopword Maintenance
 
-The auto-mining pipeline (`mine_boilerplate_entropy`) runs after every clustering job and writes candidates to `boilerplate_candidates`. High-confidence ones are auto-promoted; the rest queue for review.
+Boilerplate and stopword discovery runs automatically via the `discover_stopwords` job (4-phase pipeline, auto-triggered after every `tfidf_kmeans_cluster` run). It populates the `boilerplate_patterns` and `tfidf_stopwords` DB tables with `enabled=False` for review, and auto-promotes high-confidence patterns.
 
-### Weekly: Review pending candidates
+### Review pending candidates
 
 ```sql
--- Candidates waiting for review (confidence 0.70-0.89)
-SELECT term, confidence, doc_frequency, cluster_entropy, source_type
-FROM boilerplate_candidates
-WHERE promoted = false AND confidence >= 0.70
-ORDER BY confidence DESC
+-- Boilerplate patterns staged but not yet approved
+SELECT pattern, description, active FROM boilerplate_patterns
+WHERE active = false
+ORDER BY id DESC
 LIMIT 50;
 
--- What was auto-promoted this week
-SELECT term, confidence, source_type, updated_at
-FROM boilerplate_candidates
-WHERE promoted = true AND updated_at > now() - interval '7 days'
-ORDER BY confidence DESC;
+-- Staged TF-IDF stopwords not yet approved
+SELECT value, description, active FROM tfidf_stopwords
+WHERE active = false
+ORDER BY id DESC
+LIMIT 50;
 ```
 
-To manually promote a candidate:
-```python
-from app.database import SessionLocal
-from app.models.boilerplate_candidate import BoilerplateCandidate
-from app.crud.boilerplate import promote_boilerplate_candidate
-
-db = SessionLocal()
-c = db.query(BoilerplateCandidate).filter_by(term="die gesellschaft bezweckt").first()
-promote_boilerplate_candidate(db, c)
-db.commit()
-db.close()
+To approve a staged pattern (enables it for the next pipeline run):
+```sql
+UPDATE boilerplate_patterns SET active = true WHERE id = <id>;
+UPDATE tfidf_stopwords SET active = true WHERE id = <id>;
 ```
 
-### Quarterly: LLM seeding run
+Or use the Admin UI: **Admin → Boilerplate Settings** / **Admin → Settings → TF-IDF Stopwords**.
 
-Send ambiguous candidates to Claude for BOILERPLATE/SIGNAL/AMBIGUOUS classification:
+### Trigger Claude-assisted review pass
 
 ```bash
-# Dry-run to see what would be sent (no API calls made)
-python scripts/seed_boilerplate_llm.py --dry-run --limit 50
-
-# Real run (requires ANTHROPIC_API_KEY)
-ANTHROPIC_API_KEY=<key> python scripts/seed_boilerplate_llm.py --limit 500
+POST /api/v1/jobs/enqueue/discover-stopwords
+Body: {"use_ai": true}
 ```
 
-Results are written with `source_type='llm_seeded'`. Candidates labelled `BOILERPLATE` with `confidence >= 0.85` are auto-promoted to active patterns. After the script runs, invalidate the boilerplate cache and re-run keyword extraction to pick up new patterns.
+This runs all 4 phases including a single Claude Haiku call. Claude groups candidates by language and classifies each as `always_boilerplate` / `sometimes_meaningful` / `keep_as_signal`. `always_boilerplate` ones are immediately activated (`enabled=True`). Requires `ANTHROPIC_API_KEY` configured in org settings.
 
 ### After adding new patterns: refresh keywords
 
 ```bash
 POST /api/v1/scoring/recompute-keywords
 # Then re-cluster:
-POST /api/v1/scoring/semantic-cluster   # or tfidf-cluster
+POST /api/v1/jobs/enqueue/tfidf-cluster
 ```
 
 ---

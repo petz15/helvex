@@ -1,9 +1,14 @@
 import { fetchCantons, fetchStats, fetchTaxonomy } from "@/lib/api";
-import { ExplorerClient } from "./explorer-client";
+import ExplorerClient from "./explorer-client";
 
 export const dynamic = "force-dynamic";
 
-export default async function ExplorerPage() {
+export default async function ExplorerPage({
+  params,
+}: {
+  params: Promise<{ locale: string }>;
+}) {
+  const { locale } = await params;
   const [cantons, stats, taxonomy] = await Promise.all([
     fetchCantons().catch(() => [] as string[]),
     fetchStats().catch(() => ({
@@ -13,5 +18,5 @@ export default async function ExplorerPage() {
     fetchTaxonomy().catch(() => ({} as Record<string, [string, number][]>)),
   ]);
 
-  return <ExplorerClient initialCantons={cantons} initialStats={stats} initialTaxonomy={taxonomy} />;
+  return <ExplorerClient initialCantons={cantons} initialStats={stats} initialTaxonomy={taxonomy} locale={locale} />;
 }

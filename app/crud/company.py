@@ -133,7 +133,7 @@ def _apply_filters(query, *, name_filter, uid_filter=None, canton, review_status
                    zefix_status=None, has_website=None,
                    legal_form=None, registered_after=None, registered_before=None,
                    sogc_after=None, sogc_before=None, shab_type=None,
-                   business_model=None):
+                   business_model=None, purpose_language=None):
     if zefix_status:
         query = query.filter(Company.status == zefix_status)
     if has_website is True:
@@ -148,6 +148,8 @@ def _apply_filters(query, *, name_filter, uid_filter=None, canton, review_status
         else:
             terms = [t.strip() for t in business_model.split(",") if t.strip()]
             query = query.filter(Company.business_model.in_(terms))
+    if purpose_language:
+        query = query.filter(Company.purpose_language == purpose_language)
     # registered_after/before filter by first_sogc_date (earliest SOGC appearance)
     if registered_after:
         query = query.filter(Company.first_sogc_date >= registered_after)
@@ -382,6 +384,7 @@ def list_companies(
     sogc_before: str | None = None,
     shab_type: str | None = None,
     business_model: str | None = None,
+    purpose_language: str | None = None,
     # kept for backward-compat with collection.py batch query
     limit: int | None = None,
     skip: int = 0,
@@ -429,6 +432,7 @@ def list_companies(
         sogc_before=sogc_before,
         shab_type=shab_type,
         business_model=business_model,
+        purpose_language=purpose_language,
     )
 
     if sort in ("combined_score", "-combined_score"):
@@ -500,6 +504,7 @@ def count_companies(
     sogc_before: str | None = None,
     shab_type: str | None = None,
     business_model: str | None = None,
+    purpose_language: str | None = None,
 ) -> int:
     query = db.query(Company)
     query = _apply_filters(
@@ -544,6 +549,7 @@ def count_companies(
         sogc_before=sogc_before,
         shab_type=shab_type,
         business_model=business_model,
+        purpose_language=purpose_language,
     )
     return query.count()
 

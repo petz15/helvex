@@ -557,6 +557,23 @@ export async function fetchCategoryStats(
   return res.json();
 }
 
+export interface MarketSegment {
+  section: string;
+  labels: Record<string, string>;
+  company_count: number;
+  avg_relevance: number | null;
+  top_keywords: string[];
+  canton_top: string | null;
+  canton_pct: number;
+  growth_recent: number;
+}
+
+export async function fetchMarketSegments(): Promise<MarketSegment[]> {
+  const res = await fetch("/api/v1/companies/market-segments", { credentials: "include" });
+  if (!res.ok) throw new Error("Failed to fetch market segments");
+  return res.json();
+}
+
 export async function enqueueGenericJob(
   endpoint: string,
   params: Record<string, unknown> = {},
