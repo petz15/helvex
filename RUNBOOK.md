@@ -1859,7 +1859,7 @@ POST /api/v1/jobs/enqueue/tfidf-cluster
 
 ## 23. New Company Classification (Incremental)
 
-New companies added via Zefix daily SHAB import are classified automatically by `enrich_company()` in `collection.py`. This covers cluster assignment and business model detection.
+New companies added via Zefix daily SHAB import are classified automatically by `enrich_company()` in `collection.py`. This covers cluster assignment and language detection.
 
 NOGA classification for new companies runs via the batch `reclassify_noga` job (not inline) because it depends on cluster labels being set first.
 
@@ -1895,7 +1895,6 @@ stats = backfill_unclassified(
     batch_size=500,
     run_noga=True,
     run_clusters=True,
-    run_business_model=True,
 )
 print(stats)
 db.close()

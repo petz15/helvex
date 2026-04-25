@@ -9,7 +9,6 @@ import { createNote, deleteNote, fetchCompany, runCompanyWebSearch, selectCompan
 import type { Company, Note, GoogleScoredResult } from "@/lib/types";
 import "leaflet/dist/leaflet.css";
 import { SogcTimeline, SignersPanel } from "@/components/sogc-history";
-import { BaloghAdCard } from "@/components/balogh-ad-card";
 import { useI18n } from "@/i18n/context";
 
 interface Props {
@@ -219,12 +218,6 @@ export function CompanyDetailClient({ company: initial, readOnlyDemo = false }: 
 
   return (
     <div className="flex w-full px-4 py-6 gap-4">
-      {/* Left ad column */}
-      <div className="hidden xl:flex flex-col items-center w-108 shrink-0 pt-10">
-        <div className="sticky top-6">
-          <BaloghAdCard className="w-108" />
-        </div>
-      </div>
 
       {/* Main content */}
       <div className="flex-1 min-w-0 max-w-5xl mx-auto space-y-6">
@@ -615,18 +608,8 @@ export function CompanyDetailClient({ company: initial, readOnlyDemo = false }: 
         </div>
       </div>}
 
-      {/* Ad card — mobile/tablet only (xl shows side columns) */}
-      <div className="mt-6 xl:hidden">
-        <BaloghAdCard />
-      </div>
     </div>
 
-      {/* Right ad column */}
-      <div className="hidden xl:flex flex-col items-center w-108 shrink-0 pt-10">
-        <div className="sticky top-6">
-          <BaloghAdCard className="w-108" />
-        </div>
-      </div>
-    </div>
+  </div>
   );
 }

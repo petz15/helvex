@@ -754,11 +754,13 @@ Computed when a Google Search result is found.
 Returned directly by Claude API. User provides the scoring rubric via system prompt.
 
 ### Combined Score (UI display)
-- Weighted average: Claude 70% · Google 20% · Zefix 10%
-- Components that haven't run yet are excluded; weights renormalised
+Computed by `compute_relevance_score()` in `scoring.py`:
+- `ai_score × 0.60 + noga_confidence×100 × 0.25 + keyword_density×100 × 0.15`
+- Components that haven't run yet are excluded; remaining weights are renormalised
+- `flex_score` and `web_score` remain stored as supplementary signals but do not affect the combined score
 
 ### Configuring scoring
-All weights and the keyword taxonomy are stored in `app_settings` and editable live via `PATCH /api/v1/settings` or the Settings UI panel.
+The keyword taxonomy (target clusters, target keywords, flex score weights) is stored in `app_settings` and editable live via `PATCH /api/v1/settings` or the Settings UI panel. The `combined_score` formula is fixed (not org-configurable).
 
 ### Classification Pipelines (Clustering, Keywords, NOGA)
 
@@ -768,16 +770,15 @@ All weights and the keyword taxonomy are stored in `app_settings` and editable l
 
 #### ML Pipeline Overview
 
-Four complementary ML pipelines enrich company data:
+Three complementary ML pipelines enrich company data:
 
 | Pipeline | Input | Output | When to run |
 |---|---|---|---|
 | **Keyword extraction** | `purpose` text | `purpose_keywords` per company | After initial import; incremental on new companies |
-| **Semantic clustering** | `purpose_keywords` (sentence embeddings) | `tfidf_cluster` per company | Preferred method — run after keywords |
-| **TF-IDF clustering** | `purpose` or `purpose_keywords` | `tfidf_cluster` per company | Faster fallback if semantic clustering is unavailable |
+| **TF-IDF K-Means clustering** | `purpose` or `purpose_keywords` | `tfidf_cluster` per company | Run after keywords; 50 clusters (default) |
 | **NOGA classification** | name + purpose + keywords + cluster | `noga_code`, `noga_path` | After keywords + clustering are done |
 
-**Correct execution order:** Keywords → Clustering → NOGA. NOGA uses `purpose_keywords` and `tfidf_cluster` as input signals; running it before clustering degrades accuracy.
+**Correct execution order:** Keywords → Clustering → NOGA → (auto) Discover Stopwords. NOGA uses `purpose_keywords` and `tfidf_cluster` as input signals; running it before clustering degrades accuracy.
 
 ---
 
@@ -787,9 +788,9 @@ The TF-IDF-based clustering pipelines share the same preprocessing stack:
 
 1. **Boilerplate stripping** — removes generic legal boilerplate sentences (e.g. "Die Gesellschaft bezweckt...") using configurable DB regex patterns. Prevents generic legal terms from dominating cluster labels.
 2. **Lemmatization** — spaCy `de_core_news_md` reduces words to their dictionary root. "betreibt" → "betreiben". Skipped when `use_keywords=True`.
-3. **Stopword filtering** — ~30 hardcoded German legal stopwords + DB `tfidf_stopwords` table. `cluster_analysis` job identifies candidates.
+3. **Stopword filtering** — DB `tfidf_stopwords` table (populated by `discover_stopwords` job and manual admin input). `cluster_analysis` job identifies candidates.
 4. **TF-IDF vectorization** — up to 15,000 features, unigrams + bigrams, `min_df=5`, `max_df=0.4`.
-5. **Dimensionality reduction** — TruncatedSVD 50 components + L2 normalisation. Required for HDBSCAN (density requires distances); improves K-Means stability.
+5. **Dimensionality reduction** — TruncatedSVD 50 components + L2 normalisation.
 
 **`use_keywords=True` mode:** Passes pre-stored `purpose_keywords` (comma → space) directly into TF-IDF, skipping spaCy. Faster (~20 min vs ~60 min for 700K), cleaner clusters because boilerplate is already stripped. Recommended for re-clustering after keywords are established. Falls back to raw `purpose` for companies where `purpose_keywords` is NULL.
 
@@ -821,105 +822,26 @@ IDF weights drift over time as the corpus grows. After a large import (50K+ new 
 
 ---
 
-#### Clustering Algorithm Comparison
+#### TF-IDF K-Means (`tfidf_kmeans_cluster`)
 
-Four algorithms are available. All write to the same `tfidf_cluster` column and share the same label pipeline downstream.
-
-| | **Semantic K-Means** (`semantic_kmeans_cluster`) | **TF-IDF K-Means** (`tfidf_kmeans_cluster`) | **HDBSCAN** (`hdbscan_cluster`) | **BIRCH** (`birch_cluster`) |
-|---|---|---|---|---|
-| **Function** | `run_semantic_pipeline()` | `run_pipeline()` | `run_hdbscan_pipeline()` / `run_batch_merge_hdbscan_pipeline()` | `run_birch_pipeline()` |
-| **Similarity measure** | Sentence-transformer embeddings (meaning) | TF-IDF bag-of-words (vocabulary) | TF-IDF bag-of-words | TF-IDF bag-of-words |
-| **k required?** | Yes — `n_clusters` (default 150) | Yes — `n_clusters` (default 150) | No — discovers automatically | Yes — `n_clusters` |
-| **Memory scaling** | O(n) after embedding | O(n·k) | O(n²) single-pass / O(n) batch-merge | O(n) single-pass CF-tree |
-| **Assignment type** | Soft multi-label (1–3 per company) | Soft multi-label (1–3 per company) | Hard single-label or NULL | Hard single-label |
-| **Noise handling** | None — every company assigned | None — every company assigned | Outliers → NULL | None — every company assigned |
-| **Speed (700K corpus)** | ~35–50 min (embedding bottleneck) | ~25 min | ~40 min batch-merge; OOM single-pass | ~20 min |
-| **Cluster coherence** | **Highest** — same meaning, different words | Good — same words, different meaning missed | Best when it works; many noise points on messy text | Slightly below TF-IDF K-Means |
-| **Requires** | `purpose_keywords` populated | None (raw purpose is acceptable) | None | None |
-| **Artifacts saved to S3** | vectorizer (TF-IDF for labels) + SVD + centroids | vectorizer + SVD + centroids | centroids computed as cluster means | centroids computed as cluster means |
-
----
-
-#### Semantic K-Means (`semantic_kmeans_cluster`) — **Recommended**
-
-**When to use:** Production pipeline. Produces the most coherent, intuitive clusters. Companies with similar business activities group together regardless of the words they use in their purpose text.
-
-**How it works:**
-1. Each company's `purpose_keywords` (comma-separated, pre-extracted) is joined and embedded with `paraphrase-multilingual-MiniLM-L12-v2` (384-dim multilingual sentence-transformer).
-2. Embeddings are reduced with TruncatedSVD (50 components) + L2 normalisation.
-3. MiniBatchKMeans clusters in the reduced embedding space.
-4. Cluster labels are generated via c-TF-IDF on the original keyword text (separate TF-IDF re-vectorization for readability — the clustering itself is in embedding space).
-5. Multi-label soft assignment (up to 3 clusters per company, cosine similarity threshold).
-6. `purpose_keywords` are preserved unchanged — this pipeline does not overwrite them.
-
-**Requirements:** `purpose_keywords` must be populated. Run `recompute_keywords` first.
-
-**Why it's better than TF-IDF clustering:**
-A "software development" company and a "Softwareentwicklung" company land in the same cluster even though neither keyword appears in the other's purpose. TF-IDF treats them as different; embeddings understand they are the same.
-
----
-
-#### TF-IDF K-Means (`tfidf_kmeans_cluster`) — **Fast fallback**
-
-**When to use:** Full corpus runs when semantic clustering is unavailable; quick iteration when retuning cluster count.
+The only supported clustering algorithm. All other algorithms (HDBSCAN, BIRCH, semantic K-Means) have been removed.
 
 **How it works:**
 - MiniBatchKMeans on the SVD-reduced space (50 dimensions)
+- Default `n_clusters=50` — targeted at a clean, non-fragmented cluster set; near-duplicate labels (cosine > 0.88) are merged post-labeling
 - Each company gets up to 3 clusters (`max_clusters_per_company=3`) via soft cosine similarity to centroids
-- Low-quality clusters (mean IDF of top terms below `min_cluster_specificity=0.3`) are suppressed; companies assigned only to those become NULL
+- Low-quality clusters (mean IDF of top terms below `min_cluster_specificity=0.3`) are suppressed
 - c-TF-IDF labels: top-5 terms per cluster with bigram deduplication
+- After the run, `discover_stopwords` is auto-enqueued to mine the fitted vectorizer
 
 **Best practice:**
-1. Run `recompute_keywords` (keyword-only job) first to populate `purpose_keywords`
-2. Then run K-Means with `use_keywords=True` — this gives cleaner, more domain-specific clusters because generic legal boilerplate is already absent from the keyword set
-3. After clustering, run `cluster_analysis` to identify stopword candidates from cross-cluster terms
+1. Run `recompute_keywords` first to populate `purpose_keywords`
+2. Then run K-Means with `use_keywords=True` — cleaner clusters since boilerplate is already absent
+3. `discover_stopwords` runs automatically after — no manual cluster_analysis needed
 
 **Parameters to tune:**
-- `n_clusters` (default 150): Swiss company corpus has broad industry coverage. 100–200 is the useful range. Too few → over-broad clusters ("IT dienstleistungen" merges software dev with IT support); too many → label fragmentation.
-- `min_similarity` (default 0.20): Cosine similarity threshold below which a company gets NULL instead of a cluster assignment. Lower → more assignments but noisier; higher → cleaner but more NULLs.
-
----
-
-#### HDBSCAN (`hdbscan_cluster`) — **Exploration / subset only**
-
-**When to use:** Discovering the natural cluster structure of a subset; calibrating the `n_clusters` parameter for K-Means; high-quality clusters on a bounded dataset (e.g. one canton, one industry).
-
-**Why HDBSCAN is "messy" on purpose keywords:**
-1. **High noise rate** — Purpose text (even after keyword extraction) still contains ambiguous companies. HDBSCAN assigns these to label −1 (NULL), which is correct but leaves many companies unclassified.
-2. **Variable cluster count** — With `min_cluster_size=30`, a 700K corpus can produce anywhere from 50 to 1000 clusters depending on density. Unpredictable for production.
-3. **O(n²) memory** — Single-pass HDBSCAN on 700K companies requires ~2.3 TB for the distance matrix. The pod has 16 GB. This is why `run_batch_merge_hdbscan_pipeline` exists.
-4. **Batch-merge quality loss** — The batch-merge variant (100K batches → hierarchical merge on centroids) avoids OOM but loses the global density estimation that makes HDBSCAN good. Results are similar to K-Means but with more NULLs.
-
-**Recommended usage:**
-- Set `limit=30000` to run on a representative sample — this fits in memory and takes ~3 min
-- Use results to understand how many natural clusters exist and how dense they are
-- Then configure K-Means `n_clusters` accordingly
-
-**Parameters:**
-- `min_cluster_size` (default 30): Minimum companies to form a cluster. Too low → many tiny fragmented clusters; too high → large coarse clusters. For 30K companies, 30–100 is sensible.
-- `min_samples`: Controls how conservative cluster cores are. Lower → more points assigned (less noise). Setting to 1 behaves like single-linkage and produces very large clusters; leave as None to auto-set.
-- `cluster_selection_epsilon` (default 0.0): Merge nearby clusters. Values ~0.1–0.3 reduce fragmentation. Useful if clusters are splitting hairline industry sub-niches.
-
----
-
-#### BIRCH (`birch_cluster`) — **Full-corpus fast alternative to K-Means**
-
-**When to use:** When you want a quick full-corpus clustering without S3 artifacts available; when K-Means convergence is slow; memory-constrained environments.
-
-**How it works:**
-- Builds a Clustering Feature (CF) tree in a single pass over the data — O(n) memory
-- `n_clusters` controls the final agglomerative merge of CF-tree leaf nodes
-- Assignment is hard single-label only (no soft multi-assignment like K-Means)
-
-**Tradeoffs vs K-Means:**
-- Faster for very large datasets (single pass vs multiple K-Means iterations)
-- No multi-label assignment — each company gets exactly one cluster
-- Cluster quality slightly below K-Means because CF-tree summarisation loses some information
-- `threshold` parameter controls CF-tree node splitting; sklearn sets this automatically when `n_clusters` is given
-
-**When NOT to use:**
-- When you want multi-label assignment (e.g. a company that does "IT support" and "software development" should be in both clusters — K-Means handles this, BIRCH does not)
-- When cluster quality matters more than speed
+- `n_clusters` (default 50): Too few → over-broad clusters; too many → label fragmentation.
+- `min_similarity` (default 0.20): Cosine threshold for cluster assignment. Lower → more assignments but noisier.
 
 ---
 
@@ -928,20 +850,20 @@ A "software development" company and a "Softwareentwicklung" company land in the
 ```
 1. Initial import (bulk + initial jobs)
        ↓
-2. recompute_keywords   ← extracts purpose_keywords from raw purpose text
-   (keyword-only job, ~20 min for 700K)
+2. recompute_keywords   ← extracts purpose_keywords from raw purpose text (~20 min)
        ↓
-3. tfidf_kmeans_cluster  use_keywords=True   ← recommended default
-   (K-Means, ~25 min, all companies assigned)
-       ↓                       ← optional: HDBSCAN on sample to calibrate k
-4. reclassify_noga     ← uses purpose_keywords + tfidf_cluster for best accuracy
+3. tfidf_kmeans_cluster  use_keywords=True, n_clusters=50 (~25 min)
+       ↓ (auto-triggers)
+   discover_stopwords   ← 4-phase boilerplate/stopword discovery (~5 min)
+       ↓
+4. reclassify_noga     ← 2-stage classification, confidence ≥ 0.50
        ↓
 5. claude_classify     ← AI scoring uses org-configured categories & target description
        ↓
-6. recalculate_scores  ← recomputes combined_score with latest flex + AI data
+6. recalculate_scores  ← recomputes combined_score (AI×0.60 + NOGA×0.25 + keywords×0.15)
 ```
 
-For **ongoing imports** (daily SHAB updates): incremental keyword extraction and cluster assignment run automatically during the `initial` detail-fetch job using S3-cached model artifacts. Full re-cluster periodically (monthly or when corpus shifts significantly).
+For **ongoing imports** (daily SHAB updates): incremental keyword extraction, cluster assignment, and language detection (`purpose_language`) run automatically during the `initial` detail-fetch job using S3-cached model artifacts. Full re-cluster periodically (monthly or when corpus shifts significantly).
 
 ---
 
@@ -968,14 +890,12 @@ Quality depends on:
 - `noga_tree.json` — full hierarchy tree: root sections → divisions → groups → classes → types
 - NOGA embeddings — uploaded to S3 by `scripts/build_noga_embeddings.py` (one-time setup)
 
-**Classification method:**
-1. **Token matching** — company name + purpose + keywords + cluster are split into terms, matched against all NOGA node descriptions
-2. **Hybrid re-rank** (if S3 embeddings available):
-   - Embed company `purpose_keywords` with `paraphrase-multilingual-MiniLM-L12-v2`
-   - Top-50 NOGA candidates from token matching are re-ranked by embedding similarity
-   - Final score = 60% embedding cosine + 40% token score
-3. **Preference for specificity** — 6-digit codes (types) preferred over shorter codes when scores are close
-4. **Hierarchy path** — walk `noga_lookup.json` via `parentCode` links to build full ancestry (section → division → group → class → type)
+**Classification method (2-stage):**
+1. **Stage 1 — Section vote:** Embed company `purpose_keywords` with `paraphrase-multilingual-MiniLM-L12-v2`, score all ~800 NOGA leaf codes, group top-K candidates by section letter (A–U), pick the section with the most votes.
+2. **Stage 2 — Within-section re-rank:** Re-rank only codes belonging to the winning section by embedding cosine similarity. Cuts search space from ~800 to ~20–40 codes.
+3. **Confidence gate:** If best score < 0.50, return no classification rather than assign a low-confidence code.
+4. **Hierarchy path** — walk `noga_lookup.json` via `parentCode` links to build full ancestry (section → division → group → class → type).
+5. **Multilingual labels:** Section labels for the `market-segments` API are derived directly from `noga_lookup.json` using `_collect_multilang_text()` — all four language variants (DE/FR/IT/EN) are available without hardcoding.
 
 **Outputs to DB per company:**
 - `noga_code` — best-matching code (e.g. `"263001"`)
@@ -1002,24 +922,22 @@ Quality depends on:
 
 | Package | Image | Purpose |
 |---|---|---|
-| `scikit-learn` | backend + ml | TF-IDF, TruncatedSVD, MiniBatchKMeans, Birch |
-| `scipy` | backend + ml | Sparse matrix ops, hierarchical clustering in batch-merge HDBSCAN |
+| `scikit-learn` | backend + ml | TF-IDF, TruncatedSVD, MiniBatchKMeans |
+| `scipy` | backend + ml | Sparse matrix ops |
 | `numpy` | backend + ml | Centroid math, cosine similarity |
 | `spacy` + `de_core_news_md` | ml | German lemmatization (downloaded at build time) |
-| `hdbscan` | **ml only** | HDBSCAN clustering (`requirements.ml.txt`) |
 | `sentence-transformers` | ml | NOGA embedding (`paraphrase-multilingual-MiniLM-L12-v2`) |
+| `lingua-language-detector` | backend + ml | Purpose language detection (`purpose_language` column); falls back to `langdetect` |
 | `tqdm` | ml | Progress bars in pipeline CLI |
-
-**Important:** `hdbscan` is **not** in `requirements.backend.txt` — only in `requirements.ml.txt`. The `hdbscan_cluster` and `birch_cluster` jobs are routed to the `helvex-ml` K8s pod (`job_worker.py` line 78). Triggering them from the `helvex` (backend-only) pod will raise `ImportError`.
 
 **K8s pod routing (from `job_worker.py`):**
 
 ```python
-ML_JOB_TYPES = {"hdbscan_cluster", "birch_cluster", "tfidf_kmeans_cluster", ...}
+ML_JOB_TYPES = {"tfidf_kmeans_cluster", "discover_stopwords", "reclassify_noga", ...}
 # → routed to helvex-ml pod when USE_RQ=true
 ```
 
-When `USE_RQ=false` (local dev / thread mode), all jobs run in the same process — ensure `hdbscan` is installed locally.
+When `USE_RQ=false` (local dev / thread mode), all jobs run in the same process.
 
 **Model artifacts on S3 (`helvex-exports` bucket, `models/` prefix):**
 
@@ -1027,7 +945,7 @@ When `USE_RQ=false` (local dev / thread mode), all jobs run in the same process 
 |---|---|---|
 | `tfidf_vectorizer.pkl` | all clustering jobs | incremental keyword extraction on new companies |
 | `svd_transformer.pkl` | all clustering jobs | incremental cluster assignment on new companies |
-| `kmeans_centroids.npy` | all clustering jobs (centroids computed as cluster means for HDBSCAN/BIRCH) | incremental cluster assignment |
+| `kmeans_centroids.npy` | `tfidf_kmeans_cluster` | incremental cluster assignment |
 | `centroid_registry_map.json` | all clustering jobs | incremental cluster assignment (maps centroid index → canonical name) |
 | `noga_embeddings.npy` | `build_noga_embeddings.py` (one-time) | `reclassify_noga` job |
 | `noga_embedding_ids.json` | `build_noga_embeddings.py` (one-time) | `reclassify_noga` job |
@@ -1745,7 +1663,7 @@ In Redis mode a **2 s periodic DB poll** runs alongside pub/sub to deliver progr
 
 | Behaviour | Job types |
 |---|---|
-| One active per org | `bulk`, `detail`, `initial`, `recalculate_scores`, `recalculate_google_scores`, `reextract_purpose`, `reclassify_noga`, `re_geocode`, `hdbscan_cluster`, `recompute_keywords`, `cluster_analysis` |
+| One active per org | `bulk`, `detail`, `initial`, `recalculate_scores`, `recalculate_google_scores`, `reextract_purpose`, `reclassify_noga`, `re_geocode`, `tfidf_kmeans_cluster`, `discover_stopwords`, `recompute_keywords`, `cluster_analysis` |
 | One active per org + param hash | `claude_classify` (keyed on category/canton/prompt params) |
 | No dedup | `batch`, `csv_export` (cancel-before-enqueue used for csv_export instead) |
 
@@ -1814,22 +1732,19 @@ In Redis mode a **2 s periodic DB poll** runs alongside pub/sub to deliver progr
 
 ## 19. ML Pipeline Improvements (Apr 2026)
 
-This section documents the new ML services, bug fixes, and explorer redesign shipped in the Apr 2026 sprint.
+This section documents new ML services and the Explorer/scoring redesign shipped in the Apr 2026 sprint.
 
 ### New Files
 
 | File | Purpose |
 |---|---|
 | `app/services/embeddings.py` | Shared multilingual embedding backbone (singleton SentenceTransformer) |
-| `app/services/incremental_classify.py` | Classify newly imported companies inline (NOGA + clusters + business model) |
-| `app/models/boilerplate_candidate.py` | Auto-mined boilerplate candidate table |
-| `app/crud/boilerplate.py` (extended) | Candidate upsert, promote, auto-promote, cache invalidation |
-| `alembic/versions/0067_add_boilerplate_candidates.py` | Migration: `boilerplate_candidates` table |
-| `scripts/seed_boilerplate_llm.py` | One-time LLM bootstrap: labels top-500 terms BOILERPLATE/SIGNAL/AMBIGUOUS |
+| `app/services/incremental_classify.py` | Classify newly imported companies inline (NOGA + clusters + language detection) |
+| `app/services/stopword_discovery.py` | 4-phase automated boilerplate/stopword discovery pipeline |
 
 ### Shared Embedding Backbone — `app/services/embeddings.py`
 
-All ML code that needs sentence embeddings now shares a single lazy-loaded model instance:
+All ML code that needs sentence embeddings shares a single lazy-loaded model instance:
 
 ```python
 DEFAULT_MODEL = "paraphrase-multilingual-mpnet-base-v2"
@@ -1840,133 +1755,112 @@ build_company_text(company)                        → str          # purpose + 
 nearest_neighbours(query_vec, index_matrix, top_k) → list[(idx, cosine)]
 ```
 
-`_get_model()` is `lru_cache(maxsize=1)` — the model loads once and stays in memory. This prevents loading the 420 MB model multiple times when NOGA classification, semantic search, and cluster assignment run in the same process.
+`_get_model()` is `lru_cache(maxsize=1)` — the model loads once and stays in memory.
 
 ### Incremental Classification — `app/services/incremental_classify.py`
 
-When new companies arrive via Zefix import they need three classification steps. This service runs all three inline, fast enough to call synchronously during `enrich_company()`.
+When new companies arrive via Zefix import they need inline classification. This service runs synchronously during `enrich_company()`.
 
 **Entry point:**
 ```python
-classify_new_companies_inline(db, company_ids, *, run_noga=True, run_clusters=True, run_business_model=True)
-→ {"total": N, "noga_classified": X, "cluster_assigned": Y, "business_model_set": Z, "errors": [...]}
+classify_new_companies_inline(db, company_ids, *, run_noga=True, run_clusters=True)
+→ {"total": N, "noga_classified": X, "cluster_assigned": Y, "lang_detected": Z, "errors": [...]}
 ```
 
-**Three steps:**
-1. `_run_noga_batch` — calls `apply_noga_classification()` per company, bulk-updates in batches of 200.
-2. `_run_cluster_batch` — calls `assign_new_companies_to_clusters()` using cached S3 artifacts (vectorizer + SVD + centroids). Fast after first artifact load.
-3. `_run_business_model_batch` — rule-based DE/FR/IT/EN signal matching → `b2b`/`b2c`/`b2g`/`mixed`/None. Only sets if currently NULL.
+**Steps:**
+1. `_run_noga_batch` — calls `apply_noga_classification()` per company (confidence ≥ 0.50 required).
+2. `_run_cluster_batch` — `assign_new_companies_to_clusters()` using cached S3 artifacts.
+3. `_run_language_detection_batch` — detects `purpose_language` (DE/FR/IT/EN/RM) via `lingua` (falls back to `langdetect`). Always runs; instant.
 
-**Integration with collection pipeline:**
-`enrich_company()` in `collection.py` calls this service after keyword extraction:
+**Integration:**
 ```python
 if clusters and company.tfidf_cluster is None and company.purpose:
-    classify_new_companies_inline(db, [company.id], run_noga=False, run_clusters=True, run_business_model=True)
+    classify_new_companies_inline(db, [company.id], run_noga=False, run_clusters=True)
 ```
 
-NOGA classification is skipped here because it relies on `tfidf_cluster` being set — the `reclassify_noga` batch job is the correct path for NOGA on new companies.
+NOGA is skipped inline because it depends on `tfidf_cluster` — use the batch `reclassify_noga` job.
 
-**Backfill (one-time):**
+**Backfill:**
 ```python
-backfill_unclassified(db, *, batch_size=500, run_noga, run_clusters, run_business_model, limit)
+backfill_unclassified(db, *, batch_size=500, run_noga, run_clusters, limit)
 ```
-Processes all companies missing NOGA, cluster, or business_model in batches. Call from a Python shell or a one-off job.
 
-### Boilerplate Candidate Mining — `app/services/cluster_pipeline.py`
+### Automated Stopword Discovery — `app/services/stopword_discovery.py`
 
-`mine_boilerplate_entropy()` runs automatically at the end of every `run_pipeline()` call. It combines three signals to score candidate boilerplate terms:
+`discover_stopwords` job auto-triggers after every `tfidf_kmeans_cluster` run. Four phases:
 
-| Signal | Weight | How computed |
+| Phase | Method | Output |
 |---|---|---|
-| `doc_frequency` | 40% | 1 − IDF_sklearn normalized (high doc freq → high boilerplate signal) |
-| `entropy` | 40% | Shannon entropy across cluster c-TF-IDF weights, normalized to [0,1] |
-| `label_frequency` | 20% | Fraction of clusters where term appears in top-5 labels |
+| 1 — IDF analysis | Terms with IDF < 0.92 (>40% doc frequency) from fitted vectorizer | Staged in `tfidf_stopwords` with `enabled=False` |
+| 2 — Sentence dedup | Sentences appearing in >300 companies (MD5 hash across all languages) | Staged in `boilerplate_patterns` with `enabled=False` |
+| 3 — Cross-cluster staging | Terms in labels of >60% of clusters | Staged in `tfidf_stopwords` with `enabled=False` |
+| 4 — Claude review (opt-in) | Single Haiku call on top-50 candidates, grouped by language | `always_boilerplate` → `enabled=True` immediately |
 
-Combined: `0.40 * doc_freq + 0.40 * entropy + 0.20 * label_freq`
+Patterns approved (`enabled=True`) take effect on the next pipeline run via `_strip_purpose_boilerplate()`.
 
-Terms above `min_confidence=0.30` are upserted into `boilerplate_candidates`. Terms above `auto_promote_threshold=0.90` are immediately promoted to `boilerplate_patterns` (the active filter table).
+### New Relevance Score Formula
 
-### Boilerplate Candidates Table — migration `0067`
+`combined_score` is now computed by `compute_relevance_score()` in `scoring.py`:
 
-```sql
-boilerplate_candidates (
-    id, term (unique), doc_frequency, cluster_entropy,
-    cluster_label_frequency, confidence,
-    source_type ('corpus_mined' | 'cluster_feedback' | 'llm_seeded'),
-    language, llm_label ('BOILERPLATE' | 'SIGNAL' | 'AMBIGUOUS'),
-    promoted (bool), promoted_pattern_id → boilerplate_patterns(id),
-    created_at, updated_at
-)
+```
+relevance_score =
+    ai_score × 0.60
+  + noga_confidence×100 × 0.25
+  + keyword_density×100 × 0.15
+
+keyword_density = min(keyword_count, 10) / 10   # normalized: 10+ keywords = 1.0
+
+If ai_score is None → renormalize remaining weights (0.25 → 0.625, 0.15 → 0.375)
+If all inputs None → return None
 ```
 
-**Workflow:**
-1. Clustering job runs → `mine_boilerplate_entropy()` upserts candidates
-2. Candidates with `confidence ≥ 0.90` are auto-promoted to `boilerplate_patterns`
-3. Candidates with `confidence 0.70–0.89` queue for LLM/human review
-4. `scripts/seed_boilerplate_llm.py` can batch-classify ambiguous candidates via Claude
-5. Admin UI (future) can manually promote/reject candidates
+`flex_score` and `web_score` remain in the DB as supplementary data quality signals but no longer affect `combined_score`.
+
+### New API Endpoint: Market Segments
+
+`GET /api/v1/companies/market-segments`
+
+Returns NOGA section statistics for the Explorer MarketMap component. Response:
+
+```json
+[
+  {
+    "section": "J",
+    "labels": {"de": "Information und Kommunikation", "fr": "...", "it": "...", "en": "..."},
+    "company_count": 2847,
+    "avg_relevance": 74.2,
+    "top_keywords": ["software", "saas", "cloud", "api", "data"],
+    "canton_top": "ZH",
+    "canton_pct": 42,
+    "growth_recent": 312
+  }
+]
+```
+
+- Section labels are derived from `noga_lookup.json` via `_collect_multilang_text()` — no hardcoded map.
+- Cached with 1-hour TTL (module-level cache, not Redis).
+- `growth_recent` = companies with `first_sogc_date` in the last 18 months.
+
+### Purpose Language Detection
+
+`purpose_language` column (`de`/`fr`/`it`/`en`/`rm`) on the `companies` table. Populated by `_run_language_detection_batch()` in `incremental_classify.py`. Filterable via `?purpose_language=fr` on the company list endpoint.
+
+### Explorer Rewrite (frontend)
+
+`frontend/src/app/[locale]/app/explorer/explorer-client.tsx` fully replaced with a single-page Market Intelligence Hub layout:
+
+| Component | Purpose |
+|---|---|
+| `MarketMap` | 21 NOGA section tiles, colour-coded by `avg_relevance`; click sets section filter |
+| `SubSegmentStrip` | Division chips from `noga-hierarchy` endpoint; appears when section selected |
+| `FilterSidebar` | Collapsible left panel: score range, canton, language chips, legal form, review/contact status, cluster autocomplete, keyword autocomplete, date range |
+| `ScoringWizard` | 4-step modal: Clusters (autocomplete), Keywords (autocomplete), NOGA targets, Save |
+| `ExplorerPage` | Semantic search header + stats strip + MarketMap + FilterSidebar/CompanyPanel split |
+
+Removed: 3-layer CategoryGrid → CategoryDetail → BrowseView navigation, business model filter, static cluster list in ScoringWizard, scoring weight step.
 
 ### Semantic Search Endpoint
 
 `GET /api/v1/companies/semantic-search?q=<query>&top_k=8`
 
-Embeds the query with the shared multilingual model, scores all taxonomy entries (clusters, categories, keywords, NOGA codes) by cosine similarity, and returns grouped results:
-
-```json
-{
-  "query": "Softwareentwicklung",
-  "clusters":    [{"value": "software,entwicklung,cloud", "count": 1234, "similarity": 0.92}],
-  "categories":  [...],
-  "keywords":    [...],
-  "noga_codes":  [...]
-}
-```
-
-Results with `similarity < 0.20` are filtered out. The frontend's `SemanticSearchBar` component calls this endpoint with 300 ms debounce and shows a grouped dropdown. Supports DE/FR/IT/EN queries because the model is multilingual.
-
-### NOGA Category Stats Fix
-
-**Bug:** `fetchCategoryStats("noga_code", "J")` returned 0 companies even though 68,256 companies had `noga_code` under the J section.
-
-**Root cause:** `_compute_category_stats` used `WHERE noga_code = :value` (exact match). Clicking on section "J" passed the section code, but companies store the leaf code (e.g. `"6202"`). The path column `noga_path` stores ancestry as `"J|62|620|6202"`.
-
-**Fix:** Added path-based matching using OR conditions:
-```sql
-noga_code = :value
-OR noga_path = :value
-OR noga_path LIKE :noga_pfx   -- 'J|%'
-OR noga_path LIKE :noga_mid   -- '%|J|%'
-OR noga_path LIKE :noga_sfx   -- '%|J'
-```
-
-### Cluster Junction Table Staleness Fix
-
-**Bug:** Cluster cards showed company counts from the taxonomy cache but clicking them showed 0 companies.
-
-**Root cause:** `_compute_category_stats` always JOINed on `company_tfidf_clusters` (junction table), which may be empty/stale from a prior pipeline run. The taxonomy cache fell back to the denormalized `tfidf_cluster` column.
-
-**Fix:** If the junction table returns 0 companies, fall back to string-match on the denormalized column. A warning is logged to indicate stale junction data:
-```
-WARNING: Junction table stale for tfidf_cluster=X, {N} companies in denormalized column
-```
-
-The junction table is repopulated by the next full clustering run.
-
-### Explorer Redesign (frontend)
-
-Key changes in `frontend/src/app/[locale]/app/explorer/explorer-client.tsx`:
-
-| Component | Change |
-|---|---|
-| `SemanticSearchBar` | NEW — full-width search bar at top of CategoryGrid; 300 ms debounced, grouped dropdown with similarity bars |
-| `RecommendedStrip` | NEW — 4 smart picks (largest cluster, top AI category, top NOGA code, org target) as coloured pills above the tab bar |
-| Category cards | Coloured left border by type; mini score bar if avgAi available; hover "Explore →" reveal |
-| `CategoryDetail` header | Copy-filter URL button (copies `?browse=1&<filter>=<value>`) |
-| `CategoryDetail` top | "Top leads" pills — first 3 companies from the loaded page, clickable to open preview |
-| Per-tab filter | Kept as compact inline input in the tab bar, no longer the primary search |
-
-**Type → accent colour map:**
-- `tfidf_cluster` → blue (`border-blue-400`, `bg-blue-50`)
-- `ai_category` → violet (`border-violet-400`, `bg-violet-50`)
-- `keyword` → emerald (`border-emerald-400`, `bg-emerald-50`)
-- `noga_code` → amber (`border-amber-400`, `bg-amber-50`)
+Embeds the query with the shared multilingual model, scores all taxonomy entries (clusters, keywords, NOGA codes) by cosine similarity, returns grouped results. Results with `similarity < 0.20` are filtered. Used by the Explorer search header with 400 ms debounce.

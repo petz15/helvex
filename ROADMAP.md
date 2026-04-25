@@ -17,6 +17,9 @@
     - API access
     - Integrations with other products such as appollo etc?
     - other industry specific directories
+    - Definitely more overview of management
+    - Potentially other verbände such as Anwaltsverband, lobbywatch etc
+    - View of Auditoren
 
 ### MVP before public PROD
 - Tiers are enforced - partially done (not fully checked and web searches are not gated yet + always uses api instead of checking if data already exists)
@@ -51,7 +54,11 @@
 - Page size is not working on company overview
 - superadmin payment transactions does not show payment method
 - more improvements to stopping words -> the LLM improvement i.e. script is not integrated into the website as far as I can tell. 
-- 
+- SHAB needs general fixes:
+    - Languages
+    - old Auditors showing up 
+    - enconding issue
+    - and more, best solved over preprocessing -> espcially for future management view
 
 
 ### UI fixes:
@@ -59,7 +66,7 @@
 - Remove AI preview
 - Show settings in explore page (currently only shown when there is no data but there is always data)
 - create a seperate section for organization. in general show all organizations the user is a part of. Add a button to move to new organization and remove the one in the header - chaning org takes a long time to load? or does it even. remove it any way
-- Company profile page improve the AD banner, too small!
+- Company profile page improve the AD banner, too small! -> still an issue
 - Checkbox on the category detail page is not working
 - Category detail page has a number next to the title which is meaningless
 - Category detail page, an overlay how many companies have no scoring. which is weird that companies which have ai classification dont have a score...is it 0?
@@ -76,7 +83,6 @@
     - if always private, some other organization updates a link, notify other orgs that their companies link has been updated (for free)
 - flex rescore free or monthly etc?
 - other features?
-
 
 
 # Specific features
