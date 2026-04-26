@@ -1318,8 +1318,7 @@ def reextract_keywords_all(
     """Re-extract purpose_keywords for all companies using the S3-cached TF-IDF vectorizer.
 
     Lighter than recompute_keywords: no corpus refit, no spaCy, no SVD.
-    Uses the vectorizer from the last full clustering run
-    (hdbscan_cluster or tfidf_kmeans_cluster).
+    Uses the vectorizer from the last full tfidf_kmeans_cluster run.
 
     only_missing: if True, skip companies that already have purpose_keywords.
     """

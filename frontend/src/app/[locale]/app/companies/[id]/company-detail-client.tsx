@@ -372,29 +372,50 @@ export function CompanyDetailClient({ company: initial, readOnlyDemo = false }: 
               )}
             </div>
           )}
-          {(company.noga_code || company.noga_label || company.noga_level) && (
-            <div className="pt-2 border-t border-slate-100 space-y-2">
-              <span className="text-xs font-medium text-slate-600 block">{t.noga}</span>
-              {company.noga_code && (
-                <Link href={`/app/search?noga_code=${encodeURIComponent(company.noga_code)}`}>
-                  <Badge className="bg-emerald-50 text-emerald-700 text-xs cursor-pointer hover:bg-emerald-100">Code: {company.noga_code}</Badge>
-                </Link>
-              )}
-              {company.noga_level && (
-                <Link href={`/app/search?noga_level=${encodeURIComponent(company.noga_level)}`}>
-                  <Badge className="bg-teal-50 text-teal-700 text-xs cursor-pointer hover:bg-teal-100">Level: {company.noga_level}</Badge>
-                </Link>
-              )}
-              {company.noga_label && (
-                <Link href={`/app/search?noga_label=${encodeURIComponent(company.noga_label)}`}>
-                  <Badge className="bg-green-50 text-green-700 text-xs cursor-pointer hover:bg-green-100 max-w-full truncate">{company.noga_label}</Badge>
-                </Link>
-              )}
-              {company.noga_confidence != null && (
-                <p className="text-xs text-slate-500">Confidence: {Math.round(company.noga_confidence * 100)}%</p>
-              )}
-            </div>
-          )}
+          {(company.noga_code || company.noga_label || company.noga_path) && (() => {
+            const codes = (company.noga_path ?? "").split("|").filter(Boolean);
+            const labels = (company.noga_path_labels ?? "").split("|").filter(Boolean);
+            const lowConf = company.noga_confidence != null && company.noga_confidence < 0.5;
+            const segments = codes.length > 0
+              ? codes.map((code, i) => ({ code, label: labels[i] ?? code }))
+              : (company.noga_code ? [{ code: company.noga_code, label: company.noga_label ?? company.noga_code }] : []);
+            return (
+              <div className={cn("pt-2 border-t border-slate-100 space-y-2", lowConf && "opacity-70")}>
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-medium text-slate-600">{t.noga}</span>
+                  {company.noga_level && (
+                    <Badge className="bg-teal-50 text-teal-700 text-[10px]">{company.noga_level}</Badge>
+                  )}
+                  {lowConf && (
+                    <span className="text-[10px] uppercase tracking-wide text-amber-700 bg-amber-50 border border-amber-200 rounded px-1.5 py-0.5">low confidence</span>
+                  )}
+                </div>
+                {segments.length > 0 && (
+                  <div className="flex flex-wrap items-center gap-1 text-xs">
+                    {segments.map((seg, i) => (
+                      <span key={`${seg.code}-${i}`} className="inline-flex items-center gap-1">
+                        {i > 0 && <span className="text-slate-400">›</span>}
+                        <Link href={`/app/search?noga_code=${encodeURIComponent(seg.code)}`}>
+                          <Badge className={cn(
+                            "text-xs cursor-pointer truncate max-w-[260px]",
+                            i === segments.length - 1
+                              ? "bg-emerald-50 text-emerald-700 hover:bg-emerald-100"
+                              : "bg-slate-50 text-slate-600 hover:bg-slate-100"
+                          )}>
+                            <span className="font-mono mr-1 opacity-70">{seg.code}</span>
+                            {seg.label}
+                          </Badge>
+                        </Link>
+                      </span>
+                    ))}
+                  </div>
+                )}
+                {company.noga_confidence != null && (
+                  <p className="text-xs text-slate-500">Confidence: {Math.round(company.noga_confidence * 100)}%</p>
+                )}
+              </div>
+            );
+          })()}
           {company.ai_category && (
             <div className="pt-2 border-t border-slate-100">
               <span className="text-xs font-medium text-slate-600 block mb-1">{t.aiclassification}</span>

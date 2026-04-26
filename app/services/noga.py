@@ -150,18 +150,34 @@ class _NogaEmbeddings:
 
 @lru_cache(maxsize=1)
 def _load_noga_embeddings() -> _NogaEmbeddings | None:
-    """Download embedding artifacts from S3 and return them, or None if unavailable."""
+    """Download embedding artifacts from S3 and return them, or None if unavailable.
+
+    Refuses to return a matrix whose dimension does not match the query model's
+    dimension; a stale artifact built with a different model would otherwise
+    produce silently invalid cosine similarities.
+    """
     try:
         from app.services import s3_client
         if not s3_client.is_models_bucket_configured():
             return None
         import numpy as np
+        from app.services.embeddings import DEFAULT_MODEL, _embedding_dim
         ids_bytes = s3_client.download_model_bytes(_S3_IDS_KEY)
         ids_payload = json.loads(ids_bytes.decode("utf-8"))
         codes: list[str] = ids_payload["codes"]
         shape = ids_payload["shape"]
         emb_bytes = s3_client.download_model_bytes(_S3_EMBEDDINGS_KEY)
         matrix = np.frombuffer(emb_bytes, dtype="float32").reshape(shape["rows"], shape["cols"])
+
+        expected_dim = _embedding_dim(DEFAULT_MODEL)
+        if matrix.shape[1] != expected_dim:
+            logger.error(
+                "NOGA embeddings dim mismatch: artifact has %d, query model %s expects %d. "
+                "Rebuild via scripts/build_noga_embeddings.py. Falling back to token-only.",
+                matrix.shape[1], DEFAULT_MODEL, expected_dim,
+            )
+            return None
+
         logger.info("NOGA embeddings loaded from S3: %s codes, shape %s", len(codes), matrix.shape)
         return _NogaEmbeddings(matrix=matrix, codes=codes)
     except Exception as exc:
@@ -261,7 +277,11 @@ def _company_tokens(db: Session, company: Company) -> set[str]:
     return _tokens_from_texts(texts)
 
 
-_NOGA_MIN_CONFIDENCE: float = 0.50
+# Below this threshold the classification is rendered as "low confidence" in
+# the UI (muted style). It is no longer a hard cutoff — the best guess plus
+# its confidence is always stored so users can see something rather than a
+# silent NULL.
+_NOGA_LOW_CONFIDENCE: float = 0.50
 
 
 def _pick_best_code(
@@ -421,10 +441,8 @@ def classify_company_noga(db: Session, company: Company) -> NogaClassification |
         total = sum(token_scores.values())
         confidence = float(token_scores.get(best_code, 0.0) / total) if total > 0 else 0.0
 
-    # Confidence threshold — reject low-confidence assignments
-    if confidence < _NOGA_MIN_CONFIDENCE:
-        return None
-
+    # Always return the best guess; the UI renders below-threshold results as
+    # "low confidence" rather than hiding them.
     meta = idx.code_meta.get(best_code, {})
     name = meta.get("name")
     label = None
@@ -437,7 +455,84 @@ def classify_company_noga(db: Session, company: Company) -> NogaClassification |
     return NogaClassification(code=best_code, label=label, level=level, confidence=confidence)
 
 
+_BRANCH_KEYWORDS = ("zweigniederlassung", "succursale", "filiale di")
+
+
+def is_branch_office(company: Company) -> bool:
+    """Detect Swiss branch offices (Zweigniederlassung / succursale / filiale).
+
+    Branch entries replicate the parent's purpose text but get assigned NOGA
+    based on it, which gives the *right* code only by accident. We treat them
+    as a special case so they inherit from the parent or remain unclassified
+    rather than producing a misleading classification.
+    """
+    name_lower = (company.name or "").lower()
+    purpose_lower = (company.purpose or "").lower()
+    return any(k in name_lower or k in purpose_lower for k in _BRANCH_KEYWORDS)
+
+
+def _parent_uid_from_head_offices(company: Company) -> str | None:
+    raw = company.head_offices
+    if not raw:
+        return None
+    try:
+        payload = json.loads(raw)
+    except (TypeError, ValueError):
+        return None
+    candidates: list[Any] = []
+    if isinstance(payload, list):
+        candidates = payload
+    elif isinstance(payload, dict):
+        candidates = [payload]
+    for entry in candidates:
+        if not isinstance(entry, dict):
+            continue
+        uid = entry.get("uid") or entry.get("UID") or entry.get("uid_full")
+        if isinstance(uid, str) and uid.strip():
+            return uid.strip()
+    return None
+
+
+def _inherit_noga_from_parent(db: Session, company: Company) -> CompanyUpdate | None:
+    parent_uid = _parent_uid_from_head_offices(company)
+    if not parent_uid:
+        return None
+    parent = crud.get_company_by_uid(db, parent_uid)
+    if parent is None or not parent.noga_code:
+        return None
+    return CompanyUpdate(
+        noga_code=parent.noga_code,
+        noga_label=parent.noga_label,
+        noga_level=parent.noga_level,
+        noga_confidence=parent.noga_confidence,
+        noga_classified_at=datetime.now(tz=timezone.utc),
+        noga_path=parent.noga_path,
+        noga_path_labels=parent.noga_path_labels,
+    )
+
+
+def _clear_noga() -> CompanyUpdate:
+    """Return an update that wipes any stale NOGA fields."""
+    return CompanyUpdate(
+        noga_code=None,
+        noga_label=None,
+        noga_level=None,
+        noga_confidence=None,
+        noga_classified_at=datetime.now(tz=timezone.utc),
+        noga_path=None,
+        noga_path_labels=None,
+    )
+
+
 def apply_noga_classification(db: Session, company: Company) -> CompanyUpdate | None:
+    # Branches: inherit parent's NOGA when possible, otherwise clear stale data
+    # rather than producing a wrong classification from boilerplate purpose text.
+    if is_branch_office(company):
+        inherited = _inherit_noga_from_parent(db, company)
+        if inherited is not None:
+            return inherited
+        return _clear_noga() if company.noga_code else None
+
     result = classify_company_noga(db, company)
     if not result:
         return None

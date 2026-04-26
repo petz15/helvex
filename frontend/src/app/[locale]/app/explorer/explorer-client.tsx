@@ -51,11 +51,14 @@ function SetupGateBanner({ hasApiKey, hasTargetDescription }: { hasApiKey: boole
   if (!hasTargetDescription) missing.push("target company description");
   return (
     <div className="mx-4 mt-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 flex items-start gap-3">
-      <AlertTriangle size={16} className="text-amber-500 shrink-0 mt-0.5" />
+      <Sparkles size={16} className="text-amber-500 shrink-0 mt-0.5" />
       <div className="flex-1 min-w-0">
-        <p className="text-sm font-medium text-amber-800">AI scoring is not configured</p>
+        <div className="flex items-center gap-2">
+          <p className="text-sm font-medium text-amber-800">AI scoring is not configured</p>
+          <span className="inline-flex items-center gap-1 text-[10px] uppercase tracking-wide text-amber-700 bg-amber-100 border border-amber-300 rounded px-1.5 py-0.5 font-semibold">Pro</span>
+        </div>
         <p className="text-xs text-amber-700 mt-0.5">
-          Set your {missing.join(" and ")} in <a href="/app/settings" className="underline">Settings → Scoring</a> to enable AI-powered lead scoring.
+          AI lead scoring is a paid feature that uses credits per company. Set your {missing.join(" and ")} in <a href="/app/settings" className="underline">Settings → Scoring</a> to enable it. Free-tier filtering by NOGA, canton, and score is unaffected.
         </p>
       </div>
     </div>
@@ -296,16 +299,6 @@ function FilterSidebar({ filters, cantons, onChange, collapsed, onToggle }: Filt
     );
   }
 
-  async function clusterSearch(q: string) {
-    const res = await fetch(`/api/v1/companies/clusters/search?q=${encodeURIComponent(q)}&limit=20`, { credentials: "include" });
-    return res.ok ? res.json() : [];
-  }
-
-  async function keywordSearch(q: string) {
-    const res = await fetch(`/api/v1/companies/keywords/search?q=${encodeURIComponent(q)}&limit=20`, { credentials: "include" });
-    return res.ok ? res.json() : [];
-  }
-
   return (
     <div className="w-56 border-r border-slate-100 bg-white flex flex-col shrink-0 overflow-y-auto">
       {/* Header */}
@@ -427,30 +420,6 @@ function FilterSidebar({ filters, cantons, onChange, collapsed, onToggle }: Filt
             value={filters.tags ?? ""}
             onChange={e => onChange({ tags: e.target.value || undefined, page: 1 })}
             className="w-full border border-slate-200 rounded px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-blue-300"
-          />
-        </div>
-
-        {/* Cluster */}
-        <div>
-          <label className="block font-medium text-slate-500 mb-1.5">Cluster</label>
-          <AutocompleteInput
-            placeholder="Search clusters…"
-            fetchFn={clusterSearch}
-            valueKey="cluster"
-            value={filters.tfidf_cluster ?? ""}
-            onChange={v => onChange({ tfidf_cluster: v || undefined, page: 1 })}
-          />
-        </div>
-
-        {/* Keywords */}
-        <div>
-          <label className="block font-medium text-slate-500 mb-1.5">Keywords</label>
-          <AutocompleteInput
-            placeholder="Search keywords…"
-            fetchFn={keywordSearch}
-            valueKey="keyword"
-            value={filters.purpose_keywords ?? ""}
-            onChange={v => onChange({ purpose_keywords: v || undefined, page: 1 })}
           />
         </div>
 

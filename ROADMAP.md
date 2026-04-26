@@ -23,6 +23,8 @@
 
 ### MVP before public PROD
 - Tiers are enforced - partially done (not fully checked and web searches are not gated yet + always uses api instead of checking if data already exists)
+- Decide on VAT if include or exclude
+- And Set up DEV env
 
 ## PROD CHANGES
 - wordline notification url
@@ -101,6 +103,7 @@
 - [ ] **scoring wizard general overhaul** - currently pretty useless as it only shows AI categories not all. the flow should be different
 - [ ] **NOGA numbers** - NOGA is not showing up any numbers
 - [ ] **Introduction to new users** - currently new users just get thrown into explore without any guide
+- [ ] **Improve Explore** - somehow explore page got worse with the last change. maybe I need to change the ML part first, check via a dashboard/overview (and implement that) then move on to explore. 
 
 
 ## Company Data

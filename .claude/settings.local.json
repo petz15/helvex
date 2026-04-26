@@ -222,7 +222,12 @@
       "Bash(python3 -c ' *)",
       "Bash(python -m alembic revision --autogenerate -m \"add purpose_language to companies\")",
       "Bash(python -c ' *)",
-      "Bash(python -m pytest tests/ -q --ignore=tests/test_auth_register.py)"
+      "Bash(python -m pytest tests/ -q --ignore=tests/test_auth_register.py)",
+      "Bash(python -c \"from app.services import noga; print\\('noga module OK'\\)\")",
+      "Bash(python -c \"from app.services import collection; print\\('collection module OK'\\)\")",
+      "Bash(python -c \"from app.services.noga import is_branch_office, apply_noga_classification, _coerce_category, _NOGA_LOW_CONFIDENCE; print\\('symbols OK'\\)\")",
+      "Bash(python -c \"from app.services.noga import is_branch_office, apply_noga_classification, _NOGA_LOW_CONFIDENCE, _inherit_noga_from_parent, _clear_noga, _parent_uid_from_head_offices; print\\('all noga symbols OK'\\)\")",
+      "Bash(python -m pytest tests/ -x --tb=short -q)"
     ]
   }
 }

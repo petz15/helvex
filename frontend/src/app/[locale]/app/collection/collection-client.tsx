@@ -1,8 +1,9 @@
 "use client";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { Play, ChevronDown, ChevronUp, BrainCircuit } from "lucide-react";
-import { triggerJob } from "@/lib/api";
+import useSWR from "swr";
+import { triggerJob, fetchCurrentUser } from "@/lib/api";
 import { useI18n } from "@/i18n/context";
 
 function Section({ title, children, defaultOpen = false }: { title: string; children: React.ReactNode; defaultOpen?: boolean }) {
@@ -26,49 +27,20 @@ function Section({ title, children, defaultOpen = false }: { title: string; chil
 
 const ML_JOB_DOCS: { job_type: string; label: string; description: string; when: string; prereq?: string }[] = [
   {
-    job_type: "semantic_kmeans_cluster",
-    label: "Semantic K-Means",
-    description:
-      "Clusters companies by semantic meaning using sentence-transformer embeddings. Companies with similar business purposes end up together even when they use different words. This is the recommended clustering method — produces the most coherent, intuitive clusters.",
-    when: "Run after recompute_keywords. Use this as your primary clustering job.",
-    prereq: "Requires purpose_keywords. Run recompute_keywords first.",
-  },
-  {
-    job_type: "recompute_keywords",
-    label: "Recompute Keywords",
-    description:
-      "Extracts fresh TF-IDF keywords from purpose text and writes them to purpose_keywords. This is the prerequisite for semantic clustering and the best input for NOGA and cluster-based scoring.",
-    when: "Run after a fresh import or whenever purpose text has changed significantly.",
-    prereq: "Use this before semantic_kmeans_cluster.",
-  },
-  {
     job_type: "tfidf_kmeans_cluster",
     label: "TF-IDF K-Means",
     description:
-      "Clusters companies by shared vocabulary using TF-IDF bag-of-words. Fast and reliable baseline. With use_keywords=true (default) it clusters on pre-extracted keywords rather than raw purpose text, which improves coherence significantly.",
-    when: "Good fallback if semantic clustering is too slow or embeddings are unavailable.",
-  },
-  {
-    job_type: "hdbscan_cluster",
-    label: "HDBSCAN",
-    description:
-      "Density-based clustering that discovers the optimal number of clusters automatically. Marks true outliers as unclassified rather than forcing them into a cluster. More precise but requires O(n²) memory — use batch+merge mode for datasets > 50K companies.",
-    when: "Use for exploratory analysis on a filtered subset (e.g. one canton or score band) where cluster count is unknown.",
-    prereq: "Enable batch+merge for full dataset. High memory usage.",
-  },
-  {
-    job_type: "birch_cluster",
-    label: "BIRCH",
-    description:
-      "Memory-efficient incremental clustering that processes the full dataset in a single pass with ~O(n) memory. Slightly lower quality than K-Means but scales without limits.",
-    when: "Use when memory is constrained and you need to cluster the full 700K+ company dataset.",
+      "Clusters companies by shared vocabulary using TF-IDF bag-of-words. With use_keywords=true (default) it clusters on pre-extracted keywords rather than raw purpose text, which improves coherence significantly. This is the only clustering method.",
+    when: "Run after recompute_keywords when purpose text has changed significantly.",
+    prereq: "Requires purpose_keywords.",
   },
   {
     job_type: "recompute_keywords",
     label: "Recompute Keywords",
     description:
-      "Extracts TF-IDF keywords from each company's purpose text and writes them to purpose_keywords. These keywords are the input for semantic clustering and NOGA classification. Run this first after a fresh import.",
-    when: "Run after bulk import or when purpose text is updated. Always run before semantic_kmeans_cluster.",
+      "Extracts fresh TF-IDF keywords from purpose text and writes them to purpose_keywords. Prerequisite for clustering and the best input for NOGA classification.",
+    when: "Run after a fresh import or whenever purpose text has changed significantly.",
+    prereq: "Use this before tfidf_kmeans_cluster.",
   },
   {
     job_type: "reextract_keywords",
@@ -183,6 +155,16 @@ export function CollectionClient() {
   const router = useRouter();
   const [loading, setLoading] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  // ML/job admin is superadmin-only — sales reps shouldn't see the dispatcher.
+  const { data: me, isLoading: meLoading } = useSWR("me", fetchCurrentUser);
+  useEffect(() => {
+    if (!meLoading && me && !me.is_superadmin) {
+      router.replace("/app/explorer");
+    }
+  }, [me, meLoading, router]);
+  if (meLoading || !me) return null;
+  if (!me.is_superadmin) return null;
 
   async function submit(endpoint: string, body: object) {
     setLoading(endpoint);
@@ -429,204 +411,6 @@ export function CollectionClient() {
             </label>
             <SubmitBtn loading={loading === "scoring/cluster"} />
           </form>
-
-      </Section>
-
-      <Section title="HDBSCAN pipeline">
-
-        <form onSubmit={async e => {
-          e.preventDefault();
-          const fd = new FormData(e.currentTarget);
-          await submit("scoring/hdbscan", {
-            min_cluster_size: parseInt(fd.get("hdbscan_min_cluster_size") as string) || 30,
-            min_samples: parseInt(fd.get("hdbscan_min_samples") as string) || null,
-            cluster_selection_epsilon: parseFloat(fd.get("hdbscan_epsilon") as string) || 0,
-            n_components: parseInt(fd.get("hdbscan_n_components") as string) || 50,
-            top_terms: parseInt(fd.get("hdbscan_top_terms") as string) || 5,
-            top_keywords_per_company: parseInt(fd.get("hdbscan_top_keywords") as string) || 10,
-            canton: (fd.get("hdbscan_canton") as string)?.trim().toUpperCase() || null,
-            min_zefix_score: parseInt(fd.get("hdbscan_min_zefix_score") as string) || null,
-            max_zefix_score: parseInt(fd.get("hdbscan_max_zefix_score") as string) || null,
-            limit: parseInt(fd.get("hdbscan_limit") as string) || null,
-            use_keywords: fd.get("hdbscan_use_keywords") === "on",
-            use_batch_merge: fd.get("hdbscan_use_batch_merge") === "on",
-          });
-        }} className="space-y-4">
-          <div>
-            <h2 className="text-sm font-semibold text-slate-800">HDBSCAN pipeline (separate wire)</h2>
-            <p className="mt-1 text-xs text-slate-500">Density-based clustering experimentation. ⚠️ Memory-intensive for large datasets.</p>
-          </div>
-
-          {/* Memory warning and recommendations */}
-          <div className="bg-amber-50 border border-amber-300 rounded-lg px-4 py-3 space-y-2">
-            <div className="text-xs font-semibold text-amber-900">⚠️ Memory constraints (16 GB pod limit)</div>
-            <ul className="text-xs text-amber-800 space-y-1 ml-3">
-              <li>• <strong>Full dataset (763K companies):</strong> Requires ~2.3 TB for distance matrix → <span className="font-semibold">Will fail with OOM after ~1 hour</span></li>
-              <li>• <strong>Safe limits (standard):</strong> &lt;30K companies (use <code className="bg-amber-100 px-1">--canton</code> or <code className="bg-amber-100 px-1">--limit</code>)</li>
-              <li>• ✓ <strong>For full dataset:</strong> Enable <code className="bg-amber-100 px-1">Batch+Merge mode</code> below (slower but complete: 30–40 min)</li>
-            </ul>
-          </div>
-
-          {/* Recommended alternatives */}
-          <div className="bg-blue-50 border border-blue-200 rounded-lg px-4 py-3 space-y-2">
-            <div className="text-xs font-semibold text-blue-900">💡 Recommended alternatives</div>
-            <ul className="text-xs text-blue-800 space-y-1 ml-3">
-              <li>• <strong>For full dataset:</strong> Use <code className="bg-blue-100 px-1">TF-IDF + KMeans</code> (above) or HDBSCAN with Batch+Merge — no size limit</li>
-              <li>• <strong>For standard HDBSCAN (30K only):</strong> Batch by canton — 26 separate runs (~28K each), ~5–8 min per batch</li>
-              <li>• <strong>Quick test:</strong> Set limit=10000 or choose a single canton below</li>
-            </ul>
-          </div>
-
-          <div className="grid grid-cols-2 gap-4">
-            <Field label="Min cluster size">
-              <input name="hdbscan_min_cluster_size" type="number" min="2" defaultValue="30" className={inputCls} />
-            </Field>
-            <Field label="Min samples">
-              <input name="hdbscan_min_samples" type="number" min="1" className={inputCls} placeholder="Auto" />
-            </Field>
-          </div>
-          <div className="grid grid-cols-2 gap-4">
-            <Field label="Selection epsilon">
-              <input name="hdbscan_epsilon" type="number" min="0" step="0.01" defaultValue="0" className={inputCls} />
-            </Field>
-            <Field label="Components">
-              <input name="hdbscan_n_components" type="number" min="2" defaultValue="50" className={inputCls} />
-            </Field>
-          </div>
-          <div className="grid grid-cols-2 gap-4">
-            <Field label="Top cluster terms">
-              <input name="hdbscan_top_terms" type="number" min="1" defaultValue="5" className={inputCls} />
-            </Field>
-            <Field label="Top keywords/company">
-              <input name="hdbscan_top_keywords" type="number" min="1" defaultValue="10" className={inputCls} />
-            </Field>
-          </div>
-
-          {/* Dataset filters */}
-          <div className="bg-slate-50 rounded-lg px-4 py-3 border border-slate-200 space-y-4">
-            <div className="text-xs font-semibold text-slate-700">Dataset filters (leave blank for all)</div>
-            <div className="grid grid-cols-2 gap-4">
-              <Field 
-                label="Canton (e.g., ZH, BE, LU)" 
-                hint="Only cluster this canton (28K companies avg)"
-              >
-                <input name="hdbscan_canton" className={inputCls} placeholder="Any" />
-              </Field>
-              <Field 
-                label="Limit companies" 
-                hint="Max companies to cluster"
-              >
-                <input name="hdbscan_limit" type="number" min="1" className={inputCls} placeholder="All" />
-              </Field>
-            </div>
-            <div className="grid grid-cols-2 gap-4">
-              <Field label="Min Zefix score">
-                <input name="hdbscan_min_zefix_score" type="number" min="0" max="100" className={inputCls} placeholder="—" />
-              </Field>
-              <Field label="Max Zefix score">
-                <input name="hdbscan_max_zefix_score" type="number" min="0" max="100" className={inputCls} placeholder="—" />
-              </Field>
-            </div>
-          </div>
-
-          <label className="flex items-center gap-2 text-sm text-slate-700">
-            <input type="checkbox" name="hdbscan_use_keywords" className={checkCls} />
-            Use existing purpose keywords
-          </label>
-
-          <div className="bg-green-50 border border-green-200 rounded-lg px-4 py-3">
-            <label className="flex items-center gap-2 text-sm text-green-900">
-              <input type="checkbox" name="hdbscan_use_batch_merge" className={checkCls} />
-              <span><strong>Batch+Merge mode</strong> — For large datasets (30K–763K companies)</span>
-            </label>
-            <p className="ml-6 text-xs text-green-800 mt-1">
-              Splits dataset into 100K batches, clusters independently, merges via hierarchical clustering. 
-              <br />Slower but handles unlimited dataset size. ~5–8 min per batch (763K ≈ 30–40 min total).
-            </p>
-          </div>
-
-          <SubmitBtn loading={loading === "scoring/hdbscan"} />
-        </form>
-
-      </Section>
-
-      <Section title="BIRCH clustering (memory-efficient full dataset)">
-
-        <form onSubmit={async e => {
-          e.preventDefault();
-          const fd = new FormData(e.currentTarget);
-          await submit("scoring/birch", {
-            n_clusters: parseInt(fd.get("birch_n_clusters") as string) || 150,
-            n_components: parseInt(fd.get("birch_n_components") as string) || 50,
-            top_terms: parseInt(fd.get("birch_top_terms") as string) || 5,
-            top_keywords_per_company: parseInt(fd.get("birch_top_keywords") as string) || 10,
-            canton: (fd.get("birch_canton") as string)?.trim().toUpperCase() || null,
-            min_zefix_score: parseInt(fd.get("birch_min_zefix_score") as string) || null,
-            max_zefix_score: parseInt(fd.get("birch_max_zefix_score") as string) || null,
-            limit: parseInt(fd.get("birch_limit") as string) || null,
-            use_keywords: fd.get("birch_use_keywords") === "on",
-          });
-        }} className="space-y-4">
-          <div>
-            <h2 className="text-sm font-semibold text-slate-800">BIRCH pipeline (single-pass clustering)</h2>
-            <p className="mt-1 text-xs text-slate-500">Balanced Iterative Reducing and Clustering — designed for large datasets with limited memory.</p>
-          </div>
-
-          {/* BIRCH characteristics */}
-          <div className="bg-green-50 border border-green-300 rounded-lg px-4 py-3 space-y-2">
-            <div className="text-xs font-semibold text-green-900">✓ Memory-efficient for full dataset</div>
-            <ul className="text-xs text-green-800 space-y-1 ml-3">
-              <li>• <strong>Full dataset (763K):</strong> ~8-15 minutes, ~500 MB memory ✓ Safe</li>
-              <li>• <strong>Algorithm:</strong> Incremental CF-tree (Clustering Feature tree)</li>
-              <li>• <strong>Trade-off:</strong> No density estimation (less sophisticated than HDBSCAN, but works on any scale)</li>
-              <li>• <strong>Recommended:</strong> Use for full dataset when HDBSCAN memory issues occur</li>
-            </ul>
-          </div>
-
-          <div className="grid grid-cols-2 gap-4">
-            <Field label="Target clusters">
-              <input name="birch_n_clusters" type="number" min="1" defaultValue="150" className={inputCls} />
-            </Field>
-            <Field label="Components">
-              <input name="birch_n_components" type="number" min="2" defaultValue="50" className={inputCls} />
-            </Field>
-          </div>
-          <div className="grid grid-cols-2 gap-4">
-            <Field label="Top cluster terms">
-              <input name="birch_top_terms" type="number" min="1" defaultValue="5" className={inputCls} />
-            </Field>
-            <Field label="Top keywords/company">
-              <input name="birch_top_keywords" type="number" min="1" defaultValue="10" className={inputCls} />
-            </Field>
-          </div>
-
-          {/* Dataset filters */}
-          <div className="bg-slate-50 rounded-lg px-4 py-3 border border-slate-200 space-y-4">
-            <div className="text-xs font-semibold text-slate-700">Dataset filters (optional)</div>
-            <div className="grid grid-cols-2 gap-4">
-              <Field label="Canton">
-                <input name="birch_canton" className={inputCls} placeholder="Any" />
-              </Field>
-              <Field label="Limit">
-                <input name="birch_limit" type="number" min="1" className={inputCls} placeholder="All" />
-              </Field>
-            </div>
-            <div className="grid grid-cols-2 gap-4">
-              <Field label="Min Zefix score">
-                <input name="birch_min_zefix_score" type="number" min="0" max="100" className={inputCls} placeholder="—" />
-              </Field>
-              <Field label="Max Zefix score">
-                <input name="birch_max_zefix_score" type="number" min="0" max="100" className={inputCls} placeholder="—" />
-              </Field>
-            </div>
-          </div>
-
-          <label className="flex items-center gap-2 text-sm text-slate-700">
-            <input type="checkbox" name="birch_use_keywords" className={checkCls} />
-            Use existing purpose keywords
-          </label>
-          <SubmitBtn loading={loading === "scoring/birch"} />
-        </form>
 
       </Section>
 

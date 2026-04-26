@@ -331,7 +331,7 @@ export function CategoriesClient() {
       {/* ── Clusters ───────────────────────────────────────────────────── */}
       <Section
         title="Clusters"
-        subtitle={`${clusters.length} active clusters — assigned by semantic_kmeans_cluster or tfidf_kmeans_cluster. Each cluster groups companies with related business activities. Click any cluster to filter the dashboard.`}
+        subtitle={`${clusters.length} active clusters — assigned by tfidf_kmeans_cluster. Each cluster groups companies with related business activities. Click any cluster to filter the dashboard.`}
         searchValue={clusterSearch}
         onSearchChange={setClusterSearch}
       >

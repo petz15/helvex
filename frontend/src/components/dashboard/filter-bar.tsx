@@ -4,7 +4,6 @@ import { X, SlidersHorizontal, ChevronDown, Bookmark, BookmarkCheck, Trash2, Bel
 import { cn, formatClusterLabel } from "@/lib/utils";
 import { Combobox } from "./combobox";
 import { MultiSelectFilter } from "./multi-select-filter";
-import { searchKeywords, searchClusters } from "@/lib/api";
 import type { CompanyFilters, SavedView } from "@/lib/types";
 import { REVIEW_STATUSES, CONTACT_STATUSES } from "@/lib/types";
 import { useI18n } from "@/i18n/context";
@@ -38,6 +37,17 @@ function SectionLabel({ children }: { children: React.ReactNode }) {
 
 function Label({ children }: { children: React.ReactNode }) {
   return <div className="text-xs font-medium text-slate-700 mb-1">{children}</div>;
+}
+
+function ProTag() {
+  return (
+    <span
+      className="inline-flex items-center text-[9px] uppercase tracking-wide font-semibold text-amber-700 bg-amber-50 border border-amber-200 rounded px-1 py-px ml-1.5 align-middle"
+      title="AI feature — uses credits per company"
+    >
+      Pro
+    </span>
+  );
 }
 
 function ScoreRange({
@@ -104,12 +114,24 @@ export function FilterBar({
   const [showSaveInput, setShowSaveInput] = useState(false);
   const [showViewsMenu, setShowViewsMenu] = useState(false);
 
-  const clusters = taxonomy?.clusters ?? [];
-  const keywords = taxonomy?.keywords ?? [];
   const categories = taxonomy?.categories ?? [];
   const nogaCodes = taxonomy?.noga_codes ?? [];
   const nogaLevels = taxonomy?.noga_levels ?? [];
   const legalForms = taxonomy?.legal_forms ?? [];
+
+  // Taxonomy returns noga entries as "62 — Information Technology"; API expects bare code "62".
+  // Strip the label for the stored value but keep a map so the chip and dropdown show the full label.
+  const nogaOptions: [string, number][] = nogaCodes.map(([entry, cnt]) => {
+    const code = entry.split(" — ")[0]?.trim() ?? entry;
+    return [code, cnt] as [string, number];
+  });
+  const nogaLabelMap = new Map<string, string>(
+    nogaCodes.map(([entry]) => {
+      const code = entry.split(" — ")[0]?.trim() ?? entry;
+      return [code, entry];
+    })
+  );
+  const formatNogaValue = (code: string) => nogaLabelMap.get(code) ?? code;
 
   const { dict } = useI18n();
   const t = dict.app.filters;
@@ -393,32 +415,7 @@ export function FilterBar({
           <SectionLabel>{t.categoryinclude}</SectionLabel>
           <div className="grid grid-cols-1 sm:grid-cols-3 lg:grid-cols-6 gap-x-4 gap-y-3">
             <div>
-              <Label>{t.cluster}</Label>
-              <MultiSelectFilter
-                value={filters.tfidf_cluster === "_none" || filters.tfidf_cluster === "_any" ? undefined : filters.tfidf_cluster}
-                onChange={(v) => set("tfidf_cluster", v)}
-                placeholder={t.search.replace("{input}", t.cluster)}
-                options={clusters}
-                onSearch={async (q) => { const r = await searchClusters(q); return r.map(x => ({ label: x.cluster, count: x.count })); }}
-                extraOptions={[{ value: "_none", label: "None (unset)" }, { value: "_any", label: "Any (set)" }]}
-                formatValue={formatClusterLabel}
-                variant="include"
-              />
-            </div>
-            <div>
-              <Label>{t.purposekeyword}</Label>
-              <MultiSelectFilter
-                value={filters.purpose_keywords === "_none" ? undefined : filters.purpose_keywords}
-                onChange={(v) => set("purpose_keywords", v)}
-                placeholder={t.search.replace("{input}", t.purposekeyword)}
-                options={keywords}
-                onSearch={async (q) => { const r = await searchKeywords(q); return r.map(x => ({ label: x.keyword, count: x.count })); }}
-                extraOptions={[{ value: "_none", label: "None (unset)" }]}
-                variant="include"
-              />
-            </div>
-            <div>
-              <Label>{t.aiclassification}</Label>
+              <Label>{t.aiclassification}<ProTag /></Label>
               <MultiSelectFilter
                 value={filters.ai_category === "_none" ? undefined : filters.ai_category}
                 onChange={(v) => set("ai_category", v)}
@@ -434,7 +431,8 @@ export function FilterBar({
                 value={filters.noga_code === "_none" || filters.noga_code === "_any" ? undefined : filters.noga_code}
                 onChange={(v) => set("noga_code", v)}
                 placeholder={t.search.replace("{input}", t.noga)}
-                options={nogaCodes.map(([entry, cnt]) => [entry.split(" — ")[0]?.trim() ?? entry, cnt] as [string, number])}
+                options={nogaOptions}
+                formatValue={formatNogaValue}
                 extraOptions={[{ value: "_none", label: "None (unset)" }, { value: "_any", label: "Any (set)" }]}
                 variant="include"
               />
@@ -481,30 +479,7 @@ export function FilterBar({
           <SectionLabel>{t.categoryexclude}</SectionLabel>
           <div className="grid grid-cols-1 sm:grid-cols-3 lg:grid-cols-6 gap-x-4 gap-y-3">
             <div>
-              <Label>{t.cluster}</Label>
-              <MultiSelectFilter
-                value={filters.exclude_tfidf_cluster}
-                onChange={(v) => set("exclude_tfidf_cluster", v)}
-                placeholder={t.search.replace("{input}", t.cluster)}
-                options={clusters}
-                onSearch={async (q) => { const r = await searchClusters(q); return r.map(x => ({ label: x.cluster, count: x.count })); }}
-                formatValue={formatClusterLabel}
-                variant="exclude"
-              />
-            </div>
-            <div>
-              <Label>{t.purposekeyword}</Label>
-              <MultiSelectFilter
-                value={filters.exclude_purpose_keywords}
-                onChange={(v) => set("exclude_purpose_keywords", v)}
-                placeholder={t.search.replace("{input}", t.purposekeyword)}
-                options={keywords}
-                onSearch={async (q) => { const r = await searchKeywords(q); return r.map(x => ({ label: x.keyword, count: x.count })); }}
-                variant="exclude"
-              />
-            </div>
-            <div>
-              <Label>{t.aiclassification}</Label>
+              <Label>{t.aiclassification}<ProTag /></Label>
               <MultiSelectFilter
                 value={filters.exclude_ai_category}
                 onChange={(v) => set("exclude_ai_category", v)}
@@ -519,7 +494,8 @@ export function FilterBar({
                 value={filters.exclude_noga_code}
                 onChange={(v) => set("exclude_noga_code", v)}
                 placeholder={t.search.replace("{input}", t.noga)}
-                options={nogaCodes.map(([entry, cnt]) => [entry.split(" — ")[0]?.trim() ?? entry, cnt] as [string, number])}
+                options={nogaOptions}
+                formatValue={formatNogaValue}
                 variant="exclude"
               />
             </div>

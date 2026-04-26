@@ -1775,7 +1775,7 @@ def reclassify_noga(
         "skipped_existing": 0,
         "skipped_not_detailed": 0,
         "skipped_no_match": 0,
-        "skipped_branch": 0,
+        "branches_handled": 0,
         "errors": [],
     }
 
@@ -1817,19 +1817,13 @@ def reclassify_noga(
                         stats["skipped_not_detailed"] += 1
                         continue
 
-                # Skip branch offices — they replicate a parent's purpose and
-                # assigning NOGA based on their text yields the wrong code.
-                _name_lower = (company.name or "").lower()
-                _purpose_lower = (company.purpose or "").lower()
-                if (
-                    "zweigniederlassung" in _name_lower
-                    or "zweigniederlassung" in _purpose_lower
-                    or "succursale" in _purpose_lower
-                    or "succursale" in _name_lower
-                    or "filiale di" in _purpose_lower
-                ):
-                    stats["skipped_branch"] = stats.get("skipped_branch", 0) + 1
-                    continue
+                # Branches are handled inside apply_noga_classification:
+                # they inherit the parent's NOGA when available, or clear stale
+                # values rather than producing a wrong classification from
+                # boilerplate purpose text.
+                from app.services.noga import is_branch_office
+                if is_branch_office(company):
+                    stats["branches_handled"] = stats.get("branches_handled", 0) + 1
 
                 update = apply_noga_classification(db, company)
                 if update is None:
@@ -2102,15 +2096,40 @@ def claude_classify_batch(
     max_purpose_chars = int(scoring_config.get("scoring_claude_max_purpose_chars") or 800)
 
     # Fixed category taxonomy — append allowed list to prompt so output tokens stay short
+    fixed_categories: list[str] = []
+    fixed_categories_lc: dict[str, str] = {}  # lowercased → canonical
     if use_fixed_categories:
         raw_cats = (crud.get_effective_setting(db, "claude_classify_categories", org_id=org_id, default="") or "").strip()
         if raw_cats:
-            cat_list = [c.strip() for c in raw_cats.replace("\n", ",").split(",") if c.strip()]
-            if cat_list:
-                cat_str = ", ".join(cat_list)
+            fixed_categories = [c.strip() for c in raw_cats.replace("\n", ",").split(",") if c.strip()]
+            if fixed_categories:
+                fixed_categories_lc = {c.lower(): c for c in fixed_categories}
+                cat_str = ", ".join(fixed_categories)
                 prompt = prompt + f'\n\nUse ONLY one of these categories (exact match): {cat_str}'
                 # Rebuild system param with updated prompt
                 system_param = [{"type": "text", "text": prompt, "cache_control": {"type": "ephemeral"}}]
+
+    def _coerce_category(raw: object) -> str | None:
+        """Map a Claude response category onto the fixed whitelist if one is configured.
+
+        Returns the canonical whitelist entry on a case-insensitive match, or
+        None when the response is off-list. Behaviour is unchanged when no
+        whitelist is configured.
+        """
+        if raw is None:
+            return None
+        s = str(raw).strip()
+        if not s:
+            return None
+        if not fixed_categories_lc:
+            return s[:128]
+        canon = fixed_categories_lc.get(s.lower())
+        if canon is not None:
+            return canon[:128]
+        # Tolerate trailing punctuation or extra whitespace from the model
+        cleaned = s.strip(" .,;:'\"").lower()
+        canon = fixed_categories_lc.get(cleaned)
+        return canon[:128] if canon else None
 
     query = db.query(Company).filter(Company.purpose.isnot(None))
     if not rerun_classified:
@@ -2181,7 +2200,10 @@ def claude_classify_batch(
     def _apply_single(company: Company, response_text: str) -> None:
         data = json.loads(_strip_fences(response_text))
         company.ai_score = max(0, min(100, int(data.get("score", 0))))
-        company.ai_category = str(data.get("category", ""))[:128] if data.get("category") else None
+        coerced = _coerce_category(data.get("category"))
+        if fixed_categories_lc and coerced is None and data.get("category"):
+            stats.setdefault("offlist_categories", []).append(str(data.get("category"))[:64])
+        company.ai_category = coerced
         company.ai_freeform = str(data["freeform"]) if data.get("freeform") else None
         company.ai_scored_at = datetime.now(tz=timezone.utc)
         _refresh_combined(company)
@@ -2193,7 +2215,10 @@ def claude_classify_batch(
         now = datetime.now(tz=timezone.utc)
         for company, item in zip(chunk, data):
             company.ai_score = max(0, min(100, int(item.get("score", 0))))
-            company.ai_category = str(item.get("category", ""))[:128] if item.get("category") else None
+            coerced = _coerce_category(item.get("category"))
+            if fixed_categories_lc and coerced is None and item.get("category"):
+                stats.setdefault("offlist_categories", []).append(str(item.get("category"))[:64])
+            company.ai_category = coerced
             company.ai_freeform = str(item["freeform"]) if item.get("freeform") else None
             company.ai_scored_at = now
             _refresh_combined(company)

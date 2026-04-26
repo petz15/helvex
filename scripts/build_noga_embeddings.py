@@ -1,11 +1,16 @@
 """Build and upload NOGA embeddings to S3.
 
-Embeds each NOGA entry's German label using paraphrase-multilingual-MiniLM-L12-v2,
-then uploads two files to S3 (models bucket):
-  - models/noga_embeddings.npy         — float32 array, shape (N, 384)
+Embeds each NOGA entry's German label using the shared multilingual embedding
+service (DEFAULT_MODEL in app.services.embeddings — currently
+paraphrase-multilingual-mpnet-base-v2, 768-dim), then uploads two files to S3:
+  - models/noga_embeddings.npy         — float32 array, shape (N, D)
   - models/noga_embedding_ids.json     — list of N NOGA codes matching row order
 
-Run once; re-run only if noga_lookup.json changes.
+The model MUST match app.services.embeddings.DEFAULT_MODEL because
+app.services.noga.classify_company_noga() embeds queries via that same service
+and computes cosine similarity against this matrix.
+
+Run once; re-run only if noga_lookup.json changes or DEFAULT_MODEL changes.
 
 Usage:
     python scripts/build_noga_embeddings.py
@@ -27,12 +32,11 @@ load_dotenv(repo_root / ".env")
 sys.path.insert(0, str(repo_root))
 
 import numpy as np
-from sentence_transformers import SentenceTransformer
 
 from app.services import s3_client
+from app.services.embeddings import DEFAULT_MODEL, embed_texts
 
 LOOKUP_PATH = Path(__file__).resolve().parents[1] / "noga_lookup.json"
-MODEL_NAME = "paraphrase-multilingual-MiniLM-L12-v2"
 S3_EMBEDDINGS_KEY = "models/noga_embeddings.npy"
 S3_IDS_KEY = "models/noga_embedding_ids.json"
 
@@ -57,17 +61,8 @@ def main() -> None:
     labels = [_de_label(lookup[c]) for c in codes]
 
     print(f"  {len(codes)} NOGA entries loaded.")
-    print(f"Loading sentence-transformers model '{MODEL_NAME}' …")
-    model = SentenceTransformer(MODEL_NAME)
-
-    print("Encoding labels …")
-    embeddings: np.ndarray = model.encode(
-        labels,
-        batch_size=256,
-        show_progress_bar=True,
-        normalize_embeddings=True,  # cosine similarity == dot product
-        convert_to_numpy=True,
-    )
+    print(f"Encoding with shared embedding service (model: {DEFAULT_MODEL}) …")
+    embeddings = embed_texts(labels, batch_size=128, show_progress=True)
     print(f"  Embeddings shape: {embeddings.shape}, dtype: {embeddings.dtype}")
 
     # Serialize

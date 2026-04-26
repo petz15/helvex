@@ -66,6 +66,17 @@ function scoreTextClass(score: number | null): string {
   return "text-red-700";
 }
 
+function ProTag() {
+  return (
+    <span
+      className="inline-flex items-center text-[9px] uppercase tracking-wide font-semibold text-amber-700 bg-amber-50 border border-amber-200 rounded px-1 py-px"
+      title="AI feature — uses credits per company"
+    >
+      Pro
+    </span>
+  );
+}
+
 interface FlexBreakdown {
   clusters: number;
   keywords: number;
@@ -173,6 +184,30 @@ export function CompanyTable({ companies, selectedId, onSelect, filters, onSort,
         header: "Cluster",
         cell: (info) => <span className="text-slate-600 text-xs truncate max-w-[140px] block" title={(info.getValue() as string) ?? undefined}>{formatClusterLabel((info.getValue() as string)?.split("|")[0] ?? "") || "—"}</span>,
       }),
+      ch.accessor("noga_label", {
+        id: "noga",
+        header: "NOGA",
+        cell: (info) => {
+          const row = info.row.original;
+          const codes = (row.noga_path ?? "").split("|").filter(Boolean);
+          const labels = (row.noga_path_labels ?? "").split("|").filter(Boolean);
+          const leafLabel = (info.getValue() as string | null) ?? labels[labels.length - 1] ?? row.noga_code ?? null;
+          if (!leafLabel) return <span className="text-slate-300 text-xs">—</span>;
+          const tooltip = labels.length > 0
+            ? labels.map((l, i) => `${codes[i] ?? ""} ${l}`.trim()).join(" › ")
+            : (row.noga_code ? `${row.noga_code} ${leafLabel}` : leafLabel);
+          const lowConf = row.noga_confidence != null && row.noga_confidence < 0.5;
+          return (
+            <span
+              className={cn("text-slate-700 text-xs truncate max-w-[180px] block", lowConf && "text-slate-400 italic")}
+              title={tooltip}
+            >
+              {row.noga_code && <span className="font-mono opacity-60 mr-1">{row.noga_code}</span>}
+              {leafLabel}
+            </span>
+          );
+        },
+      }),
       ch.accessor("website_url", {
         id: "website",
         header: "Website",
@@ -198,11 +233,11 @@ export function CompanyTable({ companies, selectedId, onSelect, filters, onSort,
         ),
       }),
       ch.accessor("ai_score", {
-        header: "AI",
+        header: () => <span className="inline-flex items-center gap-1">AI <ProTag /></span>,
         cell: (info) => <ScoreBar score={info.getValue() as number | null} />,
       }),
       ch.accessor("ai_category", {
-        header: "Category",
+        header: () => <span className="inline-flex items-center gap-1">Category <ProTag /></span>,
         cell: (info) => <span className="text-slate-600 text-xs truncate max-w-[120px] block">{info.getValue() as string ?? "—"}</span>,
       }),
       ch.accessor("combined_score", {

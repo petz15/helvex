@@ -25,6 +25,8 @@ export interface Company {
   noga_level: string | null;
   noga_confidence: number | null;
   noga_classified_at: string | null;
+  noga_path: string | null;
+  noga_path_labels: string | null;
   combined_score: number | null;
   review_status: string | null;
   contact_status: string | null;
