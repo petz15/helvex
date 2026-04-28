@@ -72,6 +72,7 @@ mlWorker:
 
 postgres:
   enabled: true
+  imageName: ghcr.io/petz15/helvex-pgvector:16.3.0
   instances: 1
   storageSize: 40Gi
   backupEnabled: true
