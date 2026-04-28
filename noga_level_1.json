@@ -1,0 +1,1020 @@
+[
+  {
+    "annotations": [
+      {
+        "type": "EXCLUDES",
+        "text": {
+          "de": "Dieser Abschnitt umfasst nicht die Herstellung von Waren für den Eigenbedarf ohne ausgeprägten Schwerpunkt durch private Haushalte, die der Art 981000 zugeordnet sind.",
+          "en": "This section excludes undifferentiated subsistence goods-producing activities of households, which are classified in type 981000.",
+          "fr": "Cette section ne comprend pas les activités indifférenciées des ménages en tant que producteurs de biens de subsistances, qui sont classées dans le genre 981000.",
+          "it": "Questa sezione non comprende le attività di produzione di beni di sussistenza indifferenziati delle famiglie, che sono classificate nel genere 981000."
+        }
+      },
+      {
+        "type": "HIER_LEVEL",
+        "text": {
+          "de": "NOGA - Ebene 1 - Abschnitt",
+          "en": "NOGA - Level 1 - Section",
+          "fr": "NOGA - Niveau 1 - Section",
+          "it": "NOGA - Livello 1 - Sezione"
+        }
+      },
+      {
+        "type": "INCLUDES_ALSO",
+        "text": {
+          "de": "Dieser Abschnitt umfasst ferner die ökologische Landwirtschaft, die Aquakultur, den Anbau von gentechnisch veränderten Pflanzen und die Aufzucht von gentechnisch veränderten Tieren.",
+          "en": "This section also includes organic agriculture, aquaculture, the growing of genetically modified crops and the raising of genetically modified animals.",
+          "fr": "Cette section comprend également l'agriculture biologique, l'aquaculture, la culture de plantes génétiquement modifiées et l'élevage d'animaux génétiquement modifiés.",
+          "it": "Questa sezione comprende inoltre l'agricoltura biologica, l'acquacoltura, la coltivazione di colture geneticamente modificate e l'allevamento di animali geneticamente modificati."
+        }
+      },
+      {
+        "type": "INCLUDES",
+        "text": {
+          "de": "Dieser Abschnitt umfasst die Nutzung pflanzlicher und tierischer natürlicher Ressourcen, d. h. Tätigkeiten wie Pflanzenbau, Tierzucht und Tierhaltung, Holzgewinnung und die Gewinnung anderer pflanzlicher und tierischer Erzeugnisse in landwirtschaftlichen Betrieben oder in freier Natur.",
+          "en": "This section includes the exploitation of vegetal and animal natural resources, comprising the activities of growing of crops, raising and breeding of animals, harvesting of timber and other plants, and the production of animal products from a farm or natural habitats.",
+          "fr": "Cette section comprend l'exploitation des ressources naturelles végétales et animales, y compris les activités de culture, d'élevage et de reproduction des animaux, de récolte du bois et d'autres plantes, de production de produits d'origine animale à partir d'une ferme ou d'habitats naturels.",
+          "it": "Questa sezione comprende lo sfruttamento delle risorse naturali vegetali e animali, che comprende le attività di coltivazione, allevamento e riproduzione di animali, raccolta di legname e altre piante e produzione di prodotti animali da un'azienda agricola o da habitat naturali."
+        }
+      }
+    ],
+    "code": "A",
+    "name": {
+      "de": "LAND- UND FORSTWIRTSCHAFT, FISCHEREI",
+      "en": "AGRICULTURE, FORESTRY AND FISHING",
+      "fr": "AGRICULTURE, SYLVICULTURE ET PÊCHE",
+      "it": "AGRICOLTURA, SILVICOLTURA E PESCA",
+      "rm": "NA"
+    },
+    "level": "Abschnitt",
+    "level_key": "abschnitt",
+    "level_no": 1,
+    "source_level": "NOGA - Level 1 - Section"
+  },
+  {
+    "annotations": [
+      {
+        "type": "EXCLUDES",
+        "text": {
+          "de": "Dieser Abschnitt umfasst nicht:\r\n- Weiterverarbeitung der gewonnenen Rohstoffe, siehe Abschnitt C\r\n- Verwendung der geförderten Rohstoffe ohne weitere Verarbeitung für Bauzwecke, siehe Abschnitt F\r\n- Flaschenabfüllung von natürlichem Quell- und Mineralwasser, siehe 110700\r\n- Sanierung von Bergbaustandorten, siehe 390000",
+          "en": "This section excludes:\r\n- further processing of the extracted materials, see section C\r\n- use of the extracted materials without further transformation for construction purposes, see section F\r\n- bottling of natural spring and mineral waters at springs and wells, see 110700\r\n- remediation of mine sites, see 390000",
+          "fr": "Cette section ne comprend pas :\r\n- la transformation ultérieure des matières extraites, voir section C\r\n- l'utilisation des matières extraites sans autre transformation à des fins de construction, voir section F\r\n- la mise en bouteilles, à la source ou au puits, d'eau de source naturelle et d'eaux minérales , voir 110700\r\n- l'assainissement des sites miniers, voir 390000",
+          "it": "Questa sezione non comprende:\r\n- l'ulteriore trasformazione dei materiali estratti, cfr. Sezione C\r\n- l'uso dei materiali estratti senza ulteriori trasformazioni a fini di costruzione, cfr. Sezione F\r\n- imbottigliamento di acque naturali di sorgente e minerali presso sorgenti e pozzi, cfr. 110700\r\n- bonifica di siti minerari, cfr. 390000"
+        }
+      },
+      {
+        "type": "HIER_LEVEL",
+        "text": {
+          "de": "NOGA - Ebene 1 - Abschnitt",
+          "en": "NOGA - Level 1 - Section",
+          "fr": "NOGA - Niveau 1 - Section",
+          "it": "NOGA - Livello 1 - Sezione"
+        }
+      },
+      {
+        "type": "INCLUDES_ALSO"
+      },
+      {
+        "type": "INCLUDES",
+        "text": {
+          "de": "Dieser Abschnitt umfasst die Gewinnung natürlich vorkommender fester (Kohle und Erze), flüssiger (Erdöl) und gasförmiger (Erdgas) mineralischer Rohstoffe. Die Förderung und Gewinnung solcher Rohstoffe kann mit unterschiedlichen Verfahren erfolgen (z. B. im Untertage- oder Übertage-Bergbau, durch Bohrungen oder im Meeresbodenbergbau).\r\n\r\nEr umfasst auch zusätzliche Tätigkeiten zur Aufbereitung von Rohstoffen für die Vermarktung (z. B. Zerkleinern, Mahlen, Waschen, Trocknen, Sortieren, Konzentration von Erzen und Verflüssigen von Erdgas).\r\n\r\nDie Abteilungen, Gruppen und Klassen dieses Abschnitts sind nach dem hauptsächlich gewonnenen Rohstoff gegliedert. Die Abteilungen 05 und 06 befassen sich mit dem Abbau und der Gewinnung von fossilen Brennstoffen (Steinkohle, Braunkohle, Erdöl, Gas); die Abteilungen 07 und 08 behandeln den Erzbergbau, die Gewinnung von Steinen und Erden sowie sonstigen Bergbau.\r\n\r\nEinige der technischen Tätigkeiten dieses Abschnitts, insbesondere im Zusammenhang mit der Gewinnung von Kohlenwasserstoffen, können auch von spezialisierten Einheiten der Abteilung 09 als industrielle Dienstleistung für Dritte erbracht werden.",
+          "en": "Mining and quarrying include the extraction of minerals occurring naturally as solids (coal and ores), liquids (petroleum) or gases (natural gas). Extraction can be achieved by different methods (for example, underground or surface mining, well operation, seabed mining).\r\n\r\nThis section includes supplementary activities aimed at preparing the crude materials for marketing (for example, crushing, grinding, cleaning, drying, sorting, concentrating ores and liquefaction of natural gas).\r\n\r\nMining activities are classified into divisions, groups and classes on the basis of the principal mineral produced. Divisions 05, and 06 are concerned with mining and quarrying of fossil fuels (coal, lignite, petroleum, gas); divisions 07 and 08 concern metal ores, various minerals and quarry products.\r\n\r\nSome of the technical operations of this section, particularly related to the extraction of hydrocarbons, may also be carried out for third parties by specialised units as an industrial service, activity which is reflected in division 09.",
+          "fr": "Les industries extractives comprennent l'extraction de minéraux présents naturellement sous forme solide (houille et minerais), liquide (pétrole) ou gazeuse (gaz naturel). L'extraction peut se faire de différentes manières (par ex. sous terre, en surface, par le creusement de puits ou par l'exploitation minière des fonds marins).\r\n\r\nCette section comprend les opérations supplémentaires nécessaires à la préparation des matières brutes pour leur commercialisation, par ex. : concassage, broyage, nettoyage, séchage, triage, concentration des minerais ou liquéfaction du gaz naturel.\r\n\r\nLes activités minières sont classées en divisions, groupes et classes sur la base du principal minéral produit. Les divisions 05 et 06 concernent l'extraction de combustibles fossiles (houille, lignite, pétrole, gaz); les divisions 07 et 08 concernent l'extraction de minerais métalliques, de minéraux divers et de produits de carrière.\r\n\r\nCertaines opérations techniques de cette section, notamment pour l'extraction d'hydrocarbures, peuvent être réalisées pour compte de tiers par des unités spécialisées en tant qu'activités de service industrielles relevant de la division 09.",
+          "it": "Le attività estrattive comprendono l'estrazione di minerali presenti in natura sotto forma di solidi (carbone e minerali), liquidi (petrolio) o gassosi (gas naturale). L'estrazione può essere effettuata con metodi diversi (ad esempio, estrazione sotterranea o di superficie, pozzi, estrazione dal fondale marino).\r\n\r\nQuesta sezione comprende le attività supplementari volte a preparare i materiali grezzi per la commercializzazione (ad esempio, la frantumazione, la macinazione, la pulizia, l'essiccazione, la selezione, la concentrazione dei minerali e la liquefazione del gas naturale).\r\n\r\nLe attività estrattive sono classificate in divisioni, gruppi e classi sulla base del principale minerale prodotto. Le divisioni 05 e 06 riguardano l'estrazione di combustibili fossili (carbone, lignite, petrolio, gas); le divisioni 07 e 08 riguardano minerali metallici, minerali vari e prodotti di cava.\r\n\r\nAlcune delle operazioni tecniche di questa sezione, in particolare quelle relative all'estrazione di idrocarburi, possono essere svolte anche per conto di terzi da unità specializzate come servizio industriale, attività che si riflette nella divisione 09."
+        }
+      }
+    ],
+    "code": "B",
+    "name": {
+      "de": "BERGBAU UND GEWINNUNG VON STEINEN UND ERDEN",
+      "en": "MINING AND QUARRYING",
+      "fr": "INDUSTRIES EXTRACTIVES",
+      "it": "ATTIVITÀ ESTRATTIVE",
+      "rm": "NA"
+    },
+    "level": "Abschnitt",
+    "level_key": "abschnitt",
+    "level_no": 1,
+    "source_level": "NOGA - Level 1 - Section"
+  },
+  {
+    "annotations": [
+      {
+        "type": "EXCLUDES"
+      },
+      {
+        "type": "HIER_LEVEL",
+        "text": {
+          "de": "NOGA - Ebene 1 - Abschnitt",
+          "en": "NOGA - Level 1 - Section",
+          "fr": "NOGA - Niveau 1 - Section",
+          "it": "NOGA - Livello 1 - Sezione"
+        }
+      },
+      {
+        "type": "INCLUDES_ALSO"
+      },
+      {
+        "type": "INCLUDES",
+        "text": {
+          "de": "Dieser Abschnitt umfasst die physikalische, mechanische, chemische oder biologische Umwandlung von Materialien, Stoffen oder Bestandteilen in neue Produkte, obwohl dies nicht als einziges universelles Kriterium für die Definition des verarbeitenden Gewerbes verwendet werden kann (siehe Anmerkung zur Verarbeitung von Abfällen unten). Bei den Materialien, Stoffen oder Bestandteilen, die einer Umwandlung unterzogen werden, handelt es sich entweder um Rohstoffe oder um Erzeugnisse der Land- und Forstwirtschaft, der Fischerei, des Bergbaus oder der Gewinnung von Steinen und Erden sowie um Erzeugnisse anderer verarbeitender Tätigkeiten. Eine wesentliche Veränderung, Renovierung oder ein Umbau von Waren wird im Allgemeinen als Herstellung angesehen.\r\n\r\nDas Ergebnis eines Herstellungsprozesses kann fertig in dem Sinne sein, dass es gebrauchs- oder verbrauchsfertig ist, oder es kann halbfertig in dem Sinne sein, dass es als Input für eine weitere Herstellung dient. So ist z. B. das Ergebnis der Aluminiumoxidraffination der Input für die Primärproduktion von Aluminium; Primäraluminium ist der Input für das Ziehen von Aluminiumdraht; Aluminiumdraht ist der Input für die Herstellung von Drahtwaren.\r\n\r\nDie Herstellung von spezialisierten Komponenten und Teilen sowie von Zubehör und Zusatzeinrichtungen für Maschinen und Geräte wird in der Regel derselben Klasse zugeordnet wie die Herstellung der Maschinen und Geräte, für die die Teile und das Zubehör bestimmt sind. Die Herstellung von nicht spezialisierten Komponenten und Teilen von Maschinen und Geräten (z. B. Motoren, Kolben, Elektromotoren, elektrische Baugruppen, Ventile, Getriebe, Wälzlager) wird in die entsprechende Klasse des verarbeitenden Gewerbes eingereiht, ohne Rücksicht auf die Maschinen und Geräte, in denen diese Teile enthalten sein können.\r\n\r\nDie Herstellung von speziellen Bauteilen und Zubehörteilen durch Formen oder Extrudieren von Kunststoffen wird in der Regel der Gruppe 222 zugeordnet.\r\n\r\nDie Montage von Einzelteilen von Fertigerzeugnissen gilt als Herstellung. Dazu gehört auch die Montage von Fertigerzeugnissen aus selbst hergestellten oder zugekauften Komponenten.\r\n\r\nDie Verwertung von Abfällen, d. h. die Verarbeitung von Abfällen zu Sekundärrohstoffen*, wird in Gruppe 382 eingeordnet. Dies kann zwar physikalische, mechanische, biologische oder chemische Umwandlungen beinhalten, wird aber nicht als Teil der Fertigungstätigkeiten angesehen. Der Hauptzweck dieser Tätigkeiten wird als Be- oder Verarbeitung von Abfällen angesehen und sie werden daher in Abschnitt E eingestuft. Die Herstellung neuer Produkte aus Sekundärrohstoffen wird jedoch dem verarbeitenden Gewerbe zugeordnet, auch wenn bei diesen Verfahren Abfälle als Input verwendet werden. So wird beispielsweise die Herstellung von Silber aus Folienabfällen als Fertigungsprozess betrachtet.\r\n\r\nDie spezialisierte Wartung und Reparatur von industriellen, kommerziellen und ähnlichen Maschinen und Geräten wird im Allgemeinen in Abteilung 33 eingeordnet. Die Reparatur und Wartung von Computern, persönlichen Gegenständen und Haushaltswaren, Kraftfahrzeugen und Motorrädern wird jedoch in die Abteilung 95 eingeordnet.\r\n\r\nDie Installation von Maschinen und Anlagen wird, wenn sie als Spezialtätigkeit ausgeführt wird, in Klasse 3320 eingereiht.\r\n\r\nDie Wartung, Reparatur und Installation von Ausrüstungen, die integraler Bestandteil von Gebäuden oder ähnlichen Bauwerken sind (z. B. Wartung, Reparatur und Installation von Rolltreppen oder Klimaanlagen), werden dem Baugewerbe in Abschnitt F zugeordnet, wenn sie auf der Baustelle ausgeführt werden.)\r\n\r\nDieser Abschnitt umfasst auch die Tätigkeiten von Herstellern fabrikloser Waren (FGP) im verarbeitenden Gewerbe (siehe einleitende Leitlinien, Kapitel 3.4.4).\r\n\r\nIn der Regel handelt es sich bei den Tätigkeiten des verarbeitenden Gewerbes um die Umwandlung von Materialien in neue, wiederaufgearbeitete und wiederhergestellte Produkte. Ihr Ergebnis ist ein neues Produkt. Zur Klarstellung: Die folgenden Tätigkeiten werden in der NOGA als verarbeitendes Gewerbe betrachtet\r\n- Verarbeitung von frischem Fisch (Austernschälen, Filetieren von Fisch), nicht auf einem Fischereiboot, siehe 102000\r\n- Pasteurisierung und Abfüllung von Milch, siehe 105101\r\n- Lederveredelung, siehe 151100\r\n- Holzkonservierung, siehe 161200\r\n- Druckerei und damit verbundene Tätigkeiten, ausser Verlagswesen, siehe 181\r\n- Runderneuerung von Reifen, siehe 221100\r\n- Herstellung von Transportbeton, siehe 236300\r\n- Verzinken, Galvanisieren, Plattieren usw. und andere metallische oder nichtmetallische Beschichtungen von Metallen, siehe 255100\r\n- Wärmebehandlung von Metallen, siehe 255200\r\n- Wiederbefüllung von Tintenpatronen, siehe 262000\r\n- Wiederbefüllung oder Wiederauffüllung von Feuerlöschern, siehe 282900\r\n- Umbau oder Wiederaufarbeitung von Maschinen (z. B. Kraftfahrzeugmotoren), siehe 291000\r\n- Montage durch einen Verkäufer oder Zusammenstellung mehrerer zu verkaufender Produkte. Wenn die Montage von einem Auftragnehmer durchgeführt wird, sollte diese Tätigkeit dem verarbeitenden Gewerbe zugeordnet werden.\r\n\r\nUmgekehrt gibt es Tätigkeiten, die zwar manchmal Umwandlungsprozesse beinhalten, aber in andere Abschnitte der NOGA eingeordnet werden, d. h. sie werden nicht als verarbeitendes Gewerbe betrachtet. Dazu gehören:\r\n- der Holzeinschlag, der dem Abschnitt A zugeordnet ist\r\n- die Aufbereitung landwirtschaftlicher Erzeugnisse, die dem Abschnitt A zugeordnet ist\r\n- die Zubereitung von Nahrungsmitteln zum unmittelbaren Verzehr an Ort und Stelle, die der Abteilung 56 zugeordnet ist\r\n- Aufbereitung von Erzen und anderen Mineralien, die unter Abschnitt B fällt\r\n- Erzeugung von gasförmigen Brennstoffen für die Energieversorgung durch ein ständiges Netz, eingestuft in Abschnitt D\r\n- Herstellung von Kompost aus organischen Abfällen, eingestuft in Abschnitt E\r\n- Montage, die als Teil einer Lieferung oder von einem Verkäufer erbracht wird; wenn die Montage jedoch die Haupttätigkeit eines Auftragnehmers ist, wird sie dem verarbeitenden Gewerbe zugeordnet\r\n- Zerkleinerung von Massengütern und Weiterverteilung in kleineren Partien, einschliesslich Verpacken, Umpacken oder Abfüllen von Produkten (z. B. Spirituosen oder Chemikalien), Sortieren und Wiederverkauf von Schrott; Mischen von Farben auf Kundenbestellung, Schneiden von Metallen auf Kundenbestellung; Behandlung, die nicht zu einer anderen Ware führt, eingestuft in Abschnitt G\r\n- Verlagswesen und kombinierte Tätigkeiten des Verlagswesens und des Druckereigewerbes, die in Abschnitt J eingereiht werden\r\n\r\nANMERKUNG: *Sekundärrohstoffe sind Materialien und Produkte, die durch einfache Wiederverwendung oder durch Recycling und Rückgewinnung als Rohstoffe verwendet werden können.",
+          "en": "This section includes the physical, mechanical, chemical or biological transformation of materials, substances, or components into new products, although this cannot be used as the single universal criterion for defining manufacturing (see remark on processing of waste below). The materials, substances, or components undergoing transformation are either raw materials or products of agriculture, forestry, fishing, mining or quarrying as well as products of other manufacturing activities. Substantial alteration, renovation or reconstruction of goods is generally considered to be manufacturing.\r\n\r\nThe output of a manufacturing process may be finished in the sense that it is ready for use or consumption, or it may be semi-finished in the sense that it is to become an input for further manufacturing. For example, the output of alumina refining is the input used in the primary production of aluminium; primary aluminium is the input to aluminium wire drawing; aluminium wire is the input for the manufacture of fabricated wire products.\r\n\r\nManufacture of specialised components and parts of, and accessories and attachments to machinery and equipment is, as a general rule, classified in the same class as the manufacture of the machinery and equipment for which the parts and accessories are intended. Manufacture of unspecialised components and parts of machinery and equipment (for example, engines, pistons, electric motors, electrical assemblies, valves, gears, roller bearings) is classified in the appropriate class of manufacturing, without regard to the machinery and equipment in which these items may be included.\r\n\r\nMaking specialised components and accessories by moulding or extruding plastics materials is usually included in group 222.\r\n\r\nAssembly of the component parts of manufactured products is considered manufacturing. This includes the assembly of manufactured products from either self-produced or purchased components.\r\n\r\nThe recovery of waste, in other words, the processing of waste into secondary raw materials* is classified in group 382. While this may involve physical, mechanical, biological or chemical transformations, this is not considered to be a part of manufacturing activities. The primary purpose of these activities is considered to be the treatment or processing of waste and they are therefore classified in section E. However, the manufacture of new products from secondary raw materials is classified in manufacturing, even if these processes use waste as an input. For example, the production of silver from film waste is considered to be a manufacturing process.\r\n\r\nSpecialised maintenance and repair of industrial, commercial and similar machinery and equipment is, in general, classified in division 33. However, the repair and maintenance of computers, personal and household goods, motor vehicles and motorcycles is classified in division 95.\r\n\r\nThe installation of machinery and equipment, when carried out as a specialised activity, is classified in class 3320.\r\n\r\nMaintenance, repair and installation of equipment that forms an integral part of buildings or similar structures (for example, maintenance, repair and installation of escalators or of air-conditioning systems) is classified as construction in section F, if carried out at the construction site).\r\n\r\nThis section also contains the activities of factoryless goods producers (FGPs) in manufacturing (see introductory guidelines, Chapter 3.4.4).\r\n\r\nAs a general rule, the activities in the manufacturing section involve the transformation of materials into new, rebuilt and remanufactured products. Their output is a new product. As clarification, the following activities are considered manufacturing in NOGA:\r\n- fresh fish processing (oyster shucking, fish filleting), not done on a fishing boat, see 102000\r\n- milk pasteurising and bottling, see 105101\r\n- leather converting, see 151100\r\n- wood preserving, see 161200\r\n- printing and related activities, excluding published goods, see 181\r\n- tyre retreading, see 221100\r\n- ready-mixed concrete production, see 236300\r\n- galvanising, electroplating, plating, etc., and other metallic or non-metallic coating of metals, see 255100\r\n- heat treatment of metals, see 255200\r\n- refilling of ink cartridges, see 262000\r\n- refiling or recharging of fire extinguishers, see 282900\r\n- rebuilding or remanufacture of machinery (e.g. automobile engines), see 291000\r\n- assembly provided by a seller or blending of several products to be sold. If assembly is provided by a contractor, this activity should be classified in manufacturing.\r\n\r\nConversely, there are activities that, although sometimes involving transformation processes, are classified in other sections of NOGA; in other words, they are not considered as manufacturing. They include:\r\n- logging, classified in section A\r\n- beneficiating of agricultural products, classified in section A\r\n- preparation of food for immediate consumption on the premises, classified in division 56\r\n- beneficiating of ores and other minerals, classified in section B\r\n- production of gaseous fuels for energy supply through a permanent network, classified in section D\r\n- production of compost from organic waste, classified in section E\r\n- assembly provided as part of a delivery or by a seller; however, if assembly is the main activity provided by a contractor, it is classified in manufacturing\r\n- activities of breaking bulk and redistribution in smaller lots, including packaging, repackaging, or bottling products (e.g. as liquors or chemicals), sorting and reselling of scrap; mixing paints to customer order, cutting metals to customer order; treatment not resulting in a different good, classified in section G\r\n- publishing and the combined activities of publishing and printing, classified in section J\r\n\r\nNOTE: *Secondary raw materials are materials and products which can be used as raw materials by simple re-use, or via recycling and recovery.",
+          "fr": "Cette section comprend la transformation physique, mécanique, chimique ou biologique de matières, substances ou composants en nouveaux produits, bien que cela ne puisse pas être utilisé comme critère unique et universel pour définir la fabrication (voir la remarque sur le traitement des déchets ci-dessous). Les matières, substances ou composants subissant une transformation sont soit des matières premières, soit des produits de l'agriculture, de la sylviculture, de la pêche, de l'exploitation minière ou des carrières, ainsi que des produits d'autres activités manufacturières. L'altération substantielle, la rénovation et la reconstruction de biens sont généralement considérées comme activités manufacturières.\r\n\r\nLe produit résultant d'une opération de transformation peut être fini, c'est-à-dire qu'il est prêt à être utilisé ou consommé ou il peut être semi-fini, c'est-à-dire qu'il entre dans la composition d'une autre fabrication. Par exemple, le produit du raffinage de l'alumine est la matière de base utilisée dans la production primaire d'aluminium; l'aluminium primaire est la matière de base pour la fabrication du fil d'aluminium; le fil d'aluminium est la matière de base utilisée pour la fabrication de produits manufacturés à partir de ce fil.\r\n\r\nLa fabrication de composants spécialisés et de pièces, accessoires et fixations de machines et équipements est, en règle générale, rangée dans la même classe que la fabrication des machines et équipements auxquels les pièces et accessoires sont destinés. La fabrication de composants et pièces non spécialisés de machines et équipements (par ex. moteurs, pistons, générateurs, assemblages électriques, valves, engrenages, roulements) est rangée dans la classe d'activité manufacturière appropriée, sans tenir compte des machines et équipements auxquels ces éléments pourraient être intégrés.\r\n\r\nLa fabrication de composants et d'accessoires spécialisés par moulage ou extrusion de matières plastiques est généralement incluse dans le groupe 222.\r\n\r\nL'assemblage des éléments constitutifs des produits manufacturés est considéré comme une activité manufacturière. Cela comprend l'assemblage de produits manufacturés à partir de composants produits par l'entreprise elle-même ou achetés.\r\n\r\nLa récupération des déchets, c'est-à-dire la transformation des déchets en matières premières secondaires*, est classée dans le groupe 382. Bien que cela puisse impliquer des transformations physiques, mécaniques, biologiques ou chimiques, cela n'est pas considéré comme faisant partie des activités de fabrication. L'objectif premier de ces activités est considéré comme étant le traitement ou la transformation des déchets et elles sont donc classées dans la section E. Toutefois, la fabrication de nouveaux produits à partir de matières premières secondaires est classée dans l'industrie manufacturière, même si ces processus utilisent des déchets comme intrants (par ex. la production d'argent à partir de déchets de films est considérée comme une opération de transformation et relevant de l'industrie manufacturière).\r\n\r\nL'entretien et la réparation spécialisés de machines et d'équipements industriels, commerciaux et similaires sont, en général, classés dans la division 33. Toutefois, la réparation et l'entretien d'ordinateurs, de biens personnels et domestiques, de véhicules automobiles et de motocycles sont classés dans la division 95.\r\n\r\nL'installation de machines et d'équipements, lorsqu'elle est effectuée en tant qu'activité spécialisée, est classée dans la classe 3320.\r\n\r\nL'entretien, la réparation et l'installation d'équipements faisant partie intégrante de bâtiments ou de structures similaires (par ex. l'entretien, la réparation et l'installation d'escaliers mécaniques ou de systèmes de climatisation), sont classés dans la section F en tant que travaux de construction, s'ils sont effectués sur le site de construction.\r\n\r\nCette section comprend également les activités de fabrication des producteurs de biens sans usine (FGPs) (voir les lignes directrices introductives, Chapitre 3.4.4).\r\n\r\nEn règle générale, les activités incluse dans la section C impliquent la transformation de matériaux en produits nouveaux ou reconstruits et remis à neuf. Le résultat est un nouveau produit. À titre de précision, les activités suivantes sont considérées comme relevant de l'industrie manufacturière dans la NOGA :\r\n- la transformation de poissons frais (écaillage des huîtres, découpe de filets de poisson) qui n'est pas effectuée à bord des bateaux de pêche, voir 102000\r\n- la pasteurisation et la mise en bouteille du lait, voir 105101\r\n- le travail du cuir, voir 151100\r\n- la conservation du bois, voir 161200\r\n- l'imprimerie et les activités connexes, à l'exclusion des produits publiés, voir 181\r\n- le rechapage de pneus, voir 221100\r\n- la production de béton prêt à l'emploi, voir 236300\r\n- la galvanisation, la galvanoplastie, le placage, etc., et autres revêtements métalliques ou non métalliques des métaux, voir 255100\r\n- le traitement thermique des métaux, voir 255200\r\n- le remplissage de cartouches d'encre, voir 262000\r\n- le remplissage ou la recharge d'extincteurs, voir 282900\r\n- la reconstruction ou la refabrication de machines (par ex. de moteurs d'automobiles), voir 291000\r\n- l'assemblage fourni par un vendeur ou le mélange de plusieurs produits à vendre. Si l'assemblage est assuré par un entrepreneur, cette activité doit être classée dans l'industrie manufacturière.\r\n\r\nInversement, il existe des activités qui, bien qu'impliquant parfois des processus de transformation, sont classées dans d'autres sections de la NOGA; en d'autres termes, elles ne sont pas considérées comme des activités manufacturières. Il s'agit notamment des activités suivantes :\r\n- l'exploitation forestière, voir section A\r\n- la valorisation des produits agricoles, voir section A\r\n- la préparation de denrées alimentaires pour la consommation immédiate sur place, voir division 56\r\n- l'enrichissement de minerais et d'autres minéraux, voir section B\r\n- la production de combustibles gazeux pour la fourniture d'énergie par un réseau permanent de conduites, voir section D\r\n- la production de compost à partir de déchets organiques, voir section E\r\n- l'assemblage fourni dans le cadre d'une livraison ou par un vendeur, toutefois, si l'assemblage est l'activité principale d'un entrepreneur, il est classé dans l'industrie manufacturière\r\n- les activités de fractionnement en vrac et de redistribution en lots plus petits, y compris l'emballage, le reconditionnement ou l'embouteillage de produits (par ex. de liqueurs ou de produits chimiques); le tri et la revente de déchets; le mélange de peintures à la demande du client; et le découpage de métaux à la demande du client; le traitement n'aboutissant pas à un produit différent, voir section G\r\n- l'édition et les activités combinées d'édition et d'impression, voir section J\r\n\r\nNOTE : *Les matières premières secondaires sont des matériaux et des produits pouvant être utilisés comme matières premières par simple réutilisation ou par recyclage et récupération.",
+          "it": "Questa sezione comprende la trasformazione fisica, meccanica, chimica o biologica di materiali, sostanze o componenti in nuovi prodotti, anche se non può essere utilizzata come unico criterio universale per definire la produzione (si veda l'osservazione sulla trasformazione dei rifiuti). I materiali, le sostanze o i componenti sottoposti a trasformazione sono materie prime o prodotti dell'agricoltura, della silvicoltura, della pesca, dell'estrazione mineraria o delle cave, nonché prodotti di altre attività manifatturiere. La modifica sostanziale, la ristrutturazione o la ricostruzione di beni sono generalmente considerate attività manifatturiere.\r\n\r\nL'output di un processo manifatturiero può essere finito, nel senso che è pronto per l'uso o il consumo, oppure può essere semilavorato, nel senso che deve diventare un input per un'ulteriore produzione. Ad esempio, l'output della raffinazione dell'allumina è l'input utilizzato nella produzione primaria di alluminio; l'alluminio primario è l'input per la trafilatura dell'alluminio; il filo di alluminio è l'input per la produzione di prodotti in filo metallico.\r\n\r\nLa fabbricazione di componenti e parti specializzate di macchine e attrezzature, nonché di accessori e complementi di tali macchine e attrezzature è, di norma, classificata nella stessa Classe della fabbricazione delle macchine e delle attrezzature a cui sono destinati. La fabbricazione di componenti e parti non specializzate di macchine e attrezzature (ad esempio, motori, pistoni, motori elettrici, gruppi elettrici, valvole, ingranaggi, cuscinetti a rulli) è classificata nella classe di fabbricazione appropriata, senza tener conto delle macchine e attrezzature in cui tali articoli possono essere inclusi.\r\n\r\nLa fabbricazione di componenti e accessori specializzati mediante stampaggio o estrusione di materie plastiche è solitamente inclusa nel Gruppo 222.\r\n\r\nL'assemblaggio dei componenti dei prodotti manifatturieri è considerato un'attività manifatturiera. Ciò include l'assemblaggio di prodotti fabbricati a partire da componenti autoprodotti o acquistati.\r\n\r\nIl recupero dei rifiuti, in altre parole, la trasformazione dei rifiuti in materie prime secondarie* è classificato nel Gruppo 382. Sebbene possa comportare trasformazioni fisiche, meccaniche, biologiche o chimiche, non è considerato parte delle attività di produzione. Lo scopo principale di queste attività è considerato il trattamento o la trasformazione dei rifiuti e sono quindi classificate nella sezione E. Tuttavia, la fabbricazione di nuovi prodotti da materie prime secondarie è classificata come attività manifatturiera, anche se questi processi utilizzano i rifiuti come input. Ad esempio, la produzione di argento da rifiuti di film è considerata un processo di fabbricazione.\r\n\r\nLa manutenzione e la riparazione specializzata di macchinari e attrezzature industriali, commerciali e simili è, in generale, classificata nella Divisione 33. Tuttavia, la riparazione e la manutenzione di computer è considerata un processo di produzione. Tuttavia, la riparazione e la manutenzione di computer, beni personali e per la casa, veicoli a motore e motocicli è classificata nella divisione 95.\r\n\r\nL'installazione di macchinari e attrezzature, se effettuata come attività specializzata, è classificata nella Classe 3320.\r\n\r\nLa manutenzione, la riparazione e l'installazione di attrezzature che costituiscono parte integrante di edifici o strutture simili (ad esempio, la manutenzione, la riparazione e l'installazione di scale mobili o di impianti di condizionamento dell'aria) è classificata come costruzione nella Sezione F, se effettuata in cantiere).\r\n\r\nQuesta sezione contiene anche le attività dei produttori di beni senza fabbrica (FGP) nel settore manifatturiero (si vedano le linee guida introduttive, Sezione 3.4.4).\r\n\r\nDi norma, le attività della sezione manifatturiera comportano la trasformazione di materiali in prodotti nuovi, ricostruiti e rigenerati. L'output è un nuovo prodotto. A titolo di chiarimento, le seguenti attività sono considerate manifatturiere in NOGA:\r\n- lavorazione del pesce fresco (sgusciatura delle ostriche, sfilettatura del pesce), non effettuata su un peschereccio, vedi 102000\r\n- pastorizzazione e imbottigliamento del latte, cfr. 105101\r\n- trasformazione del cuoio, vedi 151100\r\n- conservazione del legno, vedere 161200\r\n- stampa e attività connesse, escluse le pubblicazioni, cfr. 181\r\n- ricostruzione di pneumatici, vedere 221100\r\n- produzione di calcestruzzo preconfezionato, vedi 236300\r\n- galvanizzazione, galvanoplastica, placcatura, ecc. e altri rivestimenti metallici o non metallici dei metalli, vedi 255100\r\n- trattamento termico dei metalli, vedi 255200\r\n- ricarica di cartucce d'inchiostro, vedi 262000\r\n- ricarica di estintori, vedi 282900\r\n- ricostruzione o rifabbricazione di macchinari (ad esempio, motori di automobili), cfr. 291000\r\n- assemblaggio fornito da un venditore o miscelazione di diversi prodotti da vendere. Se l'assemblaggio è fornito da un appaltatore, questa attività deve essere classificata nella manifattura.\r\n\r\nEsistono invece attività che, pur comportando talvolta processi di trasformazione, sono classificate in altre sezioni della NOGA; in altre parole, non sono considerate manifatturiere. Esse comprendono:\r\n- disboscamento, classificato nella Sezione A\r\n- la lavorazione dei prodotti agricoli, classificata nella Sezione A\r\n- la preparazione di alimenti per il consumo immediato sul posto, classificata nella Divisione 56\r\n- la lavorazione di minerali e altri prodotti minerari, classificata nella sezione B\r\n- produzione di combustibili gassosi per la fornitura di energia attraverso una rete permanente, classificata nella sezione D\r\n- produzione di compost da rifiuti organici, classificata nella sezione E\r\n- assemblaggio fornito come parte di una consegna o da un venditore; tuttavia, se l'assemblaggio è l'attività principale fornita da un imprenditore, è classificato nella sezione manifatturiera\r\n- attività di rottura di prodotti sfusi e ridistribuzione in lotti più piccoli, compresi l'imballaggio, il riconfezionamento o l'imbottigliamento di prodotti (ad esempio, liquori o prodotti chimici), la selezione e la rivendita di rottami; la miscelazione di vernici su ordinazione del cliente, il taglio di metalli su ordinazione del cliente; il trattamento che non dà luogo a un bene diverso, classificato nella sezione G\r\n- l'editoria e le attività combinate di editoria e stampa, classificate nella Sezione J\r\n\r\nNOTA: *Le materie prime secondarie sono materiali e prodotti che possono essere utilizzati come materie prime attraverso il semplice riutilizzo o il riciclaggio e il recupero."
+        }
+      }
+    ],
+    "code": "C",
+    "name": {
+      "de": "VERARBEITENDES GEWERBE/HERSTELLUNG VON WAREN",
+      "en": "MANUFACTURING",
+      "fr": "INDUSTRIE MANUFACTURIÈRE",
+      "it": "ATTIVITÀ MANIFATTURIERE",
+      "rm": "NA"
+    },
+    "level": "Abschnitt",
+    "level_key": "abschnitt",
+    "level_no": 1,
+    "source_level": "NOGA - Level 1 - Section"
+  },
+  {
+    "annotations": [
+      {
+        "type": "EXCLUDES",
+        "text": {
+          "de": "Dieser Abschnitt umfasst nicht:\r\n- Gewinnung von Rohgas, siehe 062000\r\n- Betrieb von Wasserversorgung und Kanalisation, siehe Abteilungen 36 und 37\r\n- Transport von Gas in Rohrfernleitungen, d. h. nicht über das Verteilungsnetz, siehe 495000",
+          "en": "This section excludes:\r\n\r\n- extraction of crude natural gas, see 062000\r\n\r\n- water supply and sewerage treatment services, see divisions 36, 37\r\n\r\n- transport of gas through pipelines, i.e. not through the distribution network, see 495000",
+          "fr": "Cette section ne comprend pas :\r\n- l'extraction de gaz naturel brut, voir 062000\r\n- la distribution d'eau et le traitement des eaux usées, voir divisions 36, 37\r\n- le transport de gaz par gazoduc, c'est-à-dire sans passer par le réseau de distribution, voir 495000",
+          "it": "Questa sezione non comprende\r\n- estrazione di gas naturale greggio, cfr. 062000\r\n\r\n- servizi di approvvigionamento idrico e di trattamento delle acque reflue, cfr. divisioni 36, 37\r\n\r\n- il trasporto di gas attraverso gasdotti, cioè non attraverso la rete di distribuzione, cfr. 495000"
+        }
+      },
+      {
+        "type": "HIER_LEVEL",
+        "text": {
+          "de": "NOGA - Ebene 1 - Abschnitt",
+          "en": "NOGA - Level 1 - Section",
+          "fr": "NOGA - Niveau 1 - Section",
+          "it": "NOGA - Livello 1 - Sezione"
+        }
+      },
+      {
+        "type": "INCLUDES_ALSO",
+        "text": {
+          "de": "Dieser Abschnitt umfasst ferner die Wärme- und Kälteversorgung (z.B. Dampf- und Klimaversorgung) über ein fest installiertes Netz.",
+          "en": "The section also includes heating and cooling (for example, steam and air conditioning supply) through a permanent network.",
+          "fr": "La section comprend également le chauffage et le refroidissement (par ex. la fourniture de vapeur et d'air conditionné) par le biais d'un réseau permanent.",
+          "it": "Questa sezione comprende inoltre il riscaldamento e il raffreddamento (ad esempio, la fornitura di vapore e aria condizionata) attraverso una rete permanente."
+        }
+      },
+      {
+        "type": "INCLUDES",
+        "text": {
+          "de": "Dieser Abschnitt umfasst die Erzeugung, Speicherung, Steuerung, Verteilung, den Handel und die Vermittlung von Elektrizität oder von gasförmigen Brennstoffen für die Energieversorgung durch ein fest installiertes Netz von Strom- bzw. Rohrleitungen (Versorgungsleitungen). Eingeschlossen ist auch die Energieversorgung von Industrie- und Gewerbegebieten, sowie von Wohngebäuden.\r\n\r\nDieser Abschnitt umfasst daher den Betrieb von Versorgungseinrichtungen für Elektrizität und Gas.",
+          "en": "This section includes the generation, storage, control, distribution, trade and brokerage of electric power or of gaseous fuels for energy supply through a permanent network of lines, mains and pipes. Energy supply for industrial parks or residential buildings is included.\r\n\r\n\r\n\r\nThis section therefore includes the operation of electricity and gas utilities.",
+          "fr": "Cette section comprend la production, le stockage, le contrôle, la distribution, le commerce et le courtage d'énergie électrique ou de combustibles gazeux pour la fourniture d'énergie par le biais d'un réseau permanent de lignes, de conduites et de canalisations. L'approvisionnement en énergie des parcs industriels ou des bâtiments résidentiels est inclus.\r\n\r\nCette section comprend donc l'exploitation des infrastructures d'électricité et de gaz.",
+          "it": "Questa sezione comprende la generazione, lo stoccaggio, il controllo, la distribuzione, il commercio e l'intermediazione di energia elettrica o di combustibili gassosi per la fornitura di energia attraverso una rete permanente di linee, condutture e tubi. È inclusa la fornitura di energia per parchi industriali o edifici residenziali.\r\n\r\n\r\nQuesta sezione comprende quindi la gestione di servizi di pubblica utilità per l'energia elettrica e il gas."
+        }
+      }
+    ],
+    "code": "D",
+    "name": {
+      "de": "ENERGIEVERSORGUNG",
+      "en": "ELECTRICITY, GAS, STEAM AND AIR CONDITIONING SUPPLY",
+      "fr": "PRODUCTION ET DISTRIBUTION D’ÉLECTRICITÉ, DE GAZ, DE VAPEUR ET D’AIR CONDITIONNÉ",
+      "it": "FORNITURA DI ENERGIA ELETTRICA, GAS, VAPORE E ARIA CONDIZIONATA",
+      "rm": "NA"
+    },
+    "level": "Abschnitt",
+    "level_key": "abschnitt",
+    "level_no": 1,
+    "source_level": "NOGA - Level 1 - Section"
+  },
+  {
+    "annotations": [
+      {
+        "type": "EXCLUDES",
+        "text": {
+          "de": "Dieser Abschnitt umfasst nicht:\r\n- Tätigkeiten der Handelsvermittlung von Abfallprodukten und Altmaterialien, siehe 461800\r\n- Tätigkeiten des Grosshandels mit Abfallprodukten und Altmaterialien, siehe 468700",
+          "en": "This section excludes:\r\n\r\n- waste trade activities as agents, see 461800\r\n\r\n- waste trade activities as wholesalers, see 468700",
+          "fr": "Cette section ne comprend pas :\r\n\r\n- les activités de négoce de déchets en tant qu'agents, voir 461800\r\n\r\n- les activités de commerce de déchets en tant que grossistes, voir 468700",
+          "it": "Questa sezione non comprende\r\n- attività di commercio di rifiuti in qualità di agente, cfr. 461800\r\n\r\n- attività di commercio di rifiuti come grossisti, cfr. 468700"
+        }
+      },
+      {
+        "type": "HIER_LEVEL",
+        "text": {
+          "de": "NOGA - Ebene 1 - Abschnitt",
+          "en": "NOGA - Level 1 - Section",
+          "fr": "NOGA - Niveau 1 - Section",
+          "it": "NOGA - Livello 1 - Sezione"
+        }
+      },
+      {
+        "type": "INCLUDES_ALSO"
+      },
+      {
+        "type": "INCLUDES",
+        "text": {
+          "de": "Dieser Abschnitt umfasst Tätigkeiten im Zusammenhang mit der Behandlung und Entsorgung, z. B. Sammlung, Vorbehandlung, Verwertung und Beseitigung, verschiedener Arten von Abfällen (wie z. B. fester oder nicht fester Industrie- oder Haushaltsabfälle), einschliesslich der Organisation dieser Tätigkeiten.\r\n\r\nDie Endprodukte der Abfall- oder Abwasserbehandlung können entweder entsorgt werden oder als Input in andere Produktionsprozesse einfliessen. Sekundärrohstoffe sind Materialien und Produkte, die durch einfache Wiederverwendung oder durch Recycling und Verwertung von Abfällen als Rohstoffe verwendet werden können. Auch Tätigkeiten der Wasserversorgung fallen in diesen Abschnitt, da sie häufig in Verbindung mit der Abwasserbehandlung durchgeführt werden, oder von Einheiten, die auch in der Abwasserbehandlung tätig sind.\r\n\r\nDie Tätigkeiten umfassen ferner die Sanierung von kontaminierten Gebäuden und Grundstücken, Böden, Oberflächen- und Grundwasser (z. B. Ozeane, Mangroven, Meere) usw.\r\n\r\nEinheiten, die in der Regel die Abfallentsorgung ihrer Auftraggeber übernehmen und somit zum Abfallentsorger des Kunden werden und dann ihrerseits ihren Auftraggebern Gebühren für die Abfallentsorgung in Rechnung stellen, werden der Abteilung 38 zugeordnet. Auch wenn diese Einheiten die entsprechenden Dienstleistungen nicht selbst erbringen, sind sie für deren Erfüllung verantwortlich. Diese Tätigkeit wird als vollständige Auslagerung einer Dienstleistung angesehen.",
+          "en": "This section includes activities related to the management, collection, pretreatment, recovery and disposal, of various forms of waste (for example, solid or non-solid industrial or household waste) and its organisation.\r\n\r\nThe output of the waste or sewage treatment process can either be disposed of or become an input into other production processes. Secondary raw materials are materials and products which can be used as raw materials by simple reuse, or via recycling and recovery of waste. Activities of water supply are also grouped in this section, since they are often carried out in connection with, or by units also engaged in, the treatment of sewage.\r\n\r\nThe activities also include remediation of contaminated buildings and sites, soil, surface and groundwater (for example, oceans, mangroves, seas), and so on.\r\n\r\nUnits that usually take over their clients’ waste procedures and become the customer of the waste hauler, and then in turn charge their clients for waste services, are classified in division 38. Even if these units do not render the corresponding services themselves, they are responsible for their fulfilment. This activity is regarded as the complete outsourcing of a service.",
+          "fr": "Cette section comprend les activités liées à la gestion, la collecte, le prétraitement, la récupération et l'élimination, de diverses formes de déchets (par ex. les déchets solides ou non solides, industriels ou ménagers) et leur organisation.\r\n\r\nLe résultat du processus de traitement des déchets ou des eaux usées peut être éliminé ou devenir un intrant dans d'autres processus de production. Les matières premières secondaires sont des matériaux et des produits qui peuvent être utilisés comme matières premières par simple réutilisation ou par le biais du recyclage et de la récupération des déchets. Les activités d'approvisionnement en eau sont également regroupées dans cette section, car elles sont souvent menées en liaison avec le traitement des eaux usées ou par des unités qui s'en occupent également.\r\n\r\nLes activités comprennent également l'assainissement des bâtiments et des sites contaminés, des sols, des eaux de surface et souterraines (par ex. les océans, les mangroves, les mers), etc.\r\n\r\nLes unités qui prennent généralement en charge les procédures de gestion des déchets de leurs clients et deviennent les clients du transporteur de déchets, puis facturent à leur tour le service de gestion des déchets à leurs clients, sont classées dans la division 38. Même si ces unités ne fournissent pas elles-mêmes les services correspondants, elles sont responsables de leur exécution. Cette activité est considérée comme une externalisation complète d'un service.",
+          "it": "Questa sezione comprende le attività relative alla gestione, alla raccolta, al pretrattamento, al recupero e allo smaltimento di varie forme di rifiuti (ad esempio, rifiuti solidi o non solidi industriali o domestici) e la loro organizzazione.\r\n\r\nL'output del processo di trattamento dei rifiuti o delle acque reflue può essere smaltito o diventare un input per altri processi produttivi. Le materie prime secondarie sono materiali e prodotti che possono essere utilizzati come materie prime attraverso il semplice riutilizzo o il riciclaggio e il recupero dei rifiuti. In questa Sezione sono raggruppate anche le attività di approvvigionamento idrico, che spesso sono svolte in connessione o da unità impegnate anche nel trattamento delle acque reflue.\r\n\r\nLe attività comprendono anche la bonifica di edifici e siti contaminati, del suolo, delle acque superficiali e sotterranee (ad esempio, oceani, mangrovie, mari) e così via.\r\n\r\nLe unità che di solito si fanno carico delle procedure di smaltimento dei rifiuti dei loro clienti e diventano clienti del trasportatore di rifiuti, e poi a loro volta addebitano ai loro clienti i servizi di smaltimento dei rifiuti, sono classificate nella Divisione 38. Anche se queste unità non rendono il servizio di smaltimento dei rifiuti, sono in grado di fornire servizi di smaltimento dei rifiuti. Anche se queste unità non forniscono direttamente i servizi corrispondenti, sono responsabili del loro adempimento. Questa attività è considerata come l'esternalizzazione completa di un servizio."
+        }
+      }
+    ],
+    "code": "E",
+    "name": {
+      "de": "WASSERVERSORGUNG; ABWASSER- UND ABFALLENTSORGUNG UND BESEITIGUNG VON UMWELTVERSCHMUTZUNGEN",
+      "en": "WATER SUPPLY; SEWERAGE, WASTE MANAGEMENT AND REMEDIATION ACTIVITIES",
+      "fr": "PRODUCTION ET DISTRIBUTION D’EAU; ASSAINISSEMENT, GESTION DES DÉCHETS ET DÉPOLLUTION",
+      "it": "FORNITURA DI ACQUA; GESTIONE DI RETI FOGNARIE, ATTIVITÀ DI TRATTAMENTO DEI RIFIUTI E RISANAMENTO",
+      "rm": "NA"
+    },
+    "level": "Abschnitt",
+    "level_key": "abschnitt",
+    "level_no": 1,
+    "source_level": "NOGA - Level 1 - Section"
+  },
+  {
+    "annotations": [
+      {
+        "type": "EXCLUDES",
+        "text": {
+          "de": "Dieser Abschnitt umfasst nicht:\r\n- Fertigungsprozesse, die nicht auf der Baustelle durchgeführt werden, siehe Abschnitt C\r\n- Herstellung und Lieferung von Konstruktionen und vorgefertigten Gebäudeteilen aus Holz oder Metall mit minimalen Bauarbeiten auf der Baustelle, siehe Abteilungen 16, 25\r\n- archäologische Ausgrabungen, siehe 722\r\n- Erhaltung, Restaurierung und andere Aktivitäten zur Unterstützung des kulturellen Erbes, siehe 913000",
+          "en": "This section excludes:\r\n- manufacturing operations not performed at the construction site, see section C\r\n- manufacture and deliverance of structures and prefabricated building parts in wood or metal with minimal on-site construction work, see divisions 16, 25\r\n- archaeological excavations, see 7220\r\n- conservation, restoration and other cultural heritage support activities, see 913000",
+          "fr": "Cette section ne comprend pas :\r\n- les opérations de fabrication qui ne sont pas effectuées sur le chantier, voir section C\r\n- la fabrication et la livraison de structures et d'éléments de bâtiments préfabriqués en bois ou en métal avec un minimum de travaux de construction sur le chantier, voir divisions 16, 25\r\n- les fouilles archéologiques, voir 7220\r\n- la conservation, la restauration et les autres activités de soutien au patrimoine culturel, voir 913000",
+          "it": "Questa sezione non comprende:\r\n- le operazioni di fabbricazione non eseguite in cantiere, cfr. sezione C\r\n- produzione e consegna di strutture e parti di edifici prefabbricati in legno o metallo con un minimo di lavori di costruzione in loco, cfr. le divisioni 16, 25\r\n- scavi archeologici, cfr. 7220\r\n- conservazione, restauro e altre attività di supporto al patrimonio culturale, cfr. 913000"
+        }
+      },
+      {
+        "type": "HIER_LEVEL",
+        "text": {
+          "de": "NOGA - Ebene 1 - Abschnitt",
+          "en": "NOGA - Level 1 - Section",
+          "fr": "NOGA - Niveau 1 - Section",
+          "it": "NOGA - Livello 1 - Sezione"
+        }
+      },
+      {
+        "type": "INCLUDES_ALSO",
+        "text": {
+          "de": "Dieser Abschnitt umfasst ferner:\r\n- Renovierung, Erneuerung, Umbau und Nachrüstung von historischen und archäologischen Stätten und Gebäuden",
+          "en": "This section also includes:\r\n\r\n- renovation, renewal, reconstruction and retrofitting of historical and archaeological sites and buildings",
+          "fr": "Cette section comprend également :\r\n- la rénovation, le renouvellement, la reconstruction et le réaménagement de sites et de bâtiments historiques et archéologiques",
+          "it": "Questa sezione comprende inoltre:\r\n\r\n- ristrutturazione, rinnovo, ricostruzione e retrofitting di siti ed edifici storici e archeologici"
+        }
+      },
+      {
+        "type": "INCLUDES",
+        "text": {
+          "de": "Dieser Abschnitt umfasst allgemeine und spezialisierte Bautätigkeiten für Hoch- und Tiefbauarbeiten. Dazu zählen Neubau, Instandsetzung, An- und Umbau, die Errichtung vorgefertigter Gebäude oder Bauwerke auf dem Baugelände sowie provisorischer Bauten.\r\n\r\nDas Baugewerbe/Der Bau umfasst den Bau kompletter Gebäude (z. B. Wohn-, Büro- und Geschäftsgebäuden, öffentliche Gebäude, sowie Gebäuden der Versorgungswirtschaft und landwirtschaftlichen Gebäuden). Hierzu zählt auch der Bau von Bauwerken des Tiefbaus (z. B. Autobahnen, Strassen, Brücken, Tunneln, Bahnverkehrsstrecken, Landebahnen, Häfen und andere Wasserbauten, Bewässerungsanlagen, Kanalisationen, Industrieanlagen, Rohrleitungen und elektrische Leitungen, Sportanlagen).\r\n\r\nDiese Arbeiten können auf eigene Rechnung oder im Lohnauftrag ausgeführt werden. Teile der Arbeit und manchmal auch die gesamte praktische Arbeit können an Subunternehmer vergeben werden. Ein Hauptauftragnehmer, der die Gesamtverantwortung für ein Bauprojekt trägt, wird hier eingeordnet.\r\n\r\nEbenfalls eingeschlossen ist die Sanierung von Gebäuden und Tiefbauten. Wartung, Reparatur und Installation von Anlagen, die integraler Bestandteil von Gebäuden sind (z. B. Rolltreppen oder Klimaanlagen), werden als Bauleistungen in Abschnitt F eingestuft, wenn sie auf der Baustelle ausgeführt werden.\r\n\r\nDieser Abschnitt umfasst die vollständige Errichtung von Gebäuden (Abteilung 41), die vollständige Errichtung von Bauwerken des Tiefbaus (Abteilung 42), sowie spezialisierte Bautätigkeiten, sofern diese nur als Teil des Bauprozesses durchgeführt werden (Abteilung 43).\r\n\r\nDie Vermietung von Baumaschinen mit Bedienpersonal wird der jeweiligen Bautätigkeit zugeordnet, die mit diesen Maschinen durchgeführt wird.",
+          "en": "This section includes general construction and specialised construction activities for buildings and civil engineering works. It includes new work, repair, additions and alterations, the erection of prefabricated buildings or structures on the site as well as construction of a temporary nature.\r\n\r\nGeneral construction is the construction of entire buildings (for example, homes, offices, stores as well as utility buildings or farm buildings). It also includes the construction of civil engineering works (for example, motorways, streets, bridges, tunnels, railways, airfields, harbours and other water projects, irrigation systems, sewerage systems, industrial facilities, pipelines and electric lines, sports facilities).\r\n\r\nThis work can be carried out on own account or on a fee or contract basis. Portions of the work and sometimes even the whole practical work can be subcontracted out. A main contractor that carries the overall responsibility for a construction project is classified here.\r\n\r\nFurther included is the repair of buildings and engineering works. Maintenance, repair and installation of equipment that forms an integral part of buildings (for example, escalators or air-conditioning systems) is classified as construction in section F, if carried out at the construction site.\r\n\r\nThis section includes the complete construction of buildings (division 41), the complete construction of civil engineering works (division 42), as well as specialised construction activities, if carried out only as a part of the construction process (division 43).\r\n\r\nThe rental of construction equipment with an operator is classified with the specific construction activity carried out with this equipment.",
+          "fr": "Cette section comprend les activités de construction générale et de construction spécialisée de bâtiments et d'ouvrages de génie civil. Elle comprend les travaux neufs, les réparations, les ajouts et les modifications, l'édification de bâtiments ou de structures préfabriqués sur le site, ainsi que les travaux de construction de nature temporaire.\r\n\r\nLa construction générale est la construction de bâtiments entiers (par ex. maisons, bureaux, magasins ainsi que bâtiments utilitaires ou bâtiments agricoles). Elle comprend également la construction d'ouvrages de génie civil (par ex. autoroutes, rues, ponts, tunnels, chemins de fer, aérodromes, ports et autres projets hydrauliques, systèmes d'irrigation, réseaux d'égouts, installations industrielles, pipelines et lignes électriques, installations sportives).\r\n\r\nCes travaux peuvent être effectués pour compte propre ou sur la base d'honoraires ou de contrats. Des parties des travaux et parfois même l'ensemble des travaux peuvent être sous-traités. Un maître d'œuvre qui assume la responsabilité globale d'un projet de construction est classé dans cette catégorie.\r\n\r\nLa réparation de bâtiments et d'ouvrages d'art est également comprise. L'entretien, la réparation et l'installation d'équipements faisant partie intégrante des bâtiments (par ex. les escaliers roulants ou les systèmes de climatisation) sont classés comme construction dans la section F, s'ils sont effectués sur le site de construction.\r\n\r\nCette section comprend la construction complète de bâtiments (division 41), la construction complète d'ouvrages de génie civil (division 42), ainsi que les activités de construction spécialisées, si elles sont effectuées uniquement dans le cadre du processus de construction (division 43).\r\n\r\nLa location de matériel de construction avec un opérateur est classée avec l'activité de construction spécifique réalisée avec ce matériel.",
+          "it": "Questa sezione comprende le attività di costruzione generale e le attività di costruzione specializzata per edifici e opere di ingegneria civile. Comprende le nuove opere, le riparazioni, le aggiunte e le modifiche, la costruzione di edifici o strutture prefabbricate in loco e le costruzioni di natura temporanea.\r\n\r\nL'edilizia generale è la costruzione di interi edifici (ad esempio, abitazioni, uffici, negozi, edifici di servizio o edifici agricoli). Include anche la costruzione di opere di ingegneria civile (ad esempio, autostrade, strade, ponti, gallerie, ferrovie, campi di aviazione, porti e altri progetti idrici, sistemi di irrigazione, sistemi fognari, impianti industriali, condutture e linee elettriche, impianti sportivi).\r\n\r\nQuesti lavori possono essere eseguiti per conto proprio, a pagamento o su base contrattuale. Porzioni di lavoro e talvolta anche l'intero lavoro pratico possono essere subappaltati. Un appaltatore principale che ha la responsabilità generale di un progetto di costruzione è classificato qui.\r\n\r\nSono inoltre incluse le riparazioni di edifici e le opere di ingegneria. La manutenzione, la riparazione e l'installazione di attrezzature che costituiscono parte integrante degli edifici (ad esempio, scale mobili o sistemi di condizionamento dell'aria) sono classificate come costruzioni nella Sezione F, se eseguite in cantiere.\r\n\r\nQuesta sezione comprende la costruzione completa di edifici (divisione 41), la costruzione completa di opere di ingegneria civile (divisione 42), nonché le attività di costruzione specializzate, se eseguite solo come parte del processo di costruzione (divisione 43).\r\n\r\nIl noleggio di attrezzature per la costruzione con operatore è classificato con la specifica attività di costruzione svolta con tali attrezzature."
+        }
+      }
+    ],
+    "code": "F",
+    "name": {
+      "de": "BAUGEWERBE/BAU",
+      "en": "CONSTRUCTION",
+      "fr": "CONSTRUCTION",
+      "it": "COSTRUZIONI",
+      "rm": "NA"
+    },
+    "level": "Abschnitt",
+    "level_key": "abschnitt",
+    "level_no": 1,
+    "source_level": "NOGA - Level 1 - Section"
+  },
+  {
+    "annotations": [
+      {
+        "type": "EXCLUDES",
+        "text": {
+          "de": "Dieser Abschnitt umfasst nicht:\r\n- Elektrizitätshandel, siehe 351500\r\n- Handel mit gasförmigen Brennstoffen für die Energieversorgung durch Rohrleitungen, siehe 352300\r\n- Handel mit digitalen Gütern, Streaming und Downloads von Inhalten auf digitalen Plattformen (z.B. E-Books und Audio-Dateien), siehe Abschnitt J\r\n- Wiederverkauf von Prepaid-Telefonkarten und -Dienstleistungen, siehe 612000\r\n- Instandhaltung und Reparatur von Kraftwagen und Krafträdern, siehe Abteilung 95\r\n- Genossenschaften werden nach ihrer überwiegenden Tätigkeit klassifiziert",
+          "en": "This section excludes:\r\n- trade of electricity, see 351500\r\n- trade of gaseous fuels for energy supply through mains, see 352300\r\n- commerce of digital goods, streaming and downloading of contents on digital platforms (e.g. e-books, audio), see section J\r\n- activities of resellers of pre-paid calling cards and services, see 612000\r\n- repair of motor vehicles and motorcycles, see division 95\r\n- cooperative associations; these are classified to their predominant activity",
+          "fr": "Cette section ne comprend pas :\r\n- le commerce de l'électricité, voir 351500\r\n- le commerce de combustibles gazeux pour la fourniture d'énergie par le réseau, voir 352300\r\n- le commerce de biens numériques, le streaming et le téléchargement de contenus sur des plateformes numériques, par ex. les livres électroniques, les fichiers audio, sont inclus dans la section J\r\n- les activités des revendeurs de cartes d'appel prépayées et de services, voir 612000\r\n- la réparation de véhicules à moteur et de motocycles, voir la division 95\r\n- les associations coopératives; ces dernières sont classées en fonction de leur activité principale",
+          "it": "Questa sezione non comprende:\r\n- commercio di energia elettrica, cfr. 351500\r\n- commercio di combustibili gassosi per la fornitura di energia tramite rete, cfr. 352300\r\n- commercio di beni digitali, streaming e download di contenuti su piattaforme digitali (ad es. e-book, audio), cfr. Sezione J\r\n- attività di rivendita di carte telefoniche prepagate e servizi, cfr. 612000\r\n- riparazione di autoveicoli e motocicli, cfr. Divisione 95\r\n- associazioni cooperative; queste sono classificate in base alla loro attività prevalente"
+        }
+      },
+      {
+        "type": "HIER_LEVEL",
+        "text": {
+          "de": "NOGA - Ebene 1 - Abschnitt",
+          "en": "NOGA - Level 1 - Section",
+          "fr": "NOGA - Niveau 1 - Section",
+          "it": "NOGA - Livello 1 - Sezione"
+        }
+      },
+      {
+        "type": "INCLUDES_ALSO",
+        "text": {
+          "de": "Dieser Abschnitt umfasst ferner:\r\n- Transithandelstätigkeiten, die darin bestehen, Waren zu kaufen und sie von einem Zollgebiet in ein anderes zu transportieren. Der Transithandel stellt ein Dreiecksgeschäft dar, in dem der Transithändler Export- und Importgeschäfte zwischen zwei oder mehr Ländern jenseits seines eigenen Wirtschaftsgebietes durchführt. Der Transithändler ist während des Transports Eigentümer der Ware (im Gegensatz zu Vermittlern, die kein Eigentum an den zwischengeschalteten Waren erwerben)\r\n- Vermittlungstätigkeiten für den Einzelhandel mit und ohne ausgeprägten Schwerpunkt, siehe 479\r\n- Verkauf von Lebensmitteln und Getränken durch Verkaufsautomaten oder automatisierte Verkaufsstellen",
+          "en": "This section also includes:\r\n- transit trade activities consisting of buying commodities, moving them from one customs territory to another. Transit trade represents a triangular transaction in which the transit trader carries out export and import transactions between two or more different countries outside their own economic territory. The transit trader owns the commodity during its transport (different to intermediaries that do not take ownership of the intermediated goods)\r\n- specialised and non-specialised intermediation service activities for retail sale, see 479\r\n- sale of food and beverages via vending machines or automated points of sale",
+          "fr": "Cette section comprend également :\r\n- les activités de commerce de transit consistant à acheter des marchandises et à les déplacer d'un territoire douanier à un autre. Le commerce de transit représente une transaction triangulaire dans laquelle le négociant effectue des opérations d'exportation et d'importation entre deux ou plusieurs pays différents en dehors de son propre territoire économique. Le négociant est propriétaire de la marchandise pendant son transport (différence avec les intermédiaires qui ne prennent pas possession des marchandises intermédiées).\r\n- les activités de service d'intermédiation spécialisés et non spécialisés pour le commerce de détail, voir 479\r\n- la vente de produits alimentaires et de boissons par l'intermédiaire de distributeurs automatiques ou de points de vente automatisés",
+          "it": "Questa sezione comprende inoltre:\r\n- attività di commercio di transito che consistono nell'acquisto di merci, spostandole da un territorio doganale a un altro. Il commercio di transito rappresenta una transazione triangolare in cui l'operatore di transito effettua operazioni di esportazione e importazione tra due o più Paesi diversi al di fuori del proprio territorio economico. L'operatore di transito è proprietario della merce durante il suo trasporto (a differenza degli intermediari che non assumono la proprietà della merce intermediata).\r\n- attività di servizi di intermediazione specializzati e non specializzati per la vendita al dettaglio, cfr. 479\r\n- vendita di prodotti alimentari e bevande tramite distributori automatici o punti vendita automatizzati"
+        }
+      },
+      {
+        "type": "INCLUDES",
+        "text": {
+          "de": "Dieser Abschnitt umfasst den Gross- und Einzelhandel (d. h. den Verkauf ohne Weiterverarbeitung bzw. Veränderung) mit materiellen Waren aller Art, sowie die Erbringung von Dienstleistungen im Zusammenhang mit dem Verkauf von Handelswaren. Waren sind physische, hergestellte Objekte, für die eine Nachfrage besteht, an denen Eigentumsrechte begründet werden können und deren Eigentum durch Transaktionen auf Märkten von einer Einheit auf eine andere übertragen werden kann. Dies steht im Einklang mit den Definitionen und Konzepten, die im Bereich der Zahlungsbilanz, der G20-Taskforce für digitale Wirtschaft, dem Handbuch zur Messung des digitalen Handels usw. verwendet werden.\r\n\r\nGross- und Einzelhandel sind die letzten Schritte im Vertrieb von Handelswaren. Hierfür werden unterstützende Tätigkeiten (siehe einführende Leitlinien, Kapitel 2.4) durchgeführt, die eine Reihe im Zusammenhang mit dem Handel üblicher Vorgänge (oder Handhabungen) umfassen, ohne dass die Güter weiterverarbeitet bzw. verändert werden. Diese Vorgänge (oder Handhabungen) umfassen z. B. das Sortieren, Klassifizieren und Zusammenstellen von Waren, das Mischen oder Vermengen von Waren (z. B. Sand), das Abfüllen in Flaschen (mit oder ohne vorherige Flaschenreinigung), das Verpacken, Auspacken und Umpacken zur Verteilung in kleinere Mengen, sowie die Lagerung (auch tiefgefroren oder gekühlt). Sofern diese Tätigkeiten nicht als im Zusammenhang mit dem Handel übliche Vorgänge (oder Handhabungen) durchgeführt werden, können sie als Haupt-, Neben- oder Hilfstätigkeiten in anderen Abschnitten der NOGA ausgeübt werden.\r\n\r\nDie Unterscheidung zwischen Grosshandel (Abzeilung 46) und Einzelhandel (Abteilung 47) erfolgt durch die Art der Kunden.\r\n\r\nGrosshandel umfasst den Weiterverkauf von neuen und gebrauchten Waren an Einzelhändler, an Unternehmen (B2B) (z. B. an Industrie, Körperschaften, gewerbliche und berufliche Nutzer), oder den Weiterverkauf an andere Grosshändler, sowie die Handelsvermittlung bzw. den Kaufabschluss auf Rechnung solcher Auftraggeber. Die typischen Grosshändler sind diejenigen, die Eigentümer der von ihnen gehandelten Waren sind. Dazu zählen z. B. Industriezulieferer, Exporteure, Importeure und Einkaufsgenossenschaften, sowie Verkaufsniederlassungen und Verkaufsbüros (jedoch keine Ladengeschäfte), die von Hersteller- oder Bergbaubetrieben getrennt von ihren Betriebsanlagen eingerichtet werden, um ihre Produkte zu vermarkten und die nicht nur Bestellungen für Direktlieferungen aus ihren Betrieben abwickeln. Ferner zählen dazu Waren- und Rohstoffmakler, Kommissionäre, Handelsvertreter und Einkäufer. Besitzt der Grosshändler nicht das Eigentum an den gehandelten Waren, wird er in die Gruppe 461 klassifiziert. Übernimmt der Grosshändler das Eigentum an den Waren, auch wenn dieser im Auftrag Dritter handelt, wird der Grosshändler in die Gruppen 462-469 klassifiziert.\r\n\r\nDie Tätigkeit von Grosshändlern besteht in der Regel darin, Waren in grossen Mengen zusammenzustellen, zu sortieren und zu klassieren, auszupacken, umzupacken und in kleineren Mengen weiterzuverteilen (z. B. Arzneimittel), Waren zu lagern, zu kühlen, auszuliefern und aufzustellen, für ihre Kunden Werbung zu betreiben und Etiketten zu gestalten.\r\n\r\nEinzelhandel umfasst den Wiederverkauf von neuen und gebrauchten Waren an private Haushalte für den privaten Gebrauch oder Verbrauch, unabhängig vom Vertriebsweg, d. h. in Verkaufsräumen, Kaufhäusern, an Verkaufsständen, durch Versandhäuser, Haustürverkauf, Strassenhändler, Verbrauchergenossenschaften, Auktionshäusern usw. Dazu gehört auch der Verkauf von Waren in Ausstellungsräumen (in denen die ausgestellten Waren gekauft werden können), in temporären Verkaufsstellen (z. B. Pop-up-Stores), sowie in automatisierten Einzelhandelsgeschäften.\r\n\r\nDie meisten Einzelhändler erwerben das Eigentum an den von ihnen verkauften Waren, einige sind aber auch als Handelsvertreter für einen Auftraggeber tätig und verkaufen entweder auf Konsignations- oder auf Kommisionsbasis. Übernimmt der Einzelhändler nicht das Eigentum an den gehandelten Waren, wird er der Gruppe 479 zugeordnet. Übernimmt der Einzelhändler das Eigentum an den Waren, auch wenn er im Auftrag eines Dritten handelt, wird er in die Gruppen 471-478 klassifiziert.\r\n\r\nDie NOGA unterscheidet auf Gruppen- und Klassenebene nicht zwischen Einzelhandel in Geschäften und Online-Einzelhandel. Die meisten Tätigkeiten des Einzelhandels finden sowohl im Ladengeschäft, wie auch online statt (sowie über andere Vertriebswege), und es ist schwierig, zwischen den beiden Vertriebs-/Verkaufswegen auf Grundlage der überwiegenden Verkaufsmethode zu unterscheiden. Der jeweilige Anteil des Online- und des Ladenhandels kann im Laufe der Zeit schwanken, was die Stabilität der Klassifizierung beeinträchtigt. Das wichtigste Klassifizierungskriterium für den Einzelhandel in der NOGA basiert auf dem, was verkauft wird und nicht auf den Verkaufswegen, und unabhängig vom gehandelten Produkt.\r\n\r\nDer Einzelhandel über den Versandhandel oder das Internet wird nach der Art der verkauften Waren klassifiziert.\r\n\r\nDie Unterscheidung zwischen Gross- und Einzelhandel beruht nicht auf der Menge der verkauften Waren, da der Grosshandel auf der Basis von Stückzahlen und der Einzelhandel auf der Basis von Mengen erfolgen kann. Der Hauptunterschied zwischen Gross- und Einzelhandel liegt vielmehr in der Art des Kunden. Beim Grosshandel sind die Kunden in der Regel andere Unternehmen, während im Einzelhandel in der Regel an Endverbraucher, private Haushalte verkauft wird. Wenn ein Händler ohne Unterscheidung sowohl an Unternehmen als auch an Endverbraucher verkauft und es praktisch unmöglich ist, die Art der Mehrheit der Kunden zu unterscheiden, wird empfohlen, den Verkäufer als Einzelhändler zu behandeln.\r\n\r\nDas Mischen von Getränken durch den Hersteller oder einen Auftragnehmer wird der Herstellung von Waren zugerechnet (Abschnitt C). Werden dabei im Zusammenhang mit dem Handel übliche Vorgänge (oder Handhabungen) durchgeführt, gilt dies als Hilfstätigkeit und wird in Abschnitt G klassifiziert.",
+          "en": "This section includes wholesale and retail sale (in other words, sale without transformation) of any type of physical goods and rendering services incidental to the sale of merchandise. Goods are physical, produced objects for which a demand exists, over which ownership rights can be established and whose ownership can be transferred from one unit to another by engaging in transactions on markets. This is consistent with the definitions and concepts applied in the balance of payments domain, the G20 Digital Economy Task Force, the Handbook on Measuring Digital Trade, and so on.\r\n\r\nWholesale and retail sale are the final steps in the distribution of merchandise. For this purpose, ancillary activities (see introductory guidelines, Chapter 2.4) are carried out, which include a number of usual operations (or manipulations) associated with trade, without transforming the goods. These operations (or manipulations) include, for example, sorting, grading and assembling of goods, mixing or blending of goods (for example, sand), bottling (with or without preceding bottle cleaning), packaging, breaking bulk and repacking for distribution in smaller lots, storage (whether or not frozen or chilled). If not carried out as usual operations (or manipulations) associated with trade, the mentioned activities can be carried out as principal, secondary or ancillary activities in other sections of NOGA.\r\n\r\nThe distinction between wholesale (division 46) and retail sale (division 47) is based on the type of customer.\r\n\r\nWholesale is the resale of new and used goods to retailers, business-to-business trade (for example, to industrial, commercial, institutional or professional users) or other wholesalers, or it involves acting as an agent or broker in buying merchandise for, or selling merchandise to, such persons or companies. The principal types of businesses included are merchant wholesalers, in other words, wholesalers who take title to the goods they sell, such as wholesale merchants or jobbers, industrial distributors, exporters, importers, and cooperative buying associations, sales branches and sales offices (but not retail stores) that are maintained by manufacturing or mining units apart from their plants or mines for the purpose of marketing their products and that do not merely take orders to be filled by direct shipments from the plants or mines. Also included are merchandise and commodity brokers, commission merchants, agents, assemblers and buyers. If the wholesaler does not assume ownership of the goods the wholesaler trades, the wholesaler is classified in group 461. If the wholesaler assumes ownership of the goods, even if the wholesaler is acting on behalf of a third party, the wholesaler is classified in groups 462 to 469.\r\n\r\nWholesalers frequently physically assemble, sort and grade goods in large lots, break bulk, repack and redistribute in smaller lots (for example, for pharmaceuticals); store, refrigerate, deliver and install goods, engage in sales promotion for their customers and label design.\r\n\r\nRetailing is the resale of new and used goods to final consumers for personal or household consumption or use, whatever the channel, in shops, department stores, stalls, mail order houses, door-to-door salespersons, hawkers, consumer cooperatives, auction houses, and so on. It includes the sale of goods via showrooms (where the exposed goods can be bought), via ephemeral points of sale (for example, pop-up stores) as well as in automated retail shops.\r\n\r\nMost retailers take title to the goods they sell, but some act as agents for a principal and sell either on consignment or on a commission basis. If the retailer does not assume ownership of the goods the retailer trades, the retailer is classified in group 479. If the retailer assumes ownership of the goods, even if the retailer is acting on behalf of a third party, the retailer is classified in groups 471 to 478.\r\n\r\nNOGA does not make any distinction at group and class level between in-store and online retail sale. Most of the retail sale activities operate both in-store and online (as well other distribution channels) and it is difficult to differentiate between the two distribution/sales channels based on the primary sales method. The share of in-store and online sales can vary over time affecting the stability of the classification. The main classification criteria for retail sale in NOGA is based on what is sold and not the sales channel.\r\n\r\nRetailing via mail order or the internet is classified according to the type of goods sold.\r\n\r\nThe distinction between wholesale and retail sale is not based on the quantity of goods sold, as wholesale may be made on a unit basis, just as retail sales may be made on a bulk basis. Instead, the primary distinction between wholesale and retail sale is the type of customer. Wholesale usually involves business customers while retail usually involves final customers, such as households. If a trader sells to both business and final customers without distinction and it is practically impossible to distinguish the majority type of customers , then it is recommended to treat the seller as a retailer.\r\n\r\nBlending of beverages to be provided by the manufacturer or by a contractor is classified in manufacturing (section C). If carried out as a usual operation (or manipulation) associated with trade, it is considered as an ancillary activity and integrated in section G.",
+          "fr": "Cette section comprend le commerce de gros et de détail (c'est-à-dire la vente sans transformation) de tout type de marchandises et la prestation de services liés à la vente de marchandises. Le commerce de gros et le commerce de détail sont les étapes finales de la distribution de marchandises. Les marchandises sont des objets physiques produits pour lesquels il existe une demande, sur lesquels des droits de propriété peuvent être établis et dont la propriété peut être transférée d'une unité à une autre en effectuant des transactions sur les marchés. Cette définition est cohérente avec les définitions et les concepts appliqués dans le domaine de la balance des paiements, le groupe de travail du G20 sur l'économie numérique, le manuel sur la mesure du commerce numérique, etc.\r\n\r\nLe commerce de gros et au détail sont les étapes finales de la distribution des marchandises. À cette fin, des activités auxiliaires (voir les lignes directrices de la NOGA, Chapitre 2.4) sont exercées, et comprennent un certain nombre d'opérations courantes (ou manipulations) associées au commerce par ex. le tri, le calibrage et l’assemblage de biens, le mélange (association) de biens (par ex. du sable), l’embouteillage (avec ou sans nettoyage préalable des bouteilles), le conditionnement, le fractionnement et le reconditionnement pour la distribution en lots plus petits, le stockage (même avec congélation ou réfrigération). Si elles ne sont pas effectuées en tant qu'opérations (ou manipulations) habituelles liées au commerce, les activités mentionnées peuvent être exercées en tant qu'activités principales, secondaires ou auxiliaires dans d'autres sections de la NOGA.\r\n\r\nLa distinction entre le commerce de gros (division 46) et le commerce de détail (division 47) s’opère en fonction du type de client.\r\n\r\nLe commerce de gros consiste en la revente d’articles et de produits neufs ou d’occasion à des détaillants, d’entreprise à entreprise (par ex. à des usagers industriels, commerciaux, à des collectivités et à des utilisateurs professionnels) ou à d’autres grossistes, ou à agir en tant qu'agent ou courtier en achetant des marchandises pour ces personnes ou entreprises ou en leur vendant des marchandises. Les principales activités incluses sont celles des marchands en gros, c’est-à-dire des grossistes qui prennent possession des marchandises qu’ils vendent, des négociants en gros, des dépositaires, des distributeurs industriels, des exportateurs, des importateurs et des coopératives d’achat, des succursales et des bureaux de vente (mais pas des magasins de détail) qui sont tenus par des unités de fabrication ou d’exploitation minière indépendamment de leurs usines ou mines dans le but de commercialiser leurs produits et qui ne se contentent pas de répondre à des commandes par expédition directe depuis les usines ou mines. Sont également inclus les courtiers en marchandises et en matières premières, les commissionnaires, les agents, les assembleurs et les acheteurs. Si le grossiste n'assume pas la propriété des marchandises qu'il négocie, il est classé dans le groupe 461. Si le grossiste assume la propriété des marchandises, même s'il agit pour le compte d'un tiers, il est classé dans les groupes 462 à 469.\r\n\r\nLes marchands en gros se chargent fréquemment d’opérations telles que l’assemblage, le tri, le calibrage de marchandises en grandes quantités, le fractionnement, le reconditionnement, la redistribution en petites quantités (par ex. de produits pharmaceutiques); l’entreposage, la réfrigération, la livraison et l’installation des marchandises, la promotion au bénéfice de leurs clients et la conception d’étiquettes.\r\n\r\nLe commerce de détail est la revente aux consommateurs finaux de biens neufs ou d’occasion destinés à la consommation ou à l'utilisation des particuliers ou des ménages, quelque soit le canal, par des magasins, des grands magasins, des comptoirs et des kiosques, des maisons de vente par correspondance, des colporteurs et des marchands ambulants, des coopératives de consommateurs, des maisons de vente aux enchères, etc. Il comprend la vente de biens dans des salles d'exposition (où les biens exposés peuvent être achetés), dans des points de vente éphémères (par ex. des magasins éphémères) ainsi que dans des magasins de commerce de détail automatisés.\r\n\r\nLa plupart des détaillants prennent possession des marchandises qu’ils vendent mais certains agissent en tant qu’intermédiaires pour le compte d'un mandant et vendent en consignation ou sur la base de commissions. Si le détaillant n'assume pas la propriété des marchandises qu'il vend, il est classé dans le groupe 479. Si le détaillant assume la propriété des biens, même s'il agit pour le compte d'un tiers, il est classé dans les groupes 471 à 478.\r\n\r\nLa NOGA ne fait pas de distinction au niveau des groupes et des classes entre le commerce de détail en magasin et en ligne. La plupart des activités de commerce de détail opèrent à la fois en magasin et en ligne (ainsi que suivant d'autres canaux de distribution) et il est difficile de différencier les deux canaux de distribution/ventes sur la base de la principale méthode de vente. La part des ventes en ligne et en magasin peut varier dans le temps, ce qui affecte la stabilité de la classification. Le principal critère de classification du commerce de détail dans la NOGA est basé sur ce qui est vendu et non sur les canaux de vente.\r\n\r\nLe commerce de détail par correspondance ou par internet est classé en fonction du type de biens vendus.\r\n\r\nLa distinction entre le commerce de gros et le commerce de détail ne repose pas sur la quantité de marchandises vendues, car le commerce de gros peut être effectué sur une base unitaire, tout comme le commerce de détail peut être effectué en vrac. La principale distinction entre le commerce de gros et le commerce de détail est plutôt le type de client. Le commerce de gros s'adresse généralement à des entreprises en tant que clients, tandis que le commerce de détail s'adresse généralement à des clients finaux, tel que les ménages. Si un commerçant vend indistinctement à des clients professionnels et à des clients finals, et s'il est pratiquement impossible de distinguer le type de client majoritaire, il est recommandé de considérer le commerçant comme un détaillant.\r\n\r\nLe mélange de boissons fourni par le fabricant ou par un sous-traitant est classé dans le secteur de la fabrication (section C). S'il est effectué en tant qu'opération (ou manipulation) habituelle associée au commerce, il est considéré comme une activité auxiliaire et intégré dans la section G.",
+          "it": "Questa sezione comprende la vendita all'ingrosso e al dettaglio (in altre parole, la vendita senza trasformazione) di qualsiasi tipo di bene fisico e la prestazione di servizi accessori alla vendita di merci. I beni sono oggetti fisici prodotti per i quali esiste una domanda, sui quali possono essere stabiliti diritti di proprietà e la cui proprietà può essere trasferita da un'unità all'altra attraverso transazioni sui mercati. Ciò è coerente con le definizioni e i concetti applicati nell'ambito della bilancia dei pagamenti, con la Task Force Economia Digitale del G20, con l'Handbook on Measuring Digital Trade e così via.\r\n\r\nLa vendita all'ingrosso e al dettaglio sono le fasi finali della distribuzione delle merci. A tal fine, vengono svolte attività ausiliarie (cfr. linee guida introduttive, capitolo 2.4), che comprendono una serie di operazioni (o manipolazioni) usuali associate al commercio, senza trasformare le merci. Tali operazioni (o manipolazioni) comprendono, ad esempio, la selezione, la classificazione e l'assemblaggio di merci, la miscelazione o il mescolamento di merci (ad esempio, sabbia), l'imbottigliamento (con o senza precedente pulizia delle bottiglie), l'imballaggio, la rottura di prodotti sfusi e il reimballaggio per la distribuzione in lotti più piccoli, lo stoccaggio (congelato o refrigerato). Se non vengono svolte come operazioni (o manipolazioni) abituali associate al commercio, le attività menzionate possono essere svolte come attività principali, secondarie o accessorie in altre sezioni di NOGA.\r\n\r\nLa distinzione tra vendita all'ingrosso (divisione 46) e vendita al dettaglio (divisione 47) si basa sul tipo di cliente.\r\n\r\nLa vendita all'ingrosso è la rivendita di beni nuovi e usati a dettaglianti, al commercio business-to-business (ad esempio, a utenti industriali, commerciali, istituzionali o professionali) o ad altri grossisti, oppure consiste nell'agire come agente o broker nell'acquisto di merci per, o nella vendita di merci a, tali persone o società. I principali generi di attività inclusi sono i grossisti commerciali, ossia i grossisti che si appropriano dei beni che vendono, come i commercianti all'ingrosso o i grossisti, i distributori industriali, gli esportatori, gli importatori e le associazioni cooperative di acquisto, le filiali di vendita e gli uffici di vendita (ma non i negozi al dettaglio) che sono gestiti da unità manifatturiere o minerarie al di fuori dei loro stabilimenti o miniere allo scopo di commercializzare i loro prodotti e che non si limitano a prendere ordini da evadere con spedizioni dirette dagli stabilimenti o dalle miniere. Sono inclusi anche i broker di merci e di beni, i commissionari, gli agenti, gli assemblatori e gli acquirenti. Se il grossista non assume la proprietà dei beni che commercia, viene classificato nel Gruppo 461. Se il grossista assume la proprietà dei beni, anche se agisce per conto di terzi, il grossista è classificato nei Gruppi da 462 a 469.\r\n\r\nI grossisti spesso assemblano fisicamente, selezionano e classificano la merce in grandi lotti, rompono la merce sfusa, la riconfezionano e la ridistribuiscono in lotti più piccoli (ad esempio, per i prodotti farmaceutici); immagazzinano, refrigerano, consegnano e installano la merce, si impegnano nella promozione delle vendite per i loro clienti e nella progettazione di etichette.\r\n\r\nLa vendita al dettaglio è la rivendita di beni nuovi e usati ai consumatori finali per il consumo o l'uso personale o domestico, indipendentemente dal canale, in negozi, grandi magazzini, bancarelle, case di vendita per corrispondenza, venditori porta a porta, ambulanti, cooperative di consumatori, case d'asta e così via. Include la vendita di beni attraverso showroom (dove i beni esposti possono essere acquistati), attraverso punti vendita effimeri (ad esempio, pop-up store) e in negozi al dettaglio automatizzati.\r\n\r\nLa maggior parte dei rivenditori si appropria dei beni che vende, ma alcuni agiscono come agenti di un committente e vendono in conto vendita o su commissione. Se il dettagliante non si assume la proprietà dei beni che commercia, viene classificato nel Gruppo 479. Se il dettagliante si assume la proprietà della merce, anche se agisce per conto di terzi, è classificato nei gruppi da 471 a 478.\r\n\r\nNOGA non fa alcuna distinzione a livello di Gruppo e Classe tra vendita al dettaglio in negozio e online. La maggior parte delle attività di vendita al dettaglio opera sia in negozio che online (così come altri canali di distribuzione) ed è difficile distinguere tra i due canali di distribuzione/vendita in base al metodo di vendita primario. La quota delle vendite in negozio e online può variare nel tempo, influenzando la stabilità della classificazione. Il principale criterio di classificazione della vendita al dettaglio in NOGA si basa su ciò che viene venduto e non sul canale di vendita.\r\n\r\nLa vendita al dettaglio per corrispondenza o via Internet è classificata in base al genere di merce venduta.\r\n\r\nLa distinzione tra vendita all'ingrosso e al dettaglio non si basa sulla quantità di merce venduta, poiché la vendita all'ingrosso può essere effettuata su base unitaria, così come la vendita al dettaglio può essere effettuata su base massiva. La distinzione principale tra vendita all'ingrosso e al dettaglio è invece il tipo di cliente. La vendita all'ingrosso riguarda solitamente clienti commerciali, mentre la vendita al dettaglio riguarda solitamente clienti finali, come le famiglie. Se un commerciante vende indistintamente a clienti commerciali e finali ed è praticamente impossibile distinguere la maggior parte dei clienti, si raccomanda di trattare il venditore come un dettagliante.\r\n\r\nLa miscelazione di bevande che deve essere fornita dal produttore o da un appaltatore è classificata come attività di produzione (Sezione C). Se viene effettuata come operazione abituale (o manipolazione) associata al commercio, è considerata un'attività accessoria e integrata nella Sezione G."
+        }
+      }
+    ],
+    "code": "G",
+    "name": {
+      "de": "HANDEL",
+      "en": "WHOLESALE AND RETAIL TRADE",
+      "fr": "COMMERCE",
+      "it": "COMMERCIO ALL’INGROSSO E AL DETTAGLIO",
+      "rm": "NA"
+    },
+    "level": "Abschnitt",
+    "level_key": "abschnitt",
+    "level_no": 1,
+    "source_level": "NOGA - Level 1 - Section"
+  },
+  {
+    "annotations": [
+      {
+        "type": "EXCLUDES",
+        "text": {
+          "de": "Dieser Abschnitt umfasst nicht:\r\n- grössere Reparatur-, Wartungs- und Umbauarbeiten an Fahrzeugen (ohne Kraftfahrzeuge), siehe 331\r\n- Bau, Instandhaltung und Reparatur von Strassen, Eisenbahnen, Häfen und Flugplätzen, siehe Abteilung 42\r\n- Vermietung von Fahrzeugen ohne Fahrer oder Bedienungspersonal, siehe 771, 773\r\n- Beförderungsleistungen als Bestandteil von Freizeiteinrichtungen (z. B. in Vergnügungsparks), siehe 932\r\n- Instandhaltung und Reparatur von Kraftwagen, siehe 9531\r\n- Instandhaltung und Reparatur von Krafträdern, siehe 953200",
+          "en": "This section excludes:\r\n- major repair, maintenance or alteration of transport equipment, except motor vehicles, see 331\r\n- construction, maintenance and repair of roads, railways, harbours, airfields, see division 42\r\n- rental of transport equipment without a driver or operator, see 771, 773\r\n- transport activities as an integral part of recreational facilities (e.g. in theme parks), see 932\r\n- maintenance and repair of motor vehicles, see 9531\r\n- maintenance and repair of motorcycles, see 953200",
+          "fr": "Cette section ne comprend pas :\r\n- les travaux importants de réparation, d'entretien ou de modification du matériel de transport, à l'exception des véhicules à moteur, voir 331\r\n- la construction, l'entretien et la réparation de routes, de voies ferrées, de ports et d'aérodromes, voir division 42\r\n- la location de matériel de transport sans chauffeur ni opérateur, voir 771, 773\r\n- les activités de transport faisant partie intégrante des installations récréatives, par ex. dans les parcs à thème, voir 932\r\n- l'entretien et la réparation de véhicules à moteur, voir 9531\r\n- l'entretien et la réparation de motocycles, voir 953200",
+          "it": "Questa sezione non comprende:\r\n- la riparazione, la manutenzione o la modifica di mezzi di trasporto, ad eccezione dei veicoli a motore, cfr. 331\r\n- costruzione, manutenzione e riparazione di strade, ferrovie, porti, aerodromi, cfr. Divisione 42\r\n- il noleggio di mezzi di trasporto senza conducente o operatore, cfr. 771, 773\r\n- attività di trasporto come parte integrante di strutture ricreative (ad esempio nei parchi a tema), cfr. 932\r\n- manutenzione e riparazione di veicoli a motore, cfr. 9531\r\n- manutenzione e riparazione di motocicli, cfr. 953200"
+        }
+      },
+      {
+        "type": "HIER_LEVEL",
+        "text": {
+          "de": "NOGA - Ebene 1 - Abschnitt",
+          "en": "NOGA - Level 1 - Section",
+          "fr": "NOGA - Niveau 1 - Section",
+          "it": "NOGA - Livello 1 - Sezione"
+        }
+      },
+      {
+        "type": "INCLUDES_ALSO",
+        "text": {
+          "de": "Dieser Abschnitt umfasst ferner:\r\n- Vermittlungstätigkeiten, die Kunden mit Anbietern von Güter- und Personenbeförderungsleistungen in Verbindung bringen, ausgenommen solche für Abteilung 79",
+          "en": "This section also includes:\r\n\r\n- intermediation services that link customers to transport service providers, except for division 79",
+          "fr": "Cette section comprend également :\r\n- les services d'intermédiation qui relient les clients aux fournisseurs de services de transport, à l'exception de la division 79",
+          "it": "Questa sezione comprende inoltre:\r\n\r\n- i servizi di intermediazione che collegano i clienti ai fornitori di servizi di trasporto, ad eccezione della divisione 79"
+        }
+      },
+      {
+        "type": "INCLUDES",
+        "text": {
+          "de": "Dieser Abschnitt umfasst die Personen- und Güterbeförderung z.B. auf Schienen, in Rohrfernleitungen, auf der Strasse, zu Wasser und in der Luft, einschliesslich der Beförderung von Personen, unabhängig davon, ob aus persönlichen, beruflichen oder Freizeitgründen, im Linien- oder Gelegenheitsverkehr.. Auch die Vermietung von Beförderungsmitteln mit Fahrer oder Bedienungspersonal sowie Post- und Kurierdienste sind in diesem Abschnitt enthalten.\r\n\r\nDieser Abschnitt umfasst ferner damit verbundene Tätigkeiten (z. B. Betrieb von Bahnhöfen, Häfen und Flughäfen, Parkplätzen und Parkhäusern, Frachtumschlag, Lagerei, z. B. Betrieb von Silos, Warenlagern, Lagertanks). Transporttätigkeiten, die in den Abteilungen 49, 50, 51, 53 klassifiziert sind, beinhalten oft zugehörige Tätigkeiten (z. B. Verpacken, Warenumschlag, vorübergehende Verladung, Probenahme und Wiegen von Waren) die lediglich die Transporttätigkeiten unterstützen. Diese unterstützenden Tätigkeiten sind nur dann der Abteilung 52 zuzuordnen, wenn sie im Auftrag Dritter durchgeführt werden.",
+          "en": "This section includes the transport of passengers or freight, by rail, pipeline, road, water or air. It includes the transport of passengers regardless of the reasons, whether for personal, professional or recreational reasons, scheduled or not. Rental of transport equipment with a driver or operator as well as postal and courier activities are classified in this section.\r\n\r\nThe section also includes associated activities (for example, operation of terminal and parking facilities, cargo handling, warehousing and storage, such as the operation of silos, merchandise warehouses, storage tanks). Transport activities classified in divisions 49, 50, 51 and 53 often involve related activities (for example, packaging, goods handling operations, temporary crating, sampling and weighing of goods) which solely support the transport activities. These supporting activities are only to be classified in division 52 if they are performed on behalf of others.",
+          "fr": "Cette section comprend le transport de passagers ou de marchandises par rail, conduite, route, eau ou air. Elle comprend le transport de passagers sans tenir compte des raisons, qu'elles soient personnelles, professionnelles ou récréatives, programmées ou non. La location de matériel de transport avec un chauffeur ou un opérateur ainsi que les activités de poste et de courrier sont classées dans cette section.\r\n\r\nLa section comprend également les activités connexes (par ex. l'exploitation de terminaux et d'installations de stationnement, la manutention de marchandises, l'entreposage et le stockage, tel que l'exploitation de silos, d'entrepôts de marchandises, de réservoirs de stockage). Les activités de transport classées dans les divisions 49, 50, 51 et 53 impliquent souvent des activités auxiliaires (par ex. emballage, manutention des marchandises, mise en caisse temporaire, échantillonnage et pesage des marchandises, qui soutiennent uniquement les activités de transport). Ces activités de soutien ne doivent être classées dans la division 52 que si elles sont effectuées pour le compte d'autrui.",
+          "it": "Questa sezione comprende il trasporto di passeggeri o merci, per ferrovia, conduttura, strada, acqua o aria. Include il trasporto di passeggeri indipendentemente dalle ragioni, sia per motivi personali, professionali o ricreativi, programmati o meno. Il noleggio di mezzi di trasporto con autista o operatore e le attività postali e di corriere sono classificate in questa Sezione.\r\n\r\nQuesta sezione comprende inoltre le attività connesse (ad esempio, la gestione di terminal e parcheggi, la movimentazione delle merci, il magazzinaggio e lo stoccaggio, come la gestione di silos, magazzini merci, serbatoi di stoccaggio). Le attività di trasporto classificate nelle divisioni 49, 50, 51 e 53 spesso comportano attività correlate (ad esempio, imballaggio, operazioni di movimentazione delle merci, casse temporanee, campionamento e pesatura delle merci) che supportano esclusivamente le attività di trasporto. Queste attività di supporto devono essere classificate nella divisione 52 solo se sono svolte per conto di altri."
+        }
+      }
+    ],
+    "code": "H",
+    "name": {
+      "de": "VERKEHR UND LAGEREI",
+      "en": "TRANSPORTATION AND STORAGE",
+      "fr": "TRANSPORTS ET ENTREPOSAGE",
+      "it": "TRASPORTO E MAGAZZINAGGIO",
+      "rm": "NA"
+    },
+    "level": "Abschnitt",
+    "level_key": "abschnitt",
+    "level_no": 1,
+    "source_level": "NOGA - Level 1 - Section"
+  },
+  {
+    "annotations": [
+      {
+        "type": "EXCLUDES",
+        "text": {
+          "de": "Dieser Abschnitt umfasst nicht:\r\n- Weiterverkauf von Speisen und Getränken im Gross- oder Einzelhandel, siehe Abschnitt G (die Zubereitung dieser Speisen und Getränke fällt unter Herstellung und Verarbeitung von Waren, siehe Abschnitt C)\r\n- Bereitstellung von Langzeitunterkünften (ein Jahr oder länger) als Hauptwohnsitz, siehe Abschnitt M",
+          "en": "This section excludes:\r\n\r\n- the resale of food or drinks through wholesale or retail sale activities, see section G (the preparation of these foods and drinks is classified in manufacturing, see section C)\r\n\r\n- the provision of long-term (one year or more) accommodation as primary residences, see section M",
+          "fr": "Cette section ne comprend pas :\r\n- la revente d'aliments ou de boissons par le biais d'activités de vente en gros ou au détail, voir section G (la préparation de ces aliments et boissons est classée dans l'industrie manufacturière, voir section C)\r\n- la fourniture d'un logement à long terme (un an ou plus) en tant que résidence principale, voir section M",
+          "it": "Questa sezione non comprende:\r\n\r\n- la rivendita di alimenti o bevande attraverso attività di vendita all'ingrosso o al dettaglio, cfr. Sezione G (la preparazione di questi alimenti e bevande è classificata come attività manifatturiera, cfr. Sezione C)\r\n\r\n- la fornitura di alloggi a lungo termine (un anno o più) come residenze primarie, cfr. sezione M"
+        }
+      },
+      {
+        "type": "HIER_LEVEL",
+        "text": {
+          "de": "NOGA - Ebene 1 - Abschnitt",
+          "en": "NOGA - Level 1 - Section",
+          "fr": "NOGA - Niveau 1 - Section",
+          "it": "NOGA - Livello 1 - Sezione"
+        }
+      },
+      {
+        "type": "INCLUDES_ALSO"
+      },
+      {
+        "type": "INCLUDES",
+        "text": {
+          "de": "Dieser Abschnitt umfasst die kurzzeitige Beherbergung (weniger als ein Jahr) von Besuchern und anderen Reisenden, die befristete Unterbringung in Einzel- oder Mehrbettzimmern, in Wohnheimen für Studenten, Saisonarbeiter und andere Personen, sowie die Bereitstellung von kompletten Mahlzeiten und von Getränken zum sofortigen Verzehr. Art und Umfang von zusätzlichen Dienstleistungen können innerhalb dieses Abschnitts stark variieren.",
+          "en": "This section includes the provision of short-term (less than one year) accommodation for visitors and other travellers, temporary accommodation in single or shared rooms or dormitories for students, seasonal workers and other individuals, as well as the provision of meals and drinks fit for immediate consumption. The amount and type of supplementary services provided within this section can vary widely.",
+          "fr": "Cette section comprend l'hébergement de courte durée (moins d'un an) pour les visiteurs et autres voyageurs, l'hébergement temporaire en chambres individuelles ou partagées ou en dortoirs pour les étudiants, les travailleurs saisonniers et autres personnes, ainsi que la fourniture de repas et de boissons propres à la consommation immédiate. La quantité et le type de services supplémentaires fournis dans cette section peuvent varier considérablement.",
+          "it": "Questa sezione comprende la fornitura di alloggi a breve termine (meno di un anno) per visitatori e altri viaggiatori, l'alloggio temporaneo in camere singole o condivise o dormitori per studenti, lavoratori stagionali e altre persone, nonché la fornitura di pasti e bevande adatti al consumo immediato. La quantità e il genere di servizi supplementari forniti in questa sezione possono variare notevolmente."
+        }
+      }
+    ],
+    "code": "I",
+    "name": {
+      "de": "GASTGEWERBE/BEHERBERGUNG UND GASTRONOMIE",
+      "en": "ACCOMMODATION AND FOOD SERVICE ACTIVITIES",
+      "fr": "HÉBERGEMENT ET RESTAURATION",
+      "it": "ATTIVITÀ DEI SERVIZI DI ALLOGGIO E DI RISTORAZIONE",
+      "rm": "NA"
+    },
+    "level": "Abschnitt",
+    "level_key": "abschnitt",
+    "level_no": 1,
+    "source_level": "NOGA - Level 1 - Section"
+  },
+  {
+    "annotations": [
+      {
+        "type": "EXCLUDES",
+        "text": {
+          "de": "Dieser Abschnitt umfasst nicht:\r\n- Gross- und Einzelhandel mit bespielten Ton-, Bild- und Datenträgern, siehe Abschnitt G\r\n- die Erbringung von Telekommunikations- und damit verbundenen Dienstleistungen, d. h. die Übertragung von Sprache, Daten, Text, Ton und Video, Tätigkeiten der Computerprogrammierung, der EDV-Infrastruktur, des Hostings sowie von Web-Suchportalen, siehe Abschnitt K\r\n- die Erbringung von Finanz- und Versicherungsdienstleistungen unter Verwendung veröffentlichter Software für Finanz- und Versicherungstechnologien, siehe Abschnitt L\r\n- die Verwaltung von Urheberrechten, siehe 749100\r\n- Tätigkeiten von Videotheken, siehe 772200\r\n- Tätigkeiten von unabhängigen Musikern und Schauspielern (einschliesslich Influencern, die in Vlogs auftreten), Schriftstellern und Bloggern, deren Inhalte von Dritten veröffentlicht werden, sowie von Glücksspiel-Webseiten, siehe Abschnitt S",
+          "en": "This section excludes:\r\n- wholesale and retail sale of recorded media, see section G\r\n- activities of providing telecommunication and related service activities, i.e. transmitting voice, data, text, sound and video, computer programming activities, computing infrastructure and hosting activities and web search portals, see section K\r\n- provision of financial and insurance services using published financial and insurance technologies software, see section L\r\n- the management of copyrights, see 749100\r\n- rental of discs, see 772200\r\n- activities of independent musicians and actors (including influencers appearing in vlogs), writers and bloggers, whose content is published by a third party, and gambling sites, see section S",
+          "fr": "Cette section ne comprend pas :\r\n- le commerce de gros et au détail de supports enregistrés, voir section G\r\n- les activités de fourniture de services de télécommunications et de services connexes, c'est-à-dire la transmission de la voix, de données, de textes, de sons et de vidéos, les activités de programmation informatique, les activités d'infrastructure et d'hébergement informatiques et les portails de recherche sur le web, voir section K\r\n- la fourniture de services financiers et d'assurance à l'aide de logiciels publiés dans le domaine des technologies financières et d'assurance, voir section L\r\n- la gestion des droits d'auteur, voir 749100\r\n- la location de disques, voir 772200\r\n- les activités des musiciens et acteurs indépendants (y compris les influenceurs apparaissant dans les vlogs), les écrivains et les blogueurs, dont le contenu est publié par un tiers, et les sites de jeux d'argent, voir section S",
+          "it": "Questa sezione non comprende:\r\n- vendita all'ingrosso e al dettaglio di supporti registrati, cfr. Sezione G\r\n- attività di fornitura di servizi di telecomunicazione e servizi correlati, vale a dire trasmissione di voce, dati, testi, suoni e video, attività di programmazione informatica, infrastrutture informatiche e attività di hosting e portali di ricerca sul web, cfr. sezione K\r\n- fornitura di servizi finanziari e assicurativi utilizzando software di tecnologie finanziarie e assicurative pubblicati, cfr. Sezione L\r\n- gestione di diritti d'autore, cfr. 749100\r\n- noleggio di dischi, cfr. 772200\r\n- attività di musicisti e attori indipendenti (compresi gli influencer che appaiono nei vlog), scrittori e blogger, i cui contenuti sono pubblicati da terzi, e siti di gioco d'azzardo, cfr. sezione S"
+        }
+      },
+      {
+        "type": "HIER_LEVEL",
+        "text": {
+          "de": "NOGA - Ebene 1 - Abschnitt",
+          "en": "NOGA - Level 1 - Section",
+          "fr": "NOGA - Niveau 1 - Section",
+          "it": "NOGA - Livello 1 - Sezione"
+        }
+      },
+      {
+        "type": "INCLUDES_ALSO",
+        "text": {
+          "de": "Dieser Abschnitt umfasst ferner:\r\n- die Schaffung und das Leasing von Urheberrechten an veröffentlichten Inhalten",
+          "en": "This section also includes:\r\n\r\n- the creation and leasing of copyrights for published content",
+          "fr": "Cette section comprend également :\r\n- la création et la location de droits d'auteur pour le contenu publié",
+          "it": "Questa sezione comprende inoltre:\r\n\r\n- la creazione e l'affitto dei diritti d'autore per i contenuti pubblicati"
+        }
+      },
+      {
+        "type": "INCLUDES",
+        "text": {
+          "de": "Dieser Abschnitt umfasst die Herstellung und das Verlegen, die Ausstrahlung und den sonstigen Vertrieb von Informationsprodukten.\r\n\r\nDieser Abschnitt umfasst das Verlegen von Büchern, Zeitungen, Zeitschriften und Software (Abteilung 58); die Produktion von Filmen, Videos und Fernsehprogrammen, das Verlegen von Tonträgern und Musik (Abteilung 59); die Erstellung und den Vertrieb von Hörfunk- und Fernsehprogrammen, einschliesslich des Betriebs von Streaming- und Download-Plattformen sowie Plattformen zur Verbreitung von Inhalten (Sharing), die nicht mit dem Verlegen von Inhalten in Verbindung stehen, des Betriebs von Blogs und Wiki-Webseiten, sozialen Netzwerken und Webseiten für Online-Gaming / Computerspiele (Abteilung 60).\r\n\r\nUnter Verlegen versteht man den Erwerb von Urheberrechten an Inhalten (Informationsprodukten) und die Bereitstellung dieser Inhalte für die Allgemeinheit durch die Durchführung (oder Veranlassung) der Vervielfältigung und Verbreitung dieser Inhalte in verschiedenen Formen. Verleger können nur veröffentlichen und anderen Lizenzen für die Verbreitung ihrer Inhalte erteilen, oder sie können von ihnen erstellte oder in ihrem Besitz befindliche Inhalte veröffentlichen und verbreiten. Dieser Abschnitt umfasst alle möglichen Formen des Verlegens (in gedruckter, elektronischer, digitaler, analoger oder sonstiger Form) sowie Tätigkeiten des Selbstverlags.\r\n\r\nEinzelkomponenten von Fernsehprogrammen (z. B. Spielfilme oder Fernsehserien) sind in die Abteilung 59 eingegliedert, während die Herstellung ganzer Fernsehprogramme, ob aus Komponenten gemäss Abteilung 59 oder anderen Bestandteilen bestehend (z. B. Live-Nachrichtenprogramme), unter Abteilung 60 fällt. Ebenfalls unter Abteilung 60 fällt die Ausstrahlung der Programme durch den Produzenten.",
+          "en": "This section includes the production and publishing, broadcasting and other distribution of information products.\r\n\r\nThis section includes: book, newspaper, periodical and software publishing activities (division 58); the production of motion picture, video and television programme elements , sound recording and music publishing activities (division 59); radio and television broadcasting as well as television or radio programme production and distribution activities, including the operation of streaming, downloads and content distribution (sharing) platforms not associated with publishing of the content, the operation of blogs and wiki sites, social network sites and online gaming / video game sites (division 60).\r\n\r\nPublishing refers to the acquisition of copyrights to content (information products) and making this content available to the general public by engaging in (or arranging for) the reproduction and distribution of this content in various forms. Publishers may solely publish and then license rights to others to distribute their content, or they may publish and distribute content they create or own. All the feasible forms of publishing (in print, electronic, digital, analogue, or any other form) and self-publishing activities are included in this section.\r\n\r\nIndividual television programming components (for example, movies, television series) are produced by activities in division 59, while the creation of a complete programme for a television channel, from components produced in division 59 or other components (for example, live news programming), is included in division 60. Division 60 also includes the broadcasting of this programme by the producer.",
+          "fr": "Cette section comprend la production et l'édition, la diffusion et la distribution de produits d'information.\r\n\r\nCette section comprend les activités d'édition de livres, de journaux, de périodiques et de logiciels (division 58); la production de films cinématographiques, de vidéos et d'éléments de programmes de télévision; les activités d'enregistrement sonore et d'édition musicale (division 59); la radiodiffusion et la télédiffusion ainsi que la production et la distribution de programmes de télévision ou de radio, y compris l'exploitation de plateformes de streaming, de téléchargement et de distribution (partage) de contenu non associées à l'édition du contenu, l'exploitation de sites de blogs et de wikis, de sites de réseaux sociaux et de sites de jeux en ligne/vidéo (division 60).\r\n\r\nL'édition fait référence à l'acquisition de droits d'auteur sur le contenu (produits d'information) et à la mise à disposition de ce contenu au grand public en s'engageant (ou en organisant) la reproduction et la distribution de ce contenu sous diverses formes. Les éditeurs peuvent se contenter de publier et de concéder à d'autres les droits de distribution de leur contenu, ou ils peuvent publier et distribuer un contenu qu'ils ont créé ou qu'ils possèdent. Toutes les formes possibles d'édition (imprimée, numérique, analogique ou toute autre forme) et les activités d'autoédition sont incluses dans cette section.\r\n\r\nLes éléments individuels de programmation télévisuelle (par ex. films, séries télévisées) sont produits par les activités comprises dans la division 59, tandis que la création d'un programme complet pour une chaîne de télévision, à partir d'éléments produits dans la division 59 ou d'autres éléments (par ex. les programmes d'information en direct), est comprise dans la division 60. La division 60 comprend également la diffusion de ce programme par le producteur.",
+          "it": "Questa sezione comprende la produzione e la pubblicazione, la trasmissione e altre forme di distribuzione di prodotti informativi.\r\n\r\nQuesta sezione comprende: le attività di edizione di libri, giornali, periodici e software (divisione 58); la produzione di elementi di film, video e programmi televisivi, le attività di registrazione del suono e di pubblicazione di musica (divisione 59); le attività di trasmissione radiofonica e televisiva e le attività di produzione e distribuzione di programmi televisivi o radiofonici, compresa la gestione di piattaforme di streaming, download e distribuzione di contenuti (condivisione) non associate alla pubblicazione dei contenuti, la gestione di blog e siti wiki, siti di social network e siti di giochi online / videogiochi (divisione 60).\r\n\r\nPer pubblicazione si intende l'acquisizione di diritti d'autore su contenuti (prodotti informativi) e la messa a disposizione di tali contenuti al pubblico in generale, impegnandosi (o organizzando) la riproduzione e la distribuzione di tali contenuti in varie forme. Gli editori possono pubblicare e concedere in licenza ad altri i diritti di distribuzione dei loro contenuti, oppure possono pubblicare e distribuire contenuti creati o di loro proprietà. In questa sezione sono incluse tutte le forme praticabili di pubblicazione (a stampa, elettronica, digitale, analogica o in qualsiasi altra forma) e le attività di self-publishing.\r\n\r\nLe singole componenti di programmazione televisiva (ad esempio, film, serie televisive) sono prodotte dalle attività della divisione 59, mentre la creazione di un programma completo per un canale televisivo, a partire da componenti prodotte nella divisione 59 o da altre componenti (ad esempio, la programmazione di notizie in diretta), è inclusa nella divisione 60. Questa divisione comprende inoltre la trasmissione di questo programma da parte del produttore."
+        }
+      }
+    ],
+    "code": "J",
+    "name": {
+      "de": "VERLAGSWESEN, RUNDFUNK SOWIE ERSTELLUNG UND VERBREITUNG VON MEDIENINHALTEN",
+      "en": "PUBLISHING, BROADCASTING, AND CONTENT PRODUCTION AND DISTRIBUTION ACTIVITIES",
+      "fr": "ÉDITION, DIFFUSION ET ACTIVITÉS DE PRODUCTION ET DE DISTRIBUTION DE CONTENU",
+      "it": "ATTIVITÀ EDITORIALI, TRASMISSIONI RADIOFONICHE E PRODUZIONE E DISTRIBUZIONE DI CONTENUTI",
+      "rm": "NA"
+    },
+    "level": "Abschnitt",
+    "level_key": "abschnitt",
+    "level_no": 1,
+    "source_level": "NOGA - Level 1 - Section"
+  },
+  {
+    "annotations": [
+      {
+        "type": "EXCLUDES",
+        "text": {
+          "de": "Dieser Abschnitt umfasst nicht:\r\n- Verlagswesen, Rundfunk und Produktion von Inhalten, einschliesslich des Verlegens von Software, Nachbearbeitungsdiensten zur Konvertierung von Audio- und Videoinhalten in Streaming-Formate sowie der Bereitstellung von Audio- und Video-Streaming- oder Download-Diensten auf Abruf durch unabhängige Dritte, siehe Abschnitt J\r\n- Erbringung von Finanz- und Versicherungsdienstleistungen unter Verwendung veröffentlichter Software für Finanz- und Versicherungstechnologien, siehe Abschnitt L\r\n- Tätigkeiten von Glücksspiel-Webseiten, siehe Abschnitt 920000\r\n- Reparatur und Wartung von Computern und Kommunikationsgeräten, siehe Abschnitt 951000",
+          "en": "This section excludes:\r\n- publishing, broadcasting and content production, including software publishing, post-production services to convert audio and video content into streaming formats and independent third-party provision of on-demand audio and video streaming or download distribution services, see section J\r\n- provision of financial and insurance services using published financial and insurance technologies software, see section L\r\n- activities of gambling sites, see 920000\r\n- repair and maintenance of computers and communication equipment, see 951000",
+          "fr": "Cette section ne comprend pas :\r\n- l'édition, la diffusion et la production de contenu, y compris l'édition de logiciels, les services de postproduction pour convertir le contenu audio et vidéo en formats permettant le streaming et la fourniture par des tiers indépendants de services de streaming ou de téléchargement de contenu audio et vidéo à la demande, voir section J\r\n- la fourniture de services financiers et d'assurance utilisant des logiciels publiés dans le domaine des technologies financières et d'assurance, voir section L\r\n- les activités des sites de jeux d'argent, voir 920000\r\n- la réparation et l'entretien d'ordinateurs et d'équipements de communication, voir 951000",
+          "it": "Questa sezione non comprende:\r\n- l'editoria, la radiodiffusione e la produzione di contenuti, compresa la pubblicazione di software, i servizi di post-produzione per la conversione di contenuti audio e video in formati di streaming e la fornitura da parte di terzi indipendenti di servizi di distribuzione on-demand di streaming audio e video o di download, cfr. sezione J\r\n- fornitura di servizi finanziari e assicurativi utilizzando software di tecnologie finanziarie e assicurative pubblicati, cfr. Sezione L\r\n- attività di siti di gioco d'azzardo, cfr. 920000\r\n- riparazione e manutenzione di computer e apparecchiature di comunicazione, cfr. 951000"
+        }
+      },
+      {
+        "type": "HIER_LEVEL",
+        "text": {
+          "de": "NOGA - Ebene 1 - Abschnitt",
+          "en": "NOGA - Level 1 - Section",
+          "fr": "NOGA - Niveau 1 - Section",
+          "it": "NOGA - Livello 1 - Sezione"
+        }
+      },
+      {
+        "type": "INCLUDES_ALSO"
+      },
+      {
+        "type": "INCLUDES",
+        "text": {
+          "de": "Dieser Abschnitt umfasst die Erbringung von Telekommunikationsdienstleistungen, d. h. die Übertragung von Sprache, Daten, Text, Ton und Bild (Abteilung 61), Computerprogrammierung, IT-Beratung und damit verbundene Tätigkeiten (Abteilung 62) sowie die Bereitstellung von EDV-Infrastruktur, Datenverarbeitung, Hosting und andere Informationsdienstleistungen (Abteilung 63).",
+          "en": "This section includes telecommunication and related service activities, in other words, transmitting voice, data, text, sound and video (division 61), computer programming, consultancy and related activities (division 62), and the provision of computing infrastructure, data processing, hosting and other information service activities (division 63).",
+          "fr": "Cette section comprend les télécommunications et les services connexes, c'est-à-dire la transmission de la voix, de données, de textes, de sons et d'images (division 61), la programmation informatique, le conseil et les activités connexes (division 62), et la fourniture d'infrastructures informatiques, le traitement des données, l'hébergement et les autres activités liées aux services d'information (division 63).",
+          "it": "Questa sezione comprende le attività di telecomunicazione e servizi correlati, in altre parole la trasmissione di voce, dati, testi, suoni e video (divisione 61), la programmazione informatica, la consulenza e le attività correlate (divisione 62) e la fornitura di infrastrutture informatiche, l'elaborazione di dati, l'hosting e altre attività di servizi informativi (divisione 63)."
+        }
+      }
+    ],
+    "code": "K",
+    "name": {
+      "de": "TELEKOMMUNIKATION, SOFTWAREENTWICKLUNG, IT-BERATUNG UND ERBRINGUNG SONSTIGER DIENSTLEISTUNGEN DER INFORMATIONSTECHNOLOGIE UND DER COMPUTERINFRASTRUKTUR",
+      "en": "TELECOMMUNICATION, COMPUTER PROGRAMMING, CONSULTING, COMPUTING INFRASTRUCTURE AND OTHER INFORMATION SERVICE ACTIVITIES",
+      "fr": "TÉLÉCOMMUNICATIONS, PROGRAMMATION INFORMATIQUE, CONSEIL, INFRASTRUCTURE INFORMATIQUE ET AUTRES ACTIVITÉS DE SER­VICE D’INFORMATION",
+      "it": "TELECOMUNICAZIONI, PROGRAMMAZIONE E CONSULENZA INFORMATICA, INFRASTRUTTURE INFORMATICHE E ALTRE ATTIVITÀ DEI SERVIZI D’INFORMAZIONE",
+      "rm": "NA"
+    },
+    "level": "Abschnitt",
+    "level_key": "abschnitt",
+    "level_no": 1,
+    "source_level": "NOGA - Level 1 - Section"
+  },
+  {
+    "annotations": [
+      {
+        "type": "EXCLUDES",
+        "text": {
+          "de": "Dieser Abschnitt schliesst unterstützende Tätigkeiten für Finanzdienstleistungen aus, die nicht finanzieller Natur sind (z. B. IT-Dienstleistungen zur Unterstützung von Bankgeschäften).",
+          "en": "This section excludes support activities to financial services that are not financial in nature (for example, IT services supporting banking activities).",
+          "fr": "Cette section ne comprend pas les activités de soutien aux services financiers qui ne sont pas de nature financière (par ex. les services informatiques soutenant les activités bancaires).",
+          "it": "Questa sezione non comprende le attività di supporto ai servizi finanziari che non sono di natura finanziaria (ad esempio, i servizi informatici a supporto delle attività bancarie)."
+        }
+      },
+      {
+        "type": "HIER_LEVEL",
+        "text": {
+          "de": "NOGA - Ebene 1 - Abschnitt",
+          "en": "NOGA - Level 1 - Section",
+          "fr": "NOGA - Niveau 1 - Section",
+          "it": "NOGA - Livello 1 - Sezione"
+        }
+      },
+      {
+        "type": "INCLUDES_ALSO",
+        "text": {
+          "de": "Dieser Abschnitt umfasst auch die Tätigkeiten des Haltens von Vermögenswerten, wie z. B. die Tätigkeiten von Holdinggesellschaften und Finanzierungs-Conduits und die Tätigkeiten von Trusts, Fonds und ähnlichen Finanzunternehmen (Abteilung 64), sowie die Tätigkeiten von Rückversicherungen und Pensionsfonds (Abteilung 65).",
+          "en": "This section also includes activities of holding assets, such as the activities of holding companies and financing conduits and the activities of trusts, funds and similar financial entities (division 64), as well as the activities of reinsurance and pension funds (division 65).",
+          "fr": "Cette section comprend également les activités de détention d'actifs, tels que les activités des sociétés holding et des conduits de financement et les activités des trusts, fonds et entités financières similaires (division 64), ainsi que les activités de réassurance et fonds de pension (division 65).",
+          "it": "Questa sezione comprende inoltre le attività di detenzione di attività, come le attività delle società di partecipazione e dei conduit di finanziamento e le attività di trust, fondi ed entità finanziarie simili (divisione 64), nonché le attività di riassicurazione e dei fondi pensione (divisione 65)."
+        }
+      },
+      {
+        "type": "INCLUDES",
+        "text": {
+          "de": "Dieser Abschnitt umfasst Finanzdienstleistungs-, Versicherungs- und mit dem Kredit- und Versicherungsgewerbe verbundene Tätigkeiten, unabhängig davon, welche Technologien zur Durchführung dieser Tätigkeiten oder unterstützenden Dienstleistungen eingesetzt werden.\r\n\r\nIn diesem Abschnitt werden drei Haupttätigkeiten unterschieden: die Beschaffung und Bereitstellung von Finanzmitteln (Abteilung 64), die Zusammenfassung von Risiken durch die Übernahme von Versicherungen und Renten (Abteilung 65) und die Erbringung von Spezialdienstleistungen, die die Erbringung von Finanz- und Versicherungsdienstleistungen erleichtern oder unterstützen (Abteilung 66).",
+          "en": "This section includes financial service activities, insurance activities and financial auxiliary activities, regardless of the technologies used to conduct these activities or support services.\r\n\r\nThree principal types of activities are classified in this section: raising, obtaining and providing funding (division 64); pooling of risk by underwriting insurance and annuities (division 65); and providing specialised services facilitating or supporting financial or insurance service activities (division 66).",
+          "fr": "Cette section comprend les activités de services financiers, les activités d'assurance et les activités auxiliaires financières, quelles que soient les technologies utilisées pour mener à bien ces activités ou ces services de soutien.\r\n\r\nTrois principaux types d'activités sont classés dans cette section : la collecte, l'obtention et la fourniture de fonds (division 64); la mutualisation des risques par la souscription d'assurances et de rentes (division 65); et la fourniture de services spécialisés facilitant ou soutenant les activités de services financiers ou d'assurance (division 66).",
+          "it": "Questa sezione comprende le attività di servizi finanziari, le attività assicurative e le attività finanziarie ausiliarie, indipendentemente dalle tecnologie utilizzate per svolgere tali attività o servizi di supporto.\r\n\r\nIn questa sezione sono classificate tre principali tipologie di attività: raccolta, ottenimento e fornitura di finanziamenti (divisione 64); condivisione del rischio attraverso la sottoscrizione di assicurazioni e rendite (divisione 65); fornitura di servizi specializzati che facilitano o supportano le attività di servizi finanziari o assicurativi (divisione 66)."
+        }
+      }
+    ],
+    "code": "L",
+    "name": {
+      "de": "ERBRINGUNG VON FINANZ- UND VERSICHERUNGSDIENSTLEISTUNGEN",
+      "en": "FINANCIAL AND INSURANCE ACTIVITIES",
+      "fr": "ACTIVITÉS FINANCIÈRES ET D’ASSURANCE",
+      "it": "ATTIVITÀ FINANZIARIE E ASSICURATIVE",
+      "rm": "NA"
+    },
+    "level": "Abschnitt",
+    "level_key": "abschnitt",
+    "level_no": 1,
+    "source_level": "NOGA - Level 1 - Section"
+  },
+  {
+    "annotations": [
+      {
+        "type": "EXCLUDES",
+        "text": {
+          "de": "Dieser Abschnitt umfasst nicht:\r\n- allgemeine und spezialisierte Bautätigkeiten für Hoch- und Tiefbau, siehe Abschnitt F",
+          "en": "This section excludes:\r\n\r\n- general construction and specialised construction activities for buildings and civil engineering works, see section F",
+          "fr": "Cette section ne comprend pas :\r\n\r\n- les activités de construction générale et de construction spécialisée de bâtiments et d'ouvrages de génie civil, voir section F",
+          "it": "Questa sezione non comprende\r\n- le attività di costruzione in generale e le attività di costruzione specializzate per edifici e opere di ingegneria civile, cfr. Sezione F"
+        }
+      },
+      {
+        "type": "HIER_LEVEL",
+        "text": {
+          "de": "NOGA - Ebene 1 - Abschnitt",
+          "en": "NOGA - Level 1 - Section",
+          "fr": "NOGA - Niveau 1 - Section",
+          "it": "NOGA - Livello 1 - Sezione"
+        }
+      },
+      {
+        "type": "INCLUDES_ALSO",
+        "text": {
+          "de": "Dieser Abschnitt umfasst ferner die Entwicklung von Bauprojekten für eigene Gebäude oder Tiefbauten, zum späteren Verkauf oder zur Vermietung.",
+          "en": "This section also includes the development of construction projects for self-owned buildings or civil engineering works for later sale or rental.",
+          "fr": "Cette section comprend également le développement de projets de construction pour des bâtiments propres ou des travaux de génie civil en vue d'une vente ou d'une location ultérieure.",
+          "it": "Questa sezione comprende inoltre lo sviluppo di progetti di costruzione di edifici di proprietà o di opere di ingegneria civile per la successiva vendita o locazione."
+        }
+      },
+      {
+        "type": "INCLUDES",
+        "text": {
+          "de": "Dieser Abschnitt umfasst die Tätigkeiten des Besitzes, der Vermietung, des Kaufs, des Verkaufs, der Entwicklung oder Sanierung (Um-/Neugestaltung) von Immobilien. Er umfasst verschiedene Arten von Immobilieninvestoren (z. B. Immobilien-Investmentgesellschaften, Immobilien-Investmentfonds (Real Estate Investment Trusts - REITs), Immobilienverwaltungsgesellschaften, Immobilienfonds, Bauträger oder Immobilienhändler, Wohnbaugenossenschaften).\r\n\r\nDieser Abschnitt umfasst darüber hinaus Vermittler und/oder Makler, die eine oder mehrere der folgenden Tätigkeiten ausüben: Verkauf oder Kauf von Grundstücken, Gebäuden und Wohnungen, Vermietung von Grundstücken, Gebäuden und Wohnungen, Erbringung sonstiger Dienstleistungen für Immobilien (z. B. Schätzung von Immobilien oder Tätigkeiten als Immobilientreuhänder). Die unter diesem Abschnitt fallenden Tätigkeiten können eigene oder gemietete Objekte betreffen und gegen Entgelt oder auf Vertragsbasis ausgeübt werden.",
+          "en": "This section includes the activities of owning, renting out, buying, selling, developing or refurbishing (redeveloping) property. It includes various types of real estate investors (for example, real estate investment companies, real estate investment trust (REITs), real estate asset management firms, real estate funds, real estate development companies or real estate traders, housing cooperatives).\r\n\r\nFurthermore, it includes agents and/or brokers in one or more of the following: selling or buying real estate, renting out of real estate, providing other real estate services (for example, appraising real estate or acting as a real estate escrow agent). Activities in this section may be carried out on self-owned or leased property and may be carried out on a fee or contract basis.",
+          "fr": "Cette section comprend les activités de propriété, de location, d'achat, de vente, de développement ou de rénovation (redéveloppement) de biens immobiliers. Elle comprend différents types d'investisseurs immobiliers (par ex. sociétés d'investissement immobilier, fonds d'investissement immobilier, sociétés de gestion d'actifs immobiliers, fonds immobiliers, sociétés de développement immobilier ou négociants en immobilier, coopératives de logement).\r\n\r\nEn outre, elle comprend les agents et/ou les courtiers dans un ou plusieurs des domaines suivants : vente ou achat de biens immobiliers, location de biens immobiliers, fourniture d'autres services immobiliers (par ex. l'évaluation de biens immobiliers ou la fonction d'agent d'entiercement de biens immobiliers). Les activités de cette section peuvent être exercées sur des biens propres ou loués et peuvent être effectuées sur la base d'honoraires ou de contrats.",
+          "it": "Questa sezione comprende le attività di proprietà, locazione, acquisto, vendita, sviluppo o ristrutturazione (riqualificazione) di immobili. Questo genere comprende diversi tipi di investitori immobiliari (ad esempio, società di investimento immobiliare, trust di investimento immobiliare (REIT), società di gestione patrimoniale immobiliare, fondi immobiliari, società di sviluppo immobiliare o operatori immobiliari, cooperative edilizie).\r\n\r\nInoltre, include agenti e/o mediatori in una o più delle seguenti attività: vendita o acquisto di beni immobili, locazione di beni immobili, fornitura di altri servizi immobiliari (ad esempio, valutazione di beni immobili o attività di escrow agent). Le attività di questa Sezione possono essere svolte su beni di proprietà o in affitto e possono essere svolte su base contrattuale o a pagamento."
+        }
+      }
+    ],
+    "code": "M",
+    "name": {
+      "de": "GRUNDSTÜCKS- UND WOHNUNGSWESEN",
+      "en": "REAL ESTATE ACTIVITIES",
+      "fr": "ACTIVITÉS IMMOBILIÈRES",
+      "it": "ATTIVITÀ IMMOBILIARI",
+      "rm": "NA"
+    },
+    "level": "Abschnitt",
+    "level_key": "abschnitt",
+    "level_no": 1,
+    "source_level": "NOGA - Level 1 - Section"
+  },
+  {
+    "annotations": [
+      {
+        "type": "EXCLUDES"
+      },
+      {
+        "type": "HIER_LEVEL",
+        "text": {
+          "de": "NOGA - Ebene 1 - Abschnitt",
+          "en": "NOGA - Level 1 - Section",
+          "fr": "NOGA - Niveau 1 - Section",
+          "it": "NOGA - Livello 1 - Sezione"
+        }
+      },
+      {
+        "type": "INCLUDES_ALSO"
+      },
+      {
+        "type": "INCLUDES",
+        "text": {
+          "de": "Dieser Abschnitt umfasst spezialisierte wissenschaftliche und technische Tätigkeiten. Diese Tätigkeiten erfordern ein hohes Mass an Ausbildung und stellen den Nutzern Fachkenntnisse und Qualifikationen zur Verfügung.",
+          "en": "This section includes specialised professional, scientific and technical activities. These activities require a high degree of training and make specialised knowledge and skills available to users.",
+          "fr": "Cette section comprend les activités professionnelles, scientifiques et techniques spécialisées. Ces activités requièrent un haut degré de formation et mettent à la disposition des utilisateurs des connaissances et des compétences spécialisées.",
+          "it": "Questa sezione comprende le attività professionali, scientifiche e tecniche specializzate. Queste attività richiedono un elevato grado di formazione e mettono a disposizione degli utenti conoscenze e competenze specialistiche."
+        }
+      }
+    ],
+    "code": "N",
+    "name": {
+      "de": "ERBRINGUNG VON WISSENSCHAFTLICHEN UND TECHNISCHEN DIENSTLEISTUNGEN",
+      "en": "PROFESSIONAL, SCIENTIFIC AND TECHNICAL ACTIVITIES",
+      "fr": "ACTIVITÉS SPÉCIALISÉES, SCIENTIFIQUES ET TECHNIQUES",
+      "it": "ATTIVITÀ PROFESSIONALI, SCIENTIFICHE E TECNICHE",
+      "rm": "NA"
+    },
+    "level": "Abschnitt",
+    "level_key": "abschnitt",
+    "level_no": 1,
+    "source_level": "NOGA - Level 1 - Section"
+  },
+  {
+    "annotations": [
+      {
+        "type": "EXCLUDES"
+      },
+      {
+        "type": "HIER_LEVEL",
+        "text": {
+          "de": "NOGA - Ebene 1 - Abschnitt",
+          "en": "NOGA - Level 1 - Section",
+          "fr": "NOGA - Niveau 1 - Section",
+          "it": "NOGA - Livello 1 - Sezione"
+        }
+      },
+      {
+        "type": "INCLUDES_ALSO"
+      },
+      {
+        "type": "INCLUDES",
+        "text": {
+          "de": "Dieser Abschnitt umfasst eine Vielzahl von Tätigkeiten, die den allgemeinen Geschäftsbetrieb unterstützen. Diese Tätigkeiten unterscheiden sich insofern von denen in Abschnitt N, als ihr Hauptzweck nicht in der Übertragung von Fachwissen besteht.",
+          "en": "This section includes a variety of activities that support general business operations. These activities differ from those in section N since their primary purpose is not the transfer of specialised knowledge.",
+          "fr": "Cette section comprend une variété d'activités qui soutiennent les opérations générales de l'entreprise. Ces activités diffèrent de celles de la section N car leur objectif premier n'est pas le transfert de connaissances spécialisées.",
+          "it": "Questa sezione comprende una serie di attività che supportano le operazioni commerciali generali. Queste attività si differenziano da quelle della sezione N perché il loro scopo principale non è il trasferimento di conoscenze specialistiche."
+        }
+      }
+    ],
+    "code": "O",
+    "name": {
+      "de": "ERBRINGUNG VON SONSTIGEN WIRTSCHAFTLICHEN DIENSTLEISTUNGEN",
+      "en": "ADMINISTRATIVE AND SUPPORT SERVICE ACTIVITIES",
+      "fr": "ACTIVITÉS DE SERVICE ADMINISTRATIF ET DE SOUTIEN",
+      "it": "ATTIVITÀ AMMINISTRATIVE E DI SERVIZI DI SUPPORTO",
+      "rm": "NA"
+    },
+    "level": "Abschnitt",
+    "level_key": "abschnitt",
+    "level_no": 1,
+    "source_level": "NOGA - Level 1 - Section"
+  },
+  {
+    "annotations": [
+      {
+        "type": "EXCLUDES"
+      },
+      {
+        "type": "HIER_LEVEL",
+        "text": {
+          "de": "NOGA - Ebene 1 - Abschnitt",
+          "en": "NOGA - Level 1 - Section",
+          "fr": "NOGA - Niveau 1 - Section",
+          "it": "NOGA - Livello 1 - Sezione"
+        }
+      },
+      {
+        "type": "INCLUDES_ALSO",
+        "text": {
+          "de": "Dieser Abschnitt umfasst ferner die gesetzliche Sozialversicherung.",
+          "en": "This section also includes compulsory social security activities.",
+          "fr": "Cette section comprend également les activités liées à la sécurité sociale obligatoire.",
+          "it": "Questa sezione comprende inoltre le attività di previdenza sociale obbligatoria."
+        }
+      },
+      {
+        "type": "INCLUDES",
+        "text": {
+          "de": "Dieser Abschnitt umfasst die Tätigkeiten staatlicher Natur, die normalerweise von der öffentlichen Verwaltung ausgeführt werden. Dazu gehören das Erlassen und die juristische Auslegung von Gesetzen und daraus resultierenden Vorschriften sowie die Verwaltung von Programmen, die auf ihnen beruhen, Gesetzgebungstätigkeiten, Steuerverwaltung, Verteidigung, öffentliche Sicherheit und Ordnung, Einwanderungsdienste, auswärtige Angelegenheiten und die Verwaltung von Regierungsprogrammen.\r\n\r\nDer rechtliche oder institutionelle Status an sich ist nicht entscheidend für die Einordnung einer Tätigkeit in diesen Abschnitt, sondern vielmehr der Umstand, dass eine Tätigkeit den im vorstehenden Abschnitt dargestellten Charakter aufweist. Demnach fallen an anderer Stelle in der NOGA aufgeführte Tätigkeiten nicht unter diesen Abschnitt, auch wenn sie von öffentlichen Einheiten ausgeführt werden. So ist z. B. die Verwaltung des Bildungssystems (Vorschriften, Aufsicht, Lehrpläne) diesem Abschnitt zugeordnet, nicht aber die eigentliche Erziehungs- und Unterrichtstätigkeit (s. Abschnitt Q), und Gefängnisse oder Gefängnis- und Militärkrankenhäuser sind dem Gesundheits- und Sozialwesen (Abschnitt R) zuzurechnen. Andererseits können einige der in diesem Abschnitt aufgeführten Tätigkeiten von nichtstaatlichen Einheiten ausgeübt werden.",
+          "en": "This section includes activities of a governmental nature, normally carried out by the public administration. This includes the enactment and judicial interpretation of laws and their pursuant regulation, as well as the administration of programmes based on them, legislative activities, taxation, national defence, public order and safety, immigration services, foreign affairs and the administration of government programmes.\r\n\r\nThe legal or institutional status is not, in itself, the determining factor for an activity to belong in this section, rather than the activity being of a nature specified in the previous paragraph. This means that activities classified elsewhere in NOGA do not fall under this section, even if carried out by public entities (for example, the administration of the school system – in other words, regulations, checks, curricula – falls under this section, but teaching itself does not (see section Q), while a prison or military hospital is classified to health (see section R)). Similarly, some activities described in this section may be carried out by non-government units.",
+          "fr": "Cette section comprend les activités de nature gouvernementale habituellement exercées par l’administration publique. Elle comprend la promulgation et l’interprétation judiciaire des lois et de leurs règlements d’application, ainsi que l’administration des programmes établis sous le régime de ces lois et règlements d’application, les services législatifs, la fiscalité, la défense nationale, le maintien de l’ordre et de la sécurité publics, les services d’immigration, les affaires étrangères et l’administration des programmes publics.\r\n\r\nLe statut légal ou institutionnel n’est pas, en soi, le facteur déterminant pour qu’une activité soit rangée dans cette section, mais plutôt le fait que cette activité soit d’une nature visée au paragraphe précédent. Cela signifie que les activités classées ailleurs dans la NOGA ne relèvent pas de cette section, même si elles sont exercées par des organismes publics (par ex. l'administration du système scolaire – en d'autres termes, les règlements, les contrôles, les programmes – relève de cette section, mais pas l'enseignement lui-même (voir section Q), tandis qu'une prison ou un hôpital militaire est classé dans la santé (voir section R)). De même, certaines activités décrites dans cette section peuvent être exercées par des unités non gouvernementales.",
+          "it": "Questa sezione comprende le attività di natura governativa, normalmente svolte dalla pubblica amministrazione. Sono comprese l'emanazione e l'interpretazione giudiziaria delle leggi e la loro regolamentazione, nonché l'amministrazione dei programmi basati su di esse, le attività legislative, la tassazione, la difesa nazionale, l'ordine pubblico e la sicurezza, i servizi di immigrazione, gli affari esteri e l'amministrazione dei programmi governativi.\r\n\r\nLo status giuridico o istituzionale non è, di per sé, il fattore determinante per l'appartenenza di un'attività a questa Sezione, piuttosto che l'attività sia di natura specificata nel paragrafo precedente. Ciò significa che le attività classificate in altre sezioni della NOGA non rientrano in questa sezione, anche se svolte da enti pubblici (ad esempio, l'amministrazione del sistema scolastico • in altre parole, regolamenti, controlli, curricula • rientra in questa sezione, ma non l'insegnamento in sé (si veda la sezione Q), mentre un carcere o un ospedale militare sono classificati nella sanità (si veda la sezione R)). Allo stesso modo, alcune attività descritte in questa sezione possono essere svolte da unità non governative."
+        }
+      }
+    ],
+    "code": "P",
+    "name": {
+      "de": "ÖFFENTLICHE VERWALTUNG, VERTEIDIGUNG; SOZIALVERSICHERUNG",
+      "en": "PUBLIC ADMINISTRATION AND DEFENCE; COMPULSORY SOCIAL SECURITY",
+      "fr": "ADMINISTRATION PUBLIQUE ET DÉFENSE; SÉCURITÉ SOCIALE OBLIGATOIRE",
+      "it": "AMMINISTRAZIONE PUBBLICA E DIFESA; ASSICURAZIONE SOCIALE OBBLIGATORIA",
+      "rm": "NA"
+    },
+    "level": "Abschnitt",
+    "level_key": "abschnitt",
+    "level_no": 1,
+    "source_level": "NOGA - Level 1 - Section"
+  },
+  {
+    "annotations": [
+      {
+        "type": "EXCLUDES",
+        "text": {
+          "de": "Dieser Abschnitt umfasst nicht:\r\n- Tagesbetreuung von Kindern (ISCED-P 2011 Stufe 01: Frühkindliche Bildung, Betreuung und Erziehung für Kinder unter drei Jahren), siehe 889100",
+          "en": "This section excludes:\r\n- child day-care activities, see 889100",
+          "fr": "Cette section ne comprend pas :\r\n- les activités de garde d’enfants de jour, voir 889100",
+          "it": "Questa sezione non comprende:\r\n- attività di custodia diurna di bambini, cfr. 889100"
+        }
+      },
+      {
+        "type": "HIER_LEVEL",
+        "text": {
+          "de": "NOGA - Ebene 1 - Abschnitt",
+          "en": "NOGA - Level 1 - Section",
+          "fr": "NOGA - Niveau 1 - Section",
+          "it": "NOGA - Livello 1 - Sezione"
+        }
+      },
+      {
+        "type": "INCLUDES_ALSO",
+        "text": {
+          "de": "Dieser Abschnitt berücksichtigt auch die Unterscheidung zwischen formalen und nicht formalen Bildungsprogrammen, die in der europäischen Klassifikation von Lernaktivitäten (CLA) vorgesehen ist. Somit umfasst dieser Abschnitt (in den Gruppen 855 und 856) auch nicht formalen Unterricht, der sich in erster Linie mit Sport- und Freizeitaktivitäten befasst, z. B. Tennis oder Golf, sowie Dienstleistungen für Erziehung und Unterricht.\r\n\r\nDieser Abschnitt umfasst auch Bildungstätigkeiten, die von selbständigen / auf eigene Rechnung abrechnenden / individuellen / unabhängigen Dozenten (Tutoren, Akademikern, Ausbildern) durchgeführt werden. Diese Tätigkeiten sind der Gruppe 855 zugeordnet.\r\n\r\nDieser Abschnitt umfasst ferner Tätigkeiten im Zusammenhang mit der Verwaltung, der Kontrolle, dem Betrieb oder der Unterstützung von Schulen und anderen Bildungseinrichtungen sowie der Koordinierung von Sportprogrammen.",
+          "en": "This section is also based on the distinction between formal and non-formal educational programmes provided by the European classification of learning activities (CLA). Thus, it also includes non-formal instruction primarily concerned with sports, arts and recreation education and education support activities in groups 855 and 856.\r\n\r\nThis section also includes education activities run by self-employed / own account / individual / independent lecturers (tutors, academics, instructors); such activities should be classified in group 855.\r\n\r\nThis section also includes activities relating to administration, inspection, operation or support of schools and other institutions providing education as well as coordination of sports programmes.",
+          "fr": "Cette section repose également sur la distinction entre les programmes d’enseignement formels et non formels fournie par la classification européenne des activités d'apprentissage (CLA). C'est pourquoi, elle comprend donc également l'enseignement non formel principalement axé sur les activités sportives, culturelles et récréatives et les activités de soutien à l’enseignement dans les groupes 855 et 856.\r\n\r\nCette section comprend également les activités d’enseignement menées par des professeurs indépendants/à leur propre compte/individuels/autonomes (tuteurs, universitaires, instructeurs); ces activités doivent être classées dans le groupe 855.\r\n\r\nCette section comprend également les activités liées à l'administration, à l'inspection, à l’exploitation ou au soutien des écoles et autres établissements d'enseignement, ainsi qu'à la coordination des programmes sportifs.",
+          "it": "Questa sezione si basa anche sulla distinzione tra programmi educativi formali e non formali prevista dalla classificazione europea delle attività di apprendimento (CLA). Questo gruppo comprende inoltre l'istruzione non formale che riguarda principalmente l'educazione allo sport, alle arti e alla ricreazione e le attività di supporto all'istruzione nei gruppi 855 e 856.\r\n\r\nQuesta sezione comprende inoltre le attività educative gestite da docenti autonomi / per conto proprio / individuali / indipendenti (tutor, accademici, istruttori); tali attività dovrebbero essere classificate nel gruppo 855.\r\n\r\nQuesta sezione comprende inoltre le attività relative all'amministrazione, all'ispezione, al funzionamento o al sostegno di scuole e altre istituzioni che forniscono istruzione, nonché al coordinamento di programmi sportivi."
+        }
+      },
+      {
+        "type": "INCLUDES",
+        "text": {
+          "de": "Dieser Abschnitt umfasst Erziehung und Unterricht auf allen Stufen und für alle Berufe. Der Unterricht kann mündlich oder schriftlich, über Rundfunk, Fernsehen, Internet oder als Fernkurs erteilt werden.\r\n\r\nTätigkeiten im Bereich Erziehung und Unterricht sind solche, die ein Bildungsprogramm, einen Zeitrahmen und eine Bewertung der erworbenen Kenntnisse beinhalten.\r\n\r\nDazu gehört der erste Bildungsweg in seinen verschiedenen Stufen, die von den verschiedenen Einrichtungen des regulären Schulsystems angeboten werden und Schülern als kontinuierlicher Bildungsweg vor dem ersten Eintritt in den Arbeitsmarkt dienen sollen, sowie die formale Bildung ausserhalb des regulären Schulsystems, deren Programminhalte und Qualifikationen gegenüber dem ersten Bildungsweg gleichwertig sind (Erwachsenenbildung, Alphabetisierungsprogramme usw.).\r\n\r\nEbenfalls eingeschlossen sind Tätigkeiten, die von Militärschulen und -akademien, Gefängnisschulen usw. auf ihren jeweiligen Stufen angeboten werden.\r\n\r\nDieser Abschnitt umfasst den verpflichtenden und nicht verpflichteten Schulunterricht, sowie den öffentlichen und den privaten Unterricht.\r\n\r\nFür jede Bildungsstufe umfassen die Klassen auch den Sonderunterricht für Personen mit körperlichen oder geistigen Beeinträchtigungen.\r\n\r\nDie Gruppen 851, 852, 853 und 854 berücksichtigen formale Bildungsangebote gemäss der Klassifikation ISCED-P 2011, d. h. der Internationale Standardklassifikation des Bildungswesens. Folglich basiert die Aufschlüsselung der Kategorien in diesem Abschnitt auf jenem Bildungsniveau, das durch die Stufen der ISCED-P 2011* definiert ist. Die Tätigkeiten von Bildungseinrichtungen, die Bildungsgänge der Stufe 02 (ISCED-P 2011) anbieten, werden in Klasse 8510 eingeordnet; solche der Stufe 1 (ISCED-P 2011) in Klasse 8520; solche der Stufe 2 Kategorie 24 (ISCED-P 2011) und solche der Stufe 3 Kategorie 34 (ISCED-P 2011) in Klasse 8531; solche der Stufe 2 Kategorie 25 (ISCED-P 2011) und solche der Stufe 3 Kategorie 35 (ISCED-P 2011) in Klasse 8532; solche der Stufe 4 (ISCED-P 2011) in Klasse 8533 und solche der Stufen 5, 6, 7 und 8 (ISCED-P 2011) in Gruppe 854.\r\n\r\nHINWEIS: * Die Zuordnungen zwischen den Bildungsniveaus und den Bezeichnungen der Qualifikationen in der jeweiligen Landessprache finden Sie unter https://europa.eu/!mDwYbG\r\n\r\nDie Bildungseinrichtungen der Gruppen 852 bis 854 sind befugt, den erfolgreichen Abschluss eines Bildungsprogramms zu bescheinigen, üblicherweise in Form eines von den zuständigen nationalen Bildungsbehörden offiziell anerkannten Dokuments.",
+          "en": "This section includes education at any level or for any profession. The instructions may be oral or written and may be provided by radio, television, the internet or via correspondence.\r\n\r\nEducation activities are those having an educational programme, a time frame and some evaluation of the knowledge achieved.\r\n\r\nThis section includes formal initial education at its various levels provided by institutions in the regular school system designed for students as a continuous educational pathway before their first entrance into the labour market, as well as formal education outside the regular school system with programme content and qualifications that are equivalent to those of such initial education (adult education, literacy programmes, and so on).\r\n\r\nAlso included are activities provided at their respective levels by military schools and academies, prison schools, and so on.\r\n\r\nThis section includes compulsory and non-compulsory schooling, as well as public and private education.\r\n\r\nFor each level of education, special education for physically or mentally disabled persons is included.\r\n\r\nGroups 851 to 854 take into account the formal education activities provided under the international classification of educational programmes (ISCED-P 2011 classification). The breakdown of the categories in this section is based on the level of education offered as defined by the levels of ISCED-P 2011*. The activities of educational institutions providing courses at ISCED-P 2011 Level 0 are classified in class 8510, at ISCED-P 2011 Level 1 in class 8520, at ISCED-P 2011 Level 2 category 24 and Level 3 category 34 in class 8531, at ISCED-P 2011 2011 Level 2 category 25 and Level 3 category 35 in class 8532, at ISCED-P 2011 Level 4 in class 8533 and at ISCED-P 2011 Levels 5 to 8 in group 854.\r\n\r\nEducational institutions classified in groups 852 to 854 are authorised to certify successful completion of an educational programme, usually in the form of a document officially recognised by the relevant national education authorities.\r\n\r\nNOTE: * mappings between the levels of education and the name of the qualifications in national language can be found here https://europa.eu/!mDwYbG",
+          "fr": "Cette section comprend l’enseignement de tous les niveaux et pour toutes les disciplines. Les cours peuvent être donnés oralement ou par écrit et être diffusés à la radio, à la télévision, sur internet ou par correspondance.\r\n\r\nLes activités d’enseignement sont celles qui comportent un programme éducatif, un calendrier et une évaluation des connaissances acquises.\r\n\r\nCette section comprend l'enseignement initial formel à ses différents niveaux, dispensé par les différentes institutions du système scolaire traditionnel, conçu pour les étudiants comme un parcours éducatif continu avant leur première entrée sur le marché du travail, ainsi que l'enseignement formel en dehors du système scolaire ordinaire dont le contenu des programmes et les qualifications sont équivalents à ceux de cet enseignement initial (enseignement pour adultes, programmes d'alphabétisation, etc.).\r\n\r\nSont également incluses les activités dispensées à leurs niveaux respectifs par les écoles et académies militaires, les écoles pénitentiaires, etc.\r\n\r\nCette section comprend l'enseignement obligatoire et non obligatoire, ainsi que l'enseignement public et privé.\r\n\r\nPour chaque niveau d’enseignement, l’enseignement spécialisé pour les personnes atteintes d'un handicap physique ou mental est inclus.\r\n\r\nLes groupes 851 à 854 prennent en compte les activités d'éducation formelle dispensées selon la Classification internationale des programmes éducatifs (CITE-P 2011). Par conséquent, la ventilation des catégories dans cette section est basée sur le niveau d'enseignement tel qu'il est défini par les niveaux de la CITE-P 2011*. Les activités des établissements d'enseignement dispensant des cours au niveau 0 de la CITE-P 2011 sont classées dans la classe 8510, au niveau 1 de la CITE-P 2011 dans la classe 8520, au niveau 2 catégorie 24 ainsi qu'au niveau 3 catégorie 34 de la CITE-P 2011 dans la classe 8531, au niveau 2 catégorie 25 ainsi qu'au niveau 3 catégorie 35 de la CITE-P 2011 dans la classe 8532, au niveau 4 de la CITE-P 2011 dans la classe 8533 et aux niveaux 5-6-7-8 de la CITE-P 2011 dans le groupe 854.\r\n\r\nLes établissements d'enseignement classés dans les groupes 852 à 854 sont autorisés à attester la réussite d'un programme d'enseignement, généralement sous la forme d'un document reconnu officiellement par les autorités nationales compétentes en matière d'éducation.\r\n\r\nNOTE : * Les correspondances entre les niveaux d'enseignement et le nom des qualifications dans la langue nationale peuvent être trouvées ici https://europa.eu/!mDwYbG",
+          "it": "Questa sezione comprende l'istruzione a qualsiasi livello o per qualsiasi professione. Le istruzioni possono essere orali o scritte e possono essere fornite via radio, televisione, Internet o per corrispondenza.\r\n\r\nLe attività di formazione sono quelle che prevedono un programma educativo, un calendario e una valutazione delle conoscenze raggiunte.\r\n\r\nQuesta sezione comprende l'istruzione formale iniziale, ai suoi vari livelli, fornita da istituzioni del sistema scolastico regolare e destinata agli studenti come percorso educativo continuo prima del loro primo ingresso nel mercato del lavoro, nonché l'istruzione formale al di fuori del sistema scolastico regolare con contenuti e qualifiche equivalenti a quelli dell'istruzione iniziale (istruzione per adulti, programmi di alfabetizzazione e così via).\r\n\r\nSono incluse anche le attività fornite, ai rispettivi livelli, da scuole e accademie militari, scuole carcerarie e così via.\r\n\r\nQuesta sezione comprende la scuola obbligatoria e non obbligatoria, nonché l'istruzione pubblica e privata.\r\n\r\nPer ogni livello di istruzione, è inclusa l'istruzione speciale per i disabili fisici o mentali.\r\n\r\nI gruppi da 851 a 854 tengono conto delle attività di istruzione formale previste dalla classificazione internazionale dei programmi educativi (classificazione ISCED-P 2011). La ripartizione delle categorie in questa sezione si basa sul livello di istruzione offerto, definito dai livelli della classificazione ISCED-P 2011*. Le attività delle istituzioni educative che offrono corsi al livello 0 dell'ISCED-P 2011 sono classificate nella classe 8510, al livello 1 dell'ISCED-P 2011 nella classe 8520, al livello 2 dell'ISCED-P 2011, categoria 24, e al livello 3, categoria 34, nella classe 8531, al livello 2 dell'ISCED-P 2011, categoria 25, e al livello 3, categoria 35, nella classe 8532, al livello 4 dell'ISCED-P 2011 nella classe 8533 e ai livelli da 5 a 8 dell'ISCED-P 2011 nel Gruppo 854.\r\n\r\nLe istituzioni educative classificate nei gruppi da 852 a 854 sono autorizzate a certificare il completamento di un programma educativo, di solito sotto forma di un documento ufficialmente riconosciuto dalle autorità educative nazionali competenti.\r\n\r\nNOTA: * le mappature tra i livelli di istruzione e il nome delle qualifiche nella lingua nazionale possono essere trovate qui https://europa.eu/!mDwYbG"
+        }
+      }
+    ],
+    "code": "Q",
+    "name": {
+      "de": "ERZIEHUNG UND UNTERRICHT",
+      "en": "EDUCATION",
+      "fr": "ENSEIGNEMENT",
+      "it": "ISTRUZIONE E FORMAZIONE",
+      "rm": "NA"
+    },
+    "level": "Abschnitt",
+    "level_key": "abschnitt",
+    "level_no": 1,
+    "source_level": "NOGA - Level 1 - Section"
+  },
+  {
+    "annotations": [
+      {
+        "type": "EXCLUDES"
+      },
+      {
+        "type": "HIER_LEVEL",
+        "text": {
+          "de": "NOGA - Ebene 1 - Abschnitt",
+          "en": "NOGA - Level 1 - Section",
+          "fr": "NOGA - Niveau 1 - Section",
+          "it": "NOGA - Livello 1 - Sezione"
+        }
+      },
+      {
+        "type": "INCLUDES_ALSO",
+        "text": {
+          "de": "Dieser Abschnitt umfasst ferner Tätigkeiten des Sozialwesens mit Unterbringung (z. B. Obdachlosenheime).",
+          "en": "This section also includes social work activities with accommodation (e.g. temporary homeless shelters).",
+          "fr": "Cette section comprend également les activités de travail social avec hébergement (par ex. les centres d'hébergement temporaire pour sans-abri).",
+          "it": "Questa sezione comprende inoltre le attività di assistenza sociale con alloggio (ad esempio, rifugi temporanei per senzatetto)."
+        }
+      },
+      {
+        "type": "INCLUDES",
+        "text": {
+          "de": "Dieser Abschnitt umfasst die Erbringung von Dienstleistungen des Gesundheits- und Sozialwesens. Diese umfassen ein breites Spektrum an privaten oder öffentlichen Tätigkeiten.",
+          "en": "This section includes the provision of a wide range of health and social work activities. These activities can be exercised by private or public service providers.",
+          "fr": "Cette section comprend la fourniture d'un large éventail d'activités de santé et d'action sociale. Ces activités peuvent être exercées par des prestataires de services privés ou publiques.",
+          "it": "Questa sezione comprende la fornitura di un'ampia gamma di attività sanitarie e sociali. Queste attività possono essere esercitate da fornitori di servizi pubblici o privati."
+        }
+      }
+    ],
+    "code": "R",
+    "name": {
+      "de": "GESUNDHEITS- UND SOZIALWESEN",
+      "en": "HUMAN HEALTH AND SOCIAL WORK ACTIVITIES",
+      "fr": "SANTÉ HUMAINE ET ACTIVITÉS D’ACTION SOCIALE",
+      "it": "ATTIVITÀ PER LA SALUTE UMANA E DI ASSISTENZA SOCIALE",
+      "rm": "NA"
+    },
+    "level": "Abschnitt",
+    "level_key": "abschnitt",
+    "level_no": 1,
+    "source_level": "NOGA - Level 1 - Section"
+  },
+  {
+    "annotations": [
+      {
+        "type": "EXCLUDES"
+      },
+      {
+        "type": "HIER_LEVEL",
+        "text": {
+          "de": "NOGA - Ebene 1 - Abschnitt",
+          "en": "NOGA - Level 1 - Section",
+          "fr": "NOGA - Niveau 1 - Section",
+          "it": "NOGA - Livello 1 - Sezione"
+        }
+      },
+      {
+        "type": "INCLUDES_ALSO",
+        "text": {
+          "de": "Dieser Abschnitt umfasst ferner die Erbringung von Dienstleistungen, die Unterhaltungsveranstaltungen und Live-Aufführungen ermöglichen.",
+          "en": "This section also includes services that facilitate entertainment events and live performances.",
+          "fr": "Cette section comprend également les services qui facilitent les événements de divertissement et les spectacles en direct.",
+          "it": "Questa sezione comprende inoltre servizi che facilitano eventi di intrattenimento e spettacoli dal vivo."
+        }
+      },
+      {
+        "type": "INCLUDES",
+        "text": {
+          "de": "Dieser Abschnitt umfasst eine Vielzahl von Tätigkeiten, um die verschiedenen kulturellen, sportlichen und Freizeitinteressen der Kunden zu erfüllen, einschliesslich Live-Aufführungen, Unterhaltung, Betrieb von Kultur- und Naturerbestätten sowie Glücksspiel.",
+          "en": "This section includes a wide range of activities to meet varied cultural, sports and recreational interests of their customers, including live performances, entertainment, the operation of cultural and natural heritage sites, and gambling.",
+          "fr": "Cette section comprend un vaste éventail d’activités destinées à répondre aux intérêts de leurs clients en matière de culture, de sports ainsi que de divertissement et de loisirs, y compris les spectacles, les divertissements, l'exploitation de sites du patrimoine culturel et naturel, et les jeux d'argent.",
+          "it": "Questa sezione comprende un'ampia gamma di attività per soddisfare i vari interessi culturali, sportivi e ricreativi dei clienti, tra cui spettacoli dal vivo, intrattenimento, gestione di siti del patrimonio culturale e naturale e gioco d'azzardo."
+        }
+      }
+    ],
+    "code": "S",
+    "name": {
+      "de": "KUNST, SPORT UND ERHOLUNG",
+      "en": "ARTS, SPORTS AND RECREATION",
+      "fr": "ARTS, SPORTS ET ACTIVITÉS RÉCRÉATIVES",
+      "it": "ATTIVITÀ ARTISTICHE, SPORTIVE E DI DIVERTIMENTO",
+      "rm": "NA"
+    },
+    "level": "Abschnitt",
+    "level_key": "abschnitt",
+    "level_no": 1,
+    "source_level": "NOGA - Level 1 - Section"
+  },
+  {
+    "annotations": [
+      {
+        "type": "EXCLUDES"
+      },
+      {
+        "type": "HIER_LEVEL",
+        "text": {
+          "de": "NOGA - Ebene 1 - Abschnitt",
+          "en": "NOGA - Level 1 - Section",
+          "fr": "NOGA - Niveau 1 - Section",
+          "it": "NOGA - Livello 1 - Sezione"
+        }
+      },
+      {
+        "type": "INCLUDES_ALSO"
+      },
+      {
+        "type": "INCLUDES",
+        "text": {
+          "de": "Dieser Abschnitt (als Restkategorie) umfasst die Tätigkeiten von Interessenvertretungen, die Instandhaltung und Reparatur von Datenverarbeitungsgeräten und -einrichtungen, Gebrauchsgütern und Kraftfahrzeugen, sowie eine Reihe von persönlichen Dienstleistungen, die anderweitig in dieser Klassifikation nicht erfasst sind.",
+          "en": "This section (as a residual category) includes the activities of membership organisations, the repair of computers, personal and household goods, motor vehicles and motorcycles, and a variety of personal service activities not covered elsewhere in the classification.",
+          "fr": "Cette section (en tant que catégorie résiduelle) comprend les activités des organisations associatives, la réparation d’ordinateurs, de biens personnels et domestiques, d’automobiles et motocycles, ainsi que diverses activités de services personnels non classées ailleurs dans cette nomenclature.",
+          "it": "Questa sezione comprende (come categoria residuale) le attività delle organizzazioni associative, la riparazione di computer, di beni personali e per la casa, di autoveicoli e motocicli e una serie di attività di servizi alla persona non contemplate altrove nella classificazione."
+        }
+      }
+    ],
+    "code": "T",
+    "name": {
+      "de": "ERBRINGUNG VON SONSTIGEN DIENSTLEISTUNGEN",
+      "en": "OTHER SERVICE ACTIVITIES",
+      "fr": "AUTRES ACTIVITÉS DE SERVICES",
+      "it": "ALTRE ATTIVITÀ DI SERVIZI",
+      "rm": "NA"
+    },
+    "level": "Abschnitt",
+    "level_key": "abschnitt",
+    "level_no": 1,
+    "source_level": "NOGA - Level 1 - Section"
+  },
+  {
+    "annotations": [
+      {
+        "type": "EXCLUDES"
+      },
+      {
+        "type": "HIER_LEVEL",
+        "text": {
+          "de": "NOGA - Ebene 1 - Abschnitt",
+          "en": "NOGA - Level 1 - Section",
+          "fr": "NOGA - Niveau 1 - Section",
+          "it": "NOGA - Livello 1 - Sezione"
+        }
+      },
+      {
+        "type": "INCLUDES_ALSO"
+      },
+      {
+        "type": "INCLUDES"
+      }
+    ],
+    "code": "U",
+    "name": {
+      "de": "PRIVATE HAUSHALTE MIT HAUSPERSONAL SOWIE HERSTELLUNG VON WAREN UND ERBRINGUNG VON DIENSTLEISTUNGEN DURCH PRIVATE HAUSHALTE FÜR DEN EIGENBEDARF OHNE AUSGEPRÄGTEN SCHWERPUNKT",
+      "en": "ACTIVITIES OF HOUSEHOLDS AS EMPLOYERS AND UNDIFFERENTIATED GOODS - AND SERVICE-PRODUCING ACTIVITIES OF HOUSEHOLDS FOR OWN USE",
+      "fr": "ACTIVITÉS DES MÉNAGES EN TANT QU’EMPLOYEURS; ACTIVITÉS INDIFFÉRENCIÉES DES MÉNAGES EN TANT QUE PRODUCTEURS DE BIENS ET SERVICES POUR USAGE PROPRE",
+      "it": "ATTIVITÀ DI FAMIGLIE E CONVIVENZE COME DATORI DI LAVORO PER PERSONALE DOMESTICO E PRODUZIONE DI BENI E SERVIZI INDIFFERENZIATI PER USO PROPRIO DA PARTE DI FAMIGLIE E CONVIVENZE",
+      "rm": "NA"
+    },
+    "level": "Abschnitt",
+    "level_key": "abschnitt",
+    "level_no": 1,
+    "source_level": "NOGA - Level 1 - Section"
+  },
+  {
+    "annotations": [
+      {
+        "type": "EXCLUDES"
+      },
+      {
+        "type": "HIER_LEVEL",
+        "text": {
+          "de": "NOGA - Ebene 1 - Abschnitt",
+          "en": "NOGA - Level 1 - Section",
+          "fr": "NOGA - Niveau 1 - Section",
+          "it": "NOGA - Livello 1 - Sezione"
+        }
+      },
+      {
+        "type": "INCLUDES_ALSO"
+      },
+      {
+        "type": "INCLUDES"
+      }
+    ],
+    "code": "V",
+    "name": {
+      "de": "EXTERRITORIALE ORGANISATIONEN UND KÖRPERSCHAFTEN",
+      "en": "ACTIVITIES OF EXTRATERRITORIAL ORGANISATIONS AND BODIES",
+      "fr": "ACTIVITÉS DES ORGANISATIONS ET ORGANISMES EXTRATERRITORIAUX",
+      "it": "ATTIVITÀ DI ORGANIZZAZIONI E ORGANISMI EXTRATERRITORIALI",
+      "rm": "NA"
+    },
+    "level": "Abschnitt",
+    "level_key": "abschnitt",
+    "level_no": 1,
+    "source_level": "NOGA - Level 1 - Section"
+  }
+]

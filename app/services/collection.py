@@ -2460,3 +2460,131 @@ def resume_claude_batch(
 
     db.commit()
     return ("ended", stats)
+
+
+def detect_language_bulk(
+    db: Session,
+    *,
+    batch_size: int = 1000,
+    only_missing: bool = True,
+    progress_cb: Any = None,
+) -> dict[str, Any]:
+    """Backfill purpose_language for all companies where it is NULL (or all).
+
+    Routes to the ML worker via the existing job system. Safe to re-run —
+    with only_missing=True it skips companies that already have a language.
+    """
+    from app.services.language_detection import detect_purpose_language
+
+    stats: dict[str, Any] = {
+        "selected": 0,
+        "updated": 0,
+        "skipped_no_purpose": 0,
+        "skipped_existing": 0,
+        "errors": [],
+    }
+
+    query = db.query(Company).filter(Company.purpose.isnot(None))
+    if only_missing:
+        query = query.filter(Company.purpose_language.is_(None))
+
+    total = query.count()
+    stats["selected"] = total
+    offset = 0
+
+    while True:
+        batch = query.order_by(Company.id.asc()).offset(offset).limit(batch_size).all()
+        if not batch:
+            break
+
+        for company in batch:
+            try:
+                if only_missing and company.purpose_language:
+                    stats["skipped_existing"] += 1
+                    continue
+                if not company.purpose:
+                    stats["skipped_no_purpose"] += 1
+                    continue
+                lang = detect_purpose_language(company.purpose)
+                if lang:
+                    company.purpose_language = lang
+                    stats["updated"] += 1
+            except Exception as exc:  # noqa: BLE001
+                stats["errors"].append(f"{company.uid}: {type(exc).__name__}: {exc}")
+
+        db.commit()
+        offset += len(batch)
+
+        if progress_cb:
+            progress_cb(min(offset, total), total, stats)
+
+    return stats
+
+
+def reclassify_low_confidence_noga(
+    db: Session,
+    *,
+    confidence_threshold: float = 0.80,
+    batch_size: int = 500,
+    progress_cb: Any = None,
+) -> dict[str, Any]:
+    """Re-classify companies whose noga_confidence is below the threshold.
+
+    These are candidates for API-based refinement. This job re-runs the local
+    classifier (embedding + token hybrid) which may improve scores once
+    pgvector embeddings are loaded. Companies with NULL confidence are also
+    included since they have never been classified.
+    """
+    from app.services.noga import apply_noga_classification
+
+    threshold = confidence_threshold
+
+    stats: dict[str, Any] = {
+        "selected": 0,
+        "updated": 0,
+        "improved": 0,
+        "still_low": 0,
+        "skipped_no_match": 0,
+        "errors": [],
+    }
+
+    query = db.query(Company).filter(
+        Company.purpose.isnot(None),
+        or_(
+            Company.noga_confidence.is_(None),
+            Company.noga_confidence < threshold,
+        ),
+    )
+
+    total = query.count()
+    stats["selected"] = total
+    offset = 0
+
+    while True:
+        batch = query.order_by(Company.id.asc()).offset(offset).limit(batch_size).all()
+        if not batch:
+            break
+
+        for company in batch:
+            try:
+                update = apply_noga_classification(db, company)
+                if update is None:
+                    stats["skipped_no_match"] += 1
+                    continue
+                crud.update_company(db, company, update)
+                stats["updated"] += 1
+                new_conf = update.noga_confidence or 0.0
+                if new_conf >= threshold:
+                    stats["improved"] += 1
+                else:
+                    stats["still_low"] += 1
+            except Exception as exc:  # noqa: BLE001
+                stats["errors"].append(f"{company.uid}: {type(exc).__name__}: {exc}")
+
+        db.commit()
+        offset += len(batch)
+
+        if progress_cb:
+            progress_cb(min(offset, total), total, stats)
+
+    return stats

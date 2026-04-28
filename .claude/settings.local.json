@@ -227,7 +227,8 @@
       "Bash(python -c \"from app.services import collection; print\\('collection module OK'\\)\")",
       "Bash(python -c \"from app.services.noga import is_branch_office, apply_noga_classification, _coerce_category, _NOGA_LOW_CONFIDENCE; print\\('symbols OK'\\)\")",
       "Bash(python -c \"from app.services.noga import is_branch_office, apply_noga_classification, _NOGA_LOW_CONFIDENCE, _inherit_noga_from_parent, _clear_noga, _parent_uid_from_head_offices; print\\('all noga symbols OK'\\)\")",
-      "Bash(python -m pytest tests/ -x --tb=short -q)"
+      "Bash(python -m pytest tests/ -x --tb=short -q)",
+      "Bash(find /c/D/coding_projects/zefix_analyzer/frontend/src/app/[locale]/app/collection -type f)"
     ]
   }
 }

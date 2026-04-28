@@ -72,6 +72,9 @@ _QUEUE_FOR_JOB_TYPE: dict[str, str] = {
     "recalculate_google_scores": "helvex-api",
     "reextract_purpose":         "helvex-api",
     "reclassify_noga":           "helvex-ml",
+    "build_noga_embeddings":     "helvex-ml",
+    "detect_language_bulk":      "helvex-ml",
+    "reclassify_low_conf_noga":  "helvex-ml",
     "claude_classify":           "helvex-api",
     "csv_export":                "helvex-api",
     "tfidf_kmeans_cluster":      "helvex-ml",
@@ -98,6 +101,7 @@ def _compute_dedup_key(job_type: str, org_id: int | None, params: dict) -> str |
         "shab_daily", "shab_backfill",
         "recalculate_scores", "recalculate_google_scores",
         "reextract_purpose", "reclassify_noga",
+        "build_noga_embeddings", "detect_language_bulk", "reclassify_low_conf_noga",
         "re_geocode",
         "tfidf_kmeans_cluster",
         "recompute_keywords", "reextract_keywords",
@@ -563,6 +567,64 @@ def _run_job(app, job_id: int) -> None:  # noqa: C901
                 )
                 if resume_from:
                     done_msg += f" (resumed from {resume_from})"
+
+            elif job.job_type == "build_noga_embeddings":
+                from scripts.build_noga_embeddings_pg import run as _build_noga_emb
+
+                batch_size = int(params.get("batch_size", 256))
+                crud.update_progress(db, job, message="Embedding NOGA taxonomy…", done=0, total=1, stats={})
+                _build_noga_emb(batch_size=batch_size, dry_run=False)
+                stats = {"batch_size": batch_size}
+                done_msg = "NOGA embeddings built and stored in pgvector"
+
+            elif job.job_type == "detect_language_bulk":
+                from app.services.collection import detect_language_bulk
+
+                def _progress(done: int, total: int, stats: dict) -> None:
+                    _assert_not_cancelled()
+                    msg = (
+                        f"Processed {done}/{total} — {stats.get('updated', 0)} updated, "
+                        f"{stats.get('skipped_no_purpose', 0)} no purpose"
+                    )
+                    crud.update_progress(db, job, message=msg, done=done, total=total, stats=stats)
+                    _heartbeat()
+
+                stats = detect_language_bulk(
+                    db,
+                    only_missing=bool(params.get("only_missing", True)),
+                    progress_cb=_progress,
+                )
+                done_msg = (
+                    f"Done — {stats.get('updated', 0)} languages detected, "
+                    f"{stats.get('skipped_existing', 0)} skipped existing, "
+                    f"{len(stats.get('errors', []))} errors"
+                )
+
+            elif job.job_type == "reclassify_low_conf_noga":
+                from app.services.collection import reclassify_low_confidence_noga
+
+                threshold = float(params.get("confidence_threshold", 0.80))
+
+                def _progress(done: int, total: int, stats: dict) -> None:
+                    _assert_not_cancelled()
+                    msg = (
+                        f"Processed {done}/{total} — {stats.get('improved', 0)} improved, "
+                        f"{stats.get('still_low', 0)} still low confidence"
+                    )
+                    crud.update_progress(db, job, message=msg, done=done, total=total, stats=stats)
+                    _heartbeat()
+
+                stats = reclassify_low_confidence_noga(
+                    db,
+                    confidence_threshold=threshold,
+                    progress_cb=_progress,
+                )
+                done_msg = (
+                    f"Done — {stats.get('updated', 0)} reclassified, "
+                    f"{stats.get('improved', 0)} now above threshold, "
+                    f"{stats.get('still_low', 0)} still low, "
+                    f"{len(stats.get('errors', []))} errors"
+                )
 
             elif job.job_type == "discover_stopwords":
                 from app.services.stopword_discovery import discover_stopwords

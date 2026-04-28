@@ -392,6 +392,18 @@ class ReclassifyNogaBody(BaseModel):
     only_detailed_raw: bool = True
 
 
+class BuildNogaEmbeddingsBody(BaseModel):
+    batch_size: int = 256
+
+
+class DetectLanguageBulkBody(BaseModel):
+    only_missing: bool = True
+
+
+class ReclassifyLowConfNogaBody(BaseModel):
+    confidence_threshold: float = 0.80
+
+
 class ClaudeClassifyBody(BaseModel):
     canton: str | None = None
     min_zefix_score: int | None = None   # passed as-is to job params; worker maps to min_flex_score
@@ -571,6 +583,60 @@ def trigger_reclassify_noga(
         request,
         job_type="reclassify_noga",
         label=label,
+        params=body.model_dump(),
+        db=db,
+    )
+    return JobOut.from_orm_obj(job)
+
+
+@router.post("/scoring/build-noga-embeddings", response_model=JobOut, status_code=status.HTTP_202_ACCEPTED)
+def trigger_build_noga_embeddings(
+    body: BuildNogaEmbeddingsBody,
+    request: Request,
+    db: Session = Depends(get_db),
+    _: User = Depends(require_superadmin),
+):
+    job = _enqueue_or_http_error(
+        request,
+        job_type="build_noga_embeddings",
+        label="Build NOGA pgvector embeddings",
+        params=body.model_dump(),
+        db=db,
+    )
+    return JobOut.from_orm_obj(job)
+
+
+@router.post("/scoring/detect-language", response_model=JobOut, status_code=status.HTTP_202_ACCEPTED)
+def trigger_detect_language_bulk(
+    body: DetectLanguageBulkBody,
+    request: Request,
+    db: Session = Depends(get_db),
+    _: User = Depends(require_superadmin),
+):
+    label = "Detect purpose language"
+    if body.only_missing:
+        label += " (missing only)"
+    job = _enqueue_or_http_error(
+        request,
+        job_type="detect_language_bulk",
+        label=label,
+        params=body.model_dump(),
+        db=db,
+    )
+    return JobOut.from_orm_obj(job)
+
+
+@router.post("/scoring/reclassify-low-conf-noga", response_model=JobOut, status_code=status.HTTP_202_ACCEPTED)
+def trigger_reclassify_low_conf_noga(
+    body: ReclassifyLowConfNogaBody,
+    request: Request,
+    db: Session = Depends(get_db),
+    _: User = Depends(require_superadmin),
+):
+    job = _enqueue_or_http_error(
+        request,
+        job_type="reclassify_low_conf_noga",
+        label=f"Reclassify low-confidence NOGA (threshold {body.confidence_threshold})",
         params=body.model_dump(),
         db=db,
     )

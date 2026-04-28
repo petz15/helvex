@@ -104,6 +104,7 @@
 - [ ] **NOGA numbers** - NOGA is not showing up any numbers
 - [ ] **Introduction to new users** - currently new users just get thrown into explore without any guide
 - [ ] **Improve Explore** - somehow explore page got worse with the last change. maybe I need to change the ML part first, check via a dashboard/overview (and implement that) then move on to explore. 
+- [ ] **Noga Classification** - Too difficult via purpose keywords, keeps finding wrong categories. should use AI to do so (if not human supervision)
 
 
 ## Company Data
@@ -113,10 +114,11 @@
 - [ ] **CSV export** — export current filtered/sorted dashboard view as CSV; include all visible columns; respect active filters and column selection -> somewhat exists but not fully operational yet. No way to set which columns the CSV exports currently!
 - [ ] **Web crawler** — crawl company websites to extract description, contact info, product/service keywords; store as structured fields; feed into scoring and classification; replace/supplement current Google scrape
 - [ ] **Google results & scoring** — Improve the selection and scoring of google results
-- [ ] **NOGA Data** — add NOGA data (or similar) which is something other sites have such as business-monitor.ch or moneyhouse.ch -> first implementation done via AI classification; needs improvement preferably without AI or optional with AI; displaying is not looking too good yet; only shows the level it is confident in but not the full hierarchy
+- [ ] **NOGA Data** — add NOGA data (or similar) which is something other sites have such as business-monitor.ch or moneyhouse.ch -> first implementation done via AI classification; needs improvement preferably without AI or optional with AI; displaying is not looking too good yet; only shows the level it is confident in but not the full hierarchy -> NOGA classification should be done via AI
 - [ ] **Free tier**- show some limited or teaser data for free tier
 - [ ] **Flex Rescore** - Needs to be implemented differently. Should be 1x rescore or maybe 2x rescore per month for all available companies. then like 1000 credits per rescore. Depends how much actual computation power it needs
 - [ ] **Multiple scores** - allow for different set of scores in case users are looking for different types of companies. e.g. for a specific campaign or promotion etc
+- [ ] **Fix Multilang issue** - Need to decide if I have one language as base (such as english), convert everything to english for stuff like categorization etc then go and translate back i.e. use the original language again? other method would be to do it per language and then add a filter for languges with optional translations for other langugages. 
 
 
 ## Company Profile
@@ -131,7 +133,7 @@
 
 ## Classification & Scoring
 
-- [ ] **LLM classification extensions** — add OpenAI (ChatGPT) alongside Claude; user-configurable classification prompt per LLM; user-adjustable criteria
+- [ ] **LLM classification extensions** — add OpenAI (ChatGPT) alongside Claude; user-configurable classification prompt per LLM; user-adjustable criteria. Potentially add groq for even cheaper prices especially for the noga usecase. potential: groq (context length might be an issue if NOGA has to be provided), deepseek, 
 - [ ] **Custom review & proposal categories** — keep sensible defaults, allow users to define own categories per account
 - [ ] **Per-user scoring rules** — custom distance origin, keyword boosts/penalties, cluster weights; DB: `user_scoring_config` (1:1 with users) + `company_user_score` (per user/company); scoring service already accepts a config dict
 - [ ] **Imporve Purpose Keyword extraction** - Seeing as this is central for NOGA and clustering, these keywords should be as accurate as possible. Review how it is done. Generally improve ML later as much as possible

@@ -51,12 +51,36 @@ const ML_JOB_DOCS: { job_type: string; label: string; description: string; when:
     prereq: "Requires S3 artifacts from a previous cluster run.",
   },
   {
+    job_type: "build_noga_embeddings",
+    label: "Build NOGA Embeddings",
+    description:
+      "Embeds all ~2000 NOGA level-5 categories in DE/FR/IT/EN using the multilingual sentence-transformer model and stores the vectors in PostgreSQL (pgvector). One-time setup step — re-run only when the NOGA taxonomy file changes.",
+    when: "Run once after initial deployment, before any NOGA classification.",
+    prereq: "Requires migration 0069 (pgvector extension + noga_embeddings table).",
+  },
+  {
+    job_type: "detect_language_bulk",
+    label: "Detect Purpose Language",
+    description:
+      "Detects the written language (DE/FR/IT/EN) of each company's purpose text using lingua and stores it in purpose_language. The NOGA classifier uses this to match each company against same-language NOGA embeddings, improving accuracy.",
+    when: "Run once after build_noga_embeddings, and after large bulk imports.",
+    prereq: "Run before reclassify_noga for best accuracy.",
+  },
+  {
     job_type: "reclassify_noga",
     label: "NOGA Classification",
     description:
-      "Classifies each company into the official Swiss NOGA industry taxonomy using a hybrid of token matching and sentence-transformer embedding similarity. Produces noga_code, noga_label, noga_confidence, and a full ancestry path.",
-    when: "Run after purpose_keywords are populated. NOGA uses keywords + clusters as signals.",
-    prereq: "Requires purpose_keywords. Works better after clustering.",
+      "Classifies each company into the official Swiss NOGA industry taxonomy using a hybrid of pgvector embedding similarity (60%) and token matching (40%). Language-aware: queries embeddings in the company's detected language. Produces noga_code, noga_label, noga_confidence (0–1), and a full ancestry path.",
+    when: "Run after detect_language_bulk. Re-run after large imports or when NOGA embeddings are rebuilt.",
+    prereq: "Requires purpose_keywords and noga_embeddings table to be populated.",
+  },
+  {
+    job_type: "reclassify_low_conf_noga",
+    label: "Re-run Low Confidence NOGA",
+    description:
+      "Re-classifies only companies whose noga_confidence is below the configured threshold (default 0.80). Useful after rebuilding embeddings to lift scores on previously uncertain results without re-processing the entire dataset.",
+    when: "Run after rebuilding NOGA embeddings to improve borderline results.",
+    prereq: "Requires noga_embeddings table to be populated.",
   },
   {
     job_type: "claude_classify",
@@ -316,31 +340,119 @@ export function CollectionClient() {
         </form>
       </Section>
 
-      <Section title="Reclassify NOGA">
-          <form onSubmit={async e => {
-            e.preventDefault();
-            const fd = new FormData(e.currentTarget);
-            await submit("scoring/reclassify-noga", {
-              only_missing_noga: fd.get("only_missing_noga") === "on",
-              only_detailed_raw: fd.get("only_detailed_raw") === "on",
-            });
-          }} className="space-y-4">
+      <Section title="NOGA Classification">
+        <div className="space-y-6">
+
+          {/* Step 1 — Build embeddings */}
+          <div className="rounded-lg border border-slate-200 p-4 space-y-3">
             <div>
-              <h2 className="text-sm font-semibold text-slate-800">Reclassify NOGA</h2>
-              <p className="mt-1 text-xs text-slate-500">Recompute NOGA labels and hierarchy paths from the local taxonomy.</p>
+              <div className="flex items-center gap-2">
+                <span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-blue-600 text-white text-[10px] font-bold">1</span>
+                <h3 className="text-sm font-semibold text-slate-800">Build NOGA Embeddings</h3>
+              </div>
+              <p className="mt-1 text-xs text-slate-500 ml-7">
+                Embed all NOGA level-5 categories in DE/FR/IT/EN and store in pgvector. One-time setup — re-run only when the NOGA taxonomy changes.
+              </p>
             </div>
-            <div className="flex gap-6 flex-wrap">
-              <label className="flex items-center gap-2 text-sm text-slate-700">
-                <input type="checkbox" name="only_missing_noga" className={checkCls} />
-                Only companies missing NOGA data
-              </label>
-              <label className="flex items-center gap-2 text-sm text-slate-700">
-                <input type="checkbox" name="only_detailed_raw" defaultChecked className={checkCls} />
-                Only companies with detailed raw Zefix data
-              </label>
+            <form onSubmit={async e => {
+              e.preventDefault();
+              const fd = new FormData(e.currentTarget);
+              await submit("scoring/build-noga-embeddings", {
+                batch_size: parseInt(fd.get("batch_size") as string) || 256,
+              });
+            }} className="space-y-3 ml-7">
+              <Field label="Batch size" hint="Texts embedded per forward pass. Lower = less RAM.">
+                <input name="batch_size" type="number" min="32" max="512" defaultValue="256" className={inputCls} />
+              </Field>
+              <SubmitBtn loading={loading === "scoring/build-noga-embeddings"} />
+            </form>
+          </div>
+
+          {/* Step 2 — Detect language */}
+          <div className="rounded-lg border border-slate-200 p-4 space-y-3">
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-blue-600 text-white text-[10px] font-bold">2</span>
+                <h3 className="text-sm font-semibold text-slate-800">Detect Purpose Language</h3>
+              </div>
+              <p className="mt-1 text-xs text-slate-500 ml-7">
+                Detect DE/FR/IT/EN for each company purpose and store in <code className="text-xs bg-slate-100 px-1 rounded">purpose_language</code>. Used to match companies to same-language NOGA embeddings.
+              </p>
             </div>
-            <SubmitBtn loading={loading === "scoring/reclassify-noga"} />
-          </form>
+            <form onSubmit={async e => {
+              e.preventDefault();
+              const fd = new FormData(e.currentTarget);
+              await submit("scoring/detect-language", {
+                only_missing: fd.get("only_missing") === "on",
+              });
+            }} className="space-y-3 ml-7">
+              <label className="flex items-center gap-2 text-sm text-slate-700">
+                <input type="checkbox" name="only_missing" defaultChecked className={checkCls} />
+                Only companies without a detected language
+              </label>
+              <SubmitBtn loading={loading === "scoring/detect-language"} />
+            </form>
+          </div>
+
+          {/* Step 3 — Classify */}
+          <div className="rounded-lg border border-slate-200 p-4 space-y-3">
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-blue-600 text-white text-[10px] font-bold">3</span>
+                <h3 className="text-sm font-semibold text-slate-800">Reclassify NOGA</h3>
+              </div>
+              <p className="mt-1 text-xs text-slate-500 ml-7">
+                Classify companies using hybrid pgvector embedding + token matching. Stores <code className="text-xs bg-slate-100 px-1 rounded">noga_code</code>, <code className="text-xs bg-slate-100 px-1 rounded">noga_confidence</code>, and full ancestry path.
+              </p>
+            </div>
+            <form onSubmit={async e => {
+              e.preventDefault();
+              const fd = new FormData(e.currentTarget);
+              await submit("scoring/reclassify-noga", {
+                only_missing_noga: fd.get("only_missing_noga") === "on",
+                only_detailed_raw: fd.get("only_detailed_raw") === "on",
+              });
+            }} className="space-y-3 ml-7">
+              <div className="flex gap-6 flex-wrap">
+                <label className="flex items-center gap-2 text-sm text-slate-700">
+                  <input type="checkbox" name="only_missing_noga" className={checkCls} />
+                  Only companies missing NOGA
+                </label>
+                <label className="flex items-center gap-2 text-sm text-slate-700">
+                  <input type="checkbox" name="only_detailed_raw" defaultChecked className={checkCls} />
+                  Only with detailed Zefix raw data
+                </label>
+              </div>
+              <SubmitBtn loading={loading === "scoring/reclassify-noga"} />
+            </form>
+          </div>
+
+          {/* Step 4 — Re-run low confidence */}
+          <div className="rounded-lg border border-amber-200 bg-amber-50/40 p-4 space-y-3">
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-amber-500 text-white text-[10px] font-bold">4</span>
+                <h3 className="text-sm font-semibold text-slate-800">Re-run Low Confidence</h3>
+              </div>
+              <p className="mt-1 text-xs text-slate-500 ml-7">
+                Re-classify companies whose <code className="text-xs bg-slate-100 px-1 rounded">noga_confidence</code> is below the threshold. These are candidates for API-based refinement.
+              </p>
+            </div>
+            <form onSubmit={async e => {
+              e.preventDefault();
+              const fd = new FormData(e.currentTarget);
+              await submit("scoring/reclassify-low-conf-noga", {
+                confidence_threshold: parseFloat(fd.get("confidence_threshold") as string) || 0.80,
+              });
+            }} className="space-y-3 ml-7">
+              <Field label="Confidence threshold" hint="Companies below this score are re-classified.">
+                <input name="confidence_threshold" type="number" min="0" max="1" step="0.05" defaultValue="0.80" className={inputCls} />
+              </Field>
+              <SubmitBtn loading={loading === "scoring/reclassify-low-conf-noga"} />
+            </form>
+          </div>
+
+        </div>
       </Section>
         
       <Section title="TF-IDF + KMeans pipeline">

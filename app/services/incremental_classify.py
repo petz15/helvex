@@ -125,46 +125,8 @@ def _run_cluster_batch(db: Session, company_ids: list[int], stats: dict) -> None
 
 
 def _detect_language(text: str) -> str | None:
-    """Return ISO 639-1 language code for the given text, or None if uncertain.
-
-    Tries lingua first (higher accuracy for short/Swiss texts including Romansh),
-    falls back to langdetect. Both are optional — returns None if neither is installed.
-    """
-    if not text or len(text.strip()) < 20:
-        return None
-
-    # Try lingua (preferred)
-    try:
-        from lingua import Language, LanguageDetectorBuilder
-        _LINGUA_LANGS = [
-            Language.GERMAN, Language.FRENCH, Language.ITALIAN,
-            Language.ENGLISH,
-        ]
-        detector = LanguageDetectorBuilder.from_languages(*_LINGUA_LANGS).build()
-        result = detector.detect_language_of(text)
-        if result is None:
-            return None
-        mapping = {
-            Language.GERMAN: "de",
-            Language.FRENCH: "fr",
-            Language.ITALIAN: "it",
-            Language.ENGLISH: "en",
-        }
-        return mapping.get(result)
-    except ImportError:
-        pass
-
-    # Fall back to langdetect
-    try:
-        from langdetect import detect, LangDetectException
-        lang = detect(text)
-        # Normalise: keep only the base code (e.g. "de" from "de-AT")
-        base = lang.split("-")[0].lower() if lang else None
-        if base in ("de", "fr", "it", "en"):
-            return base
-        return None
-    except Exception:  # noqa: BLE001
-        return None
+    from app.services.language_detection import detect_purpose_language
+    return detect_purpose_language(text)
 
 
 def _run_language_batch(db: Session, companies: list, stats: dict) -> None:
