@@ -123,6 +123,20 @@ Three independent scores stored separately in DB:
 - `ai_score` — Claude Haiku classification (configurable system prompt, ~$0.25/1k companies)
 - `combined_score` — weighted average (weights configurable in Settings UI without code changes)
 
+### NOGA Classification (Industry Taxonomy)
+
+Classifies each company into the official Swiss NOGA 2025 taxonomy (~2000 level-5 categories) using a hybrid approach:
+
+**Setup (one-time):**
+1. `build_noga_embeddings` — Embeds all NOGA categories in DE/FR/IT/EN using `paraphrase-multilingual-mpnet-base-v2` (768-dim), stores vectors in PostgreSQL via pgvector.
+
+**Per-company classification:**
+1. `detect_language_bulk` — Detects company purpose language (DE/FR/IT/EN) via lingua library; stores in `purpose_language`.
+2. `reclassify_noga` — Hybrid classifier: (60%) pgvector cosine similarity to language-matched NOGA embeddings + (40%) token overlap from company name/purpose/keywords. Returns `noga_code`, `noga_confidence` (0–1), and full ancestry path.
+3. `reclassify_low_conf_noga` — Confidence-based refinement: re-runs classifier on companies below threshold (default 0.80), useful after rebuilding embeddings.
+
+**Why language-aware:** Embedding company purpose in French and matching it against French NOGA descriptions yields higher semantic similarity than cross-lingual matching. Confidence scores reflect this — typically 0.75–0.95 for clear industry classifications, 0.40–0.70 for ambiguous cases (candidates for API re-run).
+
 ### Startup sequence (`app/main.py`)
 
 On lifespan start: run Alembic migrations (DB-locked, safe for multi-pod) → seed `AppSetting` rows → recover interrupted jobs → kick job worker thread → auto-enqueue one-time re-geocoding if not done.
