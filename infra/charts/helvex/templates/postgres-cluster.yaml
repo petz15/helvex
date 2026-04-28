@@ -8,6 +8,12 @@ metadata:
     {{- include "helvex.labels" . | nindent 4 }}
 spec:
   imageName: {{ .Values.postgres.imageName | default "ghcr.io/cloudnative-pg/postgresql:16.3" }}
+  {{- if .Values.imagePullSecrets }}
+  imagePullSecrets:
+    {{- range .Values.imagePullSecrets }}
+    - name: {{ .name }}
+    {{- end }}
+  {{- end }}
   instances: {{ .Values.postgres.instances }}
 
   storage:

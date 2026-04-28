@@ -275,9 +275,44 @@ jobs:
           cache-from: type=gha,scope=frontend
           cache-to: type=gha,mode=max,scope=frontend
 
+  build-pgvector:
+    # Rebuild the pgvector PostgreSQL image whenever a full prod deploy is triggered.
+    # CNPG needs this image to be present in GHCR before helmfile applies the cluster spec.
+    if: |
+      github.event_name == 'workflow_dispatch' ||
+      contains(github.event.head_commit.message, '[deploy-prod]')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GHCR_PAT != '' && secrets.GHCR_PAT || secrets.GITHUB_TOKEN }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and push pgvector image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: infra/Dockerfile.pgvector
+          push: true
+          provenance: false
+          platforms: linux/amd64
+          tags: ghcr.io/${{ github.repository }}-pgvector:16.3.0
+          cache-from: type=gha,scope=pgvector
+          cache-to: type=gha,mode=max,scope=pgvector
+
   # ── Deploy ────────────────────────────────────────────────────────────────
   deploy:
-    needs: [build-backend, build-ml, build-frontend]
+    needs: [build-backend, build-ml, build-frontend, build-pgvector]
     # Run when no build job failed/cancelled (skipped builds are fine).
     if: |
       always() &&
