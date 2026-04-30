@@ -219,6 +219,33 @@ def _word_overlap_ratio(a: str, b: str) -> float:
     return len(words_a & words_b) / len(words_a)
 
 
+def _domain_is_exact_name_match(domain: str, company_name: str) -> bool:
+    """Return True when the domain base name (sans TLD) exactly matches
+    the company name stripped of legal-form words and hyphens.
+
+        "Muster AG"       + "muster.ch"       → True
+        "Bau Schmidt GmbH" + "bau-schmidt.ch"  → True
+        "Muster AG"       + "muster-solutions.ch" → False
+    """
+    if domain.endswith(".swiss"):
+        base = domain[:-6]
+    elif domain.endswith(".ch"):
+        base = domain[:-3]
+    else:
+        return False
+
+    domain_norm = re.sub(r"[-.]", "", base)
+
+    name_words = [
+        w for w in re.findall(r"\w+", company_name.lower())
+        if len(w) >= 3 and w not in _LEGAL_FORM_WORDS
+    ]
+    if not name_words:
+        return False
+
+    return domain_norm == "".join(name_words)
+
+
 def _domain_name_overlap(domain: str, company_name: str) -> float:
     """Fraction of meaningful company name words found in the domain string.
 
@@ -295,6 +322,7 @@ def score_result(
     address: str | None = None,
     directory_domains: set[str] | None = None,
     purpose_stopwords: set[str] | None = None,
+    position: int = 0,
 ) -> int:
     """Score a single Google search result against a company profile.
 
@@ -309,6 +337,8 @@ def score_result(
       - Purpose keywords in snippet: 0-15 pts  (1-2 hits = 8, 3+ hits = 15)
       - Legal form in domain/title:   +5 pts  bonus
       - Swiss TLD (.ch / .swiss):    +10 pts  bonus
+      - Exact name match on Swiss TLD: +15 pts  extra bonus
+      - Google rank position (0-3):  +30/+20/+15/+10 pts  (not applied to directories)
       - Social media domain:         -30 pts  penalty
       - Local directory URL path:   hard  0  (verzeichnis in URL path)
       - Directory domain:           hard  0  (returned immediately)
@@ -375,9 +405,15 @@ def score_result(
         if any(a in domain or a in title.lower() for a in abbrevs if len(a) >= 2):
             score += 5
 
-    # --- Swiss TLD bonus (+10) ---
+    # --- Swiss TLD bonus (+10, +15 extra when domain base matches company name exactly) ---
     if domain.endswith(".ch") or domain.endswith(".swiss"):
         score += 10
+        if _domain_is_exact_name_match(domain, company_name):
+            score += 15
+
+    # --- Google rank bonus (+30/+20/+15/+10 for positions 0-3) ---
+    _POS_BONUS = (30, 20, 15, 10)
+    score += _POS_BONUS[position] if position < len(_POS_BONUS) else 0
 
     # --- Social media penalty (-30) ---
     if any(domain == d or domain.endswith("." + d) for d in _SOCIAL_LEAD_DOMAINS):

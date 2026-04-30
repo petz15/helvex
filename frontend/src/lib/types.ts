@@ -59,6 +59,7 @@ export interface Company {
   lat: number | null;
   lon: number | null;
   business_model: string | null;
+  purpose_language: string | null;
   created_at: string;
   updated_at: string;
   notes: Note[];

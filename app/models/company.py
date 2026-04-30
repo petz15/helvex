@@ -13,7 +13,7 @@ class Company(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
     uid: Mapped[str] = mapped_column(String(20), unique=True, index=True, nullable=False)
     name: Mapped[str] = mapped_column(String(512), nullable=False, index=True)
-    legal_form: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    legal_form: Mapped[str | None] = mapped_column(String(128), nullable=True, index=True)
     status: Mapped[str | None] = mapped_column(String(64), nullable=True)
     municipality: Mapped[str | None] = mapped_column(String(256), nullable=True)
     canton: Mapped[str | None] = mapped_column(String(8), nullable=True)

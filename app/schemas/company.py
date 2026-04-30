@@ -150,6 +150,7 @@ class CompanyRead(CompanyBase):
     model_config = ConfigDict(from_attributes=True)
 
     id: int
+    purpose_language: str | None = None
     website_checked_at: datetime | None = None
     google_search_results_raw: str | None = None
     web_score: int | None = None

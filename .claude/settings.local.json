@@ -230,7 +230,8 @@
       "Bash(python -m pytest tests/ -x --tb=short -q)",
       "Bash(find /c/D/coding_projects/zefix_analyzer/frontend/src/app/[locale]/app/collection -type f)",
       "Bash(curl -s https://ghcr.io/v2/tensorchord/cloudnative-pgvector/tags/list)",
-      "Bash(skopeo list-tags *)"
+      "Bash(skopeo list-tags *)",
+      "Bash(grep -E \"\\(\\\\.tsx|\\\\.ts|\\\\.py\\)$\")"
     ]
   }
 }

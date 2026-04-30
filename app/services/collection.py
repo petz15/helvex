@@ -827,7 +827,7 @@ def _score_google_results_for_company(db: Session, company: Company, raw_results
     use_fallback = bool(top_window) and irrelevant_count >= ((len(top_window) + 1) // 2)
 
     scored: list[dict] = []
-    for rr in raw_results:
+    for idx, rr in enumerate(raw_results):
         row = {
             "title": rr.get("title", "") or "",
             "link": rr.get("link", "") or "",
@@ -853,6 +853,7 @@ def _score_google_results_for_company(db: Session, company: Company, raw_results
                 address=company.address,
                 directory_domains=directory_domains,
                 purpose_stopwords=purpose_stopwords,
+                position=idx,
             )
 
         scored.append({**row, "score": s})
@@ -1803,19 +1804,9 @@ def reclassify_noga(
                     stats["skipped_existing"] += 1
                     continue
 
-                if only_detailed_raw:
-                    raw_text = (company.zefix_raw or "").strip()
-                    if not raw_text:
-                        stats["skipped_not_detailed"] += 1
-                        continue
-                    try:
-                        raw = json.loads(raw_text)
-                    except json.JSONDecodeError:
-                        stats["skipped_not_detailed"] += 1
-                        continue
-                    if not isinstance(raw, dict) or not _is_detailed_zefix_raw_payload(raw):
-                        stats["skipped_not_detailed"] += 1
-                        continue
+                if only_detailed_raw and not (company.purpose or "").strip():
+                    stats["skipped_not_detailed"] += 1
+                    continue
 
                 # Branches are handled inside apply_noga_classification:
                 # they inherit the parent's NOGA when available, or clear stale

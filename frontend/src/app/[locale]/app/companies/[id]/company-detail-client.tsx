@@ -343,7 +343,29 @@ export function CompanyDetailClient({ company: initial, readOnlyDemo = false }: 
         {/* Classification */}
         <div className="bg-white rounded-xl border border-slate-200 p-5 space-y-4 shadow-sm">
           <h2 className="text-base font-semibold text-slate-800">{t.classification}</h2>
-          
+
+          {company.purpose_language && (() => {
+            const LANG_META: Record<string, { flag: string; label: string }> = {
+              de: { flag: "🇩🇪", label: "German" },
+              fr: { flag: "🇫🇷", label: "French" },
+              it: { flag: "🇮🇹", label: "Italian" },
+              en: { flag: "🇬🇧", label: "English" },
+              rm: { flag: "🏔️", label: "Romansh" },
+            };
+            const meta = LANG_META[company.purpose_language] ?? { flag: "🌐", label: company.purpose_language.toUpperCase() };
+            return (
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-medium text-slate-500">Purpose language</span>
+                <Link href={`/app/search?purpose_language=${encodeURIComponent(company.purpose_language)}`}>
+                  <Badge className="bg-indigo-50 text-indigo-700 text-xs cursor-pointer hover:bg-indigo-100 gap-1">
+                    <span>{meta.flag}</span>
+                    <span>{meta.label}</span>
+                  </Badge>
+                </Link>
+              </div>
+            );
+          })()}
+
           {(company.tfidf_cluster || company.purpose_keywords) && (
             <div className="pt-2 border-t border-slate-100 space-y-2">
               {company.tfidf_cluster && (

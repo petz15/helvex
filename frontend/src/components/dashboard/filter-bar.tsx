@@ -86,6 +86,7 @@ const CHIP_LABELS: Partial<Record<keyof CompanyFilters, string>> = {
   google_searched: "Web search", tags: "Tags", ai_category: "AI Class.",
   tfidf_cluster: "Cluster", purpose_keywords: "Keyword",
   noga_code: "NOGA code", noga_label: "NOGA label", noga_level: "NOGA level",
+  purpose_language: "Language",
   business_model: "Business model",
   legal_form: "Legal form", registered_after: "First SOGC after", registered_before: "First SOGC before",
   min_web_score: "Min Web", max_web_score: "Max Web",
@@ -445,6 +446,24 @@ export function FilterBar({
                 onChange={(v) => set("legal_form", v)}
                 placeholder={t.search.replace("{input}", t.legalform)}
               />
+            </div>
+            <div>
+              <Label>Language</Label>
+              <div className="relative">
+                <select
+                  className={cn(selectCls)}
+                  value={filters.purpose_language ?? ""}
+                  onChange={(e) => set("purpose_language", e.target.value)}
+                >
+                  <option value="">All</option>
+                  <option value="de">🇩🇪 German</option>
+                  <option value="fr">🇫🇷 French</option>
+                  <option value="it">🇮🇹 Italian</option>
+                  <option value="en">🇬🇧 English</option>
+                  <option value="rm">Romansh</option>
+                </select>
+                <ChevronDown size={13} className="pointer-events-none absolute right-2 top-2 text-slate-400" />
+              </div>
             </div>
             <div>
               <Label>{t.firstsogcafter}</Label>

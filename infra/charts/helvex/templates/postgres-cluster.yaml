@@ -36,6 +36,8 @@ spec:
       owner: {{ .Values.postgres.owner }}
       secret:
         name: {{ .Values.envSecretName }}
+      postInitApplicationSQL:
+        - CREATE EXTENSION IF NOT EXISTS vector
     {{- end }}
 
   superuserSecret:
