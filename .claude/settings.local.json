@@ -231,7 +231,13 @@
       "Bash(find /c/D/coding_projects/zefix_analyzer/frontend/src/app/[locale]/app/collection -type f)",
       "Bash(curl -s https://ghcr.io/v2/tensorchord/cloudnative-pgvector/tags/list)",
       "Bash(skopeo list-tags *)",
-      "Bash(grep -E \"\\(\\\\.tsx|\\\\.ts|\\\\.py\\)$\")"
+      "Bash(grep -E \"\\(\\\\.tsx|\\\\.ts|\\\\.py\\)$\")",
+      "WebFetch(domain:www.simap.ch)",
+      "Bash(curl -s \"https://www.simap.ch/publications/v2/project/project-search?projectSubTypes=award&orderAddressCountryOnlySwitzerland=true\")",
+      "Bash(python -m json.tool)",
+      "Bash(curl -sv \"https://www.simap.ch/publications/v2/project/project-search?projectSubTypes=award&orderAddressCountryOnlySwitzerland=true\")",
+      "Bash(curl -s -H \"Accept: application/json\" \"https://www.simap.ch/api/publications/v2/project/project-search?projectSubTypes=award&orderAddressCountryOnlySwitzerland=true\")",
+      "Bash(curl -s -H \"Accept: application/json\" \"https://www.simap.ch/api/publications/v2/project/project-search?projectSubTypes=service&newestPubTypes=award_tender&orderAddressCountryOnlySwitzerland=true\")"
     ]
   }
 }

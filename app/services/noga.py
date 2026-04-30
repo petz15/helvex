@@ -298,10 +298,7 @@ def classify_company_noga(db: Session, company: Company) -> NogaClassification |
         for code in idx.token_to_codes.get(tok, set()):
             token_scores[code] = token_scores.get(code, 0.0) + 1.0
 
-    if not token_scores:
-        return None
-
-    max_tok = max(token_scores.values())
+    max_tok = max(token_scores.values()) if token_scores else 1.0
     norm_token: dict[str, float] = {c: s / max_tok for c, s in token_scores.items()}
 
     # --- Embedding re-rank via pgvector ---
@@ -315,12 +312,18 @@ def classify_company_noga(db: Session, company: Company) -> NogaClassification |
 
     use_embeddings = bool(embed_text) and _has_noga_embeddings(db)
 
+    # If there is no token overlap with the NOGA taxonomy AND embeddings are
+    # unavailable, we genuinely cannot classify this company.
+    if not token_scores and not use_embeddings:
+        return None
+
     if use_embeddings:
         query_vec = _embed_query(embed_text)
         if query_vec is not None:
             emb_results = _pgvector_search(db, query_vec, lang)
 
-            # Hybrid re-rank: weighted sum of embedding sim + token overlap
+            # Hybrid re-rank: weighted sum of embedding sim + token overlap.
+            # When token_scores is empty this degrades gracefully to pure-embedding.
             hybrid: dict[str, float] = {}
             for code, sim in emb_results:
                 hybrid[code] = _W_EMB * sim + _W_TOK * norm_token.get(code, 0.0)
@@ -328,6 +331,9 @@ def classify_company_noga(db: Session, company: Company) -> NogaClassification |
             for code, tok_score in norm_token.items():
                 if code not in hybrid:
                     hybrid[code] = _W_TOK * tok_score
+
+            if not hybrid:
+                return None
 
             best_code = _pick_best_code(hybrid)
 
@@ -340,11 +346,13 @@ def classify_company_noga(db: Session, company: Company) -> NogaClassification |
             confidence = max(0.0, min(1.0, best_sim))
         else:
             # Embedding failed; token-only fallback
+            if not token_scores:
+                return None
             best_code = _pick_best_code(norm_token)
             total = sum(token_scores.values())
             confidence = token_scores.get(best_code, 0.0) / total if total > 0 else 0.0
     else:
-        # No embeddings available yet (table empty) — token-only
+        # No embeddings available (table empty) — token-only
         best_code = _pick_best_code(token_scores)
         total = sum(token_scores.values())
         confidence = float(token_scores.get(best_code, 0.0) / total) if total > 0 else 0.0

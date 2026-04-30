@@ -9,6 +9,7 @@
     - CRM stuff ? pipeline is already in place, more to come?
     - History of removed companies (?)
     - People finder and graph of connections potentially with linkedin?
+    - Add Simap information for tenders and awards (only difficulty is how the tenders from public institutions are displayed as I have no entries for them in the Helvex DB...maybe could add?)
 
 
 - **Major features**: 
@@ -23,8 +24,18 @@
 
 ### MVP before public PROD
 - Tiers are enforced - partially done (not fully checked and web searches are not gated yet + always uses api instead of checking if data already exists)
+- Fix SHAB History!
+- Different SHAB import as fallback?
+- Clean code, completely clean up old code -> maybe only with better claude subscription
 - Decide on VAT if include or exclude
 - And Set up DEV env
+- Potentially transition away from redis already for prod. Dont fully see the use of it besides more complexity
+- Improve Explore page
+- Potentially add some features
+    - notifications of new companies
+    - overview of SHAB changes cleanier, seperate page with preprocessing
+    - Overview of People mentioned in the SHAB. Search for them and connections between multiple companies (I think competitors have that)
+    - SIMAP
 
 ## PROD CHANGES
 - wordline notification url
