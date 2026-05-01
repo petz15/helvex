@@ -389,6 +389,7 @@ class ReextractPurposeBody(BaseModel):
 
 class ReclassifyNogaBody(BaseModel):
     only_missing_noga: bool = False
+    include_stale: bool = False
     only_detailed_raw: bool = True
 
 
@@ -577,6 +578,8 @@ def trigger_reclassify_noga(
     label = "Reclassify NOGA from local taxonomy"
     if body.only_missing_noga:
         label += " (missing only)"
+    if body.include_stale:
+        label += " + stale"
     if body.only_detailed_raw:
         label += " (detailed zefix_raw only)"
     job = _enqueue_or_http_error(
