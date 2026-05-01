@@ -555,6 +555,7 @@ def _run_job(app, job_id: int) -> None:  # noqa: C901
                     db,
                     resume_from=resume_from,
                     only_missing_noga=bool(params.get("only_missing_noga", False)),
+                    include_stale=bool(params.get("include_stale", False)),
                     only_detailed_raw=bool(params.get("only_detailed_raw", True)),
                     progress_cb=_progress,
                 )

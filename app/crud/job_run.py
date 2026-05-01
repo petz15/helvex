@@ -474,9 +474,35 @@ def list_waiting_llm_batches(db: Session) -> list[JobRun]:
     )
 
 
-def has_shab_daily_run_today(db: Session) -> bool:
-    """Return True if a shab_daily job was queued, is running, or completed today (UTC).
+def has_noga_nightly_run_today(db: Session) -> bool:
+    """Return True if a noga_nightly reclassify_noga job is active or completed today (UTC).
 
+    Failed and cancelled jobs are excluded so a crash doesn't block the next attempt.
+    """
+    from datetime import timedelta
+
+    today_start = datetime.now(tz=timezone.utc).replace(
+        hour=0, minute=0, second=0, microsecond=0
+    )
+    today_end = today_start + timedelta(days=1)
+    return (
+        db.query(JobRun)
+        .filter(
+            JobRun.job_type == "reclassify_noga",
+            JobRun.queued_at >= today_start,
+            JobRun.queued_at < today_end,
+            JobRun.status.notin_(["failed", "cancelled"]),
+        )
+        .first()
+        is not None
+    )
+
+
+def has_shab_daily_run_today(db: Session) -> bool:
+    """Return True if a shab_daily job is active or successfully completed today (UTC).
+
+    Failed and cancelled jobs are excluded so a fresh run is enqueued after
+    a crash rather than the scheduler staying blocked by a dead job.
     Used by the nightly scheduler to avoid duplicate enqueues.
     """
     from datetime import timedelta
@@ -491,6 +517,7 @@ def has_shab_daily_run_today(db: Session) -> bool:
             JobRun.job_type == "shab_daily",
             JobRun.queued_at >= today_start,
             JobRun.queued_at < today_end,
+            JobRun.status.notin_(["failed", "cancelled"]),
         )
         .first()
         is not None

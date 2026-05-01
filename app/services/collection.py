@@ -1766,10 +1766,17 @@ def reclassify_noga(
     batch_size: int = 500,
     resume_from: int = 0,
     only_missing_noga: bool = False,
+    include_stale: bool = False,
     only_detailed_raw: bool = True,
     progress_cb: Any = None,
 ) -> dict[str, Any]:
-    """Bulk (re)classify companies with NOGA based on local taxonomy data."""
+    """Bulk (re)classify companies with NOGA based on local taxonomy data.
+
+    include_stale=True also selects companies whose noga_classified_at is more
+    than 5 minutes older than updated_at — meaning the record was updated
+    (e.g. by a SHAB mutation) after the last NOGA run.  The 5-minute buffer
+    prevents re-classifying companies that were just written by this very job.
+    """
     stats: dict[str, Any] = {
         "selected": 0,
         "updated": 0,
@@ -1781,8 +1788,30 @@ def reclassify_noga(
     }
 
     query = db.query(Company)
-    if only_missing_noga:
+    if only_missing_noga and not include_stale:
         query = query.filter(Company.noga_code.is_(None))
+    elif only_missing_noga and include_stale:
+        from sqlalchemy import or_ as _or, and_ as _and, text as _sqlt
+        query = query.filter(
+            _or(
+                Company.noga_code.is_(None),
+                _and(
+                    Company.noga_classified_at.isnot(None),
+                    Company.noga_classified_at < Company.updated_at - _sqlt("interval '5 minutes'"),
+                ),
+            )
+        )
+    elif include_stale:
+        from sqlalchemy import or_ as _or, and_ as _and, text as _sqlt
+        query = query.filter(
+            _or(
+                Company.noga_code.is_(None),
+                _and(
+                    Company.noga_classified_at.isnot(None),
+                    Company.noga_classified_at < Company.updated_at - _sqlt("interval '5 minutes'"),
+                ),
+            )
+        )
 
     total = query.count()
     stats["selected"] = total
@@ -1800,7 +1829,7 @@ def reclassify_noga(
 
         for company in batch:
             try:
-                if only_missing_noga and company.noga_code:
+                if only_missing_noga and not include_stale and company.noga_code:
                     stats["skipped_existing"] += 1
                     continue
 

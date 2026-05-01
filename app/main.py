@@ -271,11 +271,11 @@ def _maybe_enqueue_billing_renewal(app) -> None:
 
 
 def _start_nightly_shab_scheduler(app) -> None:
-    """Start a background daemon thread that auto-enqueues a shab_daily job each night.
+    """Start a background daemon thread for nightly SHAB import and NOGA classification.
 
-    The thread wakes up every 10 minutes and, once the clock enters the
-    02:00–02:59 window in Europe/Zurich time, enqueues a shab_daily job for
-    yesterday if one has not already been queued today.
+    Wakes every 10 minutes.
+      02:00–02:59 Zurich → enqueues shab_daily for yesterday
+      03:00–03:59 Zurich → enqueues reclassify_noga (missing + stale) on helvex-ml
     """
     import threading
     import time
@@ -286,7 +286,11 @@ def _start_nightly_shab_scheduler(app) -> None:
             try:
                 _maybe_enqueue_shab_daily(app)
             except Exception:  # noqa: BLE001
-                pass  # never crash the scheduler thread
+                pass
+            try:
+                _maybe_enqueue_noga_nightly(app)
+            except Exception:  # noqa: BLE001
+                pass
 
     t = threading.Thread(target=_scheduler_loop, daemon=True, name="shab-nightly-scheduler")
     t.start()
@@ -328,6 +332,50 @@ def _maybe_enqueue_shab_daily(app) -> None:
 
     kick_job_worker(app)
     logger.info("shab_nightly_scheduler: enqueued shab_daily for %s", yesterday)
+
+
+def _maybe_enqueue_noga_nightly(app) -> None:
+    """Enqueue a reclassify_noga job at 03:00–03:59 Zurich time if not already run today.
+
+    Targets companies with no NOGA entry or a stale classification (updated_at
+    is more than 5 minutes newer than noga_classified_at, e.g. after a SHAB
+    mutation changed the purpose).  Runs on helvex-ml via the normal job routing.
+    """
+    from datetime import datetime, timedelta, timezone
+
+    try:
+        from zoneinfo import ZoneInfo
+        tz_zurich = ZoneInfo("Europe/Zurich")
+    except Exception:  # noqa: BLE001
+        tz_zurich = timezone(timedelta(hours=1))
+
+    now_local = datetime.now(tz=tz_zurich)
+    if now_local.hour != 3:
+        return
+
+    from app.crud import create_event, create_job
+    from app.crud.job_run import has_noga_nightly_run_today
+    from app.database import SessionLocal
+    from app.services.job_worker import kick_job_worker
+
+    with SessionLocal() as db:
+        if has_noga_nightly_run_today(db):
+            return
+
+        job = create_job(
+            db,
+            job_type="reclassify_noga",
+            label="NOGA nightly classification — missing + stale (auto)",
+            params={
+                "only_missing_noga": True,
+                "include_stale": True,
+                "only_detailed_raw": True,
+            },
+        )
+        create_event(db, job_id=job.id, level="info", message="Auto-queued by nightly scheduler")
+
+    kick_job_worker(app)
+    logger.info("shab_nightly_scheduler: enqueued noga_nightly reclassify_noga")
 
 
 def _warm_taxonomy_cache(app_state) -> None:

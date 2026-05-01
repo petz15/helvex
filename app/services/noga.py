@@ -225,13 +225,14 @@ _noga_embeddings_present: bool | None = None
 
 def _has_noga_embeddings(db: Session) -> bool:
     global _noga_embeddings_present
-    if _noga_embeddings_present is None:
-        try:
-            row = db.execute(sql_text("SELECT 1 FROM noga_embeddings LIMIT 1")).fetchone()
-            _noga_embeddings_present = row is not None
-        except Exception:
-            _noga_embeddings_present = False
-    return _noga_embeddings_present
+    if _noga_embeddings_present:  # only skip the DB check once confirmed present
+        return True
+    try:
+        row = db.execute(sql_text("SELECT 1 FROM noga_embeddings LIMIT 1")).fetchone()
+        _noga_embeddings_present = row is not None
+    except Exception:
+        _noga_embeddings_present = False
+    return bool(_noga_embeddings_present)
 
 
 # ---------------------------------------------------------------------------

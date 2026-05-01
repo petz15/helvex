@@ -178,10 +178,12 @@ def import_shab_publications(
                     stats["updated"] += 1
 
                 try:
-                    enriched = enrich_company(db, company)
+                    # noga=False: NOGA classification requires the sentence-transformer
+                    # model (~420MB) which is only available on helvex-ml, not this
+                    # zefix worker. New companies are picked up by reclassify_noga.
+                    enriched = enrich_company(db, company, noga=False)
                     stats["geocoded"] += enriched["geocoded"]
                     stats["keywords"] += enriched["keywords"]
-                    stats["noga_classified"] += enriched["noga_classified"]
                 except Exception:  # noqa: BLE001
                     pass
 
