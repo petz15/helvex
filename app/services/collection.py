@@ -1815,12 +1815,19 @@ def reclassify_noga(
 
     total = query.count()
     stats["selected"] = total
-    offset = max(0, min(resume_from, total))
+
+    # Cursor-based pagination: track the last seen ID so that records dropping
+    # out of the filter (e.g. noga_code becoming non-NULL) don't cause every
+    # other batch to be silently skipped (offset-based pagination breaks when
+    # the filter is mutable).
+    # resume_from is a company ID (cursor), not a row offset
+    last_id: int = resume_from
+    processed: int = 0
 
     while True:
         batch = (
-            query.order_by(Company.id.asc())
-            .offset(offset)
+            query.filter(Company.id > last_id)
+            .order_by(Company.id.asc())
             .limit(batch_size)
             .all()
         )
@@ -1856,10 +1863,11 @@ def reclassify_noga(
                 stats["errors"].append(f"{company.uid} [{type(exc).__name__}]: {exc}")
 
         db.commit()
-        offset += len(batch)
+        last_id = batch[-1].id
+        processed += len(batch)
 
         if progress_cb:
-            progress_cb(min(offset, total), total, stats)
+            progress_cb(processed, total, stats)
 
     return stats
 

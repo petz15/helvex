@@ -56,6 +56,7 @@
 - Remove business model -> not useful and not correctly implemented (category detail page)
 - admin dashboard simple redirects non authorized users, maybe not the safest
 - NOGA: Zweigniederlassung ist falsch zbs: https://helvex.dicy.ch/app/companies/238698
+- NOGA nach embedding immernoch falsch aufgrund boiler sentences z.b. peter batt
 - Make sure that users without access to BYOL API keys, always use the one provided by me (hidden not shown visible to the user)
 - Fix translations for all pages (only headers etc done, needs more)
     - Such as filters

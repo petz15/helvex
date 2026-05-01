@@ -303,8 +303,13 @@ def classify_company_noga(db: Session, company: Company) -> NogaClassification |
     norm_token: dict[str, float] = {c: s / max_tok for c, s in token_scores.items()}
 
     # --- Embedding re-rank via pgvector ---
+    # Use the same boilerplate-stripped purpose used for token extraction so that
+    # legal phrasing doesn't pollute the embedding and drag similarity toward
+    # generic NOGA categories.
+    boilerplate_patterns = crud.get_active_boilerplate_patterns(db)
+    stripped_purpose = _strip_purpose_boilerplate(company.purpose or "", boilerplate_patterns)
     embed_text = " ".join(filter(None, [
-        company.purpose or "",
+        stripped_purpose,
         (company.purpose_keywords or "").replace(",", " "),
     ])).strip()
 

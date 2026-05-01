@@ -237,7 +237,14 @@
       "Bash(python -m json.tool)",
       "Bash(curl -sv \"https://www.simap.ch/publications/v2/project/project-search?projectSubTypes=award&orderAddressCountryOnlySwitzerland=true\")",
       "Bash(curl -s -H \"Accept: application/json\" \"https://www.simap.ch/api/publications/v2/project/project-search?projectSubTypes=award&orderAddressCountryOnlySwitzerland=true\")",
-      "Bash(curl -s -H \"Accept: application/json\" \"https://www.simap.ch/api/publications/v2/project/project-search?projectSubTypes=service&newestPubTypes=award_tender&orderAddressCountryOnlySwitzerland=true\")"
+      "Bash(curl -s -H \"Accept: application/json\" \"https://www.simap.ch/api/publications/v2/project/project-search?projectSubTypes=service&newestPubTypes=award_tender&orderAddressCountryOnlySwitzerland=true\")",
+      "Bash(awk -F: '{print $3}')",
+      "Bash(awk '/^\\(def|async def\\) /{if\\(fname\\)print fname\": \"lines\" lines\"; fname=$2; lines=0} {lines++} END{if\\(fname\\)print fname\": \"lines\" lines\"}' /c/D/coding_projects/zefix_analyzer/app/services/payments.py)",
+      "Bash(sort -t: -k2 -rn)",
+      "Bash(awk '/^@router|^def |^async def /{if\\(fname\\)print fname\": \"lines\" lines\"; fname=$2; lines=0} {lines++} END{if\\(fname\\)print fname\": \"lines\" lines\"}' /c/D/coding_projects/zefix_analyzer/app/api/routes/jobs.py)",
+      "Bash(awk '/^def |^async def /{if\\(fname\\)print fname\": \"lines\" lines\"; fname=$2; lines=0} {lines++} END{if\\(fname\\)print fname\": \"lines\" lines\"}' /c/D/coding_projects/zefix_analyzer/app/crud/company.py)",
+      "Bash(python3 -c \"from app.models.company import Company; import inspect; cols = [m for m in dir\\(Company\\) if not m.startswith\\('_'\\)]; print\\('\\\\n'.join\\([c for c in cols if c in ['review_status', 'contact_status', 'contact_name', 'contact_email', 'contact_phone', 'tags']]\\)\\)\")",
+      "Bash(git -C \"c:/D/coding_projects/zefix_analyzer\" diff HEAD~3 HEAD -- app/services/noga.py app/services/collection.py)"
     ]
   }
 }
