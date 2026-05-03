@@ -120,6 +120,33 @@ def list_my_orgs(
     return result
 
 
+@router.get(
+    "/{org_id}",
+    response_model=OrgOut,
+    summary="Get organization details",
+)
+def get_org(
+    org_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> OrgOut:
+    org = db.get(Organization, org_id)
+    if not org:
+        raise HTTPException(status_code=404, detail="Organization not found")
+
+    member = _get_member_row(db, org_id, current_user.id)
+    if member is None and not current_user.is_superadmin:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not a member of this org")
+
+    return OrgOut(
+        id=org.id,
+        name=org.name,
+        slug=org.slug,
+        tier=org.tier,
+        role=member.role if member else None,
+    )
+
+
 # ---------------------------------------------------------------------------
 # Switch active org
 # ---------------------------------------------------------------------------
