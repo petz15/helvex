@@ -36,18 +36,10 @@ class CompanyBase(BaseModel):
     first_sogc_date: str | None = None
     deletion_date: str | None = None
     # Extended detail fields (from per-UID Zefix endpoint)
-    sogc_pub: str | None = None
     capital_nominal: str | None = None
     capital_currency: str | None = None
     head_offices: str | None = None
-    further_head_offices: str | None = None
-    branch_offices: str | None = None
-    has_taken_over: str | None = None
-    was_taken_over_by: str | None = None
-    audit_companies: str | None = None
-    old_names: str | None = None
     cantonal_excerpt_web: str | None = None
-    translations: str | None = None
     zefix_detail_web: str | None = None
     address_city: str | None = None
     address_zip: str | None = None
@@ -110,18 +102,10 @@ class CompanyUpdate(BaseModel):
     first_sogc_date: str | None = None
     deletion_date: str | None = None
     # Extended detail fields
-    sogc_pub: str | None = None
     capital_nominal: str | None = None
     capital_currency: str | None = None
     head_offices: str | None = None
-    further_head_offices: str | None = None
-    branch_offices: str | None = None
-    has_taken_over: str | None = None
-    was_taken_over_by: str | None = None
-    audit_companies: str | None = None
-    old_names: str | None = None
     cantonal_excerpt_web: str | None = None
-    translations: str | None = None
     zefix_detail_web: str | None = None
     address_city: str | None = None
     address_zip: str | None = None

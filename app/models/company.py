@@ -52,18 +52,10 @@ class Company(Base):
     first_sogc_date: Mapped[str | None] = mapped_column(String(32), nullable=True, index=True)
     deletion_date: Mapped[str | None] = mapped_column(String(32), nullable=True)
     # Extended Zefix detail fields (populated from per-UID endpoint only)
-    sogc_pub: Mapped[str | None] = mapped_column(Text, nullable=True)  # JSON array
     capital_nominal: Mapped[str | None] = mapped_column(String(64), nullable=True)
     capital_currency: Mapped[str | None] = mapped_column(String(16), nullable=True)
     head_offices: Mapped[str | None] = mapped_column(Text, nullable=True)  # JSON
-    further_head_offices: Mapped[str | None] = mapped_column(Text, nullable=True)  # JSON
-    branch_offices: Mapped[str | None] = mapped_column(Text, nullable=True)  # JSON
-    has_taken_over: Mapped[str | None] = mapped_column(Text, nullable=True)  # JSON
-    was_taken_over_by: Mapped[str | None] = mapped_column(Text, nullable=True)  # JSON
-    audit_companies: Mapped[str | None] = mapped_column(Text, nullable=True)  # JSON
-    old_names: Mapped[str | None] = mapped_column(Text, nullable=True)  # JSON
     cantonal_excerpt_web: Mapped[str | None] = mapped_column(String(1024), nullable=True)
-    translations: Mapped[str | None] = mapped_column(Text, nullable=True)  # JSON array
     zefix_detail_web: Mapped[str | None] = mapped_column(String(1024), nullable=True)
     address_city: Mapped[str | None] = mapped_column(String(256), nullable=True)
     address_zip: Mapped[str | None] = mapped_column(String(16), nullable=True)

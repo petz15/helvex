@@ -125,9 +125,19 @@ def _phase1_idf_analysis(db: Session) -> int:
         return 0
 
     try:
-        import pickle
-        vec_bytes = s3_client.download_model_bytes("models/tfidf_vectorizer.pkl")
-        vectorizer = pickle.loads(vec_bytes)  # noqa: S301
+        import io
+        import json
+        import numpy as np
+        from sklearn.feature_extraction.text import TfidfVectorizer
+
+        vocab_bytes = s3_client.download_model_bytes("models/tfidf_vocabulary.json")
+        idf_bytes = s3_client.download_model_bytes("models/tfidf_idf.npy")
+        vocab: dict[str, int] = json.loads(vocab_bytes.decode("utf-8"))
+        idf_array = np.load(io.BytesIO(idf_bytes), allow_pickle=False)
+
+        vectorizer = TfidfVectorizer()
+        vectorizer.vocabulary_ = vocab
+        vectorizer.idf_ = idf_array
     except Exception as exc:
         logger.info("Phase 1: could not load vectorizer from S3 (%s), skipping", exc)
         return 0
@@ -152,8 +162,8 @@ def _phase1_idf_analysis(db: Session) -> int:
         try:
             crud.upsert_tfidf_stopword(db, term=term, enabled=False, source="idf_analysis")
             written += 1
-        except Exception:  # noqa: BLE001
-            pass
+        except Exception:
+            logger.warning("Phase 1: failed to upsert stopword %r", term, exc_info=True)
     db.commit()
     logger.info("Phase 1: staged %d low-IDF stopword candidates", written)
     return written
@@ -215,8 +225,8 @@ def _phase2_sentence_dedup(db: Session) -> int:
                 source="sentence_dedup",
             )
             written += 1
-        except Exception:  # noqa: BLE001
-            pass
+        except Exception:
+            logger.warning("Phase 2: failed to upsert boilerplate pattern", exc_info=True)
     db.commit()
     logger.info("Phase 2: staged %d boilerplate sentence patterns (threshold: %d companies)", written, _BOILERPLATE_MIN_MATCH_COUNT)
     return written
@@ -269,8 +279,8 @@ def _phase3_cross_cluster(db: Session) -> int:
         try:
             crud.upsert_tfidf_stopword(db, term=term, enabled=False, source="cross_cluster")
             written += 1
-        except Exception:  # noqa: BLE001
-            pass
+        except Exception:
+            logger.warning("Phase 3: failed to upsert stopword %r", term, exc_info=True)
     db.commit()
     logger.info("Phase 3: staged %d cross-cluster stopword candidates (label freq >= %.0f%%)", written, _CROSS_CLUSTER_LABEL_FREQ_THRESHOLD * 100)
     return written

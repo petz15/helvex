@@ -159,9 +159,12 @@ class _ConfirmEmailChangeRequest(_BaseModel):
 @router.post("/confirm-email-change", status_code=204,
              summary="Confirm an email address change via signed token")
 def confirm_email_change_api(
+    request: Request,
     body: _ConfirmEmailChangeRequest,
     db: Session = Depends(get_db),
 ) -> None:
+    if not check_public_rate_limit(get_client_ip(request), "confirm-email-change", window=3600, max_requests=5):
+        raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail="Too many requests. Try again later.")
     result = decode_email_change_token(body.token)
     if result is None:
         raise HTTPException(
@@ -276,7 +279,7 @@ def verify_email(token: str, db: Session = Depends(get_db)) -> UserRead:
         try:
             send_welcome_email(to=user.email)
         except Exception:
-            pass
+            logger.warning("Failed to send welcome email to %s", user.email, exc_info=True)
     return UserRead.model_validate(user)
 
 
@@ -412,6 +415,8 @@ def add_my_billing_address(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> BillingAddressBookRead:
+    if not check_public_rate_limit(str(current_user.id), "billing-addr-write", window=60, max_requests=10):
+        raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail="Too many requests. Try again later.")
     managed_user = _managed_current_user(db, current_user)
     addresses, default_id = parse_billing_address_book(managed_user.billing_address_json)
 
@@ -436,6 +441,8 @@ def set_default_my_billing_address(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> BillingAddressBookRead:
+    if not check_public_rate_limit(str(current_user.id), "billing-addr-write", window=60, max_requests=10):
+        raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail="Too many requests. Try again later.")
     managed_user = _managed_current_user(db, current_user)
     addresses, _default_id = parse_billing_address_book(managed_user.billing_address_json)
     if not addresses:
@@ -455,6 +462,8 @@ def delete_my_billing_address(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> BillingAddressBookRead:
+    if not check_public_rate_limit(str(current_user.id), "billing-addr-write", window=60, max_requests=10):
+        raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail="Too many requests. Try again later.")
     managed_user = _managed_current_user(db, current_user)
     addresses, default_id = parse_billing_address_book(managed_user.billing_address_json)
     kept = [a for a in addresses if str(a.get("id")) != address_id]
@@ -562,7 +571,7 @@ async def google_callback(
         return _Redirect(url=f"{_public_base_url(request)}/login?oauth_error=1", status_code=302)
 
     stored_state = request.cookies.get(_OAUTH_STATE_COOKIE)
-    if not stored_state or stored_state != state or not code:
+    if not stored_state or not code or not _secrets.compare_digest(stored_state, state or ""):
         raise HTTPException(status_code=400, detail="Invalid OAuth state or missing code")
 
     try:
@@ -648,7 +657,7 @@ async def linkedin_callback(
         return _Redirect(url=f"{_public_base_url(request)}/login?oauth_error=1", status_code=302)
 
     stored_state = request.cookies.get(_OAUTH_STATE_COOKIE)
-    if not stored_state or stored_state != state or not code:
+    if not stored_state or not code or not _secrets.compare_digest(stored_state, state or ""):
         raise HTTPException(status_code=400, detail="Invalid OAuth state or missing code")
 
     try:

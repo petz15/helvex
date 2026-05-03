@@ -311,26 +311,8 @@ def get_client_ip(request: Request) -> str:
     return peer_ip
 
 
-def _get_redis():
-    """Return a Redis client if configured, else None."""
-    try:
-        from app.config import settings as _s
-        if not _s.redis_url:
-            return None
-        import redis as _redis
-        client = _redis.Redis.from_url(_s.redis_url, socket_connect_timeout=1, socket_timeout=1)
-        client.ping()
-        return client
-    except Exception:
-        return None
-
-
 def is_login_allowed(ip: str) -> bool:
     """Return True if this IP can attempt another login."""
-    r = _get_redis()
-    if r is not None:
-        count = r.get(f"rl:login:{ip}")
-        return int(count) < _RATE_MAX if count else True
     now = time.monotonic()
     attempts = [t for t in _login_attempts[ip] if now - t < _RATE_WINDOW]
     _login_attempts[ip] = attempts
@@ -339,14 +321,6 @@ def is_login_allowed(ip: str) -> bool:
 
 def record_login_failure(ip: str) -> None:
     """Record one failed login attempt for this IP."""
-    r = _get_redis()
-    if r is not None:
-        key = f"rl:login:{ip}"
-        pipe = r.pipeline()
-        pipe.incr(key)
-        pipe.expire(key, _RATE_WINDOW)
-        pipe.execute()
-        return
     now = time.monotonic()
     attempts = [t for t in _login_attempts[ip] if now - t < _RATE_WINDOW]
     attempts.append(now)
@@ -364,19 +338,9 @@ def check_login_rate_limit(ip: str) -> bool:
 def check_public_rate_limit(ip: str, action: str, *, window: float = 900, max_requests: int = 5) -> bool:
     """Rate-limit a public endpoint by IP + action label.
 
-    Counts every call (success or failure). Returns False when the IP exceeds
-    *max_requests* within *window* seconds for this action.
+    Uses an in-process sliding window (per pod). Precise for single-pod deployments;
+    provides best-effort protection in multi-pod setups.
     """
-    r = _get_redis()
-    if r is not None:
-        # Fixed window: TTL starts on the first request and is not extended
-        # by subsequent requests. This avoids a "keep retrying → never resets"
-        # behavior.
-        key = f"rl:{action}:{ip}"
-        count = int(r.incr(key))
-        if count == 1:
-            r.expire(key, int(window))
-        return count <= max_requests
     bucket = f"{action}:{ip}"
     now = time.monotonic()
     calls = [t for t in _request_counts[bucket] if now - t < window]

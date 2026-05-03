@@ -387,6 +387,10 @@ def _maybe_sync(app, **kwargs) -> None:
 
 def _run_job(app, job_id: int) -> None:  # noqa: C901
     """Execute one job. `app` may be None when called from an RQ worker."""
+    from app.metrics import record_job_duration, record_job_error, ACTIVE_JOBS
+    
+    job_start_time = time.monotonic()
+
     with SessionLocal() as db:
         job = crud.get_job(db, job_id)
         if not job:
@@ -400,6 +404,8 @@ def _run_job(app, job_id: int) -> None:  # noqa: C901
             _refund_job_credits_if_needed(db, job=job, reason="cancelled_before_start")
             crud.mark_cancelled(db, job, message="Cancelled before start")
             crud.create_event(db, job_id=job.id, level="info", message="Job cancelled before execution started")
+            duration = time.monotonic() - job_start_time
+            record_job_duration(job.job_type, duration, "cancelled")
             return
 
         crud.mark_running(db, job, message="Starting…")

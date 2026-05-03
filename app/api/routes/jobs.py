@@ -10,8 +10,9 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app import crud
-from app.api.zefix_client import SWISS_CANTONS
-from app.auth import check_public_rate_limit, get_client_ip, get_current_user, require_superadmin
+from app.clients.zefix_client import SWISS_CANTONS
+from app.auth import get_client_ip, get_current_user, require_superadmin
+from app.services.rate_limit import check_job_rate_limit, check_rate_limit
 from app.database import get_db
 from app.models.organization import Organization
 from app.models.user import User
@@ -217,25 +218,16 @@ def resume_job(job_id: int, request: Request, db: Session = Depends(get_db), cur
 def stream_active_jobs(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     """SSE stream that pushes the full job list as JSON on every change.
 
-    Two modes:
-    - Redis pub/sub (USE_RQ=true + REDIS_URL set): workers publish a lightweight
-      notification on status transitions (complete/fail/pause/cancel); the SSE
-      endpoint also polls DB every 2 s to forward progress-bar updates (workers
-      don't publish on every tick to avoid Redis churn).  Pub/sub events cause
-      an immediate DB re-fetch in addition to the periodic poll.
-    - DB poll fallback (thread mode / no Redis): polls DB every second and sends
-      an update only when the serialised result changes.  Still much better than
-      N clients each polling at 3 s intervals.
+    Polls DB every second and sends an update only when the serialised result
+    changes (much better than N clients each polling at 3 s intervals).
 
     A heartbeat comment is emitted every 30 s to keep the TCP connection alive
     through proxies.  SSE comments are never dispatched as 'message' events by
     the browser, so the frontend onmessage handler is never called for them.
     """
     import json as _json
-    from app.config import settings as _s
 
     HEARTBEAT_INTERVAL = 30
-    PROGRESS_POLL_INTERVAL = 2  # periodic DB poll in Redis mode for progress updates
 
     def _fetch_jobs() -> list[dict]:
         db.expire_all()
@@ -260,69 +252,21 @@ def stream_active_jobs(db: Session = Depends(get_db), current_user: User = Depen
         return [JobOut.from_orm_obj(j).model_dump() for j in merged]
 
     def event_generator():
-        if _s.use_rq and _s.redis_url:
-            # ── Redis pub/sub mode ──────────────────────────────────────────
-            # Pub/sub fires immediately on status transitions.
-            # A periodic 2 s DB poll forwards progress-bar updates that workers
-            # do not publish (publishing on every tick would flood Redis).
-            from redis import Redis
-            r = Redis.from_url(_s.redis_url)
-            channel = (
-                f"jobs:{current_user.org_id}"
-                if current_user.org_id is not None
-                else "jobs:superadmin"
-            )
-            pubsub = r.pubsub()
-            pubsub.subscribe(channel)
-            try:
-                last_sent: str | None = None
-                last_hb = time.time()
-                last_poll = time.time()
-
-                # Initial snapshot
-                initial = _json.dumps(_fetch_jobs())
-                yield f"data: {initial}\n\n"
-                last_sent = initial
-
-                while True:
-                    msg = pubsub.get_message(timeout=1.0)
-                    now = time.time()
-                    should_send = (msg and msg["type"] == "message") or (
-                        now - last_poll >= PROGRESS_POLL_INTERVAL
-                    )
-                    if should_send:
-                        last_poll = now
-                        current = _json.dumps(_fetch_jobs())
-                        if current != last_sent:
-                            yield f"data: {current}\n\n"
-                            last_sent = current
-                    if now - last_hb >= HEARTBEAT_INTERVAL:
-                        yield ": heartbeat\n\n"
-                        last_hb = now
-            finally:
-                try:
-                    pubsub.unsubscribe(channel)
-                    pubsub.close()
-                except Exception:  # noqa: BLE001
-                    pass
-        else:
-            # ── DB-poll fallback (thread / no-Redis mode) ───────────────────
-            last_sent: str | None = None
-            last_hb = time.time()
-            # Initial snapshot (always send, even if empty)
-            initial = _json.dumps(_fetch_jobs())
-            yield f"data: {initial}\n\n"
-            last_sent = initial
-            while True:
-                time.sleep(1)
-                current = _json.dumps(_fetch_jobs())
-                if current != last_sent:
-                    yield f"data: {current}\n\n"
-                    last_sent = current
-                now = time.time()
-                if now - last_hb >= HEARTBEAT_INTERVAL:
-                    yield ": heartbeat\n\n"
-                    last_hb = now
+        last_sent: str | None = None
+        last_hb = time.time()
+        initial = _json.dumps(_fetch_jobs())
+        yield f"data: {initial}\n\n"
+        last_sent = initial
+        while True:
+            time.sleep(1)
+            current = _json.dumps(_fetch_jobs())
+            if current != last_sent:
+                yield f"data: {current}\n\n"
+                last_sent = current
+            now = time.time()
+            if now - last_hb >= HEARTBEAT_INTERVAL:
+                yield ": heartbeat\n\n"
+                last_hb = now
 
     return StreamingResponse(
         event_generator(),
@@ -649,7 +593,7 @@ def trigger_reclassify_low_conf_noga(
 @router.post("/scoring/claude", response_model=JobOut, status_code=status.HTTP_202_ACCEPTED)
 def trigger_claude_classify(body: ClaudeClassifyBody, request: Request, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     # Rate limit: max 20 claude classify enqueues per user per 10 minutes.
-    _check_job_rate_limit(request, current_user, "claude_classify", window=600, max_calls=20)
+    check_job_rate_limit(request, current_user, "claude_classify", window=600, max_calls=20)
 
     # Non-org users have no credit balance — block to prevent free AI calls.
     if not current_user.is_superadmin and not current_user.org_id:
@@ -680,8 +624,7 @@ def trigger_claude_classify(body: ClaudeClassifyBody, request: Request, db: Sess
 
 
 _PREVIEW_MAX_COMPANIES = 5
-_PREVIEW_RATE_LIMIT = 3        # calls per org per window
-_PREVIEW_RATE_WINDOW = 86_400  # 24 hours in seconds
+_PREVIEW_RATE_LIMIT = 3  # calls per org per calendar day
 
 
 class ClaudePreviewBody(BaseModel):
@@ -732,50 +675,24 @@ def trigger_claude_preview(
 
     org_id = current_user.org_id
 
-    # ── Rate limiting ──────────────────────────────────────────────────────────
+    # ── Rate limiting (DB-backed daily counter per org) ────────────────────────
     if not current_user.is_superadmin and org_id:
-        rate_key = f"preview_rate:{org_id}"
-        allowed = True
-
-        # Try Redis first
+        from datetime import date as _date
+        from app.crud.app_setting import set_org_setting
+        today = _date.today().isoformat()
+        raw = crud.get_effective_setting(db, f"preview_count:{today}", org_id=org_id, default="0")
         try:
-            from app.config import settings as _cfg
-            if _cfg.redis_url:
-                import redis as _redis
-                r = _redis.Redis.from_url(_cfg.redis_url, socket_connect_timeout=1, socket_timeout=1)
-                count = int(r.incr(rate_key))
-                if count == 1:
-                    r.expire(rate_key, _PREVIEW_RATE_WINDOW)
-                if count > _PREVIEW_RATE_LIMIT:
-                    ttl = r.ttl(rate_key)
-                    raise HTTPException(
-                        status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-                        detail=f"Preview rate limit reached ({_PREVIEW_RATE_LIMIT}/day). Resets in {ttl}s.",
-                    )
-                previews_used = count
-                previews_remaining = max(0, _PREVIEW_RATE_LIMIT - count)
-            else:
-                raise RuntimeError("no redis")
-        except HTTPException:
-            raise
-        except Exception:
-            # Redis unavailable — fall back to org-setting counter (less precise but safe)
-            from datetime import date as _date
-            today = _date.today().isoformat()
-            raw = crud.get_effective_setting(db, f"preview_count:{today}", org_id=org_id, default="0")
-            try:
-                count = int(raw) + 1
-            except ValueError:
-                count = 1
-            if count > _PREVIEW_RATE_LIMIT:
-                raise HTTPException(
-                    status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-                    detail=f"Preview rate limit reached ({_PREVIEW_RATE_LIMIT}/day).",
-                )
-            from app.crud.app_setting import set_org_setting
-            set_org_setting(db, org_id=org_id, key=f"preview_count:{today}", value=str(count))
-            previews_used = count
-            previews_remaining = max(0, _PREVIEW_RATE_LIMIT - count)
+            count = int(raw) + 1
+        except ValueError:
+            count = 1
+        if count > _PREVIEW_RATE_LIMIT:
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail=f"Preview rate limit reached ({_PREVIEW_RATE_LIMIT}/day).",
+            )
+        set_org_setting(db, org_id=org_id, key=f"preview_count:{today}", value=str(count))
+        previews_used = count
+        previews_remaining = max(0, _PREVIEW_RATE_LIMIT - count)
     else:
         previews_used = 0
         previews_remaining = _PREVIEW_RATE_LIMIT
@@ -1100,7 +1017,7 @@ def enqueue_csv_export(
     The finished file is stored in S3 for 7 days.
     """
     # Rate limit: max 5 export enqueues per user per 10 minutes.
-    _check_job_rate_limit(request, current_user, "csv_export", window=600, max_calls=5)
+    check_job_rate_limit(request, current_user, "csv_export", window=600, max_calls=5)
 
     from app.services.s3_client import is_configured
     if not is_configured():

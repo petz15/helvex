@@ -13,7 +13,6 @@ from typing import TYPE_CHECKING
 from fastapi import Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_current_org
 from app.models.billing_tier import BillingTier
 from app.models.organization import Organization
 from app.models.user import User
@@ -460,7 +459,7 @@ def calculate_custom_tier_price(features: dict) -> float:
 # FastAPI dependency: require an org at a minimum tier
 # ---------------------------------------------------------------------------
 
-def require_org_tier(min_tier: str):
+def require_org_tier(min_tier: str):  # noqa: ANN201
     """Dependency factory — raises 403 if the active org's tier is below *min_tier*.
 
     Superadmins always pass.
@@ -474,8 +473,10 @@ def require_org_tier(min_tier: str):
     """
     required_rank = TIER_RANK.get(normalize_tier(min_tier), 0)
 
+    from app.api.deps import get_current_org as _get_current_org
+
     def _check(
-        user_org: tuple[User, Organization] = Depends(get_current_org),
+        user_org: tuple[User, Organization] = Depends(_get_current_org),
     ) -> tuple[User, Organization]:
         user, org = user_org
         if user.is_superadmin:

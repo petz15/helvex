@@ -19,7 +19,7 @@
    - [Scoring Logic](#scoring-logic)
    - [Classification Pipelines](#classification-pipelines-clustering-keywords-noga)
 9. [Frontend](#9-frontend)
-10. [Configuration & Secrets](#10-configuration--secrets)
+10. [Configuration & Environment](#10-configuration--environment)
 11. [Docker Build](#11-docker-build) — image types, ml-base split, Dockerfiles
 12. [CI/CD Pipelines](#12-cicd-pipelines) — parallel build graph, deploy modes
 13. [Kubernetes / Helm](#13-kubernetes--helm)
@@ -49,54 +49,61 @@ Helvex is a B2B company intelligence platform. It bulk-imports the entire Swiss 
 ```
 zefix_analyzer/
 ├── app/                        # Python backend (FastAPI)
-│   ├── main.py                 # App factory, middleware, HTML auth routes
+│   ├── main.py                 # App factory, middleware, lifespan, startup jobs
 │   ├── config.py               # Pydantic settings (reads .env)
 │   ├── auth.py                 # JWT, session cookies, rate limiting, token helpers
 │   ├── database.py             # SQLAlchemy engine + session factory
 │   ├── create_admin.py         # CLI: create superadmin user
 │   ├── run_collector.py        # CLI: run collection jobs outside HTTP
-│   ├── worker_entrypoint.py    # Entrypoint for RQ worker pod
+│   ├── worker_entrypoint.py    # Entrypoint for RQ worker pod (if USE_RQ=true)
+│   ├── clients/                # External API wrappers (Zefix, Serper, Geocoding, SHAB)
+│   │   ├── zefix_client.py     # Zefix REST API client
+│   │   ├── google_search_client.py  # Serper.dev wrapper
+│   │   ├── geocoding_client.py # Offline geocoder (swisstopo + GeoNames fallback)
+│   │   └── shab_client.py      # SHAB HR publications feed
 │   ├── api/
 │   │   ├── routes/
 │   │   │   ├── auth.py         # /api/v1/auth/*
-│   │   │   ├── companies.py    # /api/v1/companies/*
+│   │   │   ├── admin.py        # /api/v1/admin/* (superadmin only)
+│   │   │   ├── companies/      # /api/v1/companies/* (split into: list, detail, bulk, analytics, search, zefix)
+│   │   │   ├── billing/        # /api/v1/billing/* (subscription, checkout, webhooks, info)
+│   │   │   ├── workspace/      # /api/v1/orgs/{org_id}/* (org settings, members, company state)
 │   │   │   ├── jobs.py         # /api/v1/jobs/*
 │   │   │   ├── map.py          # /api/v1/map/*
 │   │   │   ├── notes.py        # /api/v1/notes/*
-│   │   │   └── ops_settings.py # /api/v1/settings/*
-│   │   ├── zefix_client.py     # Zefix REST API client
-│   │   ├── google_search_client.py  # Serper.dev wrapper
-│   │   └── geocoding_client.py # Offline geocoder (swisstopo + GeoNames)
-│   ├── models/                 # SQLAlchemy ORM models
-│   │   ├── user.py
-│   │   ├── company.py
-│   │   ├── job_run.py
-│   │   ├── job_run_event.py
-│   │   ├── note.py
-│   │   ├── app_setting.py
-│   │   ├── audit_log.py
-│   │   ├── organization.py
-│   │   └── boilerplate.py
+│   │   │   ├── ops_settings.py # /api/v1/settings/* (org-scoped settings)
+│   │   │   ├── orgs.py         # /api/v1/orgs/* (organization CRUD)
+│   │   │   ├── clusters.py     # /api/v1/clusters/* (TF-IDF cluster browse)
+│   │   │   ├── views.py        # /api/v1/views/* (saved search views)
+│   │   │   ├── invites.py      # /api/v1/invites/* (organization invitations)
+│   │   │   └── deps.py         # Shared FastAPI dependencies
+│   │   └── [deprecated shims]  # Backward-compat re-exports from app/clients/
+│   ├── models/                 # SQLAlchemy ORM (70+ migrations)
+│   │   ├── user.py, organization.py, company.py, job_run.py, note.py, etc.
 │   ├── schemas/                # Pydantic request/response DTOs
-│   │   ├── user.py
-│   │   ├── company.py
-│   │   └── note.py
 │   ├── crud/                   # DB access functions (no business logic)
-│   │   ├── user.py
-│   │   ├── company.py
-│   │   ├── job_run.py
-│   │   ├── note.py
-│   │   ├── app_setting.py
-│   │   ├── audit_log.py
-│   │   └── boilerplate.py
-│   └── services/               # Business logic
-│       ├── collection.py       # All data-collection pipeline steps
-│       ├── scoring.py          # Zefix + Google + Claude score computation
-│       ├── job_worker.py       # Job orchestration (thread + RQ modes)
-│       ├── email.py            # SMTP transactional email + templates
-│       ├── cluster_pipeline.py # TF-IDF K-Means clustering
-│       ├── csv_export.py       # Async unlimited CSV export job logic
-│       └── s3_client.py        # boto3 wrapper for helvex-exports S3 bucket
+│   └── services/               # Business logic (split into ~25 focused modules)
+│       ├── collection.py       # Facade re-exporting from split modules
+│       ├── zefix_import.py     # Zefix API fetch, bulk import, detail collect
+│       ├── web_enrichment.py   # Google search enrichment, batch collect
+│       ├── geocoding_pipeline.py    # Geocoding, flex-score recalc
+│       ├── noga_pipeline.py    # NOGA industry classification, embeddings
+│       ├── claude_classify.py  # Claude Haiku batch classification + resume
+│       ├── language_detection.py    # Purpose language detection (multilingual)
+│       ├── cluster_pipeline.py # TF-IDF K-Means, HDBSCAN, semantic clustering
+│       ├── scoring.py          # Score computation (flex, web, AI, combined)
+│       ├── shab_import.py      # SHAB daily + backfill import
+│       ├── job_worker.py       # Job dispatch (now: handler registry pattern)
+│       ├── job_handlers/       # Handler modules for each job type (24 types)
+│       ├── rate_limit.py       # Centralized rate limiting (no Redis)
+│       ├── noga_lookup.py      # NOGA hierarchy file loader (zero deps)
+│       ├── credits.py          # Credit deduction, low-balance alerts
+│       ├── activity.py         # Activity logging (user actions)
+│       ├── tiers.py            # Org tier feature gates + pricing
+│       ├── email.py            # SMTP transactional email
+│       ├── s3_client.py        # boto3 S3 wrapper
+│       ├── payment_transactions.py  # Credit grant, subscription apply
+│       └── [other services]    # email, boilerplate_analysis, incremental_classify, etc.
 │
 ├── alembic/                    # Database migrations
 │   ├── env.py
@@ -462,7 +469,7 @@ Thin functions over SQLAlchemy — no business logic. Key modules:
 
 ### Migrations (`alembic/versions/`)
 
-~26 migration files. On startup `alembic upgrade head` runs automatically. To create a new migration:
+70+ migration files (covering Zefix import, multi-tenancy migration, job dispatcher, scoring evolution, etc.). On startup `alembic upgrade head` runs automatically. To create a new migration:
 
 ```bash
 alembic revision --autogenerate -m "describe change"
@@ -517,25 +524,30 @@ Admin-created users (`POST /orgs/{id}/members`) and invite-accepted users
 (`GET /invites/accept`) are set `email_verified = True` by the backend, so they are
 never blocked.
 
-### Rate limiting — `app/auth.py:250-324`
+### Rate limiting — `app/auth.py` + `app/services/rate_limit.py`
 
-- Backend: Redis `INCR` + `EXPIRE` (if `REDIS_URL` is set), otherwise in-memory `defaultdict`
-- Login failures: 10 attempts per IP per 15 min → locked out
-- Public endpoints (`/register`, `/forgot-password`): separate per-action counters, keyed by IP
+**Implementation:** In-memory sliding window using `defaultdict` of timestamps per IP/key. No external dependencies (Redis removed in Phase 3.2).
 
-**Authenticated endpoint rate limits** (keyed by `user_<id>`, not IP):
-
-| Route | Limit | Window | Action key |
+| Endpoint | Limit | Window | Keyed by |
 |---|---|---|---|
-| `POST /jobs/enqueue/csv-export` | 5 calls | 10 min | `job_rl:csv_export` |
-| `GET /companies/export.csv` | 5 calls | 10 min | `job_rl:csv_export` |
-| `POST /scoring/claude` | 20 calls | 10 min | `job_rl:claude_classify` |
-| `GET /companies/{id}/google-search` | 30 calls | 10 min | `google_search` |
-| `POST /scoring/claude-preview` | 3 calls | 24 h | `claude_preview:<org_id>` (pre-existing) |
+| Login failures | 10 attempts | 15 min | IP address |
+| `/register`, `/forgot-password`, etc. | Configurable | Per-action | IP address |
+| **Authenticated routes** | Per-route | Per-route | User ID or Org ID |
 
-Superadmins bypass all authenticated rate limits. The `_check_job_rate_limit` helper
-in `jobs.py` implements the pattern for job routes; Google search uses
-`check_public_rate_limit` directly with a user-keyed bucket.
+**Authenticated endpoint rate limits:**
+
+| Route | Limit | Window |
+|---|---|---|---|
+| `POST /jobs/enqueue/csv-export` | 5 calls | 10 min |
+| `GET /companies/export.csv` | 5 calls | 10 min |
+| `POST /scoring/claude` | 20 calls | 10 min |
+| `GET /companies/{id}/google-search` | 30 calls | 10 min |
+| `POST /scoring/claude-preview` | 3 calls | 24 h (calendar day per org) |
+
+Superadmins bypass all authenticated rate limits. The `check_rate_limit()` helper
+in `app/services/rate_limit.py` is the centralized function; routes call it directly.
+
+**Note:** Rate limiting is per-pod; in multi-pod deployments, each pod maintains its own sliding window. This is acceptable for a 2-3 pod cluster; large deployments should transition to Redis or a shared state backend.
 
 ### Credit deduction — CSV export
 
@@ -579,23 +591,57 @@ Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self'
 Strict-Transport-Security: max-age=31536000 (HTTPS only)
 ```
 
+### Session Store
+
+**Decision (Phase 3.3):** Use stateless `itsdangerous` signed cookies. No server-side session store.
+
+**Rationale:**
+- **Stateless:** Session data is cryptographically signed and embedded in the cookie. No DB/cache lookup on every request.
+- **Scalable:** Multi-pod deployments (session on pod A, request on pod B) work without shared state.
+- **Portable:** Cookie survives pod restarts; no lost sessions.
+- **Simple:** Single `SECRET_KEY` signs all session tokens. No session ID registry to manage.
+
+**Trade-off:** Cannot revoke a session before it expires (8 h TTL). If immediate logout is needed (e.g., user deactivation), the frontend clears the cookie and the backend rejects any token where `decode_session_cookie()` returns None. Immediate deactivation is rare; 8h is acceptable for most SaaS products.
+
+**If revocation becomes required:** Introduce a small session invalidation table keyed by `(user_id, session_created_at)` with a 8h TTL. Check it on each request before accepting a cookie. Trade-off: adds a DB hit per request, but revocation becomes instant.
+
+---
+
+### Secrets Management
+
+**Current state (Phase 3.4):** Secrets are stored in GitHub Actions encrypted variables and passed to K8s as environment variables during deployment.
+
+**Planned upgrade:** Transition to sealed-secrets or external-secrets-operator for K8s secret rotation without re-deploying:
+
+1. **External Secrets Operator** (recommended)
+   - Syncs secrets from a source (HashiCorp Vault, AWS Secrets Manager, etc.) into K8s `Secret` objects
+   - `helvex` Helm chart references secrets by name; external-secrets-operator populates them on a schedule
+   - Secrets are never committed to Git
+   - No manual Helm values edits needed for secret rotation
+
+2. **Sealed Secrets** (simpler alternative)
+   - Each K8s cluster has a sealing keypair; secrets encrypted with the public key can only be decrypted in that cluster
+   - `SealedSecret` CRDs are committed to Git; the sealed-secrets controller decrypts them to actual `Secret` objects
+   - Good for single-cluster deployments; less suitable for multi-cluster federation
+
+**Scope (Phase 3.4):** Document the decision and plan migration steps. Implementation deferred to later phase (requires Vault setup or external-secrets-operator deployment in K8s).
+
 ---
 
 ## 6. Background Job System
 
-### Two modes
+### Implementation
 
 **Thread mode (default, `USE_RQ=false`)**
-- Single daemon thread, polls `job_runs` table for `status=queued`
+- Single daemon thread (`app/services/job_worker.py`), polls `job_runs` table for `status=queued`
 - Executes jobs sequentially in-process
-- No external dependencies
+- No external dependencies (Redis removed in Phase 3.2)
 - Set `DISABLE_JOB_WORKER=true` to suppress the thread (e.g., API-only pod)
 
-**RQ mode (`USE_RQ=true`)**
-- Jobs pushed to Redis queue
-- `app/worker_entrypoint.py` runs as a separate `rq worker` process
-- Deployed as a separate K8s `worker-deployment.yaml` pod
-- Requires `REDIS_URL`
+**Job handler registry pattern** — Replaced the previous 735-line `elif` chain
+- Each job type has a dedicated handler in `app/services/job_handlers/{type}.py`
+- `_run_job()` dispatches via `JOB_HANDLERS[job_type](ctx)`, passing context (DB, params, progress callback, abort signal)
+- Handlers return `(stats_dict, done_message)` or raise typed exceptions (`JobPausedError`, `JobCancelledError`, `JobWaitingExternalSignal`)
 
 ### Job lifecycle
 

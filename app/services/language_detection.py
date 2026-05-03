@@ -60,3 +60,63 @@ def detect_and_update_language(company) -> str | None:
     if company.purpose_language:
         return company.purpose_language
     return detect_purpose_language(company.purpose)
+
+
+def detect_language_bulk(
+    db,
+    *,
+    batch_size: int = 1000,
+    only_missing: bool = True,
+    progress_cb=None,
+) -> dict:
+    """Backfill purpose_language for all companies where it is NULL (or all).
+
+    Safe to re-run — with only_missing=True skips companies that already have a language.
+    """
+    from app import crud
+    from app.models.company import Company
+
+    stats = {
+        "selected": 0,
+        "updated": 0,
+        "skipped_no_purpose": 0,
+        "skipped_existing": 0,
+        "errors": [],
+    }
+
+    query = db.query(Company).filter(Company.purpose.isnot(None))
+    if only_missing:
+        query = query.filter(Company.purpose_language.is_(None))
+
+    total = query.count()
+    stats["selected"] = total
+    offset = 0
+
+    while True:
+        batch = query.order_by(Company.id.asc()).offset(offset).limit(batch_size).all()
+        if not batch:
+            break
+
+        for company in batch:
+            try:
+                if only_missing and company.purpose_language:
+                    stats["skipped_existing"] += 1
+                    continue
+                if not company.purpose:
+                    stats["skipped_no_purpose"] += 1
+                    continue
+                lang = detect_purpose_language(company.purpose)
+                if lang:
+                    company.purpose_language = lang
+                    stats["updated"] += 1
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("Language detection failed for %s: %s", company.uid, exc)
+                stats["errors"].append(f"{company.uid}: {type(exc).__name__}: {exc}")
+
+        db.commit()
+        offset += len(batch)
+
+        if progress_cb:
+            progress_cb(min(offset, total), total, stats)
+
+    return stats

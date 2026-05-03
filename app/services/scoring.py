@@ -1,10 +1,13 @@
 """Scoring logic for matching Google Search results to a company profile."""
 
+import logging
 import math
 import re
 from urllib.parse import urlparse
 
 from app.config import settings
+
+logger = logging.getLogger(__name__)
 
 # Domains that are business directories, social networks, or government registries.
 _DIRECTORY_DOMAINS = {
@@ -311,6 +314,23 @@ def _extract_address_parts(address: str) -> tuple[str | None, str | None]:
     return zip_code, street_name
 
 
+# ── score_result weights ──────────────────────────────────────────────────────
+_W_NAME_TITLE = 30       # max pts: company name match in result title
+_W_NAME_SNIPPET = 20     # max pts: company name match in snippet
+_W_DOMAIN_OVERLAP = 15   # max pts: domain words overlap with company name
+_W_MUNICIPALITY = 25     # pts: municipality found in combined text
+_W_CANTON = 10           # pts: canton abbreviation found
+_W_ZIP = 15              # pts: zip code found
+_W_STREET = 15           # pts: street name found
+_W_KEYWORDS_HIGH = 15    # pts: 3+ purpose keywords in snippet
+_W_KEYWORDS_LOW = 8      # pts: 1-2 purpose keywords in snippet
+_W_LEGAL_FORM = 5        # pts: legal form abbreviation in domain/title
+_W_SWISS_TLD = 10        # pts: .ch / .swiss TLD bonus
+_W_EXACT_NAME = 15       # pts: exact company name matches domain base
+_POS_BONUS = (30, 20, 15, 10)  # pts by Google result position 0–3
+_W_SOCIAL_PENALTY = -30  # pts: social media domain penalty
+
+
 def score_result(
     result: dict,
     *,
@@ -324,24 +344,9 @@ def score_result(
     purpose_stopwords: set[str] | None = None,
     position: int = 0,
 ) -> int:
-    """Score a single Google search result against a company profile.
+    """Score a single Google search result against a company profile (0-100).
 
-    Returns an integer 0-100.
-
-    Breakdown:
-      - Name match in title:        0-30 pts  (word overlap × 30)
-      - Name match in snippet:      0-20 pts  (word overlap × 20)
-      - Domain name matches company: 0-15 pts  (overlap of company words in domain)
-      - Location in combined text:  0-65 pts  (municipality 25 + canton 10
-                                               + zip 15 + street 15)
-      - Purpose keywords in snippet: 0-15 pts  (1-2 hits = 8, 3+ hits = 15)
-      - Legal form in domain/title:   +5 pts  bonus
-      - Swiss TLD (.ch / .swiss):    +10 pts  bonus
-      - Exact name match on Swiss TLD: +15 pts  extra bonus
-      - Google rank position (0-3):  +30/+20/+15/+10 pts  (not applied to directories)
-      - Social media domain:         -30 pts  penalty
-      - Local directory URL path:   hard  0  (verzeichnis in URL path)
-      - Directory domain:           hard  0  (returned immediately)
+    Weight constants are defined at module level (_W_* and _POS_BONUS).
     """
     title = result.get("title", "") or ""
     snippet = result.get("snippet", "") or ""
@@ -368,56 +373,55 @@ def score_result(
     combined_lower = f"{title} {snippet}".lower()
     snippet_lower = snippet.lower()
 
-    # --- Name in title (0-30) ---
-    score = int(_word_overlap_ratio(company_name, title) * 30)
+    # --- Name in title ---
+    score = int(_word_overlap_ratio(company_name, title) * _W_NAME_TITLE)
 
-    # --- Name in snippet (0-20) ---
-    score += int(_word_overlap_ratio(company_name, snippet) * 20)
+    # --- Name in snippet ---
+    score += int(_word_overlap_ratio(company_name, snippet) * _W_NAME_SNIPPET)
 
-    # --- Domain name matches company name (0-15) ---
-    score += int(_domain_name_overlap(domain, company_name) * 15)
+    # --- Domain name matches company name ---
+    score += int(_domain_name_overlap(domain, company_name) * _W_DOMAIN_OVERLAP)
 
-    # --- Location match (0-65) ---
+    # --- Location match ---
     if municipality and municipality.lower() in combined_lower:
-        score += 25
+        score += _W_MUNICIPALITY
     if canton and canton.upper() in f"{title} {snippet}".upper():
-        score += 10
+        score += _W_CANTON
     if address:
         zip_code, street_name = _extract_address_parts(address)
         if zip_code and zip_code in f"{title} {snippet}":
-            score += 15
+            score += _W_ZIP
         if street_name and street_name in combined_lower:
-            score += 15
+            score += _W_STREET
 
-    # --- Purpose keywords in snippet (0-15) ---
+    # --- Purpose keywords in snippet ---
     keywords = _purpose_keywords(purpose, stopwords=purpose_stopwords)
     if keywords:
         hits = sum(1 for kw in keywords if kw in snippet_lower)
         if hits >= 3:
-            score += 15
+            score += _W_KEYWORDS_HIGH
         elif hits >= 1:
-            score += 8
+            score += _W_KEYWORDS_LOW
 
-    # --- Legal form presence in domain or title (+5 bonus) ---
+    # --- Legal form presence in domain or title ---
     if legal_form:
         lf_lower = legal_form.lower()
         abbrevs = re.findall(r"\b\w{2,6}\b", lf_lower)
         if any(a in domain or a in title.lower() for a in abbrevs if len(a) >= 2):
-            score += 5
+            score += _W_LEGAL_FORM
 
-    # --- Swiss TLD bonus (+10, +15 extra when domain base matches company name exactly) ---
+    # --- Swiss TLD bonus (+extra when domain base matches company name exactly) ---
     if domain.endswith(".ch") or domain.endswith(".swiss"):
-        score += 10
+        score += _W_SWISS_TLD
         if _domain_is_exact_name_match(domain, company_name):
-            score += 15
+            score += _W_EXACT_NAME
 
-    # --- Google rank bonus (+30/+20/+15/+10 for positions 0-3) ---
-    _POS_BONUS = (30, 20, 15, 10)
+    # --- Google rank bonus ---
     score += _POS_BONUS[position] if position < len(_POS_BONUS) else 0
 
-    # --- Social media penalty (-30) ---
+    # --- Social media penalty ---
     if any(domain == d or domain.endswith("." + d) for d in _SOCIAL_LEAD_DOMAINS):
-        score -= 30
+        score += _W_SOCIAL_PENALTY
 
     return max(0, min(100, score))
 
@@ -991,7 +995,15 @@ def normalize_raw_scores(
         max_s = max(non_cancelled.values())
         for cid, raw in non_cancelled.items():
             result[cid] = round((raw - min_s) / (max_s - min_s) * 100) if max_s > min_s else 50
+    cancelled_count = sum(1 for s in raw_scores.values() if s is None)
     for cid, raw in raw_scores.items():
         if raw is None:
             result[cid] = cancelled_score
+    logger.debug(
+        "normalize_raw_scores total=%d cancelled=%d min=%s max=%s",
+        len(raw_scores),
+        cancelled_count,
+        min(non_cancelled.values()) if non_cancelled else None,
+        max(non_cancelled.values()) if non_cancelled else None,
+    )
     return result

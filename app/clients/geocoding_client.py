@@ -1,0 +1,441 @@
+"""Geocoding for Swiss addresses using two data sources:
+
+1. Primary: swisstopo Amtliches Gebäudeadressverzeichnis (building-level, <10 m)
+   Downloaded from data.geo.admin.ch and indexed into a local SQLite database.
+   Data: https://data.geo.admin.ch/ch.swisstopo.amtliches-gebaeudeadressverzeichnis/
+   License: Open Government Data (OGD), free for any use
+
+2. Fallback: GeoNames CH postal code dataset (PLZ centroid, ~2 km)
+   Downloaded from download.geonames.org/export/zip/CH.zip
+
+Both datasets are downloaded on first use (or during Docker build) and cached
+to the ``data/`` directory.  No API key is required.
+"""
+
+import csv
+import io
+import logging
+import math
+import re
+import sqlite3
+import threading
+import zipfile
+from pathlib import Path
+
+import httpx
+
+logger = logging.getLogger(__name__)
+
+# ── Data paths ────────────────────────────────────────────────────────────────
+_DATA_DIR = Path(__file__).resolve().parents[2] / "data"
+_PLZ_CACHE = _DATA_DIR / "plz_ch.tsv"
+_BUILDING_DB = _DATA_DIR / "geocoding.db"
+
+# ── Download URLs ─────────────────────────────────────────────────────────────
+_GEONAMES_URL = "https://download.geonames.org/export/zip/CH.zip"
+_BUILDING_URL = (
+    "https://data.geo.admin.ch"
+    "/ch.swisstopo.amtliches-gebaeudeadressverzeichnis"
+    "/amtliches-gebaeudeadressverzeichnis_ch"
+    "/amtliches-gebaeudeadressverzeichnis_ch_2056.csv.zip"
+)
+
+# ── Regex helpers ─────────────────────────────────────────────────────────────
+_PLZ_RE = re.compile(r"\b(\d{4})\b")
+_PLZ_SEGMENT_RE = re.compile(r"^(?:CH-)?(\d{4})\b", re.IGNORECASE)
+
+# Matches a "street housenumber" segment: the part immediately before the PLZ city segment.
+# Groups: street, house
+_STREET_HOUSE_RE = re.compile(r"^(?P<street>.+?)\s+(?P<house>\S+)$")
+
+# ── Thread locks ──────────────────────────────────────────────────────────────
+_plz_lock = threading.Lock()
+_db_lock = threading.Lock()
+
+# ── In-memory PLZ table (fallback) ───────────────────────────────────────────
+_plz_table: dict[str, tuple[float, float]] | None = None
+_city_table: dict[str, tuple[float, float]] | None = None
+
+# ── SQLite connection (building lookup) ───────────────────────────────────────
+_db_conn: sqlite3.Connection | None = None
+
+
+# ── LV95 → WGS84 conversion ───────────────────────────────────────────────────
+
+def _lv95_to_wgs84(e: float, n: float) -> tuple[float, float]:
+    """Convert Swiss LV95 (EPSG:2056) to WGS84 lat/lon.
+
+    Uses the approximate formula published by swisstopo (accuracy < 1 m).
+    Reference: swisstopo 'Approximative Umrechnung von ETRS89/WGS84 nach LV95'
+    """
+    y = (e - 2_600_000.0) / 1_000_000.0
+    x = (n - 1_200_000.0) / 1_000_000.0
+
+    lon_sex = (
+        2.6779094
+        + 4.728982 * y
+        + 0.791484 * y * x
+        + 0.1306 * y * x ** 2
+        - 0.0436 * y ** 3
+    )
+    lat_sex = (
+        16.9023892
+        + 3.238272 * x
+        - 0.270978 * y ** 2
+        - 0.002528 * x ** 2
+        - 0.0447 * y ** 2 * x
+        - 0.0140 * x ** 3
+    )
+    return lat_sex * 100.0 / 36.0, lon_sex * 100.0 / 36.0
+
+
+# ── Normalization ─────────────────────────────────────────────────────────────
+
+def _norm(s: str) -> str:
+    """Normalize a street name or house number for consistent lookup."""
+    s = s.lower().strip()
+    s = re.sub(r"[.\-–/]", " ", s)
+    s = re.sub(r"\s+", " ", s)
+    return s.strip()
+
+
+# ── PLZ centroid fallback ─────────────────────────────────────────────────────
+
+def _load_plz_table() -> dict[str, tuple[float, float]]:
+    global _plz_table
+    with _plz_lock:
+        if _plz_table is not None:
+            return _plz_table
+
+        if not _PLZ_CACHE.exists():
+            _DATA_DIR.mkdir(parents=True, exist_ok=True)
+            with httpx.Client(timeout=30.0) as client:
+                resp = client.get(_GEONAMES_URL)
+                resp.raise_for_status()
+            with zipfile.ZipFile(io.BytesIO(resp.content)) as zf:
+                with zf.open("CH.txt") as src:
+                    _PLZ_CACHE.write_bytes(src.read())
+
+        plz_build: dict[str, tuple[float, float]] = {}
+        city_build: dict[str, tuple[float, float]] = {}
+        with _PLZ_CACHE.open(encoding="utf-8") as f:
+            for line in f:
+                parts = line.rstrip("\n").split("\t")
+                if len(parts) < 11:
+                    continue
+                plz = parts[1].strip()
+                city = parts[2].strip() if len(parts) > 2 else ""
+                try:
+                    lat = float(parts[9])
+                    lon = float(parts[10])
+                except (ValueError, IndexError):
+                    continue
+                if plz not in plz_build:
+                    plz_build[plz] = (lat, lon)
+                if city:
+                    key = _norm(city)
+                    if key and key not in city_build:
+                        city_build[key] = (lat, lon)
+
+        _plz_table = plz_build
+        # Store city table globally so _city_fallback can use it without re-reading
+        global _city_table
+        _city_table = city_build
+        return _plz_table
+
+
+def _plz_fallback(address: str) -> tuple[float, float] | None:
+    # Prefer the real postal-code segment (usually the last comma-delimited part
+    # like "8000 Zürich") instead of the first 4-digit number anywhere.
+    # This avoids picking up values like "Postfach 1234".
+    parts = [p.strip() for p in (address or "").split(",") if p.strip()]
+    plz: str | None = None
+    for part in reversed(parts):
+        m = _PLZ_SEGMENT_RE.match(part)
+        if m:
+            plz = m.group(1)
+            break
+
+    if plz is None:
+        # Backward-compatible fallback for addresses without commas.
+        m_any = _PLZ_RE.search(address or "")
+        if not m_any:
+            return None
+        plz = m_any.group(1)
+
+    return _load_plz_table().get(plz)
+
+
+def _city_fallback(address: str) -> tuple[float, float] | None:
+    """Look up (lat, lon) by matching a city/municipality name from GeoNames.
+
+    Tries each comma-delimited segment of the address, stripping any leading
+    PLZ digits, so inputs like "Zürich", "8001 Zürich", or "Hauptstrasse, Bern"
+    all resolve to the city centroid.
+    """
+    # Ensure the city table is loaded (triggers PLZ table load as a side-effect)
+    if _city_table is None:
+        _load_plz_table()
+    table = _city_table
+    if not table:
+        return None
+
+    parts = [p.strip() for p in address.split(",") if p.strip()]
+    # Try each comma segment, preferring later (rightmost) segments first
+    for part in reversed(parts):
+        # Strip leading PLZ digits ("3000 Bern" → "Bern")
+        city_part = re.sub(r"^\d{4}\s*", "", part).strip()
+        if city_part:
+            key = _norm(city_part)
+            coords = table.get(key)
+            if coords:
+                logger.debug("geocode.city_fallback address=%r matched=%r", address, city_part)
+                return coords
+
+    # Last resort: treat the whole trimmed address as a city name
+    key = _norm(address.strip())
+    coords = table.get(key)
+    if coords:
+        logger.debug("geocode.city_fallback address=%r matched_whole=True", address)
+    return coords
+
+
+# ── Building-level geocoding DB ───────────────────────────────────────────────
+
+def build_geocoding_db() -> None:
+    """Download and index the swisstopo building address register into SQLite.
+
+    Output: data/geocoding.db  (~300–400 MB on disk, ~4 M addresses)
+    Columns used from source CSV (semicolon-delimited, UTF-8 BOM):
+      STN_LABEL    – street name
+      ADR_NUMBER   – house number designation (e.g. "16", "12a", "5.1")
+      ZIP_LABEL    – postal label "4566 Oekingen" — first 4 chars = PLZ
+      ADR_EASTING  – LV95 east coordinate
+      ADR_NORTHING – LV95 north coordinate
+      ADR_STATUS   – "real" | "planned"  (we keep both)
+    """
+    _DATA_DIR.mkdir(parents=True, exist_ok=True)
+    tmp = _BUILDING_DB.with_suffix(".tmp.db")
+    tmp.unlink(missing_ok=True)
+
+    print("Downloading swisstopo building address register (~143 MB)…")
+    with httpx.Client(timeout=300.0, follow_redirects=True) as client:
+        resp = client.get(_BUILDING_URL)
+        resp.raise_for_status()
+    print(f"Downloaded {len(resp.content) / 1_048_576:.1f} MB. Building SQLite index…")
+
+    conn = sqlite3.connect(str(tmp))
+    try:
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA synchronous=OFF")
+        conn.execute(
+            "CREATE TABLE addresses "
+            "(plz TEXT, street TEXT, house TEXT, lat REAL, lon REAL)"
+        )
+
+        with zipfile.ZipFile(io.BytesIO(resp.content)) as zf:
+            csv_name = next(n for n in zf.namelist() if n.endswith(".csv"))
+            with zf.open(csv_name) as raw:
+                reader = csv.DictReader(
+                    io.TextIOWrapper(raw, encoding="utf-8-sig"),
+                    delimiter=";",
+                )
+                batch: list[tuple[str, str, str, float, float]] = []
+                n_rows = 0
+                for row in reader:
+                    try:
+                        e = float(row["ADR_EASTING"])
+                        n_coord = float(row["ADR_NORTHING"])
+                        lat, lon = _lv95_to_wgs84(e, n_coord)
+                        zip_label = row["ZIP_LABEL"].strip()
+                        plz = zip_label[:4]
+                        street = _norm(row["STN_LABEL"])
+                        house = _norm(row["ADR_NUMBER"])
+                        if plz.isdigit() and street:
+                            batch.append((plz, street, house, lat, lon))
+                            n_rows += 1
+                    except (ValueError, KeyError):
+                        continue
+                    if len(batch) >= 50_000:
+                        conn.executemany(
+                            "INSERT INTO addresses VALUES (?,?,?,?,?)", batch
+                        )
+                        batch.clear()
+                if batch:
+                    conn.executemany(
+                        "INSERT INTO addresses VALUES (?,?,?,?,?)", batch
+                    )
+
+        print(f"Indexed {n_rows:,} addresses. Creating index…")
+        conn.execute(
+            "CREATE INDEX idx_addr ON addresses (plz, street, house)"
+        )
+        conn.commit()
+        print("Done.")
+    except Exception:
+        conn.close()
+        tmp.unlink(missing_ok=True)
+        raise
+    else:
+        conn.close()
+        tmp.replace(_BUILDING_DB)
+
+
+def _get_db() -> sqlite3.Connection | None:
+    global _db_conn
+    with _db_lock:
+        if _db_conn is not None:
+            return _db_conn
+        if not _BUILDING_DB.exists():
+            try:
+                build_geocoding_db()
+            except Exception as exc:
+                logger.error("geocoding.db build failed — PLZ fallback only: %s", exc)
+                return None
+        _db_conn = sqlite3.connect(
+            f"file:{_BUILDING_DB}?mode=ro", uri=True, check_same_thread=False
+        )
+        return _db_conn
+
+
+_NON_STREET_RE = re.compile(r"^(postfach|c/o|p\.?o\.?\s*box)\b", re.IGNORECASE)
+
+
+def _parse_address(address: str) -> tuple[str, str, str] | None:
+    """Extract (plz, street, house) from a Zefix address string.
+
+    Zefix builds addresses as comma-joined segments:
+        [org,] [c/o careOf,] street housenumber, [addon,] [Postfach N,] plz city
+
+    We find the PLZ segment, then search backwards skipping Postfach/addon/c/o
+    entries until we find a segment that looks like "street housenumber".
+    """
+    parts = [p.strip() for p in address.split(",")]
+    for i, part in enumerate(parts):
+        m_plz = re.match(r"^(\d{4})\b", part)
+        if m_plz and i > 0:
+            plz = m_plz.group(1)
+            # Walk backwards, skipping non-street segments
+            for j in range(i - 1, -1, -1):
+                candidate = parts[j].strip()
+                if _NON_STREET_RE.match(candidate):
+                    continue
+                m_sh = _STREET_HOUSE_RE.match(candidate)
+                if m_sh:
+                    return plz, m_sh.group("street"), m_sh.group("house")
+                # Segment has no house number (e.g. bare street name) — still usable
+                if candidate:
+                    return plz, candidate, ""
+            break
+    return None
+
+
+def _lookup_building(address: str) -> tuple[float, float] | None:
+    parsed = _parse_address(address.strip())
+    if not parsed:
+        return None
+
+    plz, street, house = parsed
+    street = _norm(street)
+    house = _norm(house)
+
+    db = _get_db()
+    if db is None:
+        return None
+
+    try:
+        # 1. Exact match
+        row = db.execute(
+            "SELECT lat, lon FROM addresses WHERE plz=? AND street=? AND house=? LIMIT 1",
+            (plz, street, house),
+        ).fetchone()
+        if row:
+            return float(row[0]), float(row[1])
+
+        # 2. Strip trailing letter from house number (e.g. "12a" → "12")
+        house_digits = re.sub(r"[^0-9]", "", house)
+        if house_digits and house_digits != house:
+            row = db.execute(
+                "SELECT lat, lon FROM addresses WHERE plz=? AND street=? AND house=? LIMIT 1",
+                (plz, street, house_digits),
+            ).fetchone()
+            if row:
+                return float(row[0]), float(row[1])
+
+        # 3. Any address on that street in that PLZ (mid-point of first result)
+        row = db.execute(
+            "SELECT lat, lon FROM addresses WHERE plz=? AND street=? LIMIT 1",
+            (plz, street),
+        ).fetchone()
+        if row:
+            return float(row[0]), float(row[1])
+
+        return None
+    except sqlite3.Error as exc:
+        logger.error("geocoding.db query failed: %s", exc)
+        return None
+
+
+# ── Public API ────────────────────────────────────────────────────────────────
+
+# Building results more than this far from the PLZ centroid are likely wrong
+# (e.g. street name matched in a different city). Swiss PLZ areas are typically
+# 1–10 km across; 15 km gives enough room for large rural PLZs.
+_MAX_PLZ_DEVIATION_KM = 15.0
+
+
+def _haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    """Great-circle distance in km between two WGS84 points."""
+    r = 6_371.0
+    dlat = math.radians(lat2 - lat1)
+    dlon = math.radians(lon2 - lon1)
+    a = math.sin(dlat / 2) ** 2 + math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) * math.sin(dlon / 2) ** 2
+    c = 2.0 * math.asin(math.sqrt(a))
+    return r * c
+
+
+def geocode_address(address: str) -> tuple[float, float] | None:
+    """Return (lat, lon) for a Swiss address string.
+
+    Resolution order:
+    1. swisstopo building register — exact street + house match (<10 m accuracy)
+    2. swisstopo building register — street-level match (same PLZ + street name)
+    3. GeoNames PLZ centroid (~2 km accuracy)
+
+    The building result is validated against the PLZ centroid: if it lies more
+    than _MAX_PLZ_DEVIATION_KM away the result is likely a false street match
+    in a different municipality, so the PLZ centroid is used instead.
+    """
+    if not address:
+        return None
+
+    plz_coords = _plz_fallback(address)
+    building_result = _lookup_building(address)
+
+    if building_result is None:
+        parsed = _parse_address(address.strip())
+        if parsed is None:
+            logger.debug("geocode.plz_fallback reason=parse_failed address=%r", address)
+        elif _get_db() is None:
+            logger.debug("geocode.plz_fallback reason=db_unavailable address=%r", address)
+        else:
+            logger.debug("geocode.plz_fallback reason=no_street_match address=%r parsed=%r", address, parsed)
+        if plz_coords is not None:
+            return plz_coords
+        return _city_fallback(address)
+
+    if plz_coords is None:
+        logger.debug("geocode.building_only address=%r result=%r", address, building_result)
+        return building_result
+
+    # Sanity-check: building result must be within _MAX_PLZ_DEVIATION_KM of the PLZ centroid
+    dist_km = _haversine_km(building_result[0], building_result[1], plz_coords[0], plz_coords[1])
+    if dist_km > _MAX_PLZ_DEVIATION_KM:
+        logger.debug(
+            "geocode.plz_fallback reason=sanity_check_failed address=%r dist_km=%.1f",
+            address, dist_km,
+        )
+        return plz_coords
+
+    logger.debug("geocode.building address=%r result=%r", address, building_result)
+    return building_result

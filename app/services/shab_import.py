@@ -11,14 +11,17 @@ Rubric legend:
 
 from __future__ import annotations
 
+import logging
 import time
 from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
+logger = logging.getLogger(__name__)
+
 from sqlalchemy.orm import Session
 
 from app import crud
-from app.api.shab_client import (
+from app.clients.shab_client import (
     SUBR_DELETION,
     SUBR_MUTATION,
     SUBR_NEW,
@@ -184,8 +187,8 @@ def import_shab_publications(
                     enriched = enrich_company(db, company, noga=False)
                     stats["geocoded"] += enriched["geocoded"]
                     stats["keywords"] += enriched["keywords"]
-                except Exception:  # noqa: BLE001
-                    pass
+                except Exception:
+                    logger.warning("SHAB enrich failed for uid=%s", uid, exc_info=True)
 
             elif sub_rubric == SUBR_DELETION:
                 existing = crud.get_company_by_uid(db, uid)
@@ -214,8 +217,8 @@ def import_shab_publications(
             # transaction state until rollback; clear it so the import can continue.
             try:
                 db.rollback()
-            except Exception:  # noqa: BLE001
-                pass
+            except Exception:
+                logger.warning("DB rollback failed after SHAB error for uid=%s", uid, exc_info=True)
             stats["errors"].append(f"[{uid}] {type(exc).__name__}: {exc}")
 
         if progress_cb:

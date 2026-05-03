@@ -1,105 +1,29 @@
-"""Payment provider abstraction for subscription and top-up billing.
-
-Phase 6 scaffold:
-- Supports provider selection modes: worldline | stripe | dual
-- Keeps billing orchestration provider-agnostic so both providers can coexist
-  without rewriting business logic.
-"""
+"""Worldline/Saferpay payment provider implementation."""
 
 from __future__ import annotations
 
-import hashlib
-import hmac
 import json
 import logging
 import secrets
 import threading
 import time
-from dataclasses import dataclass
-from datetime import datetime, timezone
+from typing import Any, Literal
 from urllib.parse import urlencode
-from typing import Any, Literal, Protocol
 
 import httpx
 from itsdangerous import BadSignature, URLSafeSerializer
-from sqlalchemy.orm import Session
 
 from app.config import settings
-from app.models.organization import Organization
-from app.services import credits, payment_transactions
-from app.services.tiers import calculate_custom_tier_price
+from app.services.payments._types import CheckoutSession, PaymentConfigurationError
 
 logger = logging.getLogger(__name__)
-
-ProviderName = Literal["worldline", "stripe"]
 
 _PENDING_CARD_ALIAS_TTL_SECONDS = 15 * 60
 _pending_card_alias_lock = threading.Lock()
 _pending_card_alias_tokens: dict[str, dict[str, Any]] = {}
 
 
-class PaymentConfigurationError(RuntimeError):
-    """Raised when the requested payment provider is not configured."""
-
-
-@dataclass(slots=True)
-class CheckoutSession:
-    provider: ProviderName
-    checkout_url: str
-    external_id: str | None = None
-    order_reference: str | None = None
-
-
-_BASE_MONTHLY_CHF: dict[str, float] = {
-    "free": 0.0,
-    "simple": 6.0,
-    "explorer": 12.0,
-    "researcher": 17.0,
-    "strategist": 37.0,
-}
-
-
-class PaymentProvider(Protocol):
-    name: ProviderName
-
-    def create_subscription_checkout(
-        self,
-        *,
-        org_id: int,
-        tier: str,
-        billing_cycle: Literal["monthly", "yearly"],
-        success_url: str,
-        cancel_url: str,
-        billing_address: dict[str, str] | None = None,
-        save_payment_method: bool = False,
-    ) -> CheckoutSession:
-        ...
-
-    def create_topup_checkout(
-        self,
-        *,
-        org_id: int,
-        credits: int,
-        success_url: str,
-        cancel_url: str,
-        billing_address: dict[str, str] | None = None,
-        save_payment_method: bool = False,
-    ) -> CheckoutSession:
-        ...
-
-
-def _normalize_mode(raw: str) -> str:
-    mode = (raw or "").strip().lower()
-    return mode if mode in {"worldline", "stripe", "dual"} else "worldline"
-
-
-def _base_url() -> str:
-    return settings.app_base_url.rstrip("/")
-
-
-def _query_url(base_path: str, params: dict[str, str]) -> str:
-    return f"{_base_url()}{base_path}?{urlencode(params)}"
-
+# ── Config helpers ─────────────────────────────────────────────────────────────
 
 def _worldline_api_username() -> str:
     return settings.worldline_api_username.strip()
@@ -137,6 +61,12 @@ def _worldline_callback_serializer() -> URLSafeSerializer:
     return URLSafeSerializer(settings.secret_key, salt="worldline-callback-v1")
 
 
+def _base_url() -> str:
+    return settings.app_base_url.rstrip("/")
+
+
+# ── Pending card alias token store ─────────────────────────────────────────────
+
 def _prune_pending_card_alias_tokens(now_ts: float | None = None) -> None:
     now = now_ts if now_ts is not None else time.time()
     expired = [
@@ -148,7 +78,9 @@ def _prune_pending_card_alias_tokens(now_ts: float | None = None) -> None:
         _pending_card_alias_tokens.pop(order_ref, None)
 
 
-def register_pending_card_alias_token(*, order_reference: str, token: str, org_id: int, user_id: int | None = None) -> None:
+def register_pending_card_alias_token(
+    *, order_reference: str, token: str, org_id: int, user_id: int | None = None
+) -> None:
     order_ref = str(order_reference or "").strip()
     alias_token = str(token or "").strip()
     if not order_ref or not alias_token:
@@ -201,6 +133,8 @@ def clear_pending_card_alias_token(*, order_reference: str) -> None:
         _pending_card_alias_tokens.pop(order_ref, None)
 
 
+# ── Callback context ───────────────────────────────────────────────────────────
+
 def _is_retryable_alias_assert_error(message: str) -> bool:
     upper = str(message or "").upper()
     retry_markers = (
@@ -209,7 +143,7 @@ def _is_retryable_alias_assert_error(message: str) -> bool:
         "TOKEN_INVALID",
         "TOKEN_NOT_FOUND",
         "ALIAS_NOT_FOUND",
-        "ALIAS_INVALID",   # customer hasn't completed the form yet
+        "ALIAS_INVALID",
         "PENDING",
         "PROCESSING",
         "NOT READY",
@@ -282,8 +216,7 @@ def _worldline_callback_url(
     source: str,
     save_payment_method: bool = False,
 ) -> str:
-    # Alias/card-registration callbacks must go to the card-specific endpoint.
-    # Payment (subscription/topup) callbacks go to the generic return endpoint.
+    # Alias/card-registration callbacks go to the card-specific endpoint.
     if kind in {"alias", "card_alias"}:
         base_path = "/api/v1/billing/webhooks/worldline/card/return"
     else:
@@ -297,114 +230,14 @@ def _worldline_callback_url(
         cancel_url=cancel_url,
         save_payment_method=save_payment_method,
     )
-    fixed = urlencode(
-        {
-            "ctx": ctx,
-            "source": source,
-        }
-    )
+    fixed = urlencode({"ctx": ctx, "source": source})
     return f"{_base_url()}{base_path}?{fixed}"
 
 
-def compute_subscription_price_chf(
-    *,
-    tier: str,
-    billing_cycle: Literal["monthly", "yearly"],
-    custom_features: dict | None = None,
-    verified_business: bool = False,
-) -> float:
-    """Compute CHF price for a tier and billing cycle.
-
-    Yearly billing follows the plan rule: monthly * 10.
-    Verified business gets an additional 20% discount.
-    """
-    t = (tier or "free").strip().lower()
-    if t == "custom":
-        monthly = float(calculate_custom_tier_price(custom_features or {}))
-    else:
-        monthly = float(_BASE_MONTHLY_CHF.get(t, 0.0))
-
-    total = monthly * (10.0 if billing_cycle == "yearly" else 1.0)
-    if verified_business:
-        total *= 0.80
-    return round(total, 2)
-
-
-def credits_to_chf(credits_amount: int) -> float:
-    return round(float(credits_amount) * 0.0001, 4)
-
-
-def parse_worldline_merchant_reference(reference: str | None) -> dict[str, Any]:
-    """Parse order reference token created for Worldline transactions.
-
-    Supported formats:
-    - wl_sub_<org_id>_<user_id>_<tier>_<billing_cycle>_<nonce>
-    - wl_topup_<org_id>_<user_id>_<credits>_<nonce>
-
-    Backward-compatible legacy formats are also accepted:
-    - wl_sub_<org_id>_<nonce>
-    - wl_topup_<org_id>_<nonce>
-    """
-    ref = (reference or "").strip()
-    if not ref.startswith("wl_"):
-        return {}
-
-    parts = ref.split("_")
-    if len(parts) < 4:
-        return {}
-
-    kind = parts[1]
-    try:
-        org_id = int(parts[2])
-    except ValueError:
-        return {}
-
-    out: dict[str, Any] = {"kind": kind, "org_id": org_id}
-
-    if kind == "sub":
-        if len(parts) >= 7 and parts[3].isdigit():
-            out["user_id"] = int(parts[3])
-            out["tier"] = parts[4]
-            out["billing_cycle"] = parts[5]
-        elif len(parts) >= 6:
-            # wl_sub_<org_id>_<tier>_<billing_cycle>_<nonce>
-            out["tier"] = parts[3]
-            out["billing_cycle"] = parts[4]
-        return out
-
-    if kind == "topup":
-        if len(parts) >= 6 and parts[3].isdigit():
-            out["user_id"] = int(parts[3])
-            try:
-                out["topup_credits"] = int(parts[4])
-            except ValueError:
-                pass
-        elif len(parts) >= 5:
-            # wl_topup_<org_id>_<credits>_<nonce>
-            try:
-                out["topup_credits"] = int(parts[3])
-            except ValueError:
-                pass
-        return out
-
-    return {}
-
-
-def get_enabled_provider_order() -> list[ProviderName]:
-    """Return provider priority order based on PAYMENT_PROVIDER_MODE.
-
-    dual mode keeps worldline first for backward-compatibility in this codebase.
-    """
-    mode = _normalize_mode(settings.payment_provider_mode)
-    if mode == "stripe":
-        return ["stripe"]
-    if mode == "dual":
-        return ["worldline", "stripe"]
-    return ["worldline"]
-
+# ── WorldlineProvider ──────────────────────────────────────────────────────────
 
 class WorldlineProvider:
-    name: ProviderName = "worldline"
+    name: str = "worldline"
 
     def _assert_configured(self) -> None:
         customer_id = _worldline_customer_id()
@@ -435,9 +268,7 @@ class WorldlineProvider:
         if _worldline_raw_api_logging_enabled():
             logger.info(
                 "worldline.raw_request operation=%s url=%s payload=%s",
-                operation,
-                url,
-                json.dumps(payload),
+                operation, url, json.dumps(payload),
             )
 
         with httpx.Client(timeout=timeout) as client:
@@ -450,10 +281,7 @@ class WorldlineProvider:
         if _worldline_raw_api_logging_enabled():
             logger.info(
                 "worldline.raw_response operation=%s url=%s status=%s body=%s",
-                operation,
-                url,
-                resp.status_code,
-                resp.text,
+                operation, url, resp.status_code, resp.text,
             )
 
         if resp.status_code >= 400:
@@ -471,8 +299,9 @@ class WorldlineProvider:
 
         logger.info(
             "worldline.initialize_request url=%s username=%s amount_chf=%s order_ref=%s",
-            url, api_username, payload.get("Payment", {}).get("Amount", {}).get("Value"), 
-            payload.get("Payment", {}).get("OrderId")
+            url, api_username,
+            payload.get("Payment", {}).get("Amount", {}).get("Value"),
+            payload.get("Payment", {}).get("OrderId"),
         )
         logger.debug("worldline.initialize_payload payload_keys=%s", list(payload.keys()))
 
@@ -486,7 +315,10 @@ class WorldlineProvider:
         logger.info(
             "worldline.initialize_response has_token=%s has_redirect=%s",
             "Token" in data,
-            bool(data.get("RedirectUrl") or ((data.get("Redirect") or {}).get("RedirectUrl") if isinstance(data.get("Redirect"), dict) else None)),
+            bool(
+                data.get("RedirectUrl")
+                or ((data.get("Redirect") or {}).get("RedirectUrl") if isinstance(data.get("Redirect"), dict) else None)
+            ),
         )
 
         token = str(data.get("Token") or data.get("token") or "")
@@ -499,10 +331,10 @@ class WorldlineProvider:
         if not token:
             logger.error("worldline.initialize_no_token response=%s", json.dumps(data)[:200])
             raise RuntimeError("Worldline response did not include a transaction token")
-        
+
         logger.info(
             "worldline.initialize_success token=%s redirect_prefix=%s",
-            token[:20], redirect[:50] if redirect else "N/A"
+            token[:20], redirect[:50] if redirect else "N/A",
         )
         order_reference = str(payload.get("Payment", {}).get("OrderId") or "")
         return CheckoutSession(
@@ -549,26 +381,15 @@ class WorldlineProvider:
             },
             "TerminalId": terminal_id,
             "Payment": payment_block,
-            "Payer": {
-                "Language": "en",
-            },
-            "ReturnUrl": {
-                "Url": return_url,
-            },
-            "RedirectNotifyUrls": {
-                "Success": notify_url,
-                "Fail": notify_url,
-            },
+            "Payer": {"Language": "en"},
+            "ReturnUrl": {"Url": return_url},
+            "RedirectNotifyUrls": {"Success": notify_url, "Fail": notify_url},
         }
-        # Embed Saferpay form in an iframe — merchant can surround it with own CSS.
         css_url = (getattr(settings, "worldline_css_url", "") or "").strip()
         if css_url:
             payload["Styling"] = {"CssUrl": css_url}
         if payment_alias_id:
             payload["PaymentMeans"] = {"Alias": {"Id": payment_alias_id}}
-        # Alias registration is requested during Authorize with the Initialize token.
-        # Do not request alias registration here.
-        # Add billing address if provided (required by Worldline for chargeback evidence)
         if billing_address:
             payload["Payer"]["FirstName"] = billing_address.get("first_name", "")
             payload["Payer"]["LastName"] = billing_address.get("last_name", "")
@@ -581,8 +402,7 @@ class WorldlineProvider:
             }
             if billing_address.get("company_name"):
                 payload["Payer"]["CompanyName"] = billing_address["company_name"]
-        session = self._create_transaction_initialize(payload)
-        return session
+        return self._create_transaction_initialize(payload)
 
     def authorize_transaction(self, *, token: str, save_payment_method: bool = False) -> dict[str, Any]:
         customer_id = _worldline_customer_id()
@@ -609,7 +429,6 @@ class WorldlineProvider:
         tx_id = str(transaction_id or "").strip()
         if not tx_id:
             raise RuntimeError("Worldline transaction cancellation failed: missing transaction_id")
-
         payload = {
             "RequestHeader": {
                 "SpecVersion": _worldline_spec_version(),
@@ -617,9 +436,7 @@ class WorldlineProvider:
                 "RequestId": f"wl_cancel_{secrets.token_hex(8)}",
                 "RetryIndicator": 0,
             },
-            "TransactionReference": {
-                "TransactionId": tx_id,
-            },
+            "TransactionReference": {"TransactionId": tx_id},
         }
         return self._post_worldline_json(
             endpoint_path="/Payment/v1/Transaction/Cancel",
@@ -640,9 +457,7 @@ class WorldlineProvider:
                 "RequestId": f"wl_cap_{secrets.token_hex(8)}",
                 "RetryIndicator": 0,
             },
-            "TransactionReference": {
-                "TransactionId": tx_id,
-            },
+            "TransactionReference": {"TransactionId": tx_id},
         }
         return self._post_worldline_json(
             endpoint_path="/Payment/v1/Transaction/Capture",
@@ -659,18 +474,12 @@ class WorldlineProvider:
         order_id: str,
         description: str = "Refund",
     ) -> dict[str, Any]:
-        """Issue a referenced refund for a captured Saferpay/Worldline transaction.
-
-        Uses POST /Payment/v1/Transaction/Refund with CaptureReference.TransactionId.
-        The transaction_id must be the Saferpay Transaction.Id from a previously
-        captured transaction (stored as provider_transaction_id in PaymentTransaction).
-        """
+        """Issue a referenced refund for a captured Saferpay/Worldline transaction."""
         tx_id = str(transaction_id or "").strip()
         if not tx_id:
             raise RuntimeError("Saferpay refund failed: missing transaction_id")
         if amount_chf <= 0:
             raise RuntimeError("Saferpay refund failed: amount must be > 0")
-
         payload = {
             "RequestHeader": {
                 "SpecVersion": _worldline_spec_version(),
@@ -686,24 +495,16 @@ class WorldlineProvider:
                 "OrderId": order_id,
                 "Description": description,
             },
-            "CaptureReference": {
-                "TransactionId": tx_id,
-            },
+            "CaptureReference": {"TransactionId": tx_id},
         }
-        logger.info(
-            "saferpay.refund tx_id=%s amount_chf=%s order_id=%s",
-            tx_id[:20], amount_chf, order_id,
-        )
+        logger.info("saferpay.refund tx_id=%s amount_chf=%s order_id=%s", tx_id[:20], amount_chf, order_id)
         data = self._post_worldline_json(
             endpoint_path="/Payment/v1/Transaction/Refund",
             payload=payload,
             operation="Saferpay refund",
             timeout=100.0,
         )
-        logger.info(
-            "saferpay.refund_result tx_id=%s response_keys=%s",
-            tx_id[:20], list(data.keys()),
-        )
+        logger.info("saferpay.refund_result tx_id=%s response_keys=%s", tx_id[:20], list(data.keys()))
         return data
 
     def authorize_referenced_transaction(
@@ -715,12 +516,7 @@ class WorldlineProvider:
         order_reference: str,
         description: str,
     ) -> dict[str, Any]:
-        """Charge a recurring subscription using a previous transaction as reference.
-
-        Uses Transaction/AuthorizeReferenced — no customer interaction required.
-        The referenced transaction must have been initialized with Payment.Recurring.Initial.
-        Automatically captures the transaction on success.
-        """
+        """Charge a recurring subscription using a previous transaction as reference."""
         tx_id = str(transaction_id or "").strip()
         if not tx_id:
             raise RuntimeError("AuthorizeReferenced failed: missing transaction_id reference")
@@ -740,9 +536,7 @@ class WorldlineProvider:
                 "OrderId": order_reference,
                 "Description": description,
             },
-            "TransactionReference": {
-                "TransactionId": tx_id,
-            },
+            "TransactionReference": {"TransactionId": tx_id},
         }
         logger.info(
             "saferpay.authorize_referenced org_id=%s ref_tx=%s amount_chf=%s order_ref=%s",
@@ -754,14 +548,12 @@ class WorldlineProvider:
             operation="AuthorizeReferenced",
             timeout=100.0,
         )
-
         new_tx_id = str((data.get("Transaction") or {}).get("Id") or "")
         tx_status = str((data.get("Transaction") or {}).get("Status") or "").upper()
         logger.info(
             "saferpay.authorize_referenced_result org_id=%s new_tx_id=%s status=%s",
             org_id, new_tx_id[:20] if new_tx_id else "NONE", tx_status,
         )
-
         return data
 
     def create_card_alias_registration(
@@ -776,9 +568,7 @@ class WorldlineProvider:
         self._assert_configured()
         order_reference = f"wl_alias_{org_id}_{user_id or 0}_{secrets.token_hex(6)}"
         # Saferpay Alias/Insert requires the literal placeholder "{TOKEN}" in the
-        # ReturnUrl so it can substitute the session token on redirect.  Without it
-        # Saferpay does NOT append the token, and our callback receives TOKEN=NONE.
-        # The notify URL does not need this — it is a server-side call.
+        # ReturnUrl so it can substitute the session token on redirect.
         return_url = _worldline_callback_url(
             org_id=org_id,
             user_id=user_id,
@@ -804,20 +594,12 @@ class WorldlineProvider:
                 "RequestId": f"wl_alias_{org_id}_{secrets.token_hex(8)}",
                 "RetryIndicator": 0,
             },
-            "RegisterAlias": {
-                "IdGenerator": "RANDOM",
-            },
+            "RegisterAlias": {"IdGenerator": "RANDOM"},
             "Type": "CARD",
-            "ReturnUrl": {
-                "Url": return_url,
-            },
-            "Notification": {
-                "Url": notify_url,
-            },
+            "ReturnUrl": {"Url": return_url},
+            "Notification": {"Url": notify_url},
             "LanguageCode": "en",
         }
-        # Do not prefill PaymentMeans.Card fields for hosted alias registration.
-        # Sending a partial Card object makes Worldline validate Number/Exp* as required.
         data = self._post_worldline_json(
             endpoint_path="/Payment/v1/Alias/Insert",
             payload=payload,
@@ -840,7 +622,6 @@ class WorldlineProvider:
             org_id=org_id,
             user_id=user_id,
         )
-
         return CheckoutSession(
             provider=self.name,
             checkout_url=str(redirect),
@@ -912,6 +693,7 @@ class WorldlineProvider:
         billing_address: dict[str, str] | None = None,
         amount_chf: float | None = None,
     ) -> CheckoutSession:
+        from app.services.payments.pricing import compute_subscription_price_chf
         self._assert_configured()
         price = amount_chf if amount_chf is not None else compute_subscription_price_chf(tier=tier, billing_cycle=billing_cycle)
         if user_id is not None:
@@ -919,38 +701,22 @@ class WorldlineProvider:
         else:
             order_reference = f"wl_sub_{org_id}_{tier}_{billing_cycle}_{secrets.token_hex(6)}"
         return_url = _worldline_callback_url(
-            org_id=org_id,
-            user_id=user_id,
-            kind="subscription",
-            order_reference=order_reference,
-            success_url=success_url,
-            cancel_url=cancel_url,
-            source="return",
-            save_payment_method=save_payment_method,
+            org_id=org_id, user_id=user_id, kind="subscription",
+            order_reference=order_reference, success_url=success_url, cancel_url=cancel_url,
+            source="return", save_payment_method=save_payment_method,
         )
         notify_url = _worldline_callback_url(
-            org_id=org_id,
-            user_id=user_id,
-            kind="subscription",
-            order_reference=order_reference,
-            success_url=success_url,
-            cancel_url=cancel_url,
-            source="notify",
-            save_payment_method=save_payment_method,
+            org_id=org_id, user_id=user_id, kind="subscription",
+            order_reference=order_reference, success_url=success_url, cancel_url=cancel_url,
+            source="notify", save_payment_method=save_payment_method,
         )
         return self._initialize_request(
-            org_id=org_id,
-            payment_alias_id=payment_alias_id,
-            save_payment_method=save_payment_method,
-            amount_chf=price,
-            order_reference=order_reference,
+            org_id=org_id, payment_alias_id=payment_alias_id, save_payment_method=save_payment_method,
+            amount_chf=price, order_reference=order_reference,
             description=f"Helvex {tier.title()} ({billing_cycle})",
-            return_url=return_url,
-            notify_url=notify_url,
-            success_url=success_url,
-            cancel_url=cancel_url,
-            billing_address=billing_address,
-            is_initial_recurring=True,
+            return_url=return_url, notify_url=notify_url,
+            success_url=success_url, cancel_url=cancel_url,
+            billing_address=billing_address, is_initial_recurring=True,
         )
 
     def create_topup_checkout(
@@ -966,6 +732,7 @@ class WorldlineProvider:
         billing_address: dict[str, str] | None = None,
         amount_chf: float | None = None,
     ) -> CheckoutSession:
+        from app.services.payments.pricing import credits_to_chf
         self._assert_configured()
         amount_chf = amount_chf if amount_chf is not None else credits_to_chf(credits)
         if user_id is not None:
@@ -973,286 +740,20 @@ class WorldlineProvider:
         else:
             order_reference = f"wl_topup_{org_id}_{credits}_{secrets.token_hex(6)}"
         return_url = _worldline_callback_url(
-            org_id=org_id,
-            user_id=user_id,
-            kind="topup",
-            order_reference=order_reference,
-            success_url=success_url,
-            cancel_url=cancel_url,
-            source="return",
-            save_payment_method=save_payment_method,
+            org_id=org_id, user_id=user_id, kind="topup",
+            order_reference=order_reference, success_url=success_url, cancel_url=cancel_url,
+            source="return", save_payment_method=save_payment_method,
         )
         notify_url = _worldline_callback_url(
-            org_id=org_id,
-            user_id=user_id,
-            kind="topup",
-            order_reference=order_reference,
-            success_url=success_url,
-            cancel_url=cancel_url,
-            source="notify",
-            save_payment_method=save_payment_method,
+            org_id=org_id, user_id=user_id, kind="topup",
+            order_reference=order_reference, success_url=success_url, cancel_url=cancel_url,
+            source="notify", save_payment_method=save_payment_method,
         )
         return self._initialize_request(
-            org_id=org_id,
-            payment_alias_id=payment_alias_id,
-            save_payment_method=save_payment_method,
-            amount_chf=amount_chf,
-            order_reference=order_reference,
+            org_id=org_id, payment_alias_id=payment_alias_id, save_payment_method=save_payment_method,
+            amount_chf=amount_chf, order_reference=order_reference,
             description=f"Helvex top-up {credits} credits",
-            return_url=return_url,
-            notify_url=notify_url,
-            success_url=success_url,
-            cancel_url=cancel_url,
+            return_url=return_url, notify_url=notify_url,
+            success_url=success_url, cancel_url=cancel_url,
             billing_address=billing_address,
         )
-
-
-class StripeProvider:
-    name: ProviderName = "stripe"
-
-    def _assert_configured(self) -> None:
-        if not settings.stripe_secret_key.strip():
-            raise PaymentConfigurationError("Stripe provider is not configured (STRIPE_SECRET_KEY missing)")
-
-    def _post_checkout_session(self, form_data: dict[str, str]) -> CheckoutSession:
-        base = settings.stripe_api_base_url.rstrip("/")
-        url = f"{base}/v1/checkout/sessions"
-        headers = {
-            "Authorization": f"Bearer {settings.stripe_secret_key}",
-            "Content-Type": "application/x-www-form-urlencoded",
-        }
-        with httpx.Client(timeout=20.0) as client:
-            resp = client.post(url, data=form_data, headers=headers)
-            if resp.status_code >= 400:
-                raise RuntimeError(f"Stripe checkout creation failed: {resp.status_code} {resp.text}")
-            data = resp.json()
-
-        checkout_url = data.get("url")
-        if not checkout_url:
-            raise RuntimeError("Stripe response did not include checkout URL")
-        ext_id = str(data.get("id") or "")
-        return CheckoutSession(
-            provider=self.name,
-            checkout_url=str(checkout_url),
-            external_id=ext_id,
-            order_reference=(ext_id or None),
-        )
-
-    def create_subscription_checkout(
-        self,
-        *,
-        org_id: int,
-        user_id: int | None = None,
-        payment_alias_id: str | None = None,
-        save_payment_method: bool = False,
-        tier: str,
-        billing_cycle: Literal["monthly", "yearly"],
-        success_url: str,
-        cancel_url: str,
-        billing_address: dict[str, str] | None = None,
-        amount_chf: float | None = None,
-    ) -> CheckoutSession:
-        self._assert_configured()
-        price = amount_chf if amount_chf is not None else compute_subscription_price_chf(tier=tier, billing_cycle=billing_cycle)
-        amount_cents = int(round(price * 100))
-        interval = "year" if billing_cycle == "yearly" else "month"
-        ext_id = f"st_sub_{org_id}_{secrets.token_hex(6)}"
-        data = {
-            "mode": "subscription",
-            "success_url": success_url,
-            "cancel_url": cancel_url,
-            "line_items[0][quantity]": "1",
-            "line_items[0][price_data][currency]": "chf",
-            "line_items[0][price_data][unit_amount]": str(amount_cents),
-            "line_items[0][price_data][recurring][interval]": interval,
-            "line_items[0][price_data][product_data][name]": f"Helvex {tier.title()} ({billing_cycle})",
-            "metadata[org_id]": str(org_id),
-            "metadata[user_id]": str(user_id) if user_id is not None else "",
-            "metadata[tier]": tier,
-            "metadata[billing_cycle]": billing_cycle,
-            "metadata[kind]": "subscription",
-            "client_reference_id": ext_id,
-        }
-        return self._post_checkout_session(data)
-
-    def create_topup_checkout(
-        self,
-        *,
-        org_id: int,
-        user_id: int | None = None,
-        payment_alias_id: str | None = None,
-        save_payment_method: bool = False,
-        credits: int,
-        success_url: str,
-        cancel_url: str,
-        billing_address: dict[str, str] | None = None,
-        amount_chf: float | None = None,
-    ) -> CheckoutSession:
-        self._assert_configured()
-        topup_amount = amount_chf if amount_chf is not None else credits_to_chf(credits)
-        amount_cents = int(round(topup_amount * 100))
-        ext_id = f"st_topup_{org_id}_{secrets.token_hex(6)}"
-        data = {
-            "mode": "payment",
-            "success_url": success_url,
-            "cancel_url": cancel_url,
-            "line_items[0][quantity]": "1",
-            "line_items[0][price_data][currency]": "chf",
-            "line_items[0][price_data][unit_amount]": str(amount_cents),
-            "line_items[0][price_data][product_data][name]": f"Helvex top-up {credits} credits",
-            "metadata[org_id]": str(org_id),
-            "metadata[user_id]": str(user_id) if user_id is not None else "",
-            "metadata[topup_credits]": str(credits),
-            "metadata[kind]": "topup",
-            "client_reference_id": ext_id,
-        }
-        return self._post_checkout_session(data)
-
-
-def _provider_instance(name: ProviderName) -> PaymentProvider:
-    if name == "stripe":
-        return StripeProvider()
-    return WorldlineProvider()
-
-
-def _pick_provider(preferred: ProviderName | None = None) -> PaymentProvider:
-    enabled = get_enabled_provider_order()
-    if preferred is not None:
-        if preferred not in enabled:
-            raise PaymentConfigurationError(
-                f"Requested provider '{preferred}' is not enabled (enabled={enabled})"
-            )
-        return _provider_instance(preferred)
-    return _provider_instance(enabled[0])
-
-
-def create_subscription_checkout(
-    *,
-    org_id: int,
-    user_id: int | None = None,
-    payment_alias_id: str | None = None,
-    save_payment_method: bool = False,
-    tier: str,
-    billing_cycle: Literal["monthly", "yearly"],
-    success_url: str,
-    cancel_url: str,
-    billing_address: dict[str, str] | None = None,
-    amount_chf: float | None = None,
-    preferred_provider: ProviderName | None = None,
-) -> CheckoutSession:
-    provider = _pick_provider(preferred_provider)
-    return provider.create_subscription_checkout(
-        org_id=org_id,
-        user_id=user_id,
-        payment_alias_id=payment_alias_id,
-        save_payment_method=save_payment_method,
-        tier=tier,
-        billing_cycle=billing_cycle,
-        success_url=success_url,
-        cancel_url=cancel_url,
-        billing_address=billing_address,
-        amount_chf=amount_chf,
-    )
-
-
-def create_topup_checkout(
-    *,
-    org_id: int,
-    user_id: int | None = None,
-    payment_alias_id: str | None = None,
-    save_payment_method: bool = False,
-    credits: int,
-    success_url: str,
-    cancel_url: str,
-    billing_address: dict[str, str] | None = None,
-    amount_chf: float | None = None,
-    preferred_provider: ProviderName | None = None,
-) -> CheckoutSession:
-    provider = _pick_provider(preferred_provider)
-    return provider.create_topup_checkout(
-        org_id=org_id,
-        user_id=user_id,
-        payment_alias_id=payment_alias_id,
-        save_payment_method=save_payment_method,
-        credits=credits,
-        success_url=success_url,
-        cancel_url=cancel_url,
-        billing_address=billing_address,
-        amount_chf=amount_chf,
-    )
-
-
-def verify_stripe_signature(*, payload: bytes, signature_header: str | None, secret: str) -> bool:
-    """Verify Stripe webhook signature using the standard v1 HMAC format."""
-    if not signature_header or not secret:
-        return False
-    parts = [p.strip() for p in signature_header.split(",") if p.strip()]
-    values: dict[str, str] = {}
-    for part in parts:
-        if "=" in part:
-            k, v = part.split("=", 1)
-            values[k] = v
-    ts = values.get("t")
-    v1 = values.get("v1")
-    if not ts or not v1:
-        return False
-    signed = f"{ts}.".encode("utf-8") + payload
-    digest = hmac.new(secret.encode("utf-8"), signed, hashlib.sha256).hexdigest()
-    if not hmac.compare_digest(digest, v1):
-        return False
-
-    # Reject stale payloads (>5 min) to limit replay window.
-    try:
-        age = abs(int(time.time()) - int(ts))
-    except ValueError:
-        return False
-    return age <= 300
-
-
-def apply_subscription_update(
-    db: Session,
-    *,
-    org_id: int,
-    tier: str | None,
-    billing_cycle: Literal["monthly", "yearly"] | None,
-    customer_id: str | None,
-    period_end_ts: int | None,
-) -> Organization:
-    org = db.get(Organization, org_id)
-    if org is None:
-        raise ValueError("Organization not found")
-
-    if tier:
-        org.tier = tier
-    if billing_cycle:
-        org.subscription_billing_cycle = billing_cycle
-    if customer_id:
-        org.payment_customer_id = customer_id
-    if period_end_ts:
-        org.subscription_period_end = datetime.fromtimestamp(period_end_ts, tz=timezone.utc)
-
-    db.commit()
-    db.refresh(org)
-    return org
-
-
-def apply_credit_topup(db: Session, *, org_id: int, credits_amount: int, reference_id: str | None = None) -> None:
-    if credits_amount <= 0:
-        return
-    credits.grant_credits(
-        db,
-        org_id=org_id,
-        amount=credits_amount,
-        tx_type="topup",
-        reference_id=reference_id,
-    )
-
-
-def parse_json_payload(payload: bytes) -> dict[str, Any]:
-    try:
-        obj = json.loads(payload.decode("utf-8"))
-    except Exception as exc:  # noqa: BLE001
-        raise ValueError(f"Invalid JSON payload: {exc}") from exc
-    if not isinstance(obj, dict):
-        raise ValueError("Payload must be a JSON object")
-    return obj

@@ -94,12 +94,10 @@ def _load_boilerplate_patterns():
     try:
         from app import crud
         from app.database import SessionLocal
-        db = SessionLocal()
-        try:
+        with SessionLocal() as db:
             return crud.get_active_boilerplate_patterns(db)
-        finally:
-            db.close()
     except Exception:
+        logger.warning("Failed to load boilerplate patterns from DB, using empty list", exc_info=True)
         return []
 
 
@@ -123,12 +121,10 @@ def get_stopwords(cfg: PipelineConfig) -> set[str]:
         from app import crud
         from app.database import SessionLocal
 
-        db = SessionLocal()
-        try:
+        with SessionLocal() as db:
             custom = crud.get_active_tfidf_stopwords(db)
-        finally:
-            db.close()
     except Exception:
+        logger.warning("Failed to load custom stopwords from DB, using empty set", exc_info=True)
         custom = set()
 
     return custom | set(cfg.extra_stopwords)
@@ -1087,18 +1083,23 @@ def run_pipeline(
 
 # ── Phase 2c: S3 artifact persistence ─────────────────────────────────────────
 
-_S3_TFIDF_KEY = "models/tfidf_vectorizer.pkl"
-_S3_SVD_KEY = "models/svd_transformer.pkl"
+# Safe (non-pickle) artifact keys. The old .pkl keys are intentionally retired.
+_S3_TFIDF_VOCAB_KEY = "models/tfidf_vocabulary.json"
+_S3_TFIDF_IDF_KEY = "models/tfidf_idf.npy"
+_S3_SVD_KEY = "models/svd_components.npy"
+_S3_SVD_META_KEY = "models/svd_meta.json"
 _S3_CENTROIDS_KEY = "models/kmeans_centroids.npy"
 _S3_CENTROID_MAP_KEY = "models/centroid_registry_map.json"
 
 
 def _save_pipeline_artifacts(vectorizer, svd, km, canonical_labels_map: dict[int, str]) -> None:
-    """Pickle and upload TF-IDF vectorizer, SVD transformer, K-Means centroids and
-    centroid→label map to S3."""
+    """Upload TF-IDF vectorizer, SVD transformer, K-Means centroids and
+    centroid→label map to S3 using safe, non-pickle formats."""
     import io
     import json
-    import pickle
+
+    import numpy as np
+    from sklearn.preprocessing import normalize
 
     from app.services import s3_client
 
@@ -1106,13 +1107,26 @@ def _save_pipeline_artifacts(vectorizer, svd, km, canonical_labels_map: dict[int
         logger.debug("S3_BUCKET_MODELS not configured — skipping artifact upload")
         return
 
-    for obj, key in ((vectorizer, _S3_TFIDF_KEY), (svd, _S3_SVD_KEY)):
-        buf = io.BytesIO()
-        pickle.dump(obj, buf)
-        s3_client.upload_model_bytes(buf.getvalue(), key)
+    # TF-IDF vectorizer — vocab dict + IDF array (no pickle)
+    vocab = {term: int(idx) for term, idx in vectorizer.vocabulary_.items()}
+    s3_client.upload_model_bytes(json.dumps(vocab).encode("utf-8"), _S3_TFIDF_VOCAB_KEY)
+    idf_buf = io.BytesIO()
+    np.save(idf_buf, vectorizer.idf_, allow_pickle=False)
+    s3_client.upload_model_bytes(idf_buf.getvalue(), _S3_TFIDF_IDF_KEY)
+
+    # TruncatedSVD — components matrix + metadata (no pickle)
+    svd_buf = io.BytesIO()
+    np.save(svd_buf, svd.components_, allow_pickle=False)
+    s3_client.upload_model_bytes(svd_buf.getvalue(), _S3_SVD_KEY)
+    svd_meta = {
+        "n_components": int(svd.n_components),
+        "explained_variance": svd.explained_variance_.tolist(),
+        "explained_variance_ratio": svd.explained_variance_ratio_.tolist(),
+        "singular_values": svd.singular_values_.tolist(),
+    }
+    s3_client.upload_model_bytes(json.dumps(svd_meta).encode("utf-8"), _S3_SVD_META_KEY)
 
     # Centroids (normalised, float32)
-    from sklearn.preprocessing import normalize
     centers_norm = normalize(km.cluster_centers_).astype("float32")
     s3_client.upload_model_bytes(centers_norm.tobytes(), _S3_CENTROIDS_KEY)
 
@@ -1133,28 +1147,57 @@ class _PipelineArtifacts:
     centroid_map: dict[str, str]  # str(centroid_idx) → canonical_name
 
 
-from functools import lru_cache
+_artifact_cache: tuple["_PipelineArtifacts", float] | None = None
+_ARTIFACT_TTL = 3600.0
 
-@lru_cache(maxsize=1)
-def _load_pipeline_artifacts() -> _PipelineArtifacts | None:
-    """Download and cache pipeline artifacts from S3. Returns None if unavailable."""
+
+def _load_pipeline_artifacts() -> "_PipelineArtifacts | None":
+    """Download and cache pipeline artifacts from S3 using safe non-pickle formats.
+
+    Results are cached for _ARTIFACT_TTL seconds so stale models don't persist
+    across a full process lifetime on long-running workers.
+    """
     import io
     import json
-    import pickle
+    import time
 
     import numpy as np
+    from sklearn.feature_extraction.text import TfidfVectorizer
+    from sklearn.decomposition import TruncatedSVD
 
     from app.services import s3_client
+
+    global _artifact_cache
+
+    now = time.monotonic()
+    if _artifact_cache is not None and (now - _artifact_cache[1]) < _ARTIFACT_TTL:
+        return _artifact_cache[0]
 
     if not s3_client.is_models_bucket_configured():
         return None
     try:
-        vec_bytes = s3_client.download_model_bytes(_S3_TFIDF_KEY)
-        vectorizer = pickle.loads(vec_bytes)
+        # TF-IDF: reconstruct from vocab dict + IDF array
+        vocab_bytes = s3_client.download_model_bytes(_S3_TFIDF_VOCAB_KEY)
+        vocab: dict[str, int] = json.loads(vocab_bytes.decode("utf-8"))
+        idf_bytes = s3_client.download_model_bytes(_S3_TFIDF_IDF_KEY)
+        idf_array = np.load(io.BytesIO(idf_bytes), allow_pickle=False)
 
+        vectorizer = TfidfVectorizer()
+        vectorizer.vocabulary_ = vocab
+        vectorizer.idf_ = idf_array
+
+        # TruncatedSVD: reconstruct from components + metadata
         svd_bytes = s3_client.download_model_bytes(_S3_SVD_KEY)
-        svd = pickle.loads(svd_bytes)
+        components = np.load(io.BytesIO(svd_bytes), allow_pickle=False)
+        svd_meta = json.loads(s3_client.download_model_bytes(_S3_SVD_META_KEY).decode("utf-8"))
 
+        svd = TruncatedSVD(n_components=svd_meta["n_components"])
+        svd.components_ = components
+        svd.explained_variance_ = np.array(svd_meta["explained_variance"])
+        svd.explained_variance_ratio_ = np.array(svd_meta["explained_variance_ratio"])
+        svd.singular_values_ = np.array(svd_meta["singular_values"])
+
+        # Centroid map + centroids (never pickled)
         map_bytes = s3_client.download_model_bytes(_S3_CENTROID_MAP_KEY)
         payload = json.loads(map_bytes.decode("utf-8"))
         shape = payload["shape"]
@@ -1164,7 +1207,9 @@ def _load_pipeline_artifacts() -> _PipelineArtifacts | None:
         centroids = np.frombuffer(cen_bytes, dtype="float32").reshape(shape["rows"], shape["cols"])
 
         logger.info("Pipeline artifacts loaded from S3 (%d centroids)", centroids.shape[0])
-        return _PipelineArtifacts(vectorizer=vectorizer, svd=svd, centroids=centroids, centroid_map=centroid_map)
+        result = _PipelineArtifacts(vectorizer=vectorizer, svd=svd, centroids=centroids, centroid_map=centroid_map)
+        _artifact_cache = (result, now)
+        return result
     except Exception as exc:
         logger.warning("Could not load pipeline artifacts from S3: %s", exc)
         return None

@@ -13,9 +13,12 @@ to always succeed without modifying the balance.
 
 from __future__ import annotations
 
+import logging
 from datetime import datetime, timezone
 
 from sqlalchemy.orm import Session
+
+logger = logging.getLogger(__name__)
 
 from app.models.org_credit_transaction import OrgCreditTransaction
 from app.models.organization import Organization
@@ -189,7 +192,7 @@ def _maybe_low_credit_alert(
         _send_low_credit_email(db, org_id=org_id, balance=balance, threshold=threshold)
 
     except Exception:  # noqa: BLE001
-        pass  # never break a deduction because of alert logic
+        logger.warning("Low-credit alert failed for org %s", org_id, exc_info=True)  # never break a deduction
 
 
 def _send_low_credit_email(
@@ -235,7 +238,7 @@ def _send_low_credit_email(
             threshold=threshold,
         )
     except Exception:  # noqa: BLE001
-        pass
+        logger.warning("Failed to send low-credit email for org %s", org_id, exc_info=True)
 
 
 def topup_credits(
@@ -311,7 +314,7 @@ def topup_credits(
         from app.crud.app_setting import set_org_setting
         set_org_setting(db, org_id=org_id, key="low_credit_alert_at", value="")
     except Exception:  # noqa: BLE001
-        pass
+        logger.warning("Failed to clear low-credit alert flag for org %s", org_id, exc_info=True)
 
     return total_granted
 

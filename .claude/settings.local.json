@@ -244,7 +244,16 @@
       "Bash(awk '/^@router|^def |^async def /{if\\(fname\\)print fname\": \"lines\" lines\"; fname=$2; lines=0} {lines++} END{if\\(fname\\)print fname\": \"lines\" lines\"}' /c/D/coding_projects/zefix_analyzer/app/api/routes/jobs.py)",
       "Bash(awk '/^def |^async def /{if\\(fname\\)print fname\": \"lines\" lines\"; fname=$2; lines=0} {lines++} END{if\\(fname\\)print fname\": \"lines\" lines\"}' /c/D/coding_projects/zefix_analyzer/app/crud/company.py)",
       "Bash(python3 -c \"from app.models.company import Company; import inspect; cols = [m for m in dir\\(Company\\) if not m.startswith\\('_'\\)]; print\\('\\\\n'.join\\([c for c in cols if c in ['review_status', 'contact_status', 'contact_name', 'contact_email', 'contact_phone', 'tags']]\\)\\)\")",
-      "Bash(git -C \"c:/D/coding_projects/zefix_analyzer\" diff HEAD~3 HEAD -- app/services/noga.py app/services/collection.py)"
+      "Bash(git -C \"c:/D/coding_projects/zefix_analyzer\" diff HEAD~3 HEAD -- app/services/noga.py app/services/collection.py)",
+      "Bash(grep -E \"pass$|pass #\")",
+      "Bash(python -c \"import ast; [ast.parse\\(open\\(f\\).read\\(\\)\\) for f in ['app/services/job_worker.py','app/services/credits.py','app/api/routes/auth.py']] and print\\('syntax OK'\\)\")",
+      "Bash",
+      "PowerShell",
+      "PowerShell(cd c:\\\\D\\\\coding_projects\\\\zefix_analyzer; Get-Item app\\\\api\\\\routes\\\\companies.py, app\\\\api\\\\routes\\\\workspace.py, app\\\\api\\\\routes\\\\jobs.py | Select-Object Name, @{N='Lines';E={\\(Get-Content $_.FullName\\).Count}})",
+      "PowerShell(\\(Get-Content \"c:\\\\D\\\\coding_projects\\\\zefix_analyzer\\\\app\\\\services\\\\zefix_import.py\"\\).Count)",
+      "PowerShell(cd \"c:\\\\D\\\\coding_projects\\\\zefix_analyzer\"; \\(Get-Content \"app\\\\services\\\\job_worker.py\"\\) | Where-Object { $_ -notmatch '_publish_job_update' } | Set-Content \"app\\\\services\\\\job_worker.py\" -Encoding utf8)",
+      "Skill(update-config)",
+      "Skill(update-config:*)"
     ]
   }
 }

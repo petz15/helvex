@@ -8,20 +8,13 @@ import time
 import traceback
 from contextlib import asynccontextmanager
 
-# Configure logging. We attach a stdout handler directly to the "app" logger
-# rather than the root logger, because uvicorn calls logging.config.dictConfig()
-# during server init which resets the root logger (level=WARNING, no handlers).
-# By owning the "app" logger explicitly we survive uvicorn's config pass.
+# Configure structured JSON logging (see app.logging_setup for details).
+# We attach a stdout handler directly to the "app" logger rather than the root logger,
+# because uvicorn calls logging.config.dictConfig() during server init which resets
+# the root logger (level=WARNING, no handlers).
+from app.logging_setup import setup_structured_logging
 _LOG_LEVEL_NAME = (os.getenv("LOG_LEVEL") or "INFO").upper().strip()
-_LOG_LEVEL = getattr(logging, _LOG_LEVEL_NAME, logging.INFO)
-
-_app_logger = logging.getLogger("app")
-_app_logger.handlers.clear()
-_app_logger.setLevel(_LOG_LEVEL)
-_handler = logging.StreamHandler(sys.stdout)
-_handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s - %(message)s"))
-_app_logger.addHandler(_handler)
-_app_logger.propagate = False
+_app_logger = setup_structured_logging(_LOG_LEVEL_NAME)
 
 # ── Python 3.12 compatibility patch ───────────────────────────────────────────
 # pydantic.v1 (bundled inside pydantic v2) calls ForwardRef._evaluate() without
@@ -170,8 +163,8 @@ def _seed_settings(app_state) -> None:
 
     app_state.startup_message = "Loading NOGA hierarchy cache…"
     try:
-        from app.crud.company import _load_noga_hierarchy
-        _load_noga_hierarchy()
+        from app.services.noga_lookup import load_noga_hierarchy
+        load_noga_hierarchy()
     except Exception as exc:
         _app_logger.warning("NOGA hierarchy cache failed (non-fatal): %s", exc)
 
@@ -221,8 +214,8 @@ def _start_nightly_billing_scheduler(app) -> None:
             time.sleep(600)
             try:
                 _maybe_enqueue_billing_renewal(app)
-            except Exception:  # noqa: BLE001
-                pass
+            except Exception:
+                _app_logger.warning("billing renewal scheduler iteration failed", exc_info=True)
 
     t = threading.Thread(target=_scheduler_loop, daemon=True, name="billing-renewal-scheduler")
     t.start()
@@ -285,12 +278,12 @@ def _start_nightly_shab_scheduler(app) -> None:
             time.sleep(600)  # check every 10 minutes
             try:
                 _maybe_enqueue_shab_daily(app)
-            except Exception:  # noqa: BLE001
-                pass
+            except Exception:
+                _app_logger.warning("SHAB daily scheduler iteration failed", exc_info=True)
             try:
                 _maybe_enqueue_noga_nightly(app)
-            except Exception:  # noqa: BLE001
-                pass
+            except Exception:
+                _app_logger.warning("NOGA nightly scheduler iteration failed", exc_info=True)
 
     t = threading.Thread(target=_scheduler_loop, daemon=True, name="shab-nightly-scheduler")
     t.start()

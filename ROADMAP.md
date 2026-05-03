@@ -73,6 +73,7 @@
     - old Auditors showing up 
     - enconding issue
     - and more, best solved over preprocessing -> espcially for future management view
+- Broad stop words for google search anything with vergleich in the domain name but not in the zweck or company name
 
 
 ### UI fixes:
@@ -90,6 +91,8 @@
 - larger symbols and text in header
 - as soon as explorer has been opend, opening any other page requires atleast 10 seconds to load if not more if it loads at all
 - Add translations to pricing page and unify the public one and the private one
+- When map moves and a map marker is opend while more map markers load in, the currently opened map marker always closes QOL issue
+- If the purpose only is boilerplatte sentece, it is probably a holding company. might need to find general solution to this problem
 
 # Questions
 

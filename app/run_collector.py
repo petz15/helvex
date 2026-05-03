@@ -1,7 +1,7 @@
 import argparse
 from pathlib import Path
 
-from app.api.zefix_client import SWISS_CANTONS
+from app.clients.zefix_client import SWISS_CANTONS
 from app.database import SessionLocal
 from app.services.collection import bulk_import_zefix, initial_collect, run_batch_collect
 
