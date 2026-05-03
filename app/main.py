@@ -14,6 +14,7 @@ from contextlib import asynccontextmanager
 # the root logger (level=WARNING, no handlers).
 from app.logging_setup import setup_structured_logging
 _LOG_LEVEL_NAME = (os.getenv("LOG_LEVEL") or "INFO").upper().strip()
+_LOG_LEVEL = getattr(logging, _LOG_LEVEL_NAME, logging.INFO)
 _app_logger = setup_structured_logging(_LOG_LEVEL_NAME)
 
 # ── Python 3.12 compatibility patch ───────────────────────────────────────────
