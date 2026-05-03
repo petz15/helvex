@@ -1,15 +1,13 @@
 """Auth API routes — login, registration, email verification, password management."""
 
-import logging
 import json
+import logging
 import uuid
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Request, status
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
-
-logger = logging.getLogger(__name__)
 
 from app import crud
 from app.auth import (
@@ -48,6 +46,8 @@ from app.services.email import (
     send_verification_email,
     send_welcome_email,
 )
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
