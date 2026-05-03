@@ -49,9 +49,9 @@ COPY . .
 # 1. GeoNames PLZ centroid table (~800 KB) — PLZ-level fallback
 # 2. swisstopo Amtliches Gebäudeadressverzeichnis (~143 MB zip) — building-level primary
 RUN if [ "$BUILD_GEOCODING_DB" = "true" ]; then \
-      python -c "from app.api.geocoding_client import _load_plz_table; _load_plz_table()" \
+      python -c "from app.clients.geocoding_client import _load_plz_table; _load_plz_table()" \
       && echo "PLZ table ready: $(wc -l < data/plz_ch.tsv) entries" \
-      && python -c "from app.api.geocoding_client import build_geocoding_db; build_geocoding_db()" \
+      && python -c "from app.clients.geocoding_client import build_geocoding_db; build_geocoding_db()" \
       && echo "Building DB ready: $(du -sh data/geocoding.db)"; \
     else \
       echo "Skipping geocoding DB build (BUILD_GEOCODING_DB=false)"; \
