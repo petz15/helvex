@@ -31,7 +31,7 @@ from app.api.routes.companies._shared import (
 router = APIRouter()
 
 
-@router.post("/", response_model=CompanyRead, status_code=status.HTTP_201_CREATED, summary="Create company")
+@router.post("", response_model=CompanyRead, status_code=status.HTTP_201_CREATED, summary="Create company")
 def create_company(company_in: CompanyCreate, db: Session = Depends(get_db)):
     existing = crud.get_company_by_uid(db, company_in.uid)
     if existing:

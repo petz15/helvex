@@ -63,4 +63,4 @@ RUN mkdir -p /app/data && chown -R 1000:1000 /app/data
 EXPOSE 8000
 
 ENTRYPOINT ["sh", "entrypoint.sh"]
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--proxy-headers", "--forwarded-allow-ips", "*"]
