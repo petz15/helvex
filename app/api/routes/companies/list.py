@@ -23,7 +23,7 @@ from app.api.routes.companies._shared import _apply_web_results_gate, _bulk_org_
 router = APIRouter()
 
 
-@router.get("", response_model=CompanyPage, summary="List companies (paginated, filterable)")
+@router.get("/", response_model=CompanyPage, summary="List companies (paginated, filterable)")
 def list_companies(
     page: int = Query(1, ge=1),
     page_size: int = Query(50, ge=1, le=100),
