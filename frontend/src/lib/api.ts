@@ -1092,7 +1092,7 @@ export interface OrgMember {
 }
 
 export async function fetchOrg(orgId: number): Promise<OrgDetail> {
-  const res = await fetch(orgPath(orgId, ""), { credentials: "include" });
+  const res = await fetch(orgPath(orgId, "/"), { credentials: "include" });
   if (!res.ok) throw new Error("Failed to fetch org");
   return res.json();
 }
@@ -1190,7 +1190,7 @@ export async function deleteCurrentUserBillingAddress(addressId: string): Promis
 }
 
 export async function updateOrg(orgId: number, data: { name?: string; billing_address?: BillingAddressPayload | null }): Promise<OrgDetail> {
-  const res = await fetch(orgPath(orgId, ""), {
+  const res = await fetch(orgPath(orgId, "/"), {
     method: "PATCH",
     credentials: "include",
     headers: { "Content-Type": "application/json" },

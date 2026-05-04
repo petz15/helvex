@@ -44,7 +44,17 @@ def _view_to_out(view: UserView) -> SavedViewOut:
 
 @router.get("", response_model=list[SavedViewOut])
 def list_views(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    rows = db.query(UserView).filter(UserView.user_id == current_user.id).order_by(UserView.created_at.desc()).all()
+    # Return views for this user scoped to their current org, plus any legacy
+    # views without an org (org_id IS NULL) created before migration 0072.
+    rows = (
+        db.query(UserView)
+        .filter(
+            UserView.user_id == current_user.id,
+            (UserView.org_id == current_user.org_id) | (UserView.org_id.is_(None)),
+        )
+        .order_by(UserView.created_at.desc())
+        .all()
+    )
     return [_view_to_out(r) for r in rows]
 
 
@@ -64,7 +74,7 @@ def save_view(body: SaveViewRequest, current_user: User = Depends(get_current_us
             status_code=422,
             detail=f"Filter payload too large (max {_VIEW_FILTERS_MAX_BYTES // 1024} KiB)",
         )
-    view = UserView(user_id=current_user.id, name=body.name.strip(), filters_json=filters_json)
+    view = UserView(user_id=current_user.id, org_id=current_user.org_id, name=body.name.strip(), filters_json=filters_json)
     db.add(view)
     db.flush()
     log_activity(

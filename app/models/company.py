@@ -19,7 +19,11 @@ class Company(Base):
     canton: Mapped[str | None] = mapped_column(String(8), nullable=True)
     purpose: Mapped[str | None] = mapped_column(Text, nullable=True)
     address: Mapped[str | None] = mapped_column(Text, nullable=True)
-    # Website found via Google Search
+    # Website found via Google Search.
+    # DUAL-WRITE: website_url, website_checked_at, google_search_results_raw, web_score,
+    # and social_media_only also exist on org_company_state for org-specific re-scores.
+    # Company holds the global master result (seed value); org_company_state holds any
+    # org-specific override. Prefer org_company_state when org_id is available.
     website_url: Mapped[str | None] = mapped_column(String(1024), nullable=True)
     website_checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     # Top-5 Google results as JSON [{title, link, snippet, score}, ...] sorted by score desc

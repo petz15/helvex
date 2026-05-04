@@ -1,8 +1,9 @@
 # Helvex — Architecture Reference
 
 > Internal documentation for bug fixing and onboarding.
-> **Stack:** FastAPI · PostgreSQL · Redis · K3s/Hetzner · Helm · Terraform · Next.js
-> **Repo:** `helvex` (product name: Helvex)
+> **Stack:** FastAPI · PostgreSQL · K3s/Hetzner · Helm · Terraform · Next.js (Redis optional for RQ mode)
+> **Repo:** `helvex` (product name: Firmiq)
+> **Note:** This document was last updated May 2026 after Phase 1–3 refactoring. Phase 3.2 (Redis removal) remains planned but incomplete; Redis is still used in RQ mode.
 
 ---
 
@@ -78,11 +79,11 @@ zefix_analyzer/
 │   │   │   ├── invites.py      # /api/v1/invites/* (organization invitations)
 │   │   │   └── deps.py         # Shared FastAPI dependencies
 │   │   └── [deprecated shims]  # Backward-compat re-exports from app/clients/
-│   ├── models/                 # SQLAlchemy ORM (70+ migrations)
+│   ├── models/                 # SQLAlchemy ORM (70+ migrations, Phase 4 cleanups deferred)
 │   │   ├── user.py, organization.py, company.py, job_run.py, note.py, etc.
 │   ├── schemas/                # Pydantic request/response DTOs
 │   ├── crud/                   # DB access functions (no business logic)
-│   └── services/               # Business logic (split into ~25 focused modules)
+│   └── services/               # Business logic (split into 20+ focused modules)
 │       ├── collection.py       # Facade re-exporting from split modules
 │       ├── zefix_import.py     # Zefix API fetch, bulk import, detail collect
 │       ├── web_enrichment.py   # Google search enrichment, batch collect
@@ -105,9 +106,9 @@ zefix_analyzer/
 │       ├── payment_transactions.py  # Credit grant, subscription apply
 │       └── [other services]    # email, boilerplate_analysis, incremental_classify, etc.
 │
-├── alembic/                    # Database migrations
+├── alembic/                    # Database migrations (Alembic)
 │   ├── env.py
-│   ├── versions/               # ~26 numbered migration files
+│   ├── versions/               # 70+ numbered migration files (Phase 4 schema cleanups deferred)
 │   └── ...
 ├── alembic.ini
 │
@@ -256,13 +257,31 @@ HTML routes (browser, in `main.py`):
 | DELETE | `/api/v1/views/{id}` | Member (owner) | Delete a saved view |
 | PATCH | `/api/v1/views/{id}/alert` | Member (owner) | Enable/disable daily new-match alert for a saved view |
 
+#### Organizations (CRUD) — `app/api/routes/orgs.py`
+
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| GET | `/api/v1/orgs/me` | User | List all orgs the current user is a member of |
+| GET | `/api/v1/orgs/{org_id}` | Member/Admin | Get organization details (name, slug, tier, user's role) |
+| POST | `/api/v1/orgs` | User | Create new organization |
+| POST | `/api/v1/orgs/switch/{org_id}` | Member | Set active org for session |
+| DELETE | `/api/v1/orgs/{org_id}` | Owner | Delete organization (cascades members) |
+| POST | `/api/v1/orgs/{org_id}/leave` | Member | Leave organization (prevents leaving if sole owner) |
+| POST | `/api/v1/orgs/{org_id}/request-verification` | Admin/Owner | Request verified-business status (auto-verify if linked company web_score ≥ 70) |
+
 #### Workspace / Orgs — `app/api/routes/workspace.py`
 
 | Method | Path | Auth | Description |
 |---|---|---|---|
 | GET | `/api/v1/orgs/{id}/notifications` | Member | Get notification preferences (`email_notifications`) |
 | PATCH | `/api/v1/orgs/{id}/notifications` | Admin/Owner | Update notification preferences |
-| … | (other existing org/member routes) | | |
+| GET | `/api/v1/orgs/{id}/members` | Member | List organization members |
+| POST | `/api/v1/orgs/{id}/members` | Admin/Owner | Add member to organization |
+| PATCH | `/api/v1/orgs/{id}/members/{user_id}` | Admin/Owner | Update member role |
+| DELETE | `/api/v1/orgs/{id}/members/{user_id}` | Admin/Owner | Remove member from organization |
+| GET | `/api/v1/orgs/{id}/settings` | Member | Get org-scoped settings |
+| PUT | `/api/v1/orgs/{id}/settings` | Admin/Owner | Update org-scoped settings |
+| … | (other org-scoped routes) | | |
 
 #### Scoring — `app/api/routes/scoring.py`
 
@@ -388,19 +407,28 @@ The core entity. Key columns:
 | `municipality` | String | |
 | `purpose` | Text | Statutory purpose (used for scoring) |
 | `address` | String | Full address string |
-| `lat`, `lon` | Numeric | Geocoordinates (swisstopo / GeoNames) |
-| `zefix_score` | Integer 0-100 | Computed from Zefix data |
-| `website_url` | String | Top Google result URL |
-| `website_match_score` | Integer 0-100 | Name/location match quality |
-| `claude_score` | Integer 0-100 | Claude Haiku classification |
-| `claude_category` | String | Claude-assigned category |
-| `tfidf_cluster` | String | Top-3 TF-IDF terms |
-| `review_status` | String | pending / confirmed / interesting / rejected |
-| `proposal_status` | String | not_sent / sent / responded / converted / rejected |
-| `contact_name/email/phone` | String | Outreach contact info |
-| `tags` | String | Comma-separated tags |
-| `zefix_raw` | Text/JSON | Raw API response |
-| `zefix_score_breakdown` | JSON | Per-component score detail |
+| `lat`, `lon` | Float | Geocoordinates (swisstopo / GeoNames) |
+| `flex_score` | Integer 0-100 | Zefix-data-only priority score (no external API) |
+| `flex_score_breakdown` | JSON | Per-component flex score detail |
+| `website_url` | String | Top Google result URL (global master; see dual-write note) |
+| `web_score` | Integer 0-100 | Google name/location match quality |
+| `google_search_results_raw` | Text | Raw top-5 Serper results as JSON |
+| `website_checked_at` | DateTime | Last Google enrichment timestamp |
+| `social_media_only` | Bool | True if only social media URLs were found |
+| `ai_score` | Integer 0-100 | Claude Haiku classification score |
+| `ai_category` | String | Claude-assigned category label |
+| `combined_score` | Float | Stored weighted score (ai×0.60 + noga_conf×0.25 + keyword_density×0.15) |
+| `noga_code` | String | Official Swiss NOGA 2025 industry code |
+| `noga_confidence` | Float 0-1 | Classifier confidence |
+| `purpose_language` | String | Detected language of purpose text |
+| `tfidf_cluster` | Text | Top TF-IDF cluster terms (comma-separated) |
+| `purpose_keywords` | Text | Per-company top keywords from purpose text |
+| `business_model` | String | b2b / b2c / b2g / mixed |
+| `zefix_raw` | Text/JSON | Raw Zefix API response |
+
+**Dual-write note (Google scoring fields):** `website_url`, `web_score`, `google_search_results_raw`, `website_checked_at`, and `social_media_only` exist on both `Company` (global Serper master) and `OrgCompanyState` (org-specific re-score). Always read from `OrgCompanyState` when `org_id` is available; fall back to `Company` only when no org context exists. See model file comments for details.
+
+**Note:** `review_status`, `contact_status`, `contact_name/email/phone`, and `tags` also exist as legacy columns on `Company`, but the authoritative per-org values live in `OrgCompanyState`. Do not write these fields directly on `Company` for new code.
 
 #### `User` — `app/models/user.py`
 
@@ -438,7 +466,7 @@ Saved filter sets (named dashboard views) that users can recall later.
 
 | Column | Notes |
 |---|---|
-| `org_id` | FK → organizations |
+| `org_id` | FK → organizations (nullable; NULL = legacy view shown in all org contexts) |
 | `user_id` | FK → users (owner) |
 | `name` | Human-readable label |
 | `filters_json` | Serialized filter params |
@@ -446,7 +474,9 @@ Saved filter sets (named dashboard views) that users can recall later.
 | `alert_last_count` | Count of matching companies at last sweep; NULL until first sweep run |
 | `alert_last_checked_at` | Timestamp of last sweep for this view |
 
-Migration: `0052_add_user_view_alert_fields`
+Views are scoped per-user per-org. `list_views` returns rows matching `org_id = current_org` OR `org_id IS NULL` (legacy pre-0072 views). New views always set `org_id`.
+
+Migrations: `0052_add_user_view_alert_fields`, `0072_add_org_id_to_user_views`
 
 #### Other models
 
@@ -469,12 +499,21 @@ Thin functions over SQLAlchemy — no business logic. Key modules:
 
 ### Migrations (`alembic/versions/`)
 
-70+ migration files (covering Zefix import, multi-tenancy migration, job dispatcher, scoring evolution, etc.). On startup `alembic upgrade head` runs automatically. To create a new migration:
+72 migration files (covering Zefix import, multi-tenancy migration, job dispatcher, scoring evolution, Phase 4 schema cleanups, etc.). On startup `alembic upgrade head` runs automatically. To create a new migration:
 
 ```bash
 alembic revision --autogenerate -m "describe change"
 alembic upgrade head
 ```
+
+**Recent Phase 4 cleanups:**
+- `0071` — Dropped 2 redundant combined_score functional indexes + 2 stale partial indexes (pre-column-rename names). `ix_companies_combined_score_stored` (stored column B-tree) is the correct index.
+- `0072` — Added `org_id` FK to `user_views`; backfilled from `users.org_id`; views are now org-scoped.
+- `fe7a997e322a` (prior session) — Dropped 8 never-read JSON blob columns from `companies` (`sogc_pub`, `further_head_offices`, `branch_offices`, `has_taken_over`, `was_taken_over_by`, `audit_companies`, `old_names`, `translations`).
+
+**Deferred Phase 4 items:**
+- `4.4` — Legacy per-user billing columns (`payment_customer_id`, `payment_subscription_id`, `subscription_status`) are still on `users`; confirmed actively used in billing/workspace routes — deferred indefinitely.
+- `4.6` — Junction table dual-write (`tfidf_cluster`/`purpose_keywords` text columns vs junction tables via `_sync_junction_tables`) — deferred; requires full audit before removing sync logic.
 
 ---
 
@@ -526,7 +565,9 @@ never blocked.
 
 ### Rate limiting — `app/auth.py` + `app/services/rate_limit.py`
 
-**Implementation:** In-memory sliding window using `defaultdict` of timestamps per IP/key. No external dependencies (Redis removed in Phase 3.2).
+**Implementation (Thread mode, default):** In-memory sliding window using `defaultdict` of timestamps per IP/key. No external dependencies.
+
+**Note:** Phase 3.2 (Redis removal) is planned but not yet complete. Redis is still available for RQ mode (separate worker process) if needed in production.
 
 | Endpoint | Limit | Window | Keyed by |
 |---|---|---|---|
@@ -635,7 +676,7 @@ Strict-Transport-Security: max-age=31536000 (HTTPS only)
 **Thread mode (default, `USE_RQ=false`)**
 - Single daemon thread (`app/services/job_worker.py`), polls `job_runs` table for `status=queued`
 - Executes jobs sequentially in-process
-- No external dependencies (Redis removed in Phase 3.2)
+- No external dependencies; uses in-memory progress tracking
 - Set `DISABLE_JOB_WORKER=true` to suppress the thread (e.g., API-only pod)
 
 **Job handler registry pattern** — Replaced the previous 735-line `elif` chain
@@ -740,7 +781,7 @@ Both are downloaded and compiled into SQLite databases **at Docker build time**.
 - **Used for**: `claude_classify` batch job, and `claude-preview` dry-run endpoint
 - **System prompt**: User-configurable via Settings API; resolved per-org
 - **Preflight check** (`_preflight_job`): Validates org has API key before queueing `claude_classify`
-- **Dry-run / preview**: `claude_classify_batch(dry_run=True)` scores up to 5 companies without writing to DB. Called by `POST /api/v1/scoring/claude-preview`. Rate-limited to 3 calls/min per org (Redis counter).
+- **Dry-run / preview**: `claude_classify_batch(dry_run=True)` scores up to 5 companies without writing to DB. Called by `POST /api/v1/scoring/claude-preview`. Rate-limited to 3 calls/min per org (in-memory sliding window).
 
 ### Hetzner Object Storage (S3-compatible) — `app/services/s3_client.py`
 
@@ -1679,7 +1720,7 @@ failure (missing API key, insufficient credits) — check the job event log.
 ## 17. Background Job System — Design Evolution
 
 This section records the architectural changes made to the job system and the
-rationale behind each decision.
+rationale behind each decision. Most of these decisions apply to **RQ mode** (optional separate worker process, production-intended). **Thread mode** (default, `USE_RQ=false`) is simpler: it polls the DB in-process and does not use Redis.
 
 ### Overview of changes (migration 0048)
 
@@ -1702,10 +1743,10 @@ Two columns were added to `job_runs`:
 
 | Mode | Trigger | Latency | Use case |
 |---|---|---|---|
-| **Redis pub/sub** | Workers publish to `jobs:{org_id}` channel on status transitions | <1 s for transitions | RQ mode (production) |
-| **DB poll** | SSE endpoint polls DB every 1 s | ~1 s | Thread mode (dev / no Redis) |
+| **Redis pub/sub** (RQ mode) | Workers publish to `jobs:{org_id}` channel on status transitions | <1 s for transitions | Separate worker process with Redis |
+| **DB poll** (Thread mode) | SSE endpoint polls DB every 1 s | ~1 s | Default; single thread, no Redis |
 
-In Redis mode a **2 s periodic DB poll** runs alongside pub/sub to deliver progress-bar updates. Workers do not publish on every progress tick (which would flood Redis with dozens of messages per second for fast jobs); the periodic poll closes this gap with a 2 s lag that is invisible to users.
+In RQ mode with Redis, a **2 s periodic DB poll** runs alongside pub/sub to deliver progress-bar updates. Workers do not publish on every progress tick (which would flood Redis with dozens of messages per second for fast jobs); the periodic poll closes this gap with a 2 s lag that is invisible to users.
 
 **Trade-offs:**
 - **Advantage:** Near-zero polling overhead; status transitions (complete/fail/pause) reach the browser in <1 s in production.
@@ -1766,7 +1807,9 @@ In Redis mode a **2 s periodic DB poll** runs alongside pub/sub to deliver progr
 
 ---
 
-### Redis connection pool for pub/sub publish
+### Redis connection pool for pub/sub publish (RQ mode only)
+
+**Note:** This optimization applies only to RQ mode. Thread mode does not use Redis.
 
 **Before:** `_publish_job_update()` created a new `Redis(...)` TCP connection on every call — up to dozens of times per second for a fast-progressing job.
 

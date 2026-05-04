@@ -30,7 +30,12 @@ class OrgCompanyState(Base):
     contact_email: Mapped[str | None] = mapped_column(String(256), nullable=True)
     contact_phone: Mapped[str | None] = mapped_column(String(64), nullable=True)
 
-    # Google scoring (written by worker, paid tier)
+    # Google scoring (written by worker, paid tier).
+    # DUAL-WRITE: these same fields exist on Company (global Serper result, master copy).
+    # org_company_state holds the org-specific re-score; Company holds the seed value used
+    # to populate any org that hasn't run its own enrichment yet.
+    # Always read from org_company_state when org_id is available; fall back to Company
+    # only when no org context exists (e.g. superadmin or pre-enrichment queries).
     website_url: Mapped[str | None] = mapped_column(String(512), nullable=True)
     web_score: Mapped[float | None] = mapped_column(Float, nullable=True)
     google_search_results_raw: Mapped[str | None] = mapped_column(Text, nullable=True)
