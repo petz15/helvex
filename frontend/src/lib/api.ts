@@ -504,7 +504,7 @@ export async function fetchCompanies(filters: CompanyFilters = {}): Promise<Comp
   const { page = 1, page_size = 50, sort = "-updated", has_website, ...rest } = filters;
   const params: Record<string, string | number | undefined | null> = { page, page_size, sort, ...rest };
   if (has_website !== undefined && has_website !== null) params.has_website = String(has_website);
-  const url = buildUrl("/api/v1/companies", params);
+  const url = buildUrl("/api/v1/companies/", params);
   const res = await fetch(url, { credentials: "include" });
   if (!res.ok) throw new Error(`Failed to fetch companies: ${res.status}`);
   return res.json();
