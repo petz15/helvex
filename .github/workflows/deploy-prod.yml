@@ -335,8 +335,6 @@ jobs:
           kubectl create secret generic helvex-env \
             --from-literal=APP_ENV="prod" \
             --from-literal=DATABASE_URL="${{ secrets.DB_URL }}" \
-            --from-literal=REDIS_URL="${{ secrets.REDIS_URL }}" \
-            --from-literal=REDIS_PASSWORD="${{ secrets.REDIS_PASSWORD }}" \
             --from-literal=SERPER_API_KEY="${{ secrets.SERPER_API_KEY }}" \
             --from-literal=ANTHROPIC_API_KEY="${{ secrets.ANTHROPIC_API_KEY }}" \
             --from-literal=ZEFIX_API_USERNAME="${{ secrets.ZEFIX_API_USERNAME }}" \
@@ -368,7 +366,6 @@ jobs:
             --from-literal=STORAGEBOX_PORT="${{ secrets.STORAGEBOX_PORT }}" \
             --from-literal=STORAGEBOX_SSH_PRIVATE_KEY="${{ secrets.STORAGEBOX_SSH_PRIVATE_KEY }}" \
             --from-literal=APP_BASE_URL="https://helvex.dicy.ch" \
-            --from-literal=USE_RQ="true" \
             --from-literal=username="helvex" \
             --from-literal=password="${{ secrets.DB_PASSWORD }}" \
             -n helvex-prod \
@@ -637,16 +634,13 @@ jobs:
             --set "postgres.restoreSourceServerName=${{ steps.pg-meta.outputs.restore_source }}" \
             --suppress-diff
 
-      - name: Deploy app (backend + frontend + workers)
+      - name: Deploy app (backend + frontend + api-worker)
         if: |
           (github.event_name != 'workflow_dispatch' && contains(github.event.head_commit.message, '[deploy-app]')) ||
           (github.event_name == 'workflow_dispatch' && github.event.inputs.deploy_mode == 'app')
         run: |
           kubectl set image deployment/helvex \
             app=ghcr.io/${{ github.repository }}:${{ github.sha }} \
-            -n helvex-prod
-          kubectl set image deployment/helvex-zefix-worker \
-            zefix-worker=ghcr.io/${{ github.repository }}:${{ github.sha }} \
             -n helvex-prod
           kubectl set image deployment/helvex-api-worker \
             api-worker=ghcr.io/${{ github.repository }}:${{ github.sha }} \
@@ -655,16 +649,13 @@ jobs:
             frontend=ghcr.io/${{ github.repository }}-frontend:${{ github.sha }} \
             -n helvex-prod
 
-      - name: Deploy all app images (backend + frontend + ml + workers)
+      - name: Deploy all app images (backend + frontend + api-worker + ml-worker)
         if: |
           (github.event_name != 'workflow_dispatch' && contains(github.event.head_commit.message, '[deploy-all]')) ||
           (github.event_name == 'workflow_dispatch' && github.event.inputs.deploy_mode == 'all')
         run: |
           kubectl set image deployment/helvex \
             app=ghcr.io/${{ github.repository }}:${{ github.sha }} \
-            -n helvex-prod
-          kubectl set image deployment/helvex-zefix-worker \
-            zefix-worker=ghcr.io/${{ github.repository }}:${{ github.sha }} \
             -n helvex-prod
           kubectl set image deployment/helvex-api-worker \
             api-worker=ghcr.io/${{ github.repository }}:${{ github.sha }} \
@@ -692,9 +683,6 @@ jobs:
         run: |
           kubectl set image deployment/helvex \
             app=ghcr.io/${{ github.repository }}:${{ github.sha }} \
-            -n helvex-prod
-          kubectl set image deployment/helvex-zefix-worker \
-            zefix-worker=ghcr.io/${{ github.repository }}:${{ github.sha }} \
             -n helvex-prod
           kubectl set image deployment/helvex-api-worker \
             api-worker=ghcr.io/${{ github.repository }}:${{ github.sha }} \
@@ -746,7 +734,6 @@ jobs:
               kubectl rollout status deployment/helvex-ml-worker -n helvex-prod --timeout=360s
             elif [ "${DEPLOY_MODE}" = "app" ]; then
               kubectl rollout status deployment/helvex -n helvex-prod --timeout=360s
-              kubectl rollout status deployment/helvex-zefix-worker -n helvex-prod --timeout=360s
               kubectl rollout status deployment/helvex-api-worker -n helvex-prod --timeout=360s
               kubectl rollout status deployment/helvex-frontend -n helvex-prod --timeout=180s
             else
@@ -762,7 +749,6 @@ jobs:
             kubectl rollout status deployment/helvex-ml-worker -n helvex-prod --timeout=360s
           elif echo "$COMMIT_MSG" | grep -qF '[deploy-app]'; then
             kubectl rollout status deployment/helvex -n helvex-prod --timeout=360s
-            kubectl rollout status deployment/helvex-zefix-worker -n helvex-prod --timeout=360s
             kubectl rollout status deployment/helvex-api-worker -n helvex-prod --timeout=360s
             kubectl rollout status deployment/helvex-frontend -n helvex-prod --timeout=180s
           else
