@@ -50,27 +50,14 @@ resources:
 # GHCR pull secret — set in prod.yaml; leave empty for dev (local registry needs no auth)
 imagePullSecrets: []
 
-# ── RQ workers — separate Deployments running app/worker_entrypoint.py ─────────
-#
-# Three specialized workers:
-#   zefix-worker  helvex-zefix-p4..p0  bulk/detail/initial imports
-#   api-worker    helvex-api-p4..p0    scoring, geocode, NOGA, Claude classify
-#   ml-worker     helvex-ml            HDBSCAN clustering, TF-IDF (scale-to-0 via KEDA)
-
-zefixWorker:
-  enabled: false   # set to true in prod
-  replicaCount: 1
-  resources:
-    requests:
-      cpu: 250m
-      memory: 512Mi
-    limits:
-      cpu: "1"
-      memory: 1Gi
+# ── DB-polling workers (no Redis required) ───────────────────────────────────
+# Each worker runs the same Docker image with JOB_TYPE_WHITELIST set so it
+# only picks up its assigned job types. The web pod sets DISABLE_JOB_WORKER=true
+# when any worker is enabled, so jobs are never executed in the web process.
 
 apiWorker:
-  enabled: false   # set to true in prod
-  replicaCount: 2  # 2 replicas = 2 concurrent API jobs
+  enabled: false
+  replicaCount: 1
   resources:
     requests:
       cpu: 250m
@@ -80,20 +67,17 @@ apiWorker:
       memory: 1Gi
 
 mlWorker:
-  enabled: false   # set to true in prod
-  replicaCount: 1
-  keda:
-    enabled: false   # set to true after KEDA + Hetzner Cluster Autoscaler are installed
-  # nodeSelector and tolerations for a dedicated ML node pool (set in prod.yaml after CA setup)
+  enabled: false
   nodeSelector: {}
   tolerations: []
   resources:
     requests:
-      cpu: "4"
-      memory: 8Gi
+      cpu: "2"
+      memory: 4Gi
     limits:
-      cpu: "6"
-      memory: 16Gi
+      cpu: "3"
+      memory: 6Gi
+
 
 # CloudNativePG PostgreSQL cluster
 postgres:

@@ -38,15 +38,7 @@ class Settings(BaseSettings):
 
     # Background worker
     # Set DISABLE_JOB_WORKER=true to prevent starting the in-process job worker thread.
-    # Useful when running the web API in a memory-limited pod and processing jobs elsewhere.
     disable_job_worker: bool = False
-
-    # Redis — used by RQ job queue and rate limiting
-    redis_url: str = ""
-
-    # Set USE_RQ=true to enqueue jobs into Redis (RQ) instead of the in-process thread.
-    # Requires REDIS_URL and a running RQ worker (app/worker_entrypoint.py).
-    use_rq: bool = False
 
     # SMTP — for email verification and transactional emails
     smtp_host: str = ""

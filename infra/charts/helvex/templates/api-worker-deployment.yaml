@@ -10,7 +10,7 @@ metadata:
 spec:
   replicas: {{ .Values.apiWorker.replicaCount }}
   strategy:
-    type: RollingUpdate
+    type: Recreate
   selector:
     matchLabels:
       {{- include "helvex.selectorLabels" . | nindent 6 }}
@@ -21,10 +21,6 @@ spec:
         {{- include "helvex.labels" . | nindent 8 }}
         app.kubernetes.io/component: api-worker
     spec:
-      # Allow enough time for the running job to reach its next checkpoint
-      # and write status=paused before K8s sends SIGKILL.
-      terminationGracePeriodSeconds: 90
-      priorityClassName: helvex-worker
       securityContext:
         runAsNonRoot: true
         runAsUser: 1000
@@ -38,20 +34,17 @@ spec:
         - name: api-worker
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
-          command: ["python", "-m", "app.worker_entrypoint"]
+          env:
+            - name: JOB_TYPE_WHITELIST
+              value: "bulk,detail,initial,shab_daily,shab_backfill,batch,re_geocode,recalculate_scores,recalculate_google_scores,reextract_purpose,claude_classify,csv_export,analyze_boilerplate,billing_renewal,saved_view_alerts"
           envFrom:
             - secretRef:
                 name: {{ .Values.envSecretName }}
-          env:
-            - name: USE_RQ
-              value: "true"
-            - name: DISABLE_JOB_WORKER
-              value: "true"
-            - name: WORKER_TYPE
-              value: "api"
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: false
+            capabilities:
+              drop: ["ALL"]
           resources:
             {{- toYaml .Values.apiWorker.resources | nindent 12 }}
 {{- end }}

@@ -1,7 +1,4 @@
 {{- if .Values.mlWorker.enabled }}
-{{- $mlRepo := (.Values.mlImage.repository | default .Values.image.repository) -}}
-{{- $mlTag := (.Values.mlImage.tag | default .Values.image.tag) -}}
-{{- $mlPullPolicy := (.Values.mlImage.pullPolicy | default .Values.image.pullPolicy) -}}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -11,9 +8,7 @@ metadata:
     {{- include "helvex.labels" . | nindent 4 }}
     app.kubernetes.io/component: ml-worker
 spec:
-  # With KEDA enabled we start at 0 and let ScaledObject drive 0→1.
-  # Without KEDA we keep one always-on ML worker.
-  replicas: {{ ternary 0 (.Values.mlWorker.replicaCount | default 1) .Values.mlWorker.keda.enabled }}
+  replicas: 1
   strategy:
     type: Recreate
   selector:
@@ -26,10 +21,6 @@ spec:
         {{- include "helvex.labels" . | nindent 8 }}
         app.kubernetes.io/component: ml-worker
     spec:
-      # Allow enough time for the running job to reach its next checkpoint
-      # and write status=paused before K8s sends SIGKILL.
-      terminationGracePeriodSeconds: 90
-      priorityClassName: helvex-ml-worker
       securityContext:
         runAsNonRoot: true
         runAsUser: 1000
@@ -49,22 +40,19 @@ spec:
       {{- end }}
       containers:
         - name: ml-worker
-          image: "{{ $mlRepo }}:{{ $mlTag }}"
-          imagePullPolicy: {{ $mlPullPolicy }}
-          command: ["python", "-m", "app.worker_entrypoint"]
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          env:
+            - name: JOB_TYPE_WHITELIST
+              value: "reclassify_noga,build_noga_embeddings,detect_language_bulk,reclassify_low_conf_noga,tfidf_kmeans_cluster,recompute_keywords,reextract_keywords,cluster_analysis,discover_stopwords"
           envFrom:
             - secretRef:
                 name: {{ .Values.envSecretName }}
-          env:
-            - name: USE_RQ
-              value: "true"
-            - name: DISABLE_JOB_WORKER
-              value: "true"
-            - name: WORKER_TYPE
-              value: "ml"
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: false
+            capabilities:
+              drop: ["ALL"]
           resources:
             {{- toYaml .Values.mlWorker.resources | nindent 12 }}
 {{- end }}

@@ -24,8 +24,8 @@ from app.services.tiers import get_export_limit, has_feature, normalize_tier
 def _check_job_rate_limit(request: Request, current_user: User, action: str, *, window: int = 300, max_calls: int = 10) -> None:
     """Rate-limit authenticated job-triggering endpoints by user ID.
 
-    Uses the same Redis-backed sliding window as public rate limiting, keyed
-    on ``job_rl:<action>:<user_id>`` so each user has an independent bucket.
+    Uses an in-process sliding window keyed on ``job_rl:<action>:<user_id>``
+    so each user has an independent bucket.
     Superadmins are never limited.
 
     Args:

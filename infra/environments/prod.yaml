@@ -44,17 +44,18 @@ resources:
 imagePullSecrets:
   - name: ghcr-pull-secret
 
-zefixWorker:
-  enabled: true
 
 apiWorker:
   enabled: true
 
 mlWorker:
   enabled: true
-  replicaCount: 1  # Runs continuously; Option B (KEDA autoscaling) will replace this
-  keda:
-    enabled: false  # Set to true after KEDA + Hetzner Cluster Autoscaler are installed
+  nodeSelector: {workload: ml}
+  tolerations:
+    - key: workload
+      operator: Equal
+      value: ml
+      effect: NoSchedule
   resources:
     requests:
       cpu: "2"
@@ -62,13 +63,6 @@ mlWorker:
     limits:
       cpu: "3"
       memory: 6Gi
-  # Dedicated ML nodes only; enable fallback once autoscaler node group is ready.
-  nodeSelector: {workload: ml}
-  tolerations:
-    - key: workload
-      operator: Equal
-      value: ml
-      effect: NoSchedule
 
 postgres:
   enabled: true

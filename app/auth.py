@@ -258,7 +258,7 @@ def require_verified_email(user: User = Depends(get_current_user)) -> User:
 
 
 # ---------------------------------------------------------------------------
-# Rate limiting — Redis-backed with in-memory fallback
+# Rate limiting — in-process sliding window (per pod)
 # ---------------------------------------------------------------------------
 
 _RATE_WINDOW = 900   # 15 minutes

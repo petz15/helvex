@@ -22,7 +22,8 @@ def check_rate_limit(
 ) -> None:
     """Raise HTTP 429 if *key*+*action* exceeds *max_calls* in *window* seconds.
 
-    Falls back to an in-process deque when Redis is unavailable.
+    Uses an in-process sliding window. Precise for single-pod deployments;
+    provides best-effort protection in multi-pod setups.
     """
     if not check_public_rate_limit(key, action, window=window, max_requests=max_calls):
         msg = detail or f"Too many requests. Maximum {max_calls} calls per {window // 60} minutes."

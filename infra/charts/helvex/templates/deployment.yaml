@@ -37,10 +37,8 @@ spec:
               containerPort: 8000
               protocol: TCP
           env:
-            {{- if or .Values.zefixWorker.enabled .Values.apiWorker.enabled .Values.mlWorker.enabled }}
+            {{- if or .Values.apiWorker.enabled .Values.mlWorker.enabled }}
             - name: DISABLE_JOB_WORKER
-              value: "true"
-            - name: USE_RQ
               value: "true"
             {{- end }}
           envFrom:

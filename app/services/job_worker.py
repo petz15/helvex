@@ -1,14 +1,8 @@
 """Background job worker.
 
-Two modes:
-- Thread mode (default): a daemon thread polls the DB queue and runs jobs
-  sequentially in-process. Zero external dependencies.
-- RQ mode (USE_RQ=true + REDIS_URL set): jobs are pushed to a Redis queue
-  and executed by a separate `rq worker` process (app/worker_entrypoint.py).
-  The web pod sets DISABLE_JOB_WORKER=true so it never starts a thread.
-
-`enqueue_job()` is the only public entry point used by REST routes — it
-handles both modes transparently.
+A daemon thread polls the DB queue and runs jobs sequentially in-process.
+Zero external dependencies. `enqueue_job()` is the only public entry point
+used by REST routes.
 """
 from __future__ import annotations
 
@@ -33,9 +27,7 @@ _shutdown_requested: bool = False
 def request_shutdown() -> None:
     """Signal all running jobs to pause at their next progress checkpoint.
 
-    Called from:
-    - worker_entrypoint._SafeWorker.handle_warm_shutdown_request() on SIGTERM (RQ mode)
-    - app/main.py lifespan shutdown (thread mode)
+    Called from app/main.py lifespan shutdown.
     """
     global _shutdown_requested
     _shutdown_requested = True
@@ -57,35 +49,6 @@ class JobEnqueueError(RuntimeError):
 class _JobWaitingExternalSignal(Exception):
     """Internal signal: job transitioned to waiting_external — skip mark_completed."""
 
-
-# ── Queue routing ───────────────────────────────────────────────────────────────
-
-_QUEUE_FOR_JOB_TYPE: dict[str, str] = {
-    "bulk":                      "helvex-zefix",
-    "detail":                    "helvex-zefix",
-    "initial":                   "helvex-zefix",
-    "shab_daily":                "helvex-zefix",
-    "shab_backfill":             "helvex-zefix",
-    "batch":                     "helvex-api",
-    "re_geocode":                "helvex-api",
-    "recalculate_scores":        "helvex-api",
-    "recalculate_google_scores": "helvex-api",
-    "reextract_purpose":         "helvex-api",
-    "reclassify_noga":           "helvex-ml",
-    "build_noga_embeddings":     "helvex-ml",
-    "detect_language_bulk":      "helvex-ml",
-    "reclassify_low_conf_noga":  "helvex-ml",
-    "claude_classify":           "helvex-api",
-    "csv_export":                "helvex-api",
-    "tfidf_kmeans_cluster":      "helvex-ml",
-    "recompute_keywords":        "helvex-ml",
-    "reextract_keywords":        "helvex-ml",
-    "cluster_analysis":          "helvex-ml",
-    "discover_stopwords":        "helvex-ml",
-    "analyze_boilerplate":       "helvex-api",
-    "billing_renewal":           "helvex-api",
-    "saved_view_alerts":         "helvex-api",
-}
 
 
 def _compute_dedup_key(job_type: str, org_id: int | None, params: dict) -> str | None:
@@ -132,60 +95,12 @@ def _compute_dedup_key(job_type: str, org_id: int | None, params: dict) -> str |
     return None
 
 
-_redis_pub_pool: "redis.ConnectionPool | None" = None  # type: ignore[name-defined]
-
-
-def _get_redis_pub_conn():
-    """Return a Redis client backed by a module-level connection pool.
-
-    Creating a new TCP connection per publish call was wasteful when
-    _publish_job_update() fires on every job status change.  The pool
-    (max_connections=5) reuses connections across publish calls.
-    """
-    global _redis_pub_pool
-    from app.config import settings as _s
-    import redis as _redis_mod
-    if _redis_pub_pool is None:
-        _redis_pub_pool = _redis_mod.ConnectionPool.from_url(
-            _s.redis_url,
-            max_connections=5,
-            socket_connect_timeout=0.5,
-            socket_timeout=0.5,
-        )
-    return _redis_mod.Redis(connection_pool=_redis_pub_pool)
-
-
 def _publish_job_update(org_id: int | None) -> None:
-    """Publish a lightweight notification to the SSE pub/sub channel.
-
-    The SSE endpoint subscribes to this channel and re-fetches the full
-    job list from the DB when a message arrives.  Best-effort: never
-    raises, never blocks the job.
-    """
-    try:
-        from app.config import settings as _s
-        if not (_s.use_rq and _s.redis_url):
-            return
-        r = _get_redis_pub_conn()
-        channel = f"jobs:{org_id}" if org_id is not None else "jobs:superadmin"
-        r.publish(channel, "update")
-    except Exception:  # noqa: BLE001
-        pass
+    pass
 
 
 def _heartbeat() -> None:
-    """Renew the RQ started-registry TTL so clean_registries won't mark this job stale.
-
-    Safe to call from any context — no-ops outside RQ workers.
-    """
-    try:
-        from datetime import datetime, timezone as _tz
-        from rq import get_current_job as _get_rq_job
-        _rq_job = _get_rq_job()
-        if _rq_job is not None:
-            _rq_job.heartbeat(datetime.now(tz=_tz.utc), 3600)
-    except Exception:  # noqa: BLE001
-        pass
+    pass
 
 
 def _preflight_job(db: Session, *, job_type: str, params: dict) -> tuple[dict, list[str]]:
@@ -1243,12 +1158,26 @@ def _maybe_send_job_notification(
 
 # ── Worker loop ────────────────────────────────────────────────────────────────
 
+def _get_job_type_whitelist() -> set[str] | None:
+    """Read JOB_TYPE_WHITELIST from env. Returns None (= handle all types) when unset."""
+    import os
+    raw = os.environ.get("JOB_TYPE_WHITELIST", "").strip()
+    if not raw:
+        return None
+    return {t.strip() for t in raw.split(",") if t.strip()}
+
+
 def _job_worker_loop(app) -> None:
+    whitelist = _get_job_type_whitelist()
+    if whitelist:
+        logger.info("Job worker started — handling job types: %s", ", ".join(sorted(whitelist)))
+    else:
+        logger.info("Job worker started — handling all job types")
     app.state.job_worker_running = True
     try:
         while True:
             with SessionLocal() as db:
-                next_job = crud.get_next_queued_job(db)
+                next_job = crud.get_next_queued_job(db, job_type_whitelist=whitelist)
                 if next_job is None:
                     break
                 next_id = next_job.id
@@ -1256,36 +1185,37 @@ def _job_worker_loop(app) -> None:
     finally:
         app.state.job_worker_running = False
         with SessionLocal() as db:
-            if crud.get_next_queued_job(db) is not None:
+            if crud.get_next_queued_job(db, job_type_whitelist=whitelist) is not None:
                 _ensure_job_worker(app)
+
+
+_LLM_POLL_INTERVAL = 300  # 5 minutes
+
+
+def _llm_poll_loop() -> None:
+    """Daemon thread: poll Anthropic Batch API jobs every 5 minutes."""
+    while True:
+        time.sleep(_LLM_POLL_INTERVAL)
+        try:
+            poll_llm_batches()
+        except Exception:  # noqa: BLE001
+            logger.error("LLM poll loop error", exc_info=True)
 
 
 def _ensure_job_worker(app) -> None:
     if getattr(app.state, "disable_job_worker", False):
         return
+    if not getattr(app.state, "llm_poll_running", False):
+        app.state.llm_poll_running = True
+        threading.Thread(target=_llm_poll_loop, daemon=True, name="llm-batch-poller").start()
     if getattr(app.state, "job_worker_running", False):
         return
     threading.Thread(target=_job_worker_loop, args=(app,), daemon=True).start()
 
 
 def kick_job_worker(app) -> None:
-    """Ensure all DB-queued jobs are being processed.
-
-    RQ mode: push every queued job ID onto Redis. Safe to call multiple times —
-    _run_job() guards against double-execution by checking job.status on pickup.
-    Jobs in `waiting_external` status are skipped — they are being polled by the
-    api-worker background thread, not re-enqueued.
-
-    Thread mode: start/wake the in-process daemon thread.
-    """
-    from app.config import settings as _settings
-    if _settings.use_rq and _settings.redis_url:
-        with SessionLocal() as db:
-            queued = crud.list_queued_jobs(db)
-        for job in queued:
-            _enqueue_rq(job.id, job_type=job.job_type)
-    else:
-        _ensure_job_worker(app)
+    """Ensure all DB-queued jobs are being processed by the in-process daemon thread."""
+    _ensure_job_worker(app)
 
 
 # ── Enqueue helpers (used by REST routes) ─────────────────────────────────────
@@ -1360,102 +1290,14 @@ def enqueue_job(
     else:
         job = _enqueue_job_in_session(db, job_type=job_type, label=label, params=params, org_id=org_id, user_id=user_id)
 
-    from app.config import settings as _settings
-    if _settings.use_rq:
-        if not _settings.redis_url:
-            raise JobEnqueueError("USE_RQ=true but REDIS_URL is not set — jobs cannot be processed")
-        try:
-            _enqueue_rq(job.id, job_type=job_type)
-        except Exception as exc:  # noqa: BLE001
-            raise JobEnqueueError(f"Failed to enqueue job onto Redis: {type(exc).__name__}: {exc}") from exc
-    else:
-        if app is None:
-            raise JobEnqueueError("Thread worker mode requires a FastAPI app instance")
-        if getattr(app.state, "disable_job_worker", False):
-            raise JobEnqueueError("DISABLE_JOB_WORKER=true but USE_RQ is not enabled — no worker is available")
-        _ensure_job_worker(app)
+    if app is None:
+        raise JobEnqueueError("Thread worker mode requires a FastAPI app instance")
+    if getattr(app.state, "disable_job_worker", False):
+        raise JobEnqueueError("DISABLE_JOB_WORKER=true — no job worker is available")
+    _ensure_job_worker(app)
     return job
 
 
-def _enqueue_rq(job_id: int, *, job_type: str = "") -> None:
-    """Push job_id onto the appropriate Redis queue for the RQ worker to pick up.
-
-    All jobs use job_timeout=-1 (no SIGALRM wall-clock limit).  The _progress
-    heartbeat keeps the started-registry TTL alive; cancel_requested is the only
-    kill switch.  Queue routing is determined by _QUEUE_FOR_JOB_TYPE.
-    """
-    from redis import Redis
-    from rq import Queue as RQueue
-    from app.config import settings as _settings
-    from app.models.organization import Organization
-    from app.services.tiers import get_queue_priority
-
-    queue_name_base = _QUEUE_FOR_JOB_TYPE.get(job_type, "helvex-api")
-    queue_name = queue_name_base
-
-    # ML jobs keep a dedicated non-tiered queue. API/Zefix queues are suffixed
-    # with p0..p4 based on org tier priority.
-    if queue_name_base != "helvex-ml":
-        priority = 0
-        with SessionLocal() as db:
-            job = crud.get_job(db, job_id)
-            if job and job.org_id is not None:
-                org = db.query(Organization).filter(Organization.id == job.org_id).first()
-                if org is not None:
-                    priority = get_queue_priority(org)
-        queue_name = f"{queue_name_base}-p{priority}"
-
-    conn = Redis.from_url(_settings.redis_url)
-    q = RQueue(queue_name, connection=conn)
-    q.enqueue(run_job_task, job_id, job_timeout=-1, on_failure=_rq_job_failed)
-
-
-def run_job_task(job_id: int) -> None:
-    """RQ task function — called by the worker process for each job."""
-    _run_job(None, job_id)
-
-
-def _rq_job_failed(rq_job, connection, type, value, traceback) -> None:  # noqa: A002
-    """RQ on_failure callback — fired by the worker after a work horse dies.
-
-    Covers cases the in-process except handler cannot reach, e.g. SIGKILL from
-    a job timeout.  Marks the JobRun as failed so it doesn't stay stuck as
-    'running' in the DB.
-    """
-    import traceback as _tb
-    from app.database import SessionLocal
-    from app import crud
-
-    job_id: int = rq_job.args[0] if rq_job.args else None
-    if job_id is None:
-        return
-
-    error_msg = f"{type.__name__}: {value}" if type else "Killed by RQ worker (timeout or signal)"
-
-    # Robustly stringify traceback — RQ may pass a real tb, a StackSummary, or None
-    tb_str = ""
-    if traceback:
-        try:
-            tb_str = "".join(_tb.format_exception(type, value, traceback))
-        except Exception:
-            try:
-                # StackSummary has .format(); real tb objects do not
-                if hasattr(traceback, "format"):
-                    tb_str = "".join(traceback.format())
-                else:
-                    tb_str = "".join(_tb.format_tb(traceback))
-            except Exception:
-                tb_str = str(traceback)
-    full_error = f"{error_msg}\n{tb_str}".strip()
-
-    try:
-        with SessionLocal() as db:
-            job = crud.get_job(db, job_id)
-            if job and job.status == "running":
-                crud.mark_failed(db, job, error=full_error, message=error_msg)
-                crud.create_event(db, job_id=job_id, level="error", message=error_msg)
-    except Exception:  # noqa: BLE001
-        pass
 
 
 def poll_llm_batches() -> None:

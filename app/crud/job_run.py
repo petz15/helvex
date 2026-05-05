@@ -127,13 +127,11 @@ def list_active_jobs_for_user(db: Session, *, user_id: int, org_id: int | None) 
     return q.order_by(JobRun.queued_at.asc()).all()
 
 
-def get_next_queued_job(db: Session) -> JobRun | None:
-    return (
-        db.query(JobRun)
-        .filter(JobRun.status == "queued")
-        .order_by(JobRun.queued_at.asc())
-        .first()
-    )
+def get_next_queued_job(db: Session, job_type_whitelist: set[str] | None = None) -> JobRun | None:
+    q = db.query(JobRun).filter(JobRun.status == "queued")
+    if job_type_whitelist:
+        q = q.filter(JobRun.job_type.in_(job_type_whitelist))
+    return q.order_by(JobRun.queued_at.asc()).first()
 
 
 def list_queued_jobs(db: Session) -> list[JobRun]:
@@ -198,15 +196,15 @@ def requeue_interrupted_jobs(
 def requeue_recent_abandoned_jobs(
     db: Session,
     *,
-    message: str = "Recovered after worker restart (RQ abandoned job)",
+    message: str = "Recovered after worker restart",
     lookback_seconds: int = 1800,
 ) -> int:
-    """Re-queue jobs recently failed with RQ AbandonedJobError.
+    """Re-queue jobs that failed due to a worker restart.
 
-    During a full deploy restart, RQ can mark in-flight work as abandoned and
-    fail it with AbandonedJobError before our in-process runner can pause it.
-    This helper converts those recent, infrastructure-induced failures back to
-    queued so they can resume from their existing progress checkpoint.
+    During a deploy restart, in-flight jobs may be forcibly killed before
+    our in-process runner can pause them gracefully. This helper converts
+    those recent, infrastructure-induced failures back to queued so they
+    can resume from their existing progress checkpoint.
     """
     import json as _json
     from datetime import timedelta
