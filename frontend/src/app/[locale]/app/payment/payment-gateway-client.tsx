@@ -380,7 +380,7 @@ export function PaymentGatewayClient() {
         <div className="flex items-center justify-between">
           <h2 className="text-sm font-semibold text-slate-700">Billing address</h2>
           <Link
-            href={`/app/addresses?return_to=${encodeURIComponent(`/app/payment?${params.toString()}`)}`}
+            href={`/app/addresses?return_to=${encodeURIComponent(`/app/payment?${params?.toString() ?? ""}`)}`}
             className="text-xs text-blue-600 hover:underline"
           >
             Manage addresses

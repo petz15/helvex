@@ -54,7 +54,7 @@ export function NavBar() {
   });
 
   // Strip locale prefix for AUTH_PATHS check
-  const strippedPath = pathname.replace(/^\/(de|fr|it|en)/, "");
+  const strippedPath = (pathname ?? "").replace(/^\/(de|fr|it|en)/, "");
   if (AUTH_PATHS.some((p) => strippedPath.startsWith(p))) return null;
 
   const loggedIn = !isLoading && !!me;
@@ -79,7 +79,7 @@ export function NavBar() {
 
   function switchLocale(newLocale: string) {
     // Replace the locale segment in the current path
-    const newPath = pathname.replace(/^\/(de|fr|it|en)/, `/${newLocale}`);
+    const newPath = (pathname ?? "").replace(/^\/(de|fr|it|en)/, `/${newLocale}`);
     router.push(newPath || `/${newLocale}`);
   }
 
