@@ -8,7 +8,7 @@ export function ResetPasswordClient() {
   const params = useSearchParams();
   const token = params.get("token");
   const pathname = usePathname();
-  const locale = pathname.split("/")[1] ?? "de";
+  const locale = pathname?.split("/")[1] ?? "de";
   const { dict } = useI18n();
   const t = dict.auth.resetPassword;
 

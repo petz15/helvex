@@ -20,7 +20,7 @@ export function CookieBanner() {
   const t = dict.cookie;
 
   const pathname = usePathname();
-  const locale = pathname.split("/")[1] ?? "de";
+  const locale = pathname?.split("/")[1] ?? "de";
 
   const consent = useMemo<CookieConsent>(
     () => ({

@@ -14,7 +14,7 @@ const AUTH_PATHS = ["/login", "/register", "/verify-email", "/forgot-password", 
 
 function useLocale() {
   const pathname = usePathname();
-  const segment = pathname.split("/")[1];
+  const segment = pathname?.split("/")[1] ?? "";
   return SUPPORTED_LOCALES.includes(segment as (typeof SUPPORTED_LOCALES)[number])
     ? (segment as (typeof SUPPORTED_LOCALES)[number])
     : "de" as const;
@@ -102,7 +102,7 @@ export function NavBar() {
         {loggedIn && (
           <nav className="hidden md:flex items-center gap-0.5">
             {NAV_MAIN.map(({ href, label, icon: Icon }) => {
-              const active = pathname === href || pathname.startsWith(href + "/");
+              const active = pathname === href || pathname?.startsWith(href + "/");
               return (
                 <Link
                   key={href}
@@ -137,7 +137,7 @@ export function NavBar() {
               <>
                 <div className="w-px h-4 bg-slate-200 mx-1" />
                 {NAV_ADMIN.map(({ href, label, icon: Icon }) => {
-                  const active = pathname === href || pathname.startsWith(href + "/");
+                  const active = pathname === href || pathname?.startsWith(href + "/");
                   return (
                     <Link
                       key={href}
@@ -206,7 +206,7 @@ export function NavBar() {
                   href={`/${locale}/app/admin`}
                   className={cn(
                     "hidden md:flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm transition-colors",
-                    pathname.startsWith(`/${locale}/app/admin`)
+                    pathname?.startsWith(`/${locale}/app/admin`)
                       ? "bg-purple-600 text-white font-medium"
                       : "text-purple-600 hover:bg-purple-50"
                   )}
@@ -302,7 +302,7 @@ export function NavBar() {
           {loggedIn && (
             <div className="py-1">
               {NAV_MAIN.map(({ href, label, icon: Icon }) => {
-                const active = pathname === href || pathname.startsWith(href + "/");
+                const active = pathname === href || pathname?.startsWith(href + "/");
                 return (
                   <Link
                     key={href}
@@ -344,7 +344,7 @@ export function NavBar() {
                       onClick={closeMobile}
                       className={cn(
                         "flex items-center gap-3 px-5 py-3.5 text-sm border-b border-slate-50 transition-colors",
-                        pathname.startsWith(href) ? "bg-blue-50 text-blue-700 font-medium" : "text-slate-700 hover:bg-slate-50"
+                        pathname?.startsWith(href) ? "bg-blue-50 text-blue-700 font-medium" : "text-slate-700 hover:bg-slate-50"
                       )}
                     >
                       <Icon size={18} />
@@ -356,7 +356,7 @@ export function NavBar() {
                     onClick={closeMobile}
                     className={cn(
                       "flex items-center gap-3 px-5 py-3.5 text-sm border-b border-slate-50 transition-colors",
-                      pathname.startsWith(`/${locale}/app/admin`) ? "bg-purple-50 text-purple-700 font-medium" : "text-purple-600 hover:bg-purple-50"
+                      pathname?.startsWith(`/${locale}/app/admin`) ? "bg-purple-50 text-purple-700 font-medium" : "text-purple-600 hover:bg-purple-50"
                     )}
                   >
                     <Shield size={18} />

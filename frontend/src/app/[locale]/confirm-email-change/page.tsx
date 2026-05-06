@@ -8,7 +8,7 @@ function ConfirmEmailChangeContent() {
   const searchParams = useSearchParams();
   const token = searchParams?.get("token");
   const pathname = usePathname();
-  const locale = pathname.split("/")[1] ?? "de";
+  const locale = pathname?.split("/")[1] ?? "de";
   const { dict } = useI18n();
   const t = dict.auth.confirmEmailChange;
 
