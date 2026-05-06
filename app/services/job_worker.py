@@ -69,6 +69,7 @@ def _compute_dedup_key(job_type: str, org_id: int | None, params: dict) -> str |
         "tfidf_kmeans_cluster",
         "recompute_keywords", "reextract_keywords",
         "cluster_analysis", "discover_stopwords",
+        "sogc_preprocess",
         "saved_view_alerts",  # global singleton — org_id=None gives key "saved_view_alerts:None"
     }
     # No dedup: every trigger creates a fresh independent job.

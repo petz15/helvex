@@ -261,7 +261,7 @@ def claude_classify_batch(
             cid = _batch_custom_id(idx, chunk)
             chunk_map[cid] = chunk
             content = _build_user_text(chunk[0]) if len(chunk) == 1 else "\n---\n".join(_build_user_text(c) for c in chunk)
-                requests_list.append({
+            requests_list.append({
                 "custom_id": cid,
                 "params": {
                     "model": "claude-haiku-4-5-20251001",

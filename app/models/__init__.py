@@ -1,4 +1,6 @@
 from app.models.app_setting import AppSetting
+from app.models.sogc_publication import SogcPublication
+from app.models.sogc_change import SogcChange
 from app.models.audit_log import AuditLog
 from app.models.billing_tier import BillingTier
 from app.models.boilerplate import BoilerplatePattern
@@ -27,5 +29,6 @@ __all__ = [
     "GoogleDirectoryDomain", "GoogleStopword",
     "JobRun", "JobRunEvent", "Note", "OAuthAccount", "OrgCompanyState",
     "OrgCreditTransaction", "OrgMember", "OrgPaymentMethod", "OrgSetting",
-    "Organization", "PaymentTransaction", "TfidfStopword", "User", "UserCompanyState", "UserOrgSetting",
+    "Organization", "PaymentTransaction", "SogcChange", "SogcPublication",
+    "TfidfStopword", "User", "UserCompanyState", "UserOrgSetting",
 ]

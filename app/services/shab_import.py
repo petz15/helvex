@@ -190,6 +190,12 @@ def import_shab_publications(
                 except Exception:
                     logger.warning("SHAB enrich failed for uid=%s", uid, exc_info=True)
 
+                try:
+                    from app.services.sogc_preprocessor import preprocess_company_sogc_pub
+                    preprocess_company_sogc_pub(db, company)
+                except Exception:
+                    logger.warning("SOGC preprocess failed for uid=%s", uid, exc_info=True)
+
             elif sub_rubric == SUBR_DELETION:
                 existing = crud.get_company_by_uid(db, uid)
                 if existing:

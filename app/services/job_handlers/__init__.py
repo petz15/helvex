@@ -85,6 +85,7 @@ from app.services.job_handlers import (  # noqa: E402
     export,
     noga,
     shab,
+    sogc_preprocess,
     stopwords,
     zefix_jobs,
 )
@@ -116,9 +117,10 @@ JOB_HANDLERS: dict[str, Callable[[JobContext], tuple[dict, str]]] = {
     "analyze_boilerplate":       stopwords.handle_analyze_boilerplate,
     # Claude classification
     "claude_classify":           claude.handle_claude_classify,
-    # SHAB
+    # SHAB / SOGC
     "shab_daily":                shab.handle_shab,
     "shab_backfill":             shab.handle_shab,
+    "sogc_preprocess":           sogc_preprocess.handle_sogc_preprocess,
     # CSV export
     "csv_export":                export.handle_csv_export,
     # Billing
