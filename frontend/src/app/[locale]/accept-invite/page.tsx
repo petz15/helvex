@@ -14,7 +14,7 @@ function AcceptInviteContent() {
   const router = useRouter();
   const pathname = usePathname();
   const locale = pathname?.split("/")[1] ?? "de";
-  const token = searchParams.get("token") ?? "";
+  const token = searchParams?.get("token") ?? "";
   const { dict } = useI18n();
   const t = dict.auth.acceptInvite;
 
