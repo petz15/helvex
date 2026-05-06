@@ -85,13 +85,6 @@ def client(db):
         for p in _STARTUP_PATCHES:
             stack.enter_context(p)
 
-        # Tests use an in-memory DB; avoid starting a background thread worker (it would
-        # use the real SessionLocal/Postgres). Instead, run in RQ mode and stub out the
-        # Redis enqueue.
-        stack.enter_context(patch.object(app_settings, "use_rq", True))
-        stack.enter_context(patch.object(app_settings, "redis_url", "redis://localhost:6379/0"))
-        stack.enter_context(patch("app.services.job_worker._enqueue_rq", return_value=None))
-
         with TestClient(app) as c:
             # Avoid race with async startup gate during tests.
             app.state.ready = True

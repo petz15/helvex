@@ -222,6 +222,29 @@ export function CollectionClient() {
         </div>
       )}
 
+      <Section title="Re-extract Zefix Raw Fields">
+        <form onSubmit={async e => {
+          e.preventDefault();
+          const fd = new FormData(e.currentTarget);
+          await submit("scoring/reextract-zefix-raw", {
+            mode: fd.get("reextract_mode") === "on" ? "all" : "missing",
+          });
+        }} className="space-y-4">
+          <div>
+            <h2 className="text-sm font-semibold text-slate-800">Re-extract columns from zefix_raw</h2>
+            <p className="mt-1 text-xs text-slate-500">
+              Repopulates JSON blob columns (branch offices, old names, SOGC pub, etc.) from the
+              cached <code>zefix_raw</code> blob — no API calls needed.
+            </p>
+          </div>
+          <label className="flex items-center gap-2 text-sm text-slate-700">
+            <input type="checkbox" name="reextract_mode" className={checkCls} />
+            Overwrite all rows (default: only NULL rows)
+          </label>
+          <SubmitBtn loading={loading === "scoring/reextract-zefix-raw"} />
+        </form>
+      </Section>
+
       <Section title="Re-extract Purpose">
         <form onSubmit={async e => {
           e.preventDefault();

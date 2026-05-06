@@ -1,10 +1,22 @@
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, Float, Integer, String, Text, func
+from sqlalchemy import JSON, Boolean, DateTime, Float, Integer, String, Text, func
 from sqlalchemy.dialects.postgresql import ARRAY
 from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy.types import TypeDecorator
 
 from app.database import Base
+
+
+class ArrayOfText(TypeDecorator):
+    """ARRAY(Text) on PostgreSQL; JSON on SQLite (and other dialects) for test compatibility."""
+    impl = JSON
+    cache_ok = True
+
+    def load_dialect_impl(self, dialect):
+        if dialect.name == "postgresql":
+            return dialect.type_descriptor(ARRAY(Text))
+        return dialect.type_descriptor(JSON())
 
 
 class Company(Base):
@@ -83,7 +95,7 @@ class Company(Base):
     # Per-company top TF-IDF keywords extracted from this company's own purpose text
     purpose_keywords: Mapped[str | None] = mapped_column(Text, nullable=True)
     # Array form of purpose_keywords (GIN-indexed for exact-match membership queries)
-    purpose_keywords_arr: Mapped[list[str] | None] = mapped_column(ARRAY(Text), nullable=True)
+    purpose_keywords_arr: Mapped[list[str] | None] = mapped_column(ArrayOfText, nullable=True)
     # AI classification score, category, and optional free-form text
     ai_score: Mapped[int | None] = mapped_column(Integer, nullable=True)
     ai_category: Mapped[str | None] = mapped_column(String(128), nullable=True)

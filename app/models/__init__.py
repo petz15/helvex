@@ -1,11 +1,14 @@
+from app.models.activity_log import ActivityLog
 from app.models.app_setting import AppSetting
-from app.models.sogc_publication import SogcPublication
-from app.models.sogc_change import SogcChange
 from app.models.audit_log import AuditLog
 from app.models.billing_tier import BillingTier
 from app.models.boilerplate import BoilerplatePattern
+from app.models.boilerplate_candidate import BoilerplateCandidate
+from app.models.cluster_registry import ClusterRegistry
 from app.models.collection_run import CollectionRun
 from app.models.company import Company
+from app.models.company_purpose_keyword import CompanyPurposeKeyword
+from app.models.company_tfidf_cluster import CompanyTfidfCluster
 from app.models.google_directory_domain import GoogleDirectoryDomain
 from app.models.google_stopword import GoogleStopword
 from app.models.job_run import JobRun
@@ -18,17 +21,22 @@ from app.models.org_member import OrgMember
 from app.models.org_payment_method import OrgPaymentMethod
 from app.models.org_setting import OrgSetting
 from app.models.organization import Organization
-from app.models.user_org_setting import UserOrgSetting
 from app.models.payment_transaction import PaymentTransaction
+from app.models.sogc_change import SogcChange
+from app.models.sogc_publication import SogcPublication
 from app.models.tfidf_stopword import TfidfStopword
 from app.models.user import User
 from app.models.user_company_state import UserCompanyState
+from app.models.user_org_setting import UserOrgSetting
+from app.models.user_view import UserView
 
 __all__ = [
-    "AppSetting", "AuditLog", "BillingTier", "BoilerplatePattern", "Company", "CollectionRun",
+    "ActivityLog", "AppSetting", "AuditLog", "BillingTier", "BoilerplateCandidate",
+    "BoilerplatePattern", "ClusterRegistry", "CollectionRun", "Company",
+    "CompanyPurposeKeyword", "CompanyTfidfCluster",
     "GoogleDirectoryDomain", "GoogleStopword",
     "JobRun", "JobRunEvent", "Note", "OAuthAccount", "OrgCompanyState",
     "OrgCreditTransaction", "OrgMember", "OrgPaymentMethod", "OrgSetting",
     "Organization", "PaymentTransaction", "SogcChange", "SogcPublication",
-    "TfidfStopword", "User", "UserCompanyState", "UserOrgSetting",
+    "TfidfStopword", "User", "UserCompanyState", "UserOrgSetting", "UserView",
 ]
