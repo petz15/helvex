@@ -250,10 +250,10 @@ export function PaymentGatewayClient() {
       // Return back to the same payment page after card registration.
       const successUrl = new URL("/app/payment", origin);
       // Preserve all current params
-      params.forEach((v, k) => successUrl.searchParams.set(k, v));
+      params?.forEach((v, k) => successUrl.searchParams.set(k, v));
       successUrl.searchParams.set("card_saved", "1");
       const cancelUrl = new URL("/app/payment", origin);
-      params.forEach((v, k) => cancelUrl.searchParams.set(k, v));
+      params?.forEach((v, k) => cancelUrl.searchParams.set(k, v));
 
       const session = await createWorldlineCardRegistration({
         success_url: successUrl.toString(),
