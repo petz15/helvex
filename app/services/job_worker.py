@@ -1285,7 +1285,8 @@ def enqueue_job(
     if app is None:
         raise JobEnqueueError("Thread worker mode requires a FastAPI app instance")
     if getattr(app.state, "disable_job_worker", False):
-        raise JobEnqueueError("DISABLE_JOB_WORKER=true — no job worker is available")
+        # Split-worker mode: job is persisted to DB; the api-worker pod will pick it up.
+        return job
     _ensure_job_worker(app)
     return job
 
