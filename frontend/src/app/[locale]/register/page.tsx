@@ -46,8 +46,8 @@ function RegisterForm() {
   const { dict } = useI18n();
   const t = dict.auth.register;
 
-  const inviteToken = searchParams.get("invite");
-  const prefillEmail = searchParams.get("email") ?? "";
+  const inviteToken = searchParams?.get("invite");
+  const prefillEmail = searchParams?.get("email") ?? "";
 
   const [email, setEmail] = useState(prefillEmail);
   const [password, setPassword] = useState("");

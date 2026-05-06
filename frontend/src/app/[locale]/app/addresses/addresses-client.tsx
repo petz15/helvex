@@ -11,7 +11,7 @@ export function AddressesClient() {
   const t = dict.app.addresses;
 
   const returnTo = useMemo(() => {
-    const raw = searchParams.get("return_to");
+    const raw = searchParams?.get("return_to");
     if (!raw) return null;
     if (!raw.startsWith("/app/")) return null;
     return raw;

@@ -6,7 +6,7 @@ import { useI18n } from "@/i18n/context";
 
 function ConfirmEmailChangeContent() {
   const searchParams = useSearchParams();
-  const token = searchParams.get("token");
+  const token = searchParams?.get("token");
   const pathname = usePathname();
   const locale = pathname.split("/")[1] ?? "de";
   const { dict } = useI18n();
