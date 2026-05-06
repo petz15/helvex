@@ -1046,43 +1046,51 @@ def reextract_zefix_raw_fields(
 
     q = q.order_by(CompanyModel.id)
     total = q.count()
-    rows = q.offset(resume_from).all()
-    effective_total = resume_from + len(rows)
+    offset = max(0, min(resume_from, total))
+    processed = offset
 
-    for i, company in enumerate(rows, start=resume_from + 1):
+    while True:
         if abort_cb:
             abort_cb()
 
-        try:
-            raw = json.loads(company.zefix_raw)
-        except Exception:  # noqa: BLE001
-            stats["skipped_no_raw"] += 1
-            if progress_cb and i % 100 == 0:
-                progress_cb(i, effective_total, stats)
-            continue
+        batch = q.offset(offset).limit(batch_size).all()
+        if not batch:
+            break
 
-        extracted = _extract_company_fields(raw, company.uid)
-        update_payload = {
-            k: v for k, v in extracted.model_dump(include=set(target_fields)).items()
-        }
+        for company in batch:
+            if abort_cb:
+                abort_cb()
 
-        try:
-            crud.update_company(db, company, CompanyUpdate(**update_payload))
-            stats["updated"] += 1
-        except Exception as exc:  # noqa: BLE001
-            if _is_control_signal_exception(exc):
-                raise
-            logger.warning("reextract failed for %s: %s", company.uid, exc)
-            stats["errors"].append(f"{company.uid}: {exc}")
+            try:
+                raw = json.loads(company.zefix_raw)
+            except Exception:  # noqa: BLE001
+                stats["skipped_no_raw"] += 1
+                processed += 1
+                continue
 
-        if i % batch_size == 0:
-            db.commit()
+            extracted = _extract_company_fields(raw, company.uid)
+            update_payload = {
+                k: v for k, v in extracted.model_dump(include=set(target_fields)).items()
+            }
 
-        if progress_cb and i % 100 == 0:
-            progress_cb(i, effective_total, stats)
+            try:
+                crud.update_company(db, company, CompanyUpdate(**update_payload))
+                stats["updated"] += 1
+            except Exception as exc:  # noqa: BLE001
+                if _is_control_signal_exception(exc):
+                    raise
+                logger.warning("reextract failed for %s: %s", company.uid, exc)
+                stats["errors"].append(f"{company.uid}: {exc}")
+
+            processed += 1
+            if progress_cb and processed % 100 == 0:
+                progress_cb(processed, total, stats)
+
+        db.commit()
+        offset += len(batch)
 
     db.commit()
     if progress_cb:
-        progress_cb(resume_from + len(rows), effective_total, stats)
+        progress_cb(processed, total, stats)
 
     return stats

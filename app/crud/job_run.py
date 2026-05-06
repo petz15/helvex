@@ -143,6 +143,9 @@ def list_queued_jobs(db: Session) -> list[JobRun]:
     )
 
 
+MAX_RESTART_COUNT = 5
+
+
 def requeue_interrupted_jobs(
     db: Session,
     *,
@@ -154,9 +157,14 @@ def requeue_interrupted_jobs(
     Only re-queues jobs whose heartbeat is stale (older than *stale_after_seconds*)
     or missing entirely.  Jobs with a recent heartbeat are still alive on a worker
     pod and must not be double-executed.
+
+    Jobs that have been restarted more than MAX_RESTART_COUNT times are killed
+    instead of re-queued to prevent infinite crash loops.
     """
+    import logging as _logging
     import json as _json
     from datetime import timedelta
+    _logger = _logging.getLogger(__name__)
     stale_cutoff = datetime.now(tz=timezone.utc) - timedelta(seconds=stale_after_seconds)
     jobs = (
         db.query(JobRun)
@@ -170,6 +178,18 @@ def requeue_interrupted_jobs(
         .all()
     )
     for job in jobs:
+        job.restart_count = (job.restart_count or 0) + 1
+        if job.restart_count > MAX_RESTART_COUNT:
+            error_msg = f"Max retries exceeded ({job.restart_count - 1}/{MAX_RESTART_COUNT} restarts)"
+            job.status = "failed"
+            job.error = error_msg
+            job.completed_at = datetime.now(tz=timezone.utc)
+            job.message = _job_message(error_msg)
+            _logger.error(
+                "Job %s (type=%s) killed after %d restarts — max retries exceeded",
+                job.id, job.job_type, job.restart_count - 1,
+            )
+            continue
         job.status = "queued"
         # Clear control flags so a recovered job doesn't instantly cancel/pause.
         job.cancel_requested = False
@@ -179,6 +199,10 @@ def requeue_interrupted_jobs(
         # Preserve original queued_at so API created_at remains immutable.
         job.message = _job_message(message)
         job.error = None
+        _logger.warning(
+            "Job %s (type=%s) requeued after crash (restart %d/%d)",
+            job.id, job.job_type, job.restart_count, MAX_RESTART_COUNT,
+        )
         # For bulk jobs mark resume=True so the worker knows to continue the
         # existing CollectionRun checkpoint rather than starting a fresh sweep.
         if job.job_type == "bulk":
@@ -221,7 +245,21 @@ def requeue_recent_abandoned_jobs(
         )
         .all()
     )
+    import logging as _logging
+    _logger = _logging.getLogger(__name__)
     for job in jobs:
+        job.restart_count = (job.restart_count or 0) + 1
+        if job.restart_count > MAX_RESTART_COUNT:
+            error_msg = f"Max retries exceeded ({job.restart_count - 1}/{MAX_RESTART_COUNT} restarts)"
+            job.status = "failed"
+            job.error = error_msg
+            job.completed_at = datetime.now(tz=timezone.utc)
+            job.message = _job_message(error_msg)
+            _logger.error(
+                "Job %s (type=%s) killed after %d restarts — max retries exceeded",
+                job.id, job.job_type, job.restart_count - 1,
+            )
+            continue
         job.status = "queued"
         job.cancel_requested = False
         job.pause_requested = False
@@ -229,6 +267,10 @@ def requeue_recent_abandoned_jobs(
         job.completed_at = None
         job.message = _job_message(message)
         job.error = None
+        _logger.warning(
+            "Job %s (type=%s) requeued after abandon (restart %d/%d)",
+            job.id, job.job_type, job.restart_count, MAX_RESTART_COUNT,
+        )
         # For bulk jobs force checkpoint resume semantics on restart recovery.
         if job.job_type == "bulk":
             try:

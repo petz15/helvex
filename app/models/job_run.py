@@ -36,3 +36,6 @@ class JobRun(Base):
     # requeue_interrupted_jobs() skips jobs with a recent heartbeat so that
     # live worker-pod jobs are never double-executed after a web-pod restart.
     last_heartbeat_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+    # Incremented each time the job is re-queued after a pod crash or restart.
+    # Jobs exceeding MAX_RESTART_COUNT are killed instead of re-queued.
+    restart_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
