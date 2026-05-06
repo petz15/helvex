@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import logging
 import math
+import os
 import threading
 import time
 import traceback
@@ -1152,17 +1153,23 @@ def _maybe_send_job_notification(
 
 def _get_job_type_whitelist() -> set[str] | None:
     """Read JOB_TYPE_WHITELIST from env. Returns None (= handle all types) when unset."""
-    import os
     raw = os.environ.get("JOB_TYPE_WHITELIST", "").strip()
     if not raw:
         return None
     return {t.strip() for t in raw.split(",") if t.strip()}
 
 
+_JOB_POLL_INTERVAL = int(os.environ.get("JOB_POLL_INTERVAL", "5"))
+
+
 def _job_worker_loop(app) -> None:
     whitelist = _get_job_type_whitelist()
+    # In split-worker mode (JOB_TYPE_WHITELIST set) the web pod can't kick this
+    # thread when new jobs arrive, so we poll continuously. In single-pod mode
+    # we break when idle and let enqueue_job() kick us via _ensure_job_worker().
+    continuous = bool(whitelist)
     if whitelist:
-        logger.info("Job worker started — handling job types: %s", ", ".join(sorted(whitelist)))
+        logger.info("Job worker started (continuous poll) — handling job types: %s", ", ".join(sorted(whitelist)))
     else:
         logger.info("Job worker started — handling all job types")
     app.state.job_worker_running = True
@@ -1171,7 +1178,10 @@ def _job_worker_loop(app) -> None:
             with SessionLocal() as db:
                 next_job = crud.get_next_queued_job(db, job_type_whitelist=whitelist)
                 if next_job is None:
-                    break
+                    if not continuous:
+                        break
+                    time.sleep(_JOB_POLL_INTERVAL)
+                    continue
                 next_id = next_job.id
             _run_job(app, next_id)
     finally:
