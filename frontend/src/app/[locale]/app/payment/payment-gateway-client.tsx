@@ -399,7 +399,7 @@ export function PaymentGatewayClient() {
           <div className="space-y-3">
             <p className="text-sm text-amber-600">No billing address set. Add one to continue.</p>
             <AddressBookManager
-              returnTo={`/app/payment?${params.toString()}&resume_address=1`}
+              returnTo={`/app/payment?${params?.toString() ?? ""}&resume_address=1`}
             />
           </div>
         )}
