@@ -64,7 +64,7 @@ def _compute_dedup_key(job_type: str, org_id: int | None, params: dict) -> str |
         "bulk", "detail", "initial",
         "shab_daily", "shab_backfill",
         "recalculate_scores", "recalculate_google_scores",
-        "reextract_purpose", "reclassify_noga",
+        "reextract_purpose", "reextract_zefix_raw", "reclassify_noga",
         "build_noga_embeddings", "detect_language_bulk", "reclassify_low_conf_noga",
         "re_geocode",
         "tfidf_kmeans_cluster",
@@ -454,6 +454,40 @@ def _run_job(app, job_id: int) -> None:  # noqa: C901
                     f"{stats.get('skipped_not_detailed', 0)} skipped (not detailed), "
                     f"{stats.get('skipped_existing', 0)} skipped (existing), "
                     f"{stats.get('skipped_empty_extracted', 0)} skipped (empty extraction), "
+                    f"{len(stats.get('errors', []))} errors"
+                )
+                if resume_from:
+                    done_msg += f" (resumed from {resume_from})"
+
+            elif job.job_type == "reextract_zefix_raw":
+                from app.services.zefix_import import reextract_zefix_raw_fields, REEXTRACTABLE_FIELDS
+
+                def _progress(done: int, total: int, stats: dict) -> None:
+                    _assert_not_cancelled()
+                    msg = (
+                        f"Processed {done}/{total} — {stats.get('updated', 0)} updated, "
+                        f"{stats.get('skipped_no_raw', 0)} skipped (no raw), "
+                        f"{len(stats.get('errors', []))} errors"
+                    )
+                    crud.update_progress(db, job, message=msg, done=done, total=total, stats=stats)
+                    _maybe_sync(app, job_type=job.job_type, label=job.label, message=msg, stats=dict(stats), error=None, done=False)
+                    _heartbeat()
+
+                raw_fields = params.get("fields") or None
+                raw_ids = params.get("ids") or None
+                mode = params.get("mode", "missing")
+                stats = reextract_zefix_raw_fields(
+                    db,
+                    fields=raw_fields,
+                    ids=raw_ids,
+                    mode=mode,
+                    resume_from=resume_from,
+                    progress_cb=_progress,
+                    abort_cb=_assert_not_cancelled,
+                )
+                done_msg = (
+                    f"Done — {stats.get('updated', 0)} updated, "
+                    f"{stats.get('skipped_no_raw', 0)} skipped (no raw), "
                     f"{len(stats.get('errors', []))} errors"
                 )
                 if resume_from:
