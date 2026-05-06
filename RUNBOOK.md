@@ -600,8 +600,7 @@ kubectl exec -n helvex-prod -it helvex-pg-1 -- \
 # - On k3s, /etc/rancher/k3s/k3s.yaml is root-readable by default, so run kubectl via sudo.
 # - If kubectl works when you SSH in interactively but fails in the one-liner, it's usually because
 #   non-interactive SSH commands don't load your shell init files (where KUBECONFIG or kubectl aliases are set).
-ssh -t -L 5432:localhost:5432 ubuntu@<your-server-ip> \
-  "sudo kubectl -n helvex-prod port-forward svc/helvex-pg-rw 5432:5432"
+ssh -t -o ServerAliveInterval=10 -o ServerAliveCountMax=3 -L 5432:localhost:5432 ubuntu@195.201.219.240 "sudo kubectl -n helvex-prod port-forward --address 127.0.0.1 svc/helvex-pg-rw 5432:5432"
 # pgAdmin credentials: host=localhost, port=5432, user=helvex, password=<from secret above>
 #
 # If your local port 5432 is already used, change the *left* side:

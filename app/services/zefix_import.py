@@ -155,6 +155,19 @@ def _extract_company_fields(
     head_offices = json.dumps(raw.get("headOffices")) if raw.get("headOffices") is not None else None
     cantonal_excerpt_web = raw.get("cantonalExcerptWeb") or None
 
+    def _json_field(val: Any) -> str | None:
+        return json.dumps(val) if val is not None else None
+
+    further_head_offices = _json_field(raw.get("furtherHeadOffices"))
+    branch_offices = _json_field(raw.get("branchOffices"))
+    has_taken_over = _json_field(raw.get("hasTakenOver"))
+    was_taken_over_by = _json_field(raw.get("wasTakenOverBy"))
+    audit_companies = _json_field(raw.get("auditCompanies"))
+    old_names = _json_field(raw.get("oldNames"))
+    translation_raw = raw.get("translation") or []
+    translations = json.dumps(translation_raw) if translation_raw else None
+    sogc_pub = _json_field(raw.get("sogcPub"))
+
     zefix_web_raw = raw.get("zefixDetailWeb") or {}
     zefix_detail_web: str | None = None
     if isinstance(zefix_web_raw, dict):
@@ -199,6 +212,14 @@ def _extract_company_fields(
         capital_nominal=capital_nominal,
         capital_currency=capital_currency,
         head_offices=head_offices,
+        further_head_offices=further_head_offices,
+        branch_offices=branch_offices,
+        has_taken_over=has_taken_over,
+        was_taken_over_by=was_taken_over_by,
+        audit_companies=audit_companies,
+        old_names=old_names,
+        translations=translations,
+        sogc_pub=sogc_pub,
         cantonal_excerpt_web=cantonal_excerpt_web,
         zefix_detail_web=zefix_detail_web,
         address_city=city if city else None,
@@ -923,4 +944,145 @@ def run_zefix_detail_collect(
         _sleep_with_abort(request_delay, abort_cb=abort_cb)
 
     crud.complete_run(db, run, stats)
+    return stats
+
+
+# ── zefix_raw re-extraction ───────────────────────────────────────────────────
+
+# All company columns that can be recovered from zefix_raw without any API call.
+# Excluded: first_sogc_date (set once on creation, never overwritten),
+# flex_score/flex_score_breakdown (dedicated recalculate job),
+# website_url and enrichment columns (not from zefix_raw).
+REEXTRACTABLE_FIELDS: frozenset[str] = frozenset({
+    "name", "legal_form", "legal_form_id", "legal_form_uid", "legal_form_short_name",
+    "status", "municipality", "canton", "purpose",
+    "address", "address_city", "address_zip",
+    "ehraid", "chid", "legal_seat_id", "sogc_date", "deletion_date",
+    "capital_nominal", "capital_currency",
+    "head_offices", "further_head_offices", "branch_offices",
+    "has_taken_over", "was_taken_over_by", "audit_companies",
+    "old_names", "translations", "sogc_pub",
+    "cantonal_excerpt_web", "zefix_detail_web",
+})
+
+
+def _parse_id_filter(ids: list) -> tuple[list[int], list[str], list[str]]:
+    """Split a mixed ID list into (internal_ids, uids, chids)."""
+    internal_ids: list[int] = []
+    uids: list[str] = []
+    chids: list[str] = []
+    for raw_id in ids:
+        if isinstance(raw_id, int):
+            internal_ids.append(raw_id)
+        else:
+            s = str(raw_id).strip()
+            try:
+                internal_ids.append(int(s))
+            except ValueError:
+                if s.upper().startswith("CHE-"):
+                    uids.append(s)
+                else:
+                    chids.append(s)
+    return internal_ids, uids, chids
+
+
+def reextract_zefix_raw_fields(
+    db: Session,
+    *,
+    fields: list[str] | None = None,
+    ids: list | None = None,
+    mode: str = "missing",
+    batch_size: int = 500,
+    resume_from: int = 0,
+    progress_cb: Any = None,
+    abort_cb: Any = None,
+) -> dict:
+    """Re-extract columns from the stored zefix_raw JSON blob without API calls.
+
+    Args:
+        fields: Column names to re-extract. None means all REEXTRACTABLE_FIELDS.
+        ids: Restrict to these companies (internal int IDs, UIDs like CHE-…, or CHIDs).
+             None means all companies.
+        mode: "missing" — only rows where at least one requested field is NULL;
+              "all" — every row regardless of current values.
+        batch_size: DB commit interval.
+        resume_from: Skip the first N qualifying rows (for job resumption).
+        progress_cb: Callable(done, total, stats).
+        abort_cb: Callable() that raises on cancellation.
+    """
+    from sqlalchemy import or_
+    from app.models.company import Company as CompanyModel
+
+    target_fields = sorted(
+        REEXTRACTABLE_FIELDS if not fields else REEXTRACTABLE_FIELDS & set(fields)
+    )
+    if not target_fields:
+        raise ValueError(f"No valid fields. Valid: {sorted(REEXTRACTABLE_FIELDS)}")
+
+    stats: dict = {"updated": 0, "skipped_no_raw": 0, "errors": []}
+
+    q = db.query(CompanyModel).filter(CompanyModel.zefix_raw.isnot(None))
+
+    if ids:
+        internal_ids, uids, chids = _parse_id_filter(ids)
+        id_filters = []
+        if internal_ids:
+            id_filters.append(CompanyModel.id.in_(internal_ids))
+        if uids:
+            id_filters.append(CompanyModel.uid.in_(uids))
+        if chids:
+            id_filters.append(CompanyModel.chid.in_(chids))
+        if id_filters:
+            q = q.filter(or_(*id_filters))
+
+    if mode == "missing":
+        null_checks = [
+            getattr(CompanyModel, f).is_(None)
+            for f in target_fields
+            if hasattr(CompanyModel, f)
+        ]
+        if null_checks:
+            q = q.filter(or_(*null_checks))
+
+    q = q.order_by(CompanyModel.id)
+    total = q.count()
+    rows = q.offset(resume_from).all()
+    effective_total = resume_from + len(rows)
+
+    for i, company in enumerate(rows, start=resume_from + 1):
+        if abort_cb:
+            abort_cb()
+
+        try:
+            raw = json.loads(company.zefix_raw)
+        except Exception:  # noqa: BLE001
+            stats["skipped_no_raw"] += 1
+            if progress_cb and i % 100 == 0:
+                progress_cb(i, effective_total, stats)
+            continue
+
+        extracted = _extract_company_fields(raw, company.uid)
+        update_payload = {
+            k: v for k, v in extracted.model_dump(include=set(target_fields)).items()
+        }
+
+        try:
+            crud.update_company(db, company, CompanyUpdate(**update_payload))
+            stats["updated"] += 1
+        except Exception as exc:  # noqa: BLE001
+            if _is_control_signal_exception(exc):
+                raise
+            logger.warning("reextract failed for %s: %s", company.uid, exc)
+            stats["errors"].append(f"{company.uid}: {exc}")
+
+        if i % batch_size == 0:
+            db.commit()
+
+        if progress_cb and i % 100 == 0:
+            progress_cb(i, effective_total, stats)
+
+    db.commit()
+    if progress_cb:
+        progress_cb(resume_from + len(rows), effective_total, stats)
+
     return stats

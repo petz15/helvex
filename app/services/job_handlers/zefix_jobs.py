@@ -189,6 +189,49 @@ def handle_initial(ctx: JobContext) -> tuple[dict, str]:
     return stats, done_msg
 
 
+def handle_reextract_zefix_raw(ctx: JobContext) -> tuple[dict, str]:
+    from app.services.zefix_import import reextract_zefix_raw_fields, REEXTRACTABLE_FIELDS
+
+    fields = ctx.params.get("fields") or None
+    if fields is not None:
+        invalid = set(fields) - REEXTRACTABLE_FIELDS
+        if invalid:
+            raise ValueError(f"Unknown fields: {sorted(invalid)}. Valid: {sorted(REEXTRACTABLE_FIELDS)}")
+
+    ids = ctx.params.get("ids") or None
+    mode = ctx.params.get("mode", "missing")
+    if mode not in ("missing", "all"):
+        raise ValueError(f"mode must be 'missing' or 'all', got {mode!r}")
+
+    def _progress(done: int, total: int, stats: dict) -> None:
+        ctx.assert_not_cancelled()
+        msg = (
+            f"Re-extracted {done}/{total} — "
+            f"{stats.get('updated', 0)} updated, "
+            f"{stats.get('skipped_no_raw', 0)} no raw, "
+            f"{len(stats.get('errors', []))} errors"
+        )
+        ctx.progress_no_event(done, total, stats, msg)
+
+    stats = reextract_zefix_raw_fields(
+        ctx.db,
+        fields=fields,
+        ids=ids,
+        mode=mode,
+        resume_from=ctx.resume_from,
+        progress_cb=_progress,
+        abort_cb=ctx.assert_not_cancelled,
+    )
+    done_msg = (
+        f"Done — {stats.get('updated', 0)} updated, "
+        f"{stats.get('skipped_no_raw', 0)} skipped (no raw), "
+        f"{len(stats.get('errors', []))} errors"
+    )
+    if ctx.resume_from:
+        done_msg += f" (resumed from {ctx.resume_from})"
+    return stats, done_msg
+
+
 def handle_detail(ctx: JobContext) -> tuple[dict, str]:
     from app.services.collection import run_zefix_detail_collect
 

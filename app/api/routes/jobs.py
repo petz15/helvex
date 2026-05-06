@@ -331,6 +331,12 @@ class ReextractPurposeBody(BaseModel):
     only_missing_purpose: bool = True
 
 
+class ReextractZefixRawBody(BaseModel):
+    fields: list[str] | None = None  # None = all re-extractable fields
+    ids: list[str | int] | None = None  # None = all; mix of internal IDs, UIDs (CHE-…), CHIDs
+    mode: str = "missing"  # "missing" = only NULL rows; "all" = overwrite everything
+
+
 class ReclassifyNogaBody(BaseModel):
     only_missing_noga: bool = False
     include_stale: bool = False
@@ -505,6 +511,32 @@ def trigger_reextract_purpose(
     job = _enqueue_or_http_error(
         request,
         job_type="reextract_purpose",
+        label=label,
+        params=body.model_dump(),
+        db=db,
+    )
+    return JobOut.from_orm_obj(job)
+
+
+@router.post("/scoring/reextract-zefix-raw", response_model=JobOut, status_code=status.HTTP_202_ACCEPTED)
+def trigger_reextract_zefix_raw(
+    body: ReextractZefixRawBody,
+    request: Request,
+    db: Session = Depends(get_db),
+    _: User = Depends(require_superadmin),
+):
+    """Re-extract columns from the stored zefix_raw JSON blob without any API calls.
+
+    Pass ``fields`` to limit which columns are updated (default: all 29 re-extractable
+    columns). Pass ``ids`` to restrict to specific companies. ``mode`` controls whether
+    only rows with NULL values are updated ("missing") or all rows ("all").
+    """
+    fields_label = f" fields={body.fields}" if body.fields else ""
+    ids_label = f" ids={len(body.ids)}" if body.ids else ""
+    label = f"Re-extract from zefix_raw [{body.mode}]{fields_label}{ids_label}"
+    job = _enqueue_or_http_error(
+        request,
+        job_type="reextract_zefix_raw",
         label=label,
         params=body.model_dump(),
         db=db,

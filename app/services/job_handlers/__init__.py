@@ -100,6 +100,7 @@ JOB_HANDLERS: dict[str, Callable[[JobContext], tuple[dict, str]]] = {
     "recalculate_scores":        zefix_jobs.handle_recalculate_scores,
     "recalculate_google_scores": zefix_jobs.handle_recalculate_google_scores,
     "reextract_purpose":         zefix_jobs.handle_reextract_purpose,
+    "reextract_zefix_raw":       zefix_jobs.handle_reextract_zefix_raw,
     # NOGA / language
     "reclassify_noga":           noga.handle_reclassify_noga,
     "build_noga_embeddings":     noga.handle_build_noga_embeddings,
