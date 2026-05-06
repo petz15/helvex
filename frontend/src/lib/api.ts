@@ -782,7 +782,14 @@ export async function triggerJob(endpoint: string, body?: object): Promise<Job> 
     headers: { "Content-Type": "application/json" },
     body: body ? JSON.stringify(body) : "{}",
   });
-  if (!res.ok) throw new Error(`Failed to trigger job: ${res.status}`);
+  if (!res.ok) {
+    let detail = `${res.status}`;
+    try {
+      const body = await res.json();
+      if (body?.detail) detail = `${res.status} — ${body.detail}`;
+    } catch { /* ignore parse errors */ }
+    throw new Error(`Failed to trigger job: ${detail}`);
+  }
   return res.json();
 }
 
