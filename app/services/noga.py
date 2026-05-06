@@ -290,6 +290,8 @@ def classify_company_noga(db: Session, company: Company) -> NogaClassification |
     # --- Token scores (always computed, used for hybrid re-rank) ---
     tokens = _company_tokens(db, company)
     if not tokens:
+        logger.debug("No tokens extracted for company %s (UID: %s), skipping NOGA classification",
+                    company.name, company.uid)
         return None
 
     idx = _load_noga_index()
@@ -321,6 +323,8 @@ def classify_company_noga(db: Session, company: Company) -> NogaClassification |
     # If there is no token overlap with the NOGA taxonomy AND embeddings are
     # unavailable, we genuinely cannot classify this company.
     if not token_scores and not use_embeddings:
+        logger.debug("No token overlap and no embeddings for company %s (UID: %s), cannot classify",
+                     company.name, company.uid)
         return None
 
     if use_embeddings:
@@ -339,6 +343,8 @@ def classify_company_noga(db: Session, company: Company) -> NogaClassification |
                     hybrid[code] = _W_TOK * tok_score
 
             if not hybrid:
+                logger.debug("No valid candidates for company %s (UID: %s), cannot classify",
+                             company.name, company.uid)
                 return None
 
             best_code = _pick_best_code(hybrid)
