@@ -6,20 +6,14 @@ from app.services.job_handlers import JobContext, JobWaitingExternalSignal
 
 
 def handle_claude_classify(ctx: JobContext) -> tuple[dict, str]:
-    from app.config import settings as app_settings
     from app.services.collection import claude_classify_batch
     from app import crud
 
     _org_id = ctx.job.org_id
     _eff = lambda key, default="": crud.get_effective_setting(ctx.db, key, org_id=_org_id, default=default)
 
-    _use_org_key = False
-    if _org_id is not None:
-        from app.models.organization import Organization as _Org
-        from app.services.tiers import has_feature as _has_feature
-        _org_obj = ctx.db.get(_Org, _org_id)
-        _use_org_key = _org_obj is not None and _has_feature(_org_obj, "byo_llm_keys")
-    _api_key = (_eff("anthropic_api_key") if _use_org_key else "") or app_settings.anthropic_api_key
+    from app.services.claude import resolve_claude_api_key
+    _api_key = resolve_claude_api_key(ctx.db, _org_id)
     _use_batch = bool(ctx.params.get("use_batch_api", False))
 
     if _use_batch:

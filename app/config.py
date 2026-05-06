@@ -34,7 +34,12 @@ class Settings(BaseSettings):
     # This is a simple substring match list (NOT a regex).
     google_url_exclude_keywords: str = ""
 
+    # LLM API Keys (all optional — superadmin can configure via /admin/api-keys)
     anthropic_api_key: str = ""
+    openai_api_key: str = ""
+    gemini_api_key: str = ""
+    deepseek_api_key: str = ""
+    groq_api_key: str = ""
 
     # Background worker
     # Set DISABLE_JOB_WORKER=true to prevent starting the in-process job worker thread.

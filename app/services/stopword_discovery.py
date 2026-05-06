@@ -346,22 +346,13 @@ def _phase4_claude_review(db: Session, *, api_key: str | None) -> int:
     prompt = _PHASE4_PROMPT.format(stopwords=stopwords_text, boilerplate=boilerplate_text)
 
     try:
-        import anthropic
-        client = anthropic.Anthropic(api_key=api_key)
-        message = client.messages.create(
-            model="claude-haiku-4-5-20251001",
-            max_tokens=2048,
-            messages=[{"role": "user", "content": prompt}],
-        )
-        raw_response = message.content[0].text.strip()
+        from app.services.claude import claude_call, strip_fences
+        raw_response, _ = claude_call("", prompt, api_key=api_key, max_tokens=2048, cache_system=False)
     except Exception as exc:
         raise RuntimeError(f"Claude API call failed: {exc}") from exc
 
-    # Parse response
     try:
-        # Strip markdown code fences if present
-        clean = re.sub(r"^```(?:json)?\s*|\s*```$", "", raw_response, flags=re.MULTILINE)
-        review_data: dict[str, list[dict]] = json.loads(clean)
+        review_data: dict[str, list[dict]] = json.loads(strip_fences(raw_response))
     except json.JSONDecodeError as exc:
         raise RuntimeError(f"Claude returned invalid JSON: {exc}\nResponse: {raw_response[:500]}") from exc
 

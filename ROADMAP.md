@@ -3,10 +3,7 @@
 # Overview
 
 - **Angebotsgestaltung**: 
-    - Create a simpler product called "search" which simply shows zefix information in a nice way and has google search for website (this might be limited in the tiering, add reveal website 5 free per month). 
-    - Then there is the explore function which reveals companies based on keywords, clusters, AI classification, regionality etc together with the scoring mechanisms and additional website enrichment. 
-    - Map functionality keep it simple with optional socring overlay.
-    - CRM stuff ? pipeline is already in place, more to come?
+    - Then there is the explore function which reveals companies based on keywords, clusters, AI classification, regionality etc together with the scoring mechanisms and additional website enrichment. -> much improvement needed
     - History of removed companies (?)
     - People finder and graph of connections potentially with linkedin?
     - Add Simap information for tenders and awards (only difficulty is how the tenders from public institutions are displayed as I have no entries for them in the Helvex DB...maybe could add?)
@@ -115,7 +112,7 @@
 
 
 - [ ] **Create a mutation Timeline page** - A place where users can scroll through the daily company mutations with filters. Basically the company data but sorted by date instead of grouped by company and displayed on individual pages. This will probably require some preprocessing and then daily processing. 
-- [ ] **scoring wizard general overhaul** - currently pretty useless as it only shows AI categories not all. the flow should be different
+- [ ] **scoring wizard general overhaul** - currently pretty useless as it only shows AI categories not all. the flow should be different. probably move away from singular score, or use that in the end. It should have filters etc and then scoring. or weighted scores based on different other scores. for location distance scoring, implement the option of multiple locations and if descending or ascending is better (some might have different locations/branches they are interested in).
 - [ ] **NOGA numbers** - NOGA is not showing up any numbers
 - [ ] **Introduction to new users** - currently new users just get thrown into explore without any guide
 - [ ] **Improve Explore** - somehow explore page got worse with the last change. maybe I need to change the ML part first, check via a dashboard/overview (and implement that) then move on to explore. 
@@ -170,8 +167,6 @@
 - [ ] **Change postgres backup/recovery** - 1) Maintain an explicit latest backup pointer After each successful backup, write a small object like latest.json in the same bucket/prefix. 2) Manual restore source override as first-class input Add a workflow dispatch input or repo variable like POSTGRES_RESTORE_SOURCE. If set, workflow uses it exactly. If not set, then run auto-discovery.
 - [ ] **Middleware** - my middleware python program has a chokehold on the whole architecture, if that is down nothing works! Either change that, i.e. review changes or when deploying and something fails, make sure this one can revert to a stable build. 
 - [ ] **DEV/INT env** - for save deployment checks
-- [ ] **Job queueing: Redis Streams + RQ vs Procrastinate** — Currently uses Redis Streams + RQ with two-tier queues. Alternative: Procrastinate (Python async-first, uses Postgres native `SELECT...FOR UPDATE SKIP LOCKED`) would eliminate Redis dependency, simplify stack to single Postgres, and handle B2B SaaS scale.
-- [ ] **Caching & rate-limiting strategy** — If Procrastinate adopted, Redis becomes optional. Current state: not documented. Options: Postgres + PgBouncer connection pooling (may be sufficient), Postgres token-bucket table for rate-limiting, lightweight in-app caching. **Action:** Deferred pending Procrastinate decision.
 - [ ] **File storage strategy** — User uploads, exports, static Next.js assets: confirm S3-compatible (Hetzner Object Storage) path, direct-to-client signed URLs vs server-side upload, CDN for static asset delivery. Currently not documented.
 - [ ] **Session management** — Where user sessions are stored not yet documented. Options: Postgres table (preferred, integrates with RLS), in-memory (loses sessions on pod restart), Redis (if retained). 
 
@@ -212,8 +207,7 @@
 - [ ] **API key management** — token creation/revocation UI for org admins to manage their API credentials; currently only available via admin panel
 - [ ] **uvicorn async** - Each open SSE connection holds one synchronous uvicorn worker thread (blocking I/O). At current scale (<50 concurrent users) this is fine; at higher scale the endpoint should be rewritten as `async def` with `anyio.sleep` and an async Redis client.
 - [ ] **Github Action Secrets Mess** - Currently many github action secrets are thrown in there which are my ENV variables, this should be managed and documented much better. Especially when I implement a DEV/INT env I should seperate a lot of these variables
-- [ ] **reduce clutter** - reduce the spagetthi code and make it all much cleaner. e.g. multiple places for prices instead of one localised one, or how data is show to orgs/users
-- [ ] **remove Redis** - replace with postgres addon instead of having a seperate service which I dont really use tbh
+
 
 
 ## Other & QOL
@@ -305,3 +299,7 @@
 - [X] **Seperate org management page** - seperate page for org management between general and billing
 - [X] **Possibility to create new orgs** - users should be able to create as many orgs as they want to 
 - [X] **History overview** —  Old names and taken over is already visible but not SOGC publications, which needs to be custom handled in order to display changes such as people and other changes. -> nicer overview and improvements, there are still some mistakes sometimes in the displayment of people (preprocessing might be necessary)
+- [X] **Job queueing: Redis Streams + RQ vs Procrastinate** — Currently uses Redis Streams + RQ with two-tier queues. Alternative: Procrastinate (Python async-first, uses Postgres native `SELECT...FOR UPDATE SKIP LOCKED`) would eliminate Redis dependency, simplify stack to single Postgres, and handle B2B SaaS scale.
+- [X] **Caching & rate-limiting strategy** — If Procrastinate adopted, Redis becomes optional. Current state: not documented. Options: Postgres + PgBouncer connection pooling (may be sufficient), Postgres token-bucket table for rate-limiting, lightweight in-app caching. **Action:** Deferred pending Procrastinate decision.
+- [X] **reduce clutter** - reduce the spagetthi code and make it all much cleaner. e.g. multiple places for prices instead of one localised one, or how data is show to orgs/users
+- [X] **remove Redis** - replace with postgres addon instead of having a seperate service which I dont really use tbh

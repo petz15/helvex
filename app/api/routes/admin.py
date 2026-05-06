@@ -21,10 +21,12 @@ from app.schemas.billing import BillingTierRead
 from app.services import credits as credits_service
 from app.services import payments as payments_service
 from app.services.tiers import TIER_ID_BY_NAME, get_billing_tier_names, get_billing_tiers
+from app.api.routes.admin.api_keys import router as api_keys_router
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/admin", tags=["admin"])
+router.include_router(api_keys_router)
 
 def _require_superadmin(current_user: User = Depends(get_current_user)) -> User:
     if not current_user.is_superadmin:

@@ -12,6 +12,14 @@ from sqlalchemy.orm import Session
 
 from app import crud
 from app.models.company import Company
+from app.services.claude import (
+    _system_param as _claude_system_param,
+    claude_batch_create,
+    claude_batch_iter_results,
+    claude_call,
+    resolve_claude_api_key,
+    strip_fences,
+)
 from app.services.noga import _strip_purpose_boilerplate
 from app.services.scoring import distance_to_origin_km, get_default_scoring_config
 
@@ -85,17 +93,6 @@ def claude_classify_batch(
     ``use_batch_api=True`` submits all requests as a single Anthropic Message Batch
     (50% discount on top).
     """
-    try:
-        import anthropic as _anthropic
-    except ImportError:
-        return {
-            "classified": 0,
-            "skipped": 0,
-            "errors": ["anthropic package not installed. Run: pip install anthropic"],
-            "input_tokens": 0,
-            "output_tokens": 0,
-        }
-
     if not api_key:
         return {
             "classified": 0,
@@ -109,7 +106,6 @@ def claude_classify_batch(
     if dry_run:
         stats["preview_results"] = []
 
-    client = _anthropic.Anthropic(api_key=api_key)
     base_prompt = (system_prompt or "").strip() or _DEFAULT_CLAUDE_PROMPT
     if target_description and target_description.strip():
         prompt = base_prompt + f"\n\nWhat we are looking for: {target_description.strip()}"
@@ -126,8 +122,6 @@ def claude_classify_batch(
             + ' each with "score" (0-100) and "category".'
         )
 
-    system_param: list[dict] = [{"type": "text", "text": prompt, "cache_control": {"type": "ephemeral"}}]
-
     scoring_config = _load_scoring_config_for_org(db, org_id)
     origin_lat = float(scoring_config.get("scoring_origin_lat", 46.9266))
     origin_lon = float(scoring_config.get("scoring_origin_lon", 7.4817))
@@ -143,7 +137,6 @@ def claude_classify_batch(
                 fixed_categories_lc = {c.lower(): c for c in fixed_categories}
                 cat_str = ", ".join(fixed_categories)
                 prompt = prompt + f'\n\nUse ONLY one of these categories (exact match): {cat_str}'
-                system_param = [{"type": "text", "text": prompt, "cache_control": {"type": "ephemeral"}}]
 
     def _coerce_category(raw: object) -> str | None:
         if raw is None:
@@ -215,20 +208,13 @@ def claude_classify_batch(
             parts.append("Note: only social media presence found — no company website")
         return "\n".join(parts)
 
-    def _strip_fences(text: str) -> str:
-        if text.startswith("```"):
-            text = text.split("```")[1]
-            if text.startswith("json"):
-                text = text[4:]
-        return text.strip()
-
     def _refresh_combined(company: Company) -> None:
         company.combined_score = Company.compute_combined_score(
             company.ai_score, company.web_score, company.flex_score
         )
 
     def _apply_single(company: Company, response_text: str) -> None:
-        data = json.loads(_strip_fences(response_text))
+        data = json.loads(strip_fences(response_text))
         company.ai_score = max(0, min(100, int(data.get("score", 0))))
         coerced = _coerce_category(data.get("category"))
         if fixed_categories_lc and coerced is None and data.get("category"):
@@ -239,7 +225,7 @@ def claude_classify_batch(
         _refresh_combined(company)
 
     def _apply_chunk(chunk: list[Company], response_text: str) -> None:
-        data = json.loads(_strip_fences(response_text))
+        data = json.loads(strip_fences(response_text))
         if not isinstance(data, list):
             raise ValueError(f"Expected JSON array, got {type(data).__name__}: {response_text!r}")
         now = datetime.now(tz=timezone.utc)
@@ -275,12 +261,12 @@ def claude_classify_batch(
             cid = _batch_custom_id(idx, chunk)
             chunk_map[cid] = chunk
             content = _build_user_text(chunk[0]) if len(chunk) == 1 else "\n---\n".join(_build_user_text(c) for c in chunk)
-            requests_list.append({
+                requests_list.append({
                 "custom_id": cid,
                 "params": {
                     "model": "claude-haiku-4-5-20251001",
                     "max_tokens": 128 * len(chunk),
-                    "system": system_param,
+                    "system": _claude_system_param(prompt, cache=True),
                     "messages": [{"role": "user", "content": content}],
                 },
             })
@@ -288,8 +274,7 @@ def claude_classify_batch(
         if not requests_list:
             return stats
 
-        batch = client.beta.messages.batches.create(requests=requests_list)
-        stats["batch_id"] = batch.id
+        stats["batch_id"] = claude_batch_create(requests_list, api_key=api_key)
 
         if submit_only:
             stats["chunk_company_ids"] = {
@@ -300,38 +285,38 @@ def claude_classify_batch(
         if progress_cb:
             progress_cb(0, total, stats)
 
-        while batch.processing_status != "ended":
-            time.sleep(15)
-            batch = client.beta.messages.batches.retrieve(batch.id)
-            counts = batch.request_counts
-            done_so_far = (counts.succeeded or 0) + (counts.errored or 0)
+        def _batch_progress(done: int, _total: int) -> None:
             if progress_cb:
-                progress_cb(min(done_so_far * companies_per_message, total), total, stats)
+                progress_cb(min(done * companies_per_message, total), total, stats)
 
-        for result in client.beta.messages.batches.results(batch.id):
+        for result in claude_batch_iter_results(
+            stats["batch_id"],
+            api_key=api_key,
+            poll=True,
+            progress_cb=_batch_progress,
+            total_hint=total,
+        ):
             chunk = chunk_map.get(result.custom_id)
             if chunk is None:
                 continue
-            if result.result.type == "succeeded":
-                response_text = result.result.message.content[0].text.strip()
-                stats["input_tokens"] += result.result.message.usage.input_tokens
-                stats["output_tokens"] += result.result.message.usage.output_tokens
+            if result.succeeded:
+                stats["input_tokens"] += result.input_tokens
+                stats["output_tokens"] += result.output_tokens
                 try:
                     if len(chunk) == 1:
-                        _apply_single(chunk[0], response_text)
+                        _apply_single(chunk[0], result.text)
                     else:
-                        _apply_chunk(chunk, response_text)
+                        _apply_chunk(chunk, result.text)
                     stats["classified"] += len(chunk)
                 except json.JSONDecodeError as exc:
-                    stats["errors"].append(f"{_chunk_ids(chunk)}: JSON parse error — raw: {response_text!r} — {exc}")
+                    stats["errors"].append(f"{_chunk_ids(chunk)}: JSON parse error — raw: {result.text!r} — {exc}")
                     stats["skipped"] += len(chunk)
                 except Exception as exc:  # noqa: BLE001
                     logger.warning("Batch result parse failed for %s: %s", _chunk_ids(chunk), exc)
                     stats["errors"].append(f"{_chunk_ids(chunk)}: {type(exc).__name__}: {exc}")
                     stats["skipped"] += len(chunk)
             else:
-                err_info = getattr(result.result, "error", result.result.type)
-                stats["errors"].append(f"{_chunk_ids(chunk)}: batch error — {err_info}")
+                stats["errors"].append(f"{_chunk_ids(chunk)}: batch error — {result.error}")
                 stats["skipped"] += len(chunk)
 
         db.commit()
@@ -345,17 +330,17 @@ def claude_classify_batch(
         done = offset + i * companies_per_message + len(chunk)
         try:
             content = _build_user_text(chunk[0]) if len(chunk) == 1 else "\n---\n".join(_build_user_text(c) for c in chunk)
-            msg = client.messages.create(
-                model="claude-haiku-4-5-20251001",
+            response_text, tokens = claude_call(
+                prompt,
+                content,
+                api_key=api_key,
                 max_tokens=128 * len(chunk),
-                system=system_param,
-                messages=[{"role": "user", "content": content}],
+                cache_system=True,
             )
-            response_text = msg.content[0].text.strip()
-            stats["input_tokens"] += msg.usage.input_tokens
-            stats["output_tokens"] += msg.usage.output_tokens
+            stats["input_tokens"] += tokens["input_tokens"]
+            stats["output_tokens"] += tokens["output_tokens"]
             if dry_run:
-                parsed = json.loads(_strip_fences(response_text))
+                parsed = json.loads(strip_fences(response_text))
                 if len(chunk) == 1:
                     items = [parsed] if isinstance(parsed, dict) else parsed[:1]
                 else:
@@ -412,22 +397,16 @@ def resume_claude_batch(
     Returns ``(processing_status, stats)``. When ``processing_status == "ended"``
     the companies have been updated and the DB committed.
     """
-    try:
-        import anthropic as _anthropic
-    except ImportError:
-        return ("error", {"error": "anthropic package not installed", "classified": 0, "skipped": 0, "errors": []})
-
     if not api_key:
         return ("error", {"error": "Anthropic API key not configured", "classified": 0, "skipped": 0, "errors": []})
 
-    client = _anthropic.Anthropic(api_key=api_key)
     try:
-        batch = client.beta.messages.batches.retrieve(batch_id)
+        status = claude_batch_poll(batch_id, api_key=api_key)
     except Exception as exc:  # noqa: BLE001
         return ("error", {"error": f"Anthropic API error: {exc}", "classified": 0, "skipped": 0, "errors": [str(exc)]})
 
-    if batch.processing_status != "ended":
-        return (batch.processing_status, {"classified": 0, "skipped": 0, "errors": []})
+    if status != "ended":
+        return (status, {"classified": 0, "skipped": 0, "errors": []})
 
     stats: dict = {"classified": 0, "skipped": 0, "errors": [], "input_tokens": 0, "output_tokens": 0}
 
@@ -441,25 +420,17 @@ def resume_claude_batch(
         for cid, ids in chunk_company_ids.items()
     }
 
-    def _strip(text: str) -> str:
-        if text.startswith("```"):
-            text = text.split("```")[1]
-            if text.startswith("json"):
-                text = text[4:]
-        return text.strip()
-
     now = datetime.now(tz=timezone.utc)
 
-    for result in client.beta.messages.batches.results(batch_id):
+    for result in claude_batch_iter_results(batch_id, api_key=api_key, poll=False):
         chunk = chunk_map.get(result.custom_id)
         if not chunk:
             continue
-        if result.result.type == "succeeded":
-            text = result.result.message.content[0].text.strip()
-            stats["input_tokens"] += result.result.message.usage.input_tokens
-            stats["output_tokens"] += result.result.message.usage.output_tokens
+        if result.succeeded:
+            stats["input_tokens"] += result.input_tokens
+            stats["output_tokens"] += result.output_tokens
             try:
-                data = json.loads(_strip(text))
+                data = json.loads(strip_fences(result.text))
                 if len(chunk) == 1:
                     company = chunk[0]
                     company.ai_score = max(0, min(100, int(data.get("score", 0))))
@@ -481,9 +452,8 @@ def resume_claude_batch(
                 stats["errors"].append(f"{uids}: {type(exc).__name__}: {exc}")
                 stats["skipped"] += len(chunk)
         else:
-            err_info = getattr(result.result, "error", result.result.type)
             uids = ", ".join(c.uid for c in chunk)
-            stats["errors"].append(f"{uids}: batch error — {err_info}")
+            stats["errors"].append(f"{uids}: batch error — {result.error}")
             stats["skipped"] += len(chunk)
 
     db.commit()

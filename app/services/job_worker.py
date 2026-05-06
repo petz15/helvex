@@ -848,21 +848,12 @@ def _run_job(app, job_id: int) -> None:  # noqa: C901
                 done_msg = "Cross-cluster analysis written — download at /static/cluster_analysis.txt"
 
             elif job.job_type == "claude_classify":
-                from app.config import settings as app_settings
                 from app.services.collection import claude_classify_batch
+                from app.services.claude import resolve_claude_api_key
 
                 _org_id = job.org_id
                 _eff = lambda key, default="": crud.get_effective_setting(db, key, org_id=_org_id, default=default)
-                # Only use an org-level API key when the org has the byo_llm_keys feature.
-                # All other orgs fall through to the global/env key so user keys are
-                # never used without explicit BYO entitlement.
-                _use_org_key = False
-                if _org_id is not None:
-                    from app.models.organization import Organization as _Org
-                    from app.services.tiers import has_feature as _has_feature
-                    _org_obj = db.get(_Org, _org_id)
-                    _use_org_key = _org_obj is not None and _has_feature(_org_obj, "byo_llm_keys")
-                _api_key = (_eff("anthropic_api_key") if _use_org_key else "") or app_settings.anthropic_api_key
+                _api_key = resolve_claude_api_key(db, _org_id)
                 _use_batch = bool(params.get("use_batch_api", False))
 
                 if _use_batch:

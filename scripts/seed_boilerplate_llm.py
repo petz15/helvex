@@ -107,32 +107,24 @@ Terms:
 
 def _classify_batch(terms: list[str], *, api_key: str, model: str, retries: int = 3) -> dict[str, str]:
     """Call Claude to classify a batch of terms. Returns term → label mapping."""
-    import anthropic
+    from app.services.claude import claude_call
 
-    client = anthropic.Anthropic(api_key=api_key)
     user_msg = _USER_TEMPLATE.format(n=len(terms), terms_json=json.dumps(terms, ensure_ascii=False, indent=2))
 
     for attempt in range(1, retries + 1):
         try:
-            response = client.messages.create(
+            data, _ = claude_call(
+                _SYSTEM_PROMPT,
+                user_msg,
+                api_key=api_key,
                 model=model,
                 max_tokens=2048,
-                system=_SYSTEM_PROMPT,
-                messages=[{"role": "user", "content": user_msg}],
+                cache_system=True,
+                parse_json=True,
             )
-            raw = response.content[0].text.strip()
-            # Strip possible markdown code fences
-            if raw.startswith("```"):
-                raw = raw.split("```")[1]
-                if raw.startswith("json"):
-                    raw = raw[4:]
-                raw = raw.strip()
-            data = json.loads(raw)
             labels: dict[str, str] = data.get("labels", {})
-            # Validate — all returned labels must be in the allowed set
             allowed = {"BOILERPLATE", "SIGNAL", "AMBIGUOUS"}
-            labels = {k: v for k, v in labels.items() if v in allowed}
-            return labels
+            return {k: v for k, v in labels.items() if v in allowed}
         except Exception as exc:
             if attempt == retries:
                 print(f"  [WARN] Batch classification failed after {retries} attempts: {exc}", file=sys.stderr)
