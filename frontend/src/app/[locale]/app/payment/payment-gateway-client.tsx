@@ -68,12 +68,12 @@ export function PaymentGatewayClient() {
   const params = useSearchParams();
   const router = useRouter();
 
-  const kind        = params.get("kind") as "subscription" | "topup" | null;
-  const tier        = params.get("tier") ?? "";
-  const billingCycle= (params.get("billing_cycle") ?? "monthly") as "monthly" | "yearly";
-  const credits     = parseInt(params.get("credits") ?? "0");
-  const cancelPath  = params.get("cancel_path") ?? "/app/pricing";
-  const successPath = params.get("success_path") ?? "/app/billing";
+  const kind        = params?.get("kind") as "subscription" | "topup" | null;
+  const tier        = params?.get("tier") ?? "";
+  const billingCycle= (params?.get("billing_cycle") ?? "monthly") as "monthly" | "yearly";
+  const credits     = parseInt(params?.get("credits") ?? "0");
+  const cancelPath  = params?.get("cancel_path") ?? "/app/pricing";
+  const successPath = params?.get("success_path") ?? "/app/billing";
 
   const { data: me, mutate: mutateMe } = useSWR("me", fetchCurrentUser);
   const { data: summary, mutate: mutateSummary } = useSWR("billing-summary", fetchBillingSummary);
@@ -269,7 +269,7 @@ export function PaymentGatewayClient() {
   }
 
   // Show success banner after card registration redirect
-  const cardSaved = params.get("card_saved") === "1";
+  const cardSaved = params?.get("card_saved") === "1";
   useEffect(() => {
     if (cardSaved) {
       void mutateMe();

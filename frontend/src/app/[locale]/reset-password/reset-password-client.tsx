@@ -6,7 +6,7 @@ import { useI18n } from "@/i18n/context";
 
 export function ResetPasswordClient() {
   const params = useSearchParams();
-  const token = params.get("token");
+  const token = params?.get("token");
   const pathname = usePathname();
   const locale = pathname?.split("/")[1] ?? "de";
   const { dict } = useI18n();
