@@ -1812,3 +1812,105 @@ export async function fetchAdminCreditTransactions(params?: {
   if (!res.ok) throw new Error("Failed to fetch credit transactions");
   return res.json();
 }
+
+// ── Admin: API Key Management ─────────────────────────────────────────────────
+
+export interface PlatformApiKeyStatus {
+  provider: string;
+  keyFingerprint: string | null;
+  status: "valid" | "invalid" | "unconfigured";
+  lastUpdated: string | null;
+  tokenUsageMonth: number;
+  costMonth: number;
+}
+
+export interface OrgApiKeyConfig {
+  orgId: number;
+  orgName: string;
+  hasBYOFeature: boolean;
+  hasCustomKey: boolean;
+  keyFingerprint: string | null;
+  lastUpdated: string | null;
+  monthlyTokens: number;
+  monthlyCost: number;
+  estimatedTokens: number;
+}
+
+export interface FunctionOverride {
+  functionId: string;
+  functionName: string;
+  provider: "platform" | "custom";
+  keyFingerprint: string | null;
+  status: "active" | "inactive";
+}
+
+export interface StandardKeyInfo {
+  provider: string;
+  has_key: boolean;
+  keyFingerprint: string | null;
+  providerName: string;
+  defaultModel: string;
+}
+
+export async function fetchAdminPlatformApiKey(): Promise<PlatformApiKeyStatus> {
+  const res = await fetch("/api/v1/admin/api-keys/platform", { credentials: "include" });
+  if (!res.ok) throw new Error("Failed to fetch platform API key status");
+  return res.json();
+}
+
+export async function updateAdminPlatformApiKey(apiKey: string): Promise<void> {
+  const res = await fetch("/api/v1/admin/api-keys/platform", {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ apiKey }),
+  });
+  if (!res.ok) throw new Error("Failed to update platform API key");
+}
+
+export async function fetchAdminOrgApiKeys(): Promise<OrgApiKeyConfig[]> {
+  const res = await fetch("/api/v1/admin/api-keys/orgs", { credentials: "include" });
+  if (!res.ok) throw new Error("Failed to fetch org API keys");
+  return res.json();
+}
+
+export async function setAdminOrgApiKey(orgId: number, apiKey: string | null): Promise<void> {
+  const res = await fetch(`/api/v1/admin/api-keys/orgs/${orgId}/key`, {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ orgId, apiKey }),
+  });
+  if (!res.ok) throw new Error("Failed to set org API key");
+}
+
+export async function fetchAdminFunctionOverrides(): Promise<FunctionOverride[]> {
+  const res = await fetch("/api/v1/admin/api-keys/functions", { credentials: "include" });
+  if (!res.ok) throw new Error("Failed to fetch function overrides");
+  return res.json();
+}
+
+export async function fetchAdminStandardKeys(): Promise<Record<string, StandardKeyInfo>> {
+  const res = await fetch("/api/v1/admin/api-keys/standard-keys", { credentials: "include" });
+  if (!res.ok) throw new Error("Failed to fetch standard keys");
+  const data = await res.json();
+  return data.standard_keys;
+}
+
+export async function setAdminStandardKey(provider: string, apiKey: string): Promise<void> {
+  const res = await fetch(`/api/v1/admin/api-keys/standard-keys/${provider}`, {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ apiKey }),
+  });
+  if (!res.ok) throw new Error(`Failed to set standard key for ${provider}`);
+}
+
+export async function resetAdminStandardKey(provider: string): Promise<void> {
+  const res = await fetch(`/api/v1/admin/api-keys/standard-keys/${provider}`, {
+    method: "DELETE",
+    credentials: "include",
+  });
+  if (!res.ok) throw new Error(`Failed to reset standard key for ${provider}`);
+}

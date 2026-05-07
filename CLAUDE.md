@@ -2,6 +2,20 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Working rules (follow these strictly)
+
+### Scale awareness — 700k rows
+The companies table has ~700k rows. Every job, query, or data transformation **must** use batching or streaming. Never load all companies into memory at once. Default to cursor-based pagination or chunked DB queries (e.g. `LIMIT / OFFSET` or keyset pagination). If a new job processes companies, assume it needs the same chunked-batch pattern as existing enrichment jobs.
+
+### Use architecture.md as the primary reference
+Before implementing any new feature, job, or structural change, read `architecture.md` to locate the relevant files, methods, and functions. Do not guess file locations or invent new patterns when existing ones already exist. After completing a feature, function addition, or structural change, **update `architecture.md`** to reflect what changed.
+
+### Frontend wiring for jobs
+When creating any new background job (especially batch jobs), always wire it to the frontend — this means: an API endpoint to trigger it, a job status indicator in the UI, and any relevant progress/result display. If it's unclear how the job should be exposed in the UI or what the user interaction should look like, **ask before implementing**.
+
+### Ask when uncertain
+If a requirement is ambiguous, a design decision is non-obvious, or the scope of a change is unclear, stop and ask a clarifying question rather than guessing. This applies especially to: job scheduling/triggering, UI/UX behavior, data model changes, and anything touching billing or multi-tenancy.
+
 ## What this project is
 
 **Helvex** (product name) is a B2B lead intelligence platform for Swiss SMEs. It bulk-imports ~700k companies from the Zefix commercial register, enriches them with Google Search results and Claude Haiku AI scoring, geocodes addresses offline, and exposes a dashboard with filtering, mapping, and CSV export. Monetized via Stripe/Worldline credits with per-org multi-tenancy.
