@@ -229,17 +229,42 @@ def _detect_changes(texts: dict[str, str | None]) -> list[dict[str, Any]]:
 
 # ── Per-company preprocessing ─────────────────────────────────────────────────
 
+def _get_sogc_pub_json(company: Company) -> str | None:
+    """Return the SOGC publication JSON for a company.
+
+    Preference order:
+    1. company.sogc_pub  — already extracted and stored as its own column
+    2. sogcPub key inside company.zefix_raw  — fallback for companies imported
+       before the sogc_pub column was populated
+    """
+    if company.sogc_pub:
+        return company.sogc_pub
+    if company.zefix_raw:
+        try:
+            raw = json.loads(company.zefix_raw)
+            sogc_pub_raw = raw.get("sogcPub")
+            if sogc_pub_raw is not None:
+                return json.dumps(sogc_pub_raw)
+        except (json.JSONDecodeError, TypeError):
+            pass
+    return None
+
+
 def preprocess_company_sogc_pub(db: Session, company: Company) -> int:
     """Upsert sogc_publications + sogc_changes for one company.
 
     Returns the number of publication rows written (created or updated).
     Idempotent: existing rows are updated in-place; their sogc_changes are
     deleted and re-inserted.
+
+    Data source: uses company.sogc_pub when available, falls back to
+    extracting sogcPub from company.zefix_raw.
     """
-    if not company.sogc_pub:
+    sogc_pub_json = _get_sogc_pub_json(company)
+    if not sogc_pub_json:
         return 0
 
-    entries = _parse_sogc_pub_entries(company.sogc_pub)
+    entries = _parse_sogc_pub_entries(sogc_pub_json)
     if not entries:
         return 0
 
@@ -331,21 +356,26 @@ def run_sogc_preprocess_batch(
     db: Session,
     *,
     mode: str = "missing",
+    uids: list[str] | None = None,
     batch_size: int = 500,
     resume_from: int = 0,
     progress_cb=None,
     status_cb=None,
     abort_cb=None,
 ) -> dict[str, Any]:
-    """Batch-preprocess all companies that have a sogc_pub blob.
+    """Batch-preprocess companies from sogc_pub or zefix_raw.sogcPub.
 
     Args:
         mode: "missing" — only companies with no rows yet in sogc_publications;
               "all" — reprocess every company regardless.
+        uids: Optional list of CHE UIDs (e.g. ["CHE-123.456.789"]) to restrict
+              processing to specific companies. When given, mode still applies
+              (i.e. mode="missing" skips already-processed UIDs even in this list).
         batch_size: DB commit interval.
         resume_from: Skip the first N qualifying companies (for resumption).
+                     Ignored when uids is provided (small targeted runs don't need it).
     """
-    from sqlalchemy import exists
+    from sqlalchemy import or_, exists
 
     stats: dict[str, Any] = {
         "selected": 0,
@@ -355,12 +385,22 @@ def run_sogc_preprocess_batch(
         "errors": [],
     }
 
-    q = db.query(Company).filter(Company.sogc_pub.isnot(None))
+    # Include companies that have sogc_pub OR a non-empty zefix_raw (fallback path)
+    q = db.query(Company).filter(
+        or_(Company.sogc_pub.isnot(None), Company.zefix_raw.isnot(None))
+    )
+
+    if uids:
+        normalised = [u.strip() for u in uids if u and u.strip()]
+        if normalised:
+            q = q.filter(Company.uid.in_(normalised))
 
     if mode == "missing":
         already_done = db.query(SogcPublication.company_uid).distinct().subquery()
         q = q.filter(~exists().where(already_done.c.company_uid == Company.uid))
 
+    # Cursor pagination: filter by id > last_id to avoid O(n²) OFFSET scans.
+    # resume_from is treated as the last company.id already processed (not a row count).
     q = q.order_by(Company.id.asc())
     total = q.count()
     stats["selected"] = total
@@ -368,14 +408,14 @@ def run_sogc_preprocess_batch(
     if status_cb:
         status_cb(f"SOGC preprocess: {total} companies to process (mode={mode})")
 
-    offset = max(0, min(resume_from, total))
-    processed = 0
+    last_id: int = resume_from  # resume_from=0 means start from the beginning
+    done = 0
 
     while True:
         if abort_cb:
             abort_cb()
 
-        batch = q.offset(offset).limit(batch_size).all()
+        batch: list[Company] = q.filter(Company.id > last_id).limit(batch_size).all()
         if not batch:
             break
 
@@ -397,13 +437,12 @@ def run_sogc_preprocess_batch(
                 except Exception:
                     pass
 
-            processed += 1
-
         db.commit()
-        offset += len(batch)
+        last_id = batch[-1].id
+        done += len(batch)
 
         if progress_cb:
-            progress_cb(offset, total, stats)
+            progress_cb(done, total, stats)
 
     if status_cb:
         status_cb(

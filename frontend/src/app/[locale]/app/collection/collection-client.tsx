@@ -701,6 +701,47 @@ export function CollectionClient() {
         </form>
       </Section>
 
+      <Section title="SOGC Preprocess">
+        <form onSubmit={async e => {
+          e.preventDefault();
+          const fd = new FormData(e.currentTarget);
+          const mode = fd.get("sogc_mode") as string || "missing";
+          const uidsRaw = (fd.get("sogc_uids") as string || "").trim();
+          const uids = uidsRaw ? uidsRaw.split(/[\s,]+/).map(u => u.trim()).filter(Boolean) : [];
+          const batchSize = parseInt(fd.get("sogc_batch_size") as string) || 500;
+          await submit("collection/sogc-preprocess", {
+            mode,
+            uids: uids.length ? uids : undefined,
+            batch_size: batchSize,
+          });
+        }} className="space-y-4">
+          <div>
+            <h2 className="text-sm font-semibold text-slate-800">SOGC publication preprocess</h2>
+            <p className="mt-1 text-xs text-slate-500">
+              Explodes the <code className="font-mono">sogc_pub</code> / <code className="font-mono">zefix_raw</code> JSON blobs into
+              structured <code className="font-mono">sogc_publications</code> and <code className="font-mono">sogc_changes</code> rows.
+              Use <em>missing</em> mode for initial backfill, <em>all</em> to reprocess every company.
+              Optionally restrict to specific companies by CHE UID.
+            </p>
+          </div>
+          <div className="grid grid-cols-2 gap-4">
+            <Field label="Mode">
+              <select name="sogc_mode" className={inputCls}>
+                <option value="missing">missing — only unprocessed companies</option>
+                <option value="all">all — reprocess everything</option>
+              </select>
+            </Field>
+            <Field label="Batch size" hint="DB commit interval">
+              <input name="sogc_batch_size" type="number" min="10" defaultValue="500" className={inputCls} />
+            </Field>
+          </div>
+          <Field label="CHE UIDs (optional)" hint="Comma or newline-separated UIDs, e.g. CHE-123.456.789. Leave empty for all.">
+            <textarea name="sogc_uids" rows={3} placeholder="CHE-123.456.789&#10;CHE-987.654.321" className={cn(inputCls, "font-mono text-xs")} />
+          </Field>
+          <SubmitBtn loading={loading === "collection/sogc-preprocess"} />
+        </form>
+      </Section>
+
       <Section title="Bulk import from Zefix">
         <form onSubmit={async e => {
           e.preventDefault();

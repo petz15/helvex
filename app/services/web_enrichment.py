@@ -233,7 +233,7 @@ def recalculate_google_scores(
                 company.social_media_only = is_social_lead_domain(best["link"])
                 company.google_search_results_raw = json.dumps(rescored)
                 company.combined_score = Company.compute_combined_score(
-                    company.ai_score, company.web_score, company.flex_score
+                    company.ai_score, company.noga_confidence, company.purpose_keywords
                 )
                 stats["updated"] += 1
             except Exception as exc:  # noqa: BLE001

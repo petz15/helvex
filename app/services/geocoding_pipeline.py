@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 
 def _refresh_combined(company: Company) -> None:
     company.combined_score = Company.compute_combined_score(
-        company.ai_score, company.web_score, company.flex_score
+        company.ai_score, company.noga_confidence, company.purpose_keywords
     )
 
 
@@ -78,7 +78,7 @@ def geocode_and_update_company(db: Session, company: Company) -> bool:
             flex_score=new_flex,
             flex_score_breakdown=json.dumps(score_breakdown),
             flex_scored_at=datetime.now(tz=timezone.utc),
-            combined_score=Company.compute_combined_score(company.ai_score, company.web_score, new_flex),
+            combined_score=Company.compute_combined_score(company.ai_score, company.noga_confidence, company.purpose_keywords),
         ),
     )
     return True

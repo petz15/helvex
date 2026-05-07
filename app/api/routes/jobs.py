@@ -901,6 +901,12 @@ class ShabBackfillBody(BaseModel):
     request_delay: float = 0.15
 
 
+class SogcPreprocessBody(BaseModel):
+    mode: str = "missing"            # "missing" | "all"
+    uids: list[str] | None = None    # Optional CHE UIDs to restrict processing
+    batch_size: int = 500
+
+
 _SHAB_BACKFILL_MIN_DATE = date(2016, 2, 3)
 
 
@@ -979,6 +985,33 @@ def trigger_shab_backfill(
             "from_date": from_date.isoformat(),
             "to_date": to_date.isoformat(),
             "request_delay": body.request_delay,
+        },
+        db=db,
+    )
+    return JobOut.from_orm_obj(job)
+
+
+@router.post("/collection/sogc-preprocess", response_model=JobOut, status_code=status.HTTP_202_ACCEPTED)
+def trigger_sogc_preprocess(
+    body: SogcPreprocessBody,
+    request: Request,
+    db: Session = Depends(get_db),
+    _: User = Depends(require_superadmin),
+):
+    """Preprocess SOGC publication history from sogc_pub / zefix_raw into structured tables."""
+    uid_count = len(body.uids) if body.uids else 0
+    if uid_count:
+        label = f"SOGC preprocess — {uid_count} UID(s) (mode={body.mode})"
+    else:
+        label = f"SOGC preprocess — {body.mode}"
+    job = _enqueue_or_http_error(
+        request,
+        job_type="sogc_preprocess",
+        label=label,
+        params={
+            "mode": body.mode,
+            "uids": body.uids or [],
+            "batch_size": body.batch_size,
         },
         db=db,
     )

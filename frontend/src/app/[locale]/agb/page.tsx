@@ -44,11 +44,17 @@ export default function AgbPage() {
           Helvex erbringt digitale Dienstleistungen (Software-as-a-Service). Der Zugang zur gebuchten
           Leistung wird unmittelbar nach erfolgreicher Zahlung freigeschaltet – es erfolgt eine einzige
           Leistungsbereitstellung, keine Teillieferungen. Credits werden dem Konto sofort in voller Höhe
-          gutgeschrieben. Bei technisch bedingten Verzögerungen informiert Helvex den Kunden unverzüglich
+          gutgeschrieben. Bei technisch bedingten Verzögerungen informiert Balogh Consulting den Kunden unverzüglich
           per E-Mail.
         </p>
+        
+        <h2 className="font-semibold text-slate-900">5b. Abonnente</h2>
+        <p>
+          Abonnements verlängern sich automatisch um mit der gewählten Modalität (monatlich, jährlich) um die gleiche Laufzeit, sofern sie nicht vor Ablauf der aktuellen Laufzeit gekündigt werden. Kündigungen müssen vor Ablauf der aktuellen Laufzeit im Dashboard oder per E-Mail getätigt werden, 
+          wir empfehlen zur Sicherheit 24h vor Ablauf zu kündigen. Nach Kündigung bleibt der Zugang bis zum Ende der aktuellen Laufzeit bestehen, es erfolgt keine anteilige Rückerstattung. Credits bleiben auch nach Ablauf der Abonnements bestehen. 
+        </p>
 
-        <h2 className="font-semibold text-slate-900">5b. Rücktrittsrecht</h2>
+        <h2 className="font-semibold text-slate-900">5c. Rücktrittsrecht</h2>
         <p>
           Der Karteninhaber kann ohne Angabe von Gründen innerhalb von <strong>zehn (10) Kalendertagen</strong>{" "}
           ab Kaufdatum vom Vertrag zurücktreten. Der Rücktritt ist per E-Mail an{" "}

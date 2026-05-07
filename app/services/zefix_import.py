@@ -953,6 +953,136 @@ def run_zefix_detail_collect(
 # Excluded: first_sogc_date (set once on creation, never overwritten),
 # flex_score/flex_score_breakdown (dedicated recalculate job),
 # website_url and enrichment columns (not from zefix_raw).
+def _jf(v: Any) -> str | None:
+    return json.dumps(v) if v is not None else None
+
+
+def _extract_fields_direct(raw: dict[str, Any], target_fields: set[str]) -> dict[str, Any]:
+    """Extract only the requested REEXTRACTABLE_FIELDS from raw JSON without computing scores."""
+    out: dict[str, Any] = {}
+    f = target_fields
+
+    if "name" in f:
+        name_raw = raw.get("name", "")
+        if isinstance(name_raw, dict):
+            out["name"] = (
+                name_raw.get("de") or name_raw.get("fr") or name_raw.get("it")
+                or next(iter(name_raw.values()), "")
+            )
+        else:
+            out["name"] = str(name_raw)
+
+    if f & {"legal_form", "legal_form_id", "legal_form_uid", "legal_form_short_name"}:
+        lf_disp, lf_id, lf_uid, lf_short = _parse_legal_form(raw.get("legalForm"))
+        if "legal_form" in f:
+            out["legal_form"] = lf_disp
+        if "legal_form_id" in f:
+            out["legal_form_id"] = lf_id
+        if "legal_form_uid" in f:
+            out["legal_form_uid"] = lf_uid
+        if "legal_form_short_name" in f:
+            out["legal_form_short_name"] = lf_short
+
+    if "status" in f:
+        out["status"] = str(raw.get("status", "")) or None
+    if "municipality" in f:
+        out["municipality"] = raw.get("municipality") or raw.get("legalSeat") or None
+    if "canton" in f:
+        out["canton"] = raw.get("canton") or None
+    if "purpose" in f:
+        out["purpose"] = _extract_purpose_from_raw(raw)
+
+    if f & {"address", "address_city", "address_zip"}:
+        ap = raw.get("address", {}) or {}
+        city = zip_code = ""
+        if isinstance(ap, dict):
+            parts: list[str] = []
+            org = ap.get("organisation") or ""
+            care_of = ap.get("careOf") or ""
+            street = ap.get("street") or ""
+            house_num = ap.get("houseNumber") or ""
+            addon = ap.get("addon") or ""
+            po_box = ap.get("poBox") or ""
+            city = ap.get("city") or ""
+            zip_code = ap.get("swissZipCode") or ""
+            if org:
+                parts.append(org)
+            if care_of:
+                parts.append(f"c/o {care_of}")
+            street_line = f"{street} {house_num}".strip()
+            if street_line:
+                parts.append(street_line)
+            if addon:
+                parts.append(addon)
+            if po_box:
+                parts.append(f"Postfach {po_box}")
+            zip_city = f"{zip_code} {city}".strip()
+            if zip_city:
+                parts.append(zip_city)
+            if "address" in f:
+                out["address"] = ", ".join(parts) or None
+        if "address_city" in f:
+            out["address_city"] = city or None
+        if "address_zip" in f:
+            out["address_zip"] = zip_code or None
+
+    if "ehraid" in f:
+        v = raw.get("ehraId") or raw.get("ehraid") or raw.get("ehra_id")
+        out["ehraid"] = str(v) if v is not None else None
+    if "chid" in f:
+        v = raw.get("chid")
+        out["chid"] = str(v) if v is not None else None
+    if "legal_seat_id" in f:
+        v = raw.get("legalSeatId") or raw.get("legal_seat_id")
+        try:
+            out["legal_seat_id"] = int(v) if v is not None else None
+        except (ValueError, TypeError):
+            out["legal_seat_id"] = None
+    if "sogc_date" in f:
+        v = raw.get("sogcDate") or raw.get("sogc_date")
+        out["sogc_date"] = str(v) if v else None
+    if "deletion_date" in f:
+        v = raw.get("deletionDate") or raw.get("deletion_date")
+        out["deletion_date"] = str(v) if v else None
+    if "capital_nominal" in f:
+        v = raw.get("capitalNominal")
+        out["capital_nominal"] = str(v) if v is not None else None
+    if "capital_currency" in f:
+        out["capital_currency"] = raw.get("capitalCurrency") or None
+    if "head_offices" in f:
+        v = raw.get("headOffices")
+        out["head_offices"] = json.dumps(v) if v is not None else None
+    if "further_head_offices" in f:
+        out["further_head_offices"] = _jf(raw.get("furtherHeadOffices"))
+    if "branch_offices" in f:
+        out["branch_offices"] = _jf(raw.get("branchOffices"))
+    if "has_taken_over" in f:
+        out["has_taken_over"] = _jf(raw.get("hasTakenOver"))
+    if "was_taken_over_by" in f:
+        out["was_taken_over_by"] = _jf(raw.get("wasTakenOverBy"))
+    if "audit_companies" in f:
+        out["audit_companies"] = _jf(raw.get("auditCompanies"))
+    if "old_names" in f:
+        out["old_names"] = _jf(raw.get("oldNames"))
+    if "translations" in f:
+        tr = raw.get("translation") or []
+        out["translations"] = json.dumps(tr) if tr else None
+    if "sogc_pub" in f:
+        out["sogc_pub"] = _jf(raw.get("sogcPub"))
+    if "cantonal_excerpt_web" in f:
+        out["cantonal_excerpt_web"] = raw.get("cantonalExcerptWeb") or None
+    if "zefix_detail_web" in f:
+        zw = raw.get("zefixDetailWeb") or {}
+        if isinstance(zw, dict):
+            out["zefix_detail_web"] = (
+                zw.get("de") or zw.get("fr") or zw.get("it") or zw.get("en") or None
+            )
+        else:
+            out["zefix_detail_web"] = zw or None
+
+    return out
+
+
 REEXTRACTABLE_FIELDS: frozenset[str] = frozenset({
     "name", "legal_form", "legal_form_id", "legal_form_uid", "legal_form_short_name",
     "status", "municipality", "canton", "purpose",
@@ -1044,6 +1174,9 @@ def reextract_zefix_raw_fields(
         if null_checks:
             q = q.filter(or_(*null_checks))
 
+    from sqlalchemy import update as _sa_update
+
+    target_set = set(target_fields)
     q = q.order_by(CompanyModel.id)
     total = q.count()
     offset = max(0, min(resume_from, total))
@@ -1057,6 +1190,7 @@ def reextract_zefix_raw_fields(
         if not batch:
             break
 
+        update_mappings: list[dict] = []
         for company in batch:
             if abort_cb:
                 abort_cb()
@@ -1068,13 +1202,10 @@ def reextract_zefix_raw_fields(
                 processed += 1
                 continue
 
-            extracted = _extract_company_fields(raw, company.uid)
-            update_payload = {
-                k: v for k, v in extracted.model_dump(include=set(target_fields)).items()
-            }
-
             try:
-                crud.update_company(db, company, CompanyUpdate(**update_payload))
+                payload = _extract_fields_direct(raw, target_set)
+                payload["id"] = company.id
+                update_mappings.append(payload)
                 stats["updated"] += 1
             except Exception as exc:  # noqa: BLE001
                 if _is_control_signal_exception(exc):
@@ -1086,7 +1217,10 @@ def reextract_zefix_raw_fields(
             if progress_cb and processed % 100 == 0:
                 progress_cb(processed, total, stats)
 
-        db.commit()
+        if update_mappings:
+            db.bulk_update_mappings(CompanyModel, update_mappings)
+            db.commit()
+
         offset += len(batch)
 
     db.commit()

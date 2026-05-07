@@ -10,6 +10,8 @@ def handle_sogc_preprocess(ctx: JobContext) -> tuple[dict, str]:
 
     mode = ctx.params.get("mode", "missing")
     batch_size = int(ctx.params.get("batch_size", 500))
+    uids_raw = ctx.params.get("uids")
+    uids = [u for u in (uids_raw or []) if u] or None
 
     def _progress(done: int, total: int, _stats: dict) -> None:
         ctx.assert_not_cancelled()
@@ -23,6 +25,7 @@ def handle_sogc_preprocess(ctx: JobContext) -> tuple[dict, str]:
     stats = run_sogc_preprocess_batch(
         ctx.db,
         mode=mode,
+        uids=uids,
         batch_size=batch_size,
         resume_from=ctx.resume_from,
         progress_cb=_progress,
@@ -33,9 +36,11 @@ def handle_sogc_preprocess(ctx: JobContext) -> tuple[dict, str]:
     done_msg = (
         f"Done — {stats['processed']} companies processed, "
         f"{stats['publications_written']} publications written, "
-        f"{stats['skipped_no_pub']} skipped (no sogc_pub), "
+        f"{stats['skipped_no_pub']} skipped (no data), "
         f"{len(stats['errors'])} errors"
     )
-    if ctx.resume_from:
-        done_msg += f" (resumed from {ctx.resume_from})"
+    if uids:
+        done_msg += f" (targeted: {len(uids)} UID(s))"
+    elif ctx.resume_from:
+        done_msg += f" (resumed from company id={ctx.resume_from})"
     return stats, done_msg
