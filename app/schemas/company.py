@@ -161,7 +161,7 @@ class CompanyRead(CompanyBase):
     contact_phone: str | None = None
     tags: str | None = None
     purpose_keywords: str | None = None
-    combined_score: int | None = None
+    combined_score: float | None = None
     flex_scored_at: datetime | None = None
     ai_scored_at: datetime | None = None
     created_at: datetime

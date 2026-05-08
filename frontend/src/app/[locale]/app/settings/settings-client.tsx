@@ -114,6 +114,12 @@ export function SettingsClient() {
   const [newPattern, setNewPattern] = useState({ pattern: "", description: "", example: "" });
   const [addingPattern, setAddingPattern] = useState(false);
   const [triggering, setTriggering] = useState<string | null>(null);
+  const [testText, setTestText] = useState("");
+  const [testResults, setTestResults] = useState<{
+    boilerplate: { id: number; pattern: string; description: string; matchCount: number }[];
+    stripped: string;
+    tfidfMatches: string[];
+  } | null>(null);
   const [seeding, setSeeding] = useState(false);
   const [banner, setBanner] = useState<{ kind: "success" | "error"; message: string } | null>(null);
   const router = useRouter();
@@ -179,6 +185,27 @@ export function SettingsClient() {
   async function handleDelete(id: number) {
     await deleteBoilerplate(id);
     reloadBoilerplate();
+  }
+
+  function runPatternTest() {
+    let stripped = testText;
+    const bpMatches: { id: number; pattern: string; description: string; matchCount: number }[] = [];
+    for (const bp of boilerplate) {
+      if (!bp.active) continue;
+      try {
+        const re = new RegExp(bp.pattern, "gi");
+        const matches = testText.match(re);
+        if (matches && matches.length > 0) {
+          bpMatches.push({ id: bp.id, pattern: bp.pattern, description: bp.description || "", matchCount: matches.length });
+          stripped = stripped.replace(re, "");
+        }
+      } catch { /* skip invalid */ }
+    }
+    const words = new Set(testText.toLowerCase().split(/\W+/).filter(Boolean));
+    const tfidfMatches = tfidfStopwords
+      .filter(sw => sw.active && words.has(sw.value.toLowerCase()))
+      .map(sw => sw.value);
+    setTestResults({ boilerplate: bpMatches, stripped: stripped.trim(), tfidfMatches });
   }
 
   async function handleAddPattern(e: React.FormEvent) {
@@ -714,6 +741,10 @@ export function SettingsClient() {
               {triggering === "scoring/reclassify-noga" ? <Loader2 size={16} className="animate-spin text-emerald-800" /> : <FileText size={16} className="text-emerald-800" />}
               Reclassify NOGA (overwrite all)
             </button>
+            <button type="button" onClick={() => handleTrigger("scoring/analyze-boilerplate")} disabled={!!triggering} className={cn("flex items-center gap-2 bg-orange-50 hover:bg-orange-100 disabled:opacity-60 text-orange-700 px-4 py-2 rounded-lg text-sm font-medium transition-colors")}>
+              {triggering === "scoring/analyze-boilerplate" ? <Loader2 size={16} className="animate-spin text-orange-700" /> : <Sparkles size={16} className="text-orange-700" />}
+              Find new boilerplate patterns
+            </button>
           </div>
 
           <CollapsibleSection title="Boilerplate patterns" description="Regex templates used to filter boilerplate language from company text." count={boilerplate.length}>
@@ -725,7 +756,7 @@ export function SettingsClient() {
                       {bp.active ? <ToggleRight size={20} className="text-blue-500" /> : <ToggleLeft size={20} />}
                     </button>
                     <div className="flex-1 min-w-0">
-                      <p className="text-sm font-mono text-slate-700 truncate">{bp.pattern}</p>
+                      <p className="text-sm font-mono text-slate-700 break-all">{bp.pattern}</p>
                       {bp.description && <p className="text-xs text-slate-400">{bp.description}</p>}
                     </div>
                     <button type="button" onClick={() => handleDelete(bp.id)} className="shrink-0 p-1 text-slate-300 hover:text-red-500 transition-colors">
@@ -741,6 +772,62 @@ export function SettingsClient() {
                   {addingPattern ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} />} Add
                 </button>
               </form>
+
+              {/* ── Pattern & stop word tester ── */}
+              <div className="border border-slate-200 rounded-lg bg-slate-50 p-3 space-y-3">
+                <p className="text-xs font-medium text-slate-500 uppercase tracking-wide">Test patterns &amp; TF-IDF stop words</p>
+                <textarea
+                  value={testText}
+                  onChange={e => { setTestText(e.target.value); setTestResults(null); }}
+                  placeholder="Paste a company purpose text here…"
+                  rows={3}
+                  className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-300 bg-white resize-y"
+                />
+                <button
+                  type="button"
+                  onClick={runPatternTest}
+                  disabled={!testText.trim()}
+                  className="flex items-center gap-1.5 bg-slate-700 hover:bg-slate-800 disabled:opacity-40 text-white px-3 py-1.5 rounded-lg text-sm font-medium transition-colors"
+                >
+                  <Search size={13} /> Run test
+                </button>
+                {testResults && (
+                  <div className="space-y-3 pt-1">
+                    <div>
+                      <p className="text-xs font-semibold text-slate-500 mb-1">Boilerplate pattern matches ({testResults.boilerplate.length})</p>
+                      {testResults.boilerplate.length === 0
+                        ? <p className="text-xs text-slate-400">No active patterns matched.</p>
+                        : <ul className="space-y-1">
+                            {testResults.boilerplate.map(m => (
+                              <li key={m.id} className="text-xs bg-orange-50 border border-orange-200 rounded px-2 py-1">
+                                <span className="font-mono text-orange-800 break-all">{m.pattern}</span>
+                                {m.description && <span className="text-orange-500 ml-2">— {m.description}</span>}
+                                <span className="ml-2 text-orange-400">({m.matchCount} hit{m.matchCount !== 1 ? "s" : ""})</span>
+                              </li>
+                            ))}
+                          </ul>
+                      }
+                    </div>
+                    <div>
+                      <p className="text-xs font-semibold text-slate-500 mb-1">Text after stripping boilerplate</p>
+                      <p className="text-xs font-mono bg-white border border-slate-200 rounded px-2 py-1.5 whitespace-pre-wrap text-slate-700">
+                        {testResults.stripped || <span className="text-slate-400 italic">empty</span>}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-xs font-semibold text-slate-500 mb-1">TF-IDF stop words found ({testResults.tfidfMatches.length})</p>
+                      {testResults.tfidfMatches.length === 0
+                        ? <p className="text-xs text-slate-400">No active TF-IDF stop words matched.</p>
+                        : <div className="flex flex-wrap gap-1">
+                            {testResults.tfidfMatches.map(w => (
+                              <span key={w} className="text-xs bg-blue-50 border border-blue-200 text-blue-700 rounded px-1.5 py-0.5 font-mono">{w}</span>
+                            ))}
+                          </div>
+                      }
+                    </div>
+                  </div>
+                )}
+              </div>
             </div>
           </CollapsibleSection>
         </form>
