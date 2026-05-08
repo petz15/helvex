@@ -28,6 +28,7 @@ import {
 } from "@/lib/api";
 import type { AppSettings, BoilerplatePattern, GoogleDirectoryDomain, GoogleStopword, TfidfStopword } from "@/lib/types";
 import { OrgScoringSection } from "@/app/[locale]/app/org/org-client";
+import { useApiErrorHandler } from "@/lib/use-api-error";
 
 const inputCls = "w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-300 focus:border-transparent bg-white";
 const textareaCls = inputCls + " resize-y";
@@ -93,6 +94,7 @@ type TabId = typeof TABS[number]["id"];
 
 export function SettingsClient() {
   const searchParams = useSearchParams();
+  const handleApiError = useApiErrorHandler();
   const [activeTab, setActiveTab] = useState<TabId>((searchParams?.get("tab") as TabId) ?? "llm");
 
   const { data: initial, mutate: reloadSettings } = useSWR<AppSettings>("settings", fetchSettings);
@@ -169,8 +171,10 @@ export function SettingsClient() {
       setBanner({ kind: "success", message: "Job queued → redirecting to Jobs…" });
       setTimeout(() => router.push("/app/jobs"), 800);
     } catch (error) {
-      const msg = error instanceof Error ? error.message : String(error);
-      setBanner({ kind: "error", message: `Failed to queue job: ${msg}` });
+      if (!handleApiError(error)) {
+        const msg = error instanceof Error ? error.message : String(error);
+        setBanner({ kind: "error", message: `Failed to queue job: ${msg}` });
+      }
     } finally {
       setTriggering(null);
       setTimeout(() => setBanner(null), 4000);

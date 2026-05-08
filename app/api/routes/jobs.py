@@ -1,6 +1,7 @@
 """REST API for job management and collection/scoring triggers."""
 from __future__ import annotations
 
+import asyncio
 import time
 from datetime import date
 
@@ -11,7 +12,7 @@ from sqlalchemy.orm import Session
 
 from app import crud
 from app.clients.zefix_client import SWISS_CANTONS
-from app.auth import get_client_ip, get_current_user, require_superadmin
+from app.auth import get_current_user, require_superadmin
 from app.services.rate_limit import check_job_rate_limit, check_rate_limit
 from app.database import get_db
 from app.models.organization import Organization
@@ -20,28 +21,6 @@ from app.services import credits as credits_service
 from app.services.job_worker import enqueue_job
 from app.services.tiers import get_export_limit, has_feature, normalize_tier
 
-
-def _check_job_rate_limit(request: Request, current_user: User, action: str, *, window: int = 300, max_calls: int = 10) -> None:
-    """Rate-limit authenticated job-triggering endpoints by user ID.
-
-    Uses an in-process sliding window keyed on ``job_rl:<action>:<user_id>``
-    so each user has an independent bucket.
-    Superadmins are never limited.
-
-    Args:
-        window: lookback window in seconds (default 5 min).
-        max_calls: max allowed calls in the window (default 10).
-
-    Raises HTTP 429 when the limit is exceeded.
-    """
-    if current_user.is_superadmin:
-        return
-    key = f"user_{current_user.id}"
-    if not check_public_rate_limit(key, f"job_rl:{action}", window=window, max_requests=max_calls):
-        raise HTTPException(
-            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            detail=f"Too many requests. Maximum {max_calls} '{action}' calls per {window // 60} minutes.",
-        )
 
 router = APIRouter(tags=["jobs"])
 
@@ -69,7 +48,9 @@ def _enqueue_or_http_error(
     try:
         return enqueue_job(request.app, job_type=job_type, label=label, params=params, db=db, org_id=org_id, user_id=user_id)
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        msg = str(exc)
+        http_status = status.HTTP_402_PAYMENT_REQUIRED if "Insufficient credits" in msg else 400
+        raise HTTPException(status_code=http_status, detail=msg) from exc
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
@@ -215,7 +196,7 @@ def resume_job(job_id: int, request: Request, db: Session = Depends(get_db), cur
 
 
 @router.get("/jobs/stream/active")
-def stream_active_jobs(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+async def stream_active_jobs(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     """SSE stream that pushes the full job list as JSON on every change.
 
     Polls DB every second and sends an update only when the serialised result
@@ -224,12 +205,18 @@ def stream_active_jobs(db: Session = Depends(get_db), current_user: User = Depen
     A heartbeat comment is emitted every 30 s to keep the TCP connection alive
     through proxies.  SSE comments are never dispatched as 'message' events by
     the browser, so the frontend onmessage handler is never called for them.
+
+    The route is async so that `await asyncio.sleep(1)` yields back to the event
+    loop between polls instead of blocking a worker thread.  The blocking
+    SQLAlchemy calls inside `_fetch_jobs` are dispatched to a thread-pool via
+    `asyncio.to_thread` so they never stall the loop either.
     """
     import json as _json
 
     HEARTBEAT_INTERVAL = 30
 
     def _fetch_jobs() -> list[dict]:
+        # Runs inside asyncio.to_thread — blocking DB I/O is safe here.
         db.expire_all()
         if current_user.is_superadmin:
             recent = crud.list_jobs(db, limit=100)
@@ -251,15 +238,15 @@ def stream_active_jobs(db: Session = Depends(get_db), current_user: User = Depen
         )
         return [JobOut.from_orm_obj(j).model_dump() for j in merged]
 
-    def event_generator():
+    async def event_generator():
         last_sent: str | None = None
         last_hb = time.time()
-        initial = _json.dumps(_fetch_jobs())
+        initial = _json.dumps(await asyncio.to_thread(_fetch_jobs))
         yield f"data: {initial}\n\n"
         last_sent = initial
         while True:
-            time.sleep(1)
-            current = _json.dumps(_fetch_jobs())
+            await asyncio.sleep(1)
+            current = _json.dumps(await asyncio.to_thread(_fetch_jobs))
             if current != last_sent:
                 yield f"data: {current}\n\n"
                 last_sent = current
@@ -624,12 +611,29 @@ def trigger_reclassify_low_conf_noga(
 
 @router.post("/scoring/claude", response_model=JobOut, status_code=status.HTTP_202_ACCEPTED)
 def trigger_claude_classify(body: ClaudeClassifyBody, request: Request, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
-    # Rate limit: max 20 claude classify enqueues per user per 10 minutes.
-    check_job_rate_limit(request, current_user, "claude_classify", window=600, max_calls=20)
-
     # Non-org users have no credit balance — block to prevent free AI calls.
     if not current_user.is_superadmin and not current_user.org_id:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Organization membership required to use AI classification")
+
+    org: Organization | None = None
+    org_tier = "free"
+    if current_user.org_id:
+        org = db.get(Organization, current_user.org_id)
+        if org:
+            org_tier = normalize_tier(org.tier)
+
+    # Tier-aware rate limit (free: 2/15 min, simple: 5/10 min, explorer+: 15/10 min).
+    check_job_rate_limit(request, current_user, "claude_classify", org_tier=org_tier)
+
+    # Minimum-balance pre-check so user gets an immediate 402 instead of a silent job failure.
+    if not current_user.is_superadmin and org and not getattr(org, "credits_unlimited", False):
+        min_cost = credits_service.CREDIT_COSTS["batch_llm"]  # cost for 1 company
+        balance = getattr(org, "credits_balance", 0) or 0
+        if balance < min_cost:
+            raise HTTPException(
+                status_code=status.HTTP_402_PAYMENT_REQUIRED,
+                detail=f"Insufficient credits. AI classification costs {min_cost:,} credits per company. Current balance: {balance:,} credits.",
+            )
 
     # Only superadmins may supply a custom system_prompt — it is stored and
     # executed verbatim by Claude, which is a prompt-injection risk.
@@ -638,10 +642,8 @@ def trigger_claude_classify(body: ClaudeClassifyBody, request: Request, db: Sess
         params["system_prompt"] = None
         # immediate_llm (use_batch_api=False) requires Explorer tier or above.
         # Free / Simple orgs are silently downgraded to batch mode (cheaper, async).
-        if current_user.org_id:
-            org = db.get(Organization, current_user.org_id)
-            if org is not None and not has_feature(org, "immediate_llm"):
-                params["use_batch_api"] = True
+        if org is not None and not has_feature(org, "immediate_llm"):
+            params["use_batch_api"] = True
 
     job = _enqueue_or_http_error(
         request,
@@ -1081,9 +1083,6 @@ def enqueue_csv_export(
     Max 1 active export per user — any queued/running export is cancelled first.
     The finished file is stored in S3 for 7 days.
     """
-    # Rate limit: max 5 export enqueues per user per 10 minutes.
-    check_job_rate_limit(request, current_user, "csv_export", window=600, max_calls=5)
-
     from app.services.s3_client import is_configured
     if not is_configured():
         raise HTTPException(status_code=503, detail="S3 export storage is not configured on this server")
@@ -1091,11 +1090,17 @@ def enqueue_csv_export(
     # Determine and embed the tier row cap into params so the worker honours it.
     if current_user.is_superadmin:
         row_limit = None  # unlimited for superadmins
+        org = None
     elif current_user.org_id:
         org = db.get(Organization, current_user.org_id)
         row_limit = get_export_limit(org) if org else 100
     else:
+        org = None
         row_limit = 100  # free/org-less users get the free tier cap
+
+    # Tier-aware rate limit (free: 1/15 min, simple: 3/10 min, explorer+: 5/10 min).
+    org_tier = normalize_tier(org.tier) if org else "free"
+    check_job_rate_limit(request, current_user, "csv_export", org_tier=org_tier)
 
     # Deduct credits before enqueuing. We charge for the tier cap (worst case)
     # rounded up to the nearest 10k unit so the cost is deterministic.

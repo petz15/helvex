@@ -3,6 +3,7 @@ import { CookieSettingsButton } from "@/components/cookie-settings-button";
 import { AdBanner } from "@/components/ad-banner";
 import { PageViewTracker } from "@/components/page-view-tracker";
 import { AuthErrorProvider } from "@/components/auth-error-provider";
+import { NotificationProvider } from "@/components/notification-provider";
 import { getDictionary, isLocale } from "@/i18n/dictionaries";
 import { notFound } from "next/navigation";
 
@@ -19,6 +20,7 @@ export default async function AppLayout({
   const t = dict.app.footer;
 
   return (
+    <NotificationProvider>
     <AuthErrorProvider>
       <div className="flex min-h-full flex-col">
         <PageViewTracker />
@@ -37,5 +39,6 @@ export default async function AppLayout({
       </footer>
       </div>
     </AuthErrorProvider>
+    </NotificationProvider>
   );
 }

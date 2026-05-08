@@ -9,6 +9,7 @@ import { CompanyTable } from "@/components/dashboard/company-table";
 import { CompanyPreview } from "@/components/dashboard/company-preview";
 import { Pagination } from "@/components/dashboard/pagination";
 import { fetchCompanies, fetchStats, fetchCantons, fetchTaxonomy, fetchSavedViews, saveView, deleteView, enqueueCSVExport, fetchCurrentUser, fetchOrg, toggleViewAlert } from "@/lib/api";
+import { useApiErrorHandler } from "@/lib/use-api-error";
 import { getExportLimit } from "@/lib/entitlements";
 import type { Company, CompanyFilters, CompanyStats } from "@/lib/types";
 
@@ -43,6 +44,7 @@ function syncFiltersToUrl(filters: CompanyFilters, router: ReturnType<typeof use
 
 export function DashboardClient({ initialCantons, initialStats, initialFilters }: DashboardClientProps) {
   const router = useRouter();
+  const handleApiError = useApiErrorHandler();
   const { dict } = useI18n();
   const t = dict.app.dashboard;
   const [filters, setFiltersState] = useState<CompanyFilters>(initialFilters ?? DEFAULT_FILTERS);
@@ -122,7 +124,9 @@ export function DashboardClient({ initialCantons, initialStats, initialFilters }
       await enqueueCSVExport(filters);
       setExportBanner({ kind: "success", message: t.exportQueued });
     } catch (err) {
-      setExportBanner({ kind: "error", message: err instanceof Error ? err.message : "Failed to queue export" });
+      if (!handleApiError(err)) {
+        setExportBanner({ kind: "error", message: err instanceof Error ? err.message : "Failed to queue export" });
+      }
     } finally {
       setQueueingExport(false);
       setTimeout(() => setExportBanner(null), 6000);

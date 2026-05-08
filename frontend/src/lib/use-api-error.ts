@@ -1,36 +1,36 @@
 "use client";
 import { useCallback } from "react";
-import { useRouter, usePathname } from "next/navigation";
-import { SWRConfig } from "swr";
-import { createFetcher, ApiError } from "@/lib/api";
+import { usePathname } from "next/navigation";
+import { ApiError } from "@/lib/api";
 import { useNotifications } from "@/components/notification-provider";
 
-export function AuthErrorProvider({ children }: { children: React.ReactNode }) {
-  const router = useRouter();
-  const pathname = usePathname();
+/**
+ * Returns a stable `handleApiError` function that converts ApiErrors into
+ * user-visible notifications. Use this in components that call API functions
+ * manually (not via SWR) so error feedback is consistent across the app.
+ *
+ * Returns false so callers can write: `catch (e) { if (handleApiError(e)) return; }`
+ */
+export function useApiErrorHandler(): (error: unknown) => boolean {
   const { notify } = useNotifications();
+  const pathname = usePathname();
 
-  const onError = useCallback(
-    (error: any) => {
-      if (!(error instanceof ApiError)) return;
-
-      if (error.status === 401) {
-        router.push("/login");
-        return;
-      }
+  return useCallback(
+    (error: unknown): boolean => {
+      if (!(error instanceof ApiError)) return false;
 
       if (error.status === 402) {
         notify({
           kind: "error",
           title: "Insufficient credits",
           message: error.detail ?? "Your organisation does not have enough credits for this action.",
-          duration: 0, // stay until dismissed
+          duration: 0,
           action: {
             label: "Top up credits",
             href: pathname?.replace(/\/[^/]+$/, "/billing") ?? "/billing",
           },
         });
-        return;
+        return true;
       }
 
       if (error.status === 429) {
@@ -38,10 +38,14 @@ export function AuthErrorProvider({ children }: { children: React.ReactNode }) {
         notify({
           kind: "warning",
           title: "Too many requests",
-          message: error.detail ?? (retryMin ? `Please wait ${retryMin} minute${retryMin > 1 ? "s" : ""} before trying again.` : "You've hit the rate limit. Please slow down."),
+          message:
+            error.detail ??
+            (retryMin
+              ? `Please wait ${retryMin} minute${retryMin > 1 ? "s" : ""} before trying again.`
+              : "You've hit the rate limit. Please slow down."),
           duration: 8000,
         });
-        return;
+        return true;
       }
 
       if (error.status === 403) {
@@ -55,22 +59,11 @@ export function AuthErrorProvider({ children }: { children: React.ReactNode }) {
             href: pathname?.replace(/\/[^/]+$/, "/pricing") ?? "/pricing",
           },
         });
+        return true;
       }
-    },
-    [router, pathname, notify],
-  );
 
-  return (
-    <SWRConfig
-      value={{
-        fetcher: createFetcher,
-        onError,
-        revalidateOnFocus: false,
-        revalidateOnReconnect: false,
-        dedupingInterval: 60000,
-      }}
-    >
-      {children}
-    </SWRConfig>
+      return false;
+    },
+    [notify, pathname],
   );
 }

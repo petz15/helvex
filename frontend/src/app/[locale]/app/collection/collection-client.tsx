@@ -5,6 +5,7 @@ import { Play, ChevronDown, ChevronUp, BrainCircuit } from "lucide-react";
 import useSWR from "swr";
 import { triggerJob, fetchCurrentUser } from "@/lib/api";
 import { useI18n } from "@/i18n/context";
+import { useApiErrorHandler } from "@/lib/use-api-error";
 
 function Section({ title, children, defaultOpen = false }: { title: string; children: React.ReactNode; defaultOpen?: boolean }) {
   const [open, setOpen] = useState(defaultOpen);
@@ -177,6 +178,7 @@ function SubmitBtn({ loading }: { loading: boolean }) {
 export function CollectionClient() {
   const { dict } = useI18n();
   const router = useRouter();
+  const handleApiError = useApiErrorHandler();
   const [loading, setLoading] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -197,7 +199,9 @@ export function CollectionClient() {
       await triggerJob(endpoint, body);
       router.push("/app/jobs");
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : String(e));
+      if (!handleApiError(e)) {
+        setError(e instanceof Error ? e.message : String(e));
+      }
     } finally {
       setLoading(null);
     }

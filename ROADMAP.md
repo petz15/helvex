@@ -152,7 +152,7 @@
 - [ ] **Imporve Purpose Keyword extraction** - Seeing as this is central for NOGA and clustering, these keywords should be as accurate as possible. Review how it is done. Generally improve ML later as much as possible
 - [ ] **NOGA Improvement** - More NOGA related improvements on displaying and other.
 - [ ] **Semantic K Means unavailable** - cant find it in the Collection part
-
+- [ ] **Implement multiple LLM APIs** and check if they actually work. especially the selection (including model type). 
 
 ## Jobs & Infrastructure
 
@@ -188,6 +188,7 @@
 - [ ] **refund and other admin function** - check QOL of billing such as refunds and other methods. What happens when an automatic payment fails? -> subscription upgrades not working correctly, other functions not fully tested, definitely not complete. 
     - What happens to other users when an account is downgraded to free?
     - Subscription upgrade and downgrade flow
+- [ ] **Rate limiting** implemented a rate limiting for tiers for certain actions, but not sure if I want to keep this functionality
 
 
 

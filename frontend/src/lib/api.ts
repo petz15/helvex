@@ -16,17 +16,31 @@ import type {
 
 const BASE = process.env.NEXT_PUBLIC_API_BASE ?? "";
 
-class ApiError extends Error {
+export class ApiError extends Error {
   status: number;
-  constructor(message: string, status: number) {
+  detail: string | null;
+  retryAfter: number | null;
+  constructor(message: string, status: number, detail: string | null = null, retryAfter: number | null = null) {
     super(message);
     this.status = status;
+    this.detail = detail;
+    this.retryAfter = retryAfter;
   }
+}
+
+async function _handleErrorResponse(res: Response): Promise<never> {
+  let detail: string | null = null;
+  try {
+    const body = await res.json();
+    detail = body?.detail ?? null;
+  } catch { /* ignore */ }
+  const retryAfter = res.headers.get("Retry-After") ? Number(res.headers.get("Retry-After")) : null;
+  throw new ApiError(detail ?? res.statusText, res.status, detail, retryAfter);
 }
 
 export function createFetcher(url: string): Promise<any> {
   return fetch(url, { credentials: "include" }).then((res) => {
-    if (!res.ok) throw new ApiError(res.statusText, res.status);
+    if (!res.ok) return _handleErrorResponse(res);
     return res.json();
   });
 }
@@ -743,10 +757,7 @@ export async function runCompanyWebSearch(companyId: number, num = 10): Promise<
     method: "GET",
     credentials: "include",
   });
-  if (!res.ok) {
-    const body = await res.json().catch(() => ({}));
-    throw new Error(body.detail ?? "Failed to run web search");
-  }
+  if (!res.ok) return _handleErrorResponse(res);
 }
 
 // ── Jobs ──────────────────────────────────────────────────────────────────────
@@ -782,14 +793,7 @@ export async function triggerJob(endpoint: string, body?: object): Promise<Job> 
     headers: { "Content-Type": "application/json" },
     body: body ? JSON.stringify(body) : "{}",
   });
-  if (!res.ok) {
-    let detail = `${res.status}`;
-    try {
-      const body = await res.json();
-      if (body?.detail) detail = `${res.status} — ${body.detail}`;
-    } catch { /* ignore parse errors */ }
-    throw new Error(`Failed to trigger job: ${detail}`);
-  }
+  if (!res.ok) return _handleErrorResponse(res);
   return res.json();
 }
 

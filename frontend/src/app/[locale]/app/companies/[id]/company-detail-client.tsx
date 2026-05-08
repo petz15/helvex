@@ -10,6 +10,7 @@ import type { Company, Note, GoogleScoredResult } from "@/lib/types";
 import "leaflet/dist/leaflet.css";
 import { SogcTimeline, SignersPanel } from "@/components/sogc-history";
 import { useI18n } from "@/i18n/context";
+import { useApiErrorHandler } from "@/lib/use-api-error";
 
 interface Props {
   company: Company;
@@ -76,6 +77,7 @@ function RelatedCompaniesList({ items, label }: { items: CompanyShortEntry[]; la
 
 export function CompanyDetailClient({ company: initial, readOnlyDemo = false }: Props) {
   const router = useRouter();
+  const handleApiError = useApiErrorHandler();
   const [company, setCompany] = useState(initial);
   const [notes, setNotes] = useState<Note[]>(initial.notes ?? []);
   const [noteText, setNoteText] = useState("");
@@ -211,6 +213,8 @@ export function CompanyDetailClient({ company: initial, readOnlyDemo = false }: 
       const fresh = await fetchCompany(company.id);
       setCompany(fresh);
       setNotes(fresh.notes ?? []);
+    } catch (e) {
+      handleApiError(e);
     } finally {
       setSearchingWeb(false);
     }
