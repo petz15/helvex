@@ -15,7 +15,7 @@ from app.auth import require_superadmin
 from app.database import get_db
 from app.models.organization import Organization
 
-router = APIRouter(prefix="/admin/api-keys", tags=["admin"])
+router = APIRouter(prefix="/api-keys", tags=["admin"])
 
 
 # ── Schemas ────────────────────────────────────────────────────────────────

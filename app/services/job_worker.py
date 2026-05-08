@@ -1065,6 +1065,50 @@ def _run_job(app, job_id: int) -> None:  # noqa: C901
                     f"{stats.get('errors', 0)} errors"
                 )
 
+            elif job.job_type == "sogc_preprocess":
+                from app.services.sogc_preprocessor import run_sogc_preprocess_batch
+
+                mode = params.get("mode", "missing")
+                uids_raw = params.get("uids") or []
+                uids = [u for u in uids_raw if u] or None
+                batch_size = int(params.get("batch_size", 500))
+
+                def _progress(done: int, total: int, _stats: dict) -> None:
+                    _assert_not_cancelled()
+                    msg = (
+                        f"Processing {done}/{total} — "
+                        f"{_stats.get('processed', 0)} companies, "
+                        f"{_stats.get('publications_written', 0)} publications"
+                    )
+                    crud.update_progress(db, job, message=msg, done=done, total=total, stats=_stats)
+                    crud.create_event(db, job_id=job.id, level="debug", message=msg)
+                    _maybe_sync(app, job_type=job.job_type, label=job.label, message=msg, stats=dict(_stats), error=None, done=False)
+                    _heartbeat()
+
+                stats = run_sogc_preprocess_batch(
+                    db,
+                    mode=mode,
+                    uids=uids,
+                    batch_size=batch_size,
+                    resume_from=resume_from,
+                    progress_cb=_progress,
+                    status_cb=lambda m: (
+                        _assert_not_cancelled(),
+                        crud.update_progress(db, job, message=str(m)),
+                        crud.create_event(db, job_id=job.id, level="info", message=str(m)),
+                    ),
+                    abort_cb=_assert_not_cancelled,
+                )
+                uid_note = f" ({len(uids)} UID(s))" if uids else ""
+                done_msg = (
+                    f"Done{uid_note} — {stats['processed']} companies processed, "
+                    f"{stats['publications_written']} publications written, "
+                    f"{stats['skipped_no_pub']} skipped (no data), "
+                    f"{len(stats['errors'])} errors"
+                )
+                if resume_from:
+                    done_msg += f" (resumed from id={resume_from})"
+
             else:
                 raise RuntimeError(f"Unsupported job type: {job.job_type}")
 
