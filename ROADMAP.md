@@ -71,6 +71,7 @@
     - enconding issue
     - and more, best solved over preprocessing -> espcially for future management view
 - Broad stop words for google search anything with vergleich in the domain name but not in the zweck or company name
+- API key management not working as intended. multiple bugs and no clear way to manage models. code needs to be checked how it deals with multiple providers and model when sending requests
 
 
 ### UI fixes:

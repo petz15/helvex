@@ -4,16 +4,21 @@ Reads the `sogc_pub` JSON blob stored on each company (sourced from Zefix
 `sogcPub` field) and explodes it into structured `sogc_publications` and
 `sogc_changes` rows.
 
-Encoding fix: some newer Zefix entries are encoded in latin-1 but decoded as
-utf-8, producing mojibake (e.g. "Ã¼" instead of "ü"). The fix re-encodes the
-string as latin-1 bytes and decodes them as utf-8. It is only applied when
-known mojibake byte-sequences are detected.
+The Zefix company detail endpoint returns sogcPub entries with a single
+`message` field (German, French, or Italian depending on the registry canton)
+plus HTML-like <FT TYPE="..."> tags that are stripped on ingestion.
+
+Encoding fix: some entries have UTF-8 bytes that were decoded as latin-1,
+producing mojibake.  The fix tries encode("latin-1").decode("utf-8") and
+keeps the result only when it both succeeds and differs from the original.
 """
 
 from __future__ import annotations
 
+import html
 import json
 import logging
+import re
 from datetime import datetime, timezone
 from typing import Any
 
@@ -28,18 +33,45 @@ logger = logging.getLogger(__name__)
 
 # ── Encoding fix ──────────────────────────────────────────────────────────────
 
-_MOJIBAKE_MARKERS = ["Ã¼", "Ã¤", "Ã¶", "Ã©", "Ã«", "Ã¡", "Ã "]
-
-
 def _try_fix_encoding(text: str) -> tuple[str, bool]:
-    """Return (fixed_text, was_fixed). Only applies the fix when mojibake markers are present."""
-    if not text or not any(m in text for m in _MOJIBAKE_MARKERS):
-        return text, False
+    """Return (fixed_text, was_fixed).
+
+    Tries to interpret the string as latin-1 bytes that were actually UTF-8.
+    Applies the fix only when encode("latin-1") + decode("utf-8") succeeds
+    AND produces a different string (i.e. there was actual mojibake present).
+    """
     try:
         fixed = text.encode("latin-1").decode("utf-8")
-        return fixed, True
+        return (fixed, True) if fixed != text else (text, False)
     except (UnicodeDecodeError, UnicodeEncodeError):
         return text, False
+
+
+# ── HTML tag stripping ────────────────────────────────────────────────────────
+
+_FT_TAG_RE = re.compile(r"</?FT[^>]*>", re.IGNORECASE)
+
+
+def _strip_ft_tags(text: str) -> str:
+    cleaned = _FT_TAG_RE.sub("", text)
+    return html.unescape(cleaned).strip()
+
+
+# ── Canton → language ─────────────────────────────────────────────────────────
+
+_FR_CANTONS = frozenset({"GE", "JU", "NE", "VD"})
+_IT_CANTONS = frozenset({"TI"})
+
+
+def _canton_to_lang(canton: str | None) -> str:
+    if not canton:
+        return "de"
+    c = canton.upper()
+    if c in _FR_CANTONS:
+        return "fr"
+    if c in _IT_CANTONS:
+        return "it"
+    return "de"
 
 
 # ── Multilingual change-type keyword patterns ─────────────────────────────────
@@ -147,14 +179,25 @@ def _extract_mutation_keys(entry: dict[str, Any]) -> list[str]:
 def _extract_text_fields(entry: dict[str, Any]) -> dict[str, str | None]:
     """Return {"de": ..., "fr": ..., "it": ..., "en": ...} from an entry.
 
-    Tries several key shapes observed in Zefix API responses:
-    1. publicationTexts.{de|fr|it|en}  (nested dict)
-    2. sogcPubTexts: [{languageKey, text}]  (list of lang objects)
-    3. text.{de|fr|it|en}  (nested dict under "text")
-    4. textDe / textFr / textIt / textEn  (flat camelCase keys)
+    Extraction order (first match wins):
+    1. message  — single text from Zefix company detail endpoint; language
+                  inferred from registryOfCommerceCanton
+    2. publicationTexts.{de|fr|it|en} or text.{de|fr|it|en}  (nested dict)
+    3. sogcPubTexts / publicationTextsList  (list of {languageKey, text})
+    4. textDe / textFr / textIt / textEn  (flat camelCase)
     """
     texts: dict[str, str | None] = {"de": None, "fr": None, "it": None, "en": None}
 
+    # Primary: Zefix company detail uses a single "message" field with FT tags
+    msg = entry.get("message")
+    if msg and isinstance(msg, str):
+        msg = _strip_ft_tags(msg)
+        if msg:
+            lang = _canton_to_lang(entry.get("registryOfCommerceCanton"))
+            texts[lang] = msg
+            return texts
+
+    # Nested dict: publicationTexts.de / text.de
     pub_texts = entry.get("publicationTexts") or entry.get("text")
     if isinstance(pub_texts, dict):
         for lang in _LANG_ORDER:
@@ -164,6 +207,7 @@ def _extract_text_fields(entry: dict[str, Any]) -> dict[str, str | None]:
         if any(texts.values()):
             return texts
 
+    # List form: sogcPubTexts / publicationTextsList
     sogc_pub_texts = entry.get("sogcPubTexts") or entry.get("publicationTextsList")
     if isinstance(sogc_pub_texts, list):
         for item in sogc_pub_texts:
@@ -176,10 +220,9 @@ def _extract_text_fields(entry: dict[str, Any]) -> dict[str, str | None]:
         if any(texts.values()):
             return texts
 
-    # Flat camelCase fallback
+    # Flat camelCase: textDe / textFr / textIt / textEn
     for lang in _LANG_ORDER:
-        key = f"text{lang.capitalize()}"
-        val = entry.get(key)
+        val = entry.get(f"text{lang.capitalize()}")
         if val and isinstance(val, str):
             texts[lang] = val.strip() or None
 
@@ -348,6 +391,115 @@ def preprocess_company_sogc_pub(db: Session, company: Company) -> int:
         written += 1
 
     return written
+
+
+# ── Publications-only backfill ────────────────────────────────────────────────
+
+def run_sogc_publications_backfill(
+    db: Session,
+    *,
+    batch_size: int = 500,
+    resume_from: int = 0,
+    progress_cb=None,
+    status_cb=None,
+    abort_cb=None,
+) -> dict:
+    """Re-process existing sogc_publications rows: fix encoding and regenerate changes.
+
+    Iterates over sogc_publications with cursor pagination, applies the encoding
+    fix to any stored text that has mojibake, persists the corrected text back to
+    the publication, then deletes + re-inserts the sogc_changes rows.
+
+    Idempotent — safe to run multiple times.
+    """
+    stats: dict = {
+        "selected": 0,
+        "processed": 0,
+        "changes_written": 0,
+        "encoding_fixed": 0,
+        "errors": [],
+    }
+
+    q = db.query(SogcPublication).order_by(SogcPublication.id.asc())
+    total = q.count()
+    stats["selected"] = total
+
+    if status_cb:
+        status_cb(f"SOGC changes backfill: {total} publications to process")
+
+    last_id: int = resume_from
+    done = 0
+
+    while True:
+        if abort_cb:
+            abort_cb()
+
+        batch: list[SogcPublication] = q.filter(SogcPublication.id > last_id).limit(batch_size).all()
+        if not batch:
+            break
+
+        for pub in batch:
+            if abort_cb:
+                abort_cb()
+            try:
+                texts: dict[str, str | None] = {
+                    "de": pub.text_de,
+                    "fr": pub.text_fr,
+                    "it": pub.text_it,
+                    "en": pub.text_en,
+                }
+
+                encoding_fixed = False
+                for lang in _LANG_ORDER:
+                    if texts[lang]:
+                        fixed, did_fix = _try_fix_encoding(texts[lang])  # type: ignore[arg-type]
+                        texts[lang] = fixed
+                        encoding_fixed = encoding_fixed or did_fix
+
+                if encoding_fixed:
+                    pub.text_de = texts["de"]
+                    pub.text_fr = texts["fr"]
+                    pub.text_it = texts["it"]
+                    pub.text_en = texts["en"]
+                    pub.encoding_fixed = True
+                    stats["encoding_fixed"] += 1
+
+                db.query(SogcChange).filter_by(sogc_publication_id=pub.id).delete()
+                changes = _detect_changes(texts)
+                for ch in changes:
+                    db.add(SogcChange(
+                        sogc_publication_id=pub.id,
+                        change_type=ch["change_type"],
+                        keywords_matched=ch["keywords_matched"],
+                        raw_excerpt=ch["raw_excerpt"],
+                    ))
+                pub.preprocessed_at = datetime.now(tz=timezone.utc)
+                stats["processed"] += 1
+                stats["changes_written"] += len(changes)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "SOGC changes backfill failed pub.id=%s: %s", pub.id, exc, exc_info=True
+                )
+                stats["errors"].append(f"pub_id={pub.id}: {type(exc).__name__}: {exc}")
+                try:
+                    db.rollback()
+                except Exception:
+                    pass
+
+        db.commit()
+        last_id = batch[-1].id
+        done += len(batch)
+
+        if progress_cb:
+            progress_cb(done, total, stats)
+
+    if status_cb:
+        status_cb(
+            f"SOGC changes backfill done — {stats['processed']} publications, "
+            f"{stats['changes_written']} changes, {stats['encoding_fixed']} encoding fixes"
+        )
+
+    return stats
 
 
 # ── Batch job ─────────────────────────────────────────────────────────────────

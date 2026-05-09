@@ -732,14 +732,15 @@ export function CollectionClient() {
             <Field label="Mode">
               <select name="sogc_mode" className={inputCls}>
                 <option value="missing">missing — only unprocessed companies</option>
-                <option value="all">all — reprocess everything</option>
+                <option value="all">all — reprocess every company</option>
+                <option value="publications">publications — fix encoding + regenerate changes from existing rows</option>
               </select>
             </Field>
             <Field label="Batch size" hint="DB commit interval">
               <input name="sogc_batch_size" type="number" min="10" defaultValue="500" className={inputCls} />
             </Field>
           </div>
-          <Field label="CHE UIDs (optional)" hint="Comma or newline-separated UIDs, e.g. CHE-123.456.789. Leave empty for all.">
+          <Field label="CHE UIDs (optional)" hint="Only applies to missing/all modes. One per line.">
             <textarea name="sogc_uids" rows={3} placeholder="CHE-123.456.789&#10;CHE-987.654.321" className={cn(inputCls, "font-mono text-xs")} />
           </Field>
           <SubmitBtn loading={loading === "collection/sogc-preprocess"} />
