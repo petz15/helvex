@@ -127,10 +127,16 @@ def list_active_jobs_for_user(db: Session, *, user_id: int, org_id: int | None) 
     return q.order_by(JobRun.queued_at.asc()).all()
 
 
-def get_next_queued_job(db: Session, job_type_whitelist: set[str] | None = None) -> JobRun | None:
+def get_next_queued_job(
+    db: Session,
+    job_type_whitelist: set[str] | None = None,
+    job_type_blacklist: set[str] | None = None,
+) -> JobRun | None:
     q = db.query(JobRun).filter(JobRun.status == "queued")
     if job_type_whitelist:
         q = q.filter(JobRun.job_type.in_(job_type_whitelist))
+    if job_type_blacklist:
+        q = q.filter(JobRun.job_type.notin_(job_type_blacklist))
     return q.order_by(JobRun.queued_at.asc()).first()
 
 

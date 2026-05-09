@@ -425,6 +425,7 @@ The core entity. Key columns:
 | `purpose_keywords` | Text | Per-company top keywords from purpose text |
 | `business_model` | String | b2b / b2c / b2g / mixed |
 | `zefix_raw` | Text/JSON | Raw Zefix API response |
+| `sogc_pub` | Text/JSON | Raw `sogcPub` array from Zefix detail (source for `sogc_publications`) |
 
 **Dual-write note (Google scoring fields):** `website_url`, `web_score`, `google_search_results_raw`, `website_checked_at`, and `social_media_only` exist on both `Company` (global Serper master) and `OrgCompanyState` (org-specific re-score). Always read from `OrgCompanyState` when `org_id` is available; fall back to `Company` only when no org context exists. See model file comments for details.
 
@@ -489,6 +490,36 @@ Migrations: `0052_add_user_view_alert_fields`, `0072_add_org_id_to_user_views`
 | `AuditLog` | audit_log | Field-level change tracking on company records (old/new values) |
 | `ActivityLog` | activity_log | User action log — who did what, when (see §Activity Log) |
 | `Organization` | organizations | Team seats |
+| `SogcPublication` | sogc_publications | One row per SOGC publication entry from `companies.sogc_pub` |
+| `SogcChange` | sogc_changes | One row per detected change type within a publication |
+
+#### `SogcPublication` — `app/models/sogc_publication.py`
+
+Exploded from the `companies.sogc_pub` JSON blob (sourced from Zefix `sogcPub` field on the company detail endpoint).
+
+| Column | Notes |
+|---|---|
+| `sogc_id` | Zefix SOGC ID — unique, used as upsert key |
+| `company_uid` | FK → companies.uid (SET NULL on delete) |
+| `pub_date` | Publication date "YYYY-MM-DD" |
+| `sub_rubric` | HR01 / HR02 / HR03 (new / mutation / deletion) |
+| `pub_number` | Publication number if present |
+| `text_de / text_fr / text_it / text_en` | Cleaned publication text per language (language inferred from `registryOfCommerceCanton`) |
+| `detected_language` | Primary language used for parsing |
+| `encoding_fixed` | True if latin-1→utf-8 mojibake fix was applied |
+| `raw_json` | Raw entry dict from sogcPub array |
+| `preprocessed_at` | When `sogc_changes` were last written for this publication |
+
+#### `SogcChange` — `app/models/sogc_change.py`
+
+| Column | Notes |
+|---|---|
+| `sogc_publication_id` | FK → sogc_publications.id (CASCADE delete) |
+| `change_type` | One of: `address`, `person_added`, `person_removed`, `capital`, `name`, `merger`, `acquisition`, `purpose`, `status` |
+| `keywords_matched` | JSON list of keywords that matched |
+| `raw_excerpt` | First ~200 chars around the matched keyword |
+
+Migration: `0073_add_sogc_publications_and_changes`
 
 ### CRUD Layer (`app/crud/`)
 
@@ -499,7 +530,7 @@ Thin functions over SQLAlchemy — no business logic. Key modules:
 
 ### Migrations (`alembic/versions/`)
 
-72 migration files (covering Zefix import, multi-tenancy migration, job dispatcher, scoring evolution, Phase 4 schema cleanups, etc.). On startup `alembic upgrade head` runs automatically. To create a new migration:
+73 migration files (covering Zefix import, multi-tenancy migration, job dispatcher, scoring evolution, Phase 4 schema cleanups, SOGC publication tables, etc.). On startup `alembic upgrade head` runs automatically. To create a new migration:
 
 ```bash
 alembic revision --autogenerate -m "describe change"
@@ -710,6 +741,7 @@ The worker checks `cancel_requested` / `pause_requested` **between companies** (
 | `claude_classify` | `limit`, `system_prompt` | Claude Haiku scoring + categorization | ✓ Validated in preflight; uses org-effective API key |
 | `csv_export` | dashboard filter params | Unlimited paginated CSV written to S3 (`helvex-exports/{user_id}/export.csv`); stored 7 days | ✓ Per-user; max 1 active at a time |
 | `saved_view_alerts` | — | Sweep all orgs' alert-enabled saved views; email owner if new companies match since last check | ✓ One active per org; `ONE_PER_ORG` set |
+| `sogc_preprocess` | `mode`, `batch_size`, `uids` | Explode `sogc_pub` blobs into `sogc_publications` + `sogc_changes` rows; see §SOGC Preprocessing | — |
 
 #### Org-scoped job execution
 
@@ -800,6 +832,33 @@ Both buckets share the same `S3_ACCESS_KEY` / `S3_SECRET_KEY` credentials.
 - `is_configured()` guard — if env vars are missing the `/enqueue/csv-export` route returns HTTP 503
 
 **Bucket provisioning:** Hetzner Object Storage buckets are not managed by Terraform (the `hcloud` provider has no bucket resource). Create `helvex-exports` manually in the Hetzner Console under Object Storage → `nbg1`, using the same project and the same S3 credentials as `helvex-backups`.
+
+### SOGC Publication Preprocessing — `app/services/sogc_preprocessor.py`
+
+Explodes the flat `companies.sogc_pub` JSON blob (a list of SOGC publication entries from the Zefix company detail endpoint) into two normalized tables.
+
+**Data source:** Zefix company detail (`/company/uid/{uid}`) returns a `sogcPub` list where each entry has:
+```json
+{
+  "sogcId": 1006604586,
+  "sogcDate": "2026-03-24",
+  "registryOfCommerceCanton": "ZH",
+  "message": "<FT TYPE=\"F\">Acme AG</FT>, in <FT TYPE=\"S\">Zürich</FT>, ...",
+  "mutationTypes": [{"key": "MUTATION"}]
+}
+```
+The `message` field contains the full HR publication narrative (single language; `<FT TYPE="...">` HTML tags are stripped, HTML entities unescaped). Language is inferred from `registryOfCommerceCanton` (GE/JU/NE/VD → fr, TI → it, all others → de).
+
+**Encoding fix:** Some entries have UTF-8 bytes stored as latin-1 (mojibake). The fix tries `text.encode("latin-1").decode("utf-8")` and applies it only when it succeeds and changes the string.
+
+**Change detection:** `_detect_changes(texts)` runs multilingual keyword matching against `CHANGE_PATTERNS` (9 types × 4 languages) and returns one `SogcChange` row per matched type. Matching is case-insensitive substring search across all non-null text columns.
+
+**Key functions:**
+- `preprocess_company_sogc_pub(db, company)` — idempotent upsert for one company; upserts `sogc_publications` by `sogc_id`, deletes + reinserts `sogc_changes`. Called inline after each SHAB import.
+- `run_sogc_preprocess_batch(db, mode, uids, ...)` — batch over companies table with cursor pagination; `mode="missing"` skips already-processed companies, `mode="all"` reprocesses everything.
+- `run_sogc_publications_backfill(db, ...)` — iterates existing `sogc_publications` rows, re-applies encoding fix to stored texts, regenerates `sogc_changes`. Used via `mode="publications"` job param to retroactively fix rows written before the encoding/text-extraction fixes.
+
+**SHAB integration:** After every HR01/HR02 company upsert in `shab_import.py`, `preprocess_company_sogc_pub` is called fire-and-forget (errors logged, not raised), ensuring new publications are indexed immediately.
 
 ### SMTP — `app/services/email.py`
 

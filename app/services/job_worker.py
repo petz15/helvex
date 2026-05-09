@@ -1237,24 +1237,35 @@ def _get_job_type_whitelist() -> set[str] | None:
     return {t.strip() for t in raw.split(",") if t.strip()}
 
 
+def _get_job_type_blacklist() -> set[str] | None:
+    """Read JOB_TYPE_BLACKLIST from env. Returns None (= block no types) when unset."""
+    raw = os.environ.get("JOB_TYPE_BLACKLIST", "").strip()
+    if not raw:
+        return None
+    return {t.strip() for t in raw.split(",") if t.strip()}
+
+
 _JOB_POLL_INTERVAL = int(os.environ.get("JOB_POLL_INTERVAL", "5"))
 
 
 def _job_worker_loop(app) -> None:
     whitelist = _get_job_type_whitelist()
+    blacklist = _get_job_type_blacklist()
     # In split-worker mode (JOB_TYPE_WHITELIST set) the web pod can't kick this
     # thread when new jobs arrive, so we poll continuously. In single-pod mode
     # we break when idle and let enqueue_job() kick us via _ensure_job_worker().
     continuous = bool(whitelist)
     if whitelist:
         logger.info("Job worker started (continuous poll) — handling job types: %s", ", ".join(sorted(whitelist)))
+    elif blacklist:
+        logger.info("Job worker started — handling all job types except: %s", ", ".join(sorted(blacklist)))
     else:
         logger.info("Job worker started — handling all job types")
     app.state.job_worker_running = True
     try:
         while True:
             with SessionLocal() as db:
-                next_job = crud.get_next_queued_job(db, job_type_whitelist=whitelist)
+                next_job = crud.get_next_queued_job(db, job_type_whitelist=whitelist, job_type_blacklist=blacklist)
                 if next_job is None:
                     if not continuous:
                         break
@@ -1265,7 +1276,7 @@ def _job_worker_loop(app) -> None:
     finally:
         app.state.job_worker_running = False
         with SessionLocal() as db:
-            if crud.get_next_queued_job(db, job_type_whitelist=whitelist) is not None:
+            if crud.get_next_queued_job(db, job_type_whitelist=whitelist, job_type_blacklist=blacklist) is not None:
                 _ensure_job_worker(app)
 
 
