@@ -1,3 +1,4 @@
+import json
 from datetime import date
 
 
@@ -10,6 +11,10 @@ def test_fetch_hr_publications_uses_total_pages_metadata(monkeypatch):
 
         def raise_for_status(self):
             return None
+
+        @property
+        def content(self):
+            return json.dumps(self._payload).encode("utf-8")
 
         def json(self):
             return self._payload
@@ -83,6 +88,10 @@ def test_fetch_hr_publications_supports_content_page_request_wrapper(monkeypatch
         def raise_for_status(self):
             return None
 
+        @property
+        def content(self):
+            return json.dumps(self._payload).encode("utf-8")
+
         def json(self):
             return self._payload
 
@@ -120,7 +129,7 @@ def test_fetch_hr_publications_supports_content_page_request_wrapper(monkeypatch
 
 
 def test_import_company_from_zefix_uid_accepts_nested_list_uid(monkeypatch):
-    from app.services import collection
+    from app.services import zefix_import
 
     captured = {"uid": None}
 
@@ -128,22 +137,22 @@ def test_import_company_from_zefix_uid_accepts_nested_list_uid(monkeypatch):
         captured["uid"] = uid
         return {"uid": uid, "name": "Test AG"}
 
-    monkeypatch.setattr(collection, "zefix_get_company", fake_get)
-    monkeypatch.setattr(collection, "_load_scoring_config", lambda _db: {})
+    monkeypatch.setattr(zefix_import, "zefix_get_company", fake_get)
+    monkeypatch.setattr(zefix_import, "_load_scoring_config", lambda _db: {})
     monkeypatch.setattr(
-        collection,
+        zefix_import,
         "_extract_company_fields",
-        lambda _raw, _uid, *, scoring_config: collection.CompanyCreate(uid="CHE-123.456.789", name="Test AG"),
+        lambda _raw, _uid, *, scoring_config: zefix_import.CompanyCreate(uid="CHE-123.456.789", name="Test AG"),
     )
-    monkeypatch.setattr(collection.crud, "get_company_by_uid", lambda _db, _uid: None)
+    monkeypatch.setattr(zefix_import.crud, "get_company_by_uid", lambda _db, _uid: None)
 
     class DummyCompany:
         def __init__(self, uid: str):
             self.uid = uid
 
-    monkeypatch.setattr(collection.crud, "create_company", lambda _db, company_data: DummyCompany(company_data.uid))
+    monkeypatch.setattr(zefix_import.crud, "create_company", lambda _db, company_data: DummyCompany(company_data.uid))
 
-    company, created = collection.import_company_from_zefix_uid(
+    company, created = zefix_import.import_company_from_zefix_uid(
         db=object(),
         uid=[["CHE-123.456.789"]],
     )
@@ -159,6 +168,10 @@ def test_zefix_get_company_accepts_nested_list_uid(monkeypatch):
     class _Resp:
         def raise_for_status(self):
             return None
+
+        @property
+        def content(self):
+            return json.dumps({"uid": "CHE-123.456.789", "name": "Test AG"}).encode("utf-8")
 
         def json(self):
             return {"uid": "CHE-123.456.789", "name": "Test AG"}

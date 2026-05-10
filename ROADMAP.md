@@ -47,10 +47,8 @@
 ### General fixes:
 - billing/payment/pricing
     - existing subscription then upgrading is not working
-- SHAB: rerun 17.04.2026 because there seems to be an issue with the data example: https://helvex.dicy.ch/app/companies/783586 same on zefix fix utf encoding
 - NOGA auf unternehmensseite falsch dargestellt und meistens nicht korrekt!
 - NOGA auf filter, sollte auch hierarchisch darstellen und mit richtiger bezeichnung
-- Remove business model -> not useful and not correctly implemented (category detail page)
 - admin dashboard simple redirects non authorized users, maybe not the safest
 - NOGA: Zweigniederlassung ist falsch zbs: https://helvex.dicy.ch/app/companies/238698
 - NOGA nach embedding immernoch falsch aufgrund boiler sentences z.b. peter batt
@@ -69,9 +67,12 @@
     - Languages
     - old Auditors showing up 
     - enconding issue
-    - and more, best solved over preprocessing -> espcially for future management view
+    - and more, best solved over preprocessing -> espcially for future management view. Preprocessing is not working quite correctly yet:
+        - Export from sogc_publications to sogc_changes are not the relevant parts. the raw_excerpt should hold all relevant information for that sogc change (which is extracted from the sogc_publications)
+        - the sogc_publications still have issues, language (id: 1976422 oder 1976562) not always detected correctly and encoding not fixed everywhere (id: 1977130 oder 1977132)
 - Broad stop words for google search anything with vergleich in the domain name but not in the zweck or company name
 - API key management not working as intended. multiple bugs and no clear way to manage models. code needs to be checked how it deals with multiple providers and model when sending requests
+-
 
 
 ### UI fixes:

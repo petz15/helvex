@@ -36,15 +36,52 @@ logger = logging.getLogger(__name__)
 def _try_fix_encoding(text: str) -> tuple[str, bool]:
     """Return (fixed_text, was_fixed).
 
-    Tries to interpret the string as latin-1 bytes that were actually UTF-8.
-    Applies the fix only when encode("latin-1") + decode("utf-8") succeeds
-    AND produces a different string (i.e. there was actual mojibake present).
+    Interprets latin-1-range characters as UTF-8 bytes that were misread.
+    Fast path: encode the whole string as latin-1, decode as UTF-8.
+    This fails if the text has any character > U+00FF (e.g. em-dash U+2013,
+    smart quotes) mixed with mojibake.  In that case the fallback processes
+    latin-1-range runs independently, leaving higher chars untouched.
     """
+    if text.isascii():
+        return text, False
+
+    # Fast path — works when text is purely in the latin-1 range (all bytes ≤ 0xFF).
     try:
         fixed = text.encode("latin-1").decode("utf-8")
         return (fixed, True) if fixed != text else (text, False)
     except (UnicodeDecodeError, UnicodeEncodeError):
-        return text, False
+        pass
+
+    # Partial-fix path — text has non-latin-1 chars (> U+00FF) mixed with mojibake.
+    # Process contiguous runs of latin-1-range characters as byte sequences;
+    # pass characters above U+00FF through unchanged.
+    result: list[str] = []
+    run = bytearray()
+    changed = False
+
+    def _flush(run: bytearray) -> str:
+        nonlocal changed
+        if not run:
+            return ""
+        try:
+            decoded = bytes(run).decode("utf-8")
+            if decoded != bytes(run).decode("latin-1"):
+                changed = True
+            return decoded
+        except UnicodeDecodeError:
+            return bytes(run).decode("latin-1")
+
+    for ch in text:
+        if ord(ch) <= 0xFF:
+            run.append(ord(ch))
+        else:
+            result.append(_flush(run))
+            run = bytearray()
+            result.append(ch)
+    result.append(_flush(run))
+
+    fixed = "".join(result)
+    return (fixed, True) if changed else (text, False)
 
 
 # ── HTML tag stripping ────────────────────────────────────────────────────────
@@ -57,81 +94,85 @@ def _strip_ft_tags(text: str) -> str:
     return html.unescape(cleaned).strip()
 
 
-# ── Canton → language ─────────────────────────────────────────────────────────
+# ── Language detection ────────────────────────────────────────────────────────
 
-_FR_CANTONS = frozenset({"GE", "JU", "NE", "VD"})
-_IT_CANTONS = frozenset({"TI"})
+def _lang_for_entry(msg: str, canton: str | None) -> str:
+    """Detect publication language using lingua, with canton as fallback.
 
-
-def _canton_to_lang(canton: str | None) -> str:
-    if not canton:
-        return "de"
-    c = canton.upper()
-    if c in _FR_CANTONS:
-        return "fr"
-    if c in _IT_CANTONS:
-        return "it"
+    lingua handles bilingual cantons (BE, FR, GR, VS) correctly by reading
+    the actual text rather than relying on a fixed canton→language mapping.
+    """
+    try:
+        from app.services.language_detection import detect_purpose_language
+        detected = detect_purpose_language(msg)
+        if detected in ("de", "fr", "it", "en"):
+            return detected  # type: ignore[return-value]
+    except Exception:
+        pass
+    # Canton fallback (only truly monolingual cantons are mapped).
+    if canton:
+        c = canton.upper()
+        if c in ("GE", "JU", "NE", "VD"):
+            return "fr"
+        if c == "TI":
+            return "it"
     return "de"
 
 
-# ── Multilingual change-type keyword patterns ─────────────────────────────────
+# ── Section-based change detection ───────────────────────────────────────────
+#
+# SOGC HR publications use labelled sections separated by ": ".  Each section
+# header unambiguously identifies the change type; this avoids false-positive
+# keyword matches such as "neu" appearing in "Zweck neu:" (purpose, not person).
+#
+# split=True sections (person lists) are split on ";" so each individual
+# becomes its own sogc_changes row.
 
-CHANGE_PATTERNS: dict[str, dict[str, list[str]]] = {
-    "address": {
-        "de": ["sitz verlegt", "sitzverlegung", "adresse geändert", "domizil"],
-        "fr": ["siège social transféré", "changement d'adresse", "domicile"],
-        "it": ["sede trasferita", "cambio di indirizzo", "domicilio"],
-        "en": ["registered office moved", "address changed"],
-    },
-    "person_added": {
-        "de": ["neu:", "neu bestellt", "eingetreten", "tritt ein", "ernannt"],
-        "fr": ["nouveau:", "nouvellement nommé", "nommé", "nouveau membre"],
-        "it": ["nuovo:", "nominato", "nuovo membro"],
-        "en": ["newly appointed", "new member", "appointed"],
-    },
-    "person_removed": {
-        "de": ["tritt zurück", "ausgetreten", "ausgeschieden", "ist zurückgetreten"],
-        "fr": ["démissionne", "démission", "sortant"],
-        "it": ["si dimette", "dimissioni", "uscente"],
-        "en": ["resigns", "resignation", "leaves"],
-    },
-    "capital": {
-        "de": ["aktienkapital", "stammkapital", "kapitalerhöhung", "kapitalherabsetzung"],
-        "fr": ["capital-actions", "capital social", "augmentation du capital"],
-        "it": ["capitale azionario", "capitale sociale", "aumento di capitale"],
-        "en": ["share capital", "capital increase", "capital reduction"],
-    },
-    "name": {
-        "de": ["firma neu:", "umfirmiert", "firmenänderung", "neue firma:"],
-        "fr": ["nouvelle raison sociale:", "changement de raison sociale"],
-        "it": ["nuova ditta:", "cambio di ragione sociale"],
-        "en": ["new company name:", "name change"],
-    },
-    "merger": {
-        "de": ["fusion", "fusionsvertrag", "verschmelzung"],
-        "fr": ["fusion", "fusionné avec"],
-        "it": ["fusione", "fusionato con"],
-        "en": ["merger", "merged with"],
-    },
-    "acquisition": {
-        "de": ["übernahme", "übertragung", "erworben von", "hat übernommen"],
-        "fr": ["reprise", "cession", "acquisition"],
-        "it": ["acquisizione", "cessione"],
-        "en": ["acquisition", "acquired by", "takeover"],
-    },
-    "purpose": {
-        "de": ["zweck:", "zweck neu:", "zweckänderung", "zweck geändert"],
-        "fr": ["but social:", "but:", "modification du but"],
-        "it": ["scopo:", "scopo sociale modificato"],
-        "en": ["purpose:", "business purpose changed"],
-    },
-    "status": {
-        "de": ["auflösung", "in liquidation", "liquidation", "gelöscht"],
-        "fr": ["dissolution", "en liquidation", "liquidation"],
-        "it": ["scioglimento", "in liquidazione", "liquidazione"],
-        "en": ["dissolution", "in liquidation", "liquidation"],
-    },
-}
+_SECTION_DEFS: list[tuple[re.Pattern, str, bool]] = [
+    # ── German ───────────────────────────────────────────────────────────────
+    (re.compile(r"ausgeschiedene\s+personen[^:]*:", re.I),  "person_removed", True),
+    (re.compile(r"erloschene\s+unterschriften[^:]*:",  re.I), "person_removed", True),
+    (re.compile(r"eingetretene\s+personen[^:]*:",      re.I), "person_added",   True),
+    (re.compile(r"neue\s+unterschriften[^:]*:",        re.I), "person_added",   True),
+    (re.compile(r"neu\s+bestellt[^:]*:",               re.I), "person_added",   True),
+    (re.compile(r"aktienkapital[^:.]{0,30}:",          re.I), "capital",        False),
+    (re.compile(r"stammkapital[^:.]{0,30}:",           re.I), "capital",        False),
+    (re.compile(r"stammanteile[^:.]{0,30}:",           re.I), "capital",        True),
+    (re.compile(r"kapitalerhöhung[^:.]{0,30}:",        re.I), "capital",        False),
+    (re.compile(r"sitz\s+verlegt[^:.]*:|sitz[^:.]{0,20}:", re.I), "address",   False),
+    (re.compile(r"domizil[^:.]{0,20}:",                re.I), "address",        False),
+    (re.compile(r"zweck[^:.]{0,15}:",                  re.I), "purpose",        False),
+    (re.compile(r"firma\s+neu[^:.]*:|neue\s+firma[^:.]*:|umfirmiert", re.I), "name", False),
+    (re.compile(r"in\s+liquidation|auflösung[^:.]*:|gelöscht", re.I), "status", False),
+    (re.compile(r"fusion[^:.]*:|fusionsvertrag[^:.]*:|verschmelzung[^:.]*:", re.I), "merger", False),
+    (re.compile(r"übernahme[^:.]*:|übertragung[^:.]*:", re.I), "acquisition",   False),
+    (re.compile(r"statutenänderung[^:.]*:",            re.I), "purpose",        False),
+    # ── French ───────────────────────────────────────────────────────────────
+    (re.compile(r"personnes?\s+démissionnaires?[^:]*:", re.I), "person_removed", True),
+    (re.compile(r"signatures?\s+éteintes?[^:]*:",      re.I), "person_removed", True),
+    (re.compile(r"nouveaux?\s+membres?[^:]*:",         re.I), "person_added",   True),
+    (re.compile(r"nouvelles?\s+signatures?[^:]*:",     re.I), "person_added",   True),
+    (re.compile(r"capital\-?actions[^:.]{0,20}:|capital\s+social[^:.]{0,20}:", re.I), "capital", False),
+    (re.compile(r"augmentation\s+du\s+capital[^:.]*:", re.I), "capital",        False),
+    (re.compile(r"siège\s+social[^:.]*:",              re.I), "address",        False),
+    (re.compile(r"domicile[^:.]{0,20}:",               re.I), "address",        False),
+    (re.compile(r"but\s+social[^:.]*:|but\s*:",        re.I), "purpose",        False),
+    (re.compile(r"modification\s+des?\s+statuts[^:.]*:", re.I), "purpose",      False),
+    (re.compile(r"nouvelle\s+raison\s+sociale[^:.]*:", re.I), "name",           False),
+    (re.compile(r"en\s+liquidation|dissolution[^:.]*:", re.I), "status",        False),
+    (re.compile(r"fusion[^:.]*:",                      re.I), "merger",         False),
+    # ── Italian ──────────────────────────────────────────────────────────────
+    (re.compile(r"persone\s+uscenti[^:]*:|firme\s+estinte[^:]*:", re.I), "person_removed", True),
+    (re.compile(r"nuovi\s+membri[^:]*:|nuove\s+firme[^:]*:",      re.I), "person_added",   True),
+    (re.compile(r"capitale\s+azionario[^:.]{0,20}:|capitale\s+sociale[^:.]{0,20}:", re.I), "capital", False),
+    (re.compile(r"quote\s+sociali[^:.]*:",             re.I), "capital",        True),
+    (re.compile(r"sede\s+sociale[^:.]*:|sede[^:.]{0,10}:", re.I), "address",   False),
+    (re.compile(r"scopo[^:.]{0,10}:",                  re.I), "purpose",        False),
+    (re.compile(r"modifica\s+(?:dello\s+)?statuto[^:.]*:", re.I), "purpose",   False),
+    (re.compile(r"nuova\s+ditta[^:.]*:",               re.I), "name",           False),
+    (re.compile(r"in\s+liquidazione|scioglimento[^:.]*:", re.I), "status",      False),
+    (re.compile(r"fusione[^:.]*:",                     re.I), "merger",         False),
+]
 
 _LANG_ORDER = ("de", "fr", "it", "en")
 
@@ -193,7 +234,7 @@ def _extract_text_fields(entry: dict[str, Any]) -> dict[str, str | None]:
     if msg and isinstance(msg, str):
         msg = _strip_ft_tags(msg)
         if msg:
-            lang = _canton_to_lang(entry.get("registryOfCommerceCanton"))
+            lang = _lang_for_entry(msg, entry.get("registryOfCommerceCanton"))
             texts[lang] = msg
             return texts
 
@@ -231,43 +272,74 @@ def _extract_text_fields(entry: dict[str, Any]) -> dict[str, str | None]:
 
 # ── Change detection ──────────────────────────────────────────────────────────
 
-def _detect_changes(texts: dict[str, str | None]) -> list[dict[str, Any]]:
-    """Detect change types via keyword matching across all available text languages.
+def _parse_sections(text: str) -> list[dict[str, Any]]:
+    """Extract change entries from a single SOGC publication text.
 
-    Returns list of {change_type, keywords_matched (JSON), raw_excerpt}.
+    Finds all section headers defined in _SECTION_DEFS, determines the content
+    of each section (text between this header and the next), and builds one
+    sogc_changes dict per entry.
+
+    Person sections (split=True) are split on ";" so each individual person
+    becomes its own row.  This means two people leaving in one publication
+    produce two person_removed rows, each with just that person's excerpt.
     """
-    detected: list[dict[str, Any]] = []
-    seen_types: set[str] = set()
+    # Collect all header match positions
+    hits: list[tuple[int, int, str, bool]] = []  # (start, end, change_type, split)
+    for pattern, change_type, split in _SECTION_DEFS:
+        for m in pattern.finditer(text):
+            hits.append((m.start(), m.end(), change_type, split))
 
-    for change_type, lang_keywords in CHANGE_PATTERNS.items():
-        matched_keywords: list[str] = []
-        excerpt: str | None = None
+    if not hits:
+        return []
 
-        for lang in _LANG_ORDER:
-            text = texts.get(lang)
-            if not text:
-                continue
-            text_lower = text.lower()
-            keywords = lang_keywords.get(lang, [])
-            for kw in keywords:
-                if kw in text_lower:
-                    matched_keywords.append(kw)
-                    if excerpt is None:
-                        # Find the sentence or chunk around the keyword
-                        idx = text_lower.find(kw)
-                        start = max(0, idx - 50)
-                        end = min(len(text), idx + 200)
-                        excerpt = text[start:end].strip()
+    hits.sort(key=lambda h: h[0])
 
-        if matched_keywords and change_type not in seen_types:
-            seen_types.add(change_type)
-            detected.append({
-                "change_type": change_type,
-                "keywords_matched": json.dumps(list(dict.fromkeys(matched_keywords))),
-                "raw_excerpt": excerpt,
-            })
+    results: list[dict[str, Any]] = []
+    for i, (start, end, change_type, split) in enumerate(hits):
+        header = text[start:end].rstrip(": \t")
+        # Content runs to the next section header or end of text
+        next_start = hits[i + 1][0] if i + 1 < len(hits) else len(text)
+        content = text[end:next_start].strip().rstrip(". \t\n")
 
-    return detected
+        if not content:
+            continue
+
+        if split:
+            # Split on ";" to get one row per individual (person, signatory)
+            entries = [e.strip().rstrip(".") for e in content.split(";") if e.strip()]
+        else:
+            entries = [content]
+
+        for entry_text in entries:
+            if entry_text:
+                results.append({
+                    "change_type": change_type,
+                    "keywords_matched": json.dumps([header.lower()]),
+                    "raw_excerpt": entry_text,
+                })
+
+    return results
+
+
+def _detect_changes(texts: dict[str, str | None]) -> list[dict[str, Any]]:
+    """Detect changes from all available language texts.
+
+    Runs _parse_sections on each non-null text.  Deduplicates by
+    (change_type, raw_excerpt) in case the same text is stored in multiple
+    language columns.
+    """
+    seen: set[tuple[str, str]] = set()
+    results: list[dict[str, Any]] = []
+    for lang in _LANG_ORDER:
+        text = texts.get(lang)
+        if not text:
+            continue
+        for ch in _parse_sections(text):
+            key = (ch["change_type"], ch["raw_excerpt"])
+            if key not in seen:
+                seen.add(key)
+                results.append(ch)
+    return results
 
 
 # ── Per-company preprocessing ─────────────────────────────────────────────────
@@ -442,12 +514,18 @@ def run_sogc_publications_backfill(
             if abort_cb:
                 abort_cb()
             try:
-                texts: dict[str, str | None] = {
-                    "de": pub.text_de,
-                    "fr": pub.text_fr,
-                    "it": pub.text_it,
-                    "en": pub.text_en,
-                }
+                # Prefer re-extracting from raw_json so language placement and
+                # encoding are fully redone with current logic.  Fall back to
+                # the stored text columns when raw_json is absent.
+                if pub.raw_json:
+                    try:
+                        entry = json.loads(pub.raw_json)
+                        texts = _extract_text_fields(entry)
+                    except (json.JSONDecodeError, TypeError):
+                        entry = {}
+                        texts = {"de": pub.text_de, "fr": pub.text_fr, "it": pub.text_it, "en": pub.text_en}
+                else:
+                    texts = {"de": pub.text_de, "fr": pub.text_fr, "it": pub.text_it, "en": pub.text_en}
 
                 encoding_fixed = False
                 for lang in _LANG_ORDER:
@@ -456,12 +534,17 @@ def run_sogc_publications_backfill(
                         texts[lang] = fixed
                         encoding_fixed = encoding_fixed or did_fix
 
+                detected_language = next(
+                    (lang for lang in _LANG_ORDER if texts.get(lang)), None
+                ) or pub.detected_language
+
+                pub.text_de = texts["de"]
+                pub.text_fr = texts["fr"]
+                pub.text_it = texts["it"]
+                pub.text_en = texts["en"]
+                pub.detected_language = detected_language
+                pub.encoding_fixed = encoding_fixed
                 if encoding_fixed:
-                    pub.text_de = texts["de"]
-                    pub.text_fr = texts["fr"]
-                    pub.text_it = texts["it"]
-                    pub.text_en = texts["en"]
-                    pub.encoding_fixed = True
                     stats["encoding_fixed"] += 1
 
                 db.query(SogcChange).filter_by(sogc_publication_id=pub.id).delete()

@@ -392,12 +392,15 @@ def classify_company_noga(db: Session, company: Company) -> NogaClassification |
 # ---------------------------------------------------------------------------
 
 _BRANCH_KEYWORDS = ("zweigniederlassung", "succursale", "filiale di")
+# Zefix legal_form_uid codes for Swiss and foreign branch offices
+_BRANCH_LEGAL_FORM_UIDS = frozenset(("0108", "0111"))
 
 
 def is_branch_office(company: Company) -> bool:
+    if company.legal_form_uid in _BRANCH_LEGAL_FORM_UIDS:
+        return True
     name_lower = (company.name or "").lower()
-    purpose_lower = (company.purpose or "").lower()
-    return any(k in name_lower or k in purpose_lower for k in _BRANCH_KEYWORDS)
+    return any(k in name_lower for k in _BRANCH_KEYWORDS)
 
 
 def _parent_uid_from_head_offices(company: Company) -> str | None:
