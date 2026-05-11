@@ -108,7 +108,7 @@ function PersonEntityCard({ entity, locale }: { entity: SogcPersonEntity; locale
             <div className="flex items-center gap-2 flex-wrap">
               <span className="text-sm font-semibold text-slate-800">{name}</span>
               {entity.is_verified && (
-                <CheckCircle size={13} className="text-emerald-500 shrink-0" title="Verified identity" />
+                <CheckCircle size={13} className="text-emerald-500 shrink-0" aria-label="Verified identity" />
               )}
               <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${CONFIDENCE_STYLE[entity.confidence_level] ?? CONFIDENCE_STYLE.medium}`}>
                 {entity.confidence_level}
