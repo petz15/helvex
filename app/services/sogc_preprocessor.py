@@ -135,11 +135,14 @@ _SECTION_DEFS: list[tuple[re.Pattern, str, bool]] = [
     (re.compile(r"eingetretene\s+personen[^:]*:",      re.I), "person_added",   True),
     (re.compile(r"neue\s+unterschriften[^:]*:",        re.I), "person_added",   True),
     (re.compile(r"neu\s+bestellt[^:]*:",               re.I), "person_added",   True),
+    (re.compile(r"eingetragene\s+personen[^:]*:",      re.I), "person_changed", True),
+    (re.compile(r"mutierte\s+personen[^:]*:",          re.I), "person_changed", True),
     (re.compile(r"aktienkapital[^:.]{0,30}:",          re.I), "capital",        False),
     (re.compile(r"stammkapital[^:.]{0,30}:",           re.I), "capital",        False),
     (re.compile(r"stammanteile[^:.]{0,30}:",           re.I), "capital",        True),
     (re.compile(r"kapitalerhöhung[^:.]{0,30}:",        re.I), "capital",        False),
-    (re.compile(r"sitz\s+verlegt[^:.]*:|sitz[^:.]{0,20}:", re.I), "address",   False),
+    (re.compile(r"sitz\s+verlegt[^:.]*:|neuer\s+sitz[^:.]*:|sitz[^:.]{0,20}:", re.I), "address", False),
+    (re.compile(r"neue\s+adresse[^:.]*:",              re.I), "address",        False),
     (re.compile(r"domizil[^:.]{0,20}:",                re.I), "address",        False),
     (re.compile(r"zweck[^:.]{0,15}:",                  re.I), "purpose",        False),
     (re.compile(r"firma\s+neu[^:.]*:|neue\s+firma[^:.]*:|umfirmiert", re.I), "name", False),
@@ -147,34 +150,138 @@ _SECTION_DEFS: list[tuple[re.Pattern, str, bool]] = [
     (re.compile(r"fusion[^:.]*:|fusionsvertrag[^:.]*:|verschmelzung[^:.]*:", re.I), "merger", False),
     (re.compile(r"übernahme[^:.]*:|übertragung[^:.]*:", re.I), "acquisition",   False),
     (re.compile(r"statutenänderung[^:.]*:",            re.I), "purpose",        False),
+    (re.compile(r"vinkulierung[^:.]*:",               re.I), "restriction",    False),
+    (re.compile(r"mitteilungen[^:.]{0,30}:",          re.I), "governance",     False),
     # ── French ───────────────────────────────────────────────────────────────
     (re.compile(r"personnes?\s+démissionnaires?[^:]*:", re.I), "person_removed", True),
     (re.compile(r"signatures?\s+éteintes?[^:]*:",      re.I), "person_removed", True),
     (re.compile(r"nouveaux?\s+membres?[^:]*:",         re.I), "person_added",   True),
     (re.compile(r"nouvelles?\s+signatures?[^:]*:",     re.I), "person_added",   True),
+    (re.compile(r"personnes?\s+nouvelles?\s+ou[^:]*:", re.I), "person_changed", True),
+    (re.compile(r"inscriptions?\s+nouvelles?\s+(?:et\s+)?mutations?[^:]*:", re.I), "person_changed", True),
+    (re.compile(r"inscription\s+ou\s+modification\s+de\s+personne[^:.]*:", re.I), "person_changed", True),
+    (re.compile(r"radiation\s+de\s+personne[^:.]*:",   re.I), "person_removed", True),
+    (re.compile(r"nouvelle\s+inscription\s+de\s+personne[^:.]*:", re.I), "person_added", True),
+    (re.compile(r"nouveau\s+capital[-\s]?actions?[^:.]*:",  re.I), "capital",   False),
+    (re.compile(r"nouvelles?\s+actions?[^:.]*:",            re.I), "capital",   False),
     (re.compile(r"capital\-?actions[^:.]{0,20}:|capital\s+social[^:.]{0,20}:", re.I), "capital", False),
-    (re.compile(r"augmentation\s+du\s+capital[^:.]*:", re.I), "capital",        False),
-    (re.compile(r"siège\s+social[^:.]*:",              re.I), "address",        False),
+    (re.compile(r"augmentation\s+(?:\w+\s+)?du\s+capital[^:.]*:", re.I), "capital", False),
+    (re.compile(r"réduction\s+(?:\w+\s+)?du\s+capital[^:.]*:",    re.I), "capital", False),
+    (re.compile(r"siège\s+social[^:.]*:|nouveau\s+siège[^:.]*:", re.I), "address", False),
+    (re.compile(r"nouvelle\s+adresse[^:.]*:",          re.I), "address",        False),
     (re.compile(r"domicile[^:.]{0,20}:",               re.I), "address",        False),
     (re.compile(r"but\s+social[^:.]*:|but\s*:",        re.I), "purpose",        False),
     (re.compile(r"modification\s+des?\s+statuts[^:.]*:", re.I), "purpose",      False),
+    (re.compile(r"clause\s+d.agr[eé]ment[^:.]*:|restriction\s+de\s+transfert[^:.]*:", re.I), "restriction", False),
+    (re.compile(r"communications?\s+aux\s+actionnaires?[^:.]*:|avis\s+aux\s+actionnaires?[^:.]*:", re.I), "governance", False),
     (re.compile(r"nouvelle\s+raison\s+sociale[^:.]*:", re.I), "name",           False),
     (re.compile(r"en\s+liquidation|dissolution[^:.]*:", re.I), "status",        False),
     (re.compile(r"fusion[^:.]*:",                      re.I), "merger",         False),
     # ── Italian ──────────────────────────────────────────────────────────────
     (re.compile(r"persone\s+uscenti[^:]*:|firme\s+estinte[^:]*:", re.I), "person_removed", True),
     (re.compile(r"nuovi\s+membri[^:]*:|nuove\s+firme[^:]*:",      re.I), "person_added",   True),
+    (re.compile(r"persone\s+nuove\s+o[^:]*:",                     re.I), "person_changed", True),
+    (re.compile(r"iscrizioni\s+mutate[^:]*:",                     re.I), "person_changed", True),
     (re.compile(r"capitale\s+azionario[^:.]{0,20}:|capitale\s+sociale[^:.]{0,20}:", re.I), "capital", False),
     (re.compile(r"quote\s+sociali[^:.]*:",             re.I), "capital",        True),
-    (re.compile(r"sede\s+sociale[^:.]*:|sede[^:.]{0,10}:", re.I), "address",   False),
+    (re.compile(r"sede\s+sociale[^:.]*:|nuova\s+sede[^:.]*:|sede[^:.]{0,10}:", re.I), "address", False),
+    (re.compile(r"nuovo\s+indirizzo[^:.]*:",           re.I), "address",        False),
     (re.compile(r"scopo[^:.]{0,10}:",                  re.I), "purpose",        False),
     (re.compile(r"modifica\s+(?:dello\s+)?statuto[^:.]*:", re.I), "purpose",   False),
+    (re.compile(r"vincol[oa]\s+(?:di|alla)\s+(?:trasferimento|trasmissibilità)[^:.]*:|clausola\s+di\s+gradimento[^:.]*:|restrizione\s+(?:alla|di)\s+trasfer[^:.]*:", re.I), "restriction", False),
     (re.compile(r"nuova\s+ditta[^:.]*:",               re.I), "name",           False),
     (re.compile(r"in\s+liquidazione|scioglimento[^:.]*:", re.I), "status",      False),
     (re.compile(r"fusione[^:.]*:",                     re.I), "merger",         False),
 ]
 
 _LANG_ORDER = ("de", "fr", "it", "en")
+
+# Detects correction publications (Berichtigung / Rectification / Rettifica).
+# Checked against the original text BEFORE header stripping.
+_CORRECTION_RE = re.compile(
+    r"^\s*(?:Berichtigung|Rectification|Rettifica|Correction)\b",
+    re.I,
+)
+
+# Strips the standard SOGC header line (company name, UID, form, SHAB ref) so
+# that phrases in company names ("AG in Liquidation", "GmbH", etc.) never
+# trigger false-positive section matches.
+# Matches up to and including the closing "Publ. XXXXXXXX). " pattern.
+_SOGC_HEADER_RE = re.compile(
+    r"^.+?\((?:SHAB|No\.?\s*FOSC|FF\s*\d)[^)]+\)\.\s*",
+    re.DOTALL | re.I,
+)
+
+# Strips "[nicht: ...]" / "[non: ...]" / "[no: ...]" brackets from correction
+# publications — these contain the NEGATED (wrong) text and must not trigger
+# false-positive keyword matches.
+_NEGATION_BRACKET_RE = re.compile(
+    r"\[\s*(?:nicht|non|no)\s*:[^\]]*\]",
+    re.I | re.DOTALL,
+)
+
+# Matches auditor/statutory-auditor keywords in person row excerpts.
+# A person_removed/person_changed/person_added row that contains one of these
+# terms gets a mirrored auditor_change row so auditor changes are queryable
+# independently of general person changes.
+_AUDITOR_KW_RE = re.compile(
+    r"revisionsstelle"                          # DE
+    r"|organe\s+de\s+r[eé]vision"              # FR
+    r"|organe\s+de\s+contr[oô]le"              # FR alt
+    r"|soci[eé]t[eé]\s+de\s+r[eé]vision"      # FR alt
+    r"|ufficio\s+di\s+revisione"               # IT
+    r"|organo\s+di\s+revisione"                # IT alt
+    r"|societ[aà]\s+di\s+revisione",           # IT alt
+    re.I,
+)
+
+# Sentence-level patterns for free-form insolvency/legal-proceeding sentences
+# that have no section header colon.  Each match extracts the surrounding
+# sentence as raw_excerpt.
+_SENTENCE_PATTERNS: list[tuple[re.Pattern, str]] = [
+    # German — insolvency
+    (re.compile(r"konkursverfahren[^.]*(?:eingestellt|eröffnet|aufgehoben|widerrufen)", re.I), "status"),
+    (re.compile(r"mangels\s+aktiven", re.I), "status"),
+    (re.compile(r"nachlassstundung", re.I), "status"),
+    (re.compile(r"nachlassvertrag", re.I), "status"),
+    (re.compile(r"schuldenruf", re.I), "status"),
+    # German — audit exemption (match the key phrase; _sentence_containing grabs context)
+    (re.compile(r"(?:eingeschränkte|ordentliche)\s+revision\b", re.I), "governance"),
+    (re.compile(r"opting.out\b", re.I), "governance"),
+    # French — capital sentence (no colon, e.g. "Augmentation ordinaire du capital-actions.")
+    (re.compile(r"augmentation\s+(?:\w+\s+)?du\s+capital", re.I), "capital"),
+    (re.compile(r"réduction\s+(?:\w+\s+)?du\s+capital", re.I), "capital"),
+    # French — share transfer restriction embedded in content (not as section header)
+    (re.compile(r"restriction\s+de\s+transmissibilité", re.I), "restriction"),
+    # French — insolvency
+    (re.compile(r"procédure\s+de\s+(?:faillite|liquidation)", re.I), "status"),
+    (re.compile(r"sursis\s+concordataire", re.I), "status"),
+    (re.compile(r"liquidation\s+(?:forcée|officielle)", re.I), "status"),
+    # French — audit exemption
+    (re.compile(r"contrôle\s+restreint\b", re.I), "governance"),
+    (re.compile(r"renonce[^,;]{0,60}révision", re.I), "governance"),
+    # Italian — insolvency
+    (re.compile(r"procedura\s+(?:fallimentare|di\s+liquidazione)", re.I), "status"),
+    (re.compile(r"concordato\s+preventivo", re.I), "status"),
+    # Italian — audit exemption
+    (re.compile(r"revisione\s+limitata\b", re.I), "governance"),
+]
+
+
+# Sentence boundary: "." not flanked on both sides by digits (avoids "1'000.00", dates like "01.12.")
+# Also treats "]." and ")." as sentence endings.
+_SENT_BOUNDARY_RE = re.compile(r"(?<!\d)\.(?!\d)\s+|[\])]\.(?=\s+[A-ZÀ-Ö\[])")
+
+
+def _sentence_containing(text: str, match_start: int, match_end: int) -> str:
+    before = text[:match_start]
+    sent_start = 0
+    for m in _SENT_BOUNDARY_RE.finditer(before):
+        sent_start = m.end()
+    after = text[match_end:]
+    m2 = _SENT_BOUNDARY_RE.search(after)
+    sent_end = match_end + m2.start() + 1 if m2 else len(text)
+    return text[sent_start:sent_end].strip()
 
 
 # ── sogcPub JSON parsing ───────────────────────────────────────────────────────
@@ -283,23 +390,39 @@ def _parse_sections(text: str) -> list[dict[str, Any]]:
     becomes its own row.  This means two people leaving in one publication
     produce two person_removed rows, each with just that person's excerpt.
     """
-    # Collect all header match positions
+    # Strip the standard SOGC header line (company name + SHAB ref) so that
+    # phrases like "AG in Liquidation" in the company name don't trigger
+    # false-positive section matches.
+    # Flag correction publications before stripping the header
+    is_correction = bool(_CORRECTION_RE.match(text))
+
+    hdr_m = _SOGC_HEADER_RE.match(text)
+    body = text[hdr_m.end():] if hdr_m else text
+
+    # Remove "[nicht: ...]" / "[non: ...]" brackets so negated (wrong) text
+    # in correction publications doesn't trigger false-positive matches.
+    body = _NEGATION_BRACKET_RE.sub(" ", body)
+
+    # Collect all section-header match positions
     hits: list[tuple[int, int, str, bool]] = []  # (start, end, change_type, split)
     for pattern, change_type, split in _SECTION_DEFS:
-        for m in pattern.finditer(text):
+        for m in pattern.finditer(body):
             hits.append((m.start(), m.end(), change_type, split))
-
-    if not hits:
-        return []
 
     hits.sort(key=lambda h: h[0])
 
     results: list[dict[str, Any]] = []
+    if is_correction:
+        results.append({
+            "change_type": "correction",
+            "keywords_matched": json.dumps(["berichtigung"]),
+            "raw_excerpt": body[:200].strip(),
+        })
     for i, (start, end, change_type, split) in enumerate(hits):
-        header = text[start:end].rstrip(": \t")
-        # Content runs to the next section header or end of text
-        next_start = hits[i + 1][0] if i + 1 < len(hits) else len(text)
-        content = text[end:next_start].strip().rstrip(". \t\n")
+        header = body[start:end].rstrip(": \t")
+        # Content runs to the next section header or end of body
+        next_start = hits[i + 1][0] if i + 1 < len(hits) else len(body)
+        content = body[end:next_start].strip().rstrip(". \t\n")
 
         if not content:
             continue
@@ -317,6 +440,36 @@ def _parse_sections(text: str) -> list[dict[str, Any]]:
                     "keywords_matched": json.dumps([header.lower()]),
                     "raw_excerpt": entry_text,
                 })
+
+    # Sentence-level patterns for free-form text with no section-header colon
+    # (e.g. insolvency proceedings described in plain prose).
+    seen_excerpts: set[tuple[str, str]] = {(r["change_type"], r["raw_excerpt"]) for r in results}
+    for pattern, change_type in _SENTENCE_PATTERNS:
+        for m in pattern.finditer(body):
+            excerpt = _sentence_containing(body, m.start(), m.end())[:300]
+            key = (change_type, excerpt)
+            if key not in seen_excerpts:
+                seen_excerpts.add(key)
+                results.append({
+                    "change_type": change_type,
+                    "keywords_matched": json.dumps([m.group(0).lower()]),
+                    "raw_excerpt": excerpt,
+                })
+
+    # Mirror any person row that mentions an auditor keyword as auditor_change
+    # so auditor changes are independently queryable.
+    for r in list(results):
+        if r["change_type"] in ("person_removed", "person_changed", "person_added"):
+            if _AUDITOR_KW_RE.search(r.get("raw_excerpt") or ""):
+                kw_m = _AUDITOR_KW_RE.search(r["raw_excerpt"])
+                key = ("auditor_change", r["raw_excerpt"])
+                if key not in seen_excerpts:
+                    seen_excerpts.add(key)
+                    results.append({
+                        "change_type": "auditor_change",
+                        "keywords_matched": json.dumps([kw_m.group(0).lower()]),
+                        "raw_excerpt": r["raw_excerpt"],
+                    })
 
     return results
 

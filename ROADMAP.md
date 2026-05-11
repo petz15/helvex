@@ -7,6 +7,7 @@
     - History of removed companies (?)
     - People finder and graph of connections potentially with linkedin?
     - Add Simap information for tenders and awards (only difficulty is how the tenders from public institutions are displayed as I have no entries for them in the Helvex DB...maybe could add?)
+    - Data from eSHAB: has much mor than just changes in companies
 
 
 - **Major features**: 
@@ -69,7 +70,7 @@
     - enconding issue
     - and more, best solved over preprocessing -> espcially for future management view. Preprocessing is not working quite correctly yet:
         - Export from sogc_publications to sogc_changes are not the relevant parts. the raw_excerpt should hold all relevant information for that sogc change (which is extracted from the sogc_publications)
-        - the sogc_publications still have issues, language (id: 1976422 oder 1976562) not always detected correctly and encoding not fixed everywhere (id: 1977130 oder 1977132)
+        - the sogc_publications still have issues, language (id: 1976422 oder 1976562) not always detected correctly and encoding not fixed everywhere (id: 1976814 oder 1977166) -> even though it says fixed!
 - Broad stop words for google search anything with vergleich in the domain name but not in the zweck or company name
 - API key management not working as intended. multiple bugs and no clear way to manage models. code needs to be checked how it deals with multiple providers and model when sending requests
 -
@@ -133,6 +134,7 @@
 - [ ] **Flex Rescore** - Needs to be implemented differently. Should be 1x rescore or maybe 2x rescore per month for all available companies. then like 1000 credits per rescore. Depends how much actual computation power it needs
 - [ ] **Multiple scores** - allow for different set of scores in case users are looking for different types of companies. e.g. for a specific campaign or promotion etc
 - [ ] **Fix Multilang issue** - Need to decide if I have one language as base (such as english), convert everything to english for stuff like categorization etc then go and translate back i.e. use the original language again? other method would be to do it per language and then add a filter for languges with optional translations for other langugages. 
+- [ ] **Data from eSHAB** - has much mor than just changes in companies
 
 
 
