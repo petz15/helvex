@@ -9,6 +9,7 @@ import { createNote, deleteNote, fetchCompany, runCompanyWebSearch, selectCompan
 import type { Company, Note, GoogleScoredResult } from "@/lib/types";
 import "leaflet/dist/leaflet.css";
 import { SogcTimeline, SignersPanel } from "@/components/sogc-history";
+import { BoardPanel } from "@/components/board-panel";
 import { useI18n } from "@/i18n/context";
 import { useApiErrorHandler } from "@/lib/use-api-error";
 
@@ -594,7 +595,10 @@ export function CompanyDetailClient({ company: initial, readOnlyDemo = false }: 
       )}
 
 
-      {/* SHAB signers */}
+      {/* Structured board & officers from SOGC person graph */}
+      <BoardPanel companyUid={company.uid} />
+
+      {/* SHAB signers (fallback from raw JSON) */}
       <SignersPanel sogcPubJson={company.sogc_pub} />
 
       {/* SHAB timeline */}

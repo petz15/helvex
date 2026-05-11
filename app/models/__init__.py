@@ -22,7 +22,11 @@ from app.models.org_payment_method import OrgPaymentMethod
 from app.models.org_setting import OrgSetting
 from app.models.organization import Organization
 from app.models.payment_transaction import PaymentTransaction
+from app.models.sogc_auditor import SogcAuditor
 from app.models.sogc_change import SogcChange
+from app.models.sogc_person_appearance import SogcPersonAppearance
+from app.models.sogc_person_entity import SogcPersonEntity
+from app.models.sogc_person_flag import SogcPersonFlag
 from app.models.sogc_publication import SogcPublication
 from app.models.tfidf_stopword import TfidfStopword
 from app.models.user import User
@@ -37,6 +41,8 @@ __all__ = [
     "GoogleDirectoryDomain", "GoogleStopword",
     "JobRun", "JobRunEvent", "Note", "OAuthAccount", "OrgCompanyState",
     "OrgCreditTransaction", "OrgMember", "OrgPaymentMethod", "OrgSetting",
-    "Organization", "PaymentTransaction", "SogcChange", "SogcPublication",
+    "Organization", "PaymentTransaction",
+    "SogcAuditor", "SogcChange", "SogcPersonAppearance", "SogcPersonEntity",
+    "SogcPersonFlag", "SogcPublication",
     "TfidfStopword", "User", "UserCompanyState", "UserOrgSetting", "UserView",
 ]

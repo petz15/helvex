@@ -2026,3 +2026,44 @@ Removed: 3-layer CategoryGrid → CategoryDetail → BrowseView navigation, busi
 `GET /api/v1/companies/semantic-search?q=<query>&top_k=8`
 
 Embeds the query with the shared multilingual model, scores all taxonomy entries (clusters, keywords, NOGA codes) by cosine similarity, returns grouped results. Results with `similarity < 0.20` are filtered. Used by the Explorer search header with 400 ms debounce.
+
+## 20. SOGC Person & Auditor Graph (May 2026)
+
+Extracts structured person and auditor data from `sogc_changes` raw excerpts into a graph-ready schema.
+
+### Tables
+
+| Table | Purpose |
+|---|---|
+| `sogc_person_entities` | Canonical person node — one row per distinct natural person (identified by `normalized_key = lastname\|firstname\|hometown`) |
+| `sogc_person_appearances` | Appearance edge — one row per SOGC change event (person_added/removed/changed). Links entity → company. |
+| `sogc_auditors` | Legal entity auditors — structurally separate from natural persons (has UID, legal form, location) |
+| `sogc_person_flags` | User-reported identity issues (`should_merge` / `should_split`) for manual disambiguation |
+
+### Identity model
+
+- `normalized_key = NFKD-lowercase(lastname)|NFKD-lowercase(firstname)|NFKD-lowercase(hometown)` — primary dedup key
+- Swiss Heimatort (`von X`) is the civil registry origin — stable for life, gives the key its distinctiveness
+- `confidence_level`: `high` = has hometown + all appearances share same residence; `medium` = has hometown but residence varies; `low` = foreign national (no Heimatort, name-only matching)
+- False merge fix: `appearance.entity_override_id` re-assigns one appearance to a different entity
+- False split fix: `entity.merged_into_id` points old entity → canonical; all queries use `COALESCE(merged_into_id, id)`
+
+### Pipeline
+
+```
+SHAB daily → preprocess_company_sogc_pub() → extract_persons_for_publication()
+                                                  ├── person_added/removed/changed → sogc_person_appearances
+                                                  └── auditor_change              → sogc_auditors
+```
+
+Backfill job: `extract_sogc_persons` (job type), triggered via `POST /api/v1/scoring/extract-sogc-persons`.
+
+### Key files
+
+| File | Purpose |
+|---|---|
+| `app/services/sogc_person_extractor.py` | Regex-based DE/FR/IT parser, entity upsert, confidence recomputation, batch job |
+| `app/services/job_handlers/sogc_persons.py` | Job handler wrapper |
+| `app/api/routes/persons.py` | Person/auditor search, company-scoped endpoints, flag reporting |
+| `frontend/src/components/board-panel.tsx` | Company detail "Board & Officers" panel |
+| `frontend/src/app/[locale]/app/people/` | People search page (Persons + Auditors tabs) |

@@ -269,3 +269,74 @@ export interface SavedView {
   alert_enabled: boolean;
   alert_last_checked_at: string | null;
 }
+
+export interface SogcPersonEntity {
+  id: number;
+  normalized_key: string;
+  lastname: string | null;
+  firstname: string | null;
+  hometown_municipality: string | null;
+  is_foreign: boolean;
+  nationality: string | null;
+  confidence_level: "high" | "medium" | "low";
+  is_verified: boolean;
+  verified_at: string | null;
+  appearance_count: number;
+  active_company_count: number;
+  linkedin_url: string | null;
+  linkedin_verified_at: string | null;
+  merged_into_id: number | null;
+  identity_notes: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface SogcPersonAppearance {
+  id: number;
+  person_entity_id: number;
+  entity_override_id: number | null;
+  sogc_change_id: number;
+  sogc_publication_id: number;
+  company_uid: string | null;
+  pub_date: string | null;
+  change_type: string;
+  role: string | null;
+  role_category: "director" | "officer" | "other" | null;
+  signature_type: string | null;
+  bisher_role: string | null;
+  residence_municipality: string | null;
+  is_current: boolean | null;
+  title: string | null;
+  raw_excerpt: string | null;
+  created_at: string;
+}
+
+export interface SogcAuditor {
+  id: number;
+  sogc_change_id: number;
+  sogc_publication_id: number;
+  company_uid: string | null;
+  pub_date: string | null;
+  change_type: string;
+  auditor_name: string | null;
+  auditor_uid: string | null;
+  auditor_legal_form: string | null;
+  auditor_location: string | null;
+  auditor_name_normalized: string | null;
+  is_current: boolean | null;
+  created_at: string;
+}
+
+export interface SogcPersonFlag {
+  id: number;
+  flag_type: "should_merge" | "should_split";
+  primary_entity_id: number;
+  secondary_entity_id: number | null;
+  appearance_id: number | null;
+  reason: string | null;
+  is_resolved: boolean;
+  resolution_action: string | null;
+  resolved_at: string | null;
+  reported_by_user_id: number | null;
+  created_at: string;
+}

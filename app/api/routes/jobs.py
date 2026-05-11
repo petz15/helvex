@@ -1020,6 +1020,33 @@ def trigger_sogc_preprocess(
     return JobOut.from_orm_obj(job)
 
 
+class ExtractSogcPersonsBody(BaseModel):
+    mode: str = "missing"   # "missing" | "all"
+    batch_size: int = 1000
+
+
+@router.post(
+    "/scoring/extract-sogc-persons",
+    response_model=JobOut,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+def trigger_extract_sogc_persons(
+    body: ExtractSogcPersonsBody,
+    request: Request,
+    db: Session = Depends(get_db),
+    _: User = Depends(require_superadmin),
+):
+    """Extract structured persons and auditors from SOGC change excerpts."""
+    job = _enqueue_or_http_error(
+        request,
+        job_type="extract_sogc_persons",
+        label=f"Extract SOGC persons — {body.mode}",
+        params={"mode": body.mode, "batch_size": body.batch_size},
+        db=db,
+    )
+    return JobOut.from_orm_obj(job)
+
+
 @router.get("/cantons")
 def list_cantons():
     return {"cantons": SWISS_CANTONS}

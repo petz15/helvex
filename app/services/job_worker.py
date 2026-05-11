@@ -71,6 +71,7 @@ def _compute_dedup_key(job_type: str, org_id: int | None, params: dict) -> str |
         "recompute_keywords", "reextract_keywords",
         "cluster_analysis", "discover_stopwords",
         "sogc_preprocess",
+        "extract_sogc_persons",
         "saved_view_alerts",  # global singleton — org_id=None gives key "saved_view_alerts:None"
     }
     # No dedup: every trigger creates a fresh independent job.
@@ -1108,6 +1109,48 @@ def _run_job(app, job_id: int) -> None:  # noqa: C901
                 )
                 if resume_from:
                     done_msg += f" (resumed from id={resume_from})"
+
+            elif job.job_type == "extract_sogc_persons":
+                from app.services.sogc_person_extractor import run_extract_sogc_persons_batch
+
+                mode = params.get("mode", "missing")
+                batch_size = int(params.get("batch_size", 1000))
+
+                def _progress(done: int, total: int, _stats: dict) -> None:
+                    _assert_not_cancelled()
+                    msg = (
+                        f"Processing {done}/{total} — "
+                        f"{_stats.get('persons_written', 0)} persons, "
+                        f"{_stats.get('auditors_written', 0)} auditors, "
+                        f"{len(_stats.get('errors', []))} errors"
+                    )
+                    crud.update_progress(db, job, message=msg, done=done, total=total, stats=_stats)
+                    crud.create_event(db, job_id=job.id, level="debug", message=msg)
+                    _maybe_sync(app, job_type=job.job_type, label=job.label, message=msg, stats=dict(_stats), error=None, done=False)
+                    _heartbeat()
+
+                stats = run_extract_sogc_persons_batch(
+                    db,
+                    mode=mode,
+                    batch_size=batch_size,
+                    resume_from=resume_from,
+                    progress_cb=_progress,
+                    status_cb=lambda m: (
+                        _assert_not_cancelled(),
+                        crud.update_progress(db, job, message=str(m)),
+                        crud.create_event(db, job_id=job.id, level="info", message=str(m)),
+                    ),
+                    abort_cb=_assert_not_cancelled,
+                )
+                done_msg = (
+                    f"Done — {stats['persons_written']} persons, "
+                    f"{stats['auditors_written']} auditors extracted from "
+                    f"{stats['processed']} changes, "
+                    f"{stats['skipped_no_excerpt']} skipped, "
+                    f"{len(stats['errors'])} errors"
+                )
+                if resume_from:
+                    done_msg += f" (resumed from change id={resume_from})"
 
             else:
                 raise RuntimeError(f"Unsupported job type: {job.job_type}")

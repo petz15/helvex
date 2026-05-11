@@ -196,6 +196,22 @@ def import_shab_publications(
                 except Exception:
                     logger.warning("SOGC preprocess failed for uid=%s", uid, exc_info=True)
 
+                try:
+                    from app.services.sogc_person_extractor import extract_persons_for_publication
+                    from app.models.sogc_publication import SogcPublication
+                    recent_pubs = (
+                        db.query(SogcPublication)
+                        .filter_by(company_uid=company.uid)
+                        .order_by(SogcPublication.id.desc())
+                        .limit(10)
+                        .all()
+                    )
+                    for pub in recent_pubs:
+                        extract_persons_for_publication(db, pub)
+                    db.commit()
+                except Exception:
+                    logger.warning("SOGC person extraction failed for uid=%s", uid, exc_info=True)
+
             elif sub_rubric == SUBR_DELETION:
                 existing = crud.get_company_by_uid(db, uid)
                 if existing:

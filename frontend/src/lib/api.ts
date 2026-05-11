@@ -1918,3 +1918,86 @@ export async function resetAdminStandardKey(provider: string): Promise<void> {
   });
   if (!res.ok) throw new Error(`Failed to reset standard key for ${provider}`);
 }
+
+// ── SOGC Persons ───────────────────────────────────────────────────────────────
+
+import type { SogcPersonEntity, SogcPersonAppearance, SogcAuditor, SogcPersonFlag } from "./types";
+
+export async function searchPersonEntities(params: {
+  q?: string;
+  hometown?: string;
+  confidence_level?: string;
+  is_verified?: boolean;
+  is_current?: boolean;
+  limit?: number;
+  offset?: number;
+}): Promise<SogcPersonEntity[]> {
+  const qs = new URLSearchParams();
+  if (params.q) qs.set("q", params.q);
+  if (params.hometown) qs.set("hometown", params.hometown);
+  if (params.confidence_level) qs.set("confidence_level", params.confidence_level);
+  if (params.is_verified !== undefined) qs.set("is_verified", String(params.is_verified));
+  if (params.is_current !== undefined) qs.set("is_current", String(params.is_current));
+  if (params.limit !== undefined) qs.set("limit", String(params.limit));
+  if (params.offset !== undefined) qs.set("offset", String(params.offset));
+  const res = await fetch(`/api/v1/sogc/persons/search?${qs}`, { credentials: "include" });
+  if (!res.ok) return _handleErrorResponse(res);
+  return res.json();
+}
+
+export async function fetchPersonEntity(entityId: number): Promise<SogcPersonEntity> {
+  const res = await fetch(`/api/v1/sogc/persons/${entityId}`, { credentials: "include" });
+  if (!res.ok) return _handleErrorResponse(res);
+  return res.json();
+}
+
+export async function fetchPersonAppearances(entityId: number, is_current?: boolean): Promise<SogcPersonAppearance[]> {
+  const qs = is_current !== undefined ? `?is_current=${is_current}` : "";
+  const res = await fetch(`/api/v1/sogc/persons/${entityId}/appearances${qs}`, { credentials: "include" });
+  if (!res.ok) return _handleErrorResponse(res);
+  return res.json();
+}
+
+export async function reportPersonFlag(
+  entityId: number,
+  body: { flag_type: string; secondary_entity_id?: number | null; appearance_id?: number | null; reason?: string | null }
+): Promise<SogcPersonFlag> {
+  const res = await fetch(`/api/v1/sogc/persons/${entityId}/flag`, {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) return _handleErrorResponse(res);
+  return res.json();
+}
+
+export async function searchAuditors(params: {
+  q?: string;
+  is_current?: boolean;
+  limit?: number;
+  offset?: number;
+}): Promise<SogcAuditor[]> {
+  const qs = new URLSearchParams();
+  if (params.q) qs.set("q", params.q);
+  if (params.is_current !== undefined) qs.set("is_current", String(params.is_current));
+  if (params.limit !== undefined) qs.set("limit", String(params.limit));
+  if (params.offset !== undefined) qs.set("offset", String(params.offset));
+  const res = await fetch(`/api/v1/sogc/auditors/search?${qs}`, { credentials: "include" });
+  if (!res.ok) return _handleErrorResponse(res);
+  return res.json();
+}
+
+export async function fetchCompanyPersons(companyUid: string, is_current?: boolean): Promise<SogcPersonAppearance[]> {
+  const qs = is_current !== undefined ? `?is_current=${is_current}` : "";
+  const res = await fetch(`/api/v1/companies/${companyUid}/persons${qs}`, { credentials: "include" });
+  if (!res.ok) return _handleErrorResponse(res);
+  return res.json();
+}
+
+export async function fetchCompanyAuditors(companyUid: string, is_current?: boolean): Promise<SogcAuditor[]> {
+  const qs = is_current !== undefined ? `?is_current=${is_current}` : "";
+  const res = await fetch(`/api/v1/companies/${companyUid}/auditors${qs}`, { credentials: "include" });
+  if (!res.ok) return _handleErrorResponse(res);
+  return res.json();
+}
