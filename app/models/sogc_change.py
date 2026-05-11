@@ -14,7 +14,7 @@ class SogcChange(Base):
         Integer, ForeignKey("sogc_publications.id", ondelete="CASCADE"), nullable=False, index=True
     )
     change_type: Mapped[str] = mapped_column(String(32), nullable=False)
-    keywords_matched: Mapped[str | None] = mapped_column(Text, nullable=True)  # JSON list
+    keywords_matched: Mapped[str | None] = mapped_column(Text, nullable=True)
     raw_excerpt: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False

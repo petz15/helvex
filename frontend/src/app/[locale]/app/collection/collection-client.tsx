@@ -104,6 +104,14 @@ const ML_JOB_DOCS: { job_type: string; label: string; description: string; when:
       "Checks what fraction of recently imported companies lack a cluster assignment. If the ratio exceeds 30% it raises a warning, indicating the clustering models may be stale.",
     when: "Run periodically (e.g. weekly) or after bulk imports to verify model freshness.",
   },
+  {
+    job_type: "extract_sogc_persons",
+    label: "Extract SOGC Persons & Auditors",
+    description:
+      "Parses sogc_changes rows (personnel, director, auditor change types) into structured person entities, appearances, and auditor records. Deduplicates across companies using a normalized key (lastname + firstname + hometown). Produces sogc_person_entities, sogc_person_appearances, and sogc_auditors.",
+    when: "Run after SOGC Preprocess. Re-run after large SHAB backfills or when the SOGC change corpus has grown significantly.",
+    prereq: "Requires sogc_changes to be populated via SOGC Preprocess first.",
+  },
 ];
 
 function MlJobReference() {
@@ -146,6 +154,15 @@ function MlJobReference() {
         </div>
       )}
     </section>
+  );
+}
+
+function GroupHeader({ label }: { label: string }) {
+  return (
+    <div className="flex items-center gap-3 pt-2">
+      <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider whitespace-nowrap">{label}</span>
+      <div className="flex-1 h-px bg-slate-200" />
+    </div>
   );
 }
 
@@ -210,8 +227,6 @@ export function CollectionClient() {
   return (
     <div className="p-6 max-w-3xl mx-auto space-y-4">
       <div>
-
-      
         <h1 className="text-xl font-semibold text-slate-900">{dict.app.collection.title}</h1>
         <p className="text-sm text-slate-500 mt-0.5">Trigger data collection and enrichment jobs</p>
       </div>
@@ -225,6 +240,299 @@ export function CollectionClient() {
           <button onClick={() => setError(null)} className="ml-auto shrink-0 text-red-400 hover:text-red-600">✕</button>
         </div>
       )}
+
+      <GroupHeader label="Zefix Import" />
+
+      <Section title="Bulk import from Zefix">
+        <form onSubmit={async e => {
+          e.preventDefault();
+          const fd = new FormData(e.currentTarget);
+          const cantons = (fd.get("cantons") as string || "").split(",").map(c => c.trim().toUpperCase()).filter(Boolean);
+          const startFrom = (fd.get("start_from_canton") as string || "").trim().toUpperCase() || null;
+          const emptyAbort = parseInt(fd.get("empty_abort_threshold") as string) || 100;
+          await submit("collection/bulk", {
+            cantons: cantons.length ? cantons : null,
+            start_from_canton: startFrom,
+            active_only: fd.get("active_only") === "on",
+            delay: parseFloat(fd.get("delay") as string) || 0.5,
+            empty_abort_threshold: emptyAbort,
+          });
+        }} className="space-y-4">
+          <Field label="Cantons" hint="Comma-separated codes (e.g. BE,ZH). Leave blank for all 26.">
+            <input name="cantons" className={inputCls} placeholder="All cantons" />
+          </Field>
+          <Field label="Start from canton" hint="Resume a failed run by skipping cantons before this one (e.g. GL to restart from Glarus onwards).">
+            <input name="start_from_canton" className={cn(inputCls, "w-24")} placeholder="e.g. GL" />
+          </Field>
+          <div className="flex gap-6">
+            <label className="flex items-center gap-2 text-sm text-slate-700">
+              <input type="checkbox" name="active_only" defaultChecked className={checkCls} />
+              Active companies only
+            </label>
+          </div>
+          <div className="grid grid-cols-2 gap-4">
+            <Field label="Request delay (seconds)">
+              <input name="delay" type="number" step="0.1" min="0.1" defaultValue="0.5" className={inputCls} />
+            </Field>
+            <Field label="Empty abort threshold" hint="Stop if this many consecutive prefixes return no results (Zefix may be down).">
+              <input name="empty_abort_threshold" type="number" min="1" defaultValue="100" className={inputCls} />
+            </Field>
+          </div>
+          <SubmitBtn loading={loading === "collection/bulk"} />
+        </form>
+      </Section>
+
+      <Section title="Zefix detail fetch">
+        <form onSubmit={async e => {
+          e.preventDefault();
+          const fd = new FormData(e.currentTarget);
+          const cantons = (fd.get("cantons") as string || "").split(",").map(c => c.trim().toUpperCase()).filter(Boolean);
+          const uids = (fd.get("uids") as string || "").split("\n").map(u => u.trim()).filter(Boolean);
+          await submit("collection/detail", {
+            cantons: cantons.length ? cantons : null,
+            uids: uids.length ? uids : null,
+            only_missing_details: fd.get("only_missing_details") === "on",
+            delay: parseFloat(fd.get("delay") as string) || 0.3,
+          });
+        }} className="space-y-4">
+          <Field label="Cantons" hint="Comma-separated. Leave blank for all.">
+            <input name="cantons" className={inputCls} placeholder="All" />
+          </Field>
+          <Field label="UIDs" hint="One per line — leave blank to use cantons filter">
+            <textarea name="uids" rows={3} className={inputCls} />
+          </Field>
+          <Field label="Request delay (seconds)">
+            <input name="delay" type="number" step="0.1" min="0.1" defaultValue="0.3" className={cn(inputCls, "w-32")} />
+          </Field>
+          <label className="flex items-center gap-2 text-sm text-slate-700">
+            <input type="checkbox" name="only_missing_details" className={checkCls} />
+            Only companies missing details
+          </label>
+          <SubmitBtn loading={loading === "collection/detail"} />
+        </form>
+      </Section>
+
+      <Section title="Specific company search">
+        <form onSubmit={async e => {
+          e.preventDefault();
+          const fd = new FormData(e.currentTarget);
+          const names = (fd.get("names") as string || "").split("\n").map(n => n.trim()).filter(Boolean);
+          const uids = (fd.get("uids") as string || "").split("\n").map(u => u.trim()).filter(Boolean);
+          await submit("collection/initial", {
+            names,
+            uids,
+            canton: (fd.get("canton") as string)?.trim().toUpperCase() || null,
+            active_only: fd.get("include_inactive") !== "on",
+            run_google: fd.get("skip_google") !== "on",
+          });
+        }} className="space-y-4">
+          <Field label="Company names" hint="One per line">
+            <textarea name="names" rows={4} className={inputCls} placeholder="Acme AG&#10;Example GmbH" />
+          </Field>
+          <Field label="UIDs" hint="One per line">
+            <textarea name="uids" rows={2} className={inputCls} placeholder="CHE-123.456.789" />
+          </Field>
+          <div className="grid grid-cols-2 gap-4">
+            <Field label="Canton">
+              <input name="canton" className={inputCls} placeholder="Any" />
+            </Field>
+          </div>
+          <div className="flex gap-6 flex-wrap">
+            <label className="flex items-center gap-2 text-sm text-slate-700">
+              <input type="checkbox" name="include_inactive" className={checkCls} />
+              Include inactive companies
+            </label>
+            <label className="flex items-center gap-2 text-sm text-slate-700">
+              <input type="checkbox" name="skip_google" className={checkCls} />
+              Skip Google search
+            </label>
+          </div>
+          <SubmitBtn loading={loading === "collection/initial"} />
+        </form>
+      </Section>
+
+      <Section title="Batch enrichment (Google search)">
+        <form onSubmit={async e => {
+          e.preventDefault();
+          const fd = new FormData(e.currentTarget);
+          await submit("collection/batch", {
+            limit: parseInt(fd.get("limit") as string) || 100,
+            only_missing_website: fd.get("all_companies") !== "on",
+            refresh_zefix: fd.get("refresh_zefix") === "on",
+            run_google: true,
+            canton: (fd.get("canton") as string)?.trim().toUpperCase() || null,
+            min_flex_score: parseInt(fd.get("min_flex_score") as string) || null,
+          });
+        }} className="space-y-4">
+          <div className="grid grid-cols-2 gap-4">
+            <Field label="Limit">
+              <input name="limit" type="number" min="1" defaultValue="100" className={inputCls} />
+            </Field>
+            <Field label="Canton">
+              <input name="canton" className={inputCls} placeholder="Any" />
+            </Field>
+          </div>
+          <div className="grid grid-cols-2 gap-4">
+            <Field label="Min Flex score">
+              <input name="min_flex_score" type="number" min="0" max="100" className={inputCls} placeholder="—" />
+            </Field>
+          </div>
+          <div className="flex gap-6 flex-wrap">
+            <label className="flex items-center gap-2 text-sm text-slate-700">
+              <input type="checkbox" name="all_companies" className={checkCls} />
+              Include companies already with website
+            </label>
+            <label className="flex items-center gap-2 text-sm text-slate-700">
+              <input type="checkbox" name="refresh_zefix" className={checkCls} />
+              Refresh Zefix data
+            </label>
+          </div>
+          <SubmitBtn loading={loading === "collection/batch"} />
+        </form>
+      </Section>
+
+      <GroupHeader label="SHAB / SOGC" />
+
+      <Section title="SHAB Daily Import">
+        <form onSubmit={async e => {
+          e.preventDefault();
+          const fd = new FormData(e.currentTarget);
+          const date = (fd.get("shab_date") as string)?.trim() || null;
+          await submit("collection/shab-daily", {
+            date: date || undefined,
+            request_delay: parseFloat(fd.get("shab_delay") as string) || 0.15,
+          });
+        }} className="space-y-4">
+          <div>
+            <h2 className="text-sm font-semibold text-slate-800">SHAB daily import</h2>
+            <p className="mt-1 text-xs text-slate-500">
+              Imports HR01 (new), HR02 (mutations) and HR03 (deletions) from the SHAB public API for a single day.
+              Leave date empty to import yesterday. New registrations automatically trigger a Zefix detail fetch.
+            </p>
+          </div>
+          <div className="grid grid-cols-2 gap-4">
+            <Field label="Date (YYYY-MM-DD)" hint="Leave empty for yesterday">
+              <input name="shab_date" type="date" className={inputCls} />
+            </Field>
+            <Field label="Request delay (seconds)" hint="Between SHAB detail API calls">
+              <input name="shab_delay" type="number" step="0.05" min="0.05" defaultValue="0.15" className={inputCls} />
+            </Field>
+          </div>
+          <SubmitBtn loading={loading === "collection/shab-daily"} />
+        </form>
+      </Section>
+
+      <Section title="SHAB Historical Backfill">
+        <form onSubmit={async e => {
+          e.preventDefault();
+          const fd = new FormData(e.currentTarget);
+          const fromDate = (fd.get("shab_from_date") as string)?.trim();
+          const toDate = (fd.get("shab_to_date") as string)?.trim() || undefined;
+          if (!fromDate) { setError("From date is required for SHAB backfill"); return; }
+          await submit("collection/shab-backfill", {
+            from_date: fromDate,
+            to_date: toDate,
+            request_delay: parseFloat(fd.get("shab_backfill_delay") as string) || 0.15,
+          });
+        }} className="space-y-4">
+          <div>
+            <h2 className="text-sm font-semibold text-slate-800">SHAB historical backfill</h2>
+            <p className="mt-1 text-xs text-slate-500">
+              Fetches all SHAB HR publications across a date range. Use this to import past data.
+              Leave &quot;to date&quot; empty to backfill through yesterday.
+            </p>
+          </div>
+          <div className="grid grid-cols-2 gap-4">
+            <Field label="From date (YYYY-MM-DD)" hint="Required — earliest date to import">
+              <input name="shab_from_date" type="date" required className={inputCls} />
+            </Field>
+            <Field label="To date (YYYY-MM-DD)" hint="Leave empty for yesterday">
+              <input name="shab_to_date" type="date" className={inputCls} />
+            </Field>
+          </div>
+          <Field label="Request delay (seconds)">
+            <input name="shab_backfill_delay" type="number" step="0.05" min="0.05" defaultValue="0.15" className={cn(inputCls, "w-32")} />
+          </Field>
+          <SubmitBtn loading={loading === "collection/shab-backfill"} />
+        </form>
+      </Section>
+
+      <Section title="SOGC Preprocess">
+        <form onSubmit={async e => {
+          e.preventDefault();
+          const fd = new FormData(e.currentTarget);
+          const mode = fd.get("sogc_mode") as string || "missing";
+          const uidsRaw = (fd.get("sogc_uids") as string || "").trim();
+          const uids = uidsRaw ? uidsRaw.split(/[\s,]+/).map(u => u.trim()).filter(Boolean) : [];
+          const batchSize = parseInt(fd.get("sogc_batch_size") as string) || 500;
+          await submit("collection/sogc-preprocess", {
+            mode,
+            uids: uids.length ? uids : undefined,
+            batch_size: batchSize,
+          });
+        }} className="space-y-4">
+          <div>
+            <h2 className="text-sm font-semibold text-slate-800">SOGC publication preprocess</h2>
+            <p className="mt-1 text-xs text-slate-500">
+              Explodes the <code className="font-mono">sogc_pub</code> / <code className="font-mono">zefix_raw</code> JSON blobs into
+              structured <code className="font-mono">sogc_publications</code> and <code className="font-mono">sogc_changes</code> rows.
+              Use <em>missing</em> mode for initial backfill, <em>all</em> to reprocess every company.
+              Optionally restrict to specific companies by CHE UID.
+            </p>
+          </div>
+          <div className="grid grid-cols-2 gap-4">
+            <Field label="Mode">
+              <select name="sogc_mode" className={inputCls}>
+                <option value="missing">missing — only unprocessed companies</option>
+                <option value="all">all — reprocess every company</option>
+                <option value="publications">publications — fix encoding + regenerate changes from existing rows</option>
+              </select>
+            </Field>
+            <Field label="Batch size" hint="DB commit interval">
+              <input name="sogc_batch_size" type="number" min="10" defaultValue="500" className={inputCls} />
+            </Field>
+          </div>
+          <Field label="CHE UIDs (optional)" hint="Only applies to missing/all modes. One per line.">
+            <textarea name="sogc_uids" rows={3} placeholder="CHE-123.456.789&#10;CHE-987.654.321" className={cn(inputCls, "font-mono text-xs")} />
+          </Field>
+          <SubmitBtn loading={loading === "collection/sogc-preprocess"} />
+        </form>
+      </Section>
+
+      <Section title="Extract SOGC Persons &amp; Auditors">
+        <form onSubmit={async e => {
+          e.preventDefault();
+          const fd = new FormData(e.currentTarget);
+          await submit("scoring/extract-sogc-persons", {
+            mode: fd.get("persons_mode") as string || "missing",
+            batch_size: parseInt(fd.get("persons_batch_size") as string) || 1000,
+          });
+        }} className="space-y-4">
+          <div>
+            <h2 className="text-sm font-semibold text-slate-800">Extract persons &amp; auditors from SOGC changes</h2>
+            <p className="mt-1 text-xs text-slate-500">
+              Parses <code className="font-mono">sogc_changes</code> rows (role, director, auditor sections) into structured
+              <code className="font-mono"> sogc_person_entities</code>, <code className="font-mono">sogc_person_appearances</code>,
+              and <code className="font-mono">sogc_auditors</code> tables. Run after SOGC Preprocess.
+              Use <em>missing</em> for incremental updates, <em>all</em> to rebuild from scratch.
+            </p>
+          </div>
+          <div className="grid grid-cols-2 gap-4">
+            <Field label="Mode">
+              <select name="persons_mode" className={inputCls}>
+                <option value="missing">missing — only unprocessed changes</option>
+                <option value="all">all — reprocess all SOGC changes</option>
+              </select>
+            </Field>
+            <Field label="Batch size" hint="DB commit interval">
+              <input name="persons_batch_size" type="number" min="100" defaultValue="1000" className={inputCls} />
+            </Field>
+          </div>
+          <SubmitBtn loading={loading === "scoring/extract-sogc-persons"} />
+        </form>
+      </Section>
+
+      <GroupHeader label="Text &amp; Keywords" />
 
       <Section title="Re-extract Zefix Raw Fields">
         <form onSubmit={async e => {
@@ -300,72 +608,39 @@ export function CollectionClient() {
         </form>
       </Section>
 
-      <Section title="Semantic K-Means clustering">
+      <Section title="Re-extract keywords">
         <form onSubmit={async e => {
           e.preventDefault();
           const fd = new FormData(e.currentTarget);
-          await submit("scoring/semantic-cluster", {
-            n_clusters: parseInt(fd.get("semantic_n_clusters") as string) || 150,
-            max_clusters_per_company: parseInt(fd.get("semantic_max_clusters_per_company") as string) || 3,
-            min_similarity: parseFloat(fd.get("semantic_min_similarity") as string) || 0.2,
-            n_components: parseInt(fd.get("semantic_n_components") as string) || 50,
-            top_terms: parseInt(fd.get("semantic_top_terms") as string) || 5,
-            canton: (fd.get("semantic_canton") as string)?.trim().toUpperCase() || null,
-            min_zefix_score: parseInt(fd.get("semantic_min_zefix_score") as string) || null,
-            max_zefix_score: parseInt(fd.get("semantic_max_zefix_score") as string) || null,
-            limit: parseInt(fd.get("semantic_limit") as string) || null,
-            embedding_batch_size: parseInt(fd.get("semantic_embedding_batch_size") as string) || 512,
+          await submit("scoring/reextract-keywords", {
+            only_missing: fd.get("only_missing_keywords") === "on",
+            canton: (fd.get("keywords_canton") as string)?.trim().toUpperCase() || null,
+            limit: parseInt(fd.get("keywords_limit") as string) || null,
           });
         }} className="space-y-4">
           <div>
-            <h2 className="text-sm font-semibold text-slate-800">Semantic K-Means clustering</h2>
-            <p className="mt-1 text-xs text-slate-500">
-              Clusters companies by meaning using multilingual embeddings. Run Recompute Keywords first so the model has clean inputs.
-            </p>
+            <h2 className="text-sm font-semibold text-slate-800">Re-extract keywords</h2>
+            <p className="mt-1 text-xs text-slate-500">Refresh purpose keywords from the cached TF-IDF vectorizer and cluster artifacts.</p>
           </div>
-          <div className="grid grid-cols-2 gap-4">
-            <Field label="Clusters">
-              <input name="semantic_n_clusters" type="number" min="1" defaultValue="150" className={inputCls} />
-            </Field>
-            <Field label="Max clusters/company">
-              <input name="semantic_max_clusters_per_company" type="number" min="1" defaultValue="3" className={inputCls} />
-            </Field>
-          </div>
-          <div className="grid grid-cols-2 gap-4">
-            <Field label="Min similarity">
-              <input name="semantic_min_similarity" type="number" min="0" max="1" step="0.01" defaultValue="0.2" className={inputCls} />
-            </Field>
-            <Field label="Components">
-              <input name="semantic_n_components" type="number" min="2" defaultValue="50" className={inputCls} />
-            </Field>
-          </div>
-          <div className="grid grid-cols-2 gap-4">
-            <Field label="Top cluster terms">
-              <input name="semantic_top_terms" type="number" min="1" defaultValue="5" className={inputCls} />
-            </Field>
-            <Field label="Embedding batch size">
-              <input name="semantic_embedding_batch_size" type="number" min="1" defaultValue="512" className={inputCls} />
-            </Field>
+          <div className="flex gap-6 flex-wrap">
+            <label className="flex items-center gap-2 text-sm text-slate-700">
+              <input type="checkbox" name="only_missing_keywords" className={checkCls} />
+              Only companies missing keywords
+            </label>
           </div>
           <div className="grid grid-cols-2 gap-4">
             <Field label="Canton">
-              <input name="semantic_canton" className={inputCls} placeholder="Any" />
+              <input name="keywords_canton" className={inputCls} placeholder="Any" />
             </Field>
             <Field label="Limit">
-              <input name="semantic_limit" type="number" min="1" className={inputCls} placeholder="All" />
+              <input name="keywords_limit" type="number" min="1" className={inputCls} placeholder="All" />
             </Field>
           </div>
-          <div className="grid grid-cols-2 gap-4">
-            <Field label="Min Zefix score">
-              <input name="semantic_min_zefix_score" type="number" min="0" max="100" className={inputCls} placeholder="—" />
-            </Field>
-            <Field label="Max Zefix score">
-              <input name="semantic_max_zefix_score" type="number" min="0" max="100" className={inputCls} placeholder="—" />
-            </Field>
-          </div>
-          <SubmitBtn loading={loading === "scoring/semantic-cluster"} />
+          <SubmitBtn loading={loading === "scoring/reextract-keywords"} />
         </form>
       </Section>
+
+      <GroupHeader label="NOGA Classification" />
 
       <Section title="NOGA Classification">
         <div className="space-y-6">
@@ -481,114 +756,147 @@ export function CollectionClient() {
 
         </div>
       </Section>
-        
-      <Section title="TF-IDF + KMeans pipeline">
-          <form onSubmit={async e => {
-            e.preventDefault();
-            const fd = new FormData(e.currentTarget);
-            await submit("scoring/cluster", {
-              n_clusters: parseInt(fd.get("n_clusters") as string) || 150,
-              max_clusters_per_company: parseInt(fd.get("max_clusters_per_company") as string) || 7,
-              min_similarity: parseFloat(fd.get("min_similarity") as string) || 0.1,
-              n_components: parseInt(fd.get("n_components") as string) || 50,
-              top_terms: parseInt(fd.get("top_terms") as string) || 5,
-              top_keywords_per_company: parseInt(fd.get("top_keywords_per_company") as string) || 10,
-              canton: (fd.get("canton") as string)?.trim().toUpperCase() || null,
-              min_zefix_score: parseInt(fd.get("min_zefix_score") as string) || null,
-              max_zefix_score: parseInt(fd.get("max_zefix_score") as string) || null,
-              limit: parseInt(fd.get("limit") as string) || null,
-              use_keywords: fd.get("use_keywords") === "on",
-            });
-          }} className="space-y-4">
-            <div>
-              <h2 className="text-sm font-semibold text-slate-800">TF-IDF + KMeans pipeline</h2>
-              <p className="mt-1 text-xs text-slate-500">Production clustering job: TF-IDF, SVD, MiniBatchKMeans, then keyword/label writes.</p>
-            </div>
-            <div className="grid grid-cols-2 gap-4">
-              <Field label="Clusters">
-                <input name="n_clusters" type="number" min="1" defaultValue="150" className={inputCls} />
-              </Field>
-              <Field label="Max clusters/company">
-                <input name="max_clusters_per_company" type="number" min="1" defaultValue="7" className={inputCls} />
-              </Field>
-            </div>
-            <div className="grid grid-cols-2 gap-4">
-              <Field label="Min similarity">
-                <input name="min_similarity" type="number" min="0" max="1" step="0.01" defaultValue="0.1" className={inputCls} />
-              </Field>
-              <Field label="Components">
-                <input name="n_components" type="number" min="2" defaultValue="50" className={inputCls} />
-              </Field>
-            </div>
-            <div className="grid grid-cols-2 gap-4">
-              <Field label="Top cluster terms">
-                <input name="top_terms" type="number" min="1" defaultValue="5" className={inputCls} />
-              </Field>
-              <Field label="Top keywords/company">
-                <input name="top_keywords_per_company" type="number" min="1" defaultValue="10" className={inputCls} />
-              </Field>
-            </div>
-            <div className="grid grid-cols-2 gap-4">
-              <Field label="Canton">
-                <input name="canton" className={inputCls} placeholder="Any" />
-              </Field>
-              <Field label="Limit">
-                <input name="limit" type="number" min="1" className={inputCls} placeholder="All" />
-              </Field>
-            </div>
-            <div className="grid grid-cols-2 gap-4">
-              <Field label="Min Zefix score">
-                <input name="min_zefix_score" type="number" min="0" max="100" className={inputCls} placeholder="—" />
-              </Field>
-              <Field label="Max Zefix score">
-                <input name="max_zefix_score" type="number" min="0" max="100" className={inputCls} placeholder="—" />
-              </Field>
-            </div>
-            <label className="flex items-center gap-2 text-sm text-slate-700">
-              <input type="checkbox" name="use_keywords" className={checkCls} />
-              Use existing purpose keywords during clustering
-            </label>
-            <SubmitBtn loading={loading === "scoring/cluster"} />
-          </form>
 
-      </Section>
+      <GroupHeader label="Clustering" />
 
-      <Section title="Re-extract keywords">
-
+      <Section title="Semantic K-Means clustering">
         <form onSubmit={async e => {
           e.preventDefault();
           const fd = new FormData(e.currentTarget);
-          await submit("scoring/reextract-keywords", {
-            only_missing: fd.get("only_missing_keywords") === "on",
-            canton: (fd.get("keywords_canton") as string)?.trim().toUpperCase() || null,
-            limit: parseInt(fd.get("keywords_limit") as string) || null,
+          await submit("scoring/semantic-cluster", {
+            n_clusters: parseInt(fd.get("semantic_n_clusters") as string) || 150,
+            max_clusters_per_company: parseInt(fd.get("semantic_max_clusters_per_company") as string) || 3,
+            min_similarity: parseFloat(fd.get("semantic_min_similarity") as string) || 0.2,
+            n_components: parseInt(fd.get("semantic_n_components") as string) || 50,
+            top_terms: parseInt(fd.get("semantic_top_terms") as string) || 5,
+            canton: (fd.get("semantic_canton") as string)?.trim().toUpperCase() || null,
+            min_zefix_score: parseInt(fd.get("semantic_min_zefix_score") as string) || null,
+            max_zefix_score: parseInt(fd.get("semantic_max_zefix_score") as string) || null,
+            limit: parseInt(fd.get("semantic_limit") as string) || null,
+            embedding_batch_size: parseInt(fd.get("semantic_embedding_batch_size") as string) || 512,
           });
         }} className="space-y-4">
           <div>
-            <h2 className="text-sm font-semibold text-slate-800">Re-extract keywords</h2>
-            <p className="mt-1 text-xs text-slate-500">Refresh purpose keywords from the cached TF-IDF vectorizer and cluster artifacts.</p>
+            <h2 className="text-sm font-semibold text-slate-800">Semantic K-Means clustering</h2>
+            <p className="mt-1 text-xs text-slate-500">
+              Clusters companies by meaning using multilingual embeddings. Run Recompute Keywords first so the model has clean inputs.
+            </p>
           </div>
-          <div className="flex gap-6 flex-wrap">
-            <label className="flex items-center gap-2 text-sm text-slate-700">
-              <input type="checkbox" name="only_missing_keywords" className={checkCls} />
-              Only companies missing keywords
-            </label>
+          <div className="grid grid-cols-2 gap-4">
+            <Field label="Clusters">
+              <input name="semantic_n_clusters" type="number" min="1" defaultValue="150" className={inputCls} />
+            </Field>
+            <Field label="Max clusters/company">
+              <input name="semantic_max_clusters_per_company" type="number" min="1" defaultValue="3" className={inputCls} />
+            </Field>
+          </div>
+          <div className="grid grid-cols-2 gap-4">
+            <Field label="Min similarity">
+              <input name="semantic_min_similarity" type="number" min="0" max="1" step="0.01" defaultValue="0.2" className={inputCls} />
+            </Field>
+            <Field label="Components">
+              <input name="semantic_n_components" type="number" min="2" defaultValue="50" className={inputCls} />
+            </Field>
+          </div>
+          <div className="grid grid-cols-2 gap-4">
+            <Field label="Top cluster terms">
+              <input name="semantic_top_terms" type="number" min="1" defaultValue="5" className={inputCls} />
+            </Field>
+            <Field label="Embedding batch size">
+              <input name="semantic_embedding_batch_size" type="number" min="1" defaultValue="512" className={inputCls} />
+            </Field>
           </div>
           <div className="grid grid-cols-2 gap-4">
             <Field label="Canton">
-              <input name="keywords_canton" className={inputCls} placeholder="Any" />
+              <input name="semantic_canton" className={inputCls} placeholder="Any" />
             </Field>
             <Field label="Limit">
-              <input name="keywords_limit" type="number" min="1" className={inputCls} placeholder="All" />
+              <input name="semantic_limit" type="number" min="1" className={inputCls} placeholder="All" />
             </Field>
           </div>
-          <SubmitBtn loading={loading === "scoring/reextract-keywords"} />
+          <div className="grid grid-cols-2 gap-4">
+            <Field label="Min Zefix score">
+              <input name="semantic_min_zefix_score" type="number" min="0" max="100" className={inputCls} placeholder="—" />
+            </Field>
+            <Field label="Max Zefix score">
+              <input name="semantic_max_zefix_score" type="number" min="0" max="100" className={inputCls} placeholder="—" />
+            </Field>
+          </div>
+          <SubmitBtn loading={loading === "scoring/semantic-cluster"} />
         </form>
+      </Section>
 
+      <Section title="TF-IDF + KMeans pipeline">
+        <form onSubmit={async e => {
+          e.preventDefault();
+          const fd = new FormData(e.currentTarget);
+          await submit("scoring/cluster", {
+            n_clusters: parseInt(fd.get("n_clusters") as string) || 150,
+            max_clusters_per_company: parseInt(fd.get("max_clusters_per_company") as string) || 7,
+            min_similarity: parseFloat(fd.get("min_similarity") as string) || 0.1,
+            n_components: parseInt(fd.get("n_components") as string) || 50,
+            top_terms: parseInt(fd.get("top_terms") as string) || 5,
+            top_keywords_per_company: parseInt(fd.get("top_keywords_per_company") as string) || 10,
+            canton: (fd.get("canton") as string)?.trim().toUpperCase() || null,
+            min_zefix_score: parseInt(fd.get("min_zefix_score") as string) || null,
+            max_zefix_score: parseInt(fd.get("max_zefix_score") as string) || null,
+            limit: parseInt(fd.get("limit") as string) || null,
+            use_keywords: fd.get("use_keywords") === "on",
+          });
+        }} className="space-y-4">
+          <div>
+            <h2 className="text-sm font-semibold text-slate-800">TF-IDF + KMeans pipeline</h2>
+            <p className="mt-1 text-xs text-slate-500">Production clustering job: TF-IDF, SVD, MiniBatchKMeans, then keyword/label writes.</p>
+          </div>
+          <div className="grid grid-cols-2 gap-4">
+            <Field label="Clusters">
+              <input name="n_clusters" type="number" min="1" defaultValue="150" className={inputCls} />
+            </Field>
+            <Field label="Max clusters/company">
+              <input name="max_clusters_per_company" type="number" min="1" defaultValue="7" className={inputCls} />
+            </Field>
+          </div>
+          <div className="grid grid-cols-2 gap-4">
+            <Field label="Min similarity">
+              <input name="min_similarity" type="number" min="0" max="1" step="0.01" defaultValue="0.1" className={inputCls} />
+            </Field>
+            <Field label="Components">
+              <input name="n_components" type="number" min="2" defaultValue="50" className={inputCls} />
+            </Field>
+          </div>
+          <div className="grid grid-cols-2 gap-4">
+            <Field label="Top cluster terms">
+              <input name="top_terms" type="number" min="1" defaultValue="5" className={inputCls} />
+            </Field>
+            <Field label="Top keywords/company">
+              <input name="top_keywords_per_company" type="number" min="1" defaultValue="10" className={inputCls} />
+            </Field>
+          </div>
+          <div className="grid grid-cols-2 gap-4">
+            <Field label="Canton">
+              <input name="canton" className={inputCls} placeholder="Any" />
+            </Field>
+            <Field label="Limit">
+              <input name="limit" type="number" min="1" className={inputCls} placeholder="All" />
+            </Field>
+          </div>
+          <div className="grid grid-cols-2 gap-4">
+            <Field label="Min Zefix score">
+              <input name="min_zefix_score" type="number" min="0" max="100" className={inputCls} placeholder="—" />
+            </Field>
+            <Field label="Max Zefix score">
+              <input name="max_zefix_score" type="number" min="0" max="100" className={inputCls} placeholder="—" />
+            </Field>
+          </div>
+          <label className="flex items-center gap-2 text-sm text-slate-700">
+            <input type="checkbox" name="use_keywords" className={checkCls} />
+            Use existing purpose keywords during clustering
+          </label>
+          <SubmitBtn loading={loading === "scoring/cluster"} />
+        </form>
       </Section>
 
       <Section title="Cluster analysis">
-
         <form onSubmit={async e => {
           e.preventDefault();
           const fd = new FormData(e.currentTarget);
@@ -611,11 +919,9 @@ export function CollectionClient() {
           </div>
           <SubmitBtn loading={loading === "scoring/cluster-analysis"} />
         </form>
-
       </Section>
 
       <Section title="Cluster drift check">
-
         <form onSubmit={async e => {
           e.preventDefault();
           const fd = new FormData(e.currentTarget);
@@ -637,261 +943,6 @@ export function CollectionClient() {
             </Field>
           </div>
           <SubmitBtn loading={loading === "scoring/cluster-drift-check"} />
-        </form>
-      
-      </Section>  
-
-      <Section title="SHAB Daily Import">
-        <form onSubmit={async e => {
-          e.preventDefault();
-          const fd = new FormData(e.currentTarget);
-          const date = (fd.get("shab_date") as string)?.trim() || null;
-          await submit("collection/shab-daily", {
-            date: date || undefined,
-            request_delay: parseFloat(fd.get("shab_delay") as string) || 0.15,
-          });
-        }} className="space-y-4">
-          <div>
-            <h2 className="text-sm font-semibold text-slate-800">SHAB daily import</h2>
-            <p className="mt-1 text-xs text-slate-500">
-              Imports HR01 (new), HR02 (mutations) and HR03 (deletions) from the SHAB public API for a single day.
-              Leave date empty to import yesterday. New registrations automatically trigger a Zefix detail fetch.
-            </p>
-          </div>
-          <div className="grid grid-cols-2 gap-4">
-            <Field label="Date (YYYY-MM-DD)" hint="Leave empty for yesterday">
-              <input name="shab_date" type="date" className={inputCls} />
-            </Field>
-            <Field label="Request delay (seconds)" hint="Between SHAB detail API calls">
-              <input name="shab_delay" type="number" step="0.05" min="0.05" defaultValue="0.15" className={inputCls} />
-            </Field>
-          </div>
-          <SubmitBtn loading={loading === "collection/shab-daily"} />
-        </form>
-      </Section>
-
-      <Section title="SHAB Historical Backfill">
-        <form onSubmit={async e => {
-          e.preventDefault();
-          const fd = new FormData(e.currentTarget);
-          const fromDate = (fd.get("shab_from_date") as string)?.trim();
-          const toDate = (fd.get("shab_to_date") as string)?.trim() || undefined;
-          if (!fromDate) { setError("From date is required for SHAB backfill"); return; }
-          await submit("collection/shab-backfill", {
-            from_date: fromDate,
-            to_date: toDate,
-            request_delay: parseFloat(fd.get("shab_backfill_delay") as string) || 0.15,
-          });
-        }} className="space-y-4">
-          <div>
-            <h2 className="text-sm font-semibold text-slate-800">SHAB historical backfill</h2>
-            <p className="mt-1 text-xs text-slate-500">
-              Fetches all SHAB HR publications across a date range. Use this to import past data.
-              Leave &quot;to date&quot; empty to backfill through yesterday.
-            </p>
-          </div>
-          <div className="grid grid-cols-2 gap-4">
-            <Field label="From date (YYYY-MM-DD)" hint="Required — earliest date to import">
-              <input name="shab_from_date" type="date" required className={inputCls} />
-            </Field>
-            <Field label="To date (YYYY-MM-DD)" hint="Leave empty for yesterday">
-              <input name="shab_to_date" type="date" className={inputCls} />
-            </Field>
-          </div>
-          <Field label="Request delay (seconds)">
-            <input name="shab_backfill_delay" type="number" step="0.05" min="0.05" defaultValue="0.15" className={cn(inputCls, "w-32")} />
-          </Field>
-          <SubmitBtn loading={loading === "collection/shab-backfill"} />
-        </form>
-      </Section>
-
-      <Section title="SOGC Preprocess">
-        <form onSubmit={async e => {
-          e.preventDefault();
-          const fd = new FormData(e.currentTarget);
-          const mode = fd.get("sogc_mode") as string || "missing";
-          const uidsRaw = (fd.get("sogc_uids") as string || "").trim();
-          const uids = uidsRaw ? uidsRaw.split(/[\s,]+/).map(u => u.trim()).filter(Boolean) : [];
-          const batchSize = parseInt(fd.get("sogc_batch_size") as string) || 500;
-          await submit("collection/sogc-preprocess", {
-            mode,
-            uids: uids.length ? uids : undefined,
-            batch_size: batchSize,
-          });
-        }} className="space-y-4">
-          <div>
-            <h2 className="text-sm font-semibold text-slate-800">SOGC publication preprocess</h2>
-            <p className="mt-1 text-xs text-slate-500">
-              Explodes the <code className="font-mono">sogc_pub</code> / <code className="font-mono">zefix_raw</code> JSON blobs into
-              structured <code className="font-mono">sogc_publications</code> and <code className="font-mono">sogc_changes</code> rows.
-              Use <em>missing</em> mode for initial backfill, <em>all</em> to reprocess every company.
-              Optionally restrict to specific companies by CHE UID.
-            </p>
-          </div>
-          <div className="grid grid-cols-2 gap-4">
-            <Field label="Mode">
-              <select name="sogc_mode" className={inputCls}>
-                <option value="missing">missing — only unprocessed companies</option>
-                <option value="all">all — reprocess every company</option>
-                <option value="publications">publications — fix encoding + regenerate changes from existing rows</option>
-              </select>
-            </Field>
-            <Field label="Batch size" hint="DB commit interval">
-              <input name="sogc_batch_size" type="number" min="10" defaultValue="500" className={inputCls} />
-            </Field>
-          </div>
-          <Field label="CHE UIDs (optional)" hint="Only applies to missing/all modes. One per line.">
-            <textarea name="sogc_uids" rows={3} placeholder="CHE-123.456.789&#10;CHE-987.654.321" className={cn(inputCls, "font-mono text-xs")} />
-          </Field>
-          <SubmitBtn loading={loading === "collection/sogc-preprocess"} />
-        </form>
-      </Section>
-
-      <Section title="Bulk import from Zefix">
-        <form onSubmit={async e => {
-          e.preventDefault();
-          const fd = new FormData(e.currentTarget);
-          const cantons = (fd.get("cantons") as string || "").split(",").map(c => c.trim().toUpperCase()).filter(Boolean);
-          const startFrom = (fd.get("start_from_canton") as string || "").trim().toUpperCase() || null;
-          const emptyAbort = parseInt(fd.get("empty_abort_threshold") as string) || 100;
-          await submit("collection/bulk", {
-            cantons: cantons.length ? cantons : null,
-            start_from_canton: startFrom,
-            active_only: fd.get("active_only") === "on",
-            delay: parseFloat(fd.get("delay") as string) || 0.5,
-            empty_abort_threshold: emptyAbort,
-          });
-        }} className="space-y-4">
-          <Field label="Cantons" hint="Comma-separated codes (e.g. BE,ZH). Leave blank for all 26.">
-            <input name="cantons" className={inputCls} placeholder="All cantons" />
-          </Field>
-          <Field label="Start from canton" hint="Resume a failed run by skipping cantons before this one (e.g. GL to restart from Glarus onwards).">
-            <input name="start_from_canton" className={cn(inputCls, "w-24")} placeholder="e.g. GL" />
-          </Field>
-          <div className="flex gap-6">
-            <label className="flex items-center gap-2 text-sm text-slate-700">
-              <input type="checkbox" name="active_only" defaultChecked className={checkCls} />
-              Active companies only
-            </label>
-          </div>
-          <div className="grid grid-cols-2 gap-4">
-            <Field label="Request delay (seconds)">
-              <input name="delay" type="number" step="0.1" min="0.1" defaultValue="0.5" className={inputCls} />
-            </Field>
-            <Field label="Empty abort threshold" hint="Stop if this many consecutive prefixes return no results (Zefix may be down).">
-              <input name="empty_abort_threshold" type="number" min="1" defaultValue="100" className={inputCls} />
-            </Field>
-          </div>
-          <SubmitBtn loading={loading === "collection/bulk"} />
-        </form>
-      </Section>
-
-      <Section title="Batch enrichment (Google search)">
-        <form onSubmit={async e => {
-          e.preventDefault();
-          const fd = new FormData(e.currentTarget);
-          await submit("collection/batch", {
-            limit: parseInt(fd.get("limit") as string) || 100,
-            only_missing_website: fd.get("all_companies") !== "on",
-            refresh_zefix: fd.get("refresh_zefix") === "on",
-            run_google: true,
-            canton: (fd.get("canton") as string)?.trim().toUpperCase() || null,
-            min_flex_score: parseInt(fd.get("min_flex_score") as string) || null,
-          });
-        }} className="space-y-4">
-          <div className="grid grid-cols-2 gap-4">
-            <Field label="Limit">
-              <input name="limit" type="number" min="1" defaultValue="100" className={inputCls} />
-            </Field>
-            <Field label="Canton">
-              <input name="canton" className={inputCls} placeholder="Any" />
-            </Field>
-          </div>
-          <div className="grid grid-cols-2 gap-4">
-            <Field label="Min Flex score">
-              <input name="min_flex_score" type="number" min="0" max="100" className={inputCls} placeholder="—" />
-            </Field>
-          </div>
-          <div className="flex gap-6 flex-wrap">
-            <label className="flex items-center gap-2 text-sm text-slate-700">
-              <input type="checkbox" name="all_companies" className={checkCls} />
-              Include companies already with website
-            </label>
-            <label className="flex items-center gap-2 text-sm text-slate-700">
-              <input type="checkbox" name="refresh_zefix" className={checkCls} />
-              Refresh Zefix data
-            </label>
-          </div>
-          <SubmitBtn loading={loading === "collection/batch"} />
-        </form>
-      </Section>
-
-      <Section title="Specific company search">
-        <form onSubmit={async e => {
-          e.preventDefault();
-          const fd = new FormData(e.currentTarget);
-          const names = (fd.get("names") as string || "").split("\n").map(n => n.trim()).filter(Boolean);
-          const uids = (fd.get("uids") as string || "").split("\n").map(u => u.trim()).filter(Boolean);
-          await submit("collection/initial", {
-            names,
-            uids,
-            canton: (fd.get("canton") as string)?.trim().toUpperCase() || null,
-            active_only: fd.get("include_inactive") !== "on",
-            run_google: fd.get("skip_google") !== "on",
-          });
-        }} className="space-y-4">
-          <Field label="Company names" hint="One per line">
-            <textarea name="names" rows={4} className={inputCls} placeholder="Acme AG&#10;Example GmbH" />
-          </Field>
-          <Field label="UIDs" hint="One per line">
-            <textarea name="uids" rows={2} className={inputCls} placeholder="CHE-123.456.789" />
-          </Field>
-          <div className="grid grid-cols-2 gap-4">
-            <Field label="Canton">
-              <input name="canton" className={inputCls} placeholder="Any" />
-            </Field>
-          </div>
-          <div className="flex gap-6 flex-wrap">
-            <label className="flex items-center gap-2 text-sm text-slate-700">
-              <input type="checkbox" name="include_inactive" className={checkCls} />
-              Include inactive companies
-            </label>
-            <label className="flex items-center gap-2 text-sm text-slate-700">
-              <input type="checkbox" name="skip_google" className={checkCls} />
-              Skip Google search
-            </label>
-          </div>
-          <SubmitBtn loading={loading === "collection/initial"} />
-        </form>
-      </Section>
-
-      <Section title="Zefix detail fetch">
-        <form onSubmit={async e => {
-          e.preventDefault();
-          const fd = new FormData(e.currentTarget);
-          const cantons = (fd.get("cantons") as string || "").split(",").map(c => c.trim().toUpperCase()).filter(Boolean);
-          const uids = (fd.get("uids") as string || "").split("\n").map(u => u.trim()).filter(Boolean);
-          await submit("collection/detail", {
-            cantons: cantons.length ? cantons : null,
-            uids: uids.length ? uids : null,
-            only_missing_details: fd.get("only_missing_details") === "on",
-            delay: parseFloat(fd.get("delay") as string) || 0.3,
-          });
-        }} className="space-y-4">
-          <Field label="Cantons" hint="Comma-separated. Leave blank for all.">
-            <input name="cantons" className={inputCls} placeholder="All" />
-          </Field>
-          <Field label="UIDs" hint="One per line — leave blank to use cantons filter">
-            <textarea name="uids" rows={3} className={inputCls} />
-          </Field>
-          <Field label="Request delay (seconds)">
-            <input name="delay" type="number" step="0.1" min="0.1" defaultValue="0.3" className={cn(inputCls, "w-32")} />
-          </Field>
-          <label className="flex items-center gap-2 text-sm text-slate-700">
-            <input type="checkbox" name="only_missing_details" className={checkCls} />
-            Only companies missing details
-          </label>
-          <SubmitBtn loading={loading === "collection/detail"} />
         </form>
       </Section>
     </div>

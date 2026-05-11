@@ -36,25 +36,28 @@ logger = logging.getLogger(__name__)
 def _try_fix_encoding(text: str) -> tuple[str, bool]:
     """Return (fixed_text, was_fixed).
 
-    Interprets latin-1-range characters as UTF-8 bytes that were misread.
-    Fast path: encode the whole string as latin-1, decode as UTF-8.
-    This fails if the text has any character > U+00FF (e.g. em-dash U+2013,
-    smart quotes) mixed with mojibake.  In that case the fallback processes
-    latin-1-range runs independently, leaving higher chars untouched.
+    Interprets mojibake — UTF-8 bytes decoded as latin-1 or Windows-1252.
+    Fast path: encode whole string as latin-1 then cp1252, decode as UTF-8.
+    This covers e.g. 'Ã¤' → 'ä' (latin-1) and 'Ãœ' → 'Ü' (cp1252, where
+    0x9C maps to U+0153 'œ' rather than the latin-1 control char).
+    Partial-fix path handles mixed text (legitimate em-dashes etc. alongside
+    mojibake) by processing cp1252-encodable runs independently.
     """
     if text.isascii():
         return text, False
 
-    # Fast path — works when text is purely in the latin-1 range (all bytes ≤ 0xFF).
-    try:
-        fixed = text.encode("latin-1").decode("utf-8")
-        return (fixed, True) if fixed != text else (text, False)
-    except (UnicodeDecodeError, UnicodeEncodeError):
-        pass
+    # Fast path — try latin-1 then cp1252 (Windows-1252 superset for 0x80-0x9F).
+    for codec in ("latin-1", "cp1252"):
+        try:
+            fixed = text.encode(codec).decode("utf-8")
+            return (fixed, True) if fixed != text else (text, False)
+        except (UnicodeDecodeError, UnicodeEncodeError):
+            pass
 
-    # Partial-fix path — text has non-latin-1 chars (> U+00FF) mixed with mojibake.
-    # Process contiguous runs of latin-1-range characters as byte sequences;
-    # pass characters above U+00FF through unchanged.
+    # Partial-fix path — text has characters not encodable even as cp1252
+    # (e.g. em-dash U+2013 when the surrounding text is legitimate Unicode)
+    # mixed with mojibake runs.  Process contiguous cp1252-encodable runs as
+    # byte sequences; leave everything else untouched.
     result: list[str] = []
     run = bytearray()
     changed = False
@@ -72,9 +75,9 @@ def _try_fix_encoding(text: str) -> tuple[str, bool]:
             return bytes(run).decode("latin-1")
 
     for ch in text:
-        if ord(ch) <= 0xFF:
-            run.append(ord(ch))
-        else:
+        try:
+            run.extend(ch.encode("cp1252"))
+        except (UnicodeEncodeError, ValueError):
             result.append(_flush(run))
             run = bytearray()
             result.append(ch)
@@ -149,7 +152,7 @@ _SECTION_DEFS: list[tuple[re.Pattern, str, bool]] = [
     (re.compile(r"in\s+liquidation|auflösung[^:.]*:|gelöscht", re.I), "status", False),
     (re.compile(r"fusion[^:.]*:|fusionsvertrag[^:.]*:|verschmelzung[^:.]*:", re.I), "merger", False),
     (re.compile(r"übernahme[^:.]*:|übertragung[^:.]*:", re.I), "acquisition",   False),
-    (re.compile(r"statutenänderung[^:.]*:",            re.I), "purpose",        False),
+    (re.compile(r"statutenänderung[^:.]*:",            re.I), "governance",     False),
     (re.compile(r"vinkulierung[^:.]*:",               re.I), "restriction",    False),
     (re.compile(r"mitteilungen[^:.]{0,30}:",          re.I), "governance",     False),
     # ── French ───────────────────────────────────────────────────────────────
@@ -171,7 +174,7 @@ _SECTION_DEFS: list[tuple[re.Pattern, str, bool]] = [
     (re.compile(r"nouvelle\s+adresse[^:.]*:",          re.I), "address",        False),
     (re.compile(r"domicile[^:.]{0,20}:",               re.I), "address",        False),
     (re.compile(r"but\s+social[^:.]*:|but\s*:",        re.I), "purpose",        False),
-    (re.compile(r"modification\s+des?\s+statuts[^:.]*:", re.I), "purpose",      False),
+    (re.compile(r"modification\s+des?\s+statuts[^:.]*:", re.I), "governance",   False),
     (re.compile(r"clause\s+d.agr[eé]ment[^:.]*:|restriction\s+de\s+transfert[^:.]*:", re.I), "restriction", False),
     (re.compile(r"communications?\s+aux\s+actionnaires?[^:.]*:|avis\s+aux\s+actionnaires?[^:.]*:", re.I), "governance", False),
     (re.compile(r"nouvelle\s+raison\s+sociale[^:.]*:", re.I), "name",           False),
@@ -187,7 +190,7 @@ _SECTION_DEFS: list[tuple[re.Pattern, str, bool]] = [
     (re.compile(r"sede\s+sociale[^:.]*:|nuova\s+sede[^:.]*:|sede[^:.]{0,10}:", re.I), "address", False),
     (re.compile(r"nuovo\s+indirizzo[^:.]*:",           re.I), "address",        False),
     (re.compile(r"scopo[^:.]{0,10}:",                  re.I), "purpose",        False),
-    (re.compile(r"modifica\s+(?:dello\s+)?statuto[^:.]*:", re.I), "purpose",   False),
+    (re.compile(r"modifica\s+(?:dello\s+)?statuto[^:.]*:", re.I), "governance", False),
     (re.compile(r"vincol[oa]\s+(?:di|alla)\s+(?:trasferimento|trasmissibilità)[^:.]*:|clausola\s+di\s+gradimento[^:.]*:|restrizione\s+(?:alla|di)\s+trasfer[^:.]*:", re.I), "restriction", False),
     (re.compile(r"nuova\s+ditta[^:.]*:",               re.I), "name",           False),
     (re.compile(r"in\s+liquidazione|scioglimento[^:.]*:", re.I), "status",      False),
@@ -415,7 +418,7 @@ def _parse_sections(text: str) -> list[dict[str, Any]]:
     if is_correction:
         results.append({
             "change_type": "correction",
-            "keywords_matched": json.dumps(["berichtigung"]),
+            "keywords_matched": "berichtigung",
             "raw_excerpt": body[:200].strip(),
         })
     for i, (start, end, change_type, split) in enumerate(hits):
@@ -437,7 +440,7 @@ def _parse_sections(text: str) -> list[dict[str, Any]]:
             if entry_text:
                 results.append({
                     "change_type": change_type,
-                    "keywords_matched": json.dumps([header.lower()]),
+                    "keywords_matched": header.lower(),
                     "raw_excerpt": entry_text,
                 })
 
@@ -452,7 +455,7 @@ def _parse_sections(text: str) -> list[dict[str, Any]]:
                 seen_excerpts.add(key)
                 results.append({
                     "change_type": change_type,
-                    "keywords_matched": json.dumps([m.group(0).lower()]),
+                    "keywords_matched": m.group(0).lower(),
                     "raw_excerpt": excerpt,
                 })
 
@@ -467,7 +470,7 @@ def _parse_sections(text: str) -> list[dict[str, Any]]:
                     seen_excerpts.add(key)
                     results.append({
                         "change_type": "auditor_change",
-                        "keywords_matched": json.dumps([kw_m.group(0).lower()]),
+                        "keywords_matched": kw_m.group(0).lower(),
                         "raw_excerpt": r["raw_excerpt"],
                     })
 
