@@ -196,9 +196,17 @@ def requeue_interrupted_jobs(
                 job.id, job.job_type, job.restart_count - 1,
             )
             continue
+        if job.cancel_requested:
+            job.status = "cancelled"
+            job.completed_at = datetime.now(tz=timezone.utc)
+            job.message = _job_message("Cancelled (honoured during crash recovery)")
+            _logger.info(
+                "Job %s (type=%s) cancelled during crash recovery — cancel was pending",
+                job.id, job.job_type,
+            )
+            continue
         job.status = "queued"
-        # Clear control flags so a recovered job doesn't instantly cancel/pause.
-        job.cancel_requested = False
+        # Clear pause flag only; cancel was already checked above.
         job.pause_requested = False
         job.started_at = None
         job.completed_at = None
@@ -266,8 +274,16 @@ def requeue_recent_abandoned_jobs(
                 job.id, job.job_type, job.restart_count - 1,
             )
             continue
+        if job.cancel_requested:
+            job.status = "cancelled"
+            job.completed_at = datetime.now(tz=timezone.utc)
+            job.message = _job_message("Cancelled (honoured during abandon recovery)")
+            _logger.info(
+                "Job %s (type=%s) cancelled during abandon recovery — cancel was pending",
+                job.id, job.job_type,
+            )
+            continue
         job.status = "queued"
-        job.cancel_requested = False
         job.pause_requested = False
         job.started_at = None
         job.completed_at = None
