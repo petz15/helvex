@@ -36,7 +36,7 @@ spec:
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           env:
             - name: JOB_TYPE_WHITELIST
-              value: "bulk,detail,initial,shab_daily,shab_backfill,sogc_preprocess,batch,re_geocode,recalculate_scores,recalculate_google_scores,reextract_purpose,reextract_zefix_raw,claude_classify,csv_export,analyze_boilerplate,billing_renewal,saved_view_alerts"
+              value: "bulk,detail,initial,shab_daily,shab_backfill,sogc_preprocess,extract_sogc_persons,batch,re_geocode,recalculate_scores,recalculate_google_scores,reextract_purpose,reextract_zefix_raw,claude_classify,csv_export,analyze_boilerplate,billing_renewal,saved_view_alerts"
           envFrom:
             - secretRef:
                 name: {{ .Values.envSecretName }}
