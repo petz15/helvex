@@ -1291,11 +1291,14 @@ def _get_job_type_blacklist() -> set[str] | None:
 _JOB_POLL_INTERVAL = int(os.environ.get("JOB_POLL_INTERVAL", "5"))
 
 
+_STALE_JOB_RECOVERY_INTERVAL = 180  # seconds between periodic stale-job sweeps
+
+
 def _job_worker_loop(app) -> None:
     whitelist = _get_job_type_whitelist()
     blacklist = _get_job_type_blacklist()
     # In split-worker mode (JOB_TYPE_WHITELIST set) the web pod can't kick this
-    # thread when new jobs arrive, so we poll continuously. In single-pod mode
+    # thread when new jobs arrives, so we poll continuously. In single-pod mode
     # we break when idle and let enqueue_job() kick us via _ensure_job_worker().
     continuous = bool(whitelist)
     if whitelist:
@@ -1305,6 +1308,9 @@ def _job_worker_loop(app) -> None:
     else:
         logger.info("Job worker started — handling all job types")
     app.state.job_worker_running = True
+    # Startup already ran requeue_interrupted_jobs; delay first periodic sweep so
+    # we don't double-recover jobs whose heartbeat hasn't gone stale yet.
+    _last_recovery = time.monotonic()
     try:
         while True:
             with SessionLocal() as db:
@@ -1312,6 +1318,14 @@ def _job_worker_loop(app) -> None:
                 if next_job is None:
                     if not continuous:
                         break
+                    # Periodically recover jobs whose heartbeat went stale after
+                    # startup (e.g. OOMKilled pods where the startup sweep ran
+                    # before the 120 s stale window elapsed).
+                    if time.monotonic() - _last_recovery >= _STALE_JOB_RECOVERY_INTERVAL:
+                        recovered = crud.requeue_interrupted_jobs(db)
+                        if recovered:
+                            logger.info("Periodic stale-job sweep: recovered %d interrupted job(s)", recovered)
+                        _last_recovery = time.monotonic()
                     time.sleep(_JOB_POLL_INTERVAL)
                     continue
                 next_id = next_job.id
