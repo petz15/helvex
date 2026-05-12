@@ -107,6 +107,8 @@ class AuditorOut(BaseModel):
     sogc_change_id: int | None
     sogc_publication_id: int | None
     company_uid: str | None
+    company_id: int | None = None
+    company_name: str | None = None
     pub_date: str | None
     change_type: str
     auditor_name: str | None
@@ -118,12 +120,14 @@ class AuditorOut(BaseModel):
     created_at: str
 
     @classmethod
-    def from_orm(cls, a) -> "AuditorOut":
+    def from_orm(cls, a, company_id: int | None = None, company_name: str | None = None) -> "AuditorOut":
         return cls(
             id=a.id,
             sogc_change_id=a.sogc_change_id,
             sogc_publication_id=a.sogc_publication_id,
             company_uid=a.company_uid,
+            company_id=company_id,
+            company_name=company_name,
             pub_date=a.pub_date,
             change_type=a.change_type,
             auditor_name=a.auditor_name,
@@ -230,9 +234,11 @@ def search_persons(
     q: str | None = Query(None, description="Partial match on lastname or firstname"),
     hometown: str | None = Query(None),
     confidence_level: str | None = Query(None),
+    nationality: str | None = Query(None),
+    min_active_companies: int | None = Query(None, ge=0),
     is_verified: bool | None = Query(None),
     is_current: bool | None = Query(None, description="Filter entities with at least one current appearance"),
-    sort_by: str | None = Query(None, description="Sort order: 'companies' (default) or 'confidence'"),
+    sort_by: str | None = Query(None, description="'companies' (default), 'confidence', or 'appearances'"),
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
     db: Session = Depends(get_db),
@@ -254,6 +260,10 @@ def search_persons(
         qry = qry.filter(func.lower(SogcPersonEntity.hometown_municipality).like(f"%{hometown.lower()}%"))
     if confidence_level:
         qry = qry.filter(SogcPersonEntity.confidence_level == confidence_level)
+    if nationality:
+        qry = qry.filter(func.lower(SogcPersonEntity.nationality).like(f"%{nationality.lower()}%"))
+    if min_active_companies is not None:
+        qry = qry.filter(SogcPersonEntity.active_company_count >= min_active_companies)
     if is_verified is not None:
         qry = qry.filter(SogcPersonEntity.is_verified == is_verified)
     if is_current is True:
@@ -267,6 +277,8 @@ def search_persons(
             else_=3,
         )
         entities = qry.order_by(conf_order, SogcPersonEntity.active_company_count.desc()).offset(offset).limit(limit).all()
+    elif sort_by == "appearances":
+        entities = qry.order_by(SogcPersonEntity.appearance_count.desc(), SogcPersonEntity.id.desc()).offset(offset).limit(limit).all()
     else:
         entities = qry.order_by(SogcPersonEntity.active_company_count.desc(), SogcPersonEntity.id.desc()).offset(offset).limit(limit).all()
 
@@ -384,6 +396,8 @@ def report_person_flag(
 @router.get("/sogc/auditors/search", response_model=list[AuditorOut])
 def search_auditors(
     q: str | None = Query(None),
+    location: str | None = Query(None),
+    legal_form: str | None = Query(None),
     is_current: bool | None = Query(None),
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
@@ -391,15 +405,31 @@ def search_auditors(
     _: User = Depends(get_current_user),
 ):
     from app.models.sogc_auditor import SogcAuditor
-    from sqlalchemy import func
+    from app.models.company import Company as CompanyModel
+    from sqlalchemy import or_
 
-    qry = db.query(SogcAuditor)
-    if q:
-        qry = qry.filter(SogcAuditor.auditor_name_normalized.like(f"%{q.lower()}%"))
-    if is_current is not None:
-        qry = qry.filter(SogcAuditor.is_current == is_current)
-    auditors = qry.order_by(SogcAuditor.pub_date.desc()).offset(offset).limit(limit).all()
-    return [AuditorOut.from_orm(a) for a in auditors]
+    conditions = []
+    if q is not None:
+        conditions.append(SogcAuditor.auditor_name_normalized.like(f"%{q.lower()}%"))
+    if location is not None:
+        conditions.append(SogcAuditor.auditor_location.ilike(f"%{location}%"))
+    if legal_form is not None:
+        conditions.append(SogcAuditor.auditor_legal_form.ilike(f"%{legal_form}%"))
+    if is_current is True:
+        # treat NULL as current (historical data predates the is_current field being set)
+        conditions.append(or_(SogcAuditor.is_current == True, SogcAuditor.is_current.is_(None)))
+    elif is_current is False:
+        conditions.append(SogcAuditor.is_current == False)
+
+    rows = (
+        db.query(SogcAuditor, CompanyModel.id, CompanyModel.name)
+        .outerjoin(CompanyModel, SogcAuditor.company_uid == CompanyModel.uid)
+        .filter(*conditions)
+        .order_by(SogcAuditor.pub_date.desc())
+        .offset(offset).limit(limit)
+        .all()
+    )
+    return [AuditorOut.from_orm(a, company_id=cid, company_name=cname) for a, cid, cname in rows]
 
 
 @router.get("/sogc/auditors/by-uid/{auditor_uid}", response_model=list[AuditorOut])
@@ -410,11 +440,24 @@ def get_auditor_clients(
     _: User = Depends(get_current_user),
 ):
     from app.models.sogc_auditor import SogcAuditor
+    from app.models.company import Company as CompanyModel
 
-    qry = db.query(SogcAuditor).filter_by(auditor_uid=auditor_uid)
-    if is_current is not None:
-        qry = qry.filter(SogcAuditor.is_current == is_current)
-    return [AuditorOut.from_orm(a) for a in qry.order_by(SogcAuditor.pub_date.desc()).all()]
+    from sqlalchemy import or_
+
+    conditions = [SogcAuditor.auditor_uid == auditor_uid]
+    if is_current is True:
+        conditions.append(or_(SogcAuditor.is_current == True, SogcAuditor.is_current.is_(None)))
+    elif is_current is False:
+        conditions.append(SogcAuditor.is_current == False)
+
+    rows = (
+        db.query(SogcAuditor, CompanyModel.id, CompanyModel.name)
+        .outerjoin(CompanyModel, SogcAuditor.company_uid == CompanyModel.uid)
+        .filter(*conditions)
+        .order_by(SogcAuditor.pub_date.desc())
+        .all()
+    )
+    return [AuditorOut.from_orm(a, company_id=cid, company_name=cname) for a, cid, cname in rows]
 
 
 # ── Company-scoped endpoints ───────────────────────────────────────────────────

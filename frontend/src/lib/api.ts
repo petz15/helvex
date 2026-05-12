@@ -1921,12 +1921,14 @@ export async function resetAdminStandardKey(provider: string): Promise<void> {
 
 // ── SOGC Persons ───────────────────────────────────────────────────────────────
 
-import type { SogcPersonEntity, SogcPersonAppearance, SogcAuditor, SogcPersonFlag, SogcPublicationDetail } from "./types";
+import type { SogcPersonEntity, SogcPersonAppearance, SogcAuditor, SogcPersonFlag, SogcPublicationDetail, GlobalSearchResult } from "./types";
 
 export async function searchPersonEntities(params: {
   q?: string;
   hometown?: string;
   confidence_level?: string;
+  nationality?: string;
+  min_active_companies?: number;
   is_verified?: boolean;
   is_current?: boolean;
   sort_by?: string;
@@ -1937,6 +1939,8 @@ export async function searchPersonEntities(params: {
   if (params.q) qs.set("q", params.q);
   if (params.hometown) qs.set("hometown", params.hometown);
   if (params.confidence_level) qs.set("confidence_level", params.confidence_level);
+  if (params.nationality) qs.set("nationality", params.nationality);
+  if (params.min_active_companies !== undefined) qs.set("min_active_companies", String(params.min_active_companies));
   if (params.is_verified !== undefined) qs.set("is_verified", String(params.is_verified));
   if (params.is_current !== undefined) qs.set("is_current", String(params.is_current));
   if (params.sort_by) qs.set("sort_by", params.sort_by);
@@ -1976,16 +1980,26 @@ export async function reportPersonFlag(
 
 export async function searchAuditors(params: {
   q?: string;
+  location?: string;
+  legal_form?: string;
   is_current?: boolean;
   limit?: number;
   offset?: number;
 }): Promise<SogcAuditor[]> {
   const qs = new URLSearchParams();
   if (params.q) qs.set("q", params.q);
+  if (params.location) qs.set("location", params.location);
+  if (params.legal_form) qs.set("legal_form", params.legal_form);
   if (params.is_current !== undefined) qs.set("is_current", String(params.is_current));
   if (params.limit !== undefined) qs.set("limit", String(params.limit));
   if (params.offset !== undefined) qs.set("offset", String(params.offset));
   const res = await fetch(`/api/v1/sogc/auditors/search?${qs}`, { credentials: "include" });
+  if (!res.ok) return _handleErrorResponse(res);
+  return res.json();
+}
+
+export async function globalSearch(q: string): Promise<GlobalSearchResult> {
+  const res = await fetch(`/api/v1/search/global?q=${encodeURIComponent(q)}&limit=6`, { credentials: "include" });
   if (!res.ok) return _handleErrorResponse(res);
   return res.json();
 }

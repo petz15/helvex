@@ -4,6 +4,7 @@ import { usePathname, useRouter } from "next/navigation";
 import useSWR from "swr";
 import { cn } from "@/lib/utils";
 import { Search, Compass, Map, Cog, Database, Activity, UserCircle, Shield, CreditCard, Menu, X, Tag, Globe, ChevronDown, Building2, Users, Newspaper } from "lucide-react";
+import { GlobalSearchTrigger } from "@/components/global-search";
 import { fetchCurrentUser } from "@/lib/api";
 import { HelvexMark } from "@/components/helvex-logo";
 import { useI18n } from "@/i18n/context";
@@ -175,6 +176,8 @@ export function NavBar() {
             ))}
           </nav>
         )}
+
+        {loggedIn && <GlobalSearchTrigger locale={locale} />}
 
         <div className="ml-auto flex items-center gap-3">
           {/* Language switcher — symbol only, dropdown on hover */}

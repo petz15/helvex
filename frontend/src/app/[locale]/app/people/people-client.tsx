@@ -2,7 +2,7 @@
 
 import { useState, useCallback } from "react";
 import Link from "next/link";
-import { useParams, useSearchParams } from "next/navigation";
+import { useParams } from "next/navigation";
 import useSWR from "swr";
 import { AlertCircle, CheckCircle, ChevronDown, ChevronRight, Search, Users, Building2, X } from "lucide-react";
 import { searchPersonEntities, fetchPersonAppearances, searchAuditors, reportPersonFlag } from "@/lib/api";
@@ -92,7 +92,7 @@ function PersonEntityCard({ entity, locale }: { entity: SogcPersonEntity; locale
   const [expanded, setExpanded] = useState(false);
   const [showFlag, setShowFlag] = useState(false);
 
-  const { data: appearances = [], isLoading: appearancesLoading } = useSWR(
+  const { data: appearances = [], isLoading: appearancesLoading, error: appearancesError } = useSWR(
     expanded ? `person-appearances-${entity.id}` : null,
     () => fetchPersonAppearances(entity.id),
     { revalidateOnFocus: false },
@@ -110,7 +110,7 @@ function PersonEntityCard({ entity, locale }: { entity: SogcPersonEntity; locale
               {entity.is_verified && (
                 <CheckCircle size={13} className="text-emerald-500 shrink-0" aria-label="Verified identity" />
               )}
-              <span className={`text-[9px] px-1.5 py-0.5 rounded ${CONFIDENCE_STYLE[entity.confidence_level] ?? CONFIDENCE_STYLE.medium}`}>
+              <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded ${CONFIDENCE_STYLE[entity.confidence_level] ?? CONFIDENCE_STYLE.medium}`}>
                 {entity.confidence_level}
               </span>
               {entity.is_foreign && entity.nationality && (
@@ -170,6 +170,8 @@ function PersonEntityCard({ entity, locale }: { entity: SogcPersonEntity; locale
           <div className="border-t border-slate-100 bg-slate-50/50 px-4 py-3 space-y-1.5">
             {appearancesLoading ? (
               <p className="text-xs text-slate-400">Loading…</p>
+            ) : appearancesError ? (
+              <p className="text-xs text-red-400">Failed to load — try refreshing.</p>
             ) : appearances.length === 0 ? (
               <p className="text-xs text-slate-400">No appearances found.</p>
             ) : (
@@ -201,27 +203,94 @@ function PersonEntityCard({ entity, locale }: { entity: SogcPersonEntity; locale
 
 // ── Auditor card ───────────────────────────────────────────────────────────────
 
-function AuditorCard({ auditor, locale }: { auditor: SogcAuditor; locale: string }) {
+interface AuditorGroup {
+  key: string;
+  name: string | null;
+  uid: string | null;
+  location: string | null;
+  legal_form: string | null;
+  companies: Array<{ id: number | null; uid: string | null; name: string | null; is_current: boolean | null; pub_date: string | null }>;
+}
+
+function groupAuditors(rows: SogcAuditor[]): AuditorGroup[] {
+  const map = new Map<string, AuditorGroup>();
+  for (const r of rows) {
+    const key = r.auditor_uid ?? r.auditor_name_normalized ?? r.auditor_name ?? String(r.id);
+    if (!map.has(key)) {
+      map.set(key, {
+        key,
+        name: r.auditor_name,
+        uid: r.auditor_uid,
+        location: r.auditor_location,
+        legal_form: r.auditor_legal_form,
+        companies: [],
+      });
+    }
+    const group = map.get(key)!;
+    if (r.company_uid || r.company_id) {
+      const alreadyIn = group.companies.some(c => c.uid === r.company_uid && c.id === r.company_id);
+      if (!alreadyIn) {
+        group.companies.push({ id: r.company_id, uid: r.company_uid, name: r.company_name, is_current: r.is_current, pub_date: r.pub_date });
+      }
+    }
+  }
+  return Array.from(map.values());
+}
+
+const COLLAPSE_THRESHOLD = 10;
+
+function AuditorCard({ group, locale }: { group: AuditorGroup; locale: string }) {
+  const [expanded, setExpanded] = useState(false);
+  const showToggle = group.companies.length > COLLAPSE_THRESHOLD;
+  const visible = showToggle && !expanded ? group.companies.slice(0, COLLAPSE_THRESHOLD) : group.companies;
+
   return (
-    <div className="bg-white rounded-xl border border-slate-200 shadow-sm px-4 py-3">
-      <div className="flex items-start justify-between gap-2">
-        <div className="min-w-0">
-          <p className="text-sm font-semibold text-slate-800">{auditor.auditor_name}</p>
-          <div className="flex flex-wrap gap-2 mt-1 text-[11px] text-slate-500">
-            {auditor.auditor_location && <span>{auditor.auditor_location}</span>}
-            {auditor.auditor_uid && (
-              <span className="font-mono text-[10px]">{auditor.auditor_uid}</span>
-            )}
-            {auditor.auditor_legal_form && <span>{auditor.auditor_legal_form}</span>}
+    <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+      <div className="px-4 py-3">
+        <div className="flex items-start justify-between gap-2">
+          <div className="min-w-0">
+            <p className="text-sm font-semibold text-slate-800">{group.name ?? "—"}</p>
+            <div className="flex flex-wrap gap-2 mt-0.5 text-[11px] text-slate-500">
+              {group.location && <span>{group.location}</span>}
+              {group.uid && <span className="font-mono text-[10px]">{group.uid}</span>}
+              {group.legal_form && <span>{group.legal_form}</span>}
+            </div>
           </div>
+          <span className="text-[11px] bg-slate-100 text-slate-500 px-2 py-0.5 rounded-full shrink-0">
+            {group.companies.length} {group.companies.length === 1 ? "client" : "clients"}
+          </span>
         </div>
-        {auditor.company_uid && (
-          <Link
-            href={`/${locale}/app/companies/${auditor.company_uid}`}
-            className="text-[11px] text-blue-600 hover:underline shrink-0"
-          >
-            {auditor.company_uid}
-          </Link>
+
+        {group.companies.length > 0 && (
+          <div className="mt-2 space-y-1">
+            {visible.map((c, i) => (
+              <div key={i} className="flex items-center gap-2 text-xs">
+                <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${c.is_current ? "bg-emerald-400" : "bg-slate-300"}`} />
+                {c.id ? (
+                  <Link
+                    href={`/${locale}/app/companies/${c.id}`}
+                    className="text-blue-600 hover:underline truncate"
+                  >
+                    {c.name ?? c.uid ?? String(c.id)}
+                  </Link>
+                ) : (
+                  <span className="text-slate-600 truncate">{c.name ?? c.uid ?? "—"}</span>
+                )}
+                {c.pub_date && (
+                  <span className="text-slate-400 shrink-0 ml-auto">{c.pub_date.slice(0, 7)}</span>
+                )}
+              </div>
+            ))}
+            {showToggle && (
+              <button
+                onClick={() => setExpanded(v => !v)}
+                className="flex items-center gap-1 text-[11px] text-blue-600 hover:text-blue-800 mt-1"
+              >
+                {expanded ? <ChevronDown size={11} /> : <ChevronRight size={11} />}
+                {expanded ? "Show less" : `Show ${group.companies.length - COLLAPSE_THRESHOLD} more`}
+              </button>
+            )}
+          </div>
         )}
       </div>
     </div>
@@ -230,28 +299,40 @@ function AuditorCard({ auditor, locale }: { auditor: SogcAuditor; locale: string
 
 // ── Main component ─────────────────────────────────────────────────────────────
 
-export function PeopleClient() {
+export function PeopleClient({
+  initialQ,
+  initialTab,
+}: {
+  initialQ?: string;
+  initialTab?: "persons" | "auditors";
+} = {}) {
   const params = useParams();
-  const searchParams = useSearchParams();
   const locale = (params?.locale as string) ?? "de";
 
-  const [tab, setTab] = useState<"persons" | "auditors">("persons");
-  const [q, setQ] = useState(searchParams?.get("q") ?? "");
+  const [tab, setTab] = useState<"persons" | "auditors">(initialTab ?? "persons");
+  const [q, setQ] = useState(initialTab !== "auditors" ? (initialQ ?? "") : "");
   const [hometown, setHometown] = useState("");
+  const [nationality, setNationality] = useState("");
+  const [minCompanies, setMinCompanies] = useState("");
   const [confidenceFilter, setConfidenceFilter] = useState("");
   const [currentOnly, setCurrentOnly] = useState(true);
   const [sortBy, setSortBy] = useState("companies");
   const [offset, setOffset] = useState(0);
 
-  const [auditorQ, setAuditorQ] = useState("");
+  const [auditorQ, setAuditorQ] = useState(initialTab === "auditors" ? (initialQ ?? "") : "");
+  const [auditorLocation, setAuditorLocation] = useState("");
+  const [auditorLegalForm, setAuditorLegalForm] = useState("");
   const [auditorCurrentOnly, setAuditorCurrentOnly] = useState(false);
+  const [auditorSortBy, setAuditorSortBy] = useState("clients");
   const [auditorOffset, setAuditorOffset] = useState(0);
 
   const { data: persons = [], isLoading: personsLoading } = useSWR(
-    tab === "persons" ? ["people-search", q, hometown, confidenceFilter, currentOnly, sortBy, offset] : null,
+    tab === "persons" ? ["people-search", q, hometown, nationality, minCompanies, confidenceFilter, currentOnly, sortBy, offset] : null,
     () => searchPersonEntities({
       q: q || undefined,
       hometown: hometown || undefined,
+      nationality: nationality || undefined,
+      min_active_companies: minCompanies ? parseInt(minCompanies, 10) : undefined,
       confidence_level: confidenceFilter || undefined,
       is_current: currentOnly ? true : undefined,
       sort_by: sortBy,
@@ -262,9 +343,11 @@ export function PeopleClient() {
   );
 
   const { data: auditors = [], isLoading: auditorsLoading } = useSWR(
-    tab === "auditors" ? ["auditors-search", auditorQ, auditorCurrentOnly, auditorOffset] : null,
+    tab === "auditors" ? ["auditors-search", auditorQ, auditorLocation, auditorLegalForm, auditorCurrentOnly, auditorOffset] : null,
     () => searchAuditors({
       q: auditorQ || undefined,
+      location: auditorLocation || undefined,
+      legal_form: auditorLegalForm || undefined,
       is_current: auditorCurrentOnly ? true : undefined,
       limit: LIMIT,
       offset: auditorOffset,
@@ -310,15 +393,30 @@ export function PeopleClient() {
                 placeholder="Search by name…"
                 value={q}
                 onChange={e => { setQ(e.target.value); resetOffset(); }}
-                className="pl-8 pr-3 py-1.5 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-200 w-56"
+                className="pl-8 pr-3 py-1.5 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-200 w-52"
               />
             </div>
             <input
               type="text"
-              placeholder="Hometown (von X)…"
+              placeholder="Hometown…"
               value={hometown}
               onChange={e => { setHometown(e.target.value); resetOffset(); }}
-              className="px-3 py-1.5 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-200 w-44"
+              className="px-3 py-1.5 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-200 w-36"
+            />
+            <input
+              type="text"
+              placeholder="Nationality…"
+              value={nationality}
+              onChange={e => { setNationality(e.target.value); resetOffset(); }}
+              className="px-3 py-1.5 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-200 w-32"
+            />
+            <input
+              type="number"
+              placeholder="Min companies"
+              value={minCompanies}
+              min={0}
+              onChange={e => { setMinCompanies(e.target.value); resetOffset(); }}
+              className="px-3 py-1.5 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-200 w-32"
             />
             <select
               value={confidenceFilter}
@@ -337,6 +435,7 @@ export function PeopleClient() {
             >
               <option value="companies">Sort: Companies</option>
               <option value="confidence">Sort: Confidence</option>
+              <option value="appearances">Sort: Appearances</option>
             </select>
             <label className="flex items-center gap-1.5 text-sm text-slate-600 cursor-pointer select-none">
               <input
@@ -392,9 +491,31 @@ export function PeopleClient() {
                 placeholder="Search auditor name…"
                 value={auditorQ}
                 onChange={e => { setAuditorQ(e.target.value); resetAuditorOffset(); }}
-                className="pl-8 pr-3 py-1.5 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-200 w-64"
+                className="pl-8 pr-3 py-1.5 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-200 w-52"
               />
             </div>
+            <input
+              type="text"
+              placeholder="Location…"
+              value={auditorLocation}
+              onChange={e => { setAuditorLocation(e.target.value); resetAuditorOffset(); }}
+              className="px-3 py-1.5 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-200 w-32"
+            />
+            <input
+              type="text"
+              placeholder="Legal form…"
+              value={auditorLegalForm}
+              onChange={e => { setAuditorLegalForm(e.target.value); resetAuditorOffset(); }}
+              className="px-3 py-1.5 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-200 w-28"
+            />
+            <select
+              value={auditorSortBy}
+              onChange={e => setAuditorSortBy(e.target.value)}
+              className="px-3 py-1.5 rounded-lg border border-slate-200 text-sm text-slate-600 bg-white"
+            >
+              <option value="clients">Sort: Most clients</option>
+              <option value="name">Sort: Name A–Z</option>
+            </select>
             <label className="flex items-center gap-1.5 text-sm text-slate-600 cursor-pointer select-none">
               <input
                 type="checkbox"
@@ -412,9 +533,15 @@ export function PeopleClient() {
             <p className="text-sm text-slate-400">No results.</p>
           ) : (
             <div className="space-y-2">
-              {auditors.map(a => (
-                <AuditorCard key={a.id} auditor={a} locale={locale} />
-              ))}
+              {groupAuditors(auditors)
+                .sort((a, b) =>
+                  auditorSortBy === "name"
+                    ? (a.name ?? "").localeCompare(b.name ?? "")
+                    : b.companies.length - a.companies.length
+                )
+                .map(group => (
+                  <AuditorCard key={group.key} group={group} locale={locale} />
+                ))}
             </div>
           )}
 

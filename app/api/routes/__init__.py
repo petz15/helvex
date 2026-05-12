@@ -8,6 +8,7 @@ from app.api.routes.jobs import router as jobs_router
 from app.api.routes.map import router as map_router
 from app.api.routes.notes import router as notes_router
 from app.api.routes.persons import router as persons_router
+from app.api.routes.search import router as search_router
 from app.api.routes.ops_settings import router as settings_router
 from app.api.routes.orgs import router as orgs_router
 from app.api.routes.views import router as views_router
@@ -24,6 +25,7 @@ __all__ = [
     "map_router",
     "notes_router",
     "persons_router",
+    "search_router",
     "settings_router",
     "orgs_router",
     "views_router",

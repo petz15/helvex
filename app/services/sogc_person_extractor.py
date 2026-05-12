@@ -293,7 +293,7 @@ def _parse_auditor(raw_excerpt: str, change_type: str) -> dict | None:
             continue
 
     is_current: bool | None
-    if change_type == "person_added":
+    if change_type in ("person_added", "auditor_change"):
         is_current = True
     elif change_type == "person_removed":
         is_current = False

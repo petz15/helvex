@@ -317,6 +317,8 @@ export interface SogcAuditor {
   sogc_change_id: number;
   sogc_publication_id: number;
   company_uid: string | null;
+  company_id: number | null;
+  company_name: string | null;
   pub_date: string | null;
   change_type: string;
   auditor_name: string | null;
@@ -326,6 +328,37 @@ export interface SogcAuditor {
   auditor_name_normalized: string | null;
   is_current: boolean | null;
   created_at: string;
+}
+
+export interface GlobalCompanySnippet {
+  id: number;
+  uid: string;
+  name: string;
+  canton: string | null;
+  legal_form: string | null;
+  status: string | null;
+}
+
+export interface GlobalPersonSnippet {
+  id: number;
+  firstname: string | null;
+  lastname: string | null;
+  hometown_municipality: string | null;
+  active_company_count: number;
+  confidence_level: string;
+}
+
+export interface GlobalAuditorSnippet {
+  key: string;
+  name: string;
+  location: string | null;
+  client_count: number;
+}
+
+export interface GlobalSearchResult {
+  companies: GlobalCompanySnippet[];
+  persons: GlobalPersonSnippet[];
+  auditors: GlobalAuditorSnippet[];
 }
 
 export interface SogcPersonFlag {
