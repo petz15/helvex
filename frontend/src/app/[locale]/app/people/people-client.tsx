@@ -92,7 +92,7 @@ function PersonEntityCard({ entity, locale }: { entity: SogcPersonEntity; locale
   const [expanded, setExpanded] = useState(false);
   const [showFlag, setShowFlag] = useState(false);
 
-  const { data: appearances = [] } = useSWR(
+  const { data: appearances = [], isLoading: appearancesLoading } = useSWR(
     expanded ? `person-appearances-${entity.id}` : null,
     () => fetchPersonAppearances(entity.id),
     { revalidateOnFocus: false },
@@ -110,22 +110,27 @@ function PersonEntityCard({ entity, locale }: { entity: SogcPersonEntity; locale
               {entity.is_verified && (
                 <CheckCircle size={13} className="text-emerald-500 shrink-0" aria-label="Verified identity" />
               )}
-              <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${CONFIDENCE_STYLE[entity.confidence_level] ?? CONFIDENCE_STYLE.medium}`}>
+              <span className={`text-[9px] px-1.5 py-0.5 rounded ${CONFIDENCE_STYLE[entity.confidence_level] ?? CONFIDENCE_STYLE.medium}`}>
                 {entity.confidence_level}
               </span>
               {entity.is_foreign && entity.nationality && (
-                <span className="text-[10px] text-slate-400 italic">{entity.nationality} national</span>
+                <span className="text-[9px] text-slate-400 italic">{entity.nationality} national</span>
               )}
             </div>
 
-            {entity.hometown_municipality && (
-              <p className="text-xs text-slate-500 mt-0.5">von {entity.hometown_municipality}</p>
-            )}
+            <div className="flex flex-wrap gap-x-3 mt-0.5">
+              {entity.hometown_municipality && (
+                <p className="text-xs text-slate-500">von {entity.hometown_municipality}</p>
+              )}
+              {entity.current_residence_municipality && (
+                <p className="text-xs text-slate-500">wohnhaft {entity.current_residence_municipality}</p>
+              )}
+            </div>
 
             {entity.confidence_level === "low" && (
-              <p className="text-[10px] text-amber-600 mt-1 flex items-center gap-1">
-                <AlertCircle size={10} />
-                Foreign national — identity match is approximate
+              <p className="text-[9px] text-amber-600/80 mt-0.5 flex items-center gap-1">
+                <AlertCircle size={9} />
+                Identity match approximate
               </p>
             )}
 
@@ -163,8 +168,10 @@ function PersonEntityCard({ entity, locale }: { entity: SogcPersonEntity; locale
 
         {expanded && (
           <div className="border-t border-slate-100 bg-slate-50/50 px-4 py-3 space-y-1.5">
-            {appearances.length === 0 ? (
-              <p className="text-xs text-slate-400">No appearances loaded.</p>
+            {appearancesLoading ? (
+              <p className="text-xs text-slate-400">Loading…</p>
+            ) : appearances.length === 0 ? (
+              <p className="text-xs text-slate-400">No appearances found.</p>
             ) : (
               appearances.map(a => (
                 <div key={a.id} className="flex items-center gap-2 text-xs">
@@ -233,19 +240,21 @@ export function PeopleClient() {
   const [hometown, setHometown] = useState("");
   const [confidenceFilter, setConfidenceFilter] = useState("");
   const [currentOnly, setCurrentOnly] = useState(true);
+  const [sortBy, setSortBy] = useState("companies");
   const [offset, setOffset] = useState(0);
 
   const [auditorQ, setAuditorQ] = useState("");
-  const [auditorCurrentOnly, setAuditorCurrentOnly] = useState(true);
+  const [auditorCurrentOnly, setAuditorCurrentOnly] = useState(false);
   const [auditorOffset, setAuditorOffset] = useState(0);
 
   const { data: persons = [], isLoading: personsLoading } = useSWR(
-    tab === "persons" ? ["people-search", q, hometown, confidenceFilter, currentOnly, offset] : null,
+    tab === "persons" ? ["people-search", q, hometown, confidenceFilter, currentOnly, sortBy, offset] : null,
     () => searchPersonEntities({
       q: q || undefined,
       hometown: hometown || undefined,
       confidence_level: confidenceFilter || undefined,
       is_current: currentOnly ? true : undefined,
+      sort_by: sortBy,
       limit: LIMIT,
       offset,
     }),
@@ -320,6 +329,14 @@ export function PeopleClient() {
               <option value="high">High</option>
               <option value="medium">Medium</option>
               <option value="low">Low (foreign)</option>
+            </select>
+            <select
+              value={sortBy}
+              onChange={e => { setSortBy(e.target.value); resetOffset(); }}
+              className="px-3 py-1.5 rounded-lg border border-slate-200 text-sm text-slate-600 bg-white"
+            >
+              <option value="companies">Sort: Companies</option>
+              <option value="confidence">Sort: Confidence</option>
             </select>
             <label className="flex items-center gap-1.5 text-sm text-slate-600 cursor-pointer select-none">
               <input

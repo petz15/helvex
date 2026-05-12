@@ -3,7 +3,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import useSWR from "swr";
 import { cn } from "@/lib/utils";
-import { Search, Compass, Map, Cog, Database, Activity, UserCircle, Shield, CreditCard, Menu, X, Tag, Globe, ChevronDown, Building2, Users } from "lucide-react";
+import { Search, Compass, Map, Cog, Database, Activity, UserCircle, Shield, CreditCard, Menu, X, Tag, Globe, ChevronDown, Building2, Users, Newspaper } from "lucide-react";
 import { fetchCurrentUser } from "@/lib/api";
 import { HelvexMark } from "@/components/helvex-logo";
 import { useI18n } from "@/i18n/context";
@@ -65,6 +65,7 @@ export function NavBar() {
     { href: `/${locale}/app/explorer`, label: t.explorer, icon: Compass },
     { href: `/${locale}/app/map`, label: t.map, icon: Map },
     { href: `/${locale}/app/people`, label: "People", icon: Users },
+    { href: `/${locale}/app/sogc`, label: "SHAB", icon: Newspaper },
     { href: `/${locale}/app/jobs`, label: t.jobs, icon: Activity },
   ];
 

@@ -1,6 +1,9 @@
 "use client";
 import { useState } from "react";
 import { ChevronDown, ChevronUp, UserPlus, UserMinus, UserCog } from "lucide-react";
+import useSWR from "swr";
+import { fetchCompanyPublications } from "@/lib/api";
+import type { SogcPublicationDetail } from "@/lib/types";
 import { useI18n } from "@/i18n/context";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -46,7 +49,7 @@ function decodeHtmlEntities(value: string): string {
 
 // ─── FT tag renderer ──────────────────────────────────────────────────────────
 
-function renderFtTags(message: string): React.ReactNode[] {
+export function renderFtTags(message: string): React.ReactNode[] {
   // Strip outer XML-like FT tags, keeping content with styling
   const parts: React.ReactNode[] = [];
   const regex = /<FT TYPE="([^"]+)">([^<]*)<\/FT>|([^<]+)/g;
@@ -221,7 +224,7 @@ export function deriveCurrentSigners(entries: SogcEntry[]): Person[] {
 
 // ─── Badge helpers ────────────────────────────────────────────────────────────
 
-const MUTATION_LABELS: Record<string, { label: string; className: string }> = {
+export const MUTATION_LABELS: Record<string, { label: string; className: string }> = {
   "status.neu": { label: "Neueintragung", className: "bg-green-100 text-green-700" },
   firmenaenderung: { label: "Firmenänderung", className: "bg-blue-100 text-blue-700" },
   zweckaenderung: { label: "Zweckänderung", className: "bg-purple-100 text-purple-700" },
@@ -232,7 +235,7 @@ const MUTATION_LABELS: Record<string, { label: string; className: string }> = {
   status: { label: "Status", className: "bg-slate-100 text-slate-600" },
 };
 
-function MutationBadge({ mutKey }: { mutKey: string }) {
+export function MutationBadge({ mutKey }: { mutKey: string }) {
   const cfg = MUTATION_LABELS[mutKey] ?? { label: mutKey, className: "bg-slate-100 text-slate-500" };
   return (
     <span className={`inline-block text-[11px] font-medium px-1.5 py-0.5 rounded ${cfg.className}`}>
@@ -431,6 +434,106 @@ export function SignersPanel({ sogcPubJson }: { sogcPubJson: string | null }) {
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
         {currentSigners.map((p, i) => (
           <PersonCard key={i} person={p} variant="current" />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ─── DB-backed timeline (uses sogc_publications table) ────────────────────────
+
+function TimelineEntryDB({ pub }: { pub: SogcPublicationDetail }) {
+  const [expanded, setExpanded] = useState(false);
+
+  const text =
+    (pub.detected_language === "fr" && pub.text_fr) ||
+    (pub.detected_language === "it" && pub.text_it) ||
+    (pub.detected_language === "en" && pub.text_en) ||
+    pub.text_de ||
+    "";
+
+  const isLong = text.length > LONG_MSG_THRESHOLD;
+
+  return (
+    <div className="relative pl-6">
+      <span className="absolute left-0 top-1.5 h-2.5 w-2.5 rounded-full border-2 border-white ring-1 ring-slate-300 bg-white" />
+
+      <div className="mb-1 flex flex-wrap items-center gap-1.5">
+        <span className="text-xs font-semibold text-slate-600">
+          {pub.pub_date
+            ? new Date(pub.pub_date).toLocaleDateString("de-CH", { day: "2-digit", month: "2-digit", year: "numeric" })
+            : "—"}
+        </span>
+        {pub.sub_rubric && <span className="text-xs text-slate-400">{pub.sub_rubric}</span>}
+        {pub.pub_number && <span className="text-xs text-slate-400 font-mono">#{pub.pub_number}</span>}
+        {pub.changes.map((c, i) => (
+          <MutationBadge key={i} mutKey={c.change_type} />
+        ))}
+      </div>
+
+      <div className="text-xs text-slate-600 leading-relaxed">
+        {!text ? (
+          <span className="italic text-slate-400">No content</span>
+        ) : isLong && !expanded ? (
+          <>
+            <span>{renderFtTags(text.slice(0, LONG_MSG_THRESHOLD))}…</span>
+            <button
+              type="button"
+              onClick={() => setExpanded(true)}
+              className="ml-1 inline-flex items-center gap-0.5 text-blue-600 hover:underline"
+            >
+              mehr <ChevronDown size={11} />
+            </button>
+          </>
+        ) : (
+          <>
+            {renderFtTags(text)}
+            {isLong && (
+              <button
+                type="button"
+                onClick={() => setExpanded(false)}
+                className="ml-1 inline-flex items-center gap-0.5 text-blue-600 hover:underline"
+              >
+                weniger <ChevronUp size={11} />
+              </button>
+            )}
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+export function SogcTimelineDB({ companyUid }: { companyUid: string }) {
+  const { dict } = useI18n();
+  const t = dict.app.companydetail;
+
+  const { data: publications = [], isLoading } = useSWR(
+    `company-publications-${companyUid}`,
+    () => fetchCompanyPublications(companyUid),
+    { revalidateOnFocus: false },
+  );
+
+  if (isLoading) {
+    return (
+      <div className="bg-white rounded-xl border border-slate-200 p-5 shadow-sm">
+        <h2 className="text-sm font-semibold text-slate-700 mb-3">{t.shabhistory}</h2>
+        <p className="text-xs text-slate-400">Loading…</p>
+      </div>
+    );
+  }
+
+  if (publications.length === 0) return null;
+
+  return (
+    <div className="bg-white rounded-xl border border-slate-200 p-5 shadow-sm">
+      <h2 className="text-sm font-semibold text-slate-700 mb-4">
+        {t.shabhistory}
+        <span className="ml-2 text-xs font-normal text-slate-400">({publications.length})</span>
+      </h2>
+      <div className="relative border-l border-slate-200 ml-1.5 space-y-5">
+        {publications.map((pub) => (
+          <TimelineEntryDB key={pub.id} pub={pub} />
         ))}
       </div>
     </div>

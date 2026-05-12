@@ -8,7 +8,7 @@ import { fmtDate, fmtDateTime, fmtRelativeTime, cn, formatClusterLabel } from "@
 import { createNote, deleteNote, fetchCompany, runCompanyWebSearch, selectCompanyWebsite } from "@/lib/api";
 import type { Company, Note, GoogleScoredResult } from "@/lib/types";
 import "leaflet/dist/leaflet.css";
-import { SogcTimeline, SignersPanel } from "@/components/sogc-history";
+import { SogcTimelineDB } from "@/components/sogc-history";
 import { BoardPanel } from "@/components/board-panel";
 import { useI18n } from "@/i18n/context";
 import { useApiErrorHandler } from "@/lib/use-api-error";
@@ -598,11 +598,8 @@ export function CompanyDetailClient({ company: initial, readOnlyDemo = false }: 
       {/* Structured board & officers from SOGC person graph */}
       <BoardPanel companyUid={company.uid} />
 
-      {/* SHAB signers (fallback from raw JSON) */}
-      <SignersPanel sogcPubJson={company.sogc_pub} />
-
-      {/* SHAB timeline */}
-      <SogcTimeline sogcPubJson={company.sogc_pub} />
+      {/* SHAB timeline from preprocessed sogc_publications table */}
+      <SogcTimelineDB companyUid={company.uid} />
 
       {/* Notes */}
       {!readOnlyDemo && <div className="bg-white rounded-xl border border-slate-200 p-5 shadow-sm">

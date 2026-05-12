@@ -20,6 +20,7 @@ class PersonEntityOut(BaseModel):
     lastname: str | None
     firstname: str | None
     hometown_municipality: str | None
+    current_residence_municipality: str | None
     is_foreign: bool
     nationality: str | None
     confidence_level: str
@@ -35,13 +36,14 @@ class PersonEntityOut(BaseModel):
     updated_at: str
 
     @classmethod
-    def from_orm(cls, e) -> "PersonEntityOut":
+    def from_orm(cls, e, residence: str | None = None) -> "PersonEntityOut":
         return cls(
             id=e.id,
             normalized_key=e.normalized_key,
             lastname=e.lastname,
             firstname=e.firstname,
             hometown_municipality=e.hometown_municipality,
+            current_residence_municipality=residence,
             is_foreign=e.is_foreign,
             nationality=e.nationality,
             confidence_level=e.confidence_level,
@@ -62,8 +64,8 @@ class PersonAppearanceOut(BaseModel):
     id: int
     person_entity_id: int
     entity_override_id: int | None
-    sogc_change_id: int
-    sogc_publication_id: int
+    sogc_change_id: int | None
+    sogc_publication_id: int | None
     company_uid: str | None
     pub_date: str | None
     change_type: str
@@ -102,8 +104,8 @@ class PersonAppearanceOut(BaseModel):
 
 class AuditorOut(BaseModel):
     id: int
-    sogc_change_id: int
-    sogc_publication_id: int
+    sogc_change_id: int | None
+    sogc_publication_id: int | None
     company_uid: str | None
     pub_date: str | None
     change_type: str
@@ -131,6 +133,56 @@ class AuditorOut(BaseModel):
             auditor_name_normalized=a.auditor_name_normalized,
             is_current=a.is_current,
             created_at=a.created_at.isoformat() if a.created_at else "",
+        )
+
+
+class SogcChangeOut(BaseModel):
+    id: int
+    change_type: str
+    keywords_matched: str | None
+    raw_excerpt: str | None
+
+    @classmethod
+    def from_orm(cls, c) -> "SogcChangeOut":
+        return cls(
+            id=c.id,
+            change_type=c.change_type,
+            keywords_matched=c.keywords_matched,
+            raw_excerpt=c.raw_excerpt,
+        )
+
+
+class SogcPublicationOut(BaseModel):
+    id: int
+    sogc_id: str
+    company_uid: str | None
+    pub_date: str | None
+    sub_rubric: str | None
+    pub_number: str | None
+    text_de: str | None
+    text_fr: str | None
+    text_it: str | None
+    text_en: str | None
+    detected_language: str | None
+    preprocessed_at: str | None
+    changes: list[SogcChangeOut] = []
+
+    @classmethod
+    def from_orm(cls, p) -> "SogcPublicationOut":
+        return cls(
+            id=p.id,
+            sogc_id=p.sogc_id,
+            company_uid=p.company_uid,
+            pub_date=p.pub_date,
+            sub_rubric=p.sub_rubric,
+            pub_number=p.pub_number,
+            text_de=p.text_de,
+            text_fr=p.text_fr,
+            text_it=p.text_it,
+            text_en=p.text_en,
+            detected_language=p.detected_language,
+            preprocessed_at=p.preprocessed_at.isoformat() if p.preprocessed_at else None,
+            changes=[SogcChangeOut.from_orm(c) for c in (p.changes or [])],
         )
 
 
@@ -180,6 +232,7 @@ def search_persons(
     confidence_level: str | None = Query(None),
     is_verified: bool | None = Query(None),
     is_current: bool | None = Query(None, description="Filter entities with at least one current appearance"),
+    sort_by: str | None = Query(None, description="Sort order: 'companies' (default) or 'confidence'"),
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
     db: Session = Depends(get_db),
@@ -187,18 +240,17 @@ def search_persons(
 ):
     from app.models.sogc_person_entity import SogcPersonEntity
     from app.models.sogc_person_appearance import SogcPersonAppearance
+    from sqlalchemy import case, func
 
     qry = db.query(SogcPersonEntity).filter(SogcPersonEntity.merged_into_id.is_(None))
 
     if q:
         term = f"%{q.lower()}%"
-        from sqlalchemy import func
         qry = qry.filter(
             (func.lower(SogcPersonEntity.lastname).like(term)) |
             (func.lower(SogcPersonEntity.firstname).like(term))
         )
     if hometown:
-        from sqlalchemy import func
         qry = qry.filter(func.lower(SogcPersonEntity.hometown_municipality).like(f"%{hometown.lower()}%"))
     if confidence_level:
         qry = qry.filter(SogcPersonEntity.confidence_level == confidence_level)
@@ -207,8 +259,36 @@ def search_persons(
     if is_current is True:
         qry = qry.filter(SogcPersonEntity.active_company_count > 0)
 
-    entities = qry.order_by(SogcPersonEntity.active_company_count.desc(), SogcPersonEntity.id.desc()).offset(offset).limit(limit).all()
-    return [PersonEntityOut.from_orm(e) for e in entities]
+    if sort_by == "confidence":
+        conf_order = case(
+            (SogcPersonEntity.confidence_level == "high", 0),
+            (SogcPersonEntity.confidence_level == "medium", 1),
+            (SogcPersonEntity.confidence_level == "low", 2),
+            else_=3,
+        )
+        entities = qry.order_by(conf_order, SogcPersonEntity.active_company_count.desc()).offset(offset).limit(limit).all()
+    else:
+        entities = qry.order_by(SogcPersonEntity.active_company_count.desc(), SogcPersonEntity.id.desc()).offset(offset).limit(limit).all()
+
+    # Batch-fetch most recent current residence for each entity (avoids N+1)
+    entity_ids = [e.id for e in entities]
+    residence_map: dict[int, str] = {}
+    if entity_ids:
+        rows = (
+            db.query(SogcPersonAppearance.person_entity_id, SogcPersonAppearance.residence_municipality)
+            .filter(
+                SogcPersonAppearance.person_entity_id.in_(entity_ids),
+                SogcPersonAppearance.is_current == True,
+                SogcPersonAppearance.residence_municipality.isnot(None),
+            )
+            .order_by(SogcPersonAppearance.person_entity_id, SogcPersonAppearance.pub_date.desc())
+            .all()
+        )
+        for pe_id, res in rows:
+            if pe_id not in residence_map:
+                residence_map[pe_id] = res
+
+    return [PersonEntityOut.from_orm(e, residence_map.get(e.id)) for e in entities]
 
 
 @router.get("/sogc/persons/flags", response_model=list[PersonFlagOut])
@@ -368,3 +448,74 @@ def get_company_auditors(
     if is_current is not None:
         qry = qry.filter(SogcAuditor.is_current == is_current)
     return [AuditorOut.from_orm(a) for a in qry.order_by(SogcAuditor.pub_date.desc()).all()]
+
+
+@router.get("/companies/{company_uid}/publications", response_model=list[SogcPublicationOut])
+def get_company_publications(
+    company_uid: str,
+    limit: int = Query(200, ge=1, le=500),
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+):
+    from app.models.sogc_publication import SogcPublication
+    from sqlalchemy.orm import joinedload
+
+    pubs = (
+        db.query(SogcPublication)
+        .filter_by(company_uid=company_uid)
+        .options(joinedload(SogcPublication.changes))
+        .order_by(SogcPublication.pub_date.desc())
+        .limit(limit)
+        .all()
+    )
+    return [SogcPublicationOut.from_orm(p) for p in pubs]
+
+
+# ── SOGC global search ─────────────────────────────────────────────────────────
+
+@router.get("/sogc/publications/search", response_model=list[SogcPublicationOut])
+def search_publications(
+    q: str | None = Query(None, description="Text search in pub content, sogc_id, or pub_number"),
+    company_uid: str | None = Query(None),
+    sub_rubric: str | None = Query(None),
+    change_type: str | None = Query(None, description="Filter by change type in linked changes"),
+    date_from: str | None = Query(None, description="YYYY-MM-DD inclusive lower bound"),
+    date_to: str | None = Query(None, description="YYYY-MM-DD inclusive upper bound"),
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+):
+    from app.models.sogc_publication import SogcPublication
+    from app.models.sogc_change import SogcChange
+    from sqlalchemy.orm import joinedload
+    from sqlalchemy import func, or_
+
+    qry = db.query(SogcPublication).options(joinedload(SogcPublication.changes))
+
+    if q:
+        term = f"%{q}%"
+        qry = qry.filter(
+            or_(
+                func.lower(SogcPublication.text_de).like(term.lower()),
+                func.lower(SogcPublication.text_fr).like(term.lower()),
+                func.lower(SogcPublication.text_it).like(term.lower()),
+                SogcPublication.sogc_id.like(term),
+                SogcPublication.pub_number.like(term),
+            )
+        )
+    if company_uid:
+        qry = qry.filter(SogcPublication.company_uid == company_uid)
+    if sub_rubric:
+        qry = qry.filter(SogcPublication.sub_rubric == sub_rubric)
+    if change_type:
+        qry = qry.filter(
+            SogcPublication.changes.any(SogcChange.change_type == change_type)
+        )
+    if date_from:
+        qry = qry.filter(SogcPublication.pub_date >= date_from)
+    if date_to:
+        qry = qry.filter(SogcPublication.pub_date <= date_to)
+
+    pubs = qry.order_by(SogcPublication.pub_date.desc()).offset(offset).limit(limit).all()
+    return [SogcPublicationOut.from_orm(p) for p in pubs]

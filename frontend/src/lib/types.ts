@@ -276,6 +276,7 @@ export interface SogcPersonEntity {
   lastname: string | null;
   firstname: string | null;
   hometown_municipality: string | null;
+  current_residence_municipality: string | null;
   is_foreign: boolean;
   nationality: string | null;
   confidence_level: "high" | "medium" | "low";
@@ -339,4 +340,27 @@ export interface SogcPersonFlag {
   resolved_at: string | null;
   reported_by_user_id: number | null;
   created_at: string;
+}
+
+export interface SogcChangeDetail {
+  id: number;
+  change_type: string;
+  keywords_matched: string | null;
+  raw_excerpt: string | null;
+}
+
+export interface SogcPublicationDetail {
+  id: number;
+  sogc_id: string;
+  company_uid: string | null;
+  pub_date: string | null;
+  sub_rubric: string | null;
+  pub_number: string | null;
+  text_de: string | null;
+  text_fr: string | null;
+  text_it: string | null;
+  text_en: string | null;
+  detected_language: string | null;
+  preprocessed_at: string | null;
+  changes: SogcChangeDetail[];
 }
