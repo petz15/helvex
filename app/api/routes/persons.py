@@ -67,6 +67,8 @@ class PersonAppearanceOut(BaseModel):
     sogc_change_id: int | None
     sogc_publication_id: int | None
     company_uid: str | None
+    company_id: int | None = None
+    company_name: str | None = None
     pub_date: str | None
     change_type: str
     role: str | None
@@ -80,7 +82,7 @@ class PersonAppearanceOut(BaseModel):
     created_at: str
 
     @classmethod
-    def from_orm(cls, a) -> "PersonAppearanceOut":
+    def from_orm(cls, a, company_id: int | None = None, company_name: str | None = None) -> "PersonAppearanceOut":
         return cls(
             id=a.id,
             person_entity_id=a.person_entity_id,
@@ -88,6 +90,8 @@ class PersonAppearanceOut(BaseModel):
             sogc_change_id=a.sogc_change_id,
             sogc_publication_id=a.sogc_publication_id,
             company_uid=a.company_uid,
+            company_id=company_id,
+            company_name=company_name,
             pub_date=a.pub_date,
             change_type=a.change_type,
             role=a.role,
@@ -160,6 +164,7 @@ class SogcPublicationOut(BaseModel):
     id: int
     sogc_id: str
     company_uid: str | None
+    company_id: int | None = None
     pub_date: str | None
     sub_rubric: str | None
     pub_number: str | None
@@ -172,11 +177,12 @@ class SogcPublicationOut(BaseModel):
     changes: list[SogcChangeOut] = []
 
     @classmethod
-    def from_orm(cls, p) -> "SogcPublicationOut":
+    def from_orm(cls, p, company_id: int | None = None) -> "SogcPublicationOut":
         return cls(
             id=p.id,
             sogc_id=p.sogc_id,
             company_uid=p.company_uid,
+            company_id=company_id,
             pub_date=p.pub_date,
             sub_rubric=p.sub_rubric,
             pub_number=p.pub_number,
@@ -290,7 +296,7 @@ def search_persons(
             db.query(SogcPersonAppearance.person_entity_id, SogcPersonAppearance.residence_municipality)
             .filter(
                 SogcPersonAppearance.person_entity_id.in_(entity_ids),
-                SogcPersonAppearance.is_current == True,
+                SogcPersonAppearance.is_current.isnot(False),
                 SogcPersonAppearance.residence_municipality.isnot(None),
             )
             .order_by(SogcPersonAppearance.person_entity_id, SogcPersonAppearance.pub_date.desc())
@@ -348,12 +354,38 @@ def get_person_appearances(
     _: User = Depends(get_current_user),
 ):
     from app.models.sogc_person_appearance import SogcPersonAppearance
+    from sqlalchemy import or_
 
-    qry = db.query(SogcPersonAppearance).filter_by(person_entity_id=entity_id)
+    qry = db.query(SogcPersonAppearance).filter(
+        or_(
+            SogcPersonAppearance.person_entity_id == entity_id,
+            SogcPersonAppearance.entity_override_id == entity_id,
+        )
+    )
     if is_current is not None:
         qry = qry.filter(SogcPersonAppearance.is_current == is_current)
     appearances = qry.order_by(SogcPersonAppearance.pub_date.desc()).limit(limit).all()
-    return [PersonAppearanceOut.from_orm(a) for a in appearances]
+
+    # Batch-fetch company id+name to avoid N+1
+    uids = [a.company_uid for a in appearances if a.company_uid]
+    company_lookup: dict[str, tuple[int, str]] = {}
+    if uids:
+        from app.models.company import Company as CompanyModel
+        for uid, cid, cname in (
+            db.query(CompanyModel.uid, CompanyModel.id, CompanyModel.name)
+            .filter(CompanyModel.uid.in_(uids))
+            .all()
+        ):
+            company_lookup[uid] = (cid, cname)
+
+    return [
+        PersonAppearanceOut.from_orm(
+            a,
+            company_id=company_lookup.get(a.company_uid, (None, None))[0] if a.company_uid else None,
+            company_name=company_lookup.get(a.company_uid, (None, None))[1] if a.company_uid else None,
+        )
+        for a in appearances
+    ]
 
 
 @router.post(
@@ -493,6 +525,14 @@ def get_company_auditors(
     return [AuditorOut.from_orm(a) for a in qry.order_by(SogcAuditor.pub_date.desc()).all()]
 
 
+def _uid_to_company_id(db, uids: list[str]) -> dict[str, int]:
+    if not uids:
+        return {}
+    from app.models.company import Company as CompanyModel
+    rows = db.query(CompanyModel.uid, CompanyModel.id).filter(CompanyModel.uid.in_(uids)).all()
+    return {uid: cid for uid, cid in rows}
+
+
 @router.get("/companies/{company_uid}/publications", response_model=list[SogcPublicationOut])
 def get_company_publications(
     company_uid: str,
@@ -511,7 +551,8 @@ def get_company_publications(
         .limit(limit)
         .all()
     )
-    return [SogcPublicationOut.from_orm(p) for p in pubs]
+    uid_map = _uid_to_company_id(db, [p.company_uid for p in pubs if p.company_uid])
+    return [SogcPublicationOut.from_orm(p, company_id=uid_map.get(p.company_uid)) for p in pubs]
 
 
 # ── SOGC global search ─────────────────────────────────────────────────────────
@@ -561,4 +602,5 @@ def search_publications(
         qry = qry.filter(SogcPublication.pub_date <= date_to)
 
     pubs = qry.order_by(SogcPublication.pub_date.desc()).offset(offset).limit(limit).all()
-    return [SogcPublicationOut.from_orm(p) for p in pubs]
+    uid_map = _uid_to_company_id(db, [p.company_uid for p in pubs if p.company_uid])
+    return [SogcPublicationOut.from_orm(p, company_id=uid_map.get(p.company_uid)) for p in pubs]

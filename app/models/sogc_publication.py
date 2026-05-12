@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text, func
+from sqlalchemy import Boolean, DateTime, ForeignKey, Index, Integer, String, Text, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
@@ -8,6 +8,9 @@ from app.database import Base
 
 class SogcPublication(Base):
     __tablename__ = "sogc_publications"
+    __table_args__ = (
+        Index("ix_sogc_pub_uid_date", "company_uid", "pub_date"),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
     sogc_id: Mapped[str] = mapped_column(String(32), unique=True, index=True, nullable=False)

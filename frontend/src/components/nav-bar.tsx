@@ -62,7 +62,7 @@ export function NavBar() {
   const loggedOut = !isLoading && !me;
 
   const NAV_MAIN = [
-    { href: `/${locale}/app/search`, label: t.search, icon: Search },
+    { href: `/${locale}/app/search`, label: "Companies", icon: Search },
     { href: `/${locale}/app/explorer`, label: t.explorer, icon: Compass },
     { href: `/${locale}/app/map`, label: t.map, icon: Map },
     { href: `/${locale}/app/people`, label: "People", icon: Users },
@@ -94,12 +94,14 @@ export function NavBar() {
         {/* Logo */}
         <Link
           href={loggedIn ? `/${locale}/app/search` : `/${locale}`}
-          className="flex items-center gap-2 font-bold text-blue-600 mr-8 tracking-tight shrink-0"
+          className="flex items-center gap-2 font-bold text-blue-600 mr-4 tracking-tight shrink-0"
           onClick={closeMobile}
         >
           <HelvexMark size={28} />
           <span className="text-2xl">Helvex</span>
         </Link>
+
+        {loggedIn && <div className="mr-4"><GlobalSearchTrigger locale={locale} /></div>}
 
         {/* Logged-in: app nav — desktop only */}
         {loggedIn && (
@@ -176,8 +178,6 @@ export function NavBar() {
             ))}
           </nav>
         )}
-
-        {loggedIn && <GlobalSearchTrigger locale={locale} />}
 
         <div className="ml-auto flex items-center gap-3">
           {/* Language switcher — symbol only, dropdown on hover */}

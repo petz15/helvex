@@ -244,6 +244,41 @@ export function MutationBadge({ mutKey }: { mutKey: string }) {
   );
 }
 
+// ─── DB change-type badges ────────────────────────────────────────────────────
+
+const SUB_RUBRIC_LABELS: Record<string, string> = {
+  HR01: "Neueintragung",
+  HR02: "Mutation",
+  HR03: "Löschung",
+  HR04: "Wiedereintragung",
+};
+
+const CHANGE_TYPE_LABELS: Record<string, { label: string; className: string }> = {
+  person_added:   { label: "Person eingetragen", className: "bg-green-100 text-green-700" },
+  person_removed: { label: "Person ausgetreten", className: "bg-red-100 text-red-700" },
+  person_changed: { label: "Person geändert",    className: "bg-amber-100 text-amber-700" },
+  capital:        { label: "Kapitaländerung",    className: "bg-teal-100 text-teal-700" },
+  address:        { label: "Adressänderung",     className: "bg-amber-100 text-amber-700" },
+  purpose:        { label: "Zweckänderung",      className: "bg-purple-100 text-purple-700" },
+  name:           { label: "Firmenänderung",     className: "bg-blue-100 text-blue-700" },
+  status:         { label: "Status",             className: "bg-slate-100 text-slate-600" },
+  merger:         { label: "Fusion",             className: "bg-orange-100 text-orange-700" },
+  acquisition:    { label: "Übernahme",          className: "bg-orange-100 text-orange-700" },
+  governance:     { label: "Statuten",           className: "bg-indigo-100 text-indigo-700" },
+  restriction:    { label: "Einschränkung",      className: "bg-red-100 text-red-700" },
+};
+
+function ChangeTypeBadge({ changeType }: { changeType: string }) {
+  const cfg = CHANGE_TYPE_LABELS[changeType] ?? { label: changeType, className: "bg-slate-100 text-slate-500" };
+  return (
+    <span className={`inline-block text-[11px] font-medium px-1.5 py-0.5 rounded ${cfg.className}`}>
+      {cfg.label}
+    </span>
+  );
+}
+
+const PERSON_CHANGE_TYPES = new Set(["person_added", "person_removed", "person_changed"]);
+
 // ─── Person card ──────────────────────────────────────────────────────────────
 
 function PersonCard({ person, variant = "current" }: { person: Person; variant?: "current" | "added" | "removed" | "mutated" }) {
@@ -454,6 +489,22 @@ function TimelineEntryDB({ pub }: { pub: SogcPublicationDetail }) {
 
   const isLong = text.length > LONG_MSG_THRESHOLD;
 
+  const hasPersonChange = pub.changes.some(c => PERSON_CHANGE_TYPES.has(c.change_type));
+  let organe: OrganeChange | null = null;
+  if (hasPersonChange && text) {
+    organe = parseOrganeSection(text);
+  }
+  const hasPersonCards =
+    organe !== null &&
+    organe.added.length + organe.removed.length + organe.mutated.length > 0;
+
+  // Structural changes (non-person) that have a highlighted excerpt
+  const excerptChanges = pub.changes.filter(
+    c => !PERSON_CHANGE_TYPES.has(c.change_type) && c.raw_excerpt,
+  );
+
+  const subRubricLabel = SUB_RUBRIC_LABELS[pub.sub_rubric ?? ""];
+
   return (
     <div className="relative pl-6">
       <span className="absolute left-0 top-1.5 h-2.5 w-2.5 rounded-full border-2 border-white ring-1 ring-slate-300 bg-white" />
@@ -461,15 +512,54 @@ function TimelineEntryDB({ pub }: { pub: SogcPublicationDetail }) {
       <div className="mb-1 flex flex-wrap items-center gap-1.5">
         <span className="text-xs font-semibold text-slate-600">
           {pub.pub_date
-            ? new Date(pub.pub_date).toLocaleDateString("de-CH", { day: "2-digit", month: "2-digit", year: "numeric" })
+            ? new Date(pub.pub_date).toLocaleDateString("de-CH", {
+                day: "2-digit",
+                month: "2-digit",
+                year: "numeric",
+              })
             : "—"}
         </span>
-        {pub.sub_rubric && <span className="text-xs text-slate-400">{pub.sub_rubric}</span>}
-        {pub.pub_number && <span className="text-xs text-slate-400 font-mono">#{pub.pub_number}</span>}
+        {subRubricLabel ? (
+          <span className="text-xs text-slate-400">{subRubricLabel}</span>
+        ) : pub.sub_rubric ? (
+          <span className="text-xs text-slate-400 font-mono">{pub.sub_rubric}</span>
+        ) : null}
+        {pub.pub_number && (
+          <span className="text-xs text-slate-400 font-mono">#{pub.pub_number}</span>
+        )}
         {pub.changes.map((c, i) => (
-          <MutationBadge key={i} mutKey={c.change_type} />
+          <ChangeTypeBadge key={i} changeType={c.change_type} />
         ))}
       </div>
+
+      {/* Person change cards */}
+      {hasPersonCards && organe && (
+        <div className="mb-2 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-1.5">
+          {organe.removed.map((p, i) => (
+            <PersonCard key={`r-${i}`} person={p} variant="removed" />
+          ))}
+          {organe.mutated.map((p, i) => (
+            <PersonCard key={`m-${i}`} person={p} variant="mutated" />
+          ))}
+          {organe.added.map((p, i) => (
+            <PersonCard key={`a-${i}`} person={p} variant="added" />
+          ))}
+        </div>
+      )}
+
+      {/* Highlighted excerpts for structural changes (address, purpose, name, capital…) */}
+      {excerptChanges.length > 0 && (
+        <div className="mb-2 space-y-1">
+          {excerptChanges.map((c, i) => (
+            <p
+              key={i}
+              className="text-xs bg-slate-50 border border-slate-100 rounded px-2 py-1 text-slate-600 italic"
+            >
+              {c.raw_excerpt}
+            </p>
+          ))}
+        </div>
+      )}
 
       <div className="text-xs text-slate-600 leading-relaxed">
         {!text ? (
@@ -534,6 +624,50 @@ export function SogcTimelineDB({ companyUid }: { companyUid: string }) {
       <div className="relative border-l border-slate-200 ml-1.5 space-y-5">
         {publications.map((pub) => (
           <TimelineEntryDB key={pub.id} pub={pub} />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ─── DB-backed signers panel (derived from sogc_publications text) ─────────────
+
+export function SignersPanelDB({ companyUid }: { companyUid: string }) {
+  const { dict } = useI18n();
+  const t = dict.app.companydetail;
+
+  // Shares the SWR cache with SogcTimelineDB — no extra network request
+  const { data: publications = [] } = useSWR(
+    `company-publications-${companyUid}`,
+    () => fetchCompanyPublications(companyUid),
+    { revalidateOnFocus: false },
+  );
+
+  // Adapt DB publications to the SogcEntry shape expected by deriveCurrentSigners
+  const adapted: SogcEntry[] = publications.map(pub => ({
+    sogcDate: pub.pub_date ?? "",
+    sogcId: pub.id,
+    registryOfCommerceCanton: "",
+    message:
+      (pub.detected_language === "fr" && pub.text_fr) ||
+      (pub.detected_language === "it" && pub.text_it) ||
+      pub.text_de ||
+      pub.text_en ||
+      "",
+    mutationTypes: pub.changes.some(c => PERSON_CHANGE_TYPES.has(c.change_type))
+      ? [{ id: 0, key: "aenderungorgane" }]
+      : [],
+  }));
+
+  const currentSigners = deriveCurrentSigners(adapted);
+  if (currentSigners.length === 0) return null;
+
+  return (
+    <div className="bg-white rounded-xl border border-slate-200 p-5 shadow-sm">
+      <h2 className="text-sm font-semibold text-slate-700 mb-4">{t.currentsigners}</h2>
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+        {currentSigners.map((p, i) => (
+          <PersonCard key={i} person={p} variant="current" />
         ))}
       </div>
     </div>

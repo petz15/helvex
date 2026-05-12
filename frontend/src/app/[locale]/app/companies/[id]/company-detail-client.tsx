@@ -8,7 +8,7 @@ import { fmtDate, fmtDateTime, fmtRelativeTime, cn, formatClusterLabel } from "@
 import { createNote, deleteNote, fetchCompany, runCompanyWebSearch, selectCompanyWebsite } from "@/lib/api";
 import type { Company, Note, GoogleScoredResult } from "@/lib/types";
 import "leaflet/dist/leaflet.css";
-import { SogcTimelineDB } from "@/components/sogc-history";
+import { SignersPanelDB, SogcTimelineDB } from "@/components/sogc-history";
 import { BoardPanel } from "@/components/board-panel";
 import { useI18n } from "@/i18n/context";
 import { useApiErrorHandler } from "@/lib/use-api-error";
@@ -597,6 +597,9 @@ export function CompanyDetailClient({ company: initial, readOnlyDemo = false }: 
 
       {/* Structured board & officers from SOGC person graph */}
       <BoardPanel companyUid={company.uid} />
+
+      {/* Current signers derived from sogc_publications text (fallback when person graph is empty) */}
+      <SignersPanelDB companyUid={company.uid} />
 
       {/* SHAB timeline from preprocessed sogc_publications table */}
       <SogcTimelineDB companyUid={company.uid} />

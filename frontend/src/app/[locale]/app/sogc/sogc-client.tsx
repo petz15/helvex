@@ -58,12 +58,16 @@ function PublicationCard({ pub, locale }: { pub: SogcPublicationDetail; locale: 
             {/* Sub-header: company + pub number + sogc id */}
             <div className="flex flex-wrap items-center gap-2">
               {pub.company_uid && (
-                <Link
-                  href={`/${locale}/app/companies/${pub.company_uid}`}
-                  className="text-blue-600 hover:underline font-mono text-[11px]"
-                >
-                  {pub.company_uid}
-                </Link>
+                pub.company_id ? (
+                  <Link
+                    href={`/${locale}/app/companies/${pub.company_id}`}
+                    className="text-blue-600 hover:underline font-mono text-[11px]"
+                  >
+                    {pub.company_uid}
+                  </Link>
+                ) : (
+                  <span className="font-mono text-[11px] text-slate-500">{pub.company_uid}</span>
+                )
               )}
               {pub.pub_number && (
                 <span className="text-slate-400 font-mono text-[11px]">#{pub.pub_number}</span>

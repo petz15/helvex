@@ -178,12 +178,16 @@ function PersonEntityCard({ entity, locale }: { entity: SogcPersonEntity; locale
               appearances.map(a => (
                 <div key={a.id} className="flex items-center gap-2 text-xs">
                   <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${a.is_current ? "bg-emerald-400" : "bg-slate-300"}`} />
-                  <Link
-                    href={`/${locale}/app/companies/${a.company_uid}`}
-                    className="text-blue-600 hover:underline font-mono text-[10px]"
-                  >
-                    {a.company_uid}
-                  </Link>
+                  {a.company_id ? (
+                    <Link
+                      href={`/${locale}/app/companies/${a.company_id}`}
+                      className="text-blue-600 hover:underline truncate"
+                    >
+                      {a.company_name ?? a.company_uid}
+                    </Link>
+                  ) : (
+                    <span className="text-slate-600 truncate font-mono text-[10px]">{a.company_uid}</span>
+                  )}
                   {a.role && <span className="text-slate-600 truncate">{a.role}</span>}
                   {a.pub_date && <span className="text-slate-400 shrink-0">{a.pub_date.slice(0, 7)}</span>}
                   {!a.is_current && a.bisher_role && (

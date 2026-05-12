@@ -228,12 +228,11 @@ def _parse_person(raw_excerpt: str, change_type: str) -> dict | None:
     role = ", ".join(role_parts)[:256] if role_parts else None
 
     is_current: bool | None
-    if change_type == "person_added":
-        is_current = True
-    elif change_type == "person_removed":
+    if change_type == "person_removed":
         is_current = False
     else:
-        is_current = None
+        # person_added and all other change types (aenderungorgane, etc.) → still present
+        is_current = True
 
     normalized_key = _normalize_key(lastname, firstname, hometown)
 

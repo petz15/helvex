@@ -299,6 +299,8 @@ export interface SogcPersonAppearance {
   sogc_change_id: number;
   sogc_publication_id: number;
   company_uid: string | null;
+  company_id: number | null;
+  company_name: string | null;
   pub_date: string | null;
   change_type: string;
   role: string | null;
@@ -386,6 +388,7 @@ export interface SogcPublicationDetail {
   id: number;
   sogc_id: string;
   company_uid: string | null;
+  company_id: number | null;
   pub_date: string | null;
   sub_rubric: string | null;
   pub_number: string | null;
