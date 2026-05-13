@@ -36,7 +36,7 @@ class PersonEntityOut(BaseModel):
     updated_at: str
 
     @classmethod
-    def from_orm(cls, e, residence: str | None = None) -> "PersonEntityOut":
+    def from_orm(cls, e, residence: str | None = None, active_company_count: int | None = None) -> "PersonEntityOut":
         return cls(
             id=e.id,
             normalized_key=e.normalized_key,
@@ -50,7 +50,7 @@ class PersonEntityOut(BaseModel):
             is_verified=e.is_verified,
             verified_at=e.verified_at.isoformat() if e.verified_at else None,
             appearance_count=e.appearance_count,
-            active_company_count=e.active_company_count,
+            active_company_count=active_company_count if active_company_count is not None else e.active_company_count,
             linkedin_url=e.linkedin_url,
             linkedin_verified_at=e.linkedin_verified_at.isoformat() if e.linkedin_verified_at else None,
             merged_into_id=e.merged_into_id,
@@ -273,7 +273,13 @@ def search_persons(
     if is_verified is not None:
         qry = qry.filter(SogcPersonEntity.is_verified == is_verified)
     if is_current is True:
-        qry = qry.filter(SogcPersonEntity.active_company_count > 0)
+        from sqlalchemy import exists as sql_exists
+        qry = qry.filter(
+            sql_exists().where(
+                SogcPersonAppearance.person_entity_id == SogcPersonEntity.id,
+                SogcPersonAppearance.is_current.is_(True),
+            )
+        )
 
     if sort_by == "confidence":
         conf_order = case(
@@ -291,6 +297,7 @@ def search_persons(
     # Batch-fetch most recent current residence for each entity (avoids N+1)
     entity_ids = [e.id for e in entities]
     residence_map: dict[int, str] = {}
+    active_count_map: dict[int, int] = {}
     if entity_ids:
         rows = (
             db.query(SogcPersonAppearance.person_entity_id, SogcPersonAppearance.residence_municipality)
@@ -306,7 +313,19 @@ def search_persons(
             if pe_id not in residence_map:
                 residence_map[pe_id] = res
 
-    return [PersonEntityOut.from_orm(e, residence_map.get(e.id)) for e in entities]
+        # Batch-compute real active company counts from appearances (cached value may be stale)
+        active_rows = (
+            db.query(SogcPersonAppearance.person_entity_id, func.count(SogcPersonAppearance.id))
+            .filter(
+                SogcPersonAppearance.person_entity_id.in_(entity_ids),
+                SogcPersonAppearance.is_current.is_(True),
+            )
+            .group_by(SogcPersonAppearance.person_entity_id)
+            .all()
+        )
+        active_count_map = {pe_id: cnt for pe_id, cnt in active_rows}
+
+    return [PersonEntityOut.from_orm(e, residence_map.get(e.id), active_count_map.get(e.id, e.active_company_count)) for e in entities]
 
 
 @router.get("/sogc/persons/flags", response_model=list[PersonFlagOut])
@@ -334,6 +353,9 @@ def get_person_entity(
 ):
     from app.models.sogc_person_entity import SogcPersonEntity
 
+    from app.models.sogc_person_appearance import SogcPersonAppearance
+    from sqlalchemy import func
+
     entity = db.get(SogcPersonEntity, entity_id)
     if not entity:
         raise HTTPException(status_code=404, detail="Person entity not found")
@@ -342,7 +364,15 @@ def get_person_entity(
         canonical = db.get(SogcPersonEntity, entity.merged_into_id)
         if canonical:
             entity = canonical
-    return PersonEntityOut.from_orm(entity)
+    live_active_count = (
+        db.query(func.count(SogcPersonAppearance.id))
+        .filter(
+            SogcPersonAppearance.person_entity_id == entity.id,
+            SogcPersonAppearance.is_current.is_(True),
+        )
+        .scalar() or 0
+    )
+    return PersonEntityOut.from_orm(entity, active_company_count=live_active_count)
 
 
 @router.get("/sogc/persons/{entity_id}/appearances", response_model=list[PersonAppearanceOut])

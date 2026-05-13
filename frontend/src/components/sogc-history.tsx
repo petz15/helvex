@@ -257,6 +257,7 @@ const CHANGE_TYPE_LABELS: Record<string, { label: string; className: string }> =
   person_added:   { label: "Person eingetragen", className: "bg-green-100 text-green-700" },
   person_removed: { label: "Person ausgetreten", className: "bg-red-100 text-red-700" },
   person_changed: { label: "Person geändert",    className: "bg-amber-100 text-amber-700" },
+  auditor_change: { label: "Revisionsstelle",    className: "bg-violet-100 text-violet-700" },
   capital:        { label: "Kapitaländerung",    className: "bg-teal-100 text-teal-700" },
   address:        { label: "Adressänderung",     className: "bg-amber-100 text-amber-700" },
   purpose:        { label: "Zweckänderung",      className: "bg-purple-100 text-purple-700" },
@@ -278,6 +279,40 @@ function ChangeTypeBadge({ changeType }: { changeType: string }) {
 }
 
 const PERSON_CHANGE_TYPES = new Set(["person_added", "person_removed", "person_changed"]);
+
+// ─── Per-change item (label + content) ───────────────────────────────────────
+
+function ChangeItem({ change }: { change: { id: number; change_type: string; raw_excerpt: string | null } }) {
+  const cfg = CHANGE_TYPE_LABELS[change.change_type] ?? { label: change.change_type, className: "bg-slate-100 text-slate-500" };
+
+  if (PERSON_CHANGE_TYPES.has(change.change_type)) {
+    const variant = change.change_type === "person_added" ? "added"
+      : change.change_type === "person_removed" ? "removed"
+      : "mutated";
+    const person = change.raw_excerpt ? parsePerson(change.raw_excerpt) : null;
+    return (
+      <div className="space-y-0.5">
+        <span className={`inline-block text-[11px] font-medium px-1.5 py-0.5 rounded ${cfg.className}`}>
+          {cfg.label}
+        </span>
+        {person && <PersonCard person={person} variant={variant} />}
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-0.5">
+      <span className={`inline-block text-[11px] font-medium px-1.5 py-0.5 rounded ${cfg.className}`}>
+        {cfg.label}
+      </span>
+      {change.raw_excerpt && (
+        <p className="text-xs bg-slate-50 border border-slate-100 rounded px-2 py-1 text-slate-600 italic">
+          {change.raw_excerpt}
+        </p>
+      )}
+    </div>
+  );
+}
 
 // ─── Person card ──────────────────────────────────────────────────────────────
 
@@ -478,7 +513,7 @@ export function SignersPanel({ sogcPubJson }: { sogcPubJson: string | null }) {
 // ─── DB-backed timeline (uses sogc_publications table) ────────────────────────
 
 function TimelineEntryDB({ pub }: { pub: SogcPublicationDetail }) {
-  const [expanded, setExpanded] = useState(false);
+  const [rawExpanded, setRawExpanded] = useState(false);
 
   const text =
     (pub.detected_language === "fr" && pub.text_fr) ||
@@ -487,29 +522,16 @@ function TimelineEntryDB({ pub }: { pub: SogcPublicationDetail }) {
     pub.text_de ||
     "";
 
-  const isLong = text.length > LONG_MSG_THRESHOLD;
-
-  const hasPersonChange = pub.changes.some(c => PERSON_CHANGE_TYPES.has(c.change_type));
-  let organe: OrganeChange | null = null;
-  if (hasPersonChange && text) {
-    organe = parseOrganeSection(text);
-  }
-  const hasPersonCards =
-    organe !== null &&
-    organe.added.length + organe.removed.length + organe.mutated.length > 0;
-
-  // Structural changes (non-person) that have a highlighted excerpt
-  const excerptChanges = pub.changes.filter(
-    c => !PERSON_CHANGE_TYPES.has(c.change_type) && c.raw_excerpt,
-  );
-
+  // One badge per unique change type
+  const uniqueChangeTypes = [...new Set(pub.changes.map(c => c.change_type))];
   const subRubricLabel = SUB_RUBRIC_LABELS[pub.sub_rubric ?? ""];
 
   return (
     <div className="relative pl-6">
       <span className="absolute left-0 top-1.5 h-2.5 w-2.5 rounded-full border-2 border-white ring-1 ring-slate-300 bg-white" />
 
-      <div className="mb-1 flex flex-wrap items-center gap-1.5">
+      {/* Header: date, registry info, deduplicated type badges */}
+      <div className="mb-2 flex flex-wrap items-center gap-1.5">
         <span className="text-xs font-semibold text-slate-600">
           {pub.pub_date
             ? new Date(pub.pub_date).toLocaleDateString("de-CH", {
@@ -527,69 +549,38 @@ function TimelineEntryDB({ pub }: { pub: SogcPublicationDetail }) {
         {pub.pub_number && (
           <span className="text-xs text-slate-400 font-mono">#{pub.pub_number}</span>
         )}
-        {pub.changes.map((c, i) => (
-          <ChangeTypeBadge key={i} changeType={c.change_type} />
+        {uniqueChangeTypes.map(ct => (
+          <ChangeTypeBadge key={ct} changeType={ct} />
         ))}
       </div>
 
-      {/* Person change cards */}
-      {hasPersonCards && organe && (
-        <div className="mb-2 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-1.5">
-          {organe.removed.map((p, i) => (
-            <PersonCard key={`r-${i}`} person={p} variant="removed" />
-          ))}
-          {organe.mutated.map((p, i) => (
-            <PersonCard key={`m-${i}`} person={p} variant="mutated" />
-          ))}
-          {organe.added.map((p, i) => (
-            <PersonCard key={`a-${i}`} person={p} variant="added" />
+      {/* One labeled item per sogc_change */}
+      {pub.changes.length > 0 && (
+        <div className="space-y-2 mb-2">
+          {pub.changes.map(c => (
+            <ChangeItem key={c.id} change={c} />
           ))}
         </div>
       )}
 
-      {/* Highlighted excerpts for structural changes (address, purpose, name, capital…) */}
-      {excerptChanges.length > 0 && (
-        <div className="mb-2 space-y-1">
-          {excerptChanges.map((c, i) => (
-            <p
-              key={i}
-              className="text-xs bg-slate-50 border border-slate-100 rounded px-2 py-1 text-slate-600 italic"
-            >
-              {c.raw_excerpt}
-            </p>
-          ))}
+      {/* Full SHAB publication text — hidden by default */}
+      {text && (
+        <div className="mt-1">
+          <button
+            type="button"
+            onClick={() => setRawExpanded(v => !v)}
+            className="inline-flex items-center gap-1 text-xs text-slate-400 hover:text-slate-600"
+          >
+            {rawExpanded ? <ChevronUp size={11} /> : <ChevronDown size={11} />}
+            Zefix Rohdaten
+          </button>
+          {rawExpanded && (
+            <div className="mt-2 text-xs text-slate-600 leading-relaxed border-t border-slate-100 pt-2">
+              {renderFtTags(text)}
+            </div>
+          )}
         </div>
       )}
-
-      <div className="text-xs text-slate-600 leading-relaxed">
-        {!text ? (
-          <span className="italic text-slate-400">No content</span>
-        ) : isLong && !expanded ? (
-          <>
-            <span>{renderFtTags(text.slice(0, LONG_MSG_THRESHOLD))}…</span>
-            <button
-              type="button"
-              onClick={() => setExpanded(true)}
-              className="ml-1 inline-flex items-center gap-0.5 text-blue-600 hover:underline"
-            >
-              mehr <ChevronDown size={11} />
-            </button>
-          </>
-        ) : (
-          <>
-            {renderFtTags(text)}
-            {isLong && (
-              <button
-                type="button"
-                onClick={() => setExpanded(false)}
-                className="ml-1 inline-flex items-center gap-0.5 text-blue-600 hover:underline"
-              >
-                weniger <ChevronUp size={11} />
-              </button>
-            )}
-          </>
-        )}
-      </div>
     </div>
   );
 }

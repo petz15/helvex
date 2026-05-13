@@ -52,7 +52,7 @@
 - NOGA auf filter, sollte auch hierarchisch darstellen und mit richtiger bezeichnung
 - admin dashboard simple redirects non authorized users, maybe not the safest
 - NOGA: Zweigniederlassung ist falsch zbs: https://helvex.dicy.ch/app/companies/238698
-- NOGA nach embedding immernoch falsch aufgrund boiler sentences z.b. peter batt
+- NOGA nach embedding immernoch falsch aufgrund boiler sentences (oder anderweitige gründe)z.b. peter batt oder auch bedag AG. keine ahnung wieso es nicht funktioniert, eventuell wäre hier wirklich mal ein llm notewendig lokal oder per api (wobei kosten hier problematisch sind)
 - Make sure that users without access to BYOL API keys, always use the one provided by me (hidden not shown visible to the user)
 - Fix translations for all pages (only headers etc done, needs more)
     - Such as filters
