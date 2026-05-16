@@ -44,8 +44,11 @@ from sqlalchemy.orm import Session
 from app import crud
 from app.auth import (
     COOKIE_NAME,
+    _SESSION_MAX_AGE,
     _user_id_from_request,
     create_session_cookie,
+    decode_session_cookie,
+    get_current_user,
     get_client_ip,
     is_login_allowed,
     record_login_failure,
@@ -477,6 +480,8 @@ app = FastAPI(
 # Add response compression middleware for large JSON payloads (5-10x compression typical)
 app.add_middleware(GZipMiddleware, minimum_size=1000)
 
+_MAX_BODY_SIZE = 10 * 1024 * 1024  # 10 MB
+
 app.mount("/static", StaticFiles(directory="app/static"), name="static")
 
 from prometheus_fastapi_instrumentator import Instrumentator
@@ -505,6 +510,50 @@ async def unhandled_exception_handler(request: Request, exc: Exception):
     print(f"UNHANDLED EXCEPTION {request.method} {request.url.path}\n{tb}", file=sys.stderr, flush=True)
     from fastapi.responses import JSONResponse
     return JSONResponse({"detail": "Internal server error"}, status_code=500)
+
+
+@app.middleware("http")
+async def refresh_session(request: Request, call_next):
+    """Sliding session TTL — reissue the session cookie on every successful response.
+
+    This resets the browser cookie's expiry to now+8h so active users are never
+    logged out mid-session. The itsdangerous token is reissued with a fresh
+    timestamp so it also passes the server-side max_age check.
+    Only runs on authenticated requests that return 2xx — never on errors.
+    """
+    response = await call_next(request)
+
+    if response.status_code >= 400:
+        return response
+
+    cookie_token = request.cookies.get(COOKIE_NAME)
+    if cookie_token and decode_session_cookie(cookie_token) is not None:
+        user_id = decode_session_cookie(cookie_token)
+        forwarded_proto = request.headers.get("x-forwarded-proto", "")
+        is_https = (
+            request.url.scheme == "https"
+            or forwarded_proto.split(",")[0].strip().lower() == "https"
+        )
+        response.set_cookie(
+            key=COOKIE_NAME,
+            value=create_session_cookie(user_id),
+            httponly=True,
+            samesite="strict",
+            secure=is_https,
+            max_age=_SESSION_MAX_AGE,
+        )
+
+    return response
+
+
+@app.middleware("http")
+async def limit_body_size(request: Request, call_next):
+    """Reject requests whose Content-Length exceeds the configured limit."""
+    content_length = request.headers.get("content-length")
+    if content_length and int(content_length) > _MAX_BODY_SIZE:
+        from fastapi.responses import JSONResponse
+        return JSONResponse({"detail": "Request body too large"}, status_code=413)
+    return await call_next(request)
 
 
 # ── Startup gate middleware ───────────────────────────────────────────────────
@@ -611,6 +660,72 @@ async def auth_gate(request: Request, call_next):
 
 
 @app.middleware("http")
+async def origin_gate(request: Request, call_next):
+    """Enforce same-origin policy for authenticated API requests.
+
+    Primary check:  Sec-Fetch-Site (browsers mark this as a forbidden header —
+                    scripts and curl cannot forge it).
+    Fallback check: Origin header exact match (older browsers, mobile).
+
+    Browsers do not reliably send Origin on same-origin GET requests, so missing
+    headers are allowed through — but logged for monitoring.
+    """
+    path = request.url.path
+
+    if path in _PUBLIC_EXACT or any(path.startswith(p) for p in _PUBLIC_PREFIXES):
+        return await call_next(request)
+
+    user_id = _user_id_from_request(request)
+    if not user_id or not path.startswith("/api/"):
+        return await call_next(request)
+
+    # Primary: Sec-Fetch-Site is unforgeable by scripts/bots (forbidden header).
+    sec_fetch_site = request.headers.get("sec-fetch-site", "")
+    if sec_fetch_site:
+        if sec_fetch_site not in ("same-origin", "same-site", "none"):
+            logger.warning(
+                "api.origin_blocked sec_fetch_site=%s user_id=%s path=%s client=%s",
+                sec_fetch_site,
+                user_id,
+                path,
+                request.client.host if request.client else "unknown",
+            )
+            from fastapi.responses import JSONResponse
+            return JSONResponse({"detail": "Request origin not allowed"}, status_code=403)
+        return await call_next(request)
+
+    # Fallback: check Origin header when Sec-Fetch-Site is absent.
+    # Use exact match — startswith would allow prefix spoofing
+    # (e.g. "https://helvex.dicy.ch.evil.com" would pass a startswith check).
+    origin = request.headers.get("origin", "").lower().strip()
+    allowed_origin = settings.app_base_url.lower().strip()
+
+    if origin:
+        if origin != allowed_origin:
+            logger.warning(
+                "api.origin_blocked origin=%s allowed=%s user_id=%s path=%s",
+                origin,
+                allowed_origin,
+                user_id,
+                path,
+            )
+            from fastapi.responses import JSONResponse
+            return JSONResponse({"detail": "Request origin not allowed"}, status_code=403)
+        return await call_next(request)
+
+    # No Sec-Fetch-Site and no Origin — typical for same-origin GET requests
+    # from browsers, which don't include either header. Allow through.
+    logger.debug(
+        "api.request_no_origin user_id=%s path=%s method=%s client=%s",
+        user_id,
+        path,
+        request.method,
+        request.client.host if request.client else "unknown",
+    )
+    return await call_next(request)
+
+
+@app.middleware("http")
 async def api_request_logger(request: Request, call_next):
     """Emit concise request logs for API and diagnostics endpoints."""
     if not settings.api_request_logging_enabled:
@@ -686,6 +801,12 @@ async def security_headers(request: Request, call_next):
             "frame-ancestors 'none';"
         )
 
+    response.headers["Permissions-Policy"] = (
+        "geolocation=(), microphone=(), camera=(), payment=(), usb=(), "
+        "interest-cohort=()"
+    )
+    response.headers["X-Permitted-Cross-Domain-Policies"] = "none"
+
     # HSTS — only meaningful over HTTPS; omit on plain HTTP dev
     forwarded_proto = request.headers.get("x-forwarded-proto", "")
     is_https = request.url.scheme == "https" or forwarded_proto.split(",")[0].strip().lower() == "https"
@@ -707,7 +828,7 @@ def health():
 
 
 @app.get("/metadata", tags=["metadata"])
-def metadata():
+def metadata(current_user=Depends(get_current_user)):
     return {
         "version": APP_VERSION,
         "build_date": BUILD_DATE,

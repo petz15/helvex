@@ -23,7 +23,9 @@ from app.auth import (
     decode_verification_token,
     get_client_ip,
     get_current_user,
+    is_email_login_allowed,
     is_login_allowed,
+    record_email_login_failure,
     record_login_failure,
 )
 from app.database import get_db
@@ -74,7 +76,7 @@ def login_for_token(
     db: Session = Depends(get_db),
 ) -> TokenResponse:
     ip = get_client_ip(request)
-    if not is_login_allowed(ip):
+    if not is_login_allowed(ip) or not is_email_login_allowed(email):
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
             detail="Too many login attempts. Try again in 15 minutes.",
@@ -83,6 +85,7 @@ def login_for_token(
     user = crud.authenticate(db, email=email, password=password)
     if not user:
         record_login_failure(ip)
+        record_email_login_failure(email)
         logger.warning("auth.login_failed email=%r ip=%s", email, ip)
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -114,7 +117,7 @@ def login_cookie(
     db: Session = Depends(get_db),
 ) -> JSONResponse:
     ip = get_client_ip(request)
-    if not is_login_allowed(ip):
+    if not is_login_allowed(ip) or not is_email_login_allowed(body.email):
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
             detail="Too many login attempts. Try again in 15 minutes.",
@@ -122,6 +125,7 @@ def login_cookie(
     user = crud.authenticate(db, email=body.email, password=body.password)
     if not user:
         record_login_failure(ip)
+        record_email_login_failure(body.email)
         logger.warning("auth.login_failed email=%r ip=%s", body.email, ip)
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid email or password")
     logger.info("auth.login_ok user_id=%s email=%r ip=%s", user.id, user.email, ip)
@@ -134,7 +138,7 @@ def login_cookie(
         key=COOKIE_NAME,
         value=create_session_cookie(user.id),
         httponly=True,
-        samesite="lax",
+        samesite="strict",
         secure=is_https,
         max_age=8 * 3600,
     )
@@ -142,7 +146,18 @@ def login_cookie(
 
 
 @router.post("/logout", status_code=200, summary="Clear the session cookie")
-def logout_cookie() -> JSONResponse:
+def logout_cookie(
+    request: Request,
+    db: Session = Depends(get_db),
+) -> JSONResponse:
+    from app.auth import _user_id_from_request, invalidate_user_cache
+    user_id = _user_id_from_request(request)
+    if user_id:
+        user = crud.get_user(db, user_id)
+        if user:
+            user.logged_out_at = datetime.now(tz=timezone.utc)
+            db.commit()
+            invalidate_user_cache(user_id)
     response = JSONResponse({"ok": True})
     response.delete_cookie(key=COOKIE_NAME)
     return response
@@ -192,7 +207,7 @@ def confirm_email_change_api(
              summary="Create a new user account")
 def register(request: Request, body: RegisterRequest, db: Session = Depends(get_db)) -> UserRead:
     ip = get_client_ip(request)
-    if not check_public_rate_limit(ip, "register", window=3600, max_requests=10):
+    if not check_public_rate_limit(ip, "register", window=3600, max_requests=5):
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
             detail="Too many registration attempts. Try again later.",
@@ -528,7 +543,7 @@ def _set_session(response: _Redirect, user_id: int, *, is_https: bool) -> None:
         key=COOKIE_NAME,
         value=create_session_cookie(user_id),
         httponly=True,
-        samesite="lax",
+        samesite="strict",
         secure=is_https,
         max_age=8 * 3600,
     )

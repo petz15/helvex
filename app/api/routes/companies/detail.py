@@ -27,6 +27,7 @@ from app.api.routes.companies._shared import (
     _clear_noga_cache,
     _overlay,
 )
+from app.services.noga import classify_company_noga_explain, is_branch_office, _parent_uid_from_head_offices
 
 router = APIRouter()
 
@@ -197,6 +198,40 @@ def google_search_for_company(
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
 
     return results
+
+
+@router.get(
+    "/{company_id}/noga-explain",
+    summary="Explain NOGA classification for a company (superadmin only)",
+)
+def noga_explain(
+    company_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    if not current_user.is_superadmin:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Superadmin only")
+    db_company = crud.get_company(db, company_id)
+    if not db_company:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Company not found")
+
+    branch = is_branch_office(db_company)
+    parent_uid = _parent_uid_from_head_offices(db_company) if branch else None
+
+    explain_trace = classify_company_noga_explain(db, db_company)
+
+    return {
+        "company_id": company_id,
+        "company_uid": db_company.uid,
+        "company_name": db_company.name,
+        "stored_noga_code": db_company.noga_code,
+        "stored_noga_label": db_company.noga_label,
+        "stored_noga_confidence": db_company.noga_confidence,
+        "stored_noga_path_labels": db_company.noga_path_labels,
+        "is_branch_office": branch,
+        "parent_uid": parent_uid,
+        **explain_trace,
+    }
 
 
 class CompanyWebsiteSelect(BaseModel):

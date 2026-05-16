@@ -528,6 +528,191 @@ def classify_company_noga(db: Session, company: Company) -> NogaClassification |
 
 
 # ---------------------------------------------------------------------------
+# Explain / trace (debug only)
+# ---------------------------------------------------------------------------
+
+def classify_company_noga_explain(db: Session, company: Company) -> dict:
+    """Re-run NOGA classification with full intermediate trace for debugging.
+
+    Mirrors classify_company_noga exactly but captures all intermediate scores
+    so callers can understand why a particular code was chosen at each level.
+    """
+    from app.services.language_detection import detect_purpose_language
+
+    boilerplate_patterns = crud.get_active_boilerplate_patterns(db)
+    stripped_purpose = _strip_purpose_boilerplate(company.purpose or "", boilerplate_patterns)
+
+    lang = (
+        company.purpose_language
+        or detect_purpose_language(company.purpose)
+        or _DEFAULT_LANG
+    )
+
+    tokens = _company_tokens(db, company)
+
+    embed_text = " ".join(filter(None, [
+        stripped_purpose,
+        (company.purpose_keywords or "").replace(",", " "),
+    ])).strip()
+
+    embeddings_ok = bool(embed_text) and _has_noga_embeddings(db)
+    query_vec = None
+    if embeddings_ok:
+        query_vec = _embed_query(embed_text)
+        embeddings_ok = query_vec is not None
+
+    trace: dict = {
+        "purpose_original": company.purpose,
+        "purpose_stripped": stripped_purpose if stripped_purpose != (company.purpose or "") else None,
+        "boilerplate_patterns_active": len(boilerplate_patterns),
+        "detected_language": lang,
+        "tokens": sorted(tokens),
+        "embed_text": embed_text or None,
+        "embeddings_available": embeddings_ok,
+        "levels": [],
+        "final_code": None,
+        "final_label": None,
+        "final_confidence": None,
+    }
+
+    if not tokens:
+        return trace
+
+    idx = _load_noga_index()
+
+    token_scores: dict[str, float] = {}
+    for tok in tokens:
+        for code in idx.token_to_codes.get(tok, set()):
+            token_scores[code] = token_scores.get(code, 0.0) + 1.0
+
+    max_tok = max(token_scores.values()) if token_scores else 1.0
+    norm_token: dict[str, float] = {c: s / max_tok for c, s in token_scores.items()}
+
+    if not token_scores and not embeddings_ok:
+        return trace
+
+    current_parent_codes: list[str] | None = None
+    level_results: list[LevelResult] = []
+
+    for level_no in range(1, 6):
+        level_trace: dict = {
+            "level_no": level_no,
+            "parent_codes": current_parent_codes,
+            "lookahead_applied": False,
+            "fallback_used": False,
+            "candidates": [],
+            "winner_code": None,
+            "winner_label": None,
+            "confidence": None,
+        }
+
+        emb_candidates: list[tuple[str, float]] = []
+        if embeddings_ok:
+            emb_candidates = _pgvector_search_level(
+                db, query_vec, lang, level_no,
+                parent_codes=current_parent_codes,
+                top_k=_LEVEL_TOP_K,
+            )
+        emb_sim_map: dict[str, float] = dict(emb_candidates)
+
+        hybrid: dict[str, float] = {}
+        for code, sim in emb_candidates:
+            hybrid[code] = _W_EMB * sim + _W_TOK * norm_token.get(code, 0.0)
+        for code, tok_score in norm_token.items():
+            meta = idx.code_meta.get(code, {})
+            if meta.get("level_no") != level_no:
+                continue
+            if current_parent_codes and meta.get("parentCode") not in current_parent_codes:
+                continue
+            if code not in hybrid:
+                hybrid[code] = _W_TOK * tok_score
+
+        excl_sims: dict[str, float] = {}
+        if embeddings_ok and hybrid:
+            excl_sims = _excludes_cosine_penalty(db, list(hybrid.keys()), query_vec, lang)
+            for code, excl_sim in excl_sims.items():
+                hybrid[code] = hybrid[code] * (1.0 - _EXCL_COSINE_WEIGHT * excl_sim)
+
+        if not hybrid:
+            level_trace["fallback_used"] = True
+            if level_results:
+                prev_code = level_results[-1].code
+                for code, meta in idx.code_meta.items():
+                    if meta.get("parentCode") == prev_code and meta.get("level_no") == level_no:
+                        label = _get_label(meta, lang)
+                        level_results.append(LevelResult(code=code, label=label, confidence=0.0))
+                        current_parent_codes = [code]
+                        level_trace["winner_code"] = code
+                        level_trace["winner_label"] = label
+                        level_trace["confidence"] = 0.0
+                        break
+            trace["levels"].append(level_trace)
+            if not level_results or len(level_results) < level_no:
+                break
+            continue
+
+        candidates_sorted = sorted(hybrid.items(), key=lambda x: x[1], reverse=True)
+        winner = candidates_sorted[0][0]
+        winner_score = candidates_sorted[0][1]
+
+        if embeddings_ok and level_no < 5 and len(candidates_sorted) >= 2:
+            runner_up = candidates_sorted[1][0]
+            runner_up_score = candidates_sorted[1][1]
+            if (winner_score - runner_up_score) <= _LOOKAHEAD_TIE_THRESHOLD:
+                level_trace["lookahead_applied"] = True
+                tied = [winner, runner_up]
+                child_results = _pgvector_search_level(
+                    db, query_vec, lang, level_no + 1,
+                    parent_codes=tied,
+                    top_k=_LEVEL_TOP_K,
+                )
+                best_child: dict[str, float] = {}
+                for child_code, child_sim in child_results:
+                    p = idx.code_meta.get(child_code, {}).get("parentCode", "")
+                    best_child[p] = max(best_child.get(p, 0.0), child_sim)
+                for parent_code in tied:
+                    hybrid[parent_code] = hybrid[parent_code] + 0.5 * best_child.get(parent_code, 0.0)
+                winner = max(tied, key=lambda c: hybrid[c])
+                winner_score = hybrid[winner]
+                candidates_sorted = sorted(hybrid.items(), key=lambda x: x[1], reverse=True)
+
+        for code, final_score in candidates_sorted[:10]:
+            c_meta = idx.code_meta.get(code, {})
+            level_trace["candidates"].append({
+                "code": code,
+                "label": _get_label(c_meta, lang),
+                "embedding_sim": round(emb_sim_map[code], 4) if code in emb_sim_map else None,
+                "token_score_normalized": round(norm_token[code], 4) if code in norm_token else None,
+                "excludes_sim": round(excl_sims[code], 4) if code in excl_sims else None,
+                "hybrid_score_final": round(final_score, 4),
+                "is_winner": code == winner,
+            })
+
+        meta = idx.code_meta.get(winner, {})
+        label = _get_label(meta, lang)
+        raw_sim = emb_sim_map.get(winner)
+        if raw_sim is None:
+            total = sum(token_scores.values())
+            raw_sim = token_scores.get(winner, 0.0) / total if total > 0 else 0.0
+        confidence = max(0.0, min(1.0, raw_sim))
+
+        level_results.append(LevelResult(code=winner, label=label, confidence=confidence))
+        current_parent_codes = [winner]
+        level_trace["winner_code"] = winner
+        level_trace["winner_label"] = label
+        level_trace["confidence"] = round(confidence, 4)
+        trace["levels"].append(level_trace)
+
+    if level_results:
+        final = level_results[-1]
+        trace["final_code"] = final.code
+        trace["final_label"] = final.label
+        trace["final_confidence"] = round(final.confidence, 4)
+
+    return trace
+
+
+# ---------------------------------------------------------------------------
 # Branch office helpers
 # ---------------------------------------------------------------------------
 

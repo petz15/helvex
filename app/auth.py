@@ -76,10 +76,9 @@ _JWT_EXPIRE_SECONDS = 8 * 3600  # 8 hours
 
 
 def create_access_token(user_id: int, expires_delta: timedelta | None = None) -> str:
-    expire = datetime.now(tz=timezone.utc) + (
-        expires_delta or timedelta(seconds=_JWT_EXPIRE_SECONDS)
-    )
-    payload = {"sub": str(user_id), "exp": expire}
+    now = datetime.now(tz=timezone.utc)
+    expire = now + (expires_delta or timedelta(seconds=_JWT_EXPIRE_SECONDS))
+    payload = {"sub": str(user_id), "exp": expire, "iat": now}
     return jwt.encode(payload, settings.secret_key, algorithm=_JWT_ALGORITHM)
 
 
@@ -93,19 +92,42 @@ def decode_access_token(token: str) -> int | None:
 
 
 # ---------------------------------------------------------------------------
-# Shared helper — extract user_id from either auth mechanism
+# Shared helpers — extract user_id (and issued_at for revocation checks)
 # ---------------------------------------------------------------------------
 
-def _user_id_from_request(request: Request) -> int | None:
+def _auth_info_from_request(request: Request) -> tuple[int, datetime | None] | None:
+    """Returns (user_id, issued_at) from cookie or JWT. issued_at may be None."""
     token = request.cookies.get(COOKIE_NAME)
     if token:
-        uid = decode_session_cookie(token)
-        if uid is not None:
-            return uid
+        try:
+            user_id, ts = _serializer().loads(
+                token, max_age=_SESSION_MAX_AGE, return_timestamp=True
+            )
+            return (int(user_id), ts)
+        except (SignatureExpired, BadSignature, ValueError, TypeError):
+            pass
+
     auth_header = request.headers.get("Authorization", "")
     if auth_header.startswith("Bearer "):
-        return decode_access_token(auth_header[7:])
+        try:
+            payload = jwt.decode(
+                auth_header[7:], settings.secret_key, algorithms=[_JWT_ALGORITHM]
+            )
+            sub = payload.get("sub")
+            if sub is None:
+                return None
+            iat = payload.get("iat")
+            issued_at = datetime.fromtimestamp(iat, tz=timezone.utc) if iat else None
+            return (int(sub), issued_at)
+        except (jwt.InvalidTokenError, ValueError, TypeError):
+            pass
+
     return None
+
+
+def _user_id_from_request(request: Request) -> int | None:
+    info = _auth_info_from_request(request)
+    return info[0] if info else None
 
 
 # ---------------------------------------------------------------------------
@@ -148,18 +170,30 @@ def get_current_user(
     db: Session = Depends(get_db),
 ) -> User:
     """Dependency that returns the authenticated User or raises 401."""
-    user_id = _user_id_from_request(request)
-    if user_id is None:
+    auth_info = _auth_info_from_request(request)
+    if auth_info is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Not authenticated",
             headers={"WWW-Authenticate": "Bearer"},
         )
+    user_id, issued_at = auth_info
     user = _get_cached_user(db, user_id)
     if not user or not user.is_active:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="User not found or inactive",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    # Reject tokens issued before the user explicitly logged out
+    if (
+        user.logged_out_at is not None
+        and issued_at is not None
+        and issued_at <= user.logged_out_at
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Session expired. Please log in again.",
             headers={"WWW-Authenticate": "Bearer"},
         )
     return user
@@ -266,6 +300,7 @@ _RATE_MAX = 10       # failed login attempts per window per IP
 
 # In-memory fallback (used when Redis is unavailable)
 _login_attempts: dict[str, list[float]] = defaultdict(list)
+_email_attempts: dict[str, list[float]] = defaultdict(list)
 _request_counts: dict[str, list[float]] = defaultdict(list)
 
 
@@ -325,6 +360,24 @@ def record_login_failure(ip: str) -> None:
     attempts = [t for t in _login_attempts[ip] if now - t < _RATE_WINDOW]
     attempts.append(now)
     _login_attempts[ip] = attempts
+
+
+def is_email_login_allowed(email: str) -> bool:
+    """Return True if this email account has not hit the per-email lockout threshold."""
+    now = time.monotonic()
+    key = email.lower()
+    attempts = [t for t in _email_attempts[key] if now - t < _RATE_WINDOW]
+    _email_attempts[key] = attempts
+    return len(attempts) < _RATE_MAX
+
+
+def record_email_login_failure(email: str) -> None:
+    """Record one failed login attempt against this email address."""
+    now = time.monotonic()
+    key = email.lower()
+    attempts = [t for t in _email_attempts[key] if now - t < _RATE_WINDOW]
+    attempts.append(now)
+    _email_attempts[key] = attempts
 
 
 def check_login_rate_limit(ip: str) -> bool:

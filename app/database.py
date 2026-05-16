@@ -16,7 +16,14 @@ else:
         database=settings.postgres_db,
     )
 
-engine = create_engine(_url, pool_pre_ping=True, pool_recycle=1800, pool_size=30, max_overflow=60)
+engine = create_engine(
+    _url,
+    pool_pre_ping=True,
+    pool_recycle=1800,
+    pool_size=30,
+    max_overflow=60,
+    connect_args={"options": "-c statement_timeout=30000"},  # 30 s per statement
+)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 

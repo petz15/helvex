@@ -46,7 +46,7 @@ function LoginForm() {
   const { dict } = useI18n();
   const t = dict.auth.login;
 
-  const next = searchParams?.get("next") ?? `/${locale}/app/search`;
+  const next = `/${locale}/app/search`;
   const oauthError = searchParams?.get("oauth_error");
 
   const [email, setEmail] = useState("");

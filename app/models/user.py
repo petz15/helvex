@@ -36,6 +36,11 @@ class User(Base):
         DateTime(timezone=True), nullable=True
     )
 
+    # Session revocation — set on logout so tokens issued before this timestamp are rejected
+    logged_out_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
     # Organisation (for team-seat tiers)
     org_id: Mapped[int | None] = mapped_column(ForeignKey("organizations.id", ondelete="SET NULL"), nullable=True)
     # Role within the org: owner | admin | member | viewer

@@ -3,14 +3,12 @@ import { useState, useCallback, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import useSWR from "swr";
 import { useI18n } from "@/i18n/context";
-import { Download, Loader2, BrainCircuit, X, Star } from "lucide-react";
+import { Download, Loader2 } from "lucide-react";
 import { FilterBar } from "@/components/dashboard/filter-bar";
 import { CompanyTable } from "@/components/dashboard/company-table";
 import { CompanyPreview } from "@/components/dashboard/company-preview";
-import { Pagination } from "@/components/dashboard/pagination";
 import { BaloghAdCard } from "@/components/balogh-ad-card";
-import { fetchCompanies, fetchStats, fetchCantons, fetchTaxonomy, fetchSavedViews, saveView, deleteView, enqueueCSVExport, fetchClaudePreview, toggleViewAlert } from "@/lib/api";
-import type { ClaudePreviewOut } from "@/lib/api";
+import { fetchCompanies, fetchStats, fetchCantons, fetchTaxonomy, fetchSavedViews, saveView, deleteView, enqueueCSVExport, toggleViewAlert } from "@/lib/api";
 import type { Company, CompanyFilters, CompanyStats } from "@/lib/types";
 
 interface SearchClientProps {
@@ -38,10 +36,6 @@ export function SearchClient({ initialCantons, initialStats, initialFilters }: S
   const [filters, setFiltersState] = useState<CompanyFilters>(initialFilters ?? DEFAULT_FILTERS);
   const [queueingExport, setQueueingExport] = useState(false);
   const [exportBanner, setExportBanner] = useState<{ kind: "success" | "error"; message: string } | null>(null);
-  const [previewOpen, setPreviewOpen] = useState(false);
-  const [previewLoading, setPreviewLoading] = useState(false);
-  const [previewResult, setPreviewResult] = useState<ClaudePreviewOut | null>(null);
-  const [previewError, setPreviewError] = useState<string | null>(null);
 
   const setFilters = useCallback((update: CompanyFilters | ((f: CompanyFilters) => CompanyFilters)) => {
     setFiltersState(prev => {
@@ -75,26 +69,6 @@ export function SearchClient({ initialCantons, initialStats, initialFilters }: S
     } finally {
       setQueueingExport(false);
       setTimeout(() => setExportBanner(null), 6000);
-    }
-  }
-
-  async function handleAIPreview() {
-    setPreviewOpen(true);
-    setPreviewLoading(true);
-    setPreviewError(null);
-    setPreviewResult(null);
-    try {
-      const result = await fetchClaudePreview({
-        canton: filters.canton ?? null,
-        min_zefix_score: filters.min_flex_score ?? null,
-        max_zefix_score: filters.max_flex_score ?? null,
-        purpose_keywords: filters.purpose_keywords ?? null,
-      });
-      setPreviewResult(result);
-    } catch (err) {
-      setPreviewError(err instanceof Error ? err.message : "Preview failed");
-    } finally {
-      setPreviewLoading(false);
     }
   }
 
@@ -173,15 +147,6 @@ export function SearchClient({ initialCantons, initialStats, initialFilters }: S
             ) : <span />}
             <div className="flex items-center gap-1.5">
               <button
-                onClick={handleAIPreview}
-                disabled={previewLoading}
-                title="Run AI scoring on up to 5 companies matching current filters (3 previews/day)"
-                className="flex items-center gap-1.5 text-xs text-violet-600 hover:text-violet-700 px-2.5 py-1 rounded border border-violet-200 hover:bg-violet-50 transition-colors disabled:opacity-50"
-              >
-                {previewLoading ? <Loader2 size={12} className="animate-spin" /> : <BrainCircuit size={12} />}
-                {t.aiPreview}
-              </button>
-              <button
                 onClick={handleQueueExport}
                 disabled={queueingExport}
                 title="Queue an unlimited background export — download from Jobs page when ready"
@@ -199,14 +164,6 @@ export function SearchClient({ initialCantons, initialStats, initialFilters }: S
             filters={filters}
             onSort={handleSort}
             isLoading={isLoading}
-          />
-          <Pagination
-            page={page?.page ?? 1}
-            pages={page?.pages ?? 1}
-            total={page?.total ?? 0}
-            pageSize={filters.page_size ?? 50}
-            onChange={(p) => setFilters((f) => ({ ...f, page: p }))}
-            onPageSizeChange={(s) => setFilters((f) => ({ ...f, page_size: s, page: 1 }))}
           />
         </div>
 
@@ -233,62 +190,6 @@ export function SearchClient({ initialCantons, initialStats, initialFilters }: S
         )}
       </div>
 
-      {/* AI Preview modal */}
-      {previewOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-          <div className="bg-white rounded-xl shadow-xl w-full max-w-lg overflow-hidden">
-            <div className="flex items-center justify-between px-4 py-3 border-b border-slate-100">
-              <p className="text-sm font-semibold text-slate-800 flex items-center gap-1.5">
-                <BrainCircuit size={14} className="text-violet-500" /> AI Preview
-              </p>
-              <button onClick={() => setPreviewOpen(false)} className="text-slate-400 hover:text-slate-600">
-                <X size={16} />
-              </button>
-            </div>
-
-            <div className="p-4">
-              {previewLoading && (
-                <div className="flex items-center gap-2 text-sm text-slate-500 py-6 justify-center">
-                  <Loader2 size={16} className="animate-spin" /> {t.scoring}
-                </div>
-              )}
-              {previewError && (
-                <p className="text-sm text-red-600 py-4 text-center">{previewError}</p>
-              )}
-              {previewResult && (
-                <>
-                  <p className="text-xs text-slate-600 mb-3">
-                    {t.previewsUsed.replace("{count}", String(previewResult.results.length)).replace("{used}", String(previewResult.previews_used)).replace("{total}", String(previewResult.previews_used + previewResult.previews_remaining))}
-                  </p>
-                  <div className="space-y-2">
-                    {previewResult.results.map(r => (
-                      <div key={r.company_id} className="rounded-lg border border-slate-100 bg-slate-50 px-3 py-2.5">
-                        <div className="flex items-center justify-between gap-2">
-                          <p className="text-sm font-medium text-slate-800 truncate">{r.name}</p>
-                          {r.ai_score != null && (
-                            <span className={`shrink-0 flex items-center gap-1 text-xs font-semibold px-2 py-0.5 rounded-full ${
-                              r.ai_score >= 70 ? "bg-emerald-100 text-emerald-700" :
-                              r.ai_score >= 40 ? "bg-amber-100 text-amber-700" :
-                              "bg-slate-100 text-slate-500"
-                            }`}>
-                              <Star size={10} /> {r.ai_score}
-                            </span>
-                          )}
-                        </div>
-                        {r.ai_category && <p className="text-xs text-slate-600 mt-0.5">{r.ai_category}</p>}
-                        {r.ai_freeform && <p className="text-xs text-slate-600 mt-1 line-clamp-2">{r.ai_freeform}</p>}
-                      </div>
-                    ))}
-                  </div>
-                  {previewResult.previews_remaining === 0 && (
-                    <p className="text-xs text-amber-600 mt-3 text-center">{t.dailyLimit}</p>
-                  )}
-                </>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }

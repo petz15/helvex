@@ -23,12 +23,16 @@ from app.api.routes.companies._shared import _apply_web_results_gate, _bulk_org_
 router = APIRouter()
 
 
+_LIST_RATE_WINDOW = 300   # 5 minutes
+_LIST_RATE_MAX = 200      # per user
+
+
 @router.get("/", response_model=CompanyPage, summary="List companies (paginated, filterable)")
 def list_companies(
-    page: int = Query(1, ge=1),
+    page: int = Query(1, ge=1, le=500),
     page_size: int = Query(50, ge=1, le=100),
     sort: str = Query("-updated", description="Sort key, e.g. -combined_score, name, -updated"),
-    q: str | None = Query(None, description="Filter by name (case-insensitive)"),
+    q: str | None = Query(None, description="Filter by name (case-insensitive)", max_length=200),
     uid: str | None = Query(None, description="Filter by UID (partial match)"),
     canton: str | None = Query(None),
     review_status: str | None = Query(None, description="Use _none for unset"),
@@ -72,6 +76,15 @@ def list_companies(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> CompanyPage:
+    if not current_user.is_superadmin:
+        check_rate_limit(
+            f"user_{current_user.id}",
+            "list_companies",
+            window=_LIST_RATE_WINDOW,
+            max_calls=_LIST_RATE_MAX,
+            detail=f"Too many requests. Maximum {_LIST_RATE_MAX} list requests per {_LIST_RATE_WINDOW // 60} minutes.",
+        )
+
     filter_kwargs = dict(
         name_filter=q,
         uid_filter=uid,
