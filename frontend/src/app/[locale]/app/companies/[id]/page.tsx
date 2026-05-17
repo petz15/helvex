@@ -25,5 +25,13 @@ export default async function CompanyDetailPage({ params }: Props) {
 
   const company: Company | null = res?.ok ? await res.json().catch(() => null) : null;
   if (!company) notFound();
-  return <CompanyDetailClient company={company!} />;
+
+  const meRes = await fetch(`${apiBase}/api/v1/auth/me`, {
+    headers: sessionCookie ? { Cookie: `session=${sessionCookie}` } : {},
+    cache: "no-store",
+  }).catch(() => null);
+  const me = meRes?.ok ? await meRes.json().catch(() => null) : null;
+  const isSuperadmin: boolean = me?.is_superadmin ?? false;
+
+  return <CompanyDetailClient company={company!} isSuperadmin={isSuperadmin} />;
 }
