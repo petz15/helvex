@@ -77,6 +77,10 @@ def _compute_dedup_key(job_type: str, org_id: int | None, params: dict) -> str |
     # No dedup: every trigger creates a fresh independent job.
     NO_DEDUP = {"batch", "csv_export"}
 
+    if job_type == "noga_explain":
+        company_id = params.get("company_id")
+        return f"noga_explain:{company_id}" if company_id is not None else None
+
     if job_type in NO_DEDUP:
         return None
     if job_type in ONE_PER_ORG:

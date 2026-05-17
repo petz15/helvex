@@ -130,8 +130,10 @@ export function CompanyDetailClient({ company: initial, readOnlyDemo = false, is
   const [selectingWebsite, setSelectingWebsite] = useState<string | null>(null);
   const [searchingWeb, setSearchingWeb] = useState(false);
   const [nogaExplainOpen, setNogaExplainOpen] = useState(false);
+  const [nogaJobId, setNogaJobId] = useState<number | null>(null);
+  const [nogaJobStatus, setNogaJobStatus] = useState<string | null>(null);
   const [nogaExplainData, setNogaExplainData] = useState<NogaExplain | null>(null);
-  const [nogaExplainLoading, setNogaExplainLoading] = useState(false);
+  const [nogaExplainError, setNogaExplainError] = useState<string | null>(null);
 
   const { dict } = useI18n();
   const t = dict.app.companydetail;
@@ -267,20 +269,41 @@ export function CompanyDetailClient({ company: initial, readOnlyDemo = false, is
   }
 
   async function handleNogaExplain() {
+    setNogaExplainData(null);
+    setNogaExplainError(null);
+    setNogaJobId(null);
+    setNogaJobStatus(null);
     setNogaExplainOpen(true);
-    if (nogaExplainData) return;
-    setNogaExplainLoading(true);
     try {
-      const res = await fetch(`/api/v1/companies/${company.id}/noga-explain`, { credentials: "include" });
+      const res = await fetch(`/api/v1/companies/${company.id}/noga-explain`, {
+        method: "POST",
+        credentials: "include",
+      });
       if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
-      setNogaExplainData(await res.json());
+      const { job_id, status: jobStatus } = await res.json();
+      setNogaJobId(job_id);
+      setNogaJobStatus(jobStatus);
     } catch (e) {
       handleApiError(e);
       setNogaExplainOpen(false);
-    } finally {
-      setNogaExplainLoading(false);
     }
   }
+
+  useEffect(() => {
+    if (!nogaJobId || !nogaExplainOpen) return;
+    if (nogaJobStatus === "completed" || nogaJobStatus === "failed" || nogaJobStatus === "cancelled") return;
+    const interval = setInterval(async () => {
+      try {
+        const res = await fetch(`/api/v1/companies/${company.id}/noga-explain/${nogaJobId}`, { credentials: "include" });
+        if (!res.ok) return;
+        const data = await res.json();
+        setNogaJobStatus(data.status);
+        if (data.status === "completed") setNogaExplainData(data.trace);
+        else if (data.status === "failed") setNogaExplainError(data.error ?? "Job failed");
+      } catch { /* ignore transient errors */ }
+    }, 2000);
+    return () => clearInterval(interval);
+  }, [nogaJobId, nogaJobStatus, nogaExplainOpen, company.id]);
 
   return (
     <>
@@ -362,10 +385,8 @@ export function CompanyDetailClient({ company: initial, readOnlyDemo = false, is
               <button
                 type="button"
                 onClick={handleNogaExplain}
-                disabled={nogaExplainLoading}
-                className="flex items-center gap-1.5 text-sm text-violet-700 hover:text-violet-900 px-3 py-1.5 rounded-lg border border-violet-200 hover:bg-violet-50 transition-colors disabled:opacity-60"
+                className="flex items-center gap-1.5 text-sm text-violet-700 hover:text-violet-900 px-3 py-1.5 rounded-lg border border-violet-200 hover:bg-violet-50 transition-colors"
               >
-                {nogaExplainLoading ? <Loader2 size={13} className="animate-spin" /> : null}
                 NOGA explain
               </button>
             )}
@@ -745,9 +766,12 @@ export function CompanyDetailClient({ company: initial, readOnlyDemo = false, is
           <button type="button" onClick={() => setNogaExplainOpen(false)} className="text-slate-400 hover:text-slate-700 text-xl leading-none">&times;</button>
         </div>
 
-        {nogaExplainLoading || !nogaExplainData ? (
-          <div className="flex items-center justify-center py-16 text-slate-500 gap-2">
-            <Loader2 size={18} className="animate-spin" /> Loading…
+        {nogaExplainError ? (
+          <div className="px-6 py-10 text-center text-red-600 text-sm">{nogaExplainError}</div>
+        ) : !nogaExplainData ? (
+          <div className="flex flex-col items-center justify-center py-16 text-slate-500 gap-3">
+            <Loader2 size={24} className="animate-spin" />
+            <span className="text-sm capitalize">{nogaJobStatus ?? "Queuing…"} — running on ML worker</span>
           </div>
         ) : (
           <div className="px-6 py-5 space-y-6 text-sm">
@@ -770,7 +794,7 @@ export function CompanyDetailClient({ company: initial, readOnlyDemo = false, is
               <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">Input</h3>
               <div className="grid grid-cols-2 gap-x-6 gap-y-1 text-slate-700">
                 <div><span className="text-slate-500">Language:</span> <code>{nogaExplainData.detected_language}</code></div>
-                <div className="flex items-center gap-1.5"><span className="text-slate-500">Embeddings:</span> {nogaExplainData.embeddings_available ? <Badge className="bg-green-50 text-green-700">available</Badge> : <Badge className="bg-red-50 text-red-700">unavailable</Badge>}</div>
+                <div className="flex items-center gap-1.5"><span className="text-slate-500">Embeddings:</span> {nogaExplainData.embeddings_available ? <Badge className="bg-green-50 text-green-700">used</Badge> : <Badge className="bg-amber-50 text-amber-700">unavailable</Badge>}</div>
                 <div><span className="text-slate-500">Boilerplate patterns active:</span> {nogaExplainData.boilerplate_patterns_active}</div>
                 <div><span className="text-slate-500">Tokens extracted:</span> {nogaExplainData.tokens.length}</div>
               </div>

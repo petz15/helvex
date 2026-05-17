@@ -218,6 +218,7 @@ HTML routes (browser, in `main.py`):
 | GET  | `/api/v1/companies/zefix/{uid}` | Raw Zefix company record |
 | POST | `/api/v1/companies/zefix/import/{uid}` | Import/refresh from Zefix into DB |
 | GET  | `/api/v1/companies/{id}/google-search` | Trigger Google Search for one company |
+| GET  | `/api/v1/companies/{id}/noga-explain` | Full NOGA classification trace (superadmin only) |
 | GET  | `/api/v1/companies/stats` | Aggregate counts (review/proposal statuses) |
 | GET  | `/api/v1/companies/cantons` | Distinct cantons list |
 | GET  | `/api/v1/companies/taxonomy` | Scoring taxonomy config |
@@ -939,6 +940,14 @@ Classifies each company into the official Swiss NOGA 2025 taxonomy (~2000 level-
 3. `reclassify_low_conf_noga` — Confidence-based refinement: re-runs classifier on companies below threshold (default 0.80), useful after rebuilding embeddings.
 
 **Why language-aware:** Embedding company purpose in French and matching it against French NOGA descriptions yields higher semantic similarity than cross-lingual matching. Confidence scores reflect this — typically 0.75–0.95 for clear industry classifications, 0.40–0.70 for ambiguous cases (candidates for API re-run).
+
+**Debug / explain endpoint (superadmin only):**
+`GET /api/v1/companies/{id}/noga-explain` — re-runs classification for a single company and returns the full intermediate trace:
+- Stripped purpose, detected language, extracted tokens, embed text
+- Per-level (L1–L5): top-10 candidates with embedding similarity, normalized token score, excludes cosine penalty, final hybrid score, and the winner
+- Flags for lookahead tie-breaking and fallback usage at each level
+
+Implemented in `classify_company_noga_explain()` in `app/services/noga.py`. Exposed in the company detail UI as a "NOGA explain" button (violet, header area) visible only to superadmins; opens a modal with the full trace.
 
 ---
 

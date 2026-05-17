@@ -70,6 +70,31 @@ def handle_detect_language_bulk(ctx: JobContext) -> tuple[dict, str]:
     )
 
 
+def handle_noga_explain(ctx: JobContext) -> tuple[dict, str]:
+    from app.services.noga import classify_company_noga_explain, is_branch_office, _parent_uid_from_head_offices
+    from app import crud
+
+    company_id = int(ctx.params["company_id"])
+    company = crud.get_company(ctx.db, company_id)
+    if company is None:
+        return {"error": f"Company {company_id} not found"}, "Company not found"
+
+    ctx.status(f"Running NOGA explain for {company.name} ({company.uid})…")
+
+    trace = classify_company_noga_explain(ctx.db, company)
+    trace["company_id"] = company_id
+    trace["company_uid"] = company.uid
+    trace["company_name"] = company.name
+    trace["stored_noga_code"] = company.noga_code
+    trace["stored_noga_label"] = company.noga_label
+    trace["stored_noga_confidence"] = company.noga_confidence
+    trace["stored_noga_path_labels"] = company.noga_path_labels
+    trace["is_branch_office"] = is_branch_office(company)
+    trace["parent_uid"] = _parent_uid_from_head_offices(company) if trace["is_branch_office"] else None
+
+    return trace, f"NOGA explain complete for {company.name}"
+
+
 def handle_reclassify_low_conf_noga(ctx: JobContext) -> tuple[dict, str]:
     from app.services.collection import reclassify_low_confidence_noga
 

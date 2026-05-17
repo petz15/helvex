@@ -27,7 +27,7 @@ from app.api.routes.companies._shared import (
     _clear_noga_cache,
     _overlay,
 )
-from app.services.noga import classify_company_noga_explain, is_branch_office, _parent_uid_from_head_offices
+from app.services.job_worker import enqueue_job
 
 router = APIRouter()
 
@@ -200,12 +200,14 @@ def google_search_for_company(
     return results
 
 
-@router.get(
+@router.post(
     "/{company_id}/noga-explain",
-    summary="Explain NOGA classification for a company (superadmin only)",
+    summary="Enqueue NOGA explain job for a company (superadmin only)",
+    status_code=status.HTTP_202_ACCEPTED,
 )
-def noga_explain(
+def noga_explain_enqueue(
     company_id: int,
+    request: Request,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -214,23 +216,40 @@ def noga_explain(
     db_company = crud.get_company(db, company_id)
     if not db_company:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Company not found")
+    job = enqueue_job(
+        request.app,
+        job_type="noga_explain",
+        label=f"NOGA explain: {db_company.name}",
+        params={"company_id": company_id},
+        db=db,
+        org_id=None,
+        user_id=current_user.id,
+    )
+    return {"job_id": job.id, "status": job.status}
 
-    branch = is_branch_office(db_company)
-    parent_uid = _parent_uid_from_head_offices(db_company) if branch else None
 
-    explain_trace = classify_company_noga_explain(db, db_company)
-
+@router.get(
+    "/{company_id}/noga-explain/{job_id}",
+    summary="Get NOGA explain job result (superadmin only)",
+)
+def noga_explain_result(
+    company_id: int,
+    job_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    import json as _json
+    if not current_user.is_superadmin:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Superadmin only")
+    job = crud.get_job(db, job_id)
+    if not job or job.job_type != "noga_explain":
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Job not found")
+    trace = _json.loads(job.stats_json) if job.stats_json else None
     return {
-        "company_id": company_id,
-        "company_uid": db_company.uid,
-        "company_name": db_company.name,
-        "stored_noga_code": db_company.noga_code,
-        "stored_noga_label": db_company.noga_label,
-        "stored_noga_confidence": db_company.noga_confidence,
-        "stored_noga_path_labels": db_company.noga_path_labels,
-        "is_branch_office": branch,
-        "parent_uid": parent_uid,
-        **explain_trace,
+        "job_id": job_id,
+        "status": job.status,
+        "trace": trace if job.status == "completed" else None,
+        "error": job.error if job.status == "failed" else None,
     }
 
 
