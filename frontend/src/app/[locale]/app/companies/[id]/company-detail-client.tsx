@@ -54,6 +54,59 @@ interface NogaExplain {
   final_confidence: number | null;
 }
 
+interface NogaTestGlobalCandidate {
+  code: string;
+  label: string | null;
+  level_no: number;
+  raw_sim: number;
+  excl_sim: number | null;
+  penalized_sim: number;
+  depth_bonus: number;
+  adjusted_score: number;
+  is_peak: boolean;
+}
+
+interface NogaTestDescentCandidate {
+  code: string;
+  label: string | null;
+  sim: number;
+  is_winner: boolean;
+}
+
+interface NogaTestDescentLevel {
+  level_no: number;
+  code: string;
+  label: string | null;
+  sim: number;
+  top_candidates: NogaTestDescentCandidate[];
+}
+
+interface NogaTestResult {
+  company_name: string;
+  stored_noga_code: string | null;
+  stored_noga_label: string | null;
+  stored_noga_confidence: number | null;
+  stored_noga_path_labels: string | null;
+  lang: string;
+  embed_text: string;
+  depth_bonus_per_level: number;
+  global_top_candidates: NogaTestGlobalCandidate[];
+  peak_code: string;
+  peak_level_no: number;
+  peak_label: string | null;
+  peak_raw_sim: number;
+  peak_penalized_sim: number;
+  peak_adjusted_score: number;
+  peak_path: string | null;
+  peak_path_labels: string | null;
+  descent_levels: NogaTestDescentLevel[];
+  leaf_code: string;
+  leaf_label: string | null;
+  leaf_sim: number;
+  leaf_path: string | null;
+  leaf_path_labels: string | null;
+}
+
 interface Props {
   company: Company;
   readOnlyDemo?: boolean;
@@ -134,6 +187,11 @@ export function CompanyDetailClient({ company: initial, readOnlyDemo = false, is
   const [nogaJobStatus, setNogaJobStatus] = useState<string | null>(null);
   const [nogaExplainData, setNogaExplainData] = useState<NogaExplain | null>(null);
   const [nogaExplainError, setNogaExplainError] = useState<string | null>(null);
+  const [nogaTestOpen, setNogaTestOpen] = useState(false);
+  const [nogaTestJobId, setNogaTestJobId] = useState<number | null>(null);
+  const [nogaTestJobStatus, setNogaTestJobStatus] = useState<string | null>(null);
+  const [nogaTestData, setNogaTestData] = useState<NogaTestResult | null>(null);
+  const [nogaTestError, setNogaTestError] = useState<string | null>(null);
 
   const { dict } = useI18n();
   const t = dict.app.companydetail;
@@ -305,6 +363,43 @@ export function CompanyDetailClient({ company: initial, readOnlyDemo = false, is
     return () => clearInterval(interval);
   }, [nogaJobId, nogaJobStatus, nogaExplainOpen, company.id]);
 
+  async function handleNogaTest() {
+    setNogaTestData(null);
+    setNogaTestError(null);
+    setNogaTestJobId(null);
+    setNogaTestJobStatus(null);
+    setNogaTestOpen(true);
+    try {
+      const res = await fetch(`/api/v1/companies/${company.id}/noga-test`, {
+        method: "POST",
+        credentials: "include",
+      });
+      if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+      const { job_id, status: jobStatus } = await res.json();
+      setNogaTestJobId(job_id);
+      setNogaTestJobStatus(jobStatus);
+    } catch (e) {
+      handleApiError(e);
+      setNogaTestOpen(false);
+    }
+  }
+
+  useEffect(() => {
+    if (!nogaTestJobId || !nogaTestOpen) return;
+    if (nogaTestJobStatus === "completed" || nogaTestJobStatus === "failed" || nogaTestJobStatus === "cancelled") return;
+    const interval = setInterval(async () => {
+      try {
+        const res = await fetch(`/api/v1/companies/${company.id}/noga-test/${nogaTestJobId}`, { credentials: "include" });
+        if (!res.ok) return;
+        const data = await res.json();
+        setNogaTestJobStatus(data.status);
+        if (data.status === "completed") setNogaTestData(data.result);
+        else if (data.status === "failed") setNogaTestError(data.error ?? "Job failed");
+      } catch { /* ignore transient errors */ }
+    }, 2000);
+    return () => clearInterval(interval);
+  }, [nogaTestJobId, nogaTestJobStatus, nogaTestOpen, company.id]);
+
   return (
     <>
     <div className="flex w-full px-4 py-6 gap-4">
@@ -388,6 +483,15 @@ export function CompanyDetailClient({ company: initial, readOnlyDemo = false, is
                 className="flex items-center gap-1.5 text-sm text-violet-700 hover:text-violet-900 px-3 py-1.5 rounded-lg border border-violet-200 hover:bg-violet-50 transition-colors"
               >
                 NOGA explain
+              </button>
+            )}
+            {isSuperadmin && (
+              <button
+                type="button"
+                onClick={handleNogaTest}
+                className="flex items-center gap-1.5 text-sm text-amber-700 hover:text-amber-900 px-3 py-1.5 rounded-lg border border-amber-200 hover:bg-amber-50 transition-colors"
+              >
+                NOGA v2 test
               </button>
             )}
           </div>
@@ -756,6 +860,146 @@ export function CompanyDetailClient({ company: initial, readOnlyDemo = false, is
     </div>
 
   </div>
+
+  {/* NOGA v2 Test Modal (superadmin only) */}
+  {nogaTestOpen && (
+    <div className="fixed inset-0 z-[1000] bg-black/40 flex items-start justify-center overflow-y-auto py-8 px-4">
+      <div className="bg-white rounded-xl shadow-xl w-full max-w-5xl">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200">
+          <h2 className="text-base font-semibold text-slate-900">NOGA v2 test — {company.name}</h2>
+          <button type="button" onClick={() => setNogaTestOpen(false)} className="text-slate-400 hover:text-slate-700 text-xl leading-none">&times;</button>
+        </div>
+
+        {nogaTestError ? (
+          <div className="px-6 py-10 text-center text-red-600 text-sm">{nogaTestError}</div>
+        ) : !nogaTestData ? (
+          <div className="flex flex-col items-center justify-center py-16 text-slate-500 gap-3">
+            <Loader2 size={24} className="animate-spin" />
+            <span className="text-sm capitalize">{nogaTestJobStatus ?? "Queuing…"} — running on ML worker</span>
+          </div>
+        ) : (
+          <div className="px-6 py-5 space-y-6 text-sm">
+
+            {/* Comparison: stored vs peak vs leaf */}
+            <section className="space-y-2">
+              <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">Result comparison</h3>
+              <div className="grid grid-cols-3 gap-3">
+                <div className="border border-slate-200 rounded-lg p-3 space-y-1">
+                  <p className="text-[10px] uppercase tracking-wide text-slate-400 font-semibold">Stored (current)</p>
+                  <p className="font-mono font-semibold text-slate-800">{nogaTestData.stored_noga_code ?? "—"}</p>
+                  <p className="text-xs text-slate-600 truncate">{nogaTestData.stored_noga_label ?? "—"}</p>
+                  <p className="text-xs text-slate-500">Confidence: {nogaTestData.stored_noga_confidence != null ? `${Math.round(nogaTestData.stored_noga_confidence * 100)}%` : "—"}</p>
+                  <p className="text-xs text-slate-400 truncate">{nogaTestData.stored_noga_path_labels ?? "—"}</p>
+                </div>
+                <div className="border border-amber-200 bg-amber-50 rounded-lg p-3 space-y-1">
+                  <p className="text-[10px] uppercase tracking-wide text-amber-600 font-semibold">v2 Peak (L{nogaTestData.peak_level_no})</p>
+                  <p className="font-mono font-semibold text-slate-800">{nogaTestData.peak_code}</p>
+                  <p className="text-xs text-slate-600 truncate">{nogaTestData.peak_label ?? "—"}</p>
+                  <p className="text-xs text-slate-500">Raw sim: {nogaTestData.peak_raw_sim.toFixed(3)} · Adj: {nogaTestData.peak_adjusted_score.toFixed(3)}</p>
+                  <p className="text-xs text-slate-400 truncate">{nogaTestData.peak_path_labels ?? "—"}</p>
+                </div>
+                <div className="border border-emerald-200 bg-emerald-50 rounded-lg p-3 space-y-1">
+                  <p className="text-[10px] uppercase tracking-wide text-emerald-600 font-semibold">v2 Leaf (descended)</p>
+                  <p className="font-mono font-semibold text-slate-800">{nogaTestData.leaf_code}</p>
+                  <p className="text-xs text-slate-600 truncate">{nogaTestData.leaf_label ?? "—"}</p>
+                  <p className="text-xs text-slate-500">Sim: {nogaTestData.leaf_sim.toFixed(3)}</p>
+                  <p className="text-xs text-slate-400 truncate">{nogaTestData.leaf_path_labels ?? "—"}</p>
+                </div>
+              </div>
+            </section>
+
+            {/* Input */}
+            <section className="space-y-1">
+              <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">Input</h3>
+              <div className="flex flex-wrap gap-4 text-slate-700 text-xs">
+                <span><span className="text-slate-500">Language:</span> <code>{nogaTestData.lang}</code></span>
+                <span><span className="text-slate-500">Depth bonus/level:</span> {nogaTestData.depth_bonus_per_level}</span>
+              </div>
+              <div>
+                <p className="text-slate-500 mb-0.5 text-xs">Embed text:</p>
+                <p className="bg-slate-50 border border-slate-200 rounded p-2 text-xs font-mono text-slate-700 whitespace-pre-wrap">{nogaTestData.embed_text}</p>
+              </div>
+            </section>
+
+            {/* Global top candidates */}
+            <section className="space-y-2">
+              <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">Global top candidates (all levels)</h3>
+              <div className="border border-slate-200 rounded-lg overflow-hidden">
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr className="text-slate-500 bg-slate-50 border-b border-slate-100">
+                      <th className="text-left px-3 py-1.5 font-medium">Code</th>
+                      <th className="text-left px-3 py-1.5 font-medium">Label</th>
+                      <th className="text-center px-3 py-1.5 font-medium">L</th>
+                      <th className="text-right px-3 py-1.5 font-medium">Raw sim</th>
+                      <th className="text-right px-3 py-1.5 font-medium">Excl sim</th>
+                      <th className="text-right px-3 py-1.5 font-medium">Penalized</th>
+                      <th className="text-right px-3 py-1.5 font-medium">Depth+</th>
+                      <th className="text-right px-3 py-1.5 font-medium">Adjusted</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {nogaTestData.global_top_candidates.map((c, i) => (
+                      <tr key={`${c.code}-${i}`} className={cn(
+                        "border-b border-slate-100 last:border-0",
+                        c.is_peak && "bg-amber-50 font-semibold",
+                      )}>
+                        <td className="px-3 py-1.5 font-mono text-slate-800">{c.code}{c.is_peak ? " ★" : ""}</td>
+                        <td className="px-3 py-1.5 text-slate-600 max-w-[180px] truncate">{c.label ?? "—"}</td>
+                        <td className="px-3 py-1.5 text-center text-slate-500">{c.level_no}</td>
+                        <td className="px-3 py-1.5 text-right text-slate-700">{c.raw_sim.toFixed(3)}</td>
+                        <td className={cn("px-3 py-1.5 text-right", c.excl_sim != null && c.excl_sim > 0.3 ? "text-red-600 font-medium" : "text-slate-500")}>
+                          {c.excl_sim != null ? c.excl_sim.toFixed(3) : "—"}
+                        </td>
+                        <td className="px-3 py-1.5 text-right text-slate-700">{c.penalized_sim.toFixed(3)}</td>
+                        <td className="px-3 py-1.5 text-right text-slate-500">+{c.depth_bonus.toFixed(3)}</td>
+                        <td className="px-3 py-1.5 text-right font-semibold text-slate-800">{c.adjusted_score.toFixed(4)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </section>
+
+            {/* Constrained descent */}
+            {nogaTestData.descent_levels.length > 0 && (
+              <section className="space-y-2">
+                <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">Constrained descent from peak</h3>
+                {nogaTestData.descent_levels.map(dl => (
+                  <div key={dl.level_no} className="border border-slate-200 rounded-lg overflow-hidden">
+                    <div className="flex items-center gap-2 px-4 py-2 bg-slate-50 border-b border-slate-200">
+                      <span className="font-semibold text-slate-800">Level {dl.level_no}</span>
+                      <Badge className="bg-emerald-50 text-emerald-700 font-mono">{dl.code} — {dl.label}</Badge>
+                      <span className="text-slate-500 text-xs">sim: {dl.sim.toFixed(3)}</span>
+                    </div>
+                    <table className="w-full text-xs">
+                      <thead>
+                        <tr className="text-slate-500 border-b border-slate-100">
+                          <th className="text-left px-4 py-1.5 font-medium">Code</th>
+                          <th className="text-left px-4 py-1.5 font-medium">Label</th>
+                          <th className="text-right px-4 py-1.5 font-medium">Sim</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {dl.top_candidates.map(tc => (
+                          <tr key={tc.code} className={cn("border-b border-slate-100 last:border-0", tc.is_winner && "bg-emerald-50")}>
+                            <td className="px-4 py-1.5 font-mono text-slate-800">{tc.code}{tc.is_winner ? " ✓" : ""}</td>
+                            <td className="px-4 py-1.5 text-slate-600 max-w-[260px] truncate">{tc.label ?? "—"}</td>
+                            <td className="px-4 py-1.5 text-right text-slate-700">{tc.sim.toFixed(3)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                ))}
+              </section>
+            )}
+
+          </div>
+        )}
+      </div>
+    </div>
+  )}
 
   {/* NOGA Explain Modal (superadmin only) */}
   {nogaExplainOpen && (

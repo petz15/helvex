@@ -528,6 +528,157 @@ def classify_company_noga(db: Session, company: Company) -> NogaClassification |
 
 
 # ---------------------------------------------------------------------------
+# V2: global multi-level search → peak → constrained descent (experimental)
+# ---------------------------------------------------------------------------
+
+# Shallower levels get a small bonus so an L2 code at 0.68 beats an L4 code at 0.69
+_DEPTH_BONUS_PER_LEVEL: float = 0.02
+
+
+def classify_company_noga_v2(db: Session, company: Company) -> dict:
+    """Experimental hybrid classifier.
+
+    Instead of descending top-down from L1, searches all levels simultaneously,
+    finds the code with the highest adjusted similarity (the 'peak'), then does
+    a constrained descent from the peak to L5. Returns both the peak result and
+    the derived leaf — without writing anything to the DB.
+    """
+    import numpy as np
+    from app.services.language_detection import detect_purpose_language
+
+    boilerplate_patterns = crud.get_active_boilerplate_patterns(db)
+    stripped_purpose = _strip_purpose_boilerplate(company.purpose or "", boilerplate_patterns)
+    lang = company.purpose_language or detect_purpose_language(company.purpose) or _DEFAULT_LANG
+
+    embed_text = " ".join(filter(None, [
+        stripped_purpose,
+        (company.purpose_keywords or "").replace(",", " "),
+    ])).strip()
+
+    if not embed_text:
+        return {"error": "No text to embed", "lang": lang}
+    if not _has_noga_embeddings(db):
+        return {"error": "No NOGA embeddings in database", "lang": lang}
+
+    query_vec = _embed_query(embed_text)
+    if query_vec is None:
+        return {"error": "Embedding computation failed", "lang": lang}
+
+    vec_list = query_vec.tolist() if isinstance(query_vec, np.ndarray) else list(query_vec)
+    vec_str = "[" + ",".join(f"{x:.8f}" for x in vec_list) + "]"
+
+    def _global_search(l: str) -> list:
+        return db.execute(sql_text("""
+            WITH q AS (SELECT CAST(:vec AS vector) AS v)
+            SELECT noga_code, level_no, 1 - (embedding <=> q.v) AS similarity
+            FROM   noga_embeddings, q
+            WHERE  lang = :lang AND ann_type = 'includes'
+            ORDER  BY embedding <=> q.v
+            LIMIT  50
+        """), {"vec": vec_str, "lang": l}).fetchall()
+
+    rows = _global_search(lang)
+    if not rows and lang != _DEFAULT_LANG:
+        rows = _global_search(_DEFAULT_LANG)
+
+    if not rows:
+        return {"error": "No results from global search", "lang": lang}
+
+    # Apply excludes penalty
+    candidate_codes = [r.noga_code for r in rows]
+    excl_sims = _excludes_cosine_penalty(db, candidate_codes, query_vec, lang)
+
+    # Score: penalized similarity + shallow-level depth bonus
+    idx = _load_noga_index()
+    scored: list[dict] = []
+    for r in rows:
+        sim = float(r.similarity)
+        excl = excl_sims.get(r.noga_code, 0.0)
+        penalized = sim * (1.0 - _EXCL_COSINE_WEIGHT * excl)
+        depth_bonus = (5 - int(r.level_no)) * _DEPTH_BONUS_PER_LEVEL
+        meta = idx.code_meta.get(r.noga_code, {})
+        scored.append({
+            "code": r.noga_code,
+            "label": _get_label(meta, lang),
+            "level_no": int(r.level_no),
+            "raw_sim": round(sim, 4),
+            "excl_sim": round(excl, 4) if excl > 0 else None,
+            "penalized_sim": round(penalized, 4),
+            "depth_bonus": round(depth_bonus, 4),
+            "adjusted_score": round(penalized + depth_bonus, 4),
+            "is_peak": False,
+        })
+
+    scored.sort(key=lambda x: x["adjusted_score"], reverse=True)
+    scored[0]["is_peak"] = True
+    peak = scored[0]
+    peak_code = peak["code"]
+    peak_level_no = peak["level_no"]
+    peak_path, peak_path_labels = _build_noga_path(peak_code)
+
+    # Constrained descent from peak level+1 down to L5
+    descent_levels: list[dict] = []
+    current_parent_codes = [peak_code]
+
+    for level_no in range(peak_level_no + 1, 6):
+        level_rows = _pgvector_search_level(
+            db, query_vec, lang, level_no,
+            parent_codes=current_parent_codes,
+            top_k=_LEVEL_TOP_K,
+        )
+        if not level_rows:
+            break
+        winner_code, winner_sim = level_rows[0]
+        winner_meta = idx.code_meta.get(winner_code, {})
+        descent_levels.append({
+            "level_no": level_no,
+            "code": winner_code,
+            "label": _get_label(winner_meta, lang),
+            "sim": round(float(winner_sim), 4),
+            "top_candidates": [
+                {
+                    "code": c,
+                    "label": _get_label(idx.code_meta.get(c, {}), lang),
+                    "sim": round(float(s), 4),
+                    "is_winner": c == winner_code,
+                }
+                for c, s in level_rows[:5]
+            ],
+        })
+        current_parent_codes = [winner_code]
+
+    if descent_levels:
+        leaf_code = descent_levels[-1]["code"]
+        leaf_label = descent_levels[-1]["label"]
+        leaf_sim = descent_levels[-1]["sim"]
+    else:
+        leaf_code, leaf_label, leaf_sim = peak_code, peak["label"], peak["raw_sim"]
+
+    leaf_path, leaf_path_labels = _build_noga_path(leaf_code)
+
+    return {
+        "lang": lang,
+        "embed_text": embed_text,
+        "depth_bonus_per_level": _DEPTH_BONUS_PER_LEVEL,
+        "global_top_candidates": scored[:20],
+        "peak_code": peak_code,
+        "peak_level_no": peak_level_no,
+        "peak_label": peak["label"],
+        "peak_raw_sim": peak["raw_sim"],
+        "peak_penalized_sim": peak["penalized_sim"],
+        "peak_adjusted_score": peak["adjusted_score"],
+        "peak_path": peak_path,
+        "peak_path_labels": peak_path_labels,
+        "descent_levels": descent_levels,
+        "leaf_code": leaf_code,
+        "leaf_label": leaf_label,
+        "leaf_sim": leaf_sim,
+        "leaf_path": leaf_path,
+        "leaf_path_labels": leaf_path_labels,
+    }
+
+
+# ---------------------------------------------------------------------------
 # Explain / trace (debug only)
 # ---------------------------------------------------------------------------
 

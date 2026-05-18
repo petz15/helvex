@@ -253,6 +253,59 @@ def noga_explain_result(
     }
 
 
+@router.post(
+    "/{company_id}/noga-test",
+    summary="Enqueue NOGA v2 test job for a company (superadmin only)",
+    status_code=status.HTTP_202_ACCEPTED,
+)
+def noga_test_enqueue(
+    company_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    if not current_user.is_superadmin:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Superadmin only")
+    db_company = crud.get_company(db, company_id)
+    if not db_company:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Company not found")
+    job = enqueue_job(
+        request.app,
+        job_type="noga_test",
+        label=f"NOGA v2 test: {db_company.name}",
+        params={"company_id": company_id},
+        db=db,
+        org_id=None,
+        user_id=current_user.id,
+    )
+    return {"job_id": job.id, "status": job.status}
+
+
+@router.get(
+    "/{company_id}/noga-test/{job_id}",
+    summary="Get NOGA v2 test job result (superadmin only)",
+)
+def noga_test_result(
+    company_id: int,
+    job_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    import json as _json
+    if not current_user.is_superadmin:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Superadmin only")
+    job = crud.get_job(db, job_id)
+    if not job or job.job_type != "noga_test":
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Job not found")
+    result = _json.loads(job.stats_json) if job.stats_json else None
+    return {
+        "job_id": job_id,
+        "status": job.status,
+        "result": result if job.status == "completed" else None,
+        "error": job.error if job.status == "failed" else None,
+    }
+
+
 class CompanyWebsiteSelect(BaseModel):
     link: str
 

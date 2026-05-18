@@ -77,9 +77,9 @@ def _compute_dedup_key(job_type: str, org_id: int | None, params: dict) -> str |
     # No dedup: every trigger creates a fresh independent job.
     NO_DEDUP = {"batch", "csv_export"}
 
-    if job_type == "noga_explain":
+    if job_type in ("noga_explain", "noga_test"):
         company_id = params.get("company_id")
-        return f"noga_explain:{company_id}" if company_id is not None else None
+        return f"{job_type}:{company_id}" if company_id is not None else None
 
     if job_type in NO_DEDUP:
         return None
@@ -1155,6 +1155,24 @@ def _run_job(app, job_id: int) -> None:  # noqa: C901
                 )
                 if resume_from:
                     done_msg += f" (resumed from change id={resume_from})"
+
+            elif job.job_type == "noga_test":
+                from app.services.noga import classify_company_noga_v2, is_branch_office, _parent_uid_from_head_offices
+
+                company_id = int(params["company_id"])
+                company = crud.get_company(db, company_id)
+                if company is None:
+                    raise ValueError(f"Company {company_id} not found")
+                crud.update_progress(db, job, message=f"Running NOGA v2 test for {company.name}…", done=0, total=1, stats={})
+                stats = classify_company_noga_v2(db, company)
+                stats["company_id"] = company_id
+                stats["company_uid"] = company.uid
+                stats["company_name"] = company.name
+                stats["stored_noga_code"] = company.noga_code
+                stats["stored_noga_label"] = company.noga_label
+                stats["stored_noga_confidence"] = company.noga_confidence
+                stats["stored_noga_path_labels"] = company.noga_path_labels
+                done_msg = f"NOGA v2 test complete for {company.name}"
 
             elif job.job_type == "noga_explain":
                 from app.services.noga import classify_company_noga_explain, is_branch_office, _parent_uid_from_head_offices

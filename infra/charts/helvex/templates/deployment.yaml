@@ -42,7 +42,7 @@ spec:
               value: "true"
             {{- else if .Values.mlWorker.enabled }}
             - name: JOB_TYPE_BLACKLIST
-              value: "reclassify_noga,build_noga_embeddings,detect_language_bulk,reclassify_low_conf_noga,tfidf_kmeans_cluster,recompute_keywords,reextract_keywords,cluster_analysis,discover_stopwords,noga_explain"
+              value: "reclassify_noga,build_noga_embeddings,detect_language_bulk,reclassify_low_conf_noga,tfidf_kmeans_cluster,recompute_keywords,reextract_keywords,cluster_analysis,discover_stopwords,noga_explain,noga_test"
             {{- else if .Values.apiWorker.enabled }}
             - name: JOB_TYPE_BLACKLIST
               value: "bulk,detail,initial,shab_daily,shab_backfill,sogc_preprocess,batch,re_geocode,recalculate_scores,recalculate_google_scores,reextract_purpose,reextract_zefix_raw,claude_classify,csv_export,analyze_boilerplate,billing_renewal,saved_view_alerts"
