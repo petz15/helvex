@@ -653,19 +653,13 @@ jobs:
         if: |
           (github.event_name != 'workflow_dispatch' && contains(github.event.head_commit.message, '[deploy-all]')) ||
           (github.event_name == 'workflow_dispatch' && github.event.inputs.deploy_mode == 'all')
+        working-directory: infra
         run: |
-          kubectl set image deployment/helvex \
-            app=ghcr.io/${{ github.repository }}:${{ github.sha }} \
-            -n helvex-prod
-          kubectl set image deployment/helvex-api-worker \
-            api-worker=ghcr.io/${{ github.repository }}:${{ github.sha }} \
-            -n helvex-prod
-          kubectl set image deployment/helvex-frontend \
-            frontend=ghcr.io/${{ github.repository }}-frontend:${{ github.sha }} \
-            -n helvex-prod
-          kubectl set image deployment/helvex-ml-worker \
-            ml-worker=ghcr.io/${{ github.repository }}-ml:${{ github.sha }} \
-            -n helvex-prod
+          helmfile -e prod apply --selector name=helvex \
+            --set "image.tag=${{ github.sha }}" \
+            --set "mlImage.tag=${{ github.sha }}" \
+            --set "frontend.image.tag=${{ github.sha }}" \
+            --suppress-diff
 
       - name: Deploy frontend only
         if: |
@@ -696,6 +690,11 @@ jobs:
           kubectl set image deployment/helvex-ml-worker \
             ml-worker=ghcr.io/${{ github.repository }}-ml:${{ github.sha }} \
             -n helvex-prod
+          ML_WHITELIST=$(grep -A1 'name: JOB_TYPE_WHITELIST' \
+            ../infra/charts/helvex/templates/ml-worker-deployment.yaml \
+            | grep 'value:' | sed 's/.*value: *"//;s/"$//')
+          kubectl set env deployment/helvex-ml-worker -n helvex-prod \
+            "JOB_TYPE_WHITELIST=${ML_WHITELIST}"
 
       - name: Wait for PostgreSQL to be healthy
         if: |
