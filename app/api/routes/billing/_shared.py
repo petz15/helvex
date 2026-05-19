@@ -52,7 +52,7 @@ class SubscriptionCheckoutRequest(BaseModel):
 
 
 class TopupCheckoutRequest(BaseModel):
-    credits: int = Field(..., ge=100)
+    credits: int = Field(..., ge=10_000, le=10_000_000)
     success_url: str
     cancel_url: str
     billing_address: BillingAddress | None = None

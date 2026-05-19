@@ -155,6 +155,11 @@ export function PricingClient() {
                     </span>
                   )}
                 </div>
+                {price > 0 && (
+                  <p className={`text-[10px] mt-0.5 ${isDark ? "text-slate-500" : "text-slate-400"}`}>
+                    {dict.app.pricing.exklMwst}
+                  </p>
+                )}
                 <p className={`mt-2 text-xs leading-relaxed ${isDark ? "text-slate-400" : "text-slate-500"}`}>
                   {tier.description}
                 </p>

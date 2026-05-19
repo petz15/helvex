@@ -5,7 +5,9 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING
 
-from sqlalchemy import BigInteger, DateTime, Float, ForeignKey, String, Text
+from decimal import Decimal
+
+from sqlalchemy import BigInteger, DateTime, Float, ForeignKey, Numeric, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 if TYPE_CHECKING:
@@ -37,6 +39,10 @@ class PaymentTransaction(Base):
     # Transaction amount (always in CHF for consistency)
     amount_chf: Mapped[float] = mapped_column(Float, nullable=False)
     currency: Mapped[str] = mapped_column(String(3), nullable=False, default="CHF")
+
+    # VAT applied to this transaction
+    vat_rate: Mapped[float | None] = mapped_column(Float, nullable=True)          # e.g. 0.081 for 8.1%
+    vat_amount_chf: Mapped[Decimal | None] = mapped_column(Numeric(10, 4), nullable=True)
 
     # Transaction type
     kind: Mapped[str] = mapped_column(String(20), nullable=False)  # "subscription" or "topup"

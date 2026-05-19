@@ -1091,6 +1091,7 @@ export interface OrgDetail {
   default_payment_user_id: number | null;
   custom_features: Record<string, unknown> | null;
   member_count: number;
+  vat_id: string | null;
 }
 
 export interface OrgMember {
@@ -1200,7 +1201,7 @@ export async function deleteCurrentUserBillingAddress(addressId: string): Promis
   return res.json();
 }
 
-export async function updateOrg(orgId: number, data: { name?: string; billing_address?: BillingAddressPayload | null }): Promise<OrgDetail> {
+export async function updateOrg(orgId: number, data: { name?: string; billing_address?: BillingAddressPayload | null; vat_id?: string | null }): Promise<OrgDetail> {
   const res = await fetch(orgPath(orgId, "/"), {
     method: "PATCH",
     credentials: "include",

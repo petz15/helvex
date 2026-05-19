@@ -306,7 +306,36 @@
     },
     "billing": {
       "title": "Fatturazione",
-      "subtitle": "Gestisci piano, crediti e cronologia pagamenti."
+      "subtitle": "Gestisci piano, crediti e cronologia pagamenti.",
+      "topup": {
+        "title": "Ricarica crediti",
+        "subtitle": "I piani superiori ricevono crediti bonus ad ogni ricarica.",
+        "errorMin": "Minimo: 10 000 crediti (CHF 1.00).",
+        "errorMax": "Importo massimo: CHF 1'000.00 per ricarica.",
+        "customLabel": "Importo personalizzato",
+        "customButton": "Ricarica importo",
+        "hintsTitle": "Note sulle ricariche",
+        "hintLimit": "Max. CHF 1'000.00 per transazione / saldo del conto",
+        "hintExpiry": "I crediti ricaricati non scadono",
+        "hintStorage": "I saldi sono custoditi dal fornitore di pagamento e trasferiti regolarmente sul conto aziendale",
+        "hintRefund": "Rimborsi disponibili solo per transazioni complete non utilizzate entro il periodo di recesso"
+      },
+      "vatId": {
+        "title": "N. IVA / UID",
+        "subtitle": "Per le aziende UE: inserire un numero IVA valido per applicare il reverse charge (IVA 0%).",
+        "label": "N. IVA / UID (facoltativo)",
+        "placeholder": "CHE-123.456.789 o DE123456789",
+        "save": "Salva",
+        "saving": "Salvataggio…",
+        "saved": "Salvato."
+      },
+      "payment": {
+        "vatSubtotal": "Subtotale",
+        "vatLine": "IVA ({pct} %)",
+        "vatTotal": "Totale",
+        "vatReverseCharge": "Reverse Charge — esente IVA (n. IVA fornito)",
+        "vatNone": "Nessuna IVA (indirizzo fuori UE/CH)"
+      }
     },
     "account": {
       "title": "Il mio account",
@@ -338,6 +367,7 @@
     },
     "pricing": {
       "title": "Piani & prezzi",
+      "exklMwst": "IVA escl.",
       "comparison": {
         "heading": "Confronta i piani",
         "featureCol": "Funzionalità",

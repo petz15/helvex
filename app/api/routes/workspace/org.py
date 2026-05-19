@@ -47,6 +47,7 @@ def _org_out(db: Session, org: Organization) -> OrgOut:
         default_payment_user_id=org.default_payment_user_id,
         custom_features=org.custom_features,
         member_count=member_count,
+        vat_id=org.vat_id,
     )
 
 
@@ -74,6 +75,8 @@ def update_org(
         org.name = body.name.strip()
     if body.billing_address is not None:
         org.billing_address_json = json.dumps(body.billing_address.model_dump())
+    if body.vat_id is not None:
+        org.vat_id = body.vat_id.strip() or None
     db.commit()
     db.refresh(org)
     return _org_out(db, org)

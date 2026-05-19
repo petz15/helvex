@@ -152,6 +152,7 @@ class OrgOut(BaseModel):
     default_payment_user_id: int | None = None
     custom_features: dict | None = None
     member_count: int = 0
+    vat_id: str | None = None
 
     model_config = {"from_attributes": True}
 
@@ -159,6 +160,7 @@ class OrgOut(BaseModel):
 class OrgUpdate(BaseModel):
     name: str | None = None
     billing_address: BillingAddress | None = None
+    vat_id: str | None = None
 
 
 class MemberOut(BaseModel):

@@ -36,7 +36,10 @@ export default function AgbPage() {
         <h2 className="font-semibold text-slate-900">5. Preise und Laufzeit</h2>
         <p>
           Preise, Leistungsumfang und Laufzeiten richten sich nach dem gewählten Plan.
-          Alle Preise verstehen sich inklusive gesetzlicher MWST, sofern nicht anders angegeben.
+          Alle Preise verstehen sich exklusive gesetzlicher Mehrwertsteuer (MWST). Die MWST wird beim Checkout
+          basierend auf der Rechnungsadresse berechnet: Rechnungsadressen in der Schweiz: 8,1&nbsp;% (aktueller
+          Normalsatz); EU-Länder: lokaler Normalsatz; alle übrigen Länder oder unklare Herkunft: 8,1&nbsp;%
+          (Schweizer Normalsatz als Standardwert).
         </p>
 
         <h2 className="font-semibold text-slate-900">5a. Lieferkonditionen</h2>
@@ -64,6 +67,36 @@ export default function AgbPage() {
           unter Angabe der Bestellnummer zu erklären. Bei Abonnements, die während der Rücktrittsfrist
           bereits vollumfänglich genutzt wurden, kann das Rücktrittsrecht gemäss Art. 40a OR eingeschränkt
           sein. Credits, die nach dem Rücktritt bereits verbraucht wurden, werden nicht rückvergütet.
+        </p>
+
+        <h2 className="font-semibold text-slate-900">5d. Aufladungen (Credits-Kauf)</h2>
+        <p>
+          <strong>Bestellprozess:</strong> Credits können im Benutzerbereich unter <em>Abrechnung → Credits aufladen</em> erworben werden.
+          Der Nutzer wählt einen vordefinierten oder individuellen Betrag (mind. CHF&nbsp;1.00&nbsp;=&nbsp;10&nbsp;000 Credits),
+          bestätigt die Rechnungsadresse und wird zur gesicherten Zahlungsseite weitergeleitet. Nach erfolgreicher Zahlung werden
+          die Credits sofort dem Konto gutgeschrieben.
+        </p>
+        <p>
+          <strong>Betragslimit:</strong> Maximalbetrag CHF&nbsp;1&apos;000.00 pro Aufladungstransaktion. Das maximale
+          Kontoguthaben beträgt CHF&nbsp;1&apos;000.00 (entspricht 10&nbsp;000&nbsp;000 Credits).
+        </p>
+        <p>
+          <strong>Verwahrung des Guthabens:</strong> Zahlungseingänge werden vom Zahlungsdienstleister (Worldline) verwahrt
+          und in regelmässigen Abständen auf das Firmenkonto überwiesen. Credits werden sofort nach erfolgreicher
+          Zahlung gutgeschrieben.
+        </p>
+        <p>
+          <strong>Gültigkeitsdauer:</strong> Aufgeladene Credits (Topups) verfallen nicht. Im Rahmen von
+          Abonnementplänen gewährte Bonus-Credits verfallen nach 12 Monaten.
+        </p>
+        <p>
+          <strong>Rückerstattung:</strong> Eine Rückerstattung ist nur für vollständige, noch unverbrauchte
+          Aufladungstransaktionen möglich. Teilrückerstattungen sind ausgeschlossen. Anträge sind innerhalb der
+          gesetzlichen Widerrufsfrist (Art.&nbsp;40a OR) per E-Mail an{" "}
+          <a href="mailto:kontakt@balogh-consulting.ch" className="underline text-blue-600">
+            kontakt@balogh-consulting.ch
+          </a>{" "}
+          unter Angabe der Bestellnummer einzureichen.
         </p>
 
         <h2 className="font-semibold text-slate-900">6. Pflichten des Kunden</h2>
@@ -94,7 +127,7 @@ export default function AgbPage() {
         </p>
       </section>
 
-      <p className="text-xs text-slate-400">Stand: 16.04.2026</p>
+      <p className="text-xs text-slate-400">Stand: 19.05.2026</p>
     </div>
   );
 }

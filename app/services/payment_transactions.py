@@ -146,6 +146,8 @@ def log_payment_transaction(
     credits_total_granted: int | None = None,
     error_code: str | None = None,
     error_message: str | None = None,
+    vat_rate: float | None = None,
+    vat_amount_chf: float | None = None,
 ) -> PaymentTransaction:
     """Log a payment transaction with full validation and security checks.
 
@@ -215,6 +217,8 @@ def log_payment_transaction(
         credits_total_granted=credits_total_granted,
         error_code=error_code,
         error_message=error_message,
+        vat_rate=vat_rate,
+        vat_amount_chf=vat_amount_chf,
     )
 
     db.add(tx)

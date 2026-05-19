@@ -306,7 +306,36 @@
     },
     "billing": {
       "title": "Facturation",
-      "subtitle": "Gérez votre plan, vos crédits et l'historique des paiements."
+      "subtitle": "Gérez votre plan, vos crédits et l'historique des paiements.",
+      "topup": {
+        "title": "Recharger des crédits",
+        "subtitle": "Les plans supérieurs reçoivent des crédits bonus à chaque achat.",
+        "errorMin": "Minimum : 10 000 crédits (CHF 1.00).",
+        "errorMax": "Maximum : CHF 1'000.00 par rechargement.",
+        "customLabel": "Montant personnalisé",
+        "customButton": "Recharger ce montant",
+        "hintsTitle": "Informations sur les rechargements",
+        "hintLimit": "Max. CHF 1'000.00 par transaction / solde du compte",
+        "hintExpiry": "Les crédits rechargés n'expirent pas",
+        "hintStorage": "Les soldes sont détenus par le prestataire de paiement et régulièrement transférés sur le compte de la société",
+        "hintRefund": "Remboursements disponibles uniquement pour les transactions complètes non utilisées dans le délai de rétractation"
+      },
+      "vatId": {
+        "title": "Numéro TVA",
+        "subtitle": "Pour les entreprises de l'UE : entrez un numéro de TVA valide pour appliquer l'autoliquidation (0 % TVA).",
+        "label": "Numéro UID / TVA (optionnel)",
+        "placeholder": "CHE-123.456.789 ou DE123456789",
+        "save": "Enregistrer",
+        "saving": "Enregistrement…",
+        "saved": "Enregistré."
+      },
+      "payment": {
+        "vatSubtotal": "Sous-total",
+        "vatLine": "TVA ({pct} %)",
+        "vatTotal": "Total",
+        "vatReverseCharge": "Autoliquidation — exonéré de TVA (numéro de TVA fourni)",
+        "vatNone": "Pas de TVA (adresse en dehors de l'UE/CH)"
+      }
     },
     "account": {
       "title": "Mon compte",
@@ -338,6 +367,7 @@
     },
     "pricing": {
       "title": "Plans & tarifs",
+      "exklMwst": "HT",
       "comparison": {
         "heading": "Comparer les plans",
         "featureCol": "Fonctionnalité",

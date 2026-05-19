@@ -2,11 +2,41 @@
 
 from __future__ import annotations
 
+import json
+from pathlib import Path
 from typing import Any, Literal
 
 from app.config import settings
 from app.services.payments._types import ProviderName
 from app.services.tiers import calculate_custom_tier_price
+
+# EU VAT standard rates keyed by ISO 3166-1 alpha-2 country code.
+_EU_VAT_RATES: dict[str, dict] = json.loads(
+    (Path(__file__).parent.parent.parent / "data" / "eu_vat_rates.json").read_text()
+)["rates"]
+
+
+def vat_rate_for(country: str, vat_id: str | None) -> float:
+    """Return applicable VAT rate for a billing country.
+
+    CH (Switzerland): 8.1 % (current standard rate).
+    EU country: local standard rate.
+    All other / unclear origin: 8.1 % (CH fallback — conservative default).
+    """
+    c = (country or "").upper().strip()
+    if c == "CH":
+        return 0.081
+    eu = _EU_VAT_RATES.get(c)
+    if eu:
+        return eu["standard_rate"] / 100.0
+    return 0.081
+
+
+def apply_vat(base_chf: float, country: str, vat_id: str | None) -> tuple[float, float, float]:
+    """Return (vat_rate, vat_amount_chf, total_chf) for a base CHF amount."""
+    rate = vat_rate_for(country, vat_id)
+    vat = round(base_chf * rate, 4)
+    return rate, vat, round(base_chf + vat, 4)
 
 
 _BASE_MONTHLY_CHF: dict[str, float] = {

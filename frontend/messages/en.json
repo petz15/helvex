@@ -306,7 +306,36 @@
     },
     "billing": {
       "title": "Billing",
-      "subtitle": "Manage your plan, credits, and payment history."
+      "subtitle": "Manage your plan, credits, and payment history.",
+      "topup": {
+        "title": "Top up credits",
+        "subtitle": "Higher tiers receive bonus credits on every purchase.",
+        "errorMin": "Minimum: 10,000 credits (CHF 1.00).",
+        "errorMax": "Maximum: CHF 1,000.00 per top-up.",
+        "customLabel": "Custom amount",
+        "customButton": "Top up custom amount",
+        "hintsTitle": "Top-up information",
+        "hintLimit": "Max. CHF 1,000.00 per transaction / account balance",
+        "hintExpiry": "Top-up credits do not expire",
+        "hintStorage": "Balances are held by the payment provider and regularly transferred to the company account",
+        "hintRefund": "Refunds available for complete, unused transactions within the withdrawal period"
+      },
+      "vatId": {
+        "title": "VAT Number",
+        "subtitle": "For EU businesses: enter a valid VAT number to apply reverse charge (0% VAT).",
+        "label": "UID / VAT Number (optional)",
+        "placeholder": "CHE-123.456.789 or DE123456789",
+        "save": "Save",
+        "saving": "Saving…",
+        "saved": "Saved."
+      },
+      "payment": {
+        "vatSubtotal": "Subtotal",
+        "vatLine": "VAT ({pct}%)",
+        "vatTotal": "Total",
+        "vatReverseCharge": "Reverse charge — tax exempt (VAT number provided)",
+        "vatNone": "No VAT (billing address outside EU/CH)"
+      }
     },
     "account": {
       "title": "My Account",
@@ -338,6 +367,7 @@
     },
     "pricing": {
       "title": "Plans & Pricing",
+      "exklMwst": "excl. VAT",
       "comparison": {
         "heading": "Compare plans",
         "featureCol": "Feature",

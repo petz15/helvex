@@ -306,7 +306,36 @@
     },
     "billing": {
       "title": "Abrechnung",
-      "subtitle": "Plan, Guthaben und Zahlungshistorie verwalten."
+      "subtitle": "Plan, Guthaben und Zahlungshistorie verwalten.",
+      "topup": {
+        "title": "Credits aufladen",
+        "subtitle": "Höhere Abonnements erhalten Bonus-Credits bei jeder Aufladung.",
+        "errorMin": "Minimum: 10 000 Credits (CHF 1.00).",
+        "errorMax": "Maximalbetrag: CHF 1’000.00 pro Aufladung.",
+        "customLabel": "Individueller Betrag",
+        "customButton": "Individuell aufladen",
+        "hintsTitle": "Hinweise zu Aufladungen",
+        "hintLimit": "Max. CHF 1’000.00 pro Transaktion / Kontoguthaben",
+        "hintExpiry": "Aufgeladene Credits verfallen nicht",
+        "hintStorage": "Guthaben werden beim Zahlungsdienstleister verwahrt und regelmässig auf das Firmenkonto überwiesen",
+        "hintRefund": "Rückerstattungen nur für vollständige, unverbrauchte Transaktionen innerhalb der Widerrufsfrist"
+      },
+      "vatId": {
+        "title": "UID / MWST-Nr.",
+        "subtitle": "Für EU-Unternehmen: gültige USt-IdNr. hinterlegen für steuerfreie Rechnungsstellung (Reverse Charge).",
+        "label": "UID / MWST-Nr. / VAT Number (optional)",
+        "placeholder": "CHE-123.456.789 oder DE123456789",
+        "save": "Speichern",
+        "saving": "Speichern…",
+        "saved": "Gespeichert."
+      },
+      "payment": {
+        "vatSubtotal": "Subtotal",
+        "vatLine": "MwSt. ({pct} %)",
+        "vatTotal": "Total",
+        "vatReverseCharge": "Reverse Charge — steuerbefreit (USt-IdNr. hinterlegt)",
+        "vatNone": "Keine MwSt. (Rechnungsadresse ausserhalb der EU/CH)"
+      }
     },
     "account": {
       "title": "Mein Konto",
@@ -338,6 +367,7 @@
     },
     "pricing": {
       "title": "Pläne & Preise",
+      "exklMwst": "exkl. MwSt.",
       "comparison": {
         "heading": "Pläne vergleichen",
         "featureCol": "Funktion",

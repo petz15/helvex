@@ -26,6 +26,7 @@ from app.api.routes.billing._shared import (
     _start_worldline_alias_polling,
     logger,
 )
+from app.services.payments.pricing import apply_vat
 
 router = APIRouter()
 
@@ -57,6 +58,11 @@ def create_subscription_checkout(
     )
     logger.debug("billing.subscription_checkout amount_resolved amount_chf=%s", amount_chf)
 
+    # VAT
+    sub_billing_country = billing_address.get("country", "") or ""
+    sub_vat_rate, sub_vat_amount_chf, sub_total_chf = apply_vat(amount_chf, sub_billing_country, getattr(org, "vat_id", None))
+    logger.debug("billing.subscription_checkout vat country=%s vat_rate=%s total=%s", sub_billing_country, sub_vat_rate, sub_total_chf)
+
     try:
         logger.info(
             "billing.subscription_checkout calling_provider provider=%s org_id=%s",
@@ -74,7 +80,7 @@ def create_subscription_checkout(
             cancel_url=body.cancel_url,
             billing_address=billing_address,
             preferred_provider=body.provider,
-            amount_chf=amount_chf,
+            amount_chf=sub_total_chf,
         )
         logger.info(
             "billing.subscription_checkout_ok org_id=%s provider=%s checkout_url_prefix=%s",
@@ -88,13 +94,15 @@ def create_subscription_checkout(
                     provider=session.provider,  # type: ignore[arg-type]
                     external_id=session.external_id,
                     order_reference=session.order_reference or f"sub_{session.external_id[:24]}",
-                    amount_chf=amount_chf,
+                    amount_chf=sub_total_chf,
                     kind="subscription",
                     status="pending",
                     subscription_tier=body.tier,
                     subscription_billing_cycle=body.billing_cycle,
                     upgrade_proration_credits=body.upgrade_proration_credits,
                     billing_address=json.dumps(billing_address),
+                    vat_rate=sub_vat_rate,
+                    vat_amount_chf=sub_vat_amount_chf,
                 )
             except payment_transactions.DuplicatePaymentError:
                 logger.warning(
@@ -114,7 +122,7 @@ def create_subscription_checkout(
         provider=session.provider,
         checkout_url=session.checkout_url,
         external_id=session.external_id,
-        amount_chf=amount_chf,
+        amount_chf=sub_total_chf,
     )
 
 
@@ -139,6 +147,23 @@ def create_topup_checkout(
     amount_chf = payments.credits_to_chf(body.credits)
     logger.debug("billing.topup_checkout amount_resolved amount_chf=%s credits=%s", amount_chf, body.credits)
 
+    # CHF 1,000 per-transaction limit
+    if amount_chf > 1000.00:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Maximum top-up is CHF 1,000.00 per transaction.")
+
+    # CHF 1,000 max account balance guard (10,000,000 credits)
+    if org.credits_balance + body.credits > 10_000_000:
+        headroom = max(0, 10_000_000 - org.credits_balance)
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Top-up would exceed the maximum account balance of CHF 1,000.00. You can add at most {headroom:,} credits.",
+        )
+
+    # VAT
+    billing_country = billing_address.get("country", "") or ""
+    vat_rate, vat_amount_chf, total_chf = apply_vat(amount_chf, billing_country, getattr(org, "vat_id", None))
+    logger.debug("billing.topup_checkout vat country=%s vat_rate=%s vat_amount=%s total=%s", billing_country, vat_rate, vat_amount_chf, total_chf)
+
     try:
         logger.info(
             "billing.topup_checkout calling_provider provider=%s org_id=%s",
@@ -157,7 +182,7 @@ def create_topup_checkout(
             cancel_url=body.cancel_url,
             billing_address=billing_address,
             preferred_provider=body.provider,
-            amount_chf=amount_chf,
+            amount_chf=total_chf,
         )
         logger.info(
             "billing.topup_checkout_ok org_id=%s provider=%s checkout_url_prefix=%s",
@@ -171,11 +196,13 @@ def create_topup_checkout(
                     provider=session.provider,  # type: ignore[arg-type]
                     external_id=session.external_id,
                     order_reference=session.order_reference or f"topup_{session.external_id[:24]}",
-                    amount_chf=amount_chf,
+                    amount_chf=total_chf,
                     kind="topup",
                     status="pending",
                     credits_purchased=body.credits,
                     billing_address=json.dumps(billing_address),
+                    vat_rate=vat_rate,
+                    vat_amount_chf=vat_amount_chf,
                 )
             except payment_transactions.DuplicatePaymentError:
                 logger.warning(
@@ -195,7 +222,7 @@ def create_topup_checkout(
         provider=session.provider,
         checkout_url=session.checkout_url,
         external_id=session.external_id,
-        amount_chf=amount_chf,
+        amount_chf=total_chf,
     )
 
 

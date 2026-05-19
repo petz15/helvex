@@ -20,6 +20,8 @@ import {
   parseBillingAddressJson,
   getPaymentInvoiceUrl,
   fetchPaymentMethods,
+  fetchOrg,
+  updateOrg,
   type BillingAddressPayload,
   type CreditTransaction,
   type CreditUsage,
@@ -411,10 +413,16 @@ function SummaryCards({ balance, tier, billingCycle, periodEnd, cancelAtPeriodEn
 }
 
 function TopupSection() {
+  const { dict } = useI18n();
   const [customCreditsInput, setCustomCreditsInput] = useState<string>("25000");
 
   const customCredits = Number.parseInt(customCreditsInput, 10);
-  const customCreditsValid = Number.isInteger(customCredits) && customCredits >= 100;
+  const customCreditsValid = Number.isInteger(customCredits) && customCredits >= 10_000 && customCredits <= 10_000_000;
+  const customCreditsErrorMsg = !Number.isInteger(customCredits) || customCredits < 10_000
+    ? dict.app.billing.topup.errorMin
+    : customCredits > 10_000_000
+      ? dict.app.billing.topup.errorMax
+      : null;
 
   function goToPayment(credits: number) {
     const p = new URLSearchParams({
@@ -428,8 +436,8 @@ function TopupSection() {
 
   return (
     <div className="rounded-2xl border border-slate-200 bg-white p-5">
-      <h2 className="text-sm font-semibold text-slate-700">Top up credits</h2>
-      <p className="text-xs text-slate-400 mt-0.5 mb-4">Higher tiers receive bonus credits on every purchase.</p>
+      <h2 className="text-sm font-semibold text-slate-700">{dict.app.billing.topup.title}</h2>
+      <p className="text-xs text-slate-400 mt-0.5 mb-4">{dict.app.billing.topup.subtitle}</p>
 
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
         {TOPUP_AMOUNTS.map(({ credits, label, chf }) => (
@@ -448,10 +456,11 @@ function TopupSection() {
       <div className="mt-4 rounded-xl border border-slate-200 bg-white p-4 space-y-3">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
           <label className="flex-1 space-y-1">
-            <span className="block text-xs uppercase tracking-wide text-slate-400 font-semibold">Custom amount</span>
+            <span className="block text-xs uppercase tracking-wide text-slate-400 font-semibold">{dict.app.billing.topup.customLabel}</span>
             <input
               type="number"
               min={10000}
+              max={10_000_000}
               step={1}
               value={customCreditsInput}
               onChange={(e) => setCustomCreditsInput(e.target.value)}
@@ -460,17 +469,83 @@ function TopupSection() {
             />
           </label>
           <div className="text-xs text-slate-500 sm:min-w-40">
-            {customCreditsValid ? `≈ CHF ${creditsToChf(customCredits).toFixed(2)}` : "Minimum is 10000 credits."}
+            {customCreditsValid
+              ? `≈ CHF ${creditsToChf(customCredits).toFixed(2)}`
+              : (customCreditsErrorMsg ?? "")}
           </div>
           <button
             onClick={() => goToPayment(customCredits)}
             disabled={!customCreditsValid}
             className="rounded-lg bg-slate-900 px-3 py-2 text-xs font-medium text-white transition-colors hover:bg-slate-800 disabled:opacity-60"
           >
-            Top up custom amount
+            {dict.app.billing.topup.customButton}
           </button>
         </div>
       </div>
+
+      <div className="mt-4 rounded-xl border border-blue-100 bg-blue-50 p-4 text-xs text-blue-800 space-y-1.5">
+        <p className="font-semibold">{dict.app.billing.topup.hintsTitle}</p>
+        <ul className="space-y-1 list-disc list-inside text-blue-700">
+          <li>{dict.app.billing.topup.hintLimit}</li>
+          <li>{dict.app.billing.topup.hintExpiry}</li>
+          <li>{dict.app.billing.topup.hintStorage}</li>
+          <li>{dict.app.billing.topup.hintRefund}</li>
+        </ul>
+      </div>
+    </div>
+  );
+}
+
+function VatIdSection({ orgId, initialVatId }: { orgId: number; initialVatId: string | null }) {
+  const { dict } = useI18n();
+  const [vatId, setVatId] = useState(initialVatId ?? "");
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function handleSave() {
+    setSaving(true);
+    setSaved(false);
+    setError(null);
+    try {
+      await updateOrg(orgId, { vat_id: vatId.trim() || null });
+      setSaved(true);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Speichern fehlgeschlagen");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="rounded-2xl border border-slate-200 bg-white p-5">
+      <h2 className="text-sm font-semibold text-slate-700 mb-1">{dict.app.billing.vatId.title}</h2>
+      <p className="text-xs text-slate-400 mb-4">
+        {dict.app.billing.vatId.subtitle}
+      </p>
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
+        <div className="flex-1 space-y-1">
+          <label className="block text-xs uppercase tracking-wide text-slate-400 font-semibold">
+            {dict.app.billing.vatId.label}
+          </label>
+          <input
+            type="text"
+            value={vatId}
+            onChange={e => { setVatId(e.target.value); setSaved(false); }}
+            placeholder={dict.app.billing.vatId.placeholder}
+            className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-800 outline-none transition-colors focus:border-blue-400"
+          />
+        </div>
+        <button
+          onClick={handleSave}
+          disabled={saving}
+          className="rounded-lg bg-slate-900 px-3 py-2 text-xs font-medium text-white transition-colors hover:bg-slate-800 disabled:opacity-60"
+        >
+          {saving ? dict.app.billing.vatId.saving : dict.app.billing.vatId.save}
+        </button>
+      </div>
+      {saved && <p className="mt-2 text-xs text-emerald-600">{dict.app.billing.vatId.saved}</p>}
+      {error && <p className="mt-2 text-xs text-red-500">{error}</p>}
     </div>
   );
 }
@@ -921,6 +996,10 @@ export function BillingClient() {
   const { data: summary, isLoading, mutate: mutateSummary } = useSWR("billing-summary", fetchBillingSummary);
   const { data: me } = useSWR("me", fetchCurrentUser);
   const { data: paymentMethodsData, mutate: mutatePaymentMethods } = useSWR("payment-methods", fetchPaymentMethods);
+  const { data: org } = useSWR(
+    me?.org_id ? `org-${me.org_id}` : null,
+    () => fetchOrg(me!.org_id!),
+  );
   const [returnBanner, setReturnBanner] = useState<{ kind: "success" | "error"; message: string } | null>(null);
   const billingAddress = parseBillingAddressJson(me?.billing_address_json);
 
@@ -1030,6 +1109,9 @@ export function BillingClient() {
 
       <div id="topup-section"><TopupSection /></div>
       <ConsumptionPricesSection />
+      {me?.org_id && (
+        <VatIdSection orgId={me.org_id} initialVatId={org?.vat_id ?? null} />
+      )}
       {me && (
         <PaymentMethodsSection
           me={me}

@@ -27,6 +27,7 @@ import {
   fetchCurrentUser,
   fetchBillingSummary,
   fetchPaymentMethods,
+  fetchOrg,
   createSubscriptionCheckout,
   createTopupCheckout,
   createWorldlineCardRegistration,
@@ -38,8 +39,24 @@ import {
   type UpgradeProration,
   type PaymentMethod,
 } from "@/lib/api";
+
+// EU standard VAT rates (%) by ISO 3166-1 alpha-2 — mirrors app/data/eu_vat_rates.json
+const EU_VAT_STANDARD: Record<string, number> = {
+  AT:20, BE:21, BG:20, CY:19, CZ:21, DK:25, DE:19, EE:24, GR:24,
+  ES:21, FI:25.5, FR:20, HR:25, HU:27, IE:23, IT:22, LV:21, LT:21,
+  LU:17, MT:18, NL:21, PL:23, PT:23, RO:19, SI:22, SK:23, SE:25,
+};
+
+function computeVat(country: string | undefined): { rate: number; pct: number } {
+  const c = (country ?? "").toUpperCase();
+  if (c === "CH") return { rate: 0.081, pct: 8.1 };
+  const euRate = EU_VAT_STANDARD[c];
+  if (euRate !== undefined) return { rate: euRate / 100, pct: euRate };
+  return { rate: 0.081, pct: 8.1 }; // unknown origin → CH fallback
+}
 import { AddressBookManager } from "@/components/billing/address-book-manager";
 import { creditsToChf } from "@/lib/entitlements";
+import { useI18n } from "@/i18n/context";
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -67,6 +84,7 @@ function fmtDate(d: Date): string {
 export function PaymentGatewayClient() {
   const params = useSearchParams();
   const router = useRouter();
+  const { dict } = useI18n();
 
   const kind        = params?.get("kind") as "subscription" | "topup" | null;
   const tier        = params?.get("tier") ?? "";
@@ -78,6 +96,10 @@ export function PaymentGatewayClient() {
   const { data: me, mutate: mutateMe } = useSWR("me", fetchCurrentUser);
   const { data: summary, mutate: mutateSummary } = useSWR("billing-summary", fetchBillingSummary);
   const { data: paymentMethodsData } = useSWR("payment-methods", fetchPaymentMethods);
+  const { data: org } = useSWR(
+    me?.org_id ? `org-${me.org_id}` : null,
+    () => fetchOrg(me!.org_id!),
+  );
 
   const billingAddress: BillingAddressPayload | null = parseBillingAddressJson(me?.billing_address_json ?? null);
   const savedMethods: PaymentMethod[] = paymentMethodsData?.items ?? [];
@@ -134,10 +156,15 @@ export function PaymentGatewayClient() {
     ? `${tier ? tier.charAt(0).toUpperCase() + tier.slice(1) : "?"} plan · ${billingCycle}`
     : `${credits.toLocaleString()} credits`;
 
+  const vat = computeVat(billingAddress?.country);
+  const baseAmount = kind === "topup" ? creditsToChf(credits) : null;
+  const vatAmount  = baseAmount !== null ? Math.round(baseAmount * vat.rate * 10000) / 10000 : null;
+  const totalAmount = baseAmount !== null ? baseAmount + (vatAmount ?? 0) : null;
+
   const estimatedAmount = kind === "subscription"
     ? null  // fetched server-side
-    : kind === "topup"
-      ? chf(creditsToChf(credits))
+    : kind === "topup" && totalAmount !== null
+      ? chf(totalAmount)
       : null;
 
   // ── tier-change handlers ───────────────────────────────────────────────────
@@ -342,10 +369,40 @@ export function PaymentGatewayClient() {
             }
             <span className="font-medium capitalize">{intentLabel}</span>
           </div>
-          {estimatedAmount && (
+          {kind === "topup" && baseAmount !== null && (
+            <span className="text-sm text-slate-500">{chf(baseAmount)}</span>
+          )}
+          {kind === "subscription" && estimatedAmount && (
             <span className="text-sm font-semibold text-slate-900">{estimatedAmount}</span>
           )}
         </div>
+
+        {/* VAT breakdown for top-ups */}
+        {kind === "topup" && baseAmount !== null && (
+          <div className="border-t border-slate-100 pt-2 space-y-1.5 text-xs">
+            {vat.rate > 0 ? (
+              <>
+                <div className="flex justify-between text-slate-500">
+                  <span>{dict.app.billing.payment.vatSubtotal}</span>
+                  <span>{chf(baseAmount)}</span>
+                </div>
+                <div className="flex justify-between text-slate-500">
+                  <span>{dict.app.billing.payment.vatLine.replace("{pct}", String(vat.pct))}</span>
+                  <span>{chf(vatAmount ?? 0)}</span>
+                </div>
+                <div className="flex justify-between font-semibold text-slate-900">
+                  <span>{dict.app.billing.payment.vatTotal}</span>
+                  <span>{totalAmount !== null ? chf(totalAmount) : "—"}</span>
+                </div>
+              </>
+            ) : (
+              <div className="flex justify-between font-semibold text-slate-900">
+                <span>{dict.app.billing.payment.vatTotal}</span>
+                <span>{totalAmount !== null ? chf(totalAmount) : "—"}</span>
+              </div>
+            )}
+          </div>
+        )}
 
         {/* Subscription notice */}
         {kind === "subscription" && (() => {

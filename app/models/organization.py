@@ -84,6 +84,8 @@ class Organization(Base):
     verified_domain: Mapped[str | None] = mapped_column(String(255), nullable=True)
     # Linked Zefix company UID for auto-verification
     zefix_uid: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    # EU or CH VAT number (UID/MWST-Nr). EU B2B: reverse charge (0% VAT). CH: still 8.1%.
+    vat_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     # User whose saved payment method is used by default for this org
     default_payment_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
 
