@@ -1,7 +1,7 @@
 """add noga_peak_code and noga_peak_label to companies
 
 Revision ID: 0081_add_noga_peak_fields
-Revises: 0080_add_user_logged_out_at
+Revises: 0080
 Create Date: 2026-05-19
 
 Records the best-match 'peak' code found by the v2 global embedding search,
@@ -11,7 +11,7 @@ from alembic import op
 import sqlalchemy as sa
 
 revision = "0081_add_noga_peak_fields"
-down_revision = "0080_add_user_logged_out_at"
+down_revision = "0080"
 branch_labels = None
 depends_on = None
 
