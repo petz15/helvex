@@ -128,6 +128,8 @@ export interface PaymentRecord {
   status: string;
   decline_reason: string | null;
   amount_chf: number;
+  vat_rate: number | null;
+  vat_amount_chf: number | null;
   payment_method: string | null;
   subscription_tier: string | null;
   subscription_billing_cycle: string | null;

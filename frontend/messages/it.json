@@ -317,7 +317,6 @@
         "hintsTitle": "Note sulle ricariche",
         "hintLimit": "Max. CHF 1'000.00 per transazione / saldo del conto",
         "hintExpiry": "I crediti ricaricati non scadono",
-        "hintStorage": "I saldi sono custoditi dal fornitore di pagamento e trasferiti regolarmente sul conto aziendale",
         "hintRefund": "Rimborsi disponibili solo per transazioni complete non utilizzate entro il periodo di recesso"
       },
       "vatId": {

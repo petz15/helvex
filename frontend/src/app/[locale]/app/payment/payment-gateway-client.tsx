@@ -156,16 +156,20 @@ export function PaymentGatewayClient() {
     ? `${tier ? tier.charAt(0).toUpperCase() + tier.slice(1) : "?"} plan · ${billingCycle}`
     : `${credits.toLocaleString()} credits`;
 
+  const PLAN_MONTHLY_CHF: Record<string, number> = {
+    free: 0, simple: 6, explorer: 12, researcher: 17, strategist: 37,
+  };
+
   const vat = computeVat(billingAddress?.country);
   const baseAmount = kind === "topup" ? creditsToChf(credits) : null;
   const vatAmount  = baseAmount !== null ? Math.round(baseAmount * vat.rate * 10000) / 10000 : null;
   const totalAmount = baseAmount !== null ? baseAmount + (vatAmount ?? 0) : null;
 
-  const estimatedAmount = kind === "subscription"
-    ? null  // fetched server-side
-    : kind === "topup" && totalAmount !== null
-      ? chf(totalAmount)
-      : null;
+  const baseSubAmount = kind === "subscription" && PLAN_MONTHLY_CHF[tier] !== undefined
+    ? PLAN_MONTHLY_CHF[tier] * (billingCycle === "yearly" ? 10 : 1)
+    : null;
+  const vatSubAmount = baseSubAmount !== null ? Math.round(baseSubAmount * vat.rate * 10000) / 10000 : null;
+  const totalSubAmount = baseSubAmount !== null ? baseSubAmount + (vatSubAmount ?? 0) : null;
 
   // ── tier-change handlers ───────────────────────────────────────────────────
 
@@ -372,35 +376,42 @@ export function PaymentGatewayClient() {
           {kind === "topup" && baseAmount !== null && (
             <span className="text-sm text-slate-500">{chf(baseAmount)}</span>
           )}
-          {kind === "subscription" && estimatedAmount && (
-            <span className="text-sm font-semibold text-slate-900">{estimatedAmount}</span>
+          {kind === "subscription" && totalSubAmount !== null && (
+            <span className="text-sm text-slate-500">{chf(baseSubAmount ?? 0)}</span>
           )}
         </div>
 
-        {/* VAT breakdown for top-ups */}
+        {/* VAT breakdown */}
         {kind === "topup" && baseAmount !== null && (
           <div className="border-t border-slate-100 pt-2 space-y-1.5 text-xs">
-            {vat.rate > 0 ? (
-              <>
-                <div className="flex justify-between text-slate-500">
-                  <span>{dict.app.billing.payment.vatSubtotal}</span>
-                  <span>{chf(baseAmount)}</span>
-                </div>
-                <div className="flex justify-between text-slate-500">
-                  <span>{dict.app.billing.payment.vatLine.replace("{pct}", String(vat.pct))}</span>
-                  <span>{chf(vatAmount ?? 0)}</span>
-                </div>
-                <div className="flex justify-between font-semibold text-slate-900">
-                  <span>{dict.app.billing.payment.vatTotal}</span>
-                  <span>{totalAmount !== null ? chf(totalAmount) : "—"}</span>
-                </div>
-              </>
-            ) : (
-              <div className="flex justify-between font-semibold text-slate-900">
-                <span>{dict.app.billing.payment.vatTotal}</span>
-                <span>{totalAmount !== null ? chf(totalAmount) : "—"}</span>
-              </div>
-            )}
+            <div className="flex justify-between text-slate-500">
+              <span>{dict.app.billing.payment.vatSubtotal}</span>
+              <span>{chf(baseAmount)}</span>
+            </div>
+            <div className="flex justify-between text-slate-500">
+              <span>{dict.app.billing.payment.vatLine.replace("{pct}", String(vat.pct))}</span>
+              <span>{chf(vatAmount ?? 0)}</span>
+            </div>
+            <div className="flex justify-between font-semibold text-slate-900">
+              <span>{dict.app.billing.payment.vatTotal}</span>
+              <span>{totalAmount !== null ? chf(totalAmount) : "—"}</span>
+            </div>
+          </div>
+        )}
+        {kind === "subscription" && baseSubAmount !== null && (
+          <div className="border-t border-slate-100 pt-2 space-y-1.5 text-xs">
+            <div className="flex justify-between text-slate-500">
+              <span>{dict.app.billing.payment.vatSubtotal}</span>
+              <span>{chf(baseSubAmount)}</span>
+            </div>
+            <div className="flex justify-between text-slate-500">
+              <span>{dict.app.billing.payment.vatLine.replace("{pct}", String(vat.pct))}</span>
+              <span>{chf(vatSubAmount ?? 0)}</span>
+            </div>
+            <div className="flex justify-between font-semibold text-slate-900">
+              <span>{dict.app.billing.payment.vatTotal}</span>
+              <span>{totalSubAmount !== null ? chf(totalSubAmount) : "—"}</span>
+            </div>
           </div>
         )}
 

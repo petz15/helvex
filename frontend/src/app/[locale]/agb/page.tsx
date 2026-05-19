@@ -81,11 +81,6 @@ export default function AgbPage() {
           Kontoguthaben beträgt CHF&nbsp;1&apos;000.00 (entspricht 10&nbsp;000&nbsp;000 Credits).
         </p>
         <p>
-          <strong>Verwahrung des Guthabens:</strong> Zahlungseingänge werden vom Zahlungsdienstleister (Worldline) verwahrt
-          und in regelmässigen Abständen auf das Firmenkonto überwiesen. Credits werden sofort nach erfolgreicher
-          Zahlung gutgeschrieben.
-        </p>
-        <p>
           <strong>Gültigkeitsdauer:</strong> Aufgeladene Credits (Topups) verfallen nicht. Im Rahmen von
           Abonnementplänen gewährte Bonus-Credits verfallen nach 12 Monaten.
         </p>

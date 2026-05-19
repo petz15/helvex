@@ -364,6 +364,8 @@ def list_payment_history(
                 "status": tx.status,
                 "decline_reason": _decline_reason(tx),
                 "amount_chf": tx.amount_chf,
+                "vat_rate": tx.vat_rate,
+                "vat_amount_chf": float(tx.vat_amount_chf) if tx.vat_amount_chf is not None else None,
                 "payment_method": tx.payment_method,
                 "subscription_tier": tx.subscription_tier,
                 "subscription_billing_cycle": tx.subscription_billing_cycle,

@@ -317,7 +317,6 @@
         "hintsTitle": "Hinweise zu Aufladungen",
         "hintLimit": "Max. CHF 1’000.00 pro Transaktion / Kontoguthaben",
         "hintExpiry": "Aufgeladene Credits verfallen nicht",
-        "hintStorage": "Guthaben werden beim Zahlungsdienstleister verwahrt und regelmässig auf das Firmenkonto überwiesen",
         "hintRefund": "Rückerstattungen nur für vollständige, unverbrauchte Transaktionen innerhalb der Widerrufsfrist"
       },
       "vatId": {

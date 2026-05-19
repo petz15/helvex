@@ -220,7 +220,9 @@ def get_payment_invoice(
         except (ValueError, TypeError):
             billing_addr_str = tx.billing_address or ""
 
-    amount_str = f"CHF {tx.amount_chf:.2f}"
+    vat_amount = float(tx.vat_amount_chf) if tx.vat_amount_chf is not None else None
+    base_amount = round(tx.amount_chf - (vat_amount or 0.0), 2)
+    amount_str = f"CHF {base_amount:.2f}"
     refund_str = f"CHF {tx.refunded_amount_chf:.2f}" if tx.refunded_amount_chf else None
     net_amount = tx.amount_chf - (tx.refunded_amount_chf or 0)
     net_amount_str = f"CHF {net_amount:.2f}"
@@ -318,16 +320,17 @@ def get_payment_invoice(
       <tr>
         <td>{description}</td>
         <td style="text-transform:capitalize;">{tx.kind}</td>
-        <td class="amount-col" style="font-weight:600;">{amount_str}</td>
+        <td class="amount-col" style="font-weight:600;">CHF {base_amount:.2f}</td>
       </tr>
     </tbody>
   </table>
 
   <div class="totals">
     <div class="total-row">
-      <span>Subtotal</span>
+      <span>Subtotal (excl. VAT)</span>
       <span>{amount_str}</span>
     </div>
+    {f'<div class="total-row"><span>VAT ({round((tx.vat_rate or 0) * 100, 2)} %)</span><span>CHF {vat_amount:.2f}</span></div>' if vat_amount is not None else '<div class="total-row"><span>VAT</span><span>—</span></div>'}
     {f'<div class="total-row refund-note"><span>Refund issued</span><span>−{refund_str}</span></div>' if refund_str else ''}
     <div class="total-row main">
       <span>Total paid</span>

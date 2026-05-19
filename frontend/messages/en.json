@@ -317,7 +317,6 @@
         "hintsTitle": "Top-up information",
         "hintLimit": "Max. CHF 1,000.00 per transaction / account balance",
         "hintExpiry": "Top-up credits do not expire",
-        "hintStorage": "Balances are held by the payment provider and regularly transferred to the company account",
         "hintRefund": "Refunds available for complete, unused transactions within the withdrawal period"
       },
       "vatId": {

@@ -317,7 +317,6 @@
         "hintsTitle": "Informations sur les rechargements",
         "hintLimit": "Max. CHF 1'000.00 par transaction / solde du compte",
         "hintExpiry": "Les crédits rechargés n'expirent pas",
-        "hintStorage": "Les soldes sont détenus par le prestataire de paiement et régulièrement transférés sur le compte de la société",
         "hintRefund": "Remboursements disponibles uniquement pour les transactions complètes non utilisées dans le délai de rétractation"
       },
       "vatId": {
