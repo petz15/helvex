@@ -13,47 +13,6 @@ import { BoardPanel } from "@/components/board-panel";
 import { useI18n } from "@/i18n/context";
 import { useApiErrorHandler } from "@/lib/use-api-error";
 
-interface NogaCandidate {
-  code: string;
-  label: string | null;
-  embedding_sim: number | null;
-  token_score_normalized: number | null;
-  excludes_sim: number | null;
-  hybrid_score_final: number;
-  is_winner: boolean;
-}
-
-interface NogaLevel {
-  level_no: number;
-  parent_codes: string[] | null;
-  lookahead_applied: boolean;
-  fallback_used: boolean;
-  candidates: NogaCandidate[];
-  winner_code: string | null;
-  winner_label: string | null;
-  confidence: number | null;
-}
-
-interface NogaExplain {
-  company_name: string;
-  stored_noga_code: string | null;
-  stored_noga_path_labels: string | null;
-  stored_noga_confidence: number | null;
-  is_branch_office: boolean;
-  parent_uid: string | null;
-  purpose_original: string | null;
-  purpose_stripped: string | null;
-  boilerplate_patterns_active: number;
-  detected_language: string;
-  tokens: string[];
-  embed_text: string | null;
-  embeddings_available: boolean;
-  levels: NogaLevel[];
-  final_code: string | null;
-  final_label: string | null;
-  final_confidence: number | null;
-}
-
 interface NogaTestGlobalCandidate {
   code: string;
   label: string | null;
@@ -182,11 +141,6 @@ export function CompanyDetailClient({ company: initial, readOnlyDemo = false, is
   const [showWebsitePicker, setShowWebsitePicker] = useState(false);
   const [selectingWebsite, setSelectingWebsite] = useState<string | null>(null);
   const [searchingWeb, setSearchingWeb] = useState(false);
-  const [nogaExplainOpen, setNogaExplainOpen] = useState(false);
-  const [nogaJobId, setNogaJobId] = useState<number | null>(null);
-  const [nogaJobStatus, setNogaJobStatus] = useState<string | null>(null);
-  const [nogaExplainData, setNogaExplainData] = useState<NogaExplain | null>(null);
-  const [nogaExplainError, setNogaExplainError] = useState<string | null>(null);
   const [nogaTestOpen, setNogaTestOpen] = useState(false);
   const [nogaTestJobId, setNogaTestJobId] = useState<number | null>(null);
   const [nogaTestJobStatus, setNogaTestJobStatus] = useState<string | null>(null);
@@ -326,43 +280,6 @@ export function CompanyDetailClient({ company: initial, readOnlyDemo = false, is
     }
   }
 
-  async function handleNogaExplain() {
-    setNogaExplainData(null);
-    setNogaExplainError(null);
-    setNogaJobId(null);
-    setNogaJobStatus(null);
-    setNogaExplainOpen(true);
-    try {
-      const res = await fetch(`/api/v1/companies/${company.id}/noga-explain`, {
-        method: "POST",
-        credentials: "include",
-      });
-      if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
-      const { job_id, status: jobStatus } = await res.json();
-      setNogaJobId(job_id);
-      setNogaJobStatus(jobStatus);
-    } catch (e) {
-      handleApiError(e);
-      setNogaExplainOpen(false);
-    }
-  }
-
-  useEffect(() => {
-    if (!nogaJobId || !nogaExplainOpen) return;
-    if (nogaJobStatus === "completed" || nogaJobStatus === "failed" || nogaJobStatus === "cancelled") return;
-    const interval = setInterval(async () => {
-      try {
-        const res = await fetch(`/api/v1/companies/${company.id}/noga-explain/${nogaJobId}`, { credentials: "include" });
-        if (!res.ok) return;
-        const data = await res.json();
-        setNogaJobStatus(data.status);
-        if (data.status === "completed") setNogaExplainData(data.trace);
-        else if (data.status === "failed") setNogaExplainError(data.error ?? "Job failed");
-      } catch { /* ignore transient errors */ }
-    }, 2000);
-    return () => clearInterval(interval);
-  }, [nogaJobId, nogaJobStatus, nogaExplainOpen, company.id]);
-
   async function handleNogaTest() {
     setNogaTestData(null);
     setNogaTestError(null);
@@ -370,7 +287,7 @@ export function CompanyDetailClient({ company: initial, readOnlyDemo = false, is
     setNogaTestJobStatus(null);
     setNogaTestOpen(true);
     try {
-      const res = await fetch(`/api/v1/companies/${company.id}/noga-test`, {
+      const res = await fetch(`/api/v1/companies/${company.id}/noga-v2-explain`, {
         method: "POST",
         credentials: "include",
       });
@@ -389,7 +306,7 @@ export function CompanyDetailClient({ company: initial, readOnlyDemo = false, is
     if (nogaTestJobStatus === "completed" || nogaTestJobStatus === "failed" || nogaTestJobStatus === "cancelled") return;
     const interval = setInterval(async () => {
       try {
-        const res = await fetch(`/api/v1/companies/${company.id}/noga-test/${nogaTestJobId}`, { credentials: "include" });
+        const res = await fetch(`/api/v1/companies/${company.id}/noga-v2-explain/${nogaTestJobId}`, { credentials: "include" });
         if (!res.ok) return;
         const data = await res.json();
         setNogaTestJobStatus(data.status);
@@ -479,19 +396,10 @@ export function CompanyDetailClient({ company: initial, readOnlyDemo = false, is
             {isSuperadmin && (
               <button
                 type="button"
-                onClick={handleNogaExplain}
-                className="flex items-center gap-1.5 text-sm text-violet-700 hover:text-violet-900 px-3 py-1.5 rounded-lg border border-violet-200 hover:bg-violet-50 transition-colors"
-              >
-                NOGA explain
-              </button>
-            )}
-            {isSuperadmin && (
-              <button
-                type="button"
                 onClick={handleNogaTest}
                 className="flex items-center gap-1.5 text-sm text-amber-700 hover:text-amber-900 px-3 py-1.5 rounded-lg border border-amber-200 hover:bg-amber-50 transition-colors"
               >
-                NOGA v2 test
+                NOGA explain
               </button>
             )}
           </div>
@@ -866,7 +774,7 @@ export function CompanyDetailClient({ company: initial, readOnlyDemo = false, is
     <div className="fixed inset-0 z-[1000] bg-black/40 flex items-start justify-center overflow-y-auto py-8 px-4">
       <div className="bg-white rounded-xl shadow-xl w-full max-w-5xl">
         <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200">
-          <h2 className="text-base font-semibold text-slate-900">NOGA v2 test — {company.name}</h2>
+          <h2 className="text-base font-semibold text-slate-900">NOGA explain — {company.name}</h2>
           <button type="button" onClick={() => setNogaTestOpen(false)} className="text-slate-400 hover:text-slate-700 text-xl leading-none">&times;</button>
         </div>
 
@@ -1001,117 +909,6 @@ export function CompanyDetailClient({ company: initial, readOnlyDemo = false, is
     </div>
   )}
 
-  {/* NOGA Explain Modal (superadmin only) */}
-  {nogaExplainOpen && (
-    <div className="fixed inset-0 z-[1000] bg-black/40 flex items-start justify-center overflow-y-auto py-8 px-4">
-      <div className="bg-white rounded-xl shadow-xl w-full max-w-5xl">
-        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200">
-          <h2 className="text-base font-semibold text-slate-900">NOGA classification trace — {company.name}</h2>
-          <button type="button" onClick={() => setNogaExplainOpen(false)} className="text-slate-400 hover:text-slate-700 text-xl leading-none">&times;</button>
-        </div>
-
-        {nogaExplainError ? (
-          <div className="px-6 py-10 text-center text-red-600 text-sm">{nogaExplainError}</div>
-        ) : !nogaExplainData ? (
-          <div className="flex flex-col items-center justify-center py-16 text-slate-500 gap-3">
-            <Loader2 size={24} className="animate-spin" />
-            <span className="text-sm capitalize">{nogaJobStatus ?? "Queuing…"} — running on ML worker</span>
-          </div>
-        ) : (
-          <div className="px-6 py-5 space-y-6 text-sm">
-
-            {/* Stored result */}
-            <section className="space-y-1">
-              <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">Stored result</h3>
-              <div className="flex flex-wrap gap-4 text-slate-700">
-                <span><span className="text-slate-500">Code:</span> <code className="font-mono">{nogaExplainData.stored_noga_code ?? "—"}</code></span>
-                <span><span className="text-slate-500">Confidence:</span> {nogaExplainData.stored_noga_confidence != null ? `${Math.round(nogaExplainData.stored_noga_confidence * 100)}%` : "—"}</span>
-                <span><span className="text-slate-500">Path:</span> {nogaExplainData.stored_noga_path_labels ?? "—"}</span>
-                {nogaExplainData.is_branch_office && (
-                  <Badge className="bg-amber-50 text-amber-700">Branch office{nogaExplainData.parent_uid ? ` → ${nogaExplainData.parent_uid}` : ""}</Badge>
-                )}
-              </div>
-            </section>
-
-            {/* Input data */}
-            <section className="space-y-2">
-              <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">Input</h3>
-              <div className="grid grid-cols-2 gap-x-6 gap-y-1 text-slate-700">
-                <div><span className="text-slate-500">Language:</span> <code>{nogaExplainData.detected_language}</code></div>
-                <div className="flex items-center gap-1.5"><span className="text-slate-500">Embeddings:</span> {nogaExplainData.embeddings_available ? <Badge className="bg-green-50 text-green-700">used</Badge> : <Badge className="bg-amber-50 text-amber-700">unavailable</Badge>}</div>
-                <div><span className="text-slate-500">Boilerplate patterns active:</span> {nogaExplainData.boilerplate_patterns_active}</div>
-                <div><span className="text-slate-500">Tokens extracted:</span> {nogaExplainData.tokens.length}</div>
-              </div>
-              {nogaExplainData.purpose_stripped && (
-                <div>
-                  <p className="text-slate-500 mb-0.5">Purpose after boilerplate stripping:</p>
-                  <p className="bg-amber-50 border border-amber-200 rounded p-2 text-xs text-slate-700 whitespace-pre-wrap">{nogaExplainData.purpose_stripped}</p>
-                </div>
-              )}
-              {nogaExplainData.embed_text && (
-                <div>
-                  <p className="text-slate-500 mb-0.5">Embed text sent to model:</p>
-                  <p className="bg-slate-50 border border-slate-200 rounded p-2 text-xs font-mono text-slate-700 whitespace-pre-wrap">{nogaExplainData.embed_text}</p>
-                </div>
-              )}
-              {nogaExplainData.tokens.length > 0 && (
-                <div>
-                  <p className="text-slate-500 mb-0.5">Tokens ({nogaExplainData.tokens.length}):</p>
-                  <p className="text-xs text-slate-600 font-mono leading-relaxed">{nogaExplainData.tokens.join(", ")}</p>
-                </div>
-              )}
-            </section>
-
-            {/* Level traces */}
-            <section className="space-y-4">
-              <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">Level-by-level trace</h3>
-              {nogaExplainData.levels.map(level => (
-                <div key={level.level_no} className="border border-slate-200 rounded-lg overflow-hidden">
-                  <div className="flex items-center gap-2 px-4 py-2 bg-slate-50 border-b border-slate-200 flex-wrap">
-                    <span className="font-semibold text-slate-800">Level {level.level_no}</span>
-                    {level.winner_code && (
-                      <Badge className="bg-emerald-50 text-emerald-700 font-mono">{level.winner_code} — {level.winner_label}</Badge>
-                    )}
-                    <span className="text-slate-500 text-xs">confidence: {level.confidence != null ? `${Math.round(level.confidence * 100)}%` : "—"}</span>
-                    {level.lookahead_applied && <Badge className="bg-blue-50 text-blue-700 text-xs">lookahead</Badge>}
-                    {level.fallback_used && <Badge className="bg-amber-50 text-amber-700 text-xs">fallback</Badge>}
-                    {level.parent_codes && <span className="text-xs text-slate-400">parent: {level.parent_codes.join(", ")}</span>}
-                  </div>
-                  {level.candidates.length > 0 && (
-                    <table className="w-full text-xs">
-                      <thead>
-                        <tr className="text-slate-500 border-b border-slate-100">
-                          <th className="text-left px-4 py-1.5 font-medium">Code</th>
-                          <th className="text-left px-4 py-1.5 font-medium">Label</th>
-                          <th className="text-right px-4 py-1.5 font-medium">Emb sim</th>
-                          <th className="text-right px-4 py-1.5 font-medium">Tok score</th>
-                          <th className="text-right px-4 py-1.5 font-medium">Excl sim</th>
-                          <th className="text-right px-4 py-1.5 font-medium">Final</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {level.candidates.map(c => (
-                          <tr key={c.code} className={cn("border-b border-slate-100 last:border-0", c.is_winner && "bg-emerald-50")}>
-                            <td className="px-4 py-1.5 font-mono font-medium text-slate-800">{c.code}{c.is_winner ? " ✓" : ""}</td>
-                            <td className="px-4 py-1.5 text-slate-600 max-w-[220px] truncate">{c.label ?? "—"}</td>
-                            <td className="px-4 py-1.5 text-right text-slate-700">{c.embedding_sim != null ? c.embedding_sim.toFixed(3) : "—"}</td>
-                            <td className="px-4 py-1.5 text-right text-slate-700">{c.token_score_normalized != null ? c.token_score_normalized.toFixed(3) : "—"}</td>
-                            <td className={cn("px-4 py-1.5 text-right", c.excludes_sim != null && c.excludes_sim > 0.3 ? "text-red-600 font-medium" : "text-slate-700")}>{c.excludes_sim != null ? c.excludes_sim.toFixed(3) : "—"}</td>
-                            <td className="px-4 py-1.5 text-right font-semibold text-slate-800">{c.hybrid_score_final.toFixed(4)}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  )}
-                </div>
-              ))}
-            </section>
-
-          </div>
-        )}
-      </div>
-    </div>
-  )}
   </>
   );
 }

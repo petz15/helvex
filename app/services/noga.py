@@ -57,6 +57,8 @@ class NogaClassification:
     level: str | None  # level name of final code (backward compat)
     confidence: float  # level-5 confidence (backward compat)
     level_results: tuple[LevelResult, ...]  # one per level, L1 → L5
+    peak_code: str | None = None   # best-match code before constrained descent
+    peak_label: str | None = None  # label for peak_code
 
     @property
     def level_confidence_json(self) -> dict[str, float]:
@@ -307,21 +309,11 @@ def _has_noga_embeddings(db: Session) -> bool:
 
 
 # ---------------------------------------------------------------------------
-# Core hierarchical classification
+# Core hierarchical classification (v2: global search → peak → descent)
 # ---------------------------------------------------------------------------
 
-def _company_tokens(db: Session, company: Company) -> set[str]:
-    texts: list[str] = []
-    boilerplate_patterns = crud.get_active_boilerplate_patterns(db)
-    if company.name:
-        texts.append(company.name)
-    if company.purpose:
-        texts.append(_strip_purpose_boilerplate(company.purpose, boilerplate_patterns))
-    if company.purpose_keywords:
-        texts.append(company.purpose_keywords.replace(",", " "))
-    if company.tfidf_cluster:
-        texts.append(company.tfidf_cluster.replace("|", " ").replace(",", " "))
-    return _tokens_from_texts(texts)
+# Confidence threshold below which embedding result is discarded and token fallback runs
+_EMB_MIN_CONFIDENCE: float = 0.30
 
 
 def _embed_query(text: str):
@@ -354,103 +346,154 @@ def _get_label(meta: dict[str, Any], lang: str) -> str | None:
     return None
 
 
-def classify_company_noga(db: Session, company: Company) -> NogaClassification | None:
-    """Hierarchical level-by-level NOGA classification (L1 → L2 → L3 → L4 → L5).
+def _classify_v2_with_embedding(
+    db: Session,
+    idx: _NogaIndex,
+    stripped_purpose: str,
+    lang: str,
+) -> NogaClassification | None:
+    """Global embedding search → peak → constrained descent.
 
-    Descends through the hierarchy using:
-      1. Embedding similarity (primary, 80% weight)
-      2. Token overlap (secondary, 20% weight)
-      3. EXCLUDES cosine penalty (negative signal)
-      4. Lookahead tie-breaking (when top-2 candidates are close)
+    Returns None when no candidate reaches _EMB_MIN_CONFIDENCE (triggers token fallback).
+    Embed text: stripped purpose only.
     """
-    from app.services.language_detection import detect_purpose_language
+    import numpy as np
 
-    # --- Language detection ---
-    lang = (
-        company.purpose_language
-        or detect_purpose_language(company.purpose)
-        or _DEFAULT_LANG
-    )
-
-    # --- Token scores (always computed) ---
-    tokens = _company_tokens(db, company)
-    if not tokens:
-        logger.debug("No tokens extracted for company %s (UID: %s), skipping NOGA classification",
-                    company.name, company.uid)
+    query_vec = _embed_query(stripped_purpose)
+    if query_vec is None:
         return None
 
-    idx = _load_noga_index()
+    vec_list = query_vec.tolist() if isinstance(query_vec, np.ndarray) else list(query_vec)
+    vec_str = "[" + ",".join(f"{x:.8f}" for x in vec_list) + "]"
+
+    def _global_search(l: str) -> list:
+        return db.execute(sql_text("""
+            WITH q AS (SELECT CAST(:vec AS vector) AS v)
+            SELECT noga_code, level_no, 1 - (embedding <=> q.v) AS similarity
+            FROM   noga_embeddings, q
+            WHERE  lang = :lang AND ann_type = 'includes'
+            ORDER  BY embedding <=> q.v
+            LIMIT  50
+        """), {"vec": vec_str, "lang": l}).fetchall()
+
+    rows = _global_search(lang)
+    if not rows and lang != _DEFAULT_LANG:
+        rows = _global_search(_DEFAULT_LANG)
+    if not rows:
+        return None
+
+    candidate_codes = [r.noga_code for r in rows]
+    excl_sims = _excludes_cosine_penalty(db, candidate_codes, query_vec, lang)
+
+    # Find peak: highest penalized similarity
+    best_penalized = 0.0
+    peak_row = None
+    for r in rows:
+        sim = float(r.similarity)
+        excl = excl_sims.get(r.noga_code, 0.0)
+        penalized = sim * (1.0 - _EXCL_COSINE_WEIGHT * excl)
+        if penalized > best_penalized:
+            best_penalized = penalized
+            peak_row = r
+
+    if best_penalized < _EMB_MIN_CONFIDENCE or peak_row is None:
+        return None
+
+    peak_code = peak_row.noga_code
+    peak_level_no = int(peak_row.level_no)
+    peak_meta = idx.code_meta.get(peak_code, {})
+    peak_label = _get_label(peak_meta, lang)
+    peak_sim = float(peak_row.similarity)
+
+    # Build ancestor chain (root → peak) for level_results above the peak
+    parent_map = _load_parent_map()
+    chain: list[str] = []
+    cur = peak_code
+    visited: set[str] = set()
+    while cur and cur not in visited:
+        chain.append(cur)
+        visited.add(cur)
+        cur = parent_map.get(cur, "")
+    chain.reverse()  # now root (L1) → peak
+
+    level_results: list[LevelResult] = []
+    for code in chain:
+        meta = idx.code_meta.get(code, {})
+        label = _get_label(meta, lang)
+        level_results.append(LevelResult(code=code, label=label, confidence=peak_sim))
+
+    # Constrained descent from peak+1 to L5
+    current_parent_codes = [peak_code]
+    for level_no in range(peak_level_no + 1, 6):
+        level_rows = _pgvector_search_level(
+            db, query_vec, lang, level_no,
+            parent_codes=current_parent_codes,
+            top_k=_LEVEL_TOP_K,
+        )
+        if not level_rows:
+            break
+        winner_code, winner_sim = level_rows[0]
+        winner_meta = idx.code_meta.get(winner_code, {})
+        winner_label = _get_label(winner_meta, lang)
+        level_results.append(LevelResult(code=winner_code, label=winner_label, confidence=float(winner_sim)))
+        current_parent_codes = [winner_code]
+
+    if not level_results:
+        return None
+
+    final = level_results[-1]
+    return NogaClassification(
+        code=final.code,
+        label=final.label,
+        level="Art",
+        confidence=final.confidence,
+        level_results=tuple(level_results),
+        peak_code=peak_code,
+        peak_label=peak_label,
+    )
+
+
+def _classify_v2_token_fallback(
+    idx: _NogaIndex,
+    company_name: str | None,
+    stripped_purpose: str,
+    lang: str,
+) -> NogaClassification | None:
+    """Token-only L1→L5 descent. Used when embedding confidence is below threshold."""
+    texts: list[str] = []
+    if company_name:
+        texts.append(company_name)
+    if stripped_purpose:
+        texts.append(stripped_purpose)
+    tokens = _tokens_from_texts(texts)
+    if not tokens:
+        return None
 
     token_scores: dict[str, float] = {}
     for tok in tokens:
         for code in idx.token_to_codes.get(tok, set()):
             token_scores[code] = token_scores.get(code, 0.0) + 1.0
-
-    max_tok = max(token_scores.values()) if token_scores else 1.0
-    norm_token: dict[str, float] = {c: s / max_tok for c, s in token_scores.items()}
-
-    # --- Embedding setup ---
-    boilerplate_patterns = crud.get_active_boilerplate_patterns(db)
-    stripped_purpose = _strip_purpose_boilerplate(company.purpose or "", boilerplate_patterns)
-    embed_text = " ".join(filter(None, [
-        stripped_purpose,
-        (company.purpose_keywords or "").replace(",", " "),
-    ])).strip()
-
-    use_embeddings = bool(embed_text) and _has_noga_embeddings(db)
-    query_vec = None
-    if use_embeddings:
-        query_vec = _embed_query(embed_text)
-        use_embeddings = query_vec is not None
-
-    if not token_scores and not use_embeddings:
-        logger.debug("No token overlap and no embeddings for company %s (UID: %s), cannot classify",
-                     company.name, company.uid)
+    if not token_scores:
         return None
 
-    # --- Hierarchical descent L1 → L5 ---
+    max_tok = max(token_scores.values())
+    norm_token: dict[str, float] = {c: s / max_tok for c, s in token_scores.items()}
+    total_tok = sum(token_scores.values())
+
     level_results: list[LevelResult] = []
     current_parent_codes: list[str] | None = None
 
     for level_no in range(1, 6):
-        # --- Get INCLUDES candidates at this level ---
-        emb_candidates: list[tuple[str, float]] = []
-        if use_embeddings:
-            emb_candidates = _pgvector_search_level(
-                db, query_vec, lang, level_no,
-                parent_codes=current_parent_codes,
-                top_k=_LEVEL_TOP_K,
-            )
-
-        # --- Compute hybrid scores ---
-        hybrid: dict[str, float] = {}
-
-        # Score embedding results
-        for code, sim in emb_candidates:
-            hybrid[code] = _W_EMB * sim + _W_TOK * norm_token.get(code, 0.0)
-
-        # Add token-only candidates filtered to this level
-        for code, tok_score in norm_token.items():
+        candidates: dict[str, float] = {}
+        for code, score in norm_token.items():
             meta = idx.code_meta.get(code, {})
             if meta.get("level_no") != level_no:
                 continue
             if current_parent_codes and meta.get("parentCode") not in current_parent_codes:
                 continue
-            if code not in hybrid:
-                hybrid[code] = _W_TOK * tok_score
+            candidates[code] = score
 
-        # --- Apply EXCLUDES penalty ---
-        if use_embeddings and hybrid:
-            excl_sims = _excludes_cosine_penalty(
-                db, list(hybrid.keys()), query_vec, lang
-            )
-            for code, excl_sim in excl_sims.items():
-                hybrid[code] = hybrid[code] * (1.0 - _EXCL_COSINE_WEIGHT * excl_sim)
-
-        # --- Fallback if no candidates ---
-        if not hybrid:
-            logger.debug("No candidates at level %d for company %s, using fallback", level_no, company.uid)
-            # Use first child of previous winner from noga_lookup (confidence=0.0)
+        if not candidates:
             if level_results:
                 prev_code = level_results[-1].code
                 for code, meta in idx.code_meta.items():
@@ -460,79 +503,69 @@ def classify_company_noga(db: Session, company: Company) -> NogaClassification |
                         current_parent_codes = [code]
                         break
                 else:
-                    # No children found — shouldn't happen but be safe
                     return None
             else:
-                # Level 1 and no candidates — cannot classify
                 return None
             continue
 
-        # --- Select winner ---
-        candidates_sorted = sorted(hybrid.items(), key=lambda x: x[1], reverse=True)
-        winner = candidates_sorted[0][0]
-        winner_score = candidates_sorted[0][1]
-
-        # --- Lookahead tie-breaking (levels 1–4 only) ---
-        if level_no < 5 and len(candidates_sorted) >= 2:
-            runner_up = candidates_sorted[1][0]
-            runner_up_score = candidates_sorted[1][1]
-            if (winner_score - runner_up_score) <= _LOOKAHEAD_TIE_THRESHOLD:
-                # Query children of both at level_no+1
-                tied = [winner, runner_up]
-                child_results = _pgvector_search_level(
-                    db, query_vec, lang, level_no + 1,
-                    parent_codes=tied,
-                    top_k=_LEVEL_TOP_K,
-                )
-
-                # Score each tied parent by best child cosine sim
-                best_child: dict[str, float] = {}
-                for child_code, child_sim in child_results:
-                    meta = idx.code_meta.get(child_code, {})
-                    p = meta.get("parentCode", "")
-                    best_child[p] = max(best_child.get(p, 0.0), child_sim)
-
-                # Lookahead boost (50% weight to tiebreak, not override)
-                for parent_code in tied:
-                    child_boost = best_child.get(parent_code, 0.0)
-                    hybrid[parent_code] = hybrid[parent_code] + 0.5 * child_boost
-
-                # Re-select winner
-                winner = max(tied, key=lambda c: hybrid[c])
-                winner_score = hybrid[winner]
-
-        # --- Store result at this level ---
+        winner = max(candidates, key=lambda c: candidates[c])
         meta = idx.code_meta.get(winner, {})
         label = _get_label(meta, lang)
-
-        # Confidence = raw cosine similarity to INCLUDES (or token proportion if token-only)
-        raw_sim = next((s for c, s in emb_candidates if c == winner), None)
-        if raw_sim is None:
-            # Token-only path
-            total = sum(token_scores.values())
-            raw_sim = token_scores.get(winner, 0.0) / total if total > 0 else 0.0
-
-        confidence = max(0.0, min(1.0, raw_sim))
+        confidence = token_scores.get(winner, 0.0) / total_tok if total_tok > 0 else 0.0
         level_results.append(LevelResult(code=winner, label=label, confidence=confidence))
         current_parent_codes = [winner]
 
-    # --- Return final result ---
-    final = level_results[-1]  # level-5 result
+    if not level_results:
+        return None
+
+    final = level_results[-1]
     return NogaClassification(
         code=final.code,
         label=final.label,
-        level="Art",  # Always level-5
+        level="Art",
         confidence=final.confidence,
         level_results=tuple(level_results),
     )
+
+
+def classify_company_noga(db: Session, company: Company) -> NogaClassification | None:
+    """V2 NOGA classifier: global embedding search → peak → constrained descent.
+
+    Embed text: stripped purpose only (no purpose_keywords, no tfidf_cluster).
+    Token-only fallback runs when no embedding candidate reaches _EMB_MIN_CONFIDENCE.
+    """
+    from app.services.language_detection import detect_purpose_language
+
+    lang = (
+        company.purpose_language
+        or detect_purpose_language(company.purpose)
+        or _DEFAULT_LANG
+    )
+
+    boilerplate_patterns = crud.get_active_boilerplate_patterns(db)
+    stripped_purpose = _strip_purpose_boilerplate(company.purpose or "", boilerplate_patterns)
+
+    idx = _load_noga_index()
+
+    if stripped_purpose and _has_noga_embeddings(db):
+        result = _classify_v2_with_embedding(db, idx, stripped_purpose, lang)
+        if result is not None:
+            return result
+        logger.debug(
+            "Embedding confidence below threshold for company %s, falling back to token classifier",
+            company.uid,
+        )
+
+    return _classify_v2_token_fallback(idx, company.name, stripped_purpose, lang)
 
 
 # ---------------------------------------------------------------------------
 # V2: global multi-level search → peak → constrained descent (experimental)
 # ---------------------------------------------------------------------------
 
-# Shallower levels get a small bonus so an L2 code at 0.68 beats an L4 code at 0.69
-_DEPTH_BONUS_PER_LEVEL: float = 0.02
+# No depth bonus — the excludes penalty already filters noisy L5 codes.
+# A depth bonus large enough to matter (≥0.04) inverts genuinely better L5 matches.
+_DEPTH_BONUS_PER_LEVEL: float = 0.0
 
 
 def classify_company_noga_v2(db: Session, company: Company) -> dict:
@@ -550,10 +583,7 @@ def classify_company_noga_v2(db: Session, company: Company) -> dict:
     stripped_purpose = _strip_purpose_boilerplate(company.purpose or "", boilerplate_patterns)
     lang = company.purpose_language or detect_purpose_language(company.purpose) or _DEFAULT_LANG
 
-    embed_text = " ".join(filter(None, [
-        stripped_purpose,
-        (company.purpose_keywords or "").replace(",", " "),
-    ])).strip()
+    embed_text = stripped_purpose
 
     if not embed_text:
         return {"error": "No text to embed", "lang": lang}
@@ -679,191 +709,6 @@ def classify_company_noga_v2(db: Session, company: Company) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# Explain / trace (debug only)
-# ---------------------------------------------------------------------------
-
-def classify_company_noga_explain(db: Session, company: Company) -> dict:
-    """Re-run NOGA classification with full intermediate trace for debugging.
-
-    Mirrors classify_company_noga exactly but captures all intermediate scores
-    so callers can understand why a particular code was chosen at each level.
-    """
-    from app.services.language_detection import detect_purpose_language
-
-    boilerplate_patterns = crud.get_active_boilerplate_patterns(db)
-    stripped_purpose = _strip_purpose_boilerplate(company.purpose or "", boilerplate_patterns)
-
-    lang = (
-        company.purpose_language
-        or detect_purpose_language(company.purpose)
-        or _DEFAULT_LANG
-    )
-
-    tokens = _company_tokens(db, company)
-
-    embed_text = " ".join(filter(None, [
-        stripped_purpose,
-        (company.purpose_keywords or "").replace(",", " "),
-    ])).strip()
-
-    embeddings_ok = bool(embed_text) and _has_noga_embeddings(db)
-    query_vec = None
-    if embeddings_ok:
-        query_vec = _embed_query(embed_text)
-        embeddings_ok = query_vec is not None
-
-    trace: dict = {
-        "purpose_original": company.purpose,
-        "purpose_stripped": stripped_purpose if stripped_purpose != (company.purpose or "") else None,
-        "boilerplate_patterns_active": len(boilerplate_patterns),
-        "detected_language": lang,
-        "tokens": sorted(tokens),
-        "embed_text": embed_text or None,
-        "embeddings_available": embeddings_ok,
-        "levels": [],
-        "final_code": None,
-        "final_label": None,
-        "final_confidence": None,
-    }
-
-    if not tokens:
-        return trace
-
-    idx = _load_noga_index()
-
-    token_scores: dict[str, float] = {}
-    for tok in tokens:
-        for code in idx.token_to_codes.get(tok, set()):
-            token_scores[code] = token_scores.get(code, 0.0) + 1.0
-
-    max_tok = max(token_scores.values()) if token_scores else 1.0
-    norm_token: dict[str, float] = {c: s / max_tok for c, s in token_scores.items()}
-
-    if not token_scores and not embeddings_ok:
-        return trace
-
-    current_parent_codes: list[str] | None = None
-    level_results: list[LevelResult] = []
-
-    for level_no in range(1, 6):
-        level_trace: dict = {
-            "level_no": level_no,
-            "parent_codes": current_parent_codes,
-            "lookahead_applied": False,
-            "fallback_used": False,
-            "candidates": [],
-            "winner_code": None,
-            "winner_label": None,
-            "confidence": None,
-        }
-
-        emb_candidates: list[tuple[str, float]] = []
-        if embeddings_ok:
-            emb_candidates = _pgvector_search_level(
-                db, query_vec, lang, level_no,
-                parent_codes=current_parent_codes,
-                top_k=_LEVEL_TOP_K,
-            )
-        emb_sim_map: dict[str, float] = dict(emb_candidates)
-
-        hybrid: dict[str, float] = {}
-        for code, sim in emb_candidates:
-            hybrid[code] = _W_EMB * sim + _W_TOK * norm_token.get(code, 0.0)
-        for code, tok_score in norm_token.items():
-            meta = idx.code_meta.get(code, {})
-            if meta.get("level_no") != level_no:
-                continue
-            if current_parent_codes and meta.get("parentCode") not in current_parent_codes:
-                continue
-            if code not in hybrid:
-                hybrid[code] = _W_TOK * tok_score
-
-        excl_sims: dict[str, float] = {}
-        if embeddings_ok and hybrid:
-            excl_sims = _excludes_cosine_penalty(db, list(hybrid.keys()), query_vec, lang)
-            for code, excl_sim in excl_sims.items():
-                hybrid[code] = hybrid[code] * (1.0 - _EXCL_COSINE_WEIGHT * excl_sim)
-
-        if not hybrid:
-            level_trace["fallback_used"] = True
-            if level_results:
-                prev_code = level_results[-1].code
-                for code, meta in idx.code_meta.items():
-                    if meta.get("parentCode") == prev_code and meta.get("level_no") == level_no:
-                        label = _get_label(meta, lang)
-                        level_results.append(LevelResult(code=code, label=label, confidence=0.0))
-                        current_parent_codes = [code]
-                        level_trace["winner_code"] = code
-                        level_trace["winner_label"] = label
-                        level_trace["confidence"] = 0.0
-                        break
-            trace["levels"].append(level_trace)
-            if not level_results or len(level_results) < level_no:
-                break
-            continue
-
-        candidates_sorted = sorted(hybrid.items(), key=lambda x: x[1], reverse=True)
-        winner = candidates_sorted[0][0]
-        winner_score = candidates_sorted[0][1]
-
-        if embeddings_ok and level_no < 5 and len(candidates_sorted) >= 2:
-            runner_up = candidates_sorted[1][0]
-            runner_up_score = candidates_sorted[1][1]
-            if (winner_score - runner_up_score) <= _LOOKAHEAD_TIE_THRESHOLD:
-                level_trace["lookahead_applied"] = True
-                tied = [winner, runner_up]
-                child_results = _pgvector_search_level(
-                    db, query_vec, lang, level_no + 1,
-                    parent_codes=tied,
-                    top_k=_LEVEL_TOP_K,
-                )
-                best_child: dict[str, float] = {}
-                for child_code, child_sim in child_results:
-                    p = idx.code_meta.get(child_code, {}).get("parentCode", "")
-                    best_child[p] = max(best_child.get(p, 0.0), child_sim)
-                for parent_code in tied:
-                    hybrid[parent_code] = hybrid[parent_code] + 0.5 * best_child.get(parent_code, 0.0)
-                winner = max(tied, key=lambda c: hybrid[c])
-                winner_score = hybrid[winner]
-                candidates_sorted = sorted(hybrid.items(), key=lambda x: x[1], reverse=True)
-
-        for code, final_score in candidates_sorted[:10]:
-            c_meta = idx.code_meta.get(code, {})
-            level_trace["candidates"].append({
-                "code": code,
-                "label": _get_label(c_meta, lang),
-                "embedding_sim": round(emb_sim_map[code], 4) if code in emb_sim_map else None,
-                "token_score_normalized": round(norm_token[code], 4) if code in norm_token else None,
-                "excludes_sim": round(excl_sims[code], 4) if code in excl_sims else None,
-                "hybrid_score_final": round(final_score, 4),
-                "is_winner": code == winner,
-            })
-
-        meta = idx.code_meta.get(winner, {})
-        label = _get_label(meta, lang)
-        raw_sim = emb_sim_map.get(winner)
-        if raw_sim is None:
-            total = sum(token_scores.values())
-            raw_sim = token_scores.get(winner, 0.0) / total if total > 0 else 0.0
-        confidence = max(0.0, min(1.0, raw_sim))
-
-        level_results.append(LevelResult(code=winner, label=label, confidence=confidence))
-        current_parent_codes = [winner]
-        level_trace["winner_code"] = winner
-        level_trace["winner_label"] = label
-        level_trace["confidence"] = round(confidence, 4)
-        trace["levels"].append(level_trace)
-
-    if level_results:
-        final = level_results[-1]
-        trace["final_code"] = final.code
-        trace["final_label"] = final.label
-        trace["final_confidence"] = round(final.confidence, 4)
-
-    return trace
-
-
-# ---------------------------------------------------------------------------
 # Branch office helpers
 # ---------------------------------------------------------------------------
 
@@ -916,6 +761,8 @@ def _inherit_noga_from_parent(db: Session, company: Company) -> CompanyUpdate | 
         noga_classified_at=datetime.now(tz=timezone.utc),
         noga_path=parent.noga_path,
         noga_path_labels=parent.noga_path_labels,
+        noga_peak_code=parent.noga_peak_code,
+        noga_peak_label=parent.noga_peak_label,
     )
 
 
@@ -929,6 +776,8 @@ def _clear_noga() -> CompanyUpdate:
         noga_classified_at=datetime.now(tz=timezone.utc),
         noga_path=None,
         noga_path_labels=None,
+        noga_peak_code=None,
+        noga_peak_label=None,
     )
 
 
@@ -958,4 +807,6 @@ def apply_noga_classification(db: Session, company: Company) -> CompanyUpdate | 
         noga_classified_at=datetime.now(tz=timezone.utc),
         noga_path=noga_path or None,
         noga_path_labels=noga_path_labels or None,
+        noga_peak_code=result.peak_code,
+        noga_peak_label=result.peak_label,
     )

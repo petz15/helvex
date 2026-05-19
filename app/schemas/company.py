@@ -67,6 +67,8 @@ class CompanyBase(BaseModel):
     noga_path: str | None = None
     noga_path_labels: str | None = None
     noga_level_confidence: dict | None = None
+    noga_peak_code: str | None = None
+    noga_peak_label: str | None = None
     business_model: str | None = None
     combined_score: float | None = None
 
@@ -142,6 +144,8 @@ class CompanyUpdate(BaseModel):
     noga_path: str | None = None
     noga_path_labels: str | None = None
     noga_level_confidence: dict | None = None
+    noga_peak_code: str | None = None
+    noga_peak_label: str | None = None
     business_model: str | None = None
     combined_score: float | None = None
     ai_scored_at: datetime | None = None
