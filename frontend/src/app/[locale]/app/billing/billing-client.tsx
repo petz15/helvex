@@ -488,7 +488,6 @@ function TopupSection() {
         <ul className="space-y-1 list-disc list-inside text-blue-700">
           <li>{dict.app.billing.topup.hintLimit}</li>
           <li>{dict.app.billing.topup.hintExpiry}</li>
-          <li>{dict.app.billing.topup.hintStorage}</li>
           <li>{dict.app.billing.topup.hintRefund}</li>
         </ul>
       </div>
