@@ -28,6 +28,7 @@ import {
   fetchBillingSummary,
   fetchPaymentMethods,
   fetchOrg,
+  fetchBillingTiers,
   createSubscriptionCheckout,
   createTopupCheckout,
   createWorldlineCardRegistration,
@@ -96,6 +97,7 @@ export function PaymentGatewayClient() {
   const { data: me, mutate: mutateMe } = useSWR("me", fetchCurrentUser);
   const { data: summary, mutate: mutateSummary } = useSWR("billing-summary", fetchBillingSummary);
   const { data: paymentMethodsData } = useSWR("payment-methods", fetchPaymentMethods);
+  const { data: tiers } = useSWR("billing-tiers", fetchBillingTiers);
   const { data: org } = useSWR(
     me?.org_id ? `org-${me.org_id}` : null,
     () => fetchOrg(me!.org_id!),
@@ -156,17 +158,15 @@ export function PaymentGatewayClient() {
     ? `${tier ? tier.charAt(0).toUpperCase() + tier.slice(1) : "?"} plan · ${billingCycle}`
     : `${credits.toLocaleString()} credits`;
 
-  const PLAN_MONTHLY_CHF: Record<string, number> = {
-    free: 0, simple: 6, explorer: 12, researcher: 17, strategist: 37,
-  };
+  const tierData = tiers?.find(t => t.slug === tier);
 
   const vat = computeVat(billingAddress?.country);
   const baseAmount = kind === "topup" ? creditsToChf(credits) : null;
   const vatAmount  = baseAmount !== null ? Math.round(baseAmount * vat.rate * 10000) / 10000 : null;
   const totalAmount = baseAmount !== null ? baseAmount + (vatAmount ?? 0) : null;
 
-  const baseSubAmount = kind === "subscription" && PLAN_MONTHLY_CHF[tier] !== undefined
-    ? PLAN_MONTHLY_CHF[tier] * (billingCycle === "yearly" ? 10 : 1)
+  const baseSubAmount = kind === "subscription" && tierData != null
+    ? (billingCycle === "yearly" ? tierData.yearly_price_chf : tierData.monthly_price_chf)
     : null;
   const vatSubAmount = baseSubAmount !== null ? Math.round(baseSubAmount * vat.rate * 10000) / 10000 : null;
   const totalSubAmount = baseSubAmount !== null ? baseSubAmount + (vatSubAmount ?? 0) : null;
