@@ -90,6 +90,7 @@ const ACTION_LABELS: Record<string, string> = {
 };
 
 function ConsumptionPricesSection() {
+  const { dict } = useI18n();
   const [open, setOpen] = useState(false);
   return (
     <div className="rounded-xl border border-slate-200 bg-white overflow-hidden">
@@ -99,14 +100,14 @@ function ConsumptionPricesSection() {
       >
         <span className="flex items-center gap-1.5">
           <Zap size={14} className="text-amber-400" />
-          Consumption prices
+          {dict.app.billing.consumptionPrices.title}
         </span>
         <ChevronDown size={14} className={`text-slate-400 transition-transform ${open ? "rotate-180" : ""}`} />
       </button>
       {open && (
         <div className="border-t border-slate-100">
           <p className="px-4 pt-3 pb-1 text-xs text-slate-400">
-            1 credit = CHF 0.0001. Credits are deducted at full base cost per action regardless of tier.
+            {dict.app.billing.consumptionPrices.creditExplanation}
           </p>
           <table className="w-full text-sm">
             <thead className="bg-slate-50">
@@ -135,6 +136,7 @@ function ConsumptionPricesSection() {
 }
 
 function CreditUsageSection() {
+  const { dict } = useI18n();
   const [days, setDays] = useState(30);
   const { data, isLoading } = useSWR<CreditUsage>(
     `credit-usage-${days}`,
@@ -148,16 +150,16 @@ function CreditUsageSection() {
     <div className="rounded-xl border border-slate-200 bg-white overflow-hidden">
       <div className="px-4 py-3 border-b border-slate-100 flex items-center justify-between">
         <p className="text-sm font-medium text-slate-800 flex items-center gap-1.5">
-          <BarChart2 size={14} className="text-slate-400" /> Credit usage
+          <BarChart2 size={14} className="text-slate-400" /> {dict.app.billing.creditUsage.title}
         </p>
         <select
           value={days}
           onChange={e => setDays(Number(e.target.value))}
           className="text-xs text-slate-600 border border-slate-200 rounded-lg px-2 py-1 bg-white"
         >
-          <option value={7}>Last 7 days</option>
-          <option value={30}>Last 30 days</option>
-          <option value={90}>Last 90 days</option>
+          <option value={7}>{dict.app.billing.creditUsage.last7Days}</option>
+          <option value={30}>{dict.app.billing.creditUsage.last30Days}</option>
+          <option value={90}>{dict.app.billing.creditUsage.last90Days}</option>
         </select>
       </div>
 
@@ -171,15 +173,15 @@ function CreditUsageSection() {
         <>
           <div className="grid grid-cols-3 divide-x divide-slate-100 border-b border-slate-100 text-center">
             <div className="px-4 py-3">
-              <p className="text-xs text-slate-400">Spent</p>
+              <p className="text-xs text-slate-400">{dict.app.billing.creditUsage.spent}</p>
               <p className="text-lg font-semibold text-slate-800">{fmtNum(data.total_spent)}</p>
             </div>
             <div className="px-4 py-3">
-              <p className="text-xs text-slate-400">Refunded</p>
+              <p className="text-xs text-slate-400">{dict.app.billing.creditUsage.refunded}</p>
               <p className="text-lg font-semibold text-emerald-600">+{fmtNum(data.total_refunded)}</p>
             </div>
             <div className="px-4 py-3">
-              <p className="text-xs text-slate-400">Net</p>
+              <p className="text-xs text-slate-400">{dict.app.billing.creditUsage.net}</p>
               <p className="text-lg font-semibold text-slate-800">{fmtNum(data.net_spent)}</p>
             </div>
           </div>
@@ -202,7 +204,7 @@ function CreditUsageSection() {
               ))}
             </div>
           ) : (
-            <p className="text-xs text-slate-400 text-center py-6">No credit usage in this period.</p>
+            <p className="text-xs text-slate-400 text-center py-6">{dict.app.billing.creditUsage.noUsage}</p>
           )}
         </>
       )}
@@ -240,6 +242,7 @@ function SummaryCards({ balance, tier, billingCycle, periodEnd, cancelAtPeriodEn
   onCancelSubscription: () => void;
   onReactivate: () => void;
 }) {
+  const { dict } = useI18n();
   const [cancelling, setCancelling] = useState(false);
   const [cancelError, setCancelError] = useState<string | null>(null);
   const [showCancelConfirm, setShowCancelConfirm] = useState(false);
@@ -283,9 +286,9 @@ function SummaryCards({ balance, tier, billingCycle, periodEnd, cancelAtPeriodEn
         <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 flex items-start gap-3">
           <span className="text-emerald-500 mt-0.5 shrink-0">✓</span>
           <div>
-            <p className="text-sm font-medium text-emerald-800">Subscription cancelled successfully.</p>
+            <p className="text-sm font-medium text-emerald-800">{dict.app.billing.summaryCards.cancellationSuccess}</p>
             <p className="text-xs text-emerald-700 mt-0.5">
-              Your {tier} plan remains active until{periodEnd ? ` ${fmtDate(periodEnd)}` : " the end of your current period"}. After that it will downgrade to Free automatically — no further charges.
+              {dict.app.billing.summaryCards.cancellationDetails.replace('{tier}', tier).replace('{date}', periodEnd ? fmtDate(periodEnd) : '')}
             </p>
           </div>
         </div>
@@ -295,7 +298,7 @@ function SummaryCards({ balance, tier, billingCycle, periodEnd, cancelAtPeriodEn
         {/* Credit balance */}
         <div className="rounded-2xl border border-slate-200 bg-white p-5">
           <div className="flex items-center gap-2 text-xs text-slate-400 font-medium uppercase tracking-wide">
-            <Zap size={12} className="text-amber-400" />Credit balance
+            <Zap size={12} className="text-amber-400" />{dict.app.billing.summaryCards.creditBalance}
           </div>
           <div className="mt-2 text-3xl font-bold text-slate-900">{fmtNum(balance)}</div>
           <div className="mt-0.5 text-sm text-slate-400">
@@ -306,7 +309,7 @@ function SummaryCards({ balance, tier, billingCycle, periodEnd, cancelAtPeriodEn
         {/* Plan */}
         <div className={`rounded-2xl border bg-white p-5 ${cancelAtPeriodEnd ? "border-amber-200" : "border-slate-200"}`}>
           <div className="flex items-center gap-2 text-xs text-slate-400 font-medium uppercase tracking-wide">
-            <TrendingUp size={12} className="text-blue-400" />Current plan
+            <TrendingUp size={12} className="text-blue-400" />{dict.app.billing.summaryCards.currentPlan}
           </div>
           <div className="mt-2 flex items-center gap-2 flex-wrap">
             <span className={`text-lg font-bold capitalize px-2.5 py-0.5 rounded-lg ${TIER_COLORS[tier] ?? "bg-slate-100 text-slate-700"}`}>
@@ -314,25 +317,25 @@ function SummaryCards({ balance, tier, billingCycle, periodEnd, cancelAtPeriodEn
             </span>
             {cancelAtPeriodEnd && (
               <span className="inline-flex items-center gap-1 rounded-full border border-amber-300 bg-amber-50 px-2 py-0.5 text-[11px] font-semibold text-amber-700">
-                Cancels {periodEnd ? fmtDate(periodEnd) : "at period end"}
+                {dict.app.billing.summaryCards.willNotRenew.replace('{date}', periodEnd ? fmtDate(periodEnd) : '')}
               </span>
             )}
           </div>
           <div className="mt-1 text-xs text-slate-400 capitalize">{billingCycle ? `${billingCycle} billing` : "—"}</div>
           {cancelAtPeriodEnd && (
-            <p className="mt-1.5 text-xs text-amber-600">Will not renew — downgrades to Free after {periodEnd ? fmtDate(periodEnd) : "period end"}.</p>
+            <p className="mt-1.5 text-xs text-amber-600">{dict.app.billing.summaryCards.willNotRenew.replace('{date}', periodEnd ? fmtDate(periodEnd) : 'period end')}</p>
           )}
         </div>
 
         {/* Subscription */}
         <div className="rounded-2xl border border-slate-200 bg-white p-5">
           <div className="flex items-center gap-2 text-xs text-slate-400 font-medium uppercase tracking-wide">
-            <CreditCard size={12} className="text-violet-400" />Subscription
+            <CreditCard size={12} className="text-violet-400" />{dict.app.billing.summaryCards.subscription}
           </div>
           <div className="mt-3 space-y-2">
             <div>
               <div className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">
-                {cancelAtPeriodEnd ? "Access ends" : isPaid ? "Next billing" : "Status"}
+                {cancelAtPeriodEnd ? dict.app.billing.summaryCards.accessEnds : isPaid ? dict.app.billing.summaryCards.nextBilling : dict.app.billing.summaryCards.status}
               </div>
               <div className={`mt-0.5 text-base font-bold ${cancelAtPeriodEnd ? "text-amber-600" : "text-slate-800"}`}>
                 {periodEnd ? fmtDate(periodEnd) : isPaid ? "—" : "Free"}
@@ -340,7 +343,7 @@ function SummaryCards({ balance, tier, billingCycle, periodEnd, cancelAtPeriodEn
             </div>
             {isPaid && (
               <div>
-                <div className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">Cycle</div>
+                <div className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">{dict.app.billing.summaryCards.cycle}</div>
                 <div className="mt-0.5 text-sm font-medium text-slate-600 capitalize">
                   {billingCycle || "monthly"}
                 </div>
@@ -348,7 +351,7 @@ function SummaryCards({ balance, tier, billingCycle, periodEnd, cancelAtPeriodEn
             )}
           </div>
           {isPaid && !cancelAtPeriodEnd && (
-            <p className="mt-2 text-xs text-slate-400">Renews automatically until cancelled</p>
+            <p className="mt-2 text-xs text-slate-400">{dict.app.billing.summaryCards.renewsAutomatically}</p>
           )}
           <div className="mt-2 flex items-center gap-3 flex-wrap">
             {!cancelAtPeriodEnd && (
@@ -356,7 +359,7 @@ function SummaryCards({ balance, tier, billingCycle, periodEnd, cancelAtPeriodEn
                 href="/app/pricing"
                 className="inline-flex items-center gap-1 text-xs text-blue-600 hover:underline"
               >
-                Change plan <ArrowUpRight size={11} />
+                {dict.app.billing.summaryCards.changePlan} <ArrowUpRight size={11} />
               </Link>
             )}
             {isPaid && !showCancelConfirm && !cancelAtPeriodEnd && (
@@ -364,7 +367,7 @@ function SummaryCards({ balance, tier, billingCycle, periodEnd, cancelAtPeriodEn
                 onClick={() => setShowCancelConfirm(true)}
                 className="text-xs text-red-500 hover:underline"
               >
-                Cancel subscription
+                {dict.app.billing.summaryCards.cancelSubscription}
               </button>
             )}
             {cancelAtPeriodEnd && (
@@ -373,7 +376,7 @@ function SummaryCards({ balance, tier, billingCycle, periodEnd, cancelAtPeriodEn
                 disabled={reactivating}
                 className="text-xs text-emerald-600 hover:underline disabled:opacity-60"
               >
-                {reactivating ? "Resuming…" : "Resume subscription"}
+                {reactivating ? dict.app.billing.summaryCards.resuming : dict.app.billing.summaryCards.resumeSubscription}
               </button>
             )}
           </div>
@@ -384,11 +387,9 @@ function SummaryCards({ balance, tier, billingCycle, periodEnd, cancelAtPeriodEn
       {/* Cancel confirmation */}
       {showCancelConfirm && (
         <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 space-y-2">
-          <p className="text-sm font-medium text-amber-900">Cancel subscription?</p>
+          <p className="text-sm font-medium text-amber-900">{dict.app.billing.cancelConfirm.title}</p>
           <p className="text-xs text-amber-800">
-            You keep full access to your <strong>{tier}</strong> plan until{" "}
-            <strong>{periodEnd ? fmtDate(periodEnd) : "the end of your current billing period"}</strong>.
-            After that the plan downgrades to Free automatically. Credits in your balance are never removed. No refund is issued.
+            {dict.app.billing.cancelConfirm.message.replace('{tier}', tier).replace('{date}', periodEnd ? fmtDate(periodEnd) : "the end of your current billing period")}
           </p>
           {cancelError && <p className="text-xs text-red-600">{cancelError}</p>}
           <div className="flex gap-2">
@@ -397,13 +398,13 @@ function SummaryCards({ balance, tier, billingCycle, periodEnd, cancelAtPeriodEn
               disabled={cancelling}
               className="rounded-lg bg-amber-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-amber-700 disabled:opacity-60"
             >
-              {cancelling ? "Cancelling…" : "Yes, cancel subscription"}
+              {cancelling ? dict.app.billing.cancelConfirm.cancelling : dict.app.billing.cancelConfirm.confirm}
             </button>
             <button
               onClick={() => { setShowCancelConfirm(false); setCancelError(null); }}
               className="rounded-lg border border-amber-200 px-3 py-1.5 text-xs text-amber-800 hover:bg-amber-100"
             >
-              Keep subscription
+              {dict.app.billing.cancelConfirm.keep}
             </button>
           </div>
         </div>
@@ -673,11 +674,13 @@ function PaymentMethodsSection({
     }
   }
 
+  const { dict } = useI18n();
+
   return (
     <div className="rounded-2xl border border-slate-200 bg-white p-5 space-y-5">
-      <h2 className="text-sm font-semibold text-slate-700">Payment methods</h2>
+      <h2 className="text-sm font-semibold text-slate-700">{dict.app.billing.paymentMethods.title}</h2>
       {!billingAddress && (
-        <p className="text-xs text-amber-600">Add a billing address first to save cards.</p>
+        <p className="text-xs text-amber-600">{dict.app.billing.paymentMethods.warning}</p>
       )}
       {error && (
         <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">{error}</div>
@@ -687,20 +690,20 @@ function PaymentMethodsSection({
       {canManage && (
         <div className="space-y-2">
           <div className="flex items-center justify-between">
-            <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">Org cards</p>
+            <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">{dict.app.billing.paymentMethods.orgCards}</p>
             <button
               onClick={() => void handleRegister("org")}
               disabled={registeringScope !== null || addingPersonalToOrg}
               className="text-xs text-blue-600 hover:underline disabled:opacity-50"
             >
-              {registeringScope === "org" ? "Opening Saferpay…" : "+ Add org card"}
+              {registeringScope === "org" ? dict.app.billing.paymentMethods.openingSaferpay : dict.app.billing.paymentMethods.addOrgCard}
             </button>
           </div>
           {showUsePersonalPrompt && personalMethods[0] && (
             <div className="rounded-xl border border-blue-200 bg-blue-50 px-3 py-3 space-y-2">
-              <p className="text-xs font-semibold text-blue-900">Use your saved personal card for the org?</p>
+              <p className="text-xs font-semibold text-blue-900">{dict.app.billing.paymentMethods.usePersonalPrompt}</p>
               <p className="text-xs text-blue-700">
-                <CardChip method={personalMethods[0]} /> can be added to the org without re-entering card details.
+                <CardChip method={personalMethods[0]} /> {dict.app.billing.paymentMethods.usePersonalDetails}
               </p>
               <div className="flex gap-2">
                 <button
@@ -709,40 +712,40 @@ function PaymentMethodsSection({
                   className="rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-blue-700 disabled:opacity-60 flex items-center gap-1"
                 >
                   {addingPersonalToOrg && <Loader2 size={11} className="animate-spin" />}
-                  {addingPersonalToOrg ? "Adding…" : "Use this card"}
+                  {addingPersonalToOrg ? "Adding…" : dict.app.billing.paymentMethods.useThisCard}
                 </button>
                 <button
                   onClick={() => { setShowUsePersonalPrompt(false); void doRegister("org"); }}
                   disabled={addingPersonalToOrg}
                   className="rounded-lg border border-blue-200 px-3 py-1.5 text-xs text-blue-800 hover:bg-blue-100 disabled:opacity-60"
                 >
-                  Register different card
+                  {dict.app.billing.paymentMethods.registerDifferent}
                 </button>
                 <button
                   onClick={() => { setShowUsePersonalPrompt(false); window.location.href = "/app/billing"; }}
                   className="ml-auto text-xs text-slate-500 hover:text-slate-700"
                 >
-                  Cancel
+                  {dict.app.billing.cancelConfirm.keep}
                 </button>
               </div>
             </div>
           )}
           {orgMethods.length === 0 ? (
-            <p className="text-xs text-slate-400">No org cards saved yet.</p>
+            <p className="text-xs text-slate-400">{dict.app.billing.paymentMethods.noOrgCards}</p>
           ) : (
             orgMethods.map(method => (
               <div key={method.id} className="flex items-center gap-3 rounded-xl border border-slate-200 px-3 py-2.5">
                 <div className="flex-1 min-w-0"><CardChip method={method} /></div>
                 <div className="flex items-center gap-2 shrink-0">
                   {method.is_default ? (
-                    <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[11px] font-semibold text-emerald-700">Default</span>
+                    <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[11px] font-semibold text-emerald-700">{dict.app.billing.paymentMethods.default}</span>
                   ) : (
                     <button
                       onClick={() => void handleSetDefault(method)}
                       disabled={settingDefaultId !== null}
                       className="text-xs text-slate-500 hover:text-blue-600 disabled:opacity-50"
                     >
-                      {settingDefaultId === method.id ? "Saving…" : "Set default"}
+                      {settingDefaultId === method.id ? dict.app.billing.paymentMethods.saving : dict.app.billing.paymentMethods.setDefault}
                     </button>
                   )}
                   <button
@@ -750,7 +753,7 @@ function PaymentMethodsSection({
                     disabled={deletingId !== null}
                     className="text-xs text-red-500 hover:underline disabled:opacity-50"
                   >
-                    {deletingId === method.id ? "Removing…" : "Remove"}
+                    {deletingId === method.id ? dict.app.billing.paymentMethods.removing : dict.app.billing.paymentMethods.remove}
                   </button>
                 </div>
               </div>
@@ -762,19 +765,19 @@ function PaymentMethodsSection({
       {/* Personal card */}
       <div className="space-y-2">
         <div className="flex items-center justify-between">
-          <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">My card</p>
+          <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">{dict.app.billing.paymentMethods.myCard}</p>
           <button
             onClick={() => void handleRegister("personal")}
             disabled={registeringScope !== null}
             className="text-xs text-blue-600 hover:underline disabled:opacity-50"
           >
             {registeringScope === "personal"
-              ? "Opening Saferpay…"
-              : personalMethods.length > 0 ? "Replace" : "+ Add card"}
+              ? dict.app.billing.paymentMethods.openingSaferpay
+              : personalMethods.length > 0 ? dict.app.billing.paymentMethods.replaceCard : dict.app.billing.paymentMethods.addCard}
           </button>
         </div>
         {personalMethods.length === 0 ? (
-          <p className="text-xs text-slate-400">No personal card saved.</p>
+          <p className="text-xs text-slate-400">{dict.app.billing.paymentMethods.noPersonalCard}</p>
         ) : (
           personalMethods.map(method => (
             <div key={method.id} className="flex items-center gap-3 rounded-xl border border-slate-200 px-3 py-2.5">
@@ -784,7 +787,7 @@ function PaymentMethodsSection({
                 disabled={deletingId !== null}
                 className="text-xs text-red-500 hover:underline disabled:opacity-50"
               >
-                {deletingId === method.id ? "Removing…" : "Remove"}
+                {deletingId === method.id ? dict.app.billing.paymentMethods.removing : dict.app.billing.paymentMethods.remove}
               </button>
             </div>
           ))
@@ -795,6 +798,7 @@ function PaymentMethodsSection({
 }
 
 function CreditHistory() {
+  const { dict } = useI18n();
   const [page, setPage] = useState(1);
   const { data, isLoading } = useSWR(
     `billing-credits-${page}`,
@@ -807,19 +811,19 @@ function CreditHistory() {
     <div className="rounded-2xl border border-slate-200 bg-white overflow-hidden">
       <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between">
         <div>
-          <h2 className="text-sm font-semibold text-slate-700">Credit ledger</h2>
-          <p className="text-xs text-slate-400 mt-0.5">{data?.total ?? 0} transactions</p>
+          <h2 className="text-sm font-semibold text-slate-700">{dict.app.billing.creditLedger.title}</h2>
+          <p className="text-xs text-slate-400 mt-0.5">{dict.app.billing.creditLedger.transactions.replace('{count}', String(data?.total ?? 0))}</p>
         </div>
       </div>
       <div className="overflow-x-auto">
         <table className="w-full text-sm">
           <thead className="bg-slate-50">
             <tr>
-              <th className="text-left px-4 py-2.5 text-xs text-slate-400 font-medium">Date</th>
-              <th className="text-left px-4 py-2.5 text-xs text-slate-400 font-medium">Type</th>
-              <th className="text-left px-4 py-2.5 text-xs text-slate-400 font-medium">Action</th>
-              <th className="text-right px-4 py-2.5 text-xs text-slate-400 font-medium">Credits</th>
-              <th className="text-right px-4 py-2.5 text-xs text-slate-400 font-medium">Balance after</th>
+              <th className="text-left px-4 py-2.5 text-xs text-slate-400 font-medium">{dict.app.billing.creditLedger.colDate}</th>
+              <th className="text-left px-4 py-2.5 text-xs text-slate-400 font-medium">{dict.app.billing.creditLedger.colType}</th>
+              <th className="text-left px-4 py-2.5 text-xs text-slate-400 font-medium">{dict.app.billing.creditLedger.colAction}</th>
+              <th className="text-right px-4 py-2.5 text-xs text-slate-400 font-medium">{dict.app.billing.creditLedger.colCredits}</th>
+              <th className="text-right px-4 py-2.5 text-xs text-slate-400 font-medium">{dict.app.billing.creditLedger.colBalanceAfter}</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-50">
@@ -845,7 +849,7 @@ function CreditHistory() {
               );
             })}
             {!isLoading && data?.items.length === 0 && (
-              <tr><td colSpan={5} className="text-center py-8 text-xs text-slate-400">No transactions yet</td></tr>
+              <tr><td colSpan={5} className="text-center py-8 text-xs text-slate-400">{dict.app.billing.creditLedger.noTransactions}</td></tr>
             )}
           </tbody>
         </table>
@@ -868,6 +872,7 @@ function CreditHistory() {
 }
 
 function PaymentHistory() {
+  const { dict } = useI18n();
   const [page, setPage] = useState(1);
   const { data, isLoading, mutate } = useSWR(
     `billing-payments-${page}`,
@@ -890,20 +895,20 @@ function PaymentHistory() {
   return (
     <div className="rounded-2xl border border-slate-200 bg-white overflow-hidden">
       <div className="px-5 py-4 border-b border-slate-100">
-        <h2 className="text-sm font-semibold text-slate-700">Payment history</h2>
-        <p className="text-xs text-slate-400 mt-0.5">{data?.total ?? 0} payments</p>
+        <h2 className="text-sm font-semibold text-slate-700">{dict.app.billing.paymentHistory.title}</h2>
+        <p className="text-xs text-slate-400 mt-0.5">{dict.app.billing.paymentHistory.payments.replace('{count}', String(data?.total ?? 0))}</p>
       </div>
       <div className="overflow-x-auto">
         <table className="w-full text-sm">
           <thead className="bg-slate-50">
             <tr>
-              <th className="text-left px-4 py-2.5 text-xs text-slate-400 font-medium">Date</th>
-              <th className="text-left px-4 py-2.5 text-xs text-slate-400 font-medium">Type</th>
-              <th className="text-left px-4 py-2.5 text-xs text-slate-400 font-medium">Details</th>
-              <th className="text-left px-4 py-2.5 text-xs text-slate-400 font-medium">Method</th>
-              <th className="text-left px-4 py-2.5 text-xs text-slate-400 font-medium">Status</th>
-              <th className="text-right px-4 py-2.5 text-xs text-slate-400 font-medium">Amount</th>
-              <th className="text-right px-4 py-2.5 text-xs text-slate-400 font-medium">Actions</th>
+              <th className="text-left px-4 py-2.5 text-xs text-slate-400 font-medium">{dict.app.billing.paymentHistory.colDate}</th>
+              <th className="text-left px-4 py-2.5 text-xs text-slate-400 font-medium">{dict.app.billing.paymentHistory.colType}</th>
+              <th className="text-left px-4 py-2.5 text-xs text-slate-400 font-medium">{dict.app.billing.paymentHistory.colDetails}</th>
+              <th className="text-left px-4 py-2.5 text-xs text-slate-400 font-medium">{dict.app.billing.paymentHistory.colMethod}</th>
+              <th className="text-left px-4 py-2.5 text-xs text-slate-400 font-medium">{dict.app.billing.paymentHistory.colStatus}</th>
+              <th className="text-right px-4 py-2.5 text-xs text-slate-400 font-medium">{dict.app.billing.paymentHistory.colAmount}</th>
+              <th className="text-right px-4 py-2.5 text-xs text-slate-400 font-medium">{dict.app.billing.paymentHistory.colActions}</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-50">
@@ -938,7 +943,7 @@ function PaymentHistory() {
                   CHF {tx.amount_chf.toFixed(2)}
                   {tx.vat_amount_chf != null && tx.vat_rate != null && (
                     <div className="text-[11px] text-slate-400 font-normal tabular-nums">
-                      inkl. CHF {tx.vat_amount_chf.toFixed(2)} MwSt. ({Math.round(tx.vat_rate * 1000) / 10} %)
+                      exkl. CHF {tx.vat_amount_chf.toFixed(2)} MwSt. ({Math.round(tx.vat_rate * 1000) / 10} %)
                     </div>
                   )}
                   {tx.refunded_amount_chf && (
@@ -954,7 +959,7 @@ function PaymentHistory() {
                         rel="noopener noreferrer"
                         className="rounded-lg border border-slate-200 px-2 py-1 text-xs text-slate-700 hover:bg-slate-100"
                       >
-                        Invoice
+                        {dict.app.billing.paymentHistory.invoice}
                       </a>
                     )}
                     {tx.status === "pending" && (
@@ -963,7 +968,7 @@ function PaymentHistory() {
                         disabled={cancelingId !== null}
                         className="rounded-lg border border-slate-200 px-2 py-1 text-xs text-slate-700 hover:bg-slate-100 disabled:opacity-60"
                       >
-                        {cancelingId === tx.id ? "Cancelling..." : "Cancel"}
+                        {cancelingId === tx.id ? dict.app.billing.paymentHistory.cancelling : dict.app.billing.paymentHistory.cancel}
                       </button>
                     )}
                   </div>
@@ -971,7 +976,7 @@ function PaymentHistory() {
               </tr>
             ))}
             {!isLoading && data?.items.length === 0 && (
-              <tr><td colSpan={7} className="text-center py-8 text-xs text-slate-400">No payments yet</td></tr>
+              <tr><td colSpan={7} className="text-center py-8 text-xs text-slate-400">{dict.app.billing.paymentHistory.noPayments}</td></tr>
             )}
           </tbody>
         </table>
@@ -1085,7 +1090,7 @@ export function BillingClient() {
       {summary?.low_credit_alert_at && (
         <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 flex items-start gap-2">
           <AlertTriangle size={16} className="shrink-0 mt-0.5" />
-          <span>Your credit balance is running low. <Link href="#" className="underline font-medium" onClick={e => { e.preventDefault(); document.getElementById("topup-section")?.scrollIntoView({ behavior: "smooth" }); }}>Top up now</Link> to avoid service interruptions.</span>
+          <span>{dict.app.billing.lowCreditAlert.replace('{topUpLink}', '').trim()} <Link href="#" className="underline font-medium" onClick={e => { e.preventDefault(); document.getElementById("topup-section")?.scrollIntoView({ behavior: "smooth" }); }}>{dict.app.billing.topUpNow}</Link> {dict.app.billing.lowCreditAlert.split('{topUpLink}')[1] ?? ''}</span>
         </div>
       )}
 

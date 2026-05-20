@@ -361,7 +361,7 @@ export function CompanyDetailClient({ company: initial, readOnlyDemo = false, is
                 className="flex items-center gap-1.5 text-sm text-emerald-700 hover:text-emerald-900 px-3 py-1.5 rounded-lg border border-emerald-200 hover:bg-emerald-50 transition-colors disabled:opacity-60"
               >
                 {searchingWeb ? <Loader2 size={13} className="animate-spin" /> : <Search size={13} />}
-                {searchingWeb ? "Queuing…" : t.runwebsearch}
+                {searchingWeb ? t.queuing : t.runwebsearch}
               </button>
             )}
             {company.website_url && (
@@ -371,7 +371,7 @@ export function CompanyDetailClient({ company: initial, readOnlyDemo = false, is
                 rel="noopener noreferrer"
                 className="flex items-center gap-1.5 text-sm text-blue-600 hover:text-blue-800 px-3 py-1.5 rounded-lg border border-blue-200 hover:bg-blue-50 transition-colors"
               >
-                <Globe size={13} /> Visit website <ExternalLink size={11} />
+                <Globe size={13} /> {t.visitWebsite} <ExternalLink size={11} />
               </a>
             )}
             {!readOnlyDemo && !!company.website_checked_at && (
@@ -380,7 +380,7 @@ export function CompanyDetailClient({ company: initial, readOnlyDemo = false, is
                 onClick={() => setShowWebsitePicker(v => !v)}
                 className="flex items-center gap-1.5 text-sm text-slate-700 hover:text-slate-900 px-3 py-1.5 rounded-lg border border-slate-200 hover:bg-slate-50 transition-colors"
               >
-                Change website
+                {t.changeWebsite}
               </button>
             )}
             {company.cantonal_excerpt_web && (
@@ -399,7 +399,7 @@ export function CompanyDetailClient({ company: initial, readOnlyDemo = false, is
                 onClick={handleNogaTest}
                 className="flex items-center gap-1.5 text-sm text-amber-700 hover:text-amber-900 px-3 py-1.5 rounded-lg border border-amber-200 hover:bg-amber-50 transition-colors"
               >
-                NOGA explain
+                {t.nogaExplain}
               </button>
             )}
           </div>
@@ -441,7 +441,7 @@ export function CompanyDetailClient({ company: initial, readOnlyDemo = false, is
                         : "border-blue-200 text-blue-600 hover:text-blue-800 hover:bg-blue-50"
                     )}
                   >
-                    {selectingWebsite === r.link ? "Selecting…" : "Use this"}
+                    {selectingWebsite === r.link ? t.selectingWebsite : t.useThisWebsite}
                   </button>
                 </div>
               </div>
@@ -457,16 +457,16 @@ export function CompanyDetailClient({ company: initial, readOnlyDemo = false, is
 
           {company.purpose_language && (() => {
             const LANG_META: Record<string, { flag: string; label: string }> = {
-              de: { flag: "🇩🇪", label: "German" },
-              fr: { flag: "🇫🇷", label: "French" },
-              it: { flag: "🇮🇹", label: "Italian" },
-              en: { flag: "🇬🇧", label: "English" },
-              rm: { flag: "🏔️", label: "Romansh" },
+              de: { flag: "🇩🇪", label: t.languageLabelDe },
+              fr: { flag: "🇫🇷", label: t.languageLabelFr },
+              it: { flag: "🇮🇹", label: t.languageLabelIt },
+              en: { flag: "🇬🇧", label: t.languageLabelEn },
+              rm: { flag: "🏔️", label: t.languageLabelRm },
             };
             const meta = LANG_META[company.purpose_language] ?? { flag: "🌐", label: company.purpose_language.toUpperCase() };
             return (
               <div className="flex items-center gap-2">
-                <span className="text-xs font-medium text-slate-500">Purpose language</span>
+                <span className="text-xs font-medium text-slate-500">{t.purposeLanguage}</span>
                 <Link href={`/app/search?purpose_language=${encodeURIComponent(company.purpose_language)}`}>
                   <Badge className="bg-indigo-50 text-indigo-700 text-xs cursor-pointer hover:bg-indigo-100 gap-1">
                     <span>{meta.flag}</span>
@@ -520,7 +520,7 @@ export function CompanyDetailClient({ company: initial, readOnlyDemo = false, is
                     <Badge className="bg-teal-50 text-teal-700 text-[10px]">{company.noga_level}</Badge>
                   )}
                   {lowConf && (
-                    <span className="text-[10px] uppercase tracking-wide text-amber-700 bg-amber-50 border border-amber-200 rounded px-1.5 py-0.5">low confidence</span>
+                    <span className="text-[10px] uppercase tracking-wide text-amber-700 bg-amber-50 border border-amber-200 rounded px-1.5 py-0.5">{t.lowConfidence}</span>
                   )}
                 </div>
                 {segments.length > 0 && (
@@ -544,7 +544,7 @@ export function CompanyDetailClient({ company: initial, readOnlyDemo = false, is
                   </div>
                 )}
                 {company.noga_confidence != null && (
-                  <p className="text-xs text-slate-500">Confidence: {Math.round(company.noga_confidence * 100)}%</p>
+                  <p className="text-xs text-slate-500">{t.confidence}: {Math.round(company.noga_confidence * 100)}%</p>
                 )}
               </div>
             );
@@ -615,7 +615,7 @@ export function CompanyDetailClient({ company: initial, readOnlyDemo = false, is
           {(company.contact_name || company.contact_email || company.contact_phone) && (
             <div className="pt-3 border-t border-slate-100 space-y-2">
               <h3 className="text-base font-semibold text-slate-800 flex items-center gap-1.5">
-                <Building2 size={14} /> Contact
+                <Building2 size={14} /> {t.contact}
               </h3>
               <div className="space-y-1 text-sm">
                 {company.contact_name && <p className="text-slate-700">{company.contact_name}</p>}
@@ -748,7 +748,7 @@ export function CompanyDetailClient({ company: initial, readOnlyDemo = false, is
               </div>
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2">
-                  <span className="text-xs font-semibold text-slate-600">User</span>
+                  <span className="text-xs font-semibold text-slate-600">{t.user}</span>
                   <span className="text-xs text-slate-500">{fmtRelativeTime(n.created_at)}</span>
                 </div>
                 <p className="text-sm text-slate-700 whitespace-pre-wrap">{n.content}</p>
@@ -783,7 +783,7 @@ export function CompanyDetailClient({ company: initial, readOnlyDemo = false, is
         ) : !nogaTestData ? (
           <div className="flex flex-col items-center justify-center py-16 text-slate-500 gap-3">
             <Loader2 size={24} className="animate-spin" />
-            <span className="text-sm capitalize">{nogaTestJobStatus ?? "Queuing…"} — running on ML worker</span>
+            <span className="text-sm capitalize">{nogaTestJobStatus ?? t.queuing} — {t.runningOnMLWorker}</span>
           </div>
         ) : (
           <div className="px-6 py-5 space-y-6 text-sm">

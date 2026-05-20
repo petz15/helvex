@@ -73,7 +73,7 @@
         - the sogc_publications still have issues, language (id: 1976422 oder 1976562) not always detected correctly and encoding not fixed everywhere (id: 1976814 oder 1977166) -> even though it says fixed!
 - Broad stop words for google search anything with vergleich in the domain name but not in the zweck or company name
 - API key management not working as intended. multiple bugs and no clear way to manage models. code needs to be checked how it deals with multiple providers and model when sending requests
--
+- NOGA v2: 366482 is terrible, how is this possible. 367779 another example. a part is too short zweck (difficult to mitigate unless website available) another part is the dirty gmbh text. 
 
 
 ### UI fixes:

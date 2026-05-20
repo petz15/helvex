@@ -104,13 +104,34 @@
       },
       "cta": "Kostenloses Konto erstellen →",
       "actions": {
-        "batchClassify": { "label": "Batch-LLM-Klassifizierung", "unit": "pro Unternehmen" },
-        "immediateClassify": { "label": "Sofortige LLM-Klassifizierung", "unit": "pro Unternehmen" },
-        "webSearch": { "label": "Web-Suche", "unit": "pro Unternehmen" },
-        "flexRescore": { "label": "Flex-Rescoring", "unit": "pro Unternehmen" },
-        "fullRecluster": { "label": "Vollständiges Reclustering", "unit": "pauschal" },
-        "exportBasic": { "label": "Massenexport – einfach (UID/Name/Kanton)", "unit": "pro 10k Zeilen" },
-        "exportDetailed": { "label": "Massenexport – detailliert", "unit": "pro 10k Zeilen" }
+        "batchClassify": {
+          "label": "Batch-LLM-Klassifizierung",
+          "unit": "pro Unternehmen"
+        },
+        "immediateClassify": {
+          "label": "Sofortige LLM-Klassifizierung",
+          "unit": "pro Unternehmen"
+        },
+        "webSearch": {
+          "label": "Web-Suche",
+          "unit": "pro Unternehmen"
+        },
+        "flexRescore": {
+          "label": "Flex-Rescoring",
+          "unit": "pro Unternehmen"
+        },
+        "fullRecluster": {
+          "label": "Vollständiges Reclustering",
+          "unit": "pauschal"
+        },
+        "exportBasic": {
+          "label": "Massenexport – einfach (UID/Name/Kanton)",
+          "unit": "pro 10k Zeilen"
+        },
+        "exportDetailed": {
+          "label": "Massenexport – detailliert",
+          "unit": "pro 10k Zeilen"
+        }
       }
     },
     "footer": {
@@ -123,12 +144,12 @@
     }
   },
   "footer": {
-  "copyright": "© {year} Helvex · Balogh Consulting",
-  "impressum": "Impressum",
-  "datenschutz": "Datenschutz",
-  "agb": "AGB",
-  "cookieSettings": "Cookie-Einstellungen",
-  "signIn": "Anmelden"
+    "copyright": "© {year} Helvex · Balogh Consulting",
+    "impressum": "Impressum",
+    "datenschutz": "Datenschutz",
+    "agb": "AGB",
+    "cookieSettings": "Cookie-Einstellungen",
+    "signIn": "Anmelden"
   },
   "auth": {
     "login": {
@@ -276,7 +297,7 @@
       "max": "Max",
       "collapsefilters": "Filter einklappen",
       "search": "Suchen {input}…"
-      },
+    },
     "map": {
       "goToAddress": "Adresse anspringen",
       "placeholder": "PLZ, Stadtname oder Adresse",
@@ -334,6 +355,205 @@
         "vatTotal": "Total",
         "vatReverseCharge": "Reverse Charge — steuerbefreit (USt-IdNr. hinterlegt)",
         "vatNone": "Keine MwSt. (Rechnungsadresse ausserhalb der EU/CH)"
+      },
+      "consumptionPrices": {
+        "title": "Verbrauchspreise",
+        "creditExplanation": "1 Credit = CHF 0.0001. Credits werden unabhängig vom Plan zum vollständigen Grundpreis pro Aktion abgezogen."
+      },
+      "creditUsage": {
+        "title": "Kreditverbrauch",
+        "spent": "Verbraucht",
+        "refunded": "Ruckerstattet",
+        "net": "Netto",
+        "noUsage": "Kein Kreditverbrauch in diesem Zeitraum.",
+        "last7Days": "Letzte 7 Tage",
+        "last30Days": "Letzte 30 Tage",
+        "last90Days": "Letzte 90 Tage"
+      },
+      "summaryCards": {
+        "creditBalance": "Kreditguthaben",
+        "currentPlan": "Aktueller Plan",
+        "subscription": "Abonnement",
+        "accessEnds": "Zugriff endet",
+        "nextBilling": "Nachste Abrechnung",
+        "status": "Status",
+        "cycle": "Zyklus",
+        "willNotRenew": "Wird nicht erneuert — downgrade auf kostenloses Konto nach {date}.",
+        "renewsAutomatically": "Erneuert sich automatisch bis zur Kundigung",
+        "changePlan": "Plan andern",
+        "cancelSubscription": "Abonnement kundigen",
+        "resumeSubscription": "Abonnement wieder aktivieren",
+        "resuming": "Wird aktiviert",
+        "cancellationSuccess": "Abonnement erfolgreich gekündigt.",
+        "cancellationDetails": "Ihr {tier}-Plan bleibt bis {date} aktiv. Danach wird er automatisch auf kostenlos herabgestuft — es entstehen keine weiteren Kosten."
+      },
+      "cancelConfirm": {
+        "title": "Abonnement kundigen?",
+        "message": "Sie behalten vollen Zugriff auf Ihren <strong>{tier}</strong>-Plan bis <strong>{date}</strong>. Danach wird der Plan automatisch auf kostenlos herabgestuft. Credits auf Ihrem Konto werden nicht entfernt. Es erfolgt keine Ruckerstattung.",
+        "confirm": "Ja, Abonnement kundigen",
+        "cancelling": "Wird gekündigt",
+        "keep": "Abonnement behalten"
+      },
+      "lowCreditAlert": "Ihr Kreditguthaben ist niedrig. {topUpLink}, um Unterbrechungen zu vermeiden.",
+      "topUpNow": "Jetzt aufladen",
+      "paymentMethods": {
+        "title": "Zahlungsmethoden",
+        "warning": "Fügen Sie zuerst eine Rechnungsadresse hinzu, um Karten zu speichern.",
+        "orgCards": "Organisations-Karten",
+        "noOrgCards": "Noch keine Organisations-Karten gespeichert.",
+        "addOrgCard": "+ Organisations-Karte hinzufugen",
+        "myCard": "Meine Karte",
+        "noPersonalCard": "Keine personliche Karte gespeichert.",
+        "addCard": "+ Karte hinzufugen",
+        "replaceCard": "Ersetzen",
+        "usePersonalPrompt": "Personliche Karte für die Organisation verwenden?",
+        "usePersonalDetails": "{card} kann ohne erneute Karteneingabe zur Organisation hinzugefügt werden.",
+        "useThisCard": "Diese Karte verwenden",
+        "registerDifferent": "Andere Karte registrieren",
+        "openingSaferpay": "Öffne Saferpay",
+        "default": "Standard",
+        "setDefault": "Als Standard festlegen",
+        "saving": "Speichern",
+        "remove": "Entfernen",
+        "removing": "Wird entfernt",
+        "savedCard": "Gespeicherte Karte"
+      },
+      "creditLedger": {
+        "title": "Credit-Ledger",
+        "transactions": "{count} Transaktionen",
+        "colDate": "Datum",
+        "colType": "Typ",
+        "colAction": "Aktion",
+        "colCredits": "Credits",
+        "colBalanceAfter": "Guthaben danach",
+        "noTransactions": "Noch keine Transaktionen"
+      },
+      "paymentHistory": {
+        "title": "Zahlungsverlauf",
+        "payments": "{count} Zahlungen",
+        "colDate": "Datum",
+        "colType": "Typ",
+        "colDetails": "Details",
+        "colMethod": "Methode",
+        "colStatus": "Status",
+        "colAmount": "Betrag",
+        "colActions": "Aktionen",
+        "noPayments": "Noch keine Zahlungen",
+        "invoice": "Rechnung",
+        "cancel": "Abbrechen",
+        "cancelling": "Wird abgebrochen"
+      }
+    },
+    "settings": {
+      "title": "Einstellungen",
+      "subtitle": "LLM-Konfiguration, Scoring-Parameter und Datenqualitätsfilter",
+      "tabs": {
+        "llm": "LLM / KI",
+        "flex": "FLEX Scoring",
+        "admin": "Admin"
+      },
+      "loading": "Laden…",
+      "save": "Speichern",
+      "saveSettings": "Einstellungen speichern",
+      "saving": "Speichern…",
+      "saved": "Gespeichert!",
+      "error": "Fehler",
+      "orgLevelLlm": "LLM-Konfiguration auf Organisationsebene — überschreibt globale Vorgaben für Ihre Organisation.",
+      "globalLlm": "Globale LLM-Vorgaben (kein Organisationskontext).",
+      "globalAdmin": "Globale Admin-Einstellungen — Google-Suche, Stoppwörter, Boilerplate-Filter und Job-Trigger.",
+      "llm": {
+        "sectionTitle": "Claude KI",
+        "anthropicApiKey": "Anthropic API-Schlüssel",
+        "apiKeyPlaceholder": "sk-ant-…",
+        "claudeModel": "Claude-Modell",
+        "claudeModelHint": "Modell für KI-Klassifizierungsjobs",
+        "claudeHaikuOption": "claude-haiku-4-5 (schnell, kostengünstig)",
+        "claudeSonnetOption": "claude-sonnet-4-6 (ausgewogen)",
+        "claudeOpusOption": "claude-opus-4-6 (leistungsstärkste)",
+        "targetDescription": "Zielbereschreibung",
+        "targetDescriptionHint": "Beschreiben Sie Ihr ideales Zielunternehmen für Claude Scoring",
+        "classifyPrompt": "Klassifizierungs-Prompt (optionale Überschreibung)",
+        "categories": "Kategorien (eine pro Zeile)",
+        "maxPurposeChars": "Max. Zweck-Zeichen für Claude"
+      },
+      "flex": {
+        "clusterScoring": "Cluster-Scoring",
+        "targetClusters": "Ziel-Cluster",
+        "targetClustersHint": "Durch Pipes getrennte Cluster-Labels, die positiv bewertet werden",
+        "excludeClusters": "Cluster ausschließen",
+        "excludeClustersHint": "Durch Pipes getrennte Cluster-Labels, die negativ bewertet werden",
+        "clusterHitPoints": "Cluster-Trefferpunkte",
+        "clusterExcludePoints": "Cluster-Ausschlusspunkte",
+        "keywordScoring": "Schlüsselwort-Scoring",
+        "targetKeywords": "Ziel-Schlüsselwörter",
+        "excludeKeywords": "Schlüsselwörter ausschließen",
+        "keywordHitPoints": "Schlüsselwort-Trefferpunkte",
+        "keywordExcludePoints": "Schlüsselwort-Ausschlusspunkte",
+        "distanceScoring": "Entferungs-Scoring",
+        "originLatitude": "Ursprungs-Breitengrad",
+        "originLongitude": "Ursprungs-Längengrad",
+        "distanceBand15km": "≤15km",
+        "distanceBand40km": "≤40km",
+        "distanceBand80km": "≤80km",
+        "distanceBand130km": "≤130km",
+        "distanceBandFar": "≤fern",
+        "legalFormScoring": "Scoring nach Rechtsform",
+        "legalFormScores": "Rechtsform-Scores",
+        "legalFormScoresHint": "Durch Kommas getrennte form:points-Paare",
+        "defaultScore": "Standard-Score",
+        "cancelledCompanyScore": "Score für aufgelöste Unternehmen"
+      },
+      "admin": {
+        "googleSearch": "Google-Suche",
+        "enableGoogleSearch": "Google-Suche aktivieren",
+        "enabled": "Aktiviert",
+        "dailyQuota": "Tägliches Limit",
+        "googleScoringFilters": "Google-Scoring-Filter",
+        "seedDescription": "Datenbank mit allen integrierten Vorgaben initialisieren: Google-Stoppwörter, Verzeichnisdomänen und TF-IDF-Stoppwörter. Kann mehrfach sicher ausgeführt werden — überspringt vorhandene Zeilen.",
+        "seedDefaults": "Vorgaben initialisieren",
+        "googleStopWords": "Google-Stoppwörter",
+        "googleStopWordsDescription": "Stoppwörter, die beim Extrahieren von Zweck-Schlüsselwörtern für Google-Match-Scoring verwendet werden.",
+        "addStopWordPlaceholder": "Stoppwort hinzufügen",
+        "directoryDomains": "Verzeichnisdomänen",
+        "directoryDomainsDescription": "Domains in dieser Tabelle werden immer als Verzeichnisse behandelt und aus der Google-Website-Zuordnung ausgeschlossen.",
+        "addDirectoryDomainPlaceholder": "Verzeichnisdomäne hinzufügen (example.ch)",
+        "tfidfAndPurpose": "TF-IDF und Zweck-Extraktion",
+        "tfidfStopWords": "TF-IDF-Stoppwörter",
+        "tfidfStopWordsDescription": "Stoppwörter, die von TF-IDF-Clustering und Zweck-Keyword-Extraktion verwendet werden.",
+        "addTfidfStopWordPlaceholder": "TF-IDF-Stoppwort hinzufügen",
+        "recalculateScores": "Scores neu berechnen",
+        "recalculateZefixScores": "Zefix-Scores neu berechnen",
+        "recalculateGoogleScores": "Google-Scores neu berechnen",
+        "reGeocodeAllCompanies": "Alle Unternehmen neu geocodieren",
+        "reExtractPurposeMissing": "Zweck erneut extrahieren (nur fehlend)",
+        "reExtractPurposeAll": "Zweck erneut extrahieren (alle überschreiben)",
+        "reclassifyNogaMissing": "NOGA neu klassifizieren (nur fehlend)",
+        "reclassifyNogaAll": "NOGA neu klassifizieren (alle überschreiben)",
+        "findNewBoilerplatePatterns": "Neue Boilerplate-Muster suchen",
+        "boilerplatePatterns": "Boilerplate-Muster",
+        "boilerplateDescription": "Regex-Vorlagen, die zum Filtern von Boilerplate-Sprache aus Unternehmenstexten verwendet werden.",
+        "regexPatternPlaceholder": "Regex-Muster",
+        "descriptionPlaceholder": "Beschreibung (optional)",
+        "testPatternsTitle": "Muster & TF-IDF-Stoppwörter testen",
+        "testTextPlaceholder": "Fügen Sie hier einen Unternehmens-Zwecktext ein…",
+        "runTest": "Test ausführen",
+        "boilerplateMatches": "Boilerplate-Muster-Übereinstimmungen",
+        "noPatternMatches": "Keine aktiven Muster stimmen überein.",
+        "textAfterStripping": "Text nach dem Entfernen von Boilerplate",
+        "emptyText": "leer",
+        "tfidfMatchesTitle": "TF-IDF-Stoppwörter gefunden",
+        "noTfidfMatches": "Keine aktiven TF-IDF-Stoppwörter stimmen überein.",
+        "tableWordColumn": "Wort",
+        "tableDomainColumn": "Domain",
+        "tableActionColumn": "Aktion",
+        "add": "Hinzufügen",
+        "noStopwordsConfigured": "Keine Stoppwörter konfiguriert. Klicken Sie auf \"Vorgaben initialisieren\", um Standardwerte zu laden.",
+        "noDirectoriesConfigured": "Keine Verzeichnisdomänen konfiguriert. Klicken Sie auf \"Vorgaben initialisieren\", um Standardwerte zu laden.",
+        "noTfidfConfigured": "Keine TF-IDF-Stoppwörter konfiguriert. Klicken Sie auf \"Vorgaben initialisieren\", um Standardwerte zu laden.",
+        "seedSuccess": "Initialisiert: {googleStopwords} Google-Stoppwörter, {directoryDomains} Verzeichnisdomänen, {tfidfStopwords} TF-IDF-Stoppwörter.",
+        "seedError": "Initialisierung von Vorgaben fehlgeschlagen.",
+        "jobQueuedSuccess": "Job in Warteschlange → Umleitung zu Jobs…",
+        "jobQueueError": "Job konnte nicht in die Warteschlange eingereiht werden: {error}"
       }
     },
     "account": {
@@ -417,6 +637,12 @@
     },
     "companydetail": {
       "runwebsearch": "Websuche starten",
+      "queuing": "Wird eingeleitet…",
+      "visitWebsite": "Website besuchen",
+      "changeWebsite": "Website ändern",
+      "nogaExplain": "NOGA erklären",
+      "selectingWebsite": "Wird ausgewählt…",
+      "useThisWebsite": "Diese verwenden",
       "cantonalexcerpt": "Kantonaler Auszug",
       "selectdifferentwebsite": "Andere Website auswählen",
       "aiclassification": "KI-Klassifizierung",
@@ -426,7 +652,16 @@
       "classification": "Klassifizierung",
       "flexcluster": "Flex-Cluster",
       "purposekeywords": "Zweck-Schlüsselwörter",
+      "purposeLanguage": "Zwecksprache",
+      "languageLabelDe": "Deutsch",
+      "languageLabelFr": "Französisch",
+      "languageLabelIt": "Italienisch",
+      "languageLabelEn": "Englisch",
+      "languageLabelRm": "Rätoromanisch",
       "noga": "NOGA",
+      "lowConfidence": "niedriges Vertrauen",
+      "confidence": "Vertrauen",
+      "contact": "Kontakt",
       "cheuid": "CHE UID",
       "legalform": "Rechtsform",
       "canton": "Kanton",
@@ -437,12 +672,12 @@
       "deletiondate": "Löschungsdatum",
       "purpose": "Zweck",
       "corporatestructure": "Unternehmensstruktur",
-      "aliasname": "Also known as",
-      "headoffice": "Head office",
-      "furtherheadoffices": "Further head offices",
-      "hastakenover": "Has taken over",
-      "wastakenoverby": "Was taken over by",
-      "auditcompanies": "Audit companies",
+      "aliasname": "Auch bekannt als",
+      "headoffice": "Hauptsitz",
+      "furtherheadoffices": "Weitere Hauptsitze",
+      "hastakenover": "Hat übernommen",
+      "wastakenoverby": "Wurde übernommen von",
+      "auditcompanies": "Revisions- unternehmen",
       "previousnames": "Frühere Namen",
       "showmore": "Mehr anzeigen",
       "showless": "Weniger anzeigen",
@@ -456,7 +691,9 @@
       "notes": "Notizen",
       "nonotes": "Noch keine Notizen. Fügen Sie welche hinzu, um Ihre Gedanken und Interaktionen mit diesem Unternehmen festzuhalten.",
       "addnote": "Notiz hinzufügen",
-      "add": "Hinzufügen"
+      "add": "Hinzufügen",
+      "user": "Benutzer",
+      "runningOnMLWorker": "läuft auf ML-Worker"
     }
   }
 }

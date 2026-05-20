@@ -29,6 +29,7 @@ import {
 import type { AppSettings, BoilerplatePattern, GoogleDirectoryDomain, GoogleStopword, TfidfStopword } from "@/lib/types";
 import { OrgScoringSection } from "@/app/[locale]/app/org/org-client";
 import { useApiErrorHandler } from "@/lib/use-api-error";
+import { useI18n } from "@/lib/i18n";
 
 const inputCls = "w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-300 focus:border-transparent bg-white";
 const textareaCls = inputCls + " resize-y";
@@ -85,14 +86,15 @@ function CollapsibleSection({
   );
 }
 
-const TABS = [
-  { id: "llm", label: "LLM / AI", icon: Brain },
-  { id: "flex", label: "FLEX Scoring", icon: Settings2 },
-  { id: "admin", label: "Admin", icon: Sparkles },
+const getTabs = (dict: any) => [
+  { id: "llm", label: dict.app.settings.tabs.llm, icon: Brain },
+  { id: "flex", label: dict.app.settings.tabs.flex, icon: Settings2 },
+  { id: "admin", label: dict.app.settings.tabs.admin, icon: Sparkles },
 ] as const;
-type TabId = typeof TABS[number]["id"];
+type TabId = "llm" | "flex" | "admin";
 
 export function SettingsClient() {
+  const { dict } = useI18n();
   const searchParams = useSearchParams();
   const handleApiError = useApiErrorHandler();
   const [activeTab, setActiveTab] = useState<TabId>((searchParams?.get("tab") as TabId) ?? "llm");
@@ -142,9 +144,13 @@ export function SettingsClient() {
       reloadStopwords();
       reloadDirectoryDomains();
       reloadTfidfStopwords();
-      setBanner({ kind: "success", message: `Seeded: ${result.google_stopwords} Google stopwords, ${result.directory_domains} directory domains, ${result.tfidf_stopwords} TF-IDF stopwords.` });
+      const message = dict.app.settings.admin.seedSuccess
+        .replace('{googleStopwords}', result.google_stopwords)
+        .replace('{directoryDomains}', result.directory_domains)
+        .replace('{tfidfStopwords}', result.tfidf_stopwords);
+      setBanner({ kind: "success", message });
     } catch {
-      setBanner({ kind: "error", message: "Failed to seed defaults." });
+      setBanner({ kind: "error", message: dict.app.settings.admin.seedError });
     } finally {
       setSeeding(false);
     }
@@ -168,12 +174,13 @@ export function SettingsClient() {
     setBanner(null);
     try {
       await triggerJob(endpoint, payload);
-      setBanner({ kind: "success", message: "Job queued → redirecting to Jobs…" });
+      setBanner({ kind: "success", message: dict.app.settings.admin.jobQueuedSuccess });
       setTimeout(() => router.push("/app/jobs"), 800);
     } catch (error) {
       if (!handleApiError(error)) {
         const msg = error instanceof Error ? error.message : String(error);
-        setBanner({ kind: "error", message: `Failed to queue job: ${msg}` });
+        const message = dict.app.settings.admin.jobQueueError.replace('{error}', msg);
+        setBanner({ kind: "error", message });
       }
     } finally {
       setTriggering(null);
@@ -293,7 +300,7 @@ export function SettingsClient() {
     reloadDirectoryDomains();
   }
 
-  if (!initial) return <div className="p-6 text-slate-400 text-sm">Loading…</div>;
+  if (!initial) return <div className="p-6 text-slate-400 text-sm">{dict.app.settings.loading}</div>;
 
   const orgId = me?.org?.id;
   const isAdmin = me?.org_role === "admin" || me?.org_role === "owner" || !!me?.is_superadmin;
@@ -316,14 +323,14 @@ export function SettingsClient() {
 
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-xl font-semibold text-slate-900">Settings</h1>
-          <p className="text-sm text-slate-500 mt-0.5">LLM configuration, scoring parameters, and data quality filters</p>
+          <h1 className="text-xl font-semibold text-slate-900">{dict.app.settings.title}</h1>
+          <p className="text-sm text-slate-500 mt-0.5">{dict.app.settings.subtitle}</p>
         </div>
       </div>
 
       {/* Tab bar */}
       <div className="flex gap-1 border-b border-slate-200">
-        {TABS.map(({ id, label, icon: Icon }) => (
+        {getTabs(dict).map(({ id, label, icon: Icon }) => (
           <button
             key={id}
             type="button"
@@ -346,40 +353,40 @@ export function SettingsClient() {
         <div className="space-y-5">
           {orgId ? (
             <>
-              <p className="text-sm text-slate-500">Org-level LLM configuration — overrides global defaults for your organization.</p>
+              <p className="text-sm text-slate-500">{dict.app.settings.orgLevelLlm}</p>
               <OrgScoringSection orgId={orgId} isAdmin={isAdmin} />
             </>
           ) : (
             <>
-              <p className="text-sm text-slate-500">Global LLM defaults (no org context).</p>
+              <p className="text-sm text-slate-500">{dict.app.settings.globalLlm}</p>
               <form onSubmit={handleSave} className="space-y-5">
                 <div className="flex justify-end">
                   <button type="submit" disabled={saving} className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-60 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors">
-                    <Save size={14} /> {saved ? "Saved!" : saving ? "Saving…" : "Save"}
+                    <Save size={14} /> {saved ? dict.app.settings.saved : saving ? dict.app.settings.saving : dict.app.settings.save}
                   </button>
                 </div>
-                <SectionTitle title="Claude AI" />
+                <SectionTitle title={dict.app.settings.llm.sectionTitle} />
                 <div className="space-y-4">
-                  <Field label="Anthropic API key">
-                    <input type="password" value={form.anthropic_api_key ?? ""} onChange={e => set("anthropic_api_key", e.target.value)} className={inputCls} placeholder="sk-ant-…" />
+                  <Field label={dict.app.settings.llm.anthropicApiKey}>
+                    <input type="password" value={form.anthropic_api_key ?? ""} onChange={e => set("anthropic_api_key", e.target.value)} className={inputCls} placeholder={dict.app.settings.llm.apiKeyPlaceholder} />
                   </Field>
-                  <Field label="Claude model" hint="Model used for AI classification jobs">
+                  <Field label={dict.app.settings.llm.claudeModel} hint={dict.app.settings.llm.claudeModelHint}>
                     <select value={(form as Record<string, string>).claude_model ?? "claude-haiku-4-5-20251001"} onChange={e => set("claude_model" as keyof AppSettings, e.target.value)} className={inputCls}>
-                      <option value="claude-haiku-4-5-20251001">claude-haiku-4-5 (fast, cost-effective)</option>
-                      <option value="claude-sonnet-4-6">claude-sonnet-4-6 (balanced)</option>
-                      <option value="claude-opus-4-6">claude-opus-4-6 (most capable)</option>
+                      <option value="claude-haiku-4-5-20251001">{dict.app.settings.llm.claudeHaikuOption}</option>
+                      <option value="claude-sonnet-4-6">{dict.app.settings.llm.claudeSonnetOption}</option>
+                      <option value="claude-opus-4-6">{dict.app.settings.llm.claudeOpusOption}</option>
                     </select>
                   </Field>
-                  <Field label="Target description" hint="Describe your ideal target company for Claude scoring">
+                  <Field label={dict.app.settings.llm.targetDescription} hint={dict.app.settings.llm.targetDescriptionHint}>
                     <textarea rows={4} value={form.claude_target_description ?? ""} onChange={e => set("claude_target_description", e.target.value)} className={textareaCls} />
                   </Field>
-                  <Field label="Classify prompt (optional override)">
+                  <Field label={dict.app.settings.llm.classifyPrompt}>
                     <textarea rows={3} value={form.claude_classify_prompt ?? ""} onChange={e => set("claude_classify_prompt", e.target.value)} className={textareaCls} />
                   </Field>
-                  <Field label="Categories (one per line)">
+                  <Field label={dict.app.settings.llm.categories}>
                     <textarea rows={8} value={form.claude_classify_categories ?? ""} onChange={e => set("claude_classify_categories", e.target.value)} className={textareaCls} />
                   </Field>
-                  <Field label="Max purpose chars for Claude">
+                  <Field label={dict.app.settings.llm.maxPurposeChars}>
                     <input type="number" min="100" value={form.scoring_claude_max_purpose_chars ?? "800"} onChange={e => set("scoring_claude_max_purpose_chars", e.target.value)} className={cn(inputCls, "w-32")} />
                   </Field>
                 </div>
@@ -394,61 +401,67 @@ export function SettingsClient() {
         <form onSubmit={handleSave} className="space-y-5">
           <div className="flex justify-end">
             <button type="submit" disabled={saving} className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-60 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors">
-              <Save size={14} /> {saved ? "Saved!" : saving ? "Saving…" : "Save settings"}
+              <Save size={14} /> {saved ? dict.app.settings.saved : saving ? dict.app.settings.saving : dict.app.settings.saveSettings}
             </button>
           </div>
 
           {/* Cluster scoring */}
-          <SectionTitle title="Cluster scoring" />
+          <SectionTitle title={dict.app.settings.flex.clusterScoring} />
           <div className="grid grid-cols-2 gap-4">
-            <Field label="Target clusters" hint="Pipe-separated cluster labels that score positively">
+            <Field label={dict.app.settings.flex.targetClusters} hint={dict.app.settings.flex.targetClustersHint}>
               <textarea rows={3} value={form.scoring_target_clusters ?? ""} onChange={e => set("scoring_target_clusters", e.target.value)} className={textareaCls} />
             </Field>
-            <Field label="Exclude clusters" hint="Pipe-separated cluster labels that score negatively">
+            <Field label={dict.app.settings.flex.excludeClusters} hint={dict.app.settings.flex.excludeClustersHint}>
               <textarea rows={3} value={form.scoring_exclude_clusters ?? ""} onChange={e => set("scoring_exclude_clusters", e.target.value)} className={textareaCls} />
             </Field>
-            <Field label="Cluster hit points">
+            <Field label={dict.app.settings.flex.clusterHitPoints}>
               <input type="number" value={form.scoring_cluster_hit_points ?? "10"} onChange={e => set("scoring_cluster_hit_points", e.target.value)} className={inputCls} />
             </Field>
-            <Field label="Cluster exclude points">
+            <Field label={dict.app.settings.flex.clusterExcludePoints}>
               <input type="number" value={form.scoring_cluster_exclude_points ?? "10"} onChange={e => set("scoring_cluster_exclude_points", e.target.value)} className={inputCls} />
             </Field>
           </div>
 
           {/* Keyword scoring */}
-          <SectionTitle title="Keyword scoring" />
+          <SectionTitle title={dict.app.settings.flex.keywordScoring} />
           <div className="grid grid-cols-2 gap-4">
-            <Field label="Target keywords">
+            <Field label={dict.app.settings.flex.targetKeywords}>
               <textarea rows={3} value={form.scoring_target_keywords ?? ""} onChange={e => set("scoring_target_keywords", e.target.value)} className={textareaCls} />
             </Field>
-            <Field label="Exclude keywords">
+            <Field label={dict.app.settings.flex.excludeKeywords}>
               <textarea rows={3} value={form.scoring_exclude_keywords ?? ""} onChange={e => set("scoring_exclude_keywords", e.target.value)} className={textareaCls} />
             </Field>
-            <Field label="Keyword hit points">
+            <Field label={dict.app.settings.flex.keywordHitPoints}>
               <input type="number" value={form.scoring_keyword_hit_points ?? "10"} onChange={e => set("scoring_keyword_hit_points", e.target.value)} className={inputCls} />
             </Field>
-            <Field label="Keyword exclude points">
+            <Field label={dict.app.settings.flex.keywordExcludePoints}>
               <input type="number" value={form.scoring_keyword_exclude_points ?? "10"} onChange={e => set("scoring_keyword_exclude_points", e.target.value)} className={inputCls} />
             </Field>
           </div>
 
           {/* Distance scoring */}
-          <SectionTitle title="Distance scoring" />
+          <SectionTitle title={dict.app.settings.flex.distanceScoring} />
           <div className="grid grid-cols-3 gap-4">
-            <Field label="Origin latitude">
+            <Field label={dict.app.settings.flex.originLatitude}>
               <input type="number" step="0.0001" value={form.scoring_origin_lat ?? "46.9266"} onChange={e => set("scoring_origin_lat", e.target.value)} className={inputCls} />
             </Field>
-            <Field label="Origin longitude">
+            <Field label={dict.app.settings.flex.originLongitude}>
               <input type="number" step="0.0001" value={form.scoring_origin_lon ?? "7.4817"} onChange={e => set("scoring_origin_lon", e.target.value)} className={inputCls} />
             </Field>
           </div>
           <div className="grid grid-cols-5 gap-3">
-            {(["15km", "40km", "80km", "130km", "far"] as const).map(band => (
-              <Field key={band} label={`≤${band}`}>
+            {([
+              { key: "15km", label: dict.app.settings.flex.distanceBand15km },
+              { key: "40km", label: dict.app.settings.flex.distanceBand40km },
+              { key: "80km", label: dict.app.settings.flex.distanceBand80km },
+              { key: "130km", label: dict.app.settings.flex.distanceBand130km },
+              { key: "far", label: dict.app.settings.flex.distanceBandFar },
+            ] as const).map(band => (
+              <Field key={band.key} label={band.label}>
                 <input
                   type="number"
-                  value={(form as Record<string, string>)[`scoring_dist_${band}`] ?? "0"}
-                  onChange={e => set(`scoring_dist_${band}` as keyof AppSettings, e.target.value)}
+                  value={(form as Record<string, string>)[`scoring_dist_${band.key}`] ?? "0"}
+                  onChange={e => set(`scoring_dist_${band.key}` as keyof AppSettings, e.target.value)}
                   className={inputCls}
                 />
               </Field>
@@ -456,15 +469,15 @@ export function SettingsClient() {
           </div>
 
           {/* Legal form */}
-          <SectionTitle title="Legal form scoring" />
+          <SectionTitle title={dict.app.settings.flex.legalFormScoring} />
           <div className="grid grid-cols-2 gap-4">
-            <Field label="Legal form scores" hint="Comma-separated form:points pairs">
+            <Field label={dict.app.settings.flex.legalFormScores} hint={dict.app.settings.flex.legalFormScoresHint}>
               <input value={form.scoring_legal_form_scores ?? ""} onChange={e => set("scoring_legal_form_scores", e.target.value)} className={inputCls} />
             </Field>
-            <Field label="Default score">
+            <Field label={dict.app.settings.flex.defaultScore}>
               <input type="number" value={form.scoring_legal_form_default ?? "5"} onChange={e => set("scoring_legal_form_default", e.target.value)} className={inputCls} />
             </Field>
-            <Field label="Cancelled company score">
+            <Field label={dict.app.settings.flex.cancelledCompanyScore}>
               <input type="number" value={form.scoring_cancelled_score ?? "5"} onChange={e => set("scoring_cancelled_score", e.target.value)} className={inputCls} />
             </Field>
           </div>
@@ -475,16 +488,16 @@ export function SettingsClient() {
       {activeTab === "admin" && (
         <form onSubmit={handleSave} className="space-y-5">
           <div className="flex items-center justify-between">
-            <p className="text-sm text-slate-500">Global admin settings — Google search, stopwords, boilerplate filters, and job triggers.</p>
+            <p className="text-sm text-slate-500">{dict.app.settings.globalAdmin}</p>
             <button type="submit" disabled={saving} className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-60 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors">
-              <Save size={14} /> {saved ? "Saved!" : saving ? "Saving…" : "Save settings"}
+              <Save size={14} /> {saved ? dict.app.settings.saved : saving ? dict.app.settings.saving : dict.app.settings.saveSettings}
             </button>
           </div>
 
           {/* Google */}
-          <SectionTitle title="Google search" />
+          <SectionTitle title={dict.app.settings.admin.googleSearch} />
       <div className="grid grid-cols-2 gap-4">
-        <Field label="Enable Google search">
+        <Field label={dict.app.settings.admin.enableGoogleSearch}>
           <label className="flex items-center gap-2 mt-1 cursor-pointer">
             <input
               type="checkbox"
@@ -492,17 +505,17 @@ export function SettingsClient() {
               onChange={e => set("google_search_enabled", e.target.checked ? "true" : "false")}
               className="rounded border-slate-300 text-blue-600"
             />
-            <span className="text-sm text-slate-700">Enabled</span>
+            <span className="text-sm text-slate-700">{dict.app.settings.admin.enabled}</span>
           </label>
         </Field>
-        <Field label="Daily quota">
+        <Field label={dict.app.settings.admin.dailyQuota}>
           <input type="number" min="1" value={form.google_daily_quota ?? "100"} onChange={e => set("google_daily_quota", e.target.value)} className={inputCls} />
         </Field>
       </div>
 
-      <SectionTitle title="Google scoring filters" />
+      <SectionTitle title={dict.app.settings.admin.googleScoringFilters} />
       <div className="flex items-center justify-between py-2">
-        <p className="text-xs text-slate-500">Seed the database with all built-in defaults: Google stopwords, directory domains, and TF-IDF stopwords. Safe to run multiple times — skips existing rows.</p>
+        <p className="text-xs text-slate-500">{dict.app.settings.admin.seedDescription}</p>
         <button
           type="button"
           onClick={handleSeedDefaults}
@@ -510,13 +523,13 @@ export function SettingsClient() {
           className="flex items-center gap-1.5 rounded border border-slate-200 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50 transition-colors"
         >
           {seeding ? <Loader2 size={13} className="animate-spin" /> : <Plus size={13} />}
-          Seed defaults
+          {dict.app.settings.admin.seedDefaults}
         </button>
       </div>
       <div className="space-y-4">
         <CollapsibleSection
-          title="Google stop words"
-          description="Stop words used when extracting purpose keywords for Google match scoring."
+          title={dict.app.settings.admin.googleStopWords}
+          description={dict.app.settings.admin.googleStopWordsDescription}
           count={stopwords.length}
         >
           <div className="space-y-2">
@@ -530,7 +543,7 @@ export function SettingsClient() {
                       addStopword();
                     }
                   }}
-                  placeholder="Add stop word"
+                  placeholder={dict.app.settings.admin.addStopWordPlaceholder}
                   className={cn(inputCls, "flex-1")}
                 />
                 <button
@@ -540,15 +553,15 @@ export function SettingsClient() {
                   className="flex items-center gap-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 px-3 py-2 rounded-lg text-sm font-medium transition-colors"
                 >
                   {addingStopword ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} />}
-                  Add
+                  {dict.app.settings.admin.add}
                 </button>
               </div>
               <div className="overflow-x-auto border border-slate-200 rounded-lg bg-white">
                 <table className="w-full text-sm">
                   <thead className="bg-slate-50 text-slate-600">
                     <tr>
-                      <th className="text-left px-3 py-2 font-medium">Word</th>
-                      <th className="text-right px-3 py-2 font-medium w-20">Action</th>
+                      <th className="text-left px-3 py-2 font-medium">{dict.app.settings.admin.tableWordColumn}</th>
+                      <th className="text-right px-3 py-2 font-medium w-20">{dict.app.settings.admin.tableActionColumn}</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -571,7 +584,7 @@ export function SettingsClient() {
                     ))}
                     {stopwords.length === 0 && (
                       <tr>
-                        <td colSpan={2} className="px-3 py-3 text-slate-400">No stop words configured. Click &ldquo;Seed defaults&rdquo; to load built-ins.</td>
+                        <td colSpan={2} className="px-3 py-3 text-slate-400">{dict.app.settings.admin.noStopwordsConfigured}</td>
                       </tr>
                     )}
                   </tbody>
@@ -581,8 +594,8 @@ export function SettingsClient() {
         </CollapsibleSection>
 
         <CollapsibleSection
-          title="Directory domains"
-          description="Domains in this table are always treated as directories and excluded from Google website matching."
+          title={dict.app.settings.admin.directoryDomains}
+          description={dict.app.settings.admin.directoryDomainsDescription}
           count={directoryDomains.length}
         >
           <div className="space-y-2">
@@ -596,7 +609,7 @@ export function SettingsClient() {
                       addDirectoryDomain();
                     }
                   }}
-                  placeholder="Add directory domain (example.ch)"
+                  placeholder={dict.app.settings.admin.addDirectoryDomainPlaceholder}
                   className={cn(inputCls, "flex-1")}
                 />
                 <button
@@ -606,15 +619,15 @@ export function SettingsClient() {
                   className="flex items-center gap-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 px-3 py-2 rounded-lg text-sm font-medium transition-colors"
                 >
                   {addingDirectoryDomain ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} />}
-                  Add
+                  {dict.app.settings.admin.add}
                 </button>
               </div>
               <div className="overflow-x-auto border border-slate-200 rounded-lg bg-white">
                 <table className="w-full text-sm">
                   <thead className="bg-slate-50 text-slate-600">
                     <tr>
-                      <th className="text-left px-3 py-2 font-medium">Domain</th>
-                      <th className="text-right px-3 py-2 font-medium w-20">Action</th>
+                      <th className="text-left px-3 py-2 font-medium">{dict.app.settings.admin.tableDomainColumn}</th>
+                      <th className="text-right px-3 py-2 font-medium w-20">{dict.app.settings.admin.tableActionColumn}</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -637,7 +650,7 @@ export function SettingsClient() {
                     ))}
                     {directoryDomains.length === 0 && (
                       <tr>
-                        <td colSpan={2} className="px-3 py-3 text-slate-400">No directory domains configured. Click &ldquo;Seed defaults&rdquo; to load built-ins.</td>
+                        <td colSpan={2} className="px-3 py-3 text-slate-400">{dict.app.settings.admin.noDirectoriesConfigured}</td>
                       </tr>
                     )}
                   </tbody>
@@ -647,10 +660,10 @@ export function SettingsClient() {
         </CollapsibleSection>
       </div>
 
-      <SectionTitle title="TF-IDF and purpose extraction" />
+      <SectionTitle title={dict.app.settings.admin.tfidfAndPurpose} />
       <CollapsibleSection
-        title="TF-IDF stop words"
-        description="Stop words used by TF-IDF clustering and purpose keyword extraction."
+        title={dict.app.settings.admin.tfidfStopWords}
+        description={dict.app.settings.admin.tfidfStopWordsDescription}
         count={tfidfStopwords.length}
       >
         <div className="space-y-2">
@@ -664,7 +677,7 @@ export function SettingsClient() {
                     addTfidfStopword();
                   }
                 }}
-                placeholder="Add TF-IDF stop word"
+                placeholder={dict.app.settings.admin.addTfidfStopWordPlaceholder}
                 className={cn(inputCls, "flex-1")}
               />
               <button
@@ -674,15 +687,15 @@ export function SettingsClient() {
                 className="flex items-center gap-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 px-3 py-2 rounded-lg text-sm font-medium transition-colors"
               >
                 {addingTfidfStopword ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} />}
-                Add
+                {dict.app.settings.admin.add}
               </button>
             </div>
             <div className="overflow-x-auto border border-slate-200 rounded-lg bg-white">
               <table className="w-full text-sm">
                 <thead className="bg-slate-50 text-slate-600">
                   <tr>
-                    <th className="text-left px-3 py-2 font-medium">Word</th>
-                    <th className="text-right px-3 py-2 font-medium w-20">Action</th>
+                    <th className="text-left px-3 py-2 font-medium">{dict.app.settings.admin.tableWordColumn}</th>
+                    <th className="text-right px-3 py-2 font-medium w-20">{dict.app.settings.admin.tableActionColumn}</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -705,7 +718,7 @@ export function SettingsClient() {
                   ))}
                   {tfidfStopwords.length === 0 && (
                     <tr>
-                      <td colSpan={2} className="px-3 py-3 text-slate-400">No TF-IDF stop words configured. Click &ldquo;Seed defaults&rdquo; to load built-ins.</td>
+                      <td colSpan={2} className="px-3 py-3 text-slate-400">{dict.app.settings.admin.noTfidfConfigured}</td>
                     </tr>
                   )}
                 </tbody>
@@ -715,43 +728,43 @@ export function SettingsClient() {
       </CollapsibleSection>
 
           {/* Recalculate actions */}
-          <SectionTitle title="Recalculate scores" />
+          <SectionTitle title={dict.app.settings.admin.recalculateScores} />
           <div className="flex gap-3 flex-wrap">
             <button type="button" onClick={() => handleTrigger("scoring/zefix")} disabled={!!triggering} className={cn("flex items-center gap-2 bg-slate-100 hover:bg-slate-200 disabled:opacity-60 text-slate-700 px-4 py-2 rounded-lg text-sm font-medium transition-colors")}>
               {triggering === "scoring/zefix" ? <Loader2 size={16} className="animate-spin text-blue-600" /> : <Landmark size={16} className="text-blue-600" />}
-              Recalculate Zefix scores
+              {dict.app.settings.admin.recalculateZefixScores}
             </button>
             <button type="button" onClick={() => handleTrigger("scoring/google")} disabled={!!triggering} className={cn("flex items-center gap-2 bg-slate-100 hover:bg-slate-200 disabled:opacity-60 text-slate-700 px-4 py-2 rounded-lg text-sm font-medium transition-colors")}>
               {triggering === "scoring/google" ? <Loader2 size={16} className="animate-spin text-green-600" /> : <Search size={16} className="text-green-600" />}
-              Recalculate Google scores
+              {dict.app.settings.admin.recalculateGoogleScores}
             </button>
             <button type="button" onClick={() => handleTrigger("scoring/re-geocode")} disabled={!!triggering} className={cn("flex items-center gap-2 bg-amber-50 hover:bg-amber-100 disabled:opacity-60 text-amber-700 px-4 py-2 rounded-lg text-sm font-medium transition-colors")}>
               {triggering === "scoring/re-geocode" ? <Loader2 size={16} className="animate-spin text-amber-700" /> : <MapPin size={16} className="text-amber-700" />}
-              Re-geocode all companies
+              {dict.app.settings.admin.reGeocodeAllCompanies}
             </button>
             <button type="button" onClick={() => handleTrigger("scoring/reextract-purpose", { only_missing_purpose: true })} disabled={!!triggering} className={cn("flex items-center gap-2 bg-indigo-50 hover:bg-indigo-100 disabled:opacity-60 text-indigo-700 px-4 py-2 rounded-lg text-sm font-medium transition-colors")}>
               {triggering === "scoring/reextract-purpose" ? <Loader2 size={16} className="animate-spin text-indigo-700" /> : <FileText size={16} className="text-indigo-700" />}
-              Re-extract purpose (missing only)
+              {dict.app.settings.admin.reExtractPurposeMissing}
             </button>
             <button type="button" onClick={() => handleTrigger("scoring/reextract-purpose", { only_missing_purpose: false })} disabled={!!triggering} className={cn("flex items-center gap-2 bg-indigo-100 hover:bg-indigo-200 disabled:opacity-60 text-indigo-800 px-4 py-2 rounded-lg text-sm font-medium transition-colors")}>
               {triggering === "scoring/reextract-purpose" ? <Loader2 size={16} className="animate-spin text-indigo-800" /> : <FileText size={16} className="text-indigo-800" />}
-              Re-extract purpose (overwrite all)
+              {dict.app.settings.admin.reExtractPurposeAll}
             </button>
             <button type="button" onClick={() => handleTrigger("scoring/reclassify-noga", { only_missing_noga: true, only_detailed_raw: true })} disabled={!!triggering} className={cn("flex items-center gap-2 bg-emerald-50 hover:bg-emerald-100 disabled:opacity-60 text-emerald-700 px-4 py-2 rounded-lg text-sm font-medium transition-colors")}>
               {triggering === "scoring/reclassify-noga" ? <Loader2 size={16} className="animate-spin text-emerald-700" /> : <FileText size={16} className="text-emerald-700" />}
-              Reclassify NOGA (missing only)
+              {dict.app.settings.admin.reclassifyNogaMissing}
             </button>
             <button type="button" onClick={() => handleTrigger("scoring/reclassify-noga", { only_missing_noga: false, only_detailed_raw: true })} disabled={!!triggering} className={cn("flex items-center gap-2 bg-emerald-100 hover:bg-emerald-200 disabled:opacity-60 text-emerald-800 px-4 py-2 rounded-lg text-sm font-medium transition-colors")}>
               {triggering === "scoring/reclassify-noga" ? <Loader2 size={16} className="animate-spin text-emerald-800" /> : <FileText size={16} className="text-emerald-800" />}
-              Reclassify NOGA (overwrite all)
+              {dict.app.settings.admin.reclassifyNogaAll}
             </button>
             <button type="button" onClick={() => handleTrigger("scoring/analyze-boilerplate")} disabled={!!triggering} className={cn("flex items-center gap-2 bg-orange-50 hover:bg-orange-100 disabled:opacity-60 text-orange-700 px-4 py-2 rounded-lg text-sm font-medium transition-colors")}>
               {triggering === "scoring/analyze-boilerplate" ? <Loader2 size={16} className="animate-spin text-orange-700" /> : <Sparkles size={16} className="text-orange-700" />}
-              Find new boilerplate patterns
+              {dict.app.settings.admin.findNewBoilerplatePatterns}
             </button>
           </div>
 
-          <CollapsibleSection title="Boilerplate patterns" description="Regex templates used to filter boilerplate language from company text." count={boilerplate.length}>
+          <CollapsibleSection title={dict.app.settings.admin.boilerplatePatterns} description={dict.app.settings.admin.boilerplateDescription} count={boilerplate.length}>
             <div className="space-y-4">
               <div className="space-y-2">
                 {boilerplate.map(bp => (
@@ -770,20 +783,20 @@ export function SettingsClient() {
                 ))}
               </div>
               <form onSubmit={handleAddPattern} className="flex gap-2">
-                <input value={newPattern.pattern} onChange={e => setNewPattern(p => ({ ...p, pattern: e.target.value }))} placeholder="Regex pattern" className={cn(inputCls, "flex-1")} required />
-                <input value={newPattern.description} onChange={e => setNewPattern(p => ({ ...p, description: e.target.value }))} placeholder="Description (optional)" className={cn(inputCls, "w-48")} />
+                <input value={newPattern.pattern} onChange={e => setNewPattern(p => ({ ...p, pattern: e.target.value }))} placeholder={dict.app.settings.admin.regexPatternPlaceholder} className={cn(inputCls, "flex-1")} required />
+                <input value={newPattern.description} onChange={e => setNewPattern(p => ({ ...p, description: e.target.value }))} placeholder={dict.app.settings.admin.descriptionPlaceholder} className={cn(inputCls, "w-48")} />
                 <button type="submit" disabled={addingPattern} className="flex items-center gap-1.5 bg-slate-100 hover:bg-slate-200 disabled:opacity-60 text-slate-700 px-3 py-2 rounded-lg text-sm font-medium transition-colors shrink-0">
-                  {addingPattern ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} />} Add
+                  {addingPattern ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} />} {dict.app.settings.admin.add}
                 </button>
               </form>
 
               {/* ── Pattern & stop word tester ── */}
               <div className="border border-slate-200 rounded-lg bg-slate-50 p-3 space-y-3">
-                <p className="text-xs font-medium text-slate-500 uppercase tracking-wide">Test patterns &amp; TF-IDF stop words</p>
+                <p className="text-xs font-medium text-slate-500 uppercase tracking-wide">{dict.app.settings.admin.testPatternsTitle}</p>
                 <textarea
                   value={testText}
                   onChange={e => { setTestText(e.target.value); setTestResults(null); }}
-                  placeholder="Paste a company purpose text here…"
+                  placeholder={dict.app.settings.admin.testTextPlaceholder}
                   rows={3}
                   className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-300 bg-white resize-y"
                 />
@@ -793,14 +806,14 @@ export function SettingsClient() {
                   disabled={!testText.trim()}
                   className="flex items-center gap-1.5 bg-slate-700 hover:bg-slate-800 disabled:opacity-40 text-white px-3 py-1.5 rounded-lg text-sm font-medium transition-colors"
                 >
-                  <Search size={13} /> Run test
+                  <Search size={13} /> {dict.app.settings.admin.runTest}
                 </button>
                 {testResults && (
                   <div className="space-y-3 pt-1">
                     <div>
-                      <p className="text-xs font-semibold text-slate-500 mb-1">Boilerplate pattern matches ({testResults.boilerplate.length})</p>
+                      <p className="text-xs font-semibold text-slate-500 mb-1">{dict.app.settings.admin.boilerplateMatches} ({testResults.boilerplate.length})</p>
                       {testResults.boilerplate.length === 0
-                        ? <p className="text-xs text-slate-400">No active patterns matched.</p>
+                        ? <p className="text-xs text-slate-400">{dict.app.settings.admin.noPatternMatches}</p>
                         : <ul className="space-y-1">
                             {testResults.boilerplate.map(m => (
                               <li key={m.id} className="text-xs bg-orange-50 border border-orange-200 rounded px-2 py-1">
@@ -813,15 +826,15 @@ export function SettingsClient() {
                       }
                     </div>
                     <div>
-                      <p className="text-xs font-semibold text-slate-500 mb-1">Text after stripping boilerplate</p>
+                      <p className="text-xs font-semibold text-slate-500 mb-1">{dict.app.settings.admin.textAfterStripping}</p>
                       <p className="text-xs font-mono bg-white border border-slate-200 rounded px-2 py-1.5 whitespace-pre-wrap text-slate-700">
-                        {testResults.stripped || <span className="text-slate-400 italic">empty</span>}
+                        {testResults.stripped || <span className="text-slate-400 italic">{dict.app.settings.admin.emptyText}</span>}
                       </p>
                     </div>
                     <div>
-                      <p className="text-xs font-semibold text-slate-500 mb-1">TF-IDF stop words found ({testResults.tfidfMatches.length})</p>
+                      <p className="text-xs font-semibold text-slate-500 mb-1">{dict.app.settings.admin.tfidfMatchesTitle} ({testResults.tfidfMatches.length})</p>
                       {testResults.tfidfMatches.length === 0
-                        ? <p className="text-xs text-slate-400">No active TF-IDF stop words matched.</p>
+                        ? <p className="text-xs text-slate-400">{dict.app.settings.admin.noTfidfMatches}</p>
                         : <div className="flex flex-wrap gap-1">
                             {testResults.tfidfMatches.map(w => (
                               <span key={w} className="text-xs bg-blue-50 border border-blue-200 text-blue-700 rounded px-1.5 py-0.5 font-mono">{w}</span>
