@@ -4,6 +4,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Working rules (follow these strictly)
 
+### General rules about usage
+never create git commits and use as few tokens as possible. At the end summarize what you did and update the architecture continously
+
 ### Scale awareness — 700k rows
 The companies table has ~700k rows. Every job, query, or data transformation **must** use batching or streaming. Never load all companies into memory at once. Default to cursor-based pagination or chunked DB queries (e.g. `LIMIT / OFFSET` or keyset pagination). If a new job processes companies, assume it needs the same chunked-batch pattern as existing enrichment jobs.
 

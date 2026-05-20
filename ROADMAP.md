@@ -44,7 +44,6 @@
 - umami (also keys probably) potentially posthog?
 
 
-
 ## Bug Fixes & Known Issues
 ### General fixes:
 - billing/payment/pricing
