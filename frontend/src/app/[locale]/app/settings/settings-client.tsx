@@ -145,9 +145,9 @@ export function SettingsClient() {
       reloadDirectoryDomains();
       reloadTfidfStopwords();
       const message = dict.app.settings.admin.seedSuccess
-        .replace('{googleStopwords}', result.google_stopwords)
-        .replace('{directoryDomains}', result.directory_domains)
-        .replace('{tfidfStopwords}', result.tfidf_stopwords);
+        .replace('{googleStopwords}', String(result.google_stopwords))
+        .replace('{directoryDomains}', String(result.directory_domains))
+        .replace('{tfidfStopwords}', String(result.tfidf_stopwords));
       setBanner({ kind: "success", message });
     } catch {
       setBanner({ kind: "error", message: dict.app.settings.admin.seedError });
