@@ -29,7 +29,7 @@ import {
 import type { AppSettings, BoilerplatePattern, GoogleDirectoryDomain, GoogleStopword, TfidfStopword } from "@/lib/types";
 import { OrgScoringSection } from "@/app/[locale]/app/org/org-client";
 import { useApiErrorHandler } from "@/lib/use-api-error";
-import { useI18n } from "@/lib/i18n";
+import { useI18n } from "@/i18n/context";
 
 const inputCls = "w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-300 focus:border-transparent bg-white";
 const textareaCls = inputCls + " resize-y";
