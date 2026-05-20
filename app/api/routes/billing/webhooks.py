@@ -16,6 +16,7 @@ from app.models.payment_transaction import PaymentTransaction
 from app.models.user import User
 from app.services import payment_transactions, payments
 from app.services.billing_addresses import get_default_billing_address
+from app.services.payments.pricing import apply_vat
 from app.services.tiers import get_tier_price_chf
 
 from app.api.routes.billing._shared import (
@@ -256,9 +257,26 @@ async def worldline_return(
         if not billing_address and org is not None:
             billing_address = getattr(org, "billing_address_json", None)
 
+        billing_country = ""
+        if billing_address:
+            try:
+                _addr = json.loads(billing_address)
+                billing_country = str(_addr.get("country") or "") if isinstance(_addr, dict) else ""
+            except (ValueError, TypeError):
+                pass
+        vat_rate_wb, vat_amount_chf_wb, amount_chf_total = apply_vat(
+            amount_chf, billing_country, getattr(org, "vat_id", None) if org else None,
+        )
+
         if pending_payment is not None:
             pending_payment.order_reference = order_reference or pending_payment.order_reference
-            pending_payment.amount_chf = amount_chf
+            # Keep amount_chf from checkout (already includes VAT); only fill if missing
+            if not pending_payment.amount_chf:
+                pending_payment.amount_chf = amount_chf_total
+            if pending_payment.vat_rate is None:
+                pending_payment.vat_rate = vat_rate_wb
+            if pending_payment.vat_amount_chf is None:
+                pending_payment.vat_amount_chf = vat_amount_chf_wb
             pending_payment.kind = kind or pending_payment.kind
             pending_payment.status = normalized_status
             pending_payment.payment_method = payment_method
@@ -283,7 +301,7 @@ async def worldline_return(
                 provider="worldline",
                 external_id=token,
                 order_reference=order_reference,
-                amount_chf=amount_chf,
+                amount_chf=amount_chf_total,
                 kind=kind,
                 status=normalized_status,
                 payment_method=payment_method,
@@ -293,6 +311,8 @@ async def worldline_return(
                 subscription_tier=(str(parsed_ref["tier"]) if parsed_ref.get("tier") else None),
                 subscription_billing_cycle=(str(parsed_ref["billing_cycle"]) if parsed_ref.get("billing_cycle") else None),
                 credits_purchased=(int(parsed_ref["topup_credits"]) if parsed_ref.get("topup_credits") else None),
+                vat_rate=vat_rate_wb,
+                vat_amount_chf=vat_amount_chf_wb,
             )
         _emit(
             "info",
