@@ -94,7 +94,7 @@ def create_subscription_checkout(
                     provider=session.provider,  # type: ignore[arg-type]
                     external_id=session.external_id,
                     order_reference=session.order_reference or f"sub_{session.external_id[:24]}",
-                    amount_chf=sub_total_chf,
+                    amount_chf=amount_chf,
                     kind="subscription",
                     status="pending",
                     subscription_tier=body.tier,
@@ -196,7 +196,7 @@ def create_topup_checkout(
                     provider=session.provider,  # type: ignore[arg-type]
                     external_id=session.external_id,
                     order_reference=session.order_reference or f"topup_{session.external_id[:24]}",
-                    amount_chf=total_chf,
+                    amount_chf=amount_chf,
                     kind="topup",
                     status="pending",
                     credits_purchased=body.credits,

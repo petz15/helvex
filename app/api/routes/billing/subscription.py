@@ -221,10 +221,11 @@ def get_payment_invoice(
             billing_addr_str = tx.billing_address or ""
 
     vat_amount = float(tx.vat_amount_chf) if tx.vat_amount_chf is not None else None
-    base_amount = round(tx.amount_chf - (vat_amount or 0.0), 2)
+    base_amount = float(tx.amount_chf)
     amount_str = f"CHF {base_amount:.2f}"
     refund_str = f"CHF {tx.refunded_amount_chf:.2f}" if tx.refunded_amount_chf else None
-    net_amount = tx.amount_chf - (tx.refunded_amount_chf or 0)
+    total_amount = base_amount + (vat_amount or 0.0)
+    net_amount = total_amount - (tx.refunded_amount_chf or 0)
     net_amount_str = f"CHF {net_amount:.2f}"
 
     if tx.kind == "subscription":

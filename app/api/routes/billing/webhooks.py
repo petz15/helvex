@@ -270,13 +270,9 @@ async def worldline_return(
 
         if pending_payment is not None:
             pending_payment.order_reference = order_reference or pending_payment.order_reference
-            # Keep amount_chf from checkout (already includes VAT); only fill if missing
-            if not pending_payment.amount_chf:
-                pending_payment.amount_chf = amount_chf_total
-            if pending_payment.vat_rate is None:
-                pending_payment.vat_rate = vat_rate_wb
-            if pending_payment.vat_amount_chf is None:
-                pending_payment.vat_amount_chf = vat_amount_chf_wb
+            pending_payment.amount_chf = amount_chf
+            pending_payment.vat_rate = vat_rate_wb
+            pending_payment.vat_amount_chf = vat_amount_chf_wb
             pending_payment.kind = kind or pending_payment.kind
             pending_payment.status = normalized_status
             pending_payment.payment_method = payment_method
@@ -301,7 +297,7 @@ async def worldline_return(
                 provider="worldline",
                 external_id=token,
                 order_reference=order_reference,
-                amount_chf=amount_chf_total,
+                amount_chf=amount_chf,
                 kind=kind,
                 status=normalized_status,
                 payment_method=payment_method,
