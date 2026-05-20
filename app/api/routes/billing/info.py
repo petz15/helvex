@@ -262,6 +262,8 @@ def list_credit_transactions(
                 "amount": tx.amount,
                 "action_type": tx.action_type,
                 "reference_id": tx.reference_id,
+                "credits_before": tx.credits_before,
+                "credits_after": tx.credits_after,
                 "created_at": tx.created_at.isoformat(),
             }
             for tx in rows

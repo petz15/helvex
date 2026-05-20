@@ -936,7 +936,7 @@ function PaymentHistory() {
                 </td>
                 <td className="px-4 py-2.5 text-right text-sm font-semibold text-slate-800 tabular-nums">
                   CHF {tx.amount_chf.toFixed(2)}
-                  {tx.vat_amount_chf !== null && tx.vat_rate !== null && (
+                  {tx.vat_amount_chf != null && tx.vat_rate != null && (
                     <div className="text-[11px] text-slate-400 font-normal tabular-nums">
                       inkl. CHF {tx.vat_amount_chf.toFixed(2)} MwSt. ({Math.round(tx.vat_rate * 1000) / 10} %)
                     </div>
