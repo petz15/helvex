@@ -85,6 +85,7 @@ from app.services.job_handlers import (  # noqa: E402
     export,
     noga,
     shab,
+    sogc_entity_resolution,
     sogc_persons,
     sogc_preprocess,
     stopwords,
@@ -124,6 +125,7 @@ JOB_HANDLERS: dict[str, Callable[[JobContext], tuple[dict, str]]] = {
     "shab_backfill":             shab.handle_shab,
     "sogc_preprocess":           sogc_preprocess.handle_sogc_preprocess,
     "extract_sogc_persons":      sogc_persons.handle_extract_sogc_persons,
+    "resolve_bisher_links":      sogc_entity_resolution.handle_resolve_bisher_links,
     # CSV export
     "csv_export":                export.handle_csv_export,
     # Billing

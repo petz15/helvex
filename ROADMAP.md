@@ -209,6 +209,28 @@
 
 ## Architecture & Refactoring
 
+### SOGC Entity Resolution — Event Sourcing (medium term)
+
+Current state: `sogc_person_entity` rows are created and mutated during extraction.
+The bisher-first resolver merges entities post-batch, but the entity table is still
+a live mutable store — re-running the resolver can produce different results depending
+on prior state.
+
+Target architecture (event sourcing / CQRS):
+- `sogc_person_appearances` becomes the **immutable event log** (append-only, never modified).
+- `sogc_person_entity` becomes a **derived projection** computed entirely from appearances.
+- User corrections (`sogc_person_flags` with should_merge / should_split) are stored as
+  first-class events, separate from raw SOGC data.
+- A `rebuild_person_entities` job drops all entity rows and re-derives them from scratch:
+  1. Key-based dedup (lastname|firstname|hometown) → initial clusters
+  2. Bisher resolver (union-find hard links) → merges entities across name changes
+  3. Re-apply user correction flags → override algorithmic merges/splits
+- Improving the resolution algorithm = run rebuild, get consistent results immediately.
+- No stale state, no partial-merge artifacts from incremental runs.
+
+Prerequisite: ensure `sogc_person_appearances` never has its `person_entity_id` used
+as a join key outside the person resolution pipeline (audit all callers first).
+
 
 - [ ] **API key management** — token creation/revocation UI for org admins to manage their API credentials; currently only available via admin panel
 - [ ] **uvicorn async** - Each open SSE connection holds one synchronous uvicorn worker thread (blocking I/O). At current scale (<50 concurrent users) this is fine; at higher scale the endpoint should be rewritten as `async def` with `anyio.sleep` and an async Redis client.

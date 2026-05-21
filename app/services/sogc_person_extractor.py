@@ -119,6 +119,68 @@ def _classify_role(role: str | None) -> str:
 
 # ── Person parsing ─────────────────────────────────────────────────────────────
 
+def _parse_bisher_fields(bisher_text: str | None) -> dict:
+    """Parse structured fields from a [bisher: ...] annotation fragment.
+
+    Bisher text can be a partial person description, e.g.:
+      "rumänische Staatsangehörige, in Ittigen"   → residence + foreign flag
+      "Müller, Hans, in Zürich"                   → name + residence
+      "in Bern"                                   → residence only
+      "Prokurist, mit Einzelunterschrift"         → role only (yields nothing useful)
+
+    Returns a dict with zero or more of:
+      bisher_residence_municipality, bisher_lastname, bisher_firstname,
+      bisher_is_foreign, bisher_nationality
+    """
+    if not bisher_text:
+        return {}
+
+    result: dict = {}
+    parts = [p.strip() for p in bisher_text.split(",") if p.strip()]
+    name_candidates: list[str] = []
+
+    for p in parts:
+        # Residence: "in X", "à X", "a X"
+        m_res = _RESIDENCE_DE_RE.match(p) or _RESIDENCE_FR_RE.match(p)
+        if m_res and "bisher_residence_municipality" not in result:
+            result["bisher_residence_municipality"] = m_res.group(1).strip()[:256]
+            continue
+
+        # Foreign national
+        m_foreign = (
+            _FOREIGN_DE_RE.match(p)
+            or _FOREIGN_FR_RE.match(p)
+            or _FOREIGN_IT_RE.match(p)
+        )
+        if m_foreign:
+            result["bisher_is_foreign"] = True
+            nat = m_foreign.group(1)
+            # Strip gender suffixes from DE adjective form (e.g. "rumänische" → "rumänisch")
+            nat = re.sub(r"(ische[nr]?|ischen)$", "", nat, flags=re.I).strip()
+            result["bisher_nationality"] = nat[:128]
+            continue
+
+        # Skip known non-name field starters (origin, role prefixes, etc.)
+        if _NON_NAME_PREFIXES.match(p):
+            continue
+
+        # Also skip signature / title tokens
+        if _SIGNATURE_RE.match(p) or _SIGNATURE_FR_RE.match(p) or _SIGNATURE_IT_RE.match(p):
+            continue
+        if _TITLE_RE.fullmatch(p):
+            continue
+
+        name_candidates.append(p)
+
+    # Up to two leftover parts are treated as lastname [firstname]
+    if name_candidates:
+        result["bisher_lastname"] = name_candidates[0][:256]
+        if len(name_candidates) >= 2:
+            result["bisher_firstname"] = name_candidates[1][:256]
+
+    return result
+
+
 def _strip_bisher(text: str) -> tuple[str, str | None]:
     """Remove [bisher: ...] / [anciennement: ...] annotations, return (clean, bisher_text)."""
     bisher = None
@@ -140,6 +202,7 @@ def _parse_person(raw_excerpt: str, change_type: str) -> dict | None:
         return None
 
     text, bisher_role = _strip_bisher(raw_excerpt.strip().rstrip("."))
+    bisher_parsed = _parse_bisher_fields(bisher_role)
     parts = [p.strip() for p in text.split(",") if p.strip()]
     if not parts:
         return None
@@ -248,6 +311,11 @@ def _parse_person(raw_excerpt: str, change_type: str) -> dict | None:
         "role_category": _classify_role(role),
         "signature_type": signature_type,
         "bisher_role": bisher_role[:256] if bisher_role else None,
+        "bisher_residence_municipality": bisher_parsed.get("bisher_residence_municipality"),
+        "bisher_lastname": bisher_parsed.get("bisher_lastname"),
+        "bisher_firstname": bisher_parsed.get("bisher_firstname"),
+        "bisher_is_foreign": bisher_parsed.get("bisher_is_foreign"),
+        "bisher_nationality": bisher_parsed.get("bisher_nationality"),
         "is_current": is_current,
         "normalized_key": normalized_key,
     }
@@ -333,12 +401,29 @@ def _get_or_create_entity(db: Session, key: str, fields: dict):
 def _recompute_entity_confidence(db: Session, entity_id: int) -> None:
     from app.models.sogc_person_entity import SogcPersonEntity
     from app.models.sogc_person_appearance import SogcPersonAppearance
+    from sqlalchemy import or_
 
     entity = db.get(SogcPersonEntity, entity_id)
     if entity is None:
         return
 
-    if entity.is_foreign or not entity.hometown_municipality:
+    # Any parsed bisher field is a hard link — confirms at least one mutation
+    # was explicitly linked, so confidence is elevated.
+    has_hard_link = (
+        db.query(SogcPersonAppearance.id)
+        .filter(
+            SogcPersonAppearance.person_entity_id == entity_id,
+            or_(
+                SogcPersonAppearance.bisher_residence_municipality.isnot(None),
+                SogcPersonAppearance.bisher_lastname.isnot(None),
+            ),
+        )
+        .first() is not None
+    )
+
+    if has_hard_link:
+        entity.confidence_level = "high"
+    elif entity.is_foreign or not entity.hometown_municipality:
         entity.confidence_level = "low"
     elif entity.appearance_count <= 1:
         entity.confidence_level = "medium"
@@ -438,6 +523,11 @@ def extract_persons_for_publication(db: Session, publication) -> dict:
                     role_category=fields["role_category"],
                     signature_type=fields["signature_type"],
                     bisher_role=fields["bisher_role"],
+                    bisher_residence_municipality=fields.get("bisher_residence_municipality"),
+                    bisher_lastname=fields.get("bisher_lastname"),
+                    bisher_firstname=fields.get("bisher_firstname"),
+                    bisher_is_foreign=fields.get("bisher_is_foreign"),
+                    bisher_nationality=fields.get("bisher_nationality"),
                     residence_municipality=fields["residence_municipality"],
                     is_current=fields["is_current"],
                     title=fields["title"],
@@ -585,6 +675,11 @@ def run_extract_sogc_persons_batch(
                         role_category=fields["role_category"],
                         signature_type=fields["signature_type"],
                         bisher_role=fields["bisher_role"],
+                        bisher_residence_municipality=fields.get("bisher_residence_municipality"),
+                        bisher_lastname=fields.get("bisher_lastname"),
+                        bisher_firstname=fields.get("bisher_firstname"),
+                        bisher_is_foreign=fields.get("bisher_is_foreign"),
+                        bisher_nationality=fields.get("bisher_nationality"),
                         residence_municipality=fields["residence_municipality"],
                         is_current=fields["is_current"],
                         title=fields["title"],

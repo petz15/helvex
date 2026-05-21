@@ -108,9 +108,17 @@ const ML_JOB_DOCS: { job_type: string; label: string; description: string; when:
     job_type: "extract_sogc_persons",
     label: "Extract SOGC Persons & Auditors",
     description:
-      "Parses sogc_changes rows (personnel, director, auditor change types) into structured person entities, appearances, and auditor records. Deduplicates across companies using a normalized key (lastname + firstname + hometown). Produces sogc_person_entities, sogc_person_appearances, and sogc_auditors.",
-    when: "Run after SOGC Preprocess. Re-run after large SHAB backfills or when the SOGC change corpus has grown significantly.",
+      "Parses sogc_changes rows (personnel, director, auditor change types) into structured person entities, appearances, and auditor records. Deduplicates across companies using a normalized key (lastname + firstname + hometown). Also parses structured bisher fields (prior name, residence, nationality) from mutation annotations. Produces sogc_person_entities, sogc_person_appearances, and sogc_auditors.",
+    when: "Run after SOGC Preprocess. Re-run after large SHAB backfills or when the SOGC change corpus has grown significantly. Always follow with Resolve Bisher Links.",
     prereq: "Requires sogc_changes to be populated via SOGC Preprocess first.",
+  },
+  {
+    job_type: "resolve_bisher_links",
+    label: "Resolve Bisher Links",
+    description:
+      "Bisher-first entity resolution: merges person entities that belong to the same person but have different normalized keys because the person changed their name (e.g. Müller → Müller-Schneider after marriage). Uses the parsed bisher fields from appearance mutations as hard links, finds the prior appearance at the same company, and unions the two entity IDs. Also re-evaluates confidence levels — entities with at least one confirmed bisher link are promoted to 'high' confidence.",
+    when: "Run after Extract SOGC Persons. Required after any full re-extraction (mode=all) to merge name-change entities.",
+    prereq: "Requires extract_sogc_persons to have run with bisher fields populated (migration 0085+).",
   },
 ];
 

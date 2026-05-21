@@ -2079,28 +2079,49 @@ Extracts structured person and auditor data from `sogc_changes` raw excerpts int
 
 ### Identity model
 
-- `normalized_key = NFKD-lowercase(lastname)|NFKD-lowercase(firstname)|NFKD-lowercase(hometown)` — primary dedup key
+- `normalized_key = NFKD-lowercase(lastname)|NFKD-lowercase(firstname)|NFKD-lowercase(hometown)` — primary dedup key at insertion time
 - Swiss Heimatort (`von X`) is the civil registry origin — stable for life, gives the key its distinctiveness
-- `confidence_level`: `high` = has hometown + all appearances share same residence; `medium` = has hometown but residence varies; `low` = foreign national (no Heimatort, name-only matching)
+- `confidence_level`: `high` = entity has at least one bisher hard link OR has hometown + single residence; `medium` = has hometown but residence varies; `low` = foreign national (no Heimatort, name-only matching)
 - False merge fix: `appearance.entity_override_id` re-assigns one appearance to a different entity
-- False split fix: `entity.merged_into_id` points old entity → canonical; all queries use `COALESCE(merged_into_id, id)`
+- False split fix: `entity.merged_into_id` points old entity → canonical; all queries filter `merged_into_id IS NULL`
 
-### Pipeline
+**Bisher structured fields** — `sogc_person_appearances` carries five parsed bisher columns (`bisher_residence_municipality`, `bisher_lastname`, `bisher_firstname`, `bisher_is_foreign`, `bisher_nationality`) extracted from the `[bisher: ...]` annotation in each SOGC mutation. These encode the person's prior state at that company and are used by the bisher resolver to hard-link appearances across name changes.
+
+### Pipeline (full reindex)
 
 ```
+SOGC Preprocess  →  extract_sogc_persons (mode=all)  →  resolve_bisher_links
+       │                       │                                  │
+       │            Inserts appearances with                Union-find on entity
+       │            bisher structured fields               IDs via bisher matches;
+       │            Key-based entity dedup                 merges entities that
+       │            (lastname|firstname|hometown)          differ only by name change
+       ▼
 SHAB daily → preprocess_company_sogc_pub() → extract_persons_for_publication()
                                                   ├── person_added/removed/changed → sogc_person_appearances
                                                   └── auditor_change              → sogc_auditors
 ```
 
-Backfill job: `extract_sogc_persons` (job type), triggered via `POST /api/v1/scoring/extract-sogc-persons`.
+**Recommended run order for full re-import:**
+1. `sogc_preprocess` (mode=all) — rebuild publications + changes
+2. `extract_sogc_persons` (mode=all) — rebuild appearances + entities
+3. `resolve_bisher_links` — merge name-change entities via hard links
+
+### Jobs
+
+| Job type | Endpoint | Worker | Description |
+|---|---|---|---|
+| `extract_sogc_persons` | `POST /api/v1/scoring/extract-sogc-persons` | api-worker | Parse sogc_changes → appearances + entities. Params: `mode` (missing\|all), `batch_size` |
+| `resolve_bisher_links` | `POST /api/v1/scoring/resolve-bisher-links` | api-worker | Merge entities linked by bisher annotations (name changes). Params: `batch_size`. Run after extract_sogc_persons. |
 
 ### Key files
 
 | File | Purpose |
 |---|---|
-| `app/services/sogc_person_extractor.py` | Regex-based DE/FR/IT parser, entity upsert, confidence recomputation, batch job |
-| `app/services/job_handlers/sogc_persons.py` | Job handler wrapper |
+| `app/services/sogc_person_extractor.py` | Regex-based DE/FR/IT parser, bisher field parsing, entity upsert, confidence recomputation, batch job |
+| `app/services/sogc_entity_resolver.py` | Bisher-first entity resolution: union-find, bisher match lookup, entity merge |
+| `app/services/job_handlers/sogc_persons.py` | Job handler for extract_sogc_persons |
+| `app/services/job_handlers/sogc_entity_resolution.py` | Job handler for resolve_bisher_links |
 | `app/api/routes/persons.py` | Person/auditor search, company-scoped endpoints, flag reporting |
 | `frontend/src/components/board-panel.tsx` | Company detail "Board & Officers" panel |
 | `frontend/src/app/[locale]/app/people/` | People search page (Persons + Auditors tabs) |

@@ -1093,6 +1093,37 @@ def trigger_extract_sogc_persons(
     return JobOut.from_orm_obj(job)
 
 
+class ResolveBisherLinksBody(BaseModel):
+    batch_size: int = 500
+
+
+@router.post(
+    "/scoring/resolve-bisher-links",
+    response_model=JobOut,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+def trigger_resolve_bisher_links(
+    body: ResolveBisherLinksBody,
+    request: Request,
+    db: Session = Depends(get_db),
+    _: User = Depends(require_superadmin),
+):
+    """Resolve person entities using bisher hard links.
+
+    Merges entities that belong to the same person but have different
+    normalized keys due to name changes (e.g. Müller → Müller-Schneider).
+    Run after extract_sogc_persons.
+    """
+    job = _enqueue_or_http_error(
+        request,
+        job_type="resolve_bisher_links",
+        label="Resolve bisher links",
+        params={"batch_size": body.batch_size},
+        db=db,
+    )
+    return JobOut.from_orm_obj(job)
+
+
 @router.get("/cantons")
 def list_cantons():
     return {"cantons": SWISS_CANTONS}

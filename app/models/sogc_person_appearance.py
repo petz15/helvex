@@ -39,6 +39,17 @@ class SogcPersonAppearance(Base):
     title: Mapped[str | None] = mapped_column(String(64), nullable=True)
     raw_excerpt: Mapped[str | None] = mapped_column(Text, nullable=True)
 
+    # Structured fields parsed from the [bisher: ...] annotation.
+    # Populated when a publication mutates an existing person entry.
+    # Used by the bisher-first entity resolver to hard-link appearances
+    # that belong to the same person despite different normalized keys
+    # (e.g. name changes: Müller → Müller-Schneider).
+    bisher_residence_municipality: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    bisher_lastname: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    bisher_firstname: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    bisher_is_foreign: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    bisher_nationality: Mapped[str | None] = mapped_column(String(128), nullable=True)
+
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
