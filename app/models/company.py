@@ -161,4 +161,4 @@ class Company(Base):
         return _compute(c)
 
     notes: Mapped[list["Note"]] = relationship("Note", back_populates="company", cascade="all, delete-orphan")  # noqa: F821
-    sogc_publications: Mapped[list["SogcPublication"]] = relationship("SogcPublication", back_populates="company", cascade="all, delete-orphan")  # noqa: F821
+    sogc_publications: Mapped[list["SogcPublication"]] = relationship("SogcPublication", foreign_keys="SogcPublication.company_id", back_populates="company", cascade="all, delete-orphan")  # noqa: F821

@@ -38,7 +38,7 @@ class SogcPublication(Base):
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
     )
 
-    company: Mapped["Company"] = relationship("Company", back_populates="sogc_publications")  # noqa: F821
+    company: Mapped["Company"] = relationship("Company", foreign_keys="SogcPublication.company_id", back_populates="sogc_publications")  # noqa: F821
     changes: Mapped[list["SogcChange"]] = relationship(  # noqa: F821
         "SogcChange", back_populates="publication", cascade="all, delete-orphan"
     )
