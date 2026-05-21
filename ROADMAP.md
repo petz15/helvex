@@ -124,8 +124,6 @@
 
 ## Company Data
 
-
-- [ ] **Daily SHAB imports** — works but zefix has a utf problem, I might have to switch to SHAB and maybe even use their pdfs
 - [ ] **Historic SHAB import** - from the official SHAB website, get all the pre 2018 SHAB publications -> and then use them for my sogc stuff. need merge logic from the current zefix imports to avoid duplications and keep manageable. needs pdf parsing
 - [ ] **CSV export** — export current filtered/sorted dashboard view as CSV; include all visible columns; respect active filters and column selection -> somewhat exists but not fully operational yet. No way to set which columns the CSV exports currently!
 - [ ] **Web crawler** — crawl company websites to extract description, contact info, product/service keywords; store as structured fields; feed into scoring and classification; replace/supplement current Google scrape
@@ -154,7 +152,6 @@
 - [ ] **LLM classification extensions** — add OpenAI (ChatGPT) alongside Claude; user-configurable classification prompt per LLM; user-adjustable criteria. Potentially add groq for even cheaper prices especially for the noga usecase. potential: groq (context length might be an issue if NOGA has to be provided), deepseek, 
 - [ ] **Custom review & proposal categories** — keep sensible defaults, allow users to define own categories per account
 - [ ] **Per-user scoring rules** — custom distance origin, keyword boosts/penalties, cluster weights; DB: `user_scoring_config` (1:1 with users) + `company_user_score` (per user/company); scoring service already accepts a config dict
-
 - [ ] **Implement multiple LLM APIs** and check if they actually work. especially the selection (including model type). 
 - [ ] **Translation** - Translating the different texts such as purpose, shab etc
 
@@ -189,11 +186,6 @@
 - [ ] **Verified business discount** — 20% extra discount (on top of tier bonus) for verified business orgs; applied at Stripe price calculation
 - [ ] **Check Free tier limitations enforcement** — export limit enforcement in CSV export endpoint; API rate limits (once API access is gated)
 - [ ] **Ad banner integration** — Ads embed for free tier; currently renders fake ads -> get real ad agency once I have users
-- [ ] **refund and other admin function** - check QOL of billing such as refunds and other methods. What happens when an automatic payment fails? -> subscription upgrades not working correctly, other functions not fully tested, definitely not complete. 
-    - What happens to other users when an account is downgraded to free?
-    - Subscription upgrade and downgrade flow
-- [ ] **Rate limiting** implemented a rate limiting for tiers for certain actions, but not sure if I want to keep this functionality
-
 
 
 ## Security & Infrastructure
@@ -328,3 +320,7 @@ as a join key outside the person resolution pipeline (audit all callers first).
 - [X] **reduce clutter** - reduce the spagetthi code and make it all much cleaner. e.g. multiple places for prices instead of one localised one, or how data is show to orgs/users
 - [X] **remove Redis** - replace with postgres addon instead of having a seperate service which I dont really use tbh
 - [X] **Imporve Purpose Keyword extraction** - Seeing as this is central for NOGA and clustering, these keywords should be as accurate as possible. Review how it is done. Generally improve ML later as much as possible
+- [X] **Rate limiting** implemented a rate limiting for tiers for certain actions, but not sure if I want to keep this functionality
+- [X] **refund and other admin function** - check QOL of billing such as refunds and other methods. What happens when an automatic payment fails? -> subscription upgrades not working correctly, other functions not fully tested, definitely not complete. 
+    - What happens to other users when an account is downgraded to free?
+    - Subscription upgrade and downgrade flow

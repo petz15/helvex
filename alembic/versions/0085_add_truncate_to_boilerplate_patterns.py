@@ -1,14 +1,14 @@
 """add truncate column to boilerplate_patterns
 
 Revision ID: 0085
-Revises: fe7a997e322a
+Revises: 0084
 Create Date: 2026-05-21
 """
 from alembic import op
 import sqlalchemy as sa
 
 revision = "0085"
-down_revision = "fe7a997e322a"
+down_revision = "0084"
 branch_labels = None
 depends_on = None
 
