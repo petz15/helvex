@@ -109,13 +109,44 @@ def _tokens_from_texts(texts: list[str]) -> set[str]:
     return tokens
 
 
-def _strip_purpose_boilerplate(text: str, patterns: list[re.Pattern]) -> str:
+def _strip_purpose_boilerplate(text: str, patterns: list[tuple[re.Pattern, bool]]) -> str:
+    """Strip boilerplate from purpose text.
+
+    Patterns are (compiled_regex, truncate) pairs.  Truncating patterns cut the
+    text at the start of the first matching sentence; non-truncating patterns
+    remove individual matching sentences.  Truncation is applied first so that
+    sentence-level stripping only operates on the surviving prefix.
+
+    Falls back to the original text if stripping would produce an empty string.
+    """
     if not text or len(text) < 40 or not patterns:
         return text
+
+    truncate_pats = [pat for pat, trunc in patterns if trunc]
+    sentence_pats = [pat for pat, trunc in patterns if not trunc]
+
     sentences = _SENTENCE_SPLIT.split(text.strip())
-    kept = [s for s in sentences if s.strip() and not any(pat.search(s) for pat in patterns)]
+
+    # Find first sentence matched by a truncating pattern and cut from there.
+    cutoff = len(sentences)
+    for i, s in enumerate(sentences):
+        if truncate_pats and any(pat.search(s) for pat in truncate_pats):
+            cutoff = i
+            break
+
+    working = sentences[:cutoff]
+    if not working:
+        return text  # truncation hit the first sentence — conservative fallback
+
+    # Remove individual sentences matched by non-truncating patterns.
+    if sentence_pats:
+        kept = [s for s in working if s.strip() and not any(pat.search(s) for pat in sentence_pats)]
+    else:
+        kept = [s for s in working if s.strip()]
+
     result = " ".join(kept).strip()
-    return result if result else text
+    # Fall back progressively: sentence-stripped → truncated → original
+    return result or " ".join(working).strip() or text
 
 
 def _extract_node_tokens(node: dict[str, Any]) -> set[str]:

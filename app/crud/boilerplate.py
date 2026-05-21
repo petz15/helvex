@@ -13,8 +13,8 @@ def list_boilerplate_patterns(db: Session) -> list[BoilerplatePattern]:
     return db.query(BoilerplatePattern).order_by(BoilerplatePattern.id).all()
 
 
-def get_active_boilerplate_patterns(db: Session) -> list[re.Pattern]:
-    """Return compiled regex patterns for all active boilerplate entries (global only).
+def get_active_boilerplate_patterns(db: Session) -> list[tuple[re.Pattern, bool]]:
+    """Return (compiled_pattern, truncate) pairs for all active global boilerplate entries.
 
     Deprecated in favour of get_effective_boilerplate_patterns() for org-aware callers.
     Results are cached for 1 hour to avoid recompiling regex patterns.
@@ -28,10 +28,10 @@ def get_active_boilerplate_patterns(db: Session) -> list[re.Pattern]:
             return cached_data["patterns"]
 
     rows = db.query(BoilerplatePattern).filter(BoilerplatePattern.active.is_(True)).all()
-    compiled = []
+    compiled: list[tuple[re.Pattern, bool]] = []
     for row in rows:
         try:
-            compiled.append(re.compile(row.pattern, re.IGNORECASE))
+            compiled.append((re.compile(row.pattern, re.IGNORECASE), bool(row.truncate)))
         except re.error:
             pass  # skip invalid patterns silently
 
@@ -39,8 +39,8 @@ def get_active_boilerplate_patterns(db: Session) -> list[re.Pattern]:
     return compiled
 
 
-def get_effective_boilerplate_patterns(db: Session, *, org_id: int | None = None) -> list[re.Pattern]:
-    """Return compiled regex patterns for global patterns PLUS org-specific overrides.
+def get_effective_boilerplate_patterns(db: Session, *, org_id: int | None = None) -> list[tuple[re.Pattern, bool]]:
+    """Return (compiled_pattern, truncate) pairs for global patterns PLUS org-specific overrides.
 
     - Global patterns (org_id IS NULL) are always included.
     - When org_id is provided, org-specific patterns for that org are merged in.
@@ -67,10 +67,10 @@ def get_effective_boilerplate_patterns(db: Session, *, org_id: int | None = None
     else:
         q = q.filter(BoilerplatePattern.org_id.is_(None))
     rows = q.all()
-    compiled = []
+    compiled: list[tuple[re.Pattern, bool]] = []
     for row in rows:
         try:
-            compiled.append(re.compile(row.pattern, re.IGNORECASE))
+            compiled.append((re.compile(row.pattern, re.IGNORECASE), bool(row.truncate)))
         except re.error:
             pass
 
@@ -86,6 +86,7 @@ def create_boilerplate_pattern(
     example: str | None = None,
     match_count: int | None = None,
     active: bool = True,
+    truncate: bool = False,
 ) -> BoilerplatePattern:
     row = BoilerplatePattern(
         pattern=pattern,
@@ -93,6 +94,7 @@ def create_boilerplate_pattern(
         example=example,
         match_count=match_count,
         active=active,
+        truncate=truncate,
     )
     db.add(row)
     db.commit()
@@ -108,6 +110,7 @@ def update_boilerplate_pattern(
     description: str | None = None,
     example: str | None = None,
     active: bool | None = None,
+    truncate: bool | None = None,
 ) -> BoilerplatePattern:
     if pattern is not None:
         row.pattern = pattern
@@ -117,6 +120,8 @@ def update_boilerplate_pattern(
         row.example = example
     if active is not None:
         row.active = active
+    if truncate is not None:
+        row.truncate = truncate
     db.commit()
     db.refresh(row)
     return row

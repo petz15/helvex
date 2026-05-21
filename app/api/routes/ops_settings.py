@@ -55,6 +55,7 @@ class BoilerplateOut(BaseModel):
     description: str | None
     example: str | None
     active: bool
+    truncate: bool
 
     model_config = {"from_attributes": True}
 
@@ -63,6 +64,7 @@ class BoilerplateCreate(BaseModel):
     pattern: str
     description: str | None = None
     example: str | None = None
+    truncate: bool = False
 
 
 class GoogleStopwordOut(BaseModel):
@@ -202,6 +204,7 @@ def create_boilerplate(body: BoilerplateCreate, db: Session = Depends(get_db), _
         description=body.description,
         example=body.example,
         active=True,
+        truncate=body.truncate,
     )
     return row
 
@@ -212,6 +215,17 @@ def toggle_boilerplate(pattern_id: int, db: Session = Depends(get_db), _: User =
     if not row:
         raise HTTPException(status_code=404, detail="Pattern not found")
     crud.update_boilerplate_pattern(db, row, active=not row.active)
+    crud.invalidate_boilerplate_cache()
+    return row
+
+
+@router.patch("/boilerplate/{pattern_id}/toggle-truncate", response_model=BoilerplateOut)
+def toggle_boilerplate_truncate(pattern_id: int, db: Session = Depends(get_db), _: User = Depends(require_superadmin)):
+    row = crud.get_boilerplate_pattern(db, pattern_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="Pattern not found")
+    crud.update_boilerplate_pattern(db, row, truncate=not row.truncate)
+    crud.invalidate_boilerplate_cache()
     return row
 
 

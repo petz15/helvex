@@ -823,7 +823,7 @@ export async function fetchBoilerplate(): Promise<BoilerplatePattern[]> {
   return res.json();
 }
 
-export async function createBoilerplate(data: { pattern: string; description?: string; example?: string }): Promise<BoilerplatePattern> {
+export async function createBoilerplate(data: { pattern: string; description?: string; example?: string; truncate?: boolean }): Promise<BoilerplatePattern> {
   const res = await fetch("/api/v1/boilerplate", {
     method: "POST",
     credentials: "include",
@@ -836,6 +836,10 @@ export async function createBoilerplate(data: { pattern: string; description?: s
 
 export async function toggleBoilerplate(id: number): Promise<void> {
   await fetch(`/api/v1/boilerplate/${id}/toggle`, { method: "PATCH", credentials: "include" });
+}
+
+export async function toggleBoilerplateTruncate(id: number): Promise<void> {
+  await fetch(`/api/v1/boilerplate/${id}/toggle-truncate`, { method: "PATCH", credentials: "include" });
 }
 
 export async function deleteBoilerplate(id: number): Promise<void> {

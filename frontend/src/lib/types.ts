@@ -216,6 +216,7 @@ export interface BoilerplatePattern {
   description: string | null;
   example: string | null;
   active: boolean;
+  truncate: boolean;
 }
 
 export interface GoogleStopword {

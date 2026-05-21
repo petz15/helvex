@@ -2,7 +2,7 @@
 import { useEffect, useState } from "react";
 import useSWR from "swr";
 import { useRouter, useSearchParams } from "next/navigation";
-import { ChevronDown, ChevronUp, Save, Plus, Trash2, ToggleLeft, ToggleRight, Loader2, Landmark, Search, MapPin, FileText, Sparkles, Settings2, Brain } from "lucide-react";
+import { ChevronDown, ChevronUp, Save, Plus, Trash2, ToggleLeft, ToggleRight, Loader2, Landmark, Search, MapPin, FileText, Sparkles, Settings2, Brain, Scissors } from "lucide-react";
 import {
   createTfidfStopword,
   createBoilerplate,
@@ -21,6 +21,7 @@ import {
   seedDefaults,
   toggleTfidfStopword,
   toggleBoilerplate,
+  toggleBoilerplateTruncate,
   toggleGoogleDirectoryDomain,
   toggleGoogleStopword,
   triggerJob,
@@ -115,12 +116,12 @@ export function SettingsClient() {
   const [addingDirectoryDomain, setAddingDirectoryDomain] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
-  const [newPattern, setNewPattern] = useState({ pattern: "", description: "", example: "" });
+  const [newPattern, setNewPattern] = useState({ pattern: "", description: "", example: "", truncate: false });
   const [addingPattern, setAddingPattern] = useState(false);
   const [triggering, setTriggering] = useState<string | null>(null);
   const [testText, setTestText] = useState("");
   const [testResults, setTestResults] = useState<{
-    boilerplate: { id: number; pattern: string; description: string; matchCount: number }[];
+    boilerplate: { id: number; pattern: string; description: string; matchCount: number; truncate: boolean }[];
     stripped: string;
     tfidfMatches: string[];
   } | null>(null);
@@ -193,30 +194,64 @@ export function SettingsClient() {
     reloadBoilerplate();
   }
 
+  async function handleToggleTruncate(id: number) {
+    await toggleBoilerplateTruncate(id);
+    reloadBoilerplate();
+  }
+
   async function handleDelete(id: number) {
     await deleteBoilerplate(id);
     reloadBoilerplate();
   }
 
   function runPatternTest() {
-    let stripped = testText;
-    const bpMatches: { id: number; pattern: string; description: string; matchCount: number }[] = [];
+    const bpMatches: { id: number; pattern: string; description: string; matchCount: number; truncate: boolean }[] = [];
+
+    // Split into sentences (mirrors Python: split on ". " before uppercase)
+    const sentenceSplit = /(?<=\.)\s+(?=[A-ZÄÖÜ])/;
+    const sentences = testText.split(sentenceSplit);
+
+    // 1. Find the first sentence matched by a truncating pattern → cut from there
+    let cutoff = sentences.length;
     for (const bp of boilerplate) {
-      if (!bp.active) continue;
+      if (!bp.active || !bp.truncate) continue;
       try {
-        const re = new RegExp(bp.pattern, "gi");
-        const matches = testText.match(re);
-        if (matches && matches.length > 0) {
-          bpMatches.push({ id: bp.id, pattern: bp.pattern, description: bp.description || "", matchCount: matches.length });
-          stripped = stripped.replace(re, "");
+        const re = new RegExp(bp.pattern, "i");
+        const idx = sentences.findIndex(s => re.test(s));
+        if (idx !== -1 && idx < cutoff) {
+          cutoff = idx;
+          bpMatches.push({ id: bp.id, pattern: bp.pattern, description: bp.description || "", matchCount: 1, truncate: true });
         }
       } catch { /* skip invalid */ }
     }
+
+    const workingSentences = cutoff === 0 ? sentences : sentences.slice(0, cutoff);
+
+    // 2. Remove individual sentences matched by non-truncating patterns
+    const kept: string[] = [];
+    for (const s of workingSentences) {
+      let remove = false;
+      for (const bp of boilerplate) {
+        if (!bp.active || bp.truncate) continue;
+        try {
+          const re = new RegExp(bp.pattern, "i");
+          if (re.test(s)) {
+            const matches = s.match(new RegExp(bp.pattern, "gi"));
+            bpMatches.push({ id: bp.id, pattern: bp.pattern, description: bp.description || "", matchCount: matches?.length ?? 1, truncate: false });
+            remove = true;
+            break;
+          }
+        } catch { /* skip invalid */ }
+      }
+      if (!remove) kept.push(s);
+    }
+
+    const stripped = kept.join(". ").trim() || workingSentences.join(". ").trim();
     const words = new Set(testText.toLowerCase().split(/\W+/).filter(Boolean));
     const tfidfMatches = tfidfStopwords
       .filter(sw => sw.active && words.has(sw.value.toLowerCase()))
       .map(sw => sw.value);
-    setTestResults({ boilerplate: bpMatches, stripped: stripped.trim(), tfidfMatches });
+    setTestResults({ boilerplate: bpMatches, stripped, tfidfMatches });
   }
 
   async function handleAddPattern(e: React.FormEvent) {
@@ -224,7 +259,7 @@ export function SettingsClient() {
     setAddingPattern(true);
     try {
       await createBoilerplate(newPattern);
-      setNewPattern({ pattern: "", description: "", example: "" });
+      setNewPattern({ pattern: "", description: "", example: "", truncate: false });
       reloadBoilerplate();
     } finally {
       setAddingPattern(false);
@@ -785,18 +820,38 @@ export function SettingsClient() {
                       {bp.active ? <ToggleRight size={20} className="text-blue-500" /> : <ToggleLeft size={20} />}
                     </button>
                     <div className="flex-1 min-w-0">
-                      <p className="text-sm font-mono text-slate-700 break-all">{bp.pattern}</p>
+                      <div className="flex items-center gap-2">
+                        <p className="text-sm font-mono text-slate-700 break-all">{bp.pattern}</p>
+                        {bp.truncate && (
+                          <span className="shrink-0 inline-flex items-center gap-0.5 text-xs bg-amber-100 text-amber-700 border border-amber-200 rounded px-1.5 py-0.5 font-medium">
+                            <Scissors size={10} /> truncate
+                          </span>
+                        )}
+                      </div>
                       {bp.description && <p className="text-xs text-slate-400">{bp.description}</p>}
                     </div>
+                    <button
+                      type="button"
+                      title={bp.truncate ? "Disable truncation" : "Enable truncation (strip from here to end)"}
+                      onClick={() => handleToggleTruncate(bp.id)}
+                      className={cn("shrink-0 p-1 transition-colors", bp.truncate ? "text-amber-500 hover:text-amber-700" : "text-slate-300 hover:text-amber-500")}
+                    >
+                      <Scissors size={14} />
+                    </button>
                     <button type="button" onClick={() => handleDelete(bp.id)} className="shrink-0 p-1 text-slate-300 hover:text-red-500 transition-colors">
                       <Trash2 size={14} />
                     </button>
                   </div>
                 ))}
               </div>
-              <form onSubmit={handleAddPattern} className="flex gap-2">
-                <input value={newPattern.pattern} onChange={e => setNewPattern(p => ({ ...p, pattern: e.target.value }))} placeholder={dict.app.settings.admin.regexPatternPlaceholder} className={cn(inputCls, "flex-1")} required />
+              <form onSubmit={handleAddPattern} className="flex gap-2 flex-wrap">
+                <input value={newPattern.pattern} onChange={e => setNewPattern(p => ({ ...p, pattern: e.target.value }))} placeholder={dict.app.settings.admin.regexPatternPlaceholder} className={cn(inputCls, "flex-1 min-w-48")} required />
                 <input value={newPattern.description} onChange={e => setNewPattern(p => ({ ...p, description: e.target.value }))} placeholder={dict.app.settings.admin.descriptionPlaceholder} className={cn(inputCls, "w-48")} />
+                <label className="flex items-center gap-1.5 text-sm text-slate-600 cursor-pointer select-none shrink-0">
+                  <input type="checkbox" checked={newPattern.truncate} onChange={e => setNewPattern(p => ({ ...p, truncate: e.target.checked }))} className="rounded" />
+                  <Scissors size={13} className={newPattern.truncate ? "text-amber-500" : "text-slate-400"} />
+                  truncate
+                </label>
                 <button type="submit" disabled={addingPattern} className="flex items-center gap-1.5 bg-slate-100 hover:bg-slate-200 disabled:opacity-60 text-slate-700 px-3 py-2 rounded-lg text-sm font-medium transition-colors shrink-0">
                   {addingPattern ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} />} {dict.app.settings.admin.add}
                 </button>
@@ -828,10 +883,15 @@ export function SettingsClient() {
                         ? <p className="text-xs text-slate-400">{dict.app.settings.admin.noPatternMatches}</p>
                         : <ul className="space-y-1">
                             {testResults.boilerplate.map(m => (
-                              <li key={m.id} className="text-xs bg-orange-50 border border-orange-200 rounded px-2 py-1">
+                              <li key={m.id} className="text-xs bg-orange-50 border border-orange-200 rounded px-2 py-1 flex items-start gap-2 flex-wrap">
                                 <span className="font-mono text-orange-800 break-all">{m.pattern}</span>
-                                {m.description && <span className="text-orange-500 ml-2">— {m.description}</span>}
-                                <span className="ml-2 text-orange-400">({m.matchCount} hit{m.matchCount !== 1 ? "s" : ""})</span>
+                                {m.truncate && (
+                                  <span className="inline-flex items-center gap-0.5 text-xs bg-amber-100 text-amber-700 border border-amber-200 rounded px-1 py-0.5 font-medium shrink-0">
+                                    <Scissors size={9} /> truncate
+                                  </span>
+                                )}
+                                {m.description && <span className="text-orange-500">— {m.description}</span>}
+                                <span className="text-orange-400">({m.matchCount} hit{m.matchCount !== 1 ? "s" : ""})</span>
                               </li>
                             ))}
                           </ul>

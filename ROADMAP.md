@@ -126,6 +126,7 @@
 
 
 - [ ] **Daily SHAB imports** — works but zefix has a utf problem, I might have to switch to SHAB and maybe even use their pdfs
+- [ ] **Historic SHAB import** - from the official SHAB website, get all the pre 2018 SHAB publications -> and then use them for my sogc stuff. need merge logic from the current zefix imports to avoid duplications and keep manageable. needs pdf parsing
 - [ ] **CSV export** — export current filtered/sorted dashboard view as CSV; include all visible columns; respect active filters and column selection -> somewhat exists but not fully operational yet. No way to set which columns the CSV exports currently!
 - [ ] **Web crawler** — crawl company websites to extract description, contact info, product/service keywords; store as structured fields; feed into scoring and classification; replace/supplement current Google scrape
 - [ ] **Google results & scoring** — Improve the selection and scoring of google results

@@ -223,6 +223,18 @@ _NEGATION_BRACKET_RE = re.compile(
     re.I | re.DOTALL,
 )
 
+# Detects bracketed content containing deletion-related keywords that indicate
+# the change should be ignored (e.g., "Domizil neu: [Das Domizil wird im
+# Handelsregister gelöscht.]" means the domicil is being deleted, not added).
+_DELETION_BRACKET_RE = re.compile(
+    r"\[(?:[^\]]*(?:"
+    r"gelöscht|deleted|supprimé|cancellato"
+    r"|aufgehoben|revoked|révoqué|revocato"
+    r"|widerrufen|rescinded|annulé|annullato"
+    r")[^\]]*)\]",
+    re.I | re.DOTALL,
+)
+
 # Matches auditor/statutory-auditor keywords in person row excerpts.
 # A person_removed/person_changed/person_added row that contains one of these
 # terms gets a mirrored auditor_change row so auditor changes are queryable
@@ -438,6 +450,10 @@ def _parse_sections(text: str) -> list[dict[str, Any]]:
 
         for entry_text in entries:
             if entry_text:
+                # Skip entries that have deletion-related keywords in brackets
+                # (e.g., "Domizil neu: [Das Domizil wird gelöscht]" → ignore)
+                if _DELETION_BRACKET_RE.search(entry_text):
+                    continue
                 results.append({
                     "change_type": change_type,
                     "keywords_matched": header.lower(),
@@ -576,6 +592,7 @@ def preprocess_company_sogc_pub(db: Session, company: Company) -> int:
         if existing:
             pub = existing
             pub.company_uid = company.uid
+            pub.company_id = company.id
             pub.pub_date = _extract_pub_date(entry)
             pub.sub_rubric = sub_rubric or None
             pub.pub_number = pub_number
@@ -590,6 +607,7 @@ def preprocess_company_sogc_pub(db: Session, company: Company) -> int:
             pub = SogcPublication(
                 sogc_id=sogc_id,
                 company_uid=company.uid,
+                company_id=company.id,
                 pub_date=_extract_pub_date(entry),
                 sub_rubric=sub_rubric or None,
                 pub_number=pub_number,

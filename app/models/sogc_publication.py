@@ -17,6 +17,9 @@ class SogcPublication(Base):
     company_uid: Mapped[str | None] = mapped_column(
         String(20), ForeignKey("companies.uid", ondelete="SET NULL"), nullable=True, index=True
     )
+    company_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("companies.id", ondelete="SET NULL"), nullable=True, index=True
+    )
     pub_date: Mapped[str | None] = mapped_column(String(32), nullable=True, index=True)
     sub_rubric: Mapped[str | None] = mapped_column(String(8), nullable=True)
     pub_number: Mapped[str | None] = mapped_column(String(64), nullable=True)

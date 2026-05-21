@@ -319,7 +319,6 @@ export function PeopleClient({
   const [nationality, setNationality] = useState("");
   const [minCompanies, setMinCompanies] = useState("");
   const [confidenceFilter, setConfidenceFilter] = useState("");
-  const [currentOnly, setCurrentOnly] = useState(true);
   const [sortBy, setSortBy] = useState("companies");
   const [offset, setOffset] = useState(0);
 
@@ -331,14 +330,13 @@ export function PeopleClient({
   const [auditorOffset, setAuditorOffset] = useState(0);
 
   const { data: persons = [], isLoading: personsLoading } = useSWR(
-    tab === "persons" ? ["people-search", q, hometown, nationality, minCompanies, confidenceFilter, currentOnly, sortBy, offset] : null,
+    tab === "persons" ? ["people-search", q, hometown, nationality, minCompanies, confidenceFilter, sortBy, offset] : null,
     () => searchPersonEntities({
       q: q || undefined,
       hometown: hometown || undefined,
       nationality: nationality || undefined,
       min_active_companies: minCompanies ? parseInt(minCompanies, 10) : undefined,
       confidence_level: confidenceFilter || undefined,
-      is_current: currentOnly ? true : undefined,
       sort_by: sortBy,
       limit: LIMIT,
       offset,
@@ -441,15 +439,6 @@ export function PeopleClient({
               <option value="confidence">Sort: Confidence</option>
               <option value="appearances">Sort: Appearances</option>
             </select>
-            <label className="flex items-center gap-1.5 text-sm text-slate-600 cursor-pointer select-none">
-              <input
-                type="checkbox"
-                checked={currentOnly}
-                onChange={e => { setCurrentOnly(e.target.checked); resetOffset(); }}
-                className="rounded border-slate-300"
-              />
-              Current only
-            </label>
           </div>
 
           {/* Results */}

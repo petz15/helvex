@@ -164,7 +164,7 @@ class SogcPublicationOut(BaseModel):
     id: int
     sogc_id: str
     company_uid: str | None
-    company_id: int | None = None
+    company_id: int | None
     pub_date: str | None
     sub_rubric: str | None
     pub_number: str | None
@@ -177,12 +177,12 @@ class SogcPublicationOut(BaseModel):
     changes: list[SogcChangeOut] = []
 
     @classmethod
-    def from_orm(cls, p, company_id: int | None = None) -> "SogcPublicationOut":
+    def from_orm(cls, p) -> "SogcPublicationOut":
         return cls(
             id=p.id,
             sogc_id=p.sogc_id,
             company_uid=p.company_uid,
-            company_id=company_id,
+            company_id=p.company_id,
             pub_date=p.pub_date,
             sub_rubric=p.sub_rubric,
             pub_number=p.pub_number,
@@ -555,14 +555,6 @@ def get_company_auditors(
     return [AuditorOut.from_orm(a) for a in qry.order_by(SogcAuditor.pub_date.desc()).all()]
 
 
-def _uid_to_company_id(db, uids: list[str]) -> dict[str, int]:
-    if not uids:
-        return {}
-    from app.models.company import Company as CompanyModel
-    rows = db.query(CompanyModel.uid, CompanyModel.id).filter(CompanyModel.uid.in_(uids)).all()
-    return {uid: cid for uid, cid in rows}
-
-
 @router.get("/companies/{company_uid}/publications", response_model=list[SogcPublicationOut])
 def get_company_publications(
     company_uid: str,
@@ -581,8 +573,7 @@ def get_company_publications(
         .limit(limit)
         .all()
     )
-    uid_map = _uid_to_company_id(db, [p.company_uid for p in pubs if p.company_uid])
-    return [SogcPublicationOut.from_orm(p, company_id=uid_map.get(p.company_uid)) for p in pubs]
+    return [SogcPublicationOut.from_orm(p) for p in pubs]
 
 
 # ── SOGC global search ─────────────────────────────────────────────────────────
@@ -632,5 +623,4 @@ def search_publications(
         qry = qry.filter(SogcPublication.pub_date <= date_to)
 
     pubs = qry.order_by(SogcPublication.pub_date.desc()).offset(offset).limit(limit).all()
-    uid_map = _uid_to_company_id(db, [p.company_uid for p in pubs if p.company_uid])
-    return [SogcPublicationOut.from_orm(p, company_id=uid_map.get(p.company_uid)) for p in pubs]
+    return [SogcPublicationOut.from_orm(p) for p in pubs]

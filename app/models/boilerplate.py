@@ -28,6 +28,9 @@ class BoilerplatePattern(Base):
     match_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
     # Only active patterns are applied during Claude classification
     active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    # When True, everything from the first match onwards is stripped rather than
+    # just the matching sentence.  Use for terminal boilerplate openers.
+    truncate: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
