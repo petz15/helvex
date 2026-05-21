@@ -28,7 +28,7 @@ def upgrade() -> None:
     op.create_index(
         "ix_sogc_person_appearances_company_lastname",
         "sogc_person_appearances",
-        ["company_uid", "lastname"],
+        ["company_uid", "bisher_lastname"],
     )
 
 
