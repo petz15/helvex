@@ -154,10 +154,9 @@
 - [ ] **LLM classification extensions** — add OpenAI (ChatGPT) alongside Claude; user-configurable classification prompt per LLM; user-adjustable criteria. Potentially add groq for even cheaper prices especially for the noga usecase. potential: groq (context length might be an issue if NOGA has to be provided), deepseek, 
 - [ ] **Custom review & proposal categories** — keep sensible defaults, allow users to define own categories per account
 - [ ] **Per-user scoring rules** — custom distance origin, keyword boosts/penalties, cluster weights; DB: `user_scoring_config` (1:1 with users) + `company_user_score` (per user/company); scoring service already accepts a config dict
-- [ ] **Imporve Purpose Keyword extraction** - Seeing as this is central for NOGA and clustering, these keywords should be as accurate as possible. Review how it is done. Generally improve ML later as much as possible
-- [ ] **NOGA Improvement** - More NOGA related improvements on displaying and other.
-- [ ] **Semantic K Means unavailable** - cant find it in the Collection part
+
 - [ ] **Implement multiple LLM APIs** and check if they actually work. especially the selection (including model type). 
+- [ ] **Translation** - Translating the different texts such as purpose, shab etc
 
 ## Jobs & Infrastructure
 
@@ -208,6 +207,9 @@
 
 
 ## Architecture & Refactoring
+- [ ] **API key management** — token creation/revocation UI for org admins to manage their API credentials; currently only available via admin panel
+- [ ] **uvicorn async** - Each open SSE connection holds one synchronous uvicorn worker thread (blocking I/O). At current scale (<50 concurrent users) this is fine; at higher scale the endpoint should be rewritten as `async def` with `anyio.sleep` and an async Redis client.
+- [ ] **Github Action Secrets Mess** - Currently many github action secrets are thrown in there which are my ENV variables, this should be managed and documented much better. Especially when I implement a DEV/INT env I should seperate a lot of these variables
 
 ### SOGC Entity Resolution — Event Sourcing (medium term)
 
@@ -232,14 +234,8 @@ Prerequisite: ensure `sogc_person_appearances` never has its `person_entity_id` 
 as a join key outside the person resolution pipeline (audit all callers first).
 
 
-- [ ] **API key management** — token creation/revocation UI for org admins to manage their API credentials; currently only available via admin panel
-- [ ] **uvicorn async** - Each open SSE connection holds one synchronous uvicorn worker thread (blocking I/O). At current scale (<50 concurrent users) this is fine; at higher scale the endpoint should be rewritten as `async def` with `anyio.sleep` and an async Redis client.
-- [ ] **Github Action Secrets Mess** - Currently many github action secrets are thrown in there which are my ENV variables, this should be managed and documented much better. Especially when I implement a DEV/INT env I should seperate a lot of these variables
-
-
 
 ## Other & QOL
-
 
 - [ ] **Report Bug** - easy report Bug somewhere
 - [ ] **Site version in UI**- the version of the site somewhere in the UI
@@ -331,3 +327,4 @@ as a join key outside the person resolution pipeline (audit all callers first).
 - [X] **Caching & rate-limiting strategy** — If Procrastinate adopted, Redis becomes optional. Current state: not documented. Options: Postgres + PgBouncer connection pooling (may be sufficient), Postgres token-bucket table for rate-limiting, lightweight in-app caching. **Action:** Deferred pending Procrastinate decision.
 - [X] **reduce clutter** - reduce the spagetthi code and make it all much cleaner. e.g. multiple places for prices instead of one localised one, or how data is show to orgs/users
 - [X] **remove Redis** - replace with postgres addon instead of having a seperate service which I dont really use tbh
+- [X] **Imporve Purpose Keyword extraction** - Seeing as this is central for NOGA and clustering, these keywords should be as accurate as possible. Review how it is done. Generally improve ML later as much as possible

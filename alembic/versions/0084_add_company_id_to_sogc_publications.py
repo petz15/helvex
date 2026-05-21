@@ -9,7 +9,7 @@ from alembic import op
 import sqlalchemy as sa
 
 revision = "0084"
-down_revision = "0083_add_company_embeddings"
+down_revision = "0083"
 branch_labels = None
 depends_on = None
 
