@@ -342,6 +342,10 @@ class ReclassifyLowConfNogaBody(BaseModel):
     confidence_threshold: float = 0.80
 
 
+class EmbedPurposeBody(BaseModel):
+    only_missing: bool = True
+
+
 class ClaudeClassifyBody(BaseModel):
     canton: str | None = None
     min_zefix_score: int | None = None   # passed as-is to job params; worker maps to min_flex_score
@@ -603,6 +607,48 @@ def trigger_reclassify_low_conf_noga(
         request,
         job_type="reclassify_low_conf_noga",
         label=f"Reclassify low-confidence NOGA (threshold {body.confidence_threshold})",
+        params=body.model_dump(),
+        db=db,
+    )
+    return JobOut.from_orm_obj(job)
+
+
+@router.post("/scoring/embed-purpose-full", response_model=JobOut, status_code=status.HTTP_202_ACCEPTED)
+def trigger_embed_purpose_full(
+    body: EmbedPurposeBody,
+    request: Request,
+    db: Session = Depends(get_db),
+    _: User = Depends(require_superadmin),
+):
+    """Embed raw company purpose text (purpose_full) for semantic search."""
+    label = "Embed purpose (full)"
+    if body.only_missing:
+        label += " — missing only"
+    job = _enqueue_or_http_error(
+        request,
+        job_type="embed_purpose_full",
+        label=label,
+        params=body.model_dump(),
+        db=db,
+    )
+    return JobOut.from_orm_obj(job)
+
+
+@router.post("/scoring/embed-purpose-clean", response_model=JobOut, status_code=status.HTTP_202_ACCEPTED)
+def trigger_embed_purpose_clean(
+    body: EmbedPurposeBody,
+    request: Request,
+    db: Session = Depends(get_db),
+    _: User = Depends(require_superadmin),
+):
+    """Embed boilerplate-stripped company purpose text (purpose_clean) for semantic search."""
+    label = "Embed purpose (clean)"
+    if body.only_missing:
+        label += " — missing only"
+    job = _enqueue_or_http_error(
+        request,
+        job_type="embed_purpose_clean",
+        label=label,
         params=body.model_dump(),
         db=db,
     )

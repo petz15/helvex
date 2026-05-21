@@ -66,6 +66,7 @@ def _compute_dedup_key(job_type: str, org_id: int | None, params: dict) -> str |
         "recalculate_scores", "recalculate_google_scores",
         "reextract_purpose", "reextract_zefix_raw", "reclassify_noga",
         "build_noga_embeddings", "detect_language_bulk", "reclassify_low_conf_noga",
+        "embed_purpose_full", "embed_purpose_clean",
         "re_geocode",
         "tfidf_kmeans_cluster",
         "recompute_keywords", "reextract_keywords",
@@ -588,6 +589,66 @@ def _run_job(app, job_id: int) -> None:  # noqa: C901
                     f"{stats.get('still_low', 0)} still low, "
                     f"{len(stats.get('errors', []))} errors"
                 )
+
+            elif job.job_type == "embed_purpose_full":
+                from app.services.collection import embed_purpose_full_batch
+
+                only_missing = bool(params.get("only_missing", True))
+
+                def _progress(done: int, total: int, stats: dict) -> None:
+                    _assert_not_cancelled()
+                    msg = (
+                        f"Processed {done}/{total} — {stats.get('updated', 0)} embedded, "
+                        f"{stats.get('skipped_no_purpose', 0)} no purpose"
+                    )
+                    crud.update_progress(db, job, message=msg, done=done, total=total, stats=stats)
+                    crud.create_event(db, job_id=job.id, level="debug", message=msg)
+                    _maybe_sync(app, job_type=job.job_type, label=job.label, message=msg, stats=dict(stats), error=None, done=False)
+                    _heartbeat()
+
+                stats = embed_purpose_full_batch(
+                    db,
+                    resume_from=resume_from,
+                    only_missing=only_missing,
+                    progress_cb=_progress,
+                )
+                done_msg = (
+                    f"Done — {stats.get('updated', 0)} embeddings stored, "
+                    f"{stats.get('skipped_no_purpose', 0)} skipped (no purpose), "
+                    f"{len(stats.get('errors', []))} errors"
+                )
+                if resume_from:
+                    done_msg += f" (resumed from {resume_from})"
+
+            elif job.job_type == "embed_purpose_clean":
+                from app.services.collection import embed_purpose_clean_batch
+
+                only_missing = bool(params.get("only_missing", True))
+
+                def _progress(done: int, total: int, stats: dict) -> None:
+                    _assert_not_cancelled()
+                    msg = (
+                        f"Processed {done}/{total} — {stats.get('updated', 0)} embedded, "
+                        f"{stats.get('skipped_no_purpose', 0)} no purpose"
+                    )
+                    crud.update_progress(db, job, message=msg, done=done, total=total, stats=stats)
+                    crud.create_event(db, job_id=job.id, level="debug", message=msg)
+                    _maybe_sync(app, job_type=job.job_type, label=job.label, message=msg, stats=dict(stats), error=None, done=False)
+                    _heartbeat()
+
+                stats = embed_purpose_clean_batch(
+                    db,
+                    resume_from=resume_from,
+                    only_missing=only_missing,
+                    progress_cb=_progress,
+                )
+                done_msg = (
+                    f"Done — {stats.get('updated', 0)} embeddings stored, "
+                    f"{stats.get('skipped_no_purpose', 0)} skipped (no purpose), "
+                    f"{len(stats.get('errors', []))} errors"
+                )
+                if resume_from:
+                    done_msg += f" (resumed from {resume_from})"
 
             elif job.job_type == "discover_stopwords":
                 from app.services.stopword_discovery import discover_stopwords

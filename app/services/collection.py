@@ -212,6 +212,11 @@ from app.services.claude_classify import (  # noqa: E402
 )
 
 from app.services.language_detection import detect_language_bulk  # noqa: E402
+from app.services.company_embedding_pipeline import (  # noqa: E402
+    embed_purpose_full_batch,
+    embed_purpose_clean_batch,
+    search_companies_semantic,
+)
 
 __all__ = [
     # Data constants
@@ -245,4 +250,8 @@ __all__ = [
     "resume_claude_batch",
     # Language
     "detect_language_bulk",
+    # Company embeddings
+    "embed_purpose_full_batch",
+    "embed_purpose_clean_batch",
+    "search_companies_semantic",
 ]

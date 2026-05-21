@@ -936,10 +936,38 @@ Classifies each company into the official Swiss NOGA 2025 taxonomy (~2000 level-
 
 **Per-company classification:**
 1. `detect_language_bulk` — Detects company purpose language (DE/FR/IT/EN) via lingua library; stores in `purpose_language`.
-2. `reclassify_noga` — Hybrid classifier: (60%) pgvector cosine similarity to language-matched NOGA embeddings + (40%) token overlap from company name/purpose/keywords. Returns `noga_code`, `noga_confidence` (0–1), and full ancestry path.
+2. `reclassify_noga` — Hybrid classifier: (60%) pgvector cosine similarity to language-matched NOGA embeddings + (40%) token overlap from company name/purpose/keywords. Returns `noga_code`, `noga_confidence` (0–1), and full ancestry path. Also stores `purpose_clean` embeddings alongside classification (no extra model-load cost).
 3. `reclassify_low_conf_noga` — Confidence-based refinement: re-runs classifier on companies below threshold (default 0.80), useful after rebuilding embeddings.
 
 **Why language-aware:** Embedding company purpose in French and matching it against French NOGA descriptions yields higher semantic similarity than cross-lingual matching. Confidence scores reflect this — typically 0.75–0.95 for clear industry classifications, 0.40–0.70 for ambiguous cases (candidates for API re-run).
+
+---
+
+### Company Purpose Embeddings (Semantic Search)
+
+Stores 768-dim L2-normalized embeddings per company in `company_embeddings` for free-text semantic search.
+
+**Two embedding types:**
+- `purpose_full` — raw `company.purpose` text
+- `purpose_clean` — boilerplate-stripped purpose (same patterns as NOGA pipeline)
+
+**Batch jobs:**
+- `embed_purpose_full` — (re)computes `purpose_full` embeddings for all companies with a purpose
+- `embed_purpose_clean` — strips boilerplate, then embeds; `only_missing=true` is the default
+- Both support pause/resume via `resume_from` (keyset pagination on `company.id`)
+
+**NOGA pipeline integration:** `reclassify_noga` automatically stores `purpose_clean` embeddings alongside NOGA classification at the end of each batch. This shares the embedding model load (lazy-cached via `lru_cache`) and boilerplate patterns, adding no extra DB round-trips.
+
+**Semantic search API:** `GET /api/v1/search/semantic?q=<text>&embedding_type=purpose_clean&limit=50` — embeds the query at request time and returns ranked companies by cosine similarity. Requires embeddings to be pre-computed.
+
+**Storage:** ~2 GB on disk for 700k companies × 2 embedding types (768-dim float32 × 4 bytes, pgvector compression).
+
+**Index:** Two partial IVFFlat indexes (one per `embedding_type`, `lists=1000`) for sub-second ANN search on 700k vectors.
+
+**Key files:**
+- `app/models/company_embedding.py` — SQLAlchemy model
+- `app/services/company_embedding_pipeline.py` — batch jobs, upsert helpers, semantic search
+- `alembic/versions/0083_add_company_embeddings.py` — migration
 
 **Debug / explain endpoint (superadmin only):**
 `GET /api/v1/companies/{id}/noga-explain` — re-runs classification for a single company and returns the full intermediate trace:

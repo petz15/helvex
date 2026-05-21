@@ -14,6 +14,10 @@ from app.services.noga import apply_noga_classification
 
 logger = logging.getLogger(__name__)
 
+# When True, purpose_clean embeddings are computed alongside NOGA classification,
+# sharing model loading and boilerplate patterns at no extra overhead.
+_EMBED_ALONGSIDE_NOGA = True
+
 
 def reclassify_noga(
     db: Session,
@@ -38,8 +42,12 @@ def reclassify_noga(
         "skipped_not_detailed": 0,
         "skipped_no_match": 0,
         "branches_handled": 0,
+        "embeddings_stored": 0,
         "errors": [],
     }
+
+    # Load boilerplate patterns once for the whole run (shared with embedding pipeline).
+    boilerplate_patterns = crud.get_active_boilerplate_patterns(db)
 
     query = db.query(Company)
     if only_missing_noga and not include_stale:
@@ -83,6 +91,8 @@ def reclassify_noga(
         if not batch:
             break
 
+        classified_this_batch: list[Company] = []
+
         for company in batch:
             try:
                 if only_missing_noga and not include_stale and company.noga_code:
@@ -103,12 +113,25 @@ def reclassify_noga(
                     continue
                 crud.update_company(db, company, update)
                 stats["updated"] += 1
+                classified_this_batch.append(company)
 
             except Exception as exc:  # noqa: BLE001
                 logger.warning("NOGA classification failed for %s: %s", company.uid, exc)
                 stats["errors"].append(f"{company.uid} [{type(exc).__name__}]: {exc}")
 
         db.commit()
+
+        # Co-locate purpose_clean embedding computation with NOGA run —
+        # shares model loading and boilerplate patterns, no extra overhead.
+        if _EMBED_ALONGSIDE_NOGA and classified_this_batch:
+            try:
+                from app.services.company_embedding_pipeline import embed_batch_for_noga
+                n = embed_batch_for_noga(db, classified_this_batch, boilerplate_patterns)
+                db.commit()
+                stats["embeddings_stored"] = stats.get("embeddings_stored", 0) + n
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("Embedding alongside NOGA failed: %s", exc)
+
         last_id = batch[-1].id
         processed += len(batch)
 

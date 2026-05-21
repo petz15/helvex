@@ -13,6 +13,60 @@ from app.models.user import User
 router = APIRouter(tags=["search"])
 
 
+# ---------------------------------------------------------------------------
+# Semantic company search
+# ---------------------------------------------------------------------------
+
+class SemanticSearchResult(BaseModel):
+    company_id: int
+    name: str
+    uid: str
+    canton: str | None
+    purpose: str | None
+    similarity: float
+    lang: str | None
+
+
+class SemanticSearchOut(BaseModel):
+    results: list[SemanticSearchResult]
+    embedding_type: str
+    query: str
+
+
+@router.get("/search/semantic", response_model=SemanticSearchOut)
+def semantic_search(
+    q: str = Query(..., min_length=2, description="Free-text query to match against company purpose"),
+    embedding_type: str = Query("purpose_clean", description="'purpose_clean' (boilerplate-stripped) or 'purpose_full'"),
+    limit: int = Query(50, ge=1, le=200),
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+):
+    """Semantic similarity search over company purpose embeddings.
+
+    Requires company purpose embeddings to be pre-computed via the
+    embed_purpose_full or embed_purpose_clean batch jobs.
+    """
+    from app.services.company_embedding_pipeline import search_companies_semantic
+
+    if embedding_type not in ("purpose_clean", "purpose_full"):
+        embedding_type = "purpose_clean"
+
+    hits = search_companies_semantic(db, q, embedding_type=embedding_type, limit=limit)
+    results = [
+        SemanticSearchResult(
+            company_id=h["company_id"],
+            name=h["name"],
+            uid=h["uid"],
+            canton=h["canton"],
+            purpose=h["purpose"],
+            similarity=h["similarity"],
+            lang=h["lang"],
+        )
+        for h in hits
+    ]
+    return SemanticSearchOut(results=results, embedding_type=embedding_type, query=q)
+
+
 class CompanySnippet(BaseModel):
     id: int
     uid: str
