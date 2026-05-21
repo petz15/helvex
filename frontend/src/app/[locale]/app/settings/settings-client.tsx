@@ -793,18 +793,7 @@ export function SettingsClient() {
               {triggering === "scoring/reclassify-noga" ? <Loader2 size={16} className="animate-spin text-emerald-800" /> : <FileText size={16} className="text-emerald-800" />}
               {dict.app.settings.admin.reclassifyNogaAll}
             </button>
-            <button type="button" onClick={() => handleTrigger("scoring/embed-purpose-full", { only_missing: true })} disabled={!!triggering} className={cn("flex items-center gap-2 bg-violet-50 hover:bg-violet-100 disabled:opacity-60 text-violet-700 px-4 py-2 rounded-lg text-sm font-medium transition-colors")}>
-              {triggering === "scoring/embed-purpose-full" ? <Loader2 size={16} className="animate-spin text-violet-700" /> : <Brain size={16} className="text-violet-700" />}
-              {dict.app.settings.admin.embedPurposeFullMissing}
-            </button>
-            <button type="button" onClick={() => handleTrigger("scoring/embed-purpose-clean", { only_missing: true })} disabled={!!triggering} className={cn("flex items-center gap-2 bg-violet-100 hover:bg-violet-200 disabled:opacity-60 text-violet-800 px-4 py-2 rounded-lg text-sm font-medium transition-colors")}>
-              {triggering === "scoring/embed-purpose-clean" ? <Loader2 size={16} className="animate-spin text-violet-800" /> : <Brain size={16} className="text-violet-800" />}
-              {dict.app.settings.admin.embedPurposeCleanMissing}
-            </button>
-            <button type="button" onClick={() => handleTrigger("scoring/embed-purpose-clean", { only_missing: false })} disabled={!!triggering} className={cn("flex items-center gap-2 bg-violet-200 hover:bg-violet-300 disabled:opacity-60 text-violet-900 px-4 py-2 rounded-lg text-sm font-medium transition-colors")}>
-              {triggering === "scoring/embed-purpose-clean" ? <Loader2 size={16} className="animate-spin text-violet-900" /> : <Brain size={16} className="text-violet-900" />}
-              {dict.app.settings.admin.embedPurposeCleanAll}
-            </button>
+
             <button type="button" onClick={() => handleTrigger("scoring/analyze-boilerplate")} disabled={!!triggering} className={cn("flex items-center gap-2 bg-orange-50 hover:bg-orange-100 disabled:opacity-60 text-orange-700 px-4 py-2 rounded-lg text-sm font-medium transition-colors")}>
               {triggering === "scoring/analyze-boilerplate" ? <Loader2 size={16} className="animate-spin text-orange-700" /> : <Sparkles size={16} className="text-orange-700" />}
               {dict.app.settings.admin.findNewBoilerplatePatterns}

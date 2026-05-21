@@ -28,6 +28,22 @@ function Section({ title, children, defaultOpen = false }: { title: string; chil
 
 const ML_JOB_DOCS: { job_type: string; label: string; description: string; when: string; prereq?: string }[] = [
   {
+    job_type: "embed_purpose_full",
+    label: "Embed Purpose (Full)",
+    description:
+      "Embeds raw company purpose text using the multilingual sentence-transformer model and stores the vectors in purpose_embedding. Used by semantic search and semantic clustering. embed_purpose_clean is preferred for classification tasks.",
+    when: "Run after bulk import to enable semantic search. Re-run after large imports.",
+    prereq: "Companies must have a purpose field.",
+  },
+  {
+    job_type: "embed_purpose_clean",
+    label: "Embed Purpose (Clean)",
+    description:
+      "Embeds boilerplate-stripped, keyword-enriched purpose text and stores the vectors in purpose_embedding_clean. Higher quality than embed_purpose_full for classification. Used by semantic clustering.",
+    when: "Run after recompute_keywords. Re-run after large imports or when keywords are refreshed.",
+    prereq: "Requires purpose_keywords. Run recompute_keywords first.",
+  },
+  {
     job_type: "tfidf_kmeans_cluster",
     label: "TF-IDF K-Means",
     description:
@@ -759,6 +775,60 @@ export function CollectionClient() {
                 <input name="confidence_threshold" type="number" min="0" max="1" step="0.05" defaultValue="0.80" className={inputCls} />
               </Field>
               <SubmitBtn loading={loading === "scoring/reclassify-low-conf-noga"} />
+            </form>
+          </div>
+
+        </div>
+      </Section>
+
+      <GroupHeader label="Purpose Embeddings" />
+
+      <Section title="Embed Purpose Text">
+        <div className="space-y-6">
+
+          {/* embed_purpose_full */}
+          <div className="rounded-lg border border-slate-200 p-4 space-y-3">
+            <div>
+              <h3 className="text-sm font-semibold text-slate-800">Embed Purpose (Full)</h3>
+              <p className="mt-1 text-xs text-slate-500">
+                Embeds raw company purpose text using the multilingual sentence-transformer and stores vectors in <code className="text-xs bg-slate-100 px-1 rounded">purpose_embedding</code>. Required for semantic search.
+              </p>
+            </div>
+            <form onSubmit={async e => {
+              e.preventDefault();
+              const fd = new FormData(e.currentTarget);
+              await submit("scoring/embed-purpose-full", {
+                only_missing: fd.get("only_missing_full") === "on",
+              });
+            }} className="space-y-3">
+              <label className="flex items-center gap-2 text-sm text-slate-700">
+                <input type="checkbox" name="only_missing_full" defaultChecked className={checkCls} />
+                Only companies missing embedding
+              </label>
+              <SubmitBtn loading={loading === "scoring/embed-purpose-full"} />
+            </form>
+          </div>
+
+          {/* embed_purpose_clean */}
+          <div className="rounded-lg border border-slate-200 p-4 space-y-3">
+            <div>
+              <h3 className="text-sm font-semibold text-slate-800">Embed Purpose (Clean)</h3>
+              <p className="mt-1 text-xs text-slate-500">
+                Embeds boilerplate-stripped, keyword-enriched purpose text and stores vectors in <code className="text-xs bg-slate-100 px-1 rounded">purpose_embedding_clean</code>. Higher quality than Full for clustering. Requires <code className="text-xs bg-slate-100 px-1 rounded">purpose_keywords</code>.
+              </p>
+            </div>
+            <form onSubmit={async e => {
+              e.preventDefault();
+              const fd = new FormData(e.currentTarget);
+              await submit("scoring/embed-purpose-clean", {
+                only_missing: fd.get("only_missing_clean") === "on",
+              });
+            }} className="space-y-3">
+              <label className="flex items-center gap-2 text-sm text-slate-700">
+                <input type="checkbox" name="only_missing_clean" defaultChecked className={checkCls} />
+                Only companies missing embedding
+              </label>
+              <SubmitBtn loading={loading === "scoring/embed-purpose-clean"} />
             </form>
           </div>
 
