@@ -18,9 +18,28 @@ from sqlalchemy.orm import Session
 
 from app.models.organization import Organization
 from app.models.payment_transaction import PaymentTransaction
+from app.models.user import User
 from app.services import payments, payment_transactions
+from app.services.billing_addresses import get_default_billing_address
+from app.services.payments.pricing import apply_vat
 
 logger = logging.getLogger(__name__)
+
+
+def _billing_country_for_org(db: Session, org: Organization) -> str:
+    """Return billing country for an org, falling back to the default payment user's address."""
+    addr = get_default_billing_address(getattr(org, "billing_address_json", None))
+    if addr and addr.get("country"):
+        return str(addr["country"]).upper().strip()
+    user_id = getattr(org, "default_payment_user_id", None)
+    if user_id:
+        user = db.get(User, user_id)
+        if user:
+            user_addr = get_default_billing_address(user.billing_address_json)
+            if user_addr and user_addr.get("country"):
+                return str(user_addr["country"]).upper().strip()
+    return ""
+
 
 # Alert recipient for payment infrastructure failures
 _ALERT_EMAIL = "peter@balogh-consulting.ch"
@@ -261,6 +280,14 @@ def run_billing_renewal(db: Session) -> dict[str, Any]:
             stats["skipped"] += 1
             continue
 
+        # --- Apply VAT based on org's default billing address ---
+        billing_country = _billing_country_for_org(db, org)
+        vat_rate, vat_amount, amount_with_vat = apply_vat(amount_chf, billing_country, getattr(org, "vat_id", None))
+        logger.info(
+            "billing_renewal.vat org_id=%s country=%s vat_rate=%.4f base=%.2f vat=%.4f total=%.2f",
+            org_id, billing_country or "unknown", vat_rate, amount_chf, vat_amount, amount_with_vat,
+        )
+
         order_reference = f"wl_recur_{org_id}_{secrets.token_hex(6)}"
         description = f"Helvex {tier.title()} ({cycle}) renewal"
 
@@ -271,7 +298,7 @@ def run_billing_renewal(db: Session) -> dict[str, Any]:
             result = provider.authorize_referenced_transaction(
                 org_id=org_id,
                 transaction_id=ref_tx_id,
-                amount_chf=amount_chf,
+                amount_chf=amount_with_vat,
                 order_reference=order_reference,
                 description=description,
             )
@@ -301,7 +328,7 @@ def run_billing_renewal(db: Session) -> dict[str, Any]:
                     result = provider.authorize_referenced_transaction(
                         org_id=org_id,
                         transaction_id=ref_tx_id,
-                        amount_chf=amount_chf,
+                        amount_chf=amount_with_vat,
                         order_reference=order_reference,
                         description=description,
                     )

@@ -1121,6 +1121,32 @@ export function BillingClient() {
       {me?.org_id && (
         <VatIdSection orgId={me.org_id} initialVatId={org?.vat_id ?? null} />
       )}
+
+      {/* Billing address */}
+      <div className="rounded-2xl border border-slate-200 bg-white p-5">
+        <div className="flex items-center justify-between mb-3">
+          <h2 className="text-sm font-semibold text-slate-700">Billing address</h2>
+          <Link href="/app/addresses" className="text-xs text-blue-600 hover:underline">
+            Manage addresses
+          </Link>
+        </div>
+        {billingAddress ? (
+          <div className="text-sm text-slate-700 space-y-0.5">
+            <p className="font-medium">{billingAddress.first_name} {billingAddress.last_name}</p>
+            {billingAddress.company_name && <p className="text-slate-500">{billingAddress.company_name}</p>}
+            <p>{billingAddress.street} {billingAddress.number}</p>
+            <p>{billingAddress.postal_code} {billingAddress.city}</p>
+            <p>{billingAddress.country}</p>
+          </div>
+        ) : (
+          <p className="text-sm text-amber-600">
+            No billing address saved.{" "}
+            <Link href="/app/addresses" className="underline hover:text-amber-800">Add one</Link>
+            {" "}to enable checkout.
+          </p>
+        )}
+      </div>
+
       {me && (
         <PaymentMethodsSection
           me={me}

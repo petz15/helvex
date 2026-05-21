@@ -75,6 +75,11 @@ export function AddressBookManager({ returnTo }: { returnTo?: string | null }) {
       await setCurrentUserDefaultBillingAddress(addressId);
       await mutate();
       await mutateGlobal("me");
+      if (returnTo) {
+        window.location.href = returnTo;
+        return;
+      }
+      flash("success", "Default address updated.");
     } catch (err) {
       flash("error", err instanceof Error ? err.message : "Failed to set default address");
     } finally {
@@ -88,6 +93,7 @@ export function AddressBookManager({ returnTo }: { returnTo?: string | null }) {
       await deleteCurrentUserBillingAddress(addressId);
       await mutate();
       await mutateGlobal("me");
+      flash("success", "Address deleted.");
     } catch (err) {
       flash("error", err instanceof Error ? err.message : "Failed to delete address");
     } finally {
