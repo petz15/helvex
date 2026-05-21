@@ -328,6 +328,7 @@ class ReclassifyNogaBody(BaseModel):
     only_missing_noga: bool = False
     include_stale: bool = False
     only_detailed_raw: bool = True
+    embed_mode: str = "clean"  # "clean" | "full_and_clean" | "none"
 
 
 class BuildNogaEmbeddingsBody(BaseModel):

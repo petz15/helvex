@@ -14,11 +14,6 @@ from app.services.noga import apply_noga_classification
 
 logger = logging.getLogger(__name__)
 
-# When True, purpose_clean embeddings are computed alongside NOGA classification,
-# sharing model loading and boilerplate patterns at no extra overhead.
-_EMBED_ALONGSIDE_NOGA = True
-
-
 def reclassify_noga(
     db: Session,
     *,
@@ -27,6 +22,7 @@ def reclassify_noga(
     only_missing_noga: bool = False,
     include_stale: bool = False,
     only_detailed_raw: bool = True,
+    embed_mode: str = "clean",
     progress_cb: Any = None,
 ) -> dict[str, Any]:
     """Bulk (re)classify companies with NOGA based on local taxonomy data.
@@ -121,12 +117,10 @@ def reclassify_noga(
 
         db.commit()
 
-        # Co-locate purpose_clean embedding computation with NOGA run —
-        # shares model loading and boilerplate patterns, no extra overhead.
-        if _EMBED_ALONGSIDE_NOGA and classified_this_batch:
+        if embed_mode != "none" and classified_this_batch:
             try:
                 from app.services.company_embedding_pipeline import embed_batch_for_noga
-                n = embed_batch_for_noga(db, classified_this_batch, boilerplate_patterns)
+                n = embed_batch_for_noga(db, classified_this_batch, boilerplate_patterns, embed_mode=embed_mode)
                 db.commit()
                 stats["embeddings_stored"] = stats.get("embeddings_stored", 0) + n
             except Exception as exc:  # noqa: BLE001

@@ -737,6 +737,7 @@ export function CollectionClient() {
               await submit("scoring/reclassify-noga", {
                 only_missing_noga: fd.get("only_missing_noga") === "on",
                 only_detailed_raw: fd.get("only_detailed_raw") === "on",
+                embed_mode: fd.get("embed_mode") as string,
               });
             }} className="space-y-3 ml-7">
               <div className="flex gap-6 flex-wrap">
@@ -748,6 +749,23 @@ export function CollectionClient() {
                   <input type="checkbox" name="only_detailed_raw" defaultChecked className={checkCls} />
                   Only with detailed Zefix raw data
                 </label>
+              </div>
+              <div className="space-y-1">
+                <p className="text-xs font-medium text-slate-600">Purpose embedding</p>
+                <div className="flex flex-col gap-1.5">
+                  <label className="flex items-center gap-2 text-sm text-slate-700">
+                    <input type="radio" name="embed_mode" value="clean" defaultChecked className={checkCls} />
+                    Update <code className="text-xs bg-slate-100 px-1 rounded">purpose_clean</code> (default — boilerplate-stripped)
+                  </label>
+                  <label className="flex items-center gap-2 text-sm text-slate-700">
+                    <input type="radio" name="embed_mode" value="full_and_clean" className={checkCls} />
+                    Update <code className="text-xs bg-slate-100 px-1 rounded">purpose_clean</code> + <code className="text-xs bg-slate-100 px-1 rounded">purpose_full</code> (raw)
+                  </label>
+                  <label className="flex items-center gap-2 text-sm text-slate-700">
+                    <input type="radio" name="embed_mode" value="none" className={checkCls} />
+                    Skip embedding update
+                  </label>
+                </div>
               </div>
               <SubmitBtn loading={loading === "scoring/reclassify-noga"} />
             </form>

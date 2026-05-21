@@ -219,33 +219,47 @@ def embed_batch_for_noga(
     db: Session,
     companies: list[Company],
     boilerplate_patterns,
+    embed_mode: str = "clean",
 ) -> int:
-    """Compute and upsert purpose_clean embeddings for a NOGA classification batch.
+    """Compute and upsert purpose embeddings for a NOGA classification batch.
+
+    embed_mode controls which embedding types are stored:
+      "clean"         — purpose_clean only (boilerplate-stripped; default)
+      "full_and_clean" — purpose_full (raw) + purpose_clean
+      "none"          — skip (no-op, returns 0)
 
     Called at the end of each reclassify_noga batch to share model loading and
     boilerplate stripping with the NOGA run.  Returns the count of rows stored.
     """
+    if embed_mode == "none":
+        return 0
+
     from app.services.embeddings import embed_texts
 
-    texts: list[str] = []
+    raw_texts: list[str] = []
+    clean_texts: list[str] = []
     valid: list[Company] = []
     for company in companies:
         raw = (company.purpose or "").strip()
         if not raw:
             continue
         stripped = _strip(raw, boilerplate_patterns)
-        texts.append(stripped or raw)
+        raw_texts.append(raw)
+        clean_texts.append(stripped or raw)
         valid.append(company)
 
-    if not texts:
+    if not valid:
         return 0
 
     try:
-        vecs = embed_texts(texts, batch_size=256)
-        rows = [
-            (c.id, "purpose_clean", vecs[i], c.purpose_language)
-            for i, c in enumerate(valid)
-        ]
+        rows: list[tuple] = []
+        clean_vecs = embed_texts(clean_texts, batch_size=256)
+        for i, c in enumerate(valid):
+            rows.append((c.id, "purpose_clean", clean_vecs[i], c.purpose_language))
+        if embed_mode == "full_and_clean":
+            full_vecs = embed_texts(raw_texts, batch_size=256)
+            for i, c in enumerate(valid):
+                rows.append((c.id, "purpose_full", full_vecs[i], c.purpose_language))
         upsert_embeddings_bulk(db, rows)
         return len(rows)
     except Exception as exc:

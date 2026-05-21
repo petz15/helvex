@@ -521,6 +521,7 @@ def _run_job(app, job_id: int) -> None:  # noqa: C901
                     only_missing_noga=bool(params.get("only_missing_noga", False)),
                     include_stale=bool(params.get("include_stale", False)),
                     only_detailed_raw=bool(params.get("only_detailed_raw", True)),
+                    embed_mode=str(params.get("embed_mode", "clean")),
                     progress_cb=_progress,
                 )
                 done_msg = (
