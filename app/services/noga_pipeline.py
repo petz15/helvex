@@ -87,7 +87,9 @@ def reclassify_noga(
         if not batch:
             break
 
-        classified_this_batch: list[Company] = []
+        # Collect (company_id, vec, lang) for purpose_clean upsert — reuses the
+        # vector already computed by the NOGA classifier, no re-embedding needed.
+        embedding_rows: list[tuple[int, str, object, str | None]] = []
 
         for company in batch:
             try:
@@ -103,13 +105,16 @@ def reclassify_noga(
                 if is_branch_office(company):
                     stats["branches_handled"] = stats.get("branches_handled", 0) + 1
 
-                update = apply_noga_classification(db, company)
+                vec_out: list = []
+                update = apply_noga_classification(db, company, _vec_out=vec_out)
                 if update is None:
                     stats["skipped_no_match"] += 1
                     continue
                 crud.update_company(db, company, update)
                 stats["updated"] += 1
-                classified_this_batch.append(company)
+
+                if vec_out:
+                    embedding_rows.append((company.id, "purpose_clean", vec_out[0], company.purpose_language))
 
             except Exception as exc:  # noqa: BLE001
                 logger.warning("NOGA classification failed for %s: %s", company.uid, exc)
@@ -117,14 +122,15 @@ def reclassify_noga(
 
         db.commit()
 
-        if embed_mode != "none" and classified_this_batch:
+        # Store captured vectors — no re-embedding, zero extra model cost.
+        if embedding_rows:
             try:
-                from app.services.company_embedding_pipeline import embed_batch_for_noga
-                n = embed_batch_for_noga(db, classified_this_batch, boilerplate_patterns, embed_mode=embed_mode)
+                from app.services.company_embedding_pipeline import upsert_embeddings_bulk
+                upsert_embeddings_bulk(db, embedding_rows)
                 db.commit()
-                stats["embeddings_stored"] = stats.get("embeddings_stored", 0) + n
+                stats["embeddings_stored"] = stats.get("embeddings_stored", 0) + len(embedding_rows)
             except Exception as exc:  # noqa: BLE001
-                logger.warning("Embedding alongside NOGA failed: %s", exc)
+                logger.warning("Embedding upsert alongside NOGA failed: %s", exc)
 
         last_id = batch[-1].id
         processed += len(batch)
@@ -172,9 +178,12 @@ def reclassify_low_confidence_noga(
         if not batch:
             break
 
+        embedding_rows: list[tuple[int, str, object, str | None]] = []
+
         for company in batch:
             try:
-                update = apply_noga_classification(db, company)
+                vec_out: list = []
+                update = apply_noga_classification(db, company, _vec_out=vec_out)
                 if update is None:
                     stats["skipped_no_match"] += 1
                     continue
@@ -185,11 +194,25 @@ def reclassify_low_confidence_noga(
                     stats["improved"] += 1
                 else:
                     stats["still_low"] += 1
+
+                if vec_out:
+                    embedding_rows.append((company.id, "purpose_clean", vec_out[0], company.purpose_language))
+
             except Exception as exc:  # noqa: BLE001
                 logger.warning("NOGA reclassification failed for %s: %s", company.uid, exc)
                 stats["errors"].append(f"{company.uid}: {type(exc).__name__}: {exc}")
 
         db.commit()
+
+        if embedding_rows:
+            try:
+                from app.services.company_embedding_pipeline import upsert_embeddings_bulk
+                upsert_embeddings_bulk(db, embedding_rows)
+                db.commit()
+                stats["embeddings_stored"] = stats.get("embeddings_stored", 0) + len(embedding_rows)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("Embedding upsert alongside NOGA failed: %s", exc)
+
         offset += len(batch)
 
         if progress_cb:

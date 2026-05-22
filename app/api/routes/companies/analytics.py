@@ -135,7 +135,7 @@ def _build_market_segments(db: Session) -> list[dict]:
             LEFT(noga_path, 1)                          AS section,
             COUNT(*)                                    AS company_count,
             AVG(combined_score)                         AS avg_relevance,
-            COUNT(CASE WHEN first_sogc_date >= :cutoff::text THEN 1 END) AS growth_recent,
+            COUNT(CASE WHEN first_sogc_date >= CAST(:cutoff AS text) THEN 1 END) AS growth_recent,
             MODE() WITHIN GROUP (ORDER BY canton)       AS canton_top,
             COUNT(canton)                               AS canton_total
         FROM companies

@@ -382,17 +382,23 @@ def _classify_v2_with_embedding(
     idx: _NogaIndex,
     stripped_purpose: str,
     lang: str,
+    *,
+    _vec_out: list | None = None,
 ) -> NogaClassification | None:
     """Global embedding search → peak → constrained descent.
 
     Returns None when no candidate reaches _EMB_MIN_CONFIDENCE (triggers token fallback).
     Embed text: stripped purpose only.
+    If _vec_out is provided, appends the computed query_vec to it so callers can
+    store it without re-embedding.
     """
     import numpy as np
 
     query_vec = _embed_query(stripped_purpose)
     if query_vec is None:
         return None
+    if _vec_out is not None:
+        _vec_out.append(query_vec)
 
     vec_list = query_vec.tolist() if isinstance(query_vec, np.ndarray) else list(query_vec)
     vec_str = "[" + ",".join(f"{x:.8f}" for x in vec_list) + "]"
@@ -559,11 +565,19 @@ def _classify_v2_token_fallback(
     )
 
 
-def classify_company_noga(db: Session, company: Company) -> NogaClassification | None:
+def classify_company_noga(
+    db: Session,
+    company: Company,
+    *,
+    _vec_out: list | None = None,
+) -> NogaClassification | None:
     """V2 NOGA classifier: global embedding search → peak → constrained descent.
 
     Embed text: stripped purpose only (no purpose_keywords, no tfidf_cluster).
     Token-only fallback runs when no embedding candidate reaches _EMB_MIN_CONFIDENCE.
+
+    If _vec_out is provided, the query embedding vector is appended to it when the
+    embedding path is taken — allowing callers to store it without re-computing.
     """
     from app.services.language_detection import detect_purpose_language
 
@@ -579,7 +593,7 @@ def classify_company_noga(db: Session, company: Company) -> NogaClassification |
     idx = _load_noga_index()
 
     if stripped_purpose and _has_noga_embeddings(db):
-        result = _classify_v2_with_embedding(db, idx, stripped_purpose, lang)
+        result = _classify_v2_with_embedding(db, idx, stripped_purpose, lang, _vec_out=_vec_out)
         if result is not None:
             return result
         logger.debug(
@@ -816,14 +830,19 @@ def _clear_noga() -> CompanyUpdate:
 # Public entry point
 # ---------------------------------------------------------------------------
 
-def apply_noga_classification(db: Session, company: Company) -> CompanyUpdate | None:
+def apply_noga_classification(
+    db: Session,
+    company: Company,
+    *,
+    _vec_out: list | None = None,
+) -> CompanyUpdate | None:
     if is_branch_office(company):
         inherited = _inherit_noga_from_parent(db, company)
         if inherited is not None:
             return inherited
         return _clear_noga() if company.noga_code else None
 
-    result = classify_company_noga(db, company)
+    result = classify_company_noga(db, company, _vec_out=_vec_out)
     if not result:
         return None
 
