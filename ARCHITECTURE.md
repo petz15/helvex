@@ -2197,4 +2197,6 @@ Controls: "Past mandates" checkbox (rekeys SWR), segmented Timeline | Network to
 | `frontend/src/lib/types.ts` | `CoDirector`, `MandateItem`, `PersonNetworkData` types |
 | `frontend/src/lib/api.ts` | `fetchPersonNetwork(entityId, params?)` |
 | `frontend/src/components/board-panel.tsx` | Company detail "Board & Officers" panel |
-| `frontend/src/app/[locale]/app/people/` | People search page: `PersonEntityCard`, `AuditorCard`, `PersonDetailPanel` (Timeline + Network), `AuditorDetailPanel`, `TenureTimeline`, `NetworkGraph`, `AuditorClientsTimeline` |
+| `frontend/src/app/[locale]/app/people/page.tsx` + `people-client.tsx` | People search list (Persons + Auditors tabs). Person cards navigate to the detail page. Auditor cards expand inline with `AuditorDetailPanel` / `AuditorClientsTimeline`. |
+| `frontend/src/app/[locale]/app/people/[id]/page.tsx` | Server component — fetches `SogcPersonEntity` via `GET /sogc/persons/{id}`, passes to `PersonDetailClient`. |
+| `frontend/src/app/[locale]/app/people/[id]/person-detail-client.tsx` | Full-page person profile: dark slate-900 hero header (name, hometown, confidence, verified, identity notes, LinkedIn), role-breakdown stats strip, `TenureTimeline` (full-width Gantt), `NetworkGraph` (1100×620 SVG, wider radial layout), Timeline/Network toggle + Past checkbox. |
