@@ -24,9 +24,9 @@ import type {
 // ── Constants ──────────────────────────────────────────────────────────────────
 
 const ROLE_COLORS: Record<string, { fill: string; label: string }> = {
-  director: { fill: "#dc2626", label: "Board / Director" },
-  officer:  { fill: "#2563eb", label: "Officer / Finance" },
-  other:    { fill: "#d97706", label: "Other / Procuration" },
+  director: { fill: "#dc2626", label: "Director" },
+  officer:  { fill: "#2563eb", label: "Officer" },
+  other:    { fill: "#d97706", label: "Other" },
 };
 const FALLBACK_COLOR = "#94a3b8";
 
@@ -122,6 +122,17 @@ function TenureTimeline({ mandates, locale }: { mandates: MandateItem[]; locale:
     [m.date_from, m.is_current ? today : m.date_to].filter(Boolean) as string[]
   );
 
+  // Build legend from actual SOGC publication titles (signature_type ?? role), coloured by role_category
+  const roleLegend = useMemo(() => {
+    const map = new Map<string, string>(); // title → fill colour
+    for (const m of mandates) {
+      const title = m.signature_type?.trim() || m.role?.trim();
+      if (!title || map.has(title)) continue;
+      map.set(title, ROLE_COLORS[m.role_category ?? ""]?.fill ?? FALLBACK_COLOR);
+    }
+    return [...map.entries()];
+  }, [mandates]);
+
   if (!allDates.length) {
     return <p className="text-xs text-slate-400 py-8 text-center">No mandate dates available.</p>;
   }
@@ -142,16 +153,16 @@ function TenureTimeline({ mandates, locale }: { mandates: MandateItem[]; locale:
 
   return (
     <div>
-      {/* Legend */}
-      <div className="flex flex-wrap gap-4 mb-4 text-[11px] text-slate-500">
-        {Object.entries(ROLE_COLORS).map(([k, v]) => (
-          <span key={k} className="flex items-center gap-1.5">
-            <span className="w-3 h-2.5 inline-block rounded-sm" style={{ background: v.fill }} />
-            {v.label}
+      {/* Legend — actual SOGC titles, coloured by role category */}
+      <div className="flex flex-wrap gap-x-4 gap-y-1.5 mb-4 text-[11px] text-slate-500">
+        {roleLegend.map(([title, fill]) => (
+          <span key={title} className="flex items-center gap-1.5">
+            <span className="w-3 h-2.5 inline-block rounded-sm shrink-0" style={{ background: fill }} />
+            {title}
           </span>
         ))}
         <span className="flex items-center gap-1.5 ml-auto">
-          <span className="w-3 h-2.5 inline-block rounded-sm opacity-35" style={{ background: "#334155" }} />
+          <span className="w-3 h-2.5 inline-block rounded-sm opacity-35 shrink-0" style={{ background: "#334155" }} />
           Past / inactive
         </span>
       </div>

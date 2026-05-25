@@ -4,7 +4,7 @@ import { useState, useRef, useEffect } from "react";
 import Link from "next/link";
 import useSWR from "swr";
 import { Search, Building2, Users, Shield, ChevronRight, X } from "lucide-react";
-import { globalSearch } from "@/lib/api";
+import { globalSearch, fetchCurrentUser } from "@/lib/api";
 import type { GlobalSearchResult } from "@/lib/types";
 
 function useDebounce<T>(value: T, delay: number): T {
@@ -61,6 +61,8 @@ export function GlobalSearchTrigger({ locale }: { locale: string }) {
     () => globalSearch(debouncedQ),
     { revalidateOnFocus: false, keepPreviousData: true },
   );
+  const { data: me } = useSWR("me", fetchCurrentUser, { revalidateOnFocus: false });
+  const isSuperAdmin = !!me?.is_superadmin;
 
   useEffect(() => {
     if (open) {
@@ -189,7 +191,7 @@ export function GlobalSearchTrigger({ locale }: { locale: string }) {
                       return (
                         <Link
                           key={p.id}
-                          href={`/${locale}/app/people?q=${encodeURIComponent(name)}`}
+                          href={`/${locale}/app/people/${p.id}`}
                           onClick={close}
                           className="flex items-center gap-3 px-4 py-2.5 hover:bg-slate-50 transition-colors group"
                         >
@@ -199,7 +201,7 @@ export function GlobalSearchTrigger({ locale }: { locale: string }) {
                               {[
                                 p.hometown_municipality ? `von ${p.hometown_municipality}` : null,
                                 `${p.active_company_count} ${p.active_company_count === 1 ? "company" : "companies"}`,
-                                p.confidence_level,
+                                isSuperAdmin ? p.confidence_level : null,
                               ]
                                 .filter(Boolean)
                                 .join(" · ")}

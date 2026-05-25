@@ -18,6 +18,7 @@ import {
   searchPersonEntities,
   searchAuditors,
   reportPersonFlag,
+  fetchCurrentUser,
 } from "@/lib/api";
 import type {
   SogcPersonEntity,
@@ -270,9 +271,11 @@ function AuditorDetailPanel({
 function PersonEntityCard({
   entity,
   locale,
+  isSuperAdmin,
 }: {
   entity: SogcPersonEntity;
   locale: string;
+  isSuperAdmin?: boolean;
 }) {
   const [showFlag, setShowFlag] = useState(false);
   const name = [entity.firstname, entity.lastname].filter(Boolean).join(" ") || entity.normalized_key;
@@ -288,11 +291,13 @@ function PersonEntityCard({
                 {entity.is_verified && (
                   <CheckCircle size={13} className="text-emerald-500 shrink-0" aria-label="Verified identity" />
                 )}
-                <span
-                  className={`text-[10px] font-medium px-1.5 py-0.5 rounded ${CONFIDENCE_STYLE[entity.confidence_level] ?? CONFIDENCE_STYLE.medium}`}
-                >
-                  {entity.confidence_level}
-                </span>
+                {isSuperAdmin && (
+                  <span
+                    className={`text-[10px] font-medium px-1.5 py-0.5 rounded ${CONFIDENCE_STYLE[entity.confidence_level] ?? CONFIDENCE_STYLE.medium}`}
+                  >
+                    {entity.confidence_level}
+                  </span>
+                )}
                 {entity.is_foreign && entity.nationality && (
                   <span className="text-[9px] text-slate-400 italic">{entity.nationality} national</span>
                 )}
@@ -307,7 +312,7 @@ function PersonEntityCard({
                 )}
               </div>
 
-              {entity.confidence_level === "low" && (
+              {isSuperAdmin && entity.confidence_level === "low" && (
                 <p className="text-[9px] text-amber-600/80 mt-0.5 flex items-center gap-1">
                   <AlertCircle size={9} />
                   Identity match approximate
@@ -456,6 +461,9 @@ export function PeopleClient({
   const params = useParams();
   const locale = (params?.locale as string) ?? "de";
 
+  const { data: me } = useSWR("me", fetchCurrentUser, { revalidateOnFocus: false });
+  const isSuperAdmin = !!me?.is_superadmin;
+
   const [tab, setTab] = useState<"persons" | "auditors">(initialTab ?? "persons");
 
   // Person filters
@@ -589,23 +597,25 @@ export function PeopleClient({
               onChange={e => { setMinCompanies(e.target.value); resetOffset(); }}
               className="px-3 py-1.5 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-200 w-32"
             />
-            <select
-              value={confidenceFilter}
-              onChange={e => { setConfidenceFilter(e.target.value); resetOffset(); }}
-              className="px-3 py-1.5 rounded-lg border border-slate-200 text-sm text-slate-600 bg-white"
-            >
-              <option value="">All confidence</option>
-              <option value="high">High</option>
-              <option value="medium">Medium</option>
-              <option value="low">Low (foreign)</option>
-            </select>
+            {isSuperAdmin && (
+              <select
+                value={confidenceFilter}
+                onChange={e => { setConfidenceFilter(e.target.value); resetOffset(); }}
+                className="px-3 py-1.5 rounded-lg border border-slate-200 text-sm text-slate-600 bg-white"
+              >
+                <option value="">All confidence</option>
+                <option value="high">High</option>
+                <option value="medium">Medium</option>
+                <option value="low">Low (foreign)</option>
+              </select>
+            )}
             <select
               value={sortBy}
               onChange={e => { setSortBy(e.target.value); resetOffset(); }}
               className="px-3 py-1.5 rounded-lg border border-slate-200 text-sm text-slate-600 bg-white"
             >
               <option value="companies">Sort: Companies</option>
-              <option value="confidence">Sort: Confidence</option>
+              {isSuperAdmin && <option value="confidence">Sort: Confidence</option>}
               <option value="appearances">Sort: Appearances</option>
             </select>
           </div>
@@ -617,7 +627,7 @@ export function PeopleClient({
           ) : (
             <div className="space-y-2">
               {persons.map(entity => (
-                <PersonEntityCard key={entity.id} entity={entity} locale={locale} />
+                <PersonEntityCard key={entity.id} entity={entity} locale={locale} isSuperAdmin={isSuperAdmin} />
               ))}
             </div>
           )}
