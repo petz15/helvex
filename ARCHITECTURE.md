@@ -248,6 +248,7 @@ HTML routes (browser, in `main.py`):
 | POST | `/api/v1/jobs/enqueue/claude-classify` | Enqueue Claude classification |
 | POST | `/api/v1/jobs/enqueue/csv-export` | Enqueue unlimited async CSV export (max 1 active per user) |
 | GET  | `/api/v1/jobs/csv-export/status` | Latest export status + presigned S3 download URL for current user |
+| POST | `/api/v1/scoring/repair-is-current` | Enqueue `repair_is_current` job — recomputes `is_current` on all existing `sogc_person_appearances` in-place |
 
 #### Views — `app/api/routes/views.py`
 
@@ -743,6 +744,7 @@ The worker checks `cancel_requested` / `pause_requested` **between companies** (
 | `csv_export` | dashboard filter params | Unlimited paginated CSV written to S3 (`helvex-exports/{user_id}/export.csv`); stored 7 days | ✓ Per-user; max 1 active at a time |
 | `saved_view_alerts` | — | Sweep all orgs' alert-enabled saved views; email owner if new companies match since last check | ✓ One active per org; `ONE_PER_ORG` set |
 | `sogc_preprocess` | `mode`, `batch_size`, `uids` | Explode `sogc_pub` blobs into `sogc_publications` + `sogc_changes` rows; see §SOGC Preprocessing | — |
+| `repair_is_current` | `batch_size` | Recompute `is_current` flag for all existing `sogc_person_appearances` rows; fixes historical data before the temporal-ordering bug was corrected | — |
 
 #### Org-scoped job execution
 
@@ -2113,21 +2115,86 @@ SHAB daily → preprocess_company_sogc_pub() → extract_persons_for_publication
 2. `extract_sogc_persons` (mode=all) — rebuild appearances + entities
 3. `resolve_bisher_links` — merge name-change entities via hard links
 
+### Known bugs fixed (May 2026)
+
+**Bug 1 — Auditors appearing in the people list:**
+The SOGC preprocessor creates a mirrored `person_added` row for each auditor entry found within a person section of a publication. The extractor was processing this mirror row, creating bogus `SogcPersonEntity` rows for auditor firms (e.g. "PricewaterhouseCoopers AG").
+
+Fix: Added `_AUDITOR_EXCERPT_RE` in `sogc_person_extractor.py` — a multilingual regex matching Revisionsstelle/organe de révision/ufficio di revisione patterns. Applied as a `continue` guard before `_parse_person` in both extraction paths (`extract_persons_for_publication` and `run_extract_sogc_persons_batch`). Matching excerpts are skipped entirely on the person path (they are already handled by the auditor extractor).
+
+**Bug 2 — Both `is_current = True` for same person at same company:**
+`_parse_person()` naively set `is_current = True` for any non-`person_removed` change, regardless of temporal ordering. Two `person_added` rows for the same entity at the same company (years apart) both ended up with `is_current = True`.
+
+Fix: Added `_recompute_is_current_for_entities(db, entity_ids)` in `sogc_person_extractor.py`. Groups appearances by `(entity_id, company_uid)`, sorts by `pub_date` descending, then: sets `is_current = False` for any `person_removed` top row, `is_current = True` for the first non-removed row, `is_current = False` for all older rows. Called after every batch in both extraction functions and also after entity merges in `run_resolve_bisher_links` (`sogc_entity_resolver.py`).
+
+**Existing data repair:** `run_repair_is_current(db, batch_size=2000)` in `sogc_person_extractor.py` iterates all non-merged entity IDs in batches and calls `_recompute_is_current_for_entities`. Exposed as the `repair_is_current` job type via `POST /api/v1/scoring/repair-is-current`. Run once after deploying the fix.
+
+### Person Network API
+
+`GET /api/v1/sogc/persons/{entity_id}/network?include_past=true&co_director_limit=8`
+
+Returns a 1-hop ego-graph for a person entity. No graph DB required — implemented with 2 SQL joins on existing tables.
+
+**Response schema (`PersonNetworkOut`):**
+```
+entity: PersonEntityOut          # full entity record
+mandates: MandateItem[]          # one per company
+  company_uid, company_id, company_name
+  role, role_category, signature_type
+  date_from, date_to (YYYY-MM-DD | null if current)
+  is_current
+  co_directors: CoDirectorOut[]  # up to co_director_limit per company
+    entity_id, lastname, firstname
+    role, role_category, is_current, active_company_count
+```
+
+**Logic:**
+1. Load all `sogc_person_appearances` for the entity (filtered by `include_past`); group by `company_uid` to produce one mandate with `date_from` (earliest pub), `date_to` (latest non-current pub), `is_current` (any current appearance).
+2. Batch-fetch `company_id`/`company_name` from `companies` table.
+3. For each company, fetch co-directors: join `sogc_person_appearances` → `sogc_person_entities` filtered to same company, excluding the central entity. Aggregate `active_company_count` per co-director.
+
 ### Jobs
 
 | Job type | Endpoint | Worker | Description |
 |---|---|---|---|
 | `extract_sogc_persons` | `POST /api/v1/scoring/extract-sogc-persons` | api-worker | Parse sogc_changes → appearances + entities. Params: `mode` (missing\|all), `batch_size` |
 | `resolve_bisher_links` | `POST /api/v1/scoring/resolve-bisher-links` | api-worker | Merge entities linked by bisher annotations (name changes). Params: `batch_size`. Run after extract_sogc_persons. |
+| `repair_is_current` | `POST /api/v1/scoring/repair-is-current` | api-worker | Recompute `is_current` on all existing `sogc_person_appearances` in-place. One-time fix for historical data. |
+
+### People page frontend (`people-client.tsx`)
+
+The People page (`/app/people`) has been fully rewritten to add inline detail panels.
+
+**Selection model:** Clicking anywhere on a `PersonEntityCard` or `AuditorCard` toggles selection (one person or auditor at a time). The detail panel renders inline below the selected card; clicking again deselects.
+
+**Person detail panel** — `PersonDetailPanel` component. Opens inline, fetches `PersonNetworkData` via SWR keyed on `person-network-{id}-{includePast}`. Contains:
+
+| View | Component | Description |
+|---|---|---|
+| Timeline (default) | `TenureTimeline` | Gantt chart: one row per company mandate. CSS grid layout (`192px` label + `1fr` bar track). Year axis with tick marks. Bars coloured by `role_category` (director=#dc2626, officer=#2563eb, other=#d97706). Muted opacity for past. Departure end-marker line. Dashed "now" line. Company name is a Link to `/app/companies/{id}`. |
+| Network | `NetworkGraph` | Pure SVG (viewBox `0 0 820 560`, no D3). Person at centre (dark circle). Company mandates as rect nodes arranged radially at R=195. Co-director circles (radius ∝ `active_company_count`, clamped 8–18 px) clustered near their company at R=85. Solid edges for current, dashed for past. Red badge on co-directors with `active_company_count > 1`. Legend box top-left, stats box top-right. |
+
+Controls: "Past mandates" checkbox (rekeys SWR), segmented Timeline | Network toggle, close button.
+
+**Auditor detail panel** — `AuditorDetailPanel` / `AuditorClientsTimeline`. Simplified Gantt only: one bar per client company at the `pub_date` point (1-month width), coloured by `is_current`. No network view for auditors.
+
+**Gantt math:**
+- `minYear` = floor of earliest `date_from` across all mandates
+- `maxDecimal` = `dateToDecimal(today) + 0.4`
+- `pos(dateStr) = clamp(((year + month/12 - minYear) / span) * 100, 0, 100)`
+- Co-director radial layout: `angle_i = (i/N) × 2π − π/2`, `cx = 410 + 195×cos(angle)`, co-director offset `coAngle = angle + (j − (K−1)/2) × 0.35`, `coX = cx + 85×cos(coAngle)`
 
 ### Key files
 
 | File | Purpose |
 |---|---|
-| `app/services/sogc_person_extractor.py` | Regex-based DE/FR/IT parser, bisher field parsing, entity upsert, confidence recomputation, batch job |
-| `app/services/sogc_entity_resolver.py` | Bisher-first entity resolution: union-find, bisher match lookup, entity merge |
+| `app/services/sogc_person_extractor.py` | Regex-based DE/FR/IT parser, bisher field parsing, entity upsert, confidence recomputation, batch job; `_AUDITOR_EXCERPT_RE` auditor skip guard; `_recompute_is_current_for_entities`; `run_repair_is_current` |
+| `app/services/sogc_entity_resolver.py` | Bisher-first entity resolution: union-find, bisher match lookup, entity merge; calls `_recompute_is_current_for_entities` after merges |
 | `app/services/job_handlers/sogc_persons.py` | Job handler for extract_sogc_persons |
 | `app/services/job_handlers/sogc_entity_resolution.py` | Job handler for resolve_bisher_links |
-| `app/api/routes/persons.py` | Person/auditor search, company-scoped endpoints, flag reporting |
+| `app/services/job_handlers/sogc_repair.py` | Job handler for repair_is_current |
+| `app/api/routes/persons.py` | Person/auditor search, company-scoped endpoints, flag reporting; `GET /sogc/persons/{id}/network` ego-graph endpoint |
+| `frontend/src/lib/types.ts` | `CoDirector`, `MandateItem`, `PersonNetworkData` types |
+| `frontend/src/lib/api.ts` | `fetchPersonNetwork(entityId, params?)` |
 | `frontend/src/components/board-panel.tsx` | Company detail "Board & Officers" panel |
-| `frontend/src/app/[locale]/app/people/` | People search page (Persons + Auditors tabs) |
+| `frontend/src/app/[locale]/app/people/` | People search page: `PersonEntityCard`, `AuditorCard`, `PersonDetailPanel` (Timeline + Network), `AuditorDetailPanel`, `TenureTimeline`, `NetworkGraph`, `AuditorClientsTimeline` |

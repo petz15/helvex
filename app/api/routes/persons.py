@@ -418,6 +418,182 @@ def get_person_appearances(
     ]
 
 
+class CoDirectorOut(BaseModel):
+    entity_id: int
+    lastname: str | None
+    firstname: str | None
+    role: str | None
+    role_category: str | None
+    is_current: bool | None
+    active_company_count: int
+
+
+class MandateItem(BaseModel):
+    company_uid: str
+    company_id: int | None
+    company_name: str | None
+    role: str | None
+    role_category: str | None
+    signature_type: str | None
+    date_from: str | None
+    date_to: str | None
+    is_current: bool | None
+    co_directors: list[CoDirectorOut]
+
+
+class PersonNetworkOut(BaseModel):
+    entity: PersonEntityOut
+    mandates: list[MandateItem]
+
+
+@router.get("/sogc/persons/{entity_id}/network", response_model=PersonNetworkOut)
+def get_person_network(
+    entity_id: int,
+    include_past: bool = Query(True, description="Include past (non-current) mandates"),
+    co_director_limit: int = Query(8, ge=1, le=30),
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+):
+    """Return ego-network data for one person: their company mandates and
+    co-directors at each company.  Used by the timeline and network graph views."""
+    from app.models.sogc_person_entity import SogcPersonEntity
+    from app.models.sogc_person_appearance import SogcPersonAppearance
+    from app.models.company import Company as CompanyModel
+    from sqlalchemy import func, or_
+
+    entity = db.get(SogcPersonEntity, entity_id)
+    if not entity:
+        raise HTTPException(status_code=404, detail="Person entity not found")
+    if entity.merged_into_id:
+        canonical = db.get(SogcPersonEntity, entity.merged_into_id)
+        if canonical:
+            entity = canonical
+
+    # --- Step 1: load all appearances for this entity ---------------------------
+    app_qry = db.query(SogcPersonAppearance).filter(
+        or_(
+            SogcPersonAppearance.person_entity_id == entity.id,
+            SogcPersonAppearance.entity_override_id == entity.id,
+        )
+    )
+    all_appearances = app_qry.order_by(SogcPersonAppearance.pub_date.asc()).all()
+
+    # Group by company_uid: track date_from, date_to, latest role/sig/is_current
+    from collections import defaultdict
+    company_data: dict[str, dict] = defaultdict(lambda: {
+        "date_from": None, "date_to": None,
+        "role": None, "role_category": None,
+        "signature_type": None, "is_current": None,
+    })
+    for a in all_appearances:
+        if not a.company_uid:
+            continue
+        d = company_data[a.company_uid]
+        if d["date_from"] is None or (a.pub_date and a.pub_date < d["date_from"]):
+            d["date_from"] = a.pub_date
+        if a.change_type == "person_removed":
+            if d["date_to"] is None or (a.pub_date and a.pub_date > d["date_to"]):
+                d["date_to"] = a.pub_date
+        if a.pub_date and (d.get("_latest") is None or a.pub_date >= d["_latest"]):
+            d["_latest"] = a.pub_date
+            d["role"] = a.role
+            d["role_category"] = a.role_category
+            d["signature_type"] = a.signature_type
+            d["is_current"] = a.is_current
+
+    if not include_past:
+        company_data = {uid: d for uid, d in company_data.items() if d["is_current"]}
+
+    company_uids = list(company_data.keys())
+
+    # --- Step 2: batch-fetch company names/ids ----------------------------------
+    company_lookup: dict[str, tuple[int | None, str | None]] = {}
+    if company_uids:
+        for uid, cid, cname in (
+            db.query(CompanyModel.uid, CompanyModel.id, CompanyModel.name)
+            .filter(CompanyModel.uid.in_(company_uids))
+            .all()
+        ):
+            company_lookup[uid] = (cid, cname)
+
+    # --- Step 3: co-directors at those companies --------------------------------
+    co_dir_rows: list[tuple] = []
+    if company_uids:
+        co_dir_rows = (
+            db.query(
+                SogcPersonAppearance.company_uid,
+                SogcPersonAppearance.person_entity_id,
+                SogcPersonEntity.lastname,
+                SogcPersonEntity.firstname,
+                SogcPersonAppearance.role,
+                SogcPersonAppearance.role_category,
+                SogcPersonAppearance.is_current,
+                SogcPersonEntity.active_company_count,
+            )
+            .join(SogcPersonEntity, SogcPersonAppearance.person_entity_id == SogcPersonEntity.id)
+            .filter(
+                SogcPersonAppearance.company_uid.in_(company_uids),
+                SogcPersonAppearance.person_entity_id != entity.id,
+                SogcPersonEntity.merged_into_id.is_(None),
+                SogcPersonAppearance.is_current.isnot(False),
+            )
+            .order_by(SogcPersonEntity.active_company_count.desc())
+            .limit(co_director_limit * len(company_uids))
+            .all()
+        )
+
+    # Group co-directors by company, capped at co_director_limit per company
+    co_dirs_by_company: dict[str, list[CoDirectorOut]] = defaultdict(list)
+    seen_per_company: dict[str, set] = defaultdict(set)
+    for row in co_dir_rows:
+        uid, eid, ln, fn, role, rc, ic, acc = row
+        if eid in seen_per_company[uid]:
+            continue
+        if len(co_dirs_by_company[uid]) >= co_director_limit:
+            continue
+        seen_per_company[uid].add(eid)
+        co_dirs_by_company[uid].append(CoDirectorOut(
+            entity_id=eid,
+            lastname=ln,
+            firstname=fn,
+            role=role,
+            role_category=rc,
+            is_current=ic,
+            active_company_count=acc or 0,
+        ))
+
+    # --- Build output -----------------------------------------------------------
+    live_active_count = (
+        db.query(func.count(SogcPersonAppearance.id))
+        .filter(
+            SogcPersonAppearance.person_entity_id == entity.id,
+            SogcPersonAppearance.is_current.is_(True),
+        )
+        .scalar() or 0
+    )
+
+    mandates = []
+    for uid, d in sorted(company_data.items(), key=lambda x: x[1].get("date_from") or ""):
+        cid, cname = company_lookup.get(uid, (None, None))
+        mandates.append(MandateItem(
+            company_uid=uid,
+            company_id=cid,
+            company_name=cname,
+            role=d["role"],
+            role_category=d["role_category"],
+            signature_type=d["signature_type"],
+            date_from=d["date_from"],
+            date_to=d["date_to"],
+            is_current=d["is_current"],
+            co_directors=co_dirs_by_company.get(uid, []),
+        ))
+
+    return PersonNetworkOut(
+        entity=PersonEntityOut.from_orm(entity, active_company_count=live_active_count),
+        mandates=mandates,
+    )
+
+
 @router.post(
     "/sogc/persons/{entity_id}/flag",
     response_model=PersonFlagOut,

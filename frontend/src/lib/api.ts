@@ -1964,6 +1964,18 @@ export async function fetchPersonEntity(entityId: number): Promise<SogcPersonEnt
   return res.json();
 }
 
+export async function fetchPersonNetwork(
+  entityId: number,
+  params?: { include_past?: boolean; co_director_limit?: number },
+): Promise<import("./types").PersonNetworkData> {
+  const qs = new URLSearchParams();
+  if (params?.include_past !== undefined) qs.set("include_past", String(params.include_past));
+  if (params?.co_director_limit !== undefined) qs.set("co_director_limit", String(params.co_director_limit));
+  const res = await fetch(`/api/v1/sogc/persons/${entityId}/network?${qs}`, { credentials: "include" });
+  if (!res.ok) return _handleErrorResponse(res);
+  return res.json();
+}
+
 export async function fetchPersonAppearances(entityId: number, is_current?: boolean): Promise<SogcPersonAppearance[]> {
   const qs = is_current !== undefined ? `?is_current=${is_current}` : "";
   const res = await fetch(`/api/v1/sogc/persons/${entityId}/appearances${qs}`, { credentials: "include" });

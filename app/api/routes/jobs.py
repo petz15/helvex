@@ -1125,6 +1125,32 @@ def trigger_resolve_bisher_links(
     return JobOut.from_orm_obj(job)
 
 
+@router.post(
+    "/scoring/repair-is-current",
+    response_model=JobOut,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+def trigger_repair_is_current(
+    request: Request,
+    db: Session = Depends(get_db),
+    _: User = Depends(require_superadmin),
+):
+    """Fix is_current flags on existing sogc_person_appearances in-place.
+
+    Corrects rows where multiple non-removed appearances for the same person
+    at the same company were all marked is_current=True.  Only the most recent
+    one per (entity, company) group is set True; all earlier ones become False.
+    """
+    job = _enqueue_or_http_error(
+        request,
+        job_type="repair_is_current",
+        label="Repair SOGC is_current flags",
+        params={},
+        db=db,
+    )
+    return JobOut.from_orm_obj(job)
+
+
 @router.get("/cantons")
 def list_cantons():
     return {"cantons": SWISS_CANTONS}

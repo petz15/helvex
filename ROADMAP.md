@@ -120,6 +120,7 @@
 - [ ] **Introduction to new users** - currently new users just get thrown into explore without any guide
 - [ ] **Improve Explore** - somehow explore page got worse with the last change. maybe I need to change the ML part first, check via a dashboard/overview (and implement that) then move on to explore. 
 - [ ] **Noga Classification** - Too difficult via purpose keywords, keeps finding wrong categories. should use AI to do so (if not human supervision)
+- [ ] **Brand ranking** (merci Tim G.) - add a brand ranking possibly via llm ranking (their information i.e. ranking). possibly for specific products or general
 
 
 ## Company Data
@@ -133,7 +134,7 @@
 - [ ] **Flex Rescore** - Needs to be implemented differently. Should be 1x rescore or maybe 2x rescore per month for all available companies. then like 1000 credits per rescore. Depends how much actual computation power it needs
 - [ ] **Multiple scores** - allow for different set of scores in case users are looking for different types of companies. e.g. for a specific campaign or promotion etc
 - [ ] **Fix Multilang issue** - Need to decide if I have one language as base (such as english), convert everything to english for stuff like categorization etc then go and translate back i.e. use the original language again? other method would be to do it per language and then add a filter for languges with optional translations for other langugages. 
-- [ ] **Data from eSHAB** - has much mor than just changes in companies
+- [ ] **Data from eSHAB** - has much mor than just changes in companies and pre 2018
 
 
 

@@ -333,6 +333,34 @@ export interface SogcAuditor {
   created_at: string;
 }
 
+export interface CoDirector {
+  entity_id: number;
+  lastname: string | null;
+  firstname: string | null;
+  role: string | null;
+  role_category: string | null;
+  is_current: boolean | null;
+  active_company_count: number;
+}
+
+export interface MandateItem {
+  company_uid: string;
+  company_id: number | null;
+  company_name: string | null;
+  role: string | null;
+  role_category: string | null;
+  signature_type: string | null;
+  date_from: string | null;
+  date_to: string | null;
+  is_current: boolean | null;
+  co_directors: CoDirector[];
+}
+
+export interface PersonNetworkData {
+  entity: SogcPersonEntity;
+  mandates: MandateItem[];
+}
+
 export interface GlobalCompanySnippet {
   id: number;
   uid: string;

@@ -76,6 +76,21 @@ _ROLE_OFFICER_KEYWORDS = {
     "direttore", "direttrice", "gerente",
 }
 
+# Auditor/revision-body keywords — an excerpt matching this is a legal entity
+# (auditor firm), not a natural person.  Such excerpts appear under person_added/
+# person_changed sections because the preprocessor mirrors them as auditor_change
+# rows; the original person-typed row must be skipped during person extraction.
+_AUDITOR_EXCERPT_RE = re.compile(
+    r"revisionsstelle"
+    r"|organe\s+de\s+r[eé]vision"
+    r"|organe\s+de\s+contr[oô]le"
+    r"|soci[eé]t[eé]\s+de\s+r[eé]vision"
+    r"|ufficio\s+di\s+revisione"
+    r"|organo\s+di\s+revisione"
+    r"|societ[aà]\s+di\s+revisione",
+    re.I,
+)
+
 # Parts that signal start of non-name fields
 _NON_NAME_PREFIXES = re.compile(
     r"^(von|de|di|in|[àa]|mit|avec|con|staatsangehörig|ressortissant|cittadin|"
@@ -467,6 +482,44 @@ def _update_entity_counts(db: Session, entity_ids: set[int]) -> None:
     db.flush()
 
 
+def _recompute_is_current_for_entities(db: Session, entity_ids: set[int]) -> None:
+    """Correct is_current by temporal ordering within each (entity, company) group.
+
+    A per-row is_current=True set at parse time is wrong when multiple
+    non-removed appearances exist for the same person at the same company
+    (e.g. two person_changed entries years apart).  This corrects that:
+    within each group the most recent non-removed appearance is True;
+    all earlier ones, and all person_removed rows, are False.
+    """
+    from app.models.sogc_person_appearance import SogcPersonAppearance
+
+    for eid in entity_ids:
+        appearances = (
+            db.query(SogcPersonAppearance)
+            .filter_by(person_entity_id=eid)
+            .all()
+        )
+
+        by_company: dict[str | None, list] = {}
+        for a in appearances:
+            by_company.setdefault(a.company_uid, []).append(a)
+
+        for company_appearances in by_company.values():
+            # ISO date strings (YYYY-MM-DD) sort correctly as strings.
+            company_appearances.sort(key=lambda a: a.pub_date or "", reverse=True)
+            current_set = False
+            for a in company_appearances:
+                if a.change_type == "person_removed":
+                    a.is_current = False
+                elif not current_set:
+                    a.is_current = True
+                    current_set = True
+                else:
+                    a.is_current = False
+
+    db.flush()
+
+
 # ── Per-publication incremental extraction ────────────────────────────────────
 
 def extract_persons_for_publication(db: Session, publication) -> dict:
@@ -507,6 +560,10 @@ def extract_persons_for_publication(db: Session, publication) -> dict:
 
         try:
             if change.change_type in PERSON_TYPES:
+                # Skip auditor entries that were mirrored into a person section
+                # by the preprocessor — they belong in sogc_auditors, not here.
+                if _AUDITOR_EXCERPT_RE.search(change.raw_excerpt):
+                    continue
                 fields = _parse_person(change.raw_excerpt, change.change_type)
                 if fields is None:
                     continue
@@ -557,6 +614,7 @@ def extract_persons_for_publication(db: Session, publication) -> dict:
 
     if touched_entity_ids:
         _update_entity_counts(db, touched_entity_ids)
+        _recompute_is_current_for_entities(db, touched_entity_ids)
         for eid in touched_entity_ids:
             _recompute_entity_confidence(db, eid)
 
@@ -657,6 +715,8 @@ def run_extract_sogc_persons_batch(
                     db.query(SA).filter_by(sogc_change_id=change.id).delete()
 
                 if change.change_type in PERSON_TYPES:
+                    if _AUDITOR_EXCERPT_RE.search(change.raw_excerpt):
+                        continue
                     fields = _parse_person(change.raw_excerpt, change.change_type)
                     if fields is None:
                         stats["skipped_no_excerpt"] += 1
@@ -715,6 +775,7 @@ def run_extract_sogc_persons_batch(
         # Update entity counts for this batch
         if touched_entity_ids:
             _update_entity_counts(db, touched_entity_ids)
+            _recompute_is_current_for_entities(db, touched_entity_ids)
             for eid in touched_entity_ids:
                 _recompute_entity_confidence(db, eid)
 
@@ -724,5 +785,77 @@ def run_extract_sogc_persons_batch(
 
         if progress_cb:
             progress_cb(done, total, stats)
+
+    return stats
+
+
+# ── Standalone is_current repair ──────────────────────────────────────────────
+
+def run_repair_is_current(
+    db: Session,
+    *,
+    batch_size: int = 2000,
+    progress_cb: Callable | None = None,
+    status_cb: Callable | None = None,
+    abort_cb: Callable | None = None,
+) -> dict:
+    """Fix is_current for all existing sogc_person_appearances in-place.
+
+    Iterates all entity IDs in batches and applies temporal-ordering logic
+    within each (entity, company) group without re-extracting excerpts.
+    Safe to run multiple times.
+    """
+    from app.models.sogc_person_entity import SogcPersonEntity
+
+    stats: dict = {"entities_processed": 0, "errors": []}
+
+    entity_ids_q = (
+        db.query(SogcPersonEntity.id)
+        .filter(SogcPersonEntity.merged_into_id.is_(None))
+        .order_by(SogcPersonEntity.id.asc())
+    )
+    total = entity_ids_q.count()
+
+    if status_cb:
+        status_cb(f"Repairing is_current: {total} entities to process")
+
+    last_id = 0
+    done = 0
+
+    while True:
+        if abort_cb:
+            abort_cb()
+
+        batch_ids = [
+            eid
+            for (eid,) in entity_ids_q.filter(SogcPersonEntity.id > last_id)
+            .limit(batch_size)
+            .all()
+        ]
+        if not batch_ids:
+            break
+
+        try:
+            _recompute_is_current_for_entities(db, set(batch_ids))
+            db.commit()
+        except Exception as exc:
+            stats["errors"].append(f"batch starting id={batch_ids[0]}: {type(exc).__name__}: {exc}")
+            try:
+                db.rollback()
+            except Exception:
+                pass
+
+        stats["entities_processed"] += len(batch_ids)
+        last_id = batch_ids[-1]
+        done += len(batch_ids)
+
+        if progress_cb:
+            progress_cb(done, total, stats)
+
+    if status_cb:
+        status_cb(
+            f"is_current repair done — {stats['entities_processed']} entities, "
+            f"{len(stats['errors'])} errors"
+        )
 
     return stats

@@ -88,6 +88,7 @@ from app.services.job_handlers import (  # noqa: E402
     sogc_entity_resolution,
     sogc_persons,
     sogc_preprocess,
+    sogc_repair,
     stopwords,
     zefix_jobs,
 )
@@ -126,6 +127,7 @@ JOB_HANDLERS: dict[str, Callable[[JobContext], tuple[dict, str]]] = {
     "sogc_preprocess":           sogc_preprocess.handle_sogc_preprocess,
     "extract_sogc_persons":      sogc_persons.handle_extract_sogc_persons,
     "resolve_bisher_links":      sogc_entity_resolution.handle_resolve_bisher_links,
+    "repair_is_current":         sogc_repair.handle_repair_is_current,
     # CSV export
     "csv_export":                export.handle_csv_export,
     # Billing

@@ -294,9 +294,16 @@ def run_resolve_bisher_links(
 
     db.flush()
 
-    # ── Step 4: Recompute counts + confidence on canonical entities ────────────
+    # ── Step 4: Recompute counts, is_current, and confidence on canonical entities
     if status_cb:
         status_cb(f"Recomputing counts for {len(touched_canonical)} entities…")
+
+    if touched_canonical:
+        from app.services.sogc_person_extractor import _recompute_is_current_for_entities
+        try:
+            _recompute_is_current_for_entities(db, touched_canonical)
+        except Exception as exc:
+            stats["errors"].append(f"recompute is_current: {type(exc).__name__}: {exc}")
 
     for eid in touched_canonical:
         try:
