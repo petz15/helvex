@@ -3,7 +3,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import useSWR from "swr";
 import { cn } from "@/lib/utils";
-import { Search, Compass, Map, Cog, Database, Activity, UserCircle, Shield, CreditCard, Menu, X, Tag, Globe, ChevronDown, Building2, Users, Newspaper, Network } from "lucide-react";
+import { Search, Compass, Map, Cog, Database, Activity, UserCircle, Shield, CreditCard, Menu, X, Tag, Globe, ChevronDown, Building2, Users, Newspaper, Network, ListTree } from "lucide-react";
 import { GlobalSearchTrigger } from "@/components/global-search";
 import { fetchCurrentUser } from "@/lib/api";
 import { HelvexMark } from "@/components/helvex-logo";
@@ -64,6 +64,7 @@ export function NavBar() {
   const NAV_MAIN = [
     { href: `/${locale}/app/search`, label: "Companies", icon: Search },
     { href: `/${locale}/app/explorer`, label: t.explorer, icon: Compass },
+    { href: `/${locale}/app/noga`, label: t.noga, icon: ListTree },
     { href: `/${locale}/app/map`, label: t.map, icon: Map },
     { href: `/${locale}/app/people`, label: "People", icon: Users },
     { href: `/${locale}/app/corporate`, label: "Corporate", icon: Network },

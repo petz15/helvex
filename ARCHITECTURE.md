@@ -2062,7 +2062,22 @@ Returns NOGA section statistics for the Explorer MarketMap component. Response:
 | `SubSegmentStrip` | Division chips from `noga-hierarchy` endpoint; appears when section selected |
 | `FilterSidebar` | Collapsible left panel: score range, canton, language chips, legal form, review/contact status, cluster autocomplete, keyword autocomplete, date range |
 | `ScoringWizard` | 4-step modal: Clusters (autocomplete), Keywords (autocomplete), NOGA targets, Save |
-| `ExplorerPage` | Semantic search header + stats strip + MarketMap + FilterSidebar/CompanyPanel split |
+| `ExplorerPage` | Semantic search header + stats strip + MarketMap + FilterSidebar/CompanyPanel split. Reads optional `?noga_code=<code>` URL param to pre-set the NOGA filter on mount (used by NOGA browser page). |
+
+### NOGA Browser Page (frontend)
+
+`frontend/src/app/[locale]/app/noga/noga-client.tsx` — full-hierarchy NOGA taxonomy browser.
+
+- Fetches `GET /api/v1/companies/noga-hierarchy` (same cached endpoint used by Explorer).
+- Renders 19 L1 sections as expandable rows with colour-coded letter badges (A–S).  
+  Clicking expands to show L2 divisions → L3 groups → L4 classes → L5 types, each indented with connecting lines.
+- Company count shown on every node (aggregated from descendants).
+- Locale-aware labels: backend now returns `labels: {de, fr, it, en}` alongside the default `label` (de); frontend picks the right language via `getLabel(node, locale)`.
+- Search bar filters the tree in real time (matches code prefix or translated label).
+- "Browse" / arrow button on any node navigates to `/app/explorer?noga_code=<code>`.
+- Nav entry: `ListTree` icon, label `t.nav.noga`, route `/[locale]/app/noga`.
+
+**Backend change:** `app/crud/company.py` `get_noga_hierarchy()` now includes a `labels` dict (`{de, fr, it, en}`) in each node alongside the existing `label` (German default). Backward-compatible — old cache entries fall back to `label`.
 
 Removed: 3-layer CategoryGrid → CategoryDetail → BrowseView navigation, business model filter, static cluster list in ScoringWizard, scoring weight step.
 

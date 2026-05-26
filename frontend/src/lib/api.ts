@@ -607,6 +607,7 @@ export async function enqueueGenericJob(
 export interface NogaNode {
   code: string;
   label: string;
+  labels?: Record<string, string>;
   level: string;
   own_count: number;
   count: number;

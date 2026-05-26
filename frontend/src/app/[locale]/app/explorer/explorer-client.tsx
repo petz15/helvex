@@ -659,11 +659,18 @@ interface ExplorerPageProps {
 }
 
 function ExplorerPage({ initialCantons, initialStats, locale }: ExplorerPageProps) {
+  const searchParams = useSearchParams();
+  const urlNogaCode = searchParams?.get("noga_code") ?? null;
+
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [wizardOpen, setWizardOpen] = useState(false);
   const [selectedCompany, setSelectedCompany] = useState<Company | null>(null);
-  const [activeSection, setActiveSection] = useState<string | null>(null);
-  const [activeDivision, setActiveDivision] = useState<string | null>(null);
+  const [activeSection, setActiveSection] = useState<string | null>(
+    urlNogaCode && /^[A-Za-z]$/.test(urlNogaCode) ? urlNogaCode.toUpperCase() : null
+  );
+  const [activeDivision, setActiveDivision] = useState<string | null>(
+    urlNogaCode && !/^[A-Za-z]$/.test(urlNogaCode) ? urlNogaCode : null
+  );
   const [semanticQuery, setSemanticQuery] = useState("");
   const [semanticResults, setSemanticResults] = useState<SemanticSearchResponse | null>(null);
   const [semanticLoading, setSemanticLoading] = useState(false);

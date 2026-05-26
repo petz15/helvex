@@ -739,14 +739,21 @@ def get_noga_hierarchy(db: Session, org_id: int | None = None) -> list[dict]:
             count = code_counts.get(code_str, 0)
             name = node.get("name", {})
             label = ""
+            labels_dict: dict[str, str] = {}
             if isinstance(name, dict):
-                label = name.get("de") or name.get("fr") or name.get("it") or name.get("en") or ""
+                for _lang in ("de", "fr", "it", "en"):
+                    _v = name.get(_lang)
+                    if isinstance(_v, str) and _v.strip():
+                        labels_dict[_lang] = _v.strip()
+                label = labels_dict.get("de") or labels_dict.get("fr") or labels_dict.get("it") or labels_dict.get("en") or ""
             elif isinstance(name, str):
                 label = name
+                labels_dict = {"de": name}
             level = node.get("level", "")
             nodes[code_str] = {
                 "code": code_str,
                 "label": label,
+                "labels": labels_dict,
                 "level": level,
                 "own_count": count,
                 "count": count,
