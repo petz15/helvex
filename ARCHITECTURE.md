@@ -2083,6 +2083,7 @@ Extracts structured person and auditor data from `sogc_changes` raw excerpts int
 | `sogc_person_entities` | Canonical person node — one row per distinct natural person (identified by `normalized_key = lastname\|firstname\|hometown`) |
 | `sogc_person_appearances` | Appearance edge — one row per SOGC change event (person_added/removed/changed). Links entity → company. |
 | `sogc_auditors` | Legal entity auditors — structurally separate from natural persons (has UID, legal form, location) |
+| `sogc_corporate_roles` | Corporate entities (companies) appearing as shareholders/officers — detected via CHE number in non-auditor person excerpts; model: `app/models/sogc_corporate_role.py` |
 | `sogc_person_flags` | User-reported identity issues (`should_merge` / `should_split`) for manual disambiguation |
 
 ### Identity model
@@ -2106,7 +2107,8 @@ SOGC Preprocess  →  extract_sogc_persons (mode=all)  →  resolve_bisher_links
        │            (lastname|firstname|hometown)          differ only by name change
        ▼
 SHAB daily → preprocess_company_sogc_pub() → extract_persons_for_publication()
-                                                  ├── person_added/removed/changed → sogc_person_appearances
+                                                  ├── person_added/removed/changed (no CHE) → sogc_person_appearances
+                                                  ├── person_added/removed/changed (CHE present, not auditor) → sogc_corporate_roles
                                                   └── auditor_change              → sogc_auditors
 ```
 

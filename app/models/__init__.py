@@ -24,6 +24,7 @@ from app.models.organization import Organization
 from app.models.payment_transaction import PaymentTransaction
 from app.models.sogc_auditor import SogcAuditor
 from app.models.sogc_change import SogcChange
+from app.models.sogc_corporate_role import SogcCorporateRole
 from app.models.sogc_person_appearance import SogcPersonAppearance
 from app.models.sogc_person_entity import SogcPersonEntity
 from app.models.sogc_person_flag import SogcPersonFlag
@@ -42,7 +43,7 @@ __all__ = [
     "JobRun", "JobRunEvent", "Note", "OAuthAccount", "OrgCompanyState",
     "OrgCreditTransaction", "OrgMember", "OrgPaymentMethod", "OrgSetting",
     "Organization", "PaymentTransaction",
-    "SogcAuditor", "SogcChange", "SogcPersonAppearance", "SogcPersonEntity",
+    "SogcAuditor", "SogcChange", "SogcCorporateRole", "SogcPersonAppearance", "SogcPersonEntity",
     "SogcPersonFlag", "SogcPublication",
     "TfidfStopword", "User", "UserCompanyState", "UserOrgSetting", "UserView",
 ]

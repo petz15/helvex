@@ -304,6 +304,7 @@ export interface SogcPersonAppearance {
   company_name: string | null;
   pub_date: string | null;
   change_type: string;
+  change_subtype: string | null;
   role: string | null;
   role_category: "director" | "officer" | "other" | null;
   signature_type: string | null;
@@ -361,6 +362,28 @@ export interface PersonNetworkData {
   mandates: MandateItem[];
 }
 
+export interface SogcCorporateRole {
+  id: number;
+  sogc_change_id: number | null;
+  sogc_publication_id: number | null;
+  entity_name: string | null;
+  entity_name_normalized: string | null;
+  entity_che: string | null;
+  entity_location: string | null;
+  entity_legal_form: string | null;
+  company_uid: string | null;
+  company_id: number | null;
+  company_name: string | null;
+  role: string | null;
+  role_details: string | null;
+  raw_excerpt: string | null;
+  pub_date: string | null;
+  change_type: string | null;
+  change_subtype: string | null;
+  is_current: boolean | null;
+  created_at: string;
+}
+
 export interface GlobalCompanySnippet {
   id: number;
   uid: string;
@@ -409,6 +432,7 @@ export interface SogcPersonFlag {
 export interface SogcChangeDetail {
   id: number;
   change_type: string;
+  change_subtype: string | null;
   keywords_matched: string | null;
   raw_excerpt: string | null;
 }

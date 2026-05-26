@@ -49,6 +49,15 @@ _SIGNATURE_IT_RE = re.compile(r"^con\s+.*(firma)", re.I)
 # Auditor UID
 _CHE_UID_RE = re.compile(r"CHE-\d{3}\.\d{3}\.\d{3}")
 
+# Capital / share-count patterns — presence alongside a [bisher:] clause signals a capital change
+_CAPITAL_CHANGE_RE = re.compile(
+    r"stammkapital|stammanteilen?\s+zu\s+je|stammanteile|aktienkapital"
+    r"|kapitalerhöhung|kapitalherabsetzung"
+    r"|parts?\s+sociales?|capital\s+social"
+    r"|azioni\s+nominative",
+    re.I,
+)
+
 _LEGAL_FORMS = {
     "aktiengesellschaft", "gesellschaft mit beschränkter haftung", "gmbh",
     "genossenschaft", "verein", "stiftung", "kollektivgesellschaft",
@@ -392,6 +401,138 @@ def _parse_auditor(raw_excerpt: str, change_type: str) -> dict | None:
     }
 
 
+# ── Corporate entity parsing ───────────────────────────────────────────────────
+
+def _parse_corporate(raw_excerpt: str, change_type: str) -> dict | None:
+    """Parse a corporate entity (company appearing as shareholder/officer) from raw_excerpt.
+
+    Formats observed:
+      "Entity Name (CHE-xxx.xxx.xxx), in Location, Role, role_details [bisher: ...]"
+      "Entity Name, in Location, CHE-xxx.xxx.xxx, Legal Form, Role"
+    """
+    if not raw_excerpt or len(raw_excerpt.strip()) < 4:
+        return None
+
+    che_m = _CHE_UID_RE.search(raw_excerpt)
+    if not che_m:
+        return None
+
+    entity_che = che_m.group(0)
+
+    # Strip bisher + SHAB refs for cleaner parsing
+    text = _BISHER_RE.sub("", raw_excerpt)
+    text = re.sub(r"\(SHAB[^)]+\)", "", text).strip().rstrip(".")
+    # Recalculate CHE position in cleaned text
+    che_m2 = _CHE_UID_RE.search(text)
+    if not che_m2:
+        return None
+
+    # Determine entity name: everything before the (CHE-...) or the CHE field
+    paren_start = text.rfind("(", 0, che_m2.start())
+    if paren_start != -1 and text[paren_start:che_m2.start()].strip() == "(":
+        # Format: "Entity Name (CHE-xxx.xxx.xxx), in Location, ..."
+        entity_name_raw = text[:paren_start].strip().rstrip(",").strip()
+        after_che = text[che_m2.end():].lstrip(")").strip().lstrip(",").strip()
+    else:
+        # Format: "Entity Name, in Location, CHE-xxx.xxx.xxx, ..."
+        before_che = text[:che_m2.start()].strip().rstrip(",")
+        entity_name_raw = before_che.split(",")[0].strip()
+        after_che = text[che_m2.end():].strip().lstrip(",").strip()
+
+    parts_after = [p.strip() for p in after_che.split(",") if p.strip()]
+
+    entity_location: str | None = None
+    entity_legal_form: str | None = None
+    role_parts: list[str] = []
+
+    for part in parts_after:
+        m_res = _RESIDENCE_DE_RE.match(part) or _RESIDENCE_FR_RE.match(part)
+        if m_res and not entity_location:
+            entity_location = m_res.group(1).strip()[:256]
+            continue
+        p_lower = part.lower()
+        p_upper = part.upper()
+        if p_lower in _LEGAL_FORMS or p_upper in {"AG", "SA", "SAGL", "SÀRL", "GMBH"}:
+            if not entity_legal_form:
+                entity_legal_form = part[:128]
+            continue
+        role_parts.append(part)
+
+    role: str | None = None
+    role_details: str | None = None
+    if role_parts:
+        role = role_parts[0][:512]
+        if len(role_parts) > 1:
+            role_details = ", ".join(role_parts[1:])[:1024]
+
+    is_current: bool | None
+    if change_type == "person_added":
+        is_current = True
+    elif change_type == "person_removed":
+        is_current = False
+    else:
+        is_current = None
+
+    return {
+        "entity_name": entity_name_raw[:512] if entity_name_raw else None,
+        "entity_name_normalized": _normalize(entity_name_raw)[:512] if entity_name_raw else None,
+        "entity_che": entity_che,
+        "entity_location": entity_location,
+        "entity_legal_form": entity_legal_form,
+        "role": role,
+        "role_details": role_details,
+        "is_current": is_current,
+    }
+
+
+# ── Change subtype detection ───────────────────────────────────────────────────
+
+def _person_change_subtype(fields: dict, change_type: str, raw_excerpt: str) -> str:
+    """Classify a natural-person appearance as one of:
+    new_appointment, resignation, role_change, capital_change, name_change,
+    address_change, other.
+    """
+    if change_type == "person_removed":
+        return "resignation"
+    # Capital change: share/capital keyword + bisher annotation
+    if _CAPITAL_CHANGE_RE.search(raw_excerpt) and (
+        _BISHER_RE.search(raw_excerpt)
+        or _ANCIENNEMENT_RE.search(raw_excerpt)
+        or _PRECEDEMMENT_RE.search(raw_excerpt)
+    ):
+        return "capital_change"
+    if change_type == "person_added":
+        return "new_appointment"
+    # person_changed
+    bisher_ln = fields.get("bisher_lastname")
+    cur_ln = fields.get("lastname")
+    if bisher_ln and cur_ln and bisher_ln.lower() != cur_ln.lower():
+        return "name_change"
+    if fields.get("bisher_residence_municipality") and not bisher_ln:
+        return "address_change"
+    if fields.get("bisher_role"):
+        return "role_change"
+    return "other"
+
+
+def _corporate_change_subtype(raw_excerpt: str, change_type: str) -> str:
+    """Classify a corporate-entity appearance."""
+    if change_type == "person_removed":
+        return "resignation"
+    has_bisher = bool(
+        _BISHER_RE.search(raw_excerpt)
+        or _ANCIENNEMENT_RE.search(raw_excerpt)
+        or _PRECEDEMMENT_RE.search(raw_excerpt)
+    )
+    if _CAPITAL_CHANGE_RE.search(raw_excerpt) and has_bisher:
+        return "capital_change"
+    if change_type == "person_added":
+        return "new_appointment"
+    if has_bisher:
+        return "role_change"
+    return "other"
+
+
 # ── Entity upsert ──────────────────────────────────────────────────────────────
 
 def _get_or_create_entity(db: Session, key: str, fields: dict):
@@ -532,6 +673,7 @@ def extract_persons_for_publication(db: Session, publication) -> dict:
     from app.models.sogc_change import SogcChange
     from app.models.sogc_person_appearance import SogcPersonAppearance
     from app.models.sogc_auditor import SogcAuditor
+    from app.models.sogc_corporate_role import SogcCorporateRole
 
     PERSON_TYPES = {"person_added", "person_removed", "person_changed"}
     AUDITOR_TYPE = "auditor_change"
@@ -540,6 +682,7 @@ def extract_persons_for_publication(db: Session, publication) -> dict:
     # sogc_changes are wiped, but we also delete explicitly for the publications mode)
     db.query(SogcPersonAppearance).filter_by(sogc_publication_id=publication.id).delete()
     db.query(SogcAuditor).filter_by(sogc_publication_id=publication.id).delete()
+    db.query(SogcCorporateRole).filter_by(sogc_publication_id=publication.id).delete()
 
     changes = (
         db.query(SogcChange)
@@ -552,6 +695,7 @@ def extract_persons_for_publication(db: Session, publication) -> dict:
 
     persons_written = 0
     auditors_written = 0
+    corporate_roles_written = 0
     touched_entity_ids: set[int] = set()
 
     for change in changes:
@@ -564,9 +708,30 @@ def extract_persons_for_publication(db: Session, publication) -> dict:
                 # by the preprocessor — they belong in sogc_auditors, not here.
                 if _AUDITOR_EXCERPT_RE.search(change.raw_excerpt):
                     continue
+                # Corporate entity: a company appearing as shareholder/officer (CHE number, not an auditor)
+                if _CHE_UID_RE.search(change.raw_excerpt):
+                    corp = _parse_corporate(change.raw_excerpt, change.change_type)
+                    if corp is not None:
+                        cst = _corporate_change_subtype(change.raw_excerpt, change.change_type)
+                        change.change_subtype = cst
+                        db.add(SogcCorporateRole(
+                            sogc_change_id=change.id,
+                            sogc_publication_id=publication.id,
+                            company_uid=publication.company_uid,
+                            company_name=None,
+                            pub_date=publication.pub_date,
+                            change_type=change.change_type,
+                            change_subtype=cst,
+                            raw_excerpt=change.raw_excerpt,
+                            **corp,
+                        ))
+                        corporate_roles_written += 1
+                    continue
                 fields = _parse_person(change.raw_excerpt, change.change_type)
                 if fields is None:
                     continue
+                pst = _person_change_subtype(fields, change.change_type, change.raw_excerpt)
+                change.change_subtype = pst
                 entity = _get_or_create_entity(db, fields["normalized_key"], fields)
                 touched_entity_ids.add(entity.id)
                 db.add(SogcPersonAppearance(
@@ -576,6 +741,7 @@ def extract_persons_for_publication(db: Session, publication) -> dict:
                     company_uid=publication.company_uid,
                     pub_date=publication.pub_date,
                     change_type=change.change_type,
+                    change_subtype=pst,
                     role=fields["role"],
                     role_category=fields["role_category"],
                     signature_type=fields["signature_type"],
@@ -618,7 +784,7 @@ def extract_persons_for_publication(db: Session, publication) -> dict:
         for eid in touched_entity_ids:
             _recompute_entity_confidence(db, eid)
 
-    return {"persons_written": persons_written, "auditors_written": auditors_written}
+    return {"persons_written": persons_written, "auditors_written": auditors_written, "corporate_roles_written": corporate_roles_written}
 
 
 # ── Bulk backfill ──────────────────────────────────────────────────────────────
@@ -653,6 +819,7 @@ def run_extract_sogc_persons_batch(
         "processed": 0,
         "persons_written": 0,
         "auditors_written": 0,
+        "corporate_roles_written": 0,
         "skipped_no_excerpt": 0,
         "errors": [],
     }
@@ -711,16 +878,40 @@ def run_extract_sogc_persons_batch(
                 if mode == "all":
                     from app.models.sogc_person_appearance import SogcPersonAppearance as SPA
                     from app.models.sogc_auditor import SogcAuditor as SA
+                    from app.models.sogc_corporate_role import SogcCorporateRole as SCR
                     db.query(SPA).filter_by(sogc_change_id=change.id).delete()
                     db.query(SA).filter_by(sogc_change_id=change.id).delete()
+                    db.query(SCR).filter_by(sogc_change_id=change.id).delete()
 
                 if change.change_type in PERSON_TYPES:
                     if _AUDITOR_EXCERPT_RE.search(change.raw_excerpt):
+                        continue
+                    if _CHE_UID_RE.search(change.raw_excerpt):
+                        from app.models.sogc_corporate_role import SogcCorporateRole
+                        corp = _parse_corporate(change.raw_excerpt, change.change_type)
+                        if corp is not None:
+                            cst = _corporate_change_subtype(change.raw_excerpt, change.change_type)
+                            change.change_subtype = cst
+                            db.add(SogcCorporateRole(
+                                sogc_change_id=change.id,
+                                sogc_publication_id=change.sogc_publication_id,
+                                company_uid=pub.company_uid if pub else None,
+                                company_name=None,
+                                pub_date=pub.pub_date if pub else None,
+                                change_type=change.change_type,
+                                change_subtype=cst,
+                                raw_excerpt=change.raw_excerpt,
+                                **corp,
+                            ))
+                            stats["corporate_roles_written"] += 1
+                        stats["processed"] += 1
                         continue
                     fields = _parse_person(change.raw_excerpt, change.change_type)
                     if fields is None:
                         stats["skipped_no_excerpt"] += 1
                         continue
+                    pst = _person_change_subtype(fields, change.change_type, change.raw_excerpt)
+                    change.change_subtype = pst
                     entity = _get_or_create_entity(db, fields["normalized_key"], fields)
                     touched_entity_ids.add(entity.id)
                     from app.models.sogc_person_appearance import SogcPersonAppearance
@@ -731,6 +922,7 @@ def run_extract_sogc_persons_batch(
                         company_uid=pub.company_uid if pub else None,
                         pub_date=pub.pub_date if pub else None,
                         change_type=change.change_type,
+                        change_subtype=pst,
                         role=fields["role"],
                         role_category=fields["role_category"],
                         signature_type=fields["signature_type"],

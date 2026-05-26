@@ -71,6 +71,7 @@ class PersonAppearanceOut(BaseModel):
     company_name: str | None = None
     pub_date: str | None
     change_type: str
+    change_subtype: str | None = None
     role: str | None
     role_category: str | None
     signature_type: str | None
@@ -94,6 +95,7 @@ class PersonAppearanceOut(BaseModel):
             company_name=company_name,
             pub_date=a.pub_date,
             change_type=a.change_type,
+            change_subtype=a.change_subtype,
             role=a.role,
             role_category=a.role_category,
             signature_type=a.signature_type,
@@ -147,6 +149,7 @@ class AuditorOut(BaseModel):
 class SogcChangeOut(BaseModel):
     id: int
     change_type: str
+    change_subtype: str | None = None
     keywords_matched: str | None
     raw_excerpt: str | None
 
@@ -155,6 +158,7 @@ class SogcChangeOut(BaseModel):
         return cls(
             id=c.id,
             change_type=c.change_type,
+            change_subtype=c.change_subtype,
             keywords_matched=c.keywords_matched,
             raw_excerpt=c.raw_excerpt,
         )
@@ -231,6 +235,52 @@ class ReportFlagBody(BaseModel):
     secondary_entity_id: int | None = None
     appearance_id: int | None = None
     reason: str | None = None
+
+
+class CorporateRoleOut(BaseModel):
+    id: int
+    sogc_change_id: int | None
+    sogc_publication_id: int | None
+    entity_name: str | None
+    entity_name_normalized: str | None
+    entity_che: str | None
+    entity_location: str | None
+    entity_legal_form: str | None
+    company_uid: str | None
+    company_id: int | None
+    company_name: str | None
+    role: str | None
+    role_details: str | None
+    raw_excerpt: str | None
+    pub_date: str | None
+    change_type: str | None
+    change_subtype: str | None
+    is_current: bool | None
+    created_at: str
+
+    @classmethod
+    def from_orm(cls, r) -> "CorporateRoleOut":
+        return cls(
+            id=r.id,
+            sogc_change_id=r.sogc_change_id,
+            sogc_publication_id=r.sogc_publication_id,
+            entity_name=r.entity_name,
+            entity_name_normalized=r.entity_name_normalized,
+            entity_che=r.entity_che,
+            entity_location=r.entity_location,
+            entity_legal_form=r.entity_legal_form,
+            company_uid=r.company_uid,
+            company_id=r.company_id,
+            company_name=r.company_name,
+            role=r.role,
+            role_details=r.role_details,
+            raw_excerpt=r.raw_excerpt,
+            pub_date=r.pub_date,
+            change_type=r.change_type,
+            change_subtype=r.change_subtype,
+            is_current=r.is_current,
+            created_at=r.created_at.isoformat() if r.created_at else "",
+        )
 
 
 # ── Person entity endpoints ────────────────────────────────────────────────────
@@ -800,3 +850,63 @@ def search_publications(
 
     pubs = qry.order_by(SogcPublication.pub_date.desc()).offset(offset).limit(limit).all()
     return [SogcPublicationOut.from_orm(p) for p in pubs]
+
+
+# ── Corporate entity endpoints ─────────────────────────────────────────────────
+
+@router.get("/sogc/corporate-roles/search", response_model=list[CorporateRoleOut])
+def search_corporate_roles(
+    q: str | None = Query(None, description="Partial match on entity name"),
+    che: str | None = Query(None, description="Exact CHE number, e.g. CHE-467.225.008"),
+    company_uid: str | None = Query(None),
+    is_current: bool | None = Query(None),
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+):
+    from app.models.sogc_corporate_role import SogcCorporateRole
+    from app.models.company import Company as CompanyModel
+    from sqlalchemy import func
+
+    qry = db.query(SogcCorporateRole)
+
+    if q:
+        qry = qry.filter(SogcCorporateRole.entity_name_normalized.like(f"%{q.lower()}%"))
+    if che:
+        qry = qry.filter(SogcCorporateRole.entity_che == che)
+    if company_uid:
+        qry = qry.filter(SogcCorporateRole.company_uid == company_uid)
+    if is_current is not None:
+        qry = qry.filter(SogcCorporateRole.is_current == is_current)
+
+    rows = (
+        qry.outerjoin(CompanyModel, SogcCorporateRole.company_uid == CompanyModel.uid)
+        .add_columns(CompanyModel.id, CompanyModel.name)
+        .order_by(SogcCorporateRole.pub_date.desc())
+        .offset(offset).limit(limit)
+        .all()
+    )
+    result = []
+    for row in rows:
+        role, cid, cname = row
+        out = CorporateRoleOut.from_orm(role)
+        out = out.model_copy(update={"company_id": cid, "company_name": cname})
+        result.append(out)
+    return result
+
+
+@router.get("/companies/{company_uid}/corporate-roles", response_model=list[CorporateRoleOut])
+def get_company_corporate_roles(
+    company_uid: str,
+    is_current: bool | None = Query(None),
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+):
+    from app.models.sogc_corporate_role import SogcCorporateRole
+
+    qry = db.query(SogcCorporateRole).filter(SogcCorporateRole.company_uid == company_uid)
+    if is_current is not None:
+        qry = qry.filter(SogcCorporateRole.is_current == is_current)
+    roles = qry.order_by(SogcCorporateRole.pub_date.desc()).all()
+    return [CorporateRoleOut.from_orm(r) for r in roles]

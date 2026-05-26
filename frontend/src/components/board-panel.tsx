@@ -146,11 +146,35 @@ function PersonCard({
   );
 }
 
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+// Subtypes that represent structural changes (address, capital, name) rather than
+// a role appointment — these are hidden from graphs so they don't inflate counts.
+const GRAPH_EXCLUDED_SUBTYPES = new Set(["capital_change", "name_change", "address_change"]);
+
+function isGraphRelevant(p: SogcPersonAppearance): boolean {
+  return !p.change_subtype || !GRAPH_EXCLUDED_SUBTYPES.has(p.change_subtype);
+}
+
+// Deduplicate appearances to one per (entity_id, role) pair, keeping the most
+// recent appearance for each pairing.  Prevents capital/name/role-change events
+// from inflating role counts or adding duplicate nodes to the network graph.
+function dedupeByEntityRole(persons: SogcPersonAppearance[]): SogcPersonAppearance[] {
+  const map = new Map<string, SogcPersonAppearance>();
+  for (const p of persons) {
+    const key = `${p.person_entity_id}|${p.role?.trim() || p.role_category || ""}`;
+    const ex = map.get(key);
+    if (!ex || (p.pub_date ?? "") > (ex.pub_date ?? "")) map.set(key, p);
+  }
+  return [...map.values()];
+}
+
 // ── Role bar chart ────────────────────────────────────────────────────────────
 
 function RoleBarChart({ persons }: { persons: SogcPersonAppearance[] }) {
+  const filtered = dedupeByEntityRole(persons.filter(isGraphRelevant));
   const roleCounts = new Map<string, { count: number; active: number; category: string }>();
-  for (const p of persons) {
+  for (const p of filtered) {
     const role = p.role?.trim() || p.role_category || "—";
     const ex = roleCounts.get(role);
     if (ex) { ex.count++; if (p.is_current) ex.active++; }
@@ -230,12 +254,14 @@ interface BPLink extends d3.SimulationLinkDatum<BPNode> {
 // ── D3 board network graph ────────────────────────────────────────────────────
 
 function BoardNetworkGraph({
-  persons, companyName, locale,
+  persons: rawPersons, companyName, locale,
 }: {
   persons: SogcPersonAppearance[];
   companyName: string;
   locale: string;
 }) {
+  // Deduplicate: one node per entity (keep most-recent graph-relevant appearance per entity)
+  const persons = dedupeByEntityRole(rawPersons.filter(isGraphRelevant));
   const router = useRouter();
   const routerRef = useRef(router);
   useEffect(() => { routerRef.current = router; }, [router]);
@@ -461,6 +487,8 @@ export function BoardPanel({ companyUid }: { companyUid: string }) {
   if (persons.length === 0 && auditors.length === 0) return null;
 
   const companyName = persons[0]?.company_name ?? companyUid;
+  // Graph-relevant: role appointments only, deduplicated per entity
+  const graphPersons = dedupeByEntityRole(persons.filter(isGraphRelevant));
 
   return (
     <div className="bg-white rounded-xl border border-slate-200 p-5 shadow-sm">
@@ -470,7 +498,7 @@ export function BoardPanel({ companyUid }: { companyUid: string }) {
           <Users size={15} className="text-slate-400" />
           Board &amp; Officers
           <span className="ml-1.5 text-[11px] font-normal text-slate-400">
-            {persons.filter(p => p.is_current).length} active · {persons.length} total
+            {graphPersons.filter(p => p.is_current).length} active · {graphPersons.length} total
           </span>
         </h2>
         {persons.length > 0 && (
@@ -492,11 +520,11 @@ export function BoardPanel({ companyUid }: { companyUid: string }) {
       </div>
 
       {/* Visualization */}
-      {persons.length > 0 && (
+      {graphPersons.length > 0 && (
         <div className="mb-4">
           {view === "bar"
-            ? <RoleBarChart persons={persons} />
-            : <BoardNetworkGraph persons={persons} companyName={companyName} locale={locale} />
+            ? <RoleBarChart persons={graphPersons} />
+            : <BoardNetworkGraph persons={graphPersons} companyName={companyName} locale={locale} />
           }
         </div>
       )}

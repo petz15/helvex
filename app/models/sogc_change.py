@@ -17,6 +17,7 @@ class SogcChange(Base):
         Integer, ForeignKey("sogc_publications.id", ondelete="CASCADE"), nullable=False, index=True
     )
     change_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    change_subtype: Mapped[str | None] = mapped_column(String(32), nullable=True, index=True)
     keywords_matched: Mapped[str | None] = mapped_column(Text, nullable=True)
     raw_excerpt: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(

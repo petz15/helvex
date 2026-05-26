@@ -29,6 +29,7 @@ class SogcPersonAppearance(Base):
 
     pub_date: Mapped[str | None] = mapped_column(String(32), nullable=True, index=True)
     change_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    change_subtype: Mapped[str | None] = mapped_column(String(32), nullable=True, index=True)
 
     role: Mapped[str | None] = mapped_column(String(256), nullable=True)
     role_category: Mapped[str | None] = mapped_column(String(32), nullable=True, index=True)

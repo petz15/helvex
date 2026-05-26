@@ -1928,7 +1928,7 @@ export async function resetAdminStandardKey(provider: string): Promise<void> {
 
 // ── SOGC Persons ───────────────────────────────────────────────────────────────
 
-import type { SogcPersonEntity, SogcPersonAppearance, SogcAuditor, SogcPersonFlag, SogcPublicationDetail, GlobalSearchResult } from "./types";
+import type { SogcPersonEntity, SogcPersonAppearance, SogcAuditor, SogcPersonFlag, SogcPublicationDetail, GlobalSearchResult, SogcCorporateRole } from "./types";
 
 export async function searchPersonEntities(params: {
   q?: string;
@@ -2063,6 +2063,33 @@ export async function searchSogcPublications(params: {
   if (params.limit !== undefined) qs.set("limit", String(params.limit));
   if (params.offset !== undefined) qs.set("offset", String(params.offset));
   const res = await fetch(`/api/v1/sogc/publications/search?${qs}`, { credentials: "include" });
+  if (!res.ok) return _handleErrorResponse(res);
+  return res.json();
+}
+
+export async function searchCorporateRoles(params: {
+  q?: string;
+  che?: string;
+  company_uid?: string;
+  is_current?: boolean;
+  limit?: number;
+  offset?: number;
+}): Promise<SogcCorporateRole[]> {
+  const qs = new URLSearchParams();
+  if (params.q) qs.set("q", params.q);
+  if (params.che) qs.set("che", params.che);
+  if (params.company_uid) qs.set("company_uid", params.company_uid);
+  if (params.is_current !== undefined) qs.set("is_current", String(params.is_current));
+  if (params.limit !== undefined) qs.set("limit", String(params.limit));
+  if (params.offset !== undefined) qs.set("offset", String(params.offset));
+  const res = await fetch(`/api/v1/sogc/corporate-roles/search?${qs}`, { credentials: "include" });
+  if (!res.ok) return _handleErrorResponse(res);
+  return res.json();
+}
+
+export async function fetchCompanyCorporateRoles(companyUid: string, is_current?: boolean): Promise<SogcCorporateRole[]> {
+  const qs = is_current !== undefined ? `?is_current=${is_current}` : "";
+  const res = await fetch(`/api/v1/companies/${companyUid}/corporate-roles${qs}`, { credentials: "include" });
   if (!res.ok) return _handleErrorResponse(res);
   return res.json();
 }

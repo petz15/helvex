@@ -18,44 +18,52 @@ router = APIRouter()
 _DEMO_UID = "CHE-435.551.225"  # Post CH AG
 
 
-@router.get("/semantic-search", summary="Cross-category semantic search using multilingual embeddings")
+def _fuzzy_score_items(
+    items: list[tuple[str, int]],
+    q_tokens: list[str],
+    q_lower: str,
+    top_k: int,
+) -> list[dict]:
+    """Score taxonomy items against a query using token overlap — no ML model required."""
+    if not items:
+        return []
+    scored: list[tuple[float, str, int]] = []
+    for label, count in items:
+        label_lower = label.lower()
+        if q_lower in label_lower:
+            score = 1.0
+        else:
+            label_tokens = set(label_lower.replace("-", " ").replace("_", " ").split())
+            hits = sum(
+                1 for t in q_tokens
+                if t in label_tokens or any(t in lt for lt in label_tokens)
+            )
+            score = hits / len(q_tokens) if q_tokens else 0.0
+        if score > 0:
+            scored.append((score, label, count))
+    scored.sort(key=lambda x: (-x[0], -x[2]))
+    return [
+        {"value": label, "count": count, "similarity": round(score, 3)}
+        for score, label, count in scored[:top_k]
+    ]
+
+
+@router.get("/semantic-search", summary="Cross-category search using text fuzzy matching")
 def semantic_search(
     q: str = Query(..., min_length=2, description="Natural-language search query (DE/FR/IT/EN)"),
     top_k: int = Query(10, ge=1, le=50, description="Maximum results per category type"),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Embed the query and return top matching clusters, categories, keywords, and NOGA codes."""
-    from app.services.embeddings import embed_single
-    import numpy as np
+    """Return top matching clusters, categories, keywords, and NOGA codes for a free-text query.
 
-    query_vec = embed_single(q)
-    if np.linalg.norm(query_vec) < 1e-6:
-        return {"clusters": [], "categories": [], "keywords": [], "noga_codes": [], "query": q}
-
+    Uses token-overlap fuzzy matching — intentionally avoids loading any ML model so this
+    endpoint is safe to call from the normal app pod (no OOM risk).
+    """
     taxonomy = crud.get_taxonomy_stats(db)
 
-    def _score_items(items: list[tuple[str, int]], max_items: int = 200) -> list[dict]:
-        if not items:
-            return []
-        labels = [item[0] for item in items[:max_items]]
-        counts = {item[0]: item[1] for item in items[:max_items]}
-        try:
-            from app.services.embeddings import embed_texts
-            vecs = embed_texts(labels)
-        except Exception:
-            return []
-        sims = vecs @ query_vec
-        top_indices = np.argsort(sims)[::-1][:top_k]
-        return [
-            {
-                "value": labels[i],
-                "count": counts.get(labels[i], 0),
-                "similarity": round(float(sims[i]), 3),
-            }
-            for i in top_indices
-            if sims[i] > 0.20
-        ]
+    q_lower = q.lower()
+    q_tokens = [t for t in q_lower.replace("-", " ").replace("_", " ").split() if len(t) > 1]
 
     clusters_raw = [(label, count) for label, count in (taxonomy.get("clusters") or [])]
     categories_raw = [(cat, count) for cat, count, *_ in (taxonomy.get("categories_enriched") or [])]
@@ -64,10 +72,10 @@ def semantic_search(
 
     return {
         "query": q,
-        "clusters": _score_items(clusters_raw),
-        "categories": _score_items(categories_raw),
-        "keywords": _score_items(keywords_raw),
-        "noga_codes": _score_items(noga_raw),
+        "clusters": _fuzzy_score_items(clusters_raw, q_tokens, q_lower, top_k),
+        "categories": _fuzzy_score_items(categories_raw, q_tokens, q_lower, top_k),
+        "keywords": _fuzzy_score_items(keywords_raw, q_tokens, q_lower, top_k),
+        "noga_codes": _fuzzy_score_items(noga_raw, q_tokens, q_lower, top_k),
     }
 
 

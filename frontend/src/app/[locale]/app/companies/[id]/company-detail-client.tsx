@@ -10,6 +10,7 @@ import type { Company, Note, GoogleScoredResult } from "@/lib/types";
 import "leaflet/dist/leaflet.css";
 import { SignersPanelDB, SogcTimelineDB } from "@/components/sogc-history";
 import { BoardPanel } from "@/components/board-panel";
+import { CorporateShareholdersPanel } from "@/components/corporate-shareholders-panel";
 import { useI18n } from "@/i18n/context";
 import { useApiErrorHandler } from "@/lib/use-api-error";
 
@@ -703,6 +704,9 @@ export function CompanyDetailClient({ company: initial, readOnlyDemo = false, is
 
       {/* Structured board & officers from SOGC person graph */}
       <BoardPanel companyUid={company.uid} />
+
+      {/* Corporate shareholders detected via CHE numbers in SOGC publications */}
+      <CorporateShareholdersPanel companyUid={company.uid} />
 
       {/* Current signers derived from sogc_publications text (fallback when person graph is empty) */}
       <SignersPanelDB companyUid={company.uid} />
