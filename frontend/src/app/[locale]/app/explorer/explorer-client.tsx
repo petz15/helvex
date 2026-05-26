@@ -4,7 +4,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import useSWR from "swr";
 import {
   Search, X, Download, Wand2, ChevronRight, Sparkles, Target,
-  TrendingUp, Building2, SlidersHorizontal, ChevronLeft, AlertTriangle,
+  TrendingUp, Building2, SlidersHorizontal, ChevronLeft, AlertTriangle, Loader2,
 } from "lucide-react";
 import { CompanyTable } from "@/components/dashboard/company-table";
 import { CompanyPreview } from "@/components/dashboard/company-preview";
@@ -13,9 +13,9 @@ import {
   fetchCompanies, fetchStats, fetchCantons,
   fetchCurrentUser, fetchOrgEffectiveSettings, saveOrgWorkspaceSettings,
   fetchOrg, fetchNogaHierarchy, fetchMarketSegments,
-  enqueueGenericJob, semanticSearch,
+  enqueueGenericJob, semanticSearch, fetchPurposeSemanticSearch,
 } from "@/lib/api";
-import type { NogaNode, MarketSegment, OrgEffectiveSettings, SemanticSearchResponse, SemanticSearchResult } from "@/lib/api";
+import type { NogaNode, MarketSegment, OrgEffectiveSettings, SemanticSearchResponse, SemanticSearchResult, PurposeSearchHit } from "@/lib/api";
 import type { Company, CompanyFilters, CompanyStats } from "@/lib/types";
 import { cn, formatClusterLabel } from "@/lib/utils";
 import { getExportLimit } from "@/lib/entitlements";
@@ -667,6 +667,8 @@ function ExplorerPage({ initialCantons, initialStats, locale }: ExplorerPageProp
   const [semanticQuery, setSemanticQuery] = useState("");
   const [semanticResults, setSemanticResults] = useState<SemanticSearchResponse | null>(null);
   const [semanticLoading, setSemanticLoading] = useState(false);
+  const [purposeHits, setPurposeHits] = useState<PurposeSearchHit[] | null>(null);
+  const [purposeLoading, setPurposeLoading] = useState(false);
   const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [, startTransition] = useTransition();
 
@@ -748,6 +750,24 @@ function ExplorerPage({ initialCantons, initialStats, locale }: ExplorerPageProp
     setSemanticResults(null);
   }
 
+  async function runPurposeSearch(q: string) {
+    if (!q.trim()) return;
+    setSemanticResults(null);
+    setPurposeHits(null);
+    setPurposeLoading(true);
+    try {
+      const res = await fetchPurposeSemanticSearch(q, 50);
+      setPurposeHits(res.results);
+    } catch { /* ignore */ }
+    finally { setPurposeLoading(false); }
+  }
+
+  function clearPurposeSearch() {
+    setPurposeHits(null);
+    setSemanticQuery("");
+    setSemanticResults(null);
+  }
+
   const total = page?.total ?? 0;
   const avgScore = page?.items
     ? Math.round(page.items.filter(c => c.combined_score != null).reduce((s, c) => s + (c.combined_score ?? 0), 0) / Math.max(1, page.items.filter(c => c.combined_score != null).length))
@@ -763,16 +783,23 @@ function ExplorerPage({ initialCantons, initialStats, locale }: ExplorerPageProp
         <div className="flex items-center gap-3">
           {/* Search */}
           <div className="relative flex-1 max-w-xl">
-            <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+            {purposeLoading
+              ? <Loader2 size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-blue-400 animate-spin" />
+              : <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+            }
             <input
               type="text"
               value={semanticQuery}
-              onChange={e => setSemanticQuery(e.target.value)}
-              placeholder="Semantic search — describe what you're looking for…"
-              className="w-full pl-8 pr-3 py-2 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-300"
+              onChange={e => { setSemanticQuery(e.target.value); if (purposeHits) setPurposeHits(null); }}
+              onKeyDown={e => { if (e.key === "Enter" && semanticQuery.trim()) runPurposeSearch(semanticQuery); }}
+              placeholder="Describe what you're looking for… (Enter for company search)"
+              className={cn(
+                "w-full pl-8 pr-3 py-2 text-sm border rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-300",
+                purposeHits ? "border-blue-400 bg-blue-50" : "border-slate-200",
+              )}
             />
-            {semanticQuery && (
-              <button onClick={() => { setSemanticQuery(""); setSemanticResults(null); }} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600">
+            {(semanticQuery || purposeHits) && (
+              <button onClick={clearPurposeSearch} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600">
                 <X size={13} />
               </button>
             )}
@@ -859,37 +886,90 @@ function ExplorerPage({ initialCantons, initialStats, locale }: ExplorerPageProp
           {/* Panel header */}
           <div className="flex items-center justify-between px-4 py-2 border-b border-slate-100 bg-white shrink-0">
             <div className="flex items-center gap-3 text-xs text-slate-500">
-              <span className="font-semibold text-slate-700">{total.toLocaleString()}</span>
-              <span>companies</span>
-              {activeSection && (
-                <span className="text-blue-600 font-medium">· Section {activeSection}{activeDivision ? ` / ${activeDivision}` : ""}</span>
+              {purposeHits ? (
+                <>
+                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-blue-100 text-blue-700 font-medium">
+                    <Search size={10} /> Semantic
+                  </span>
+                  <span><span className="font-semibold text-slate-700">{purposeHits.length}</span> matches for &ldquo;{semanticQuery}&rdquo;</span>
+                  <button onClick={clearPurposeSearch} className="text-slate-400 hover:text-slate-600 underline">clear</button>
+                </>
+              ) : (
+                <>
+                  <span className="font-semibold text-slate-700">{total.toLocaleString()}</span>
+                  <span>companies</span>
+                  {activeSection && (
+                    <span className="text-blue-600 font-medium">· Section {activeSection}{activeDivision ? ` / ${activeDivision}` : ""}</span>
+                  )}
+                </>
               )}
             </div>
             <div className="flex items-center gap-2">
-              <a
-                href={buildExportUrl(filters)}
-                target="_blank"
-                className="flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs border border-slate-200 bg-white text-slate-600 hover:border-slate-300 transition-colors"
-              >
-                <Download size={11} /> Export CSV
-              </a>
+              {!purposeHits && (
+                <a
+                  href={buildExportUrl(filters)}
+                  target="_blank"
+                  className="flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs border border-slate-200 bg-white text-slate-600 hover:border-slate-300 transition-colors"
+                >
+                  <Download size={11} /> Export CSV
+                </a>
+              )}
             </div>
           </div>
 
           {/* Table */}
           <div className="flex-1 overflow-auto">
-            <CompanyTable
-              companies={page?.items ?? []}
-              isLoading={companiesLoading}
-              filters={filters}
-              onSort={(sort) => patchFilters({ sort, page: 1 })}
-              onSelect={setSelectedCompany}
-              selectedId={selectedCompany?.id ?? null}
-            />
+            {purposeHits ? (
+              <CompanyTable
+                companies={purposeHits.map(h => ({
+                  id: h.company_id, uid: h.uid, name: h.name,
+                  canton: h.canton, purpose: h.purpose,
+                  combined_score: Math.round(h.similarity * 100),
+                  legal_form: null, status: null, municipality: null,
+                  address: null, website_url: null, website_checked_at: null,
+                  google_search_results_raw: null, web_score: null,
+                  social_media_only: null, flex_score: null,
+                  flex_score_breakdown: null, flex_scored_at: null,
+                  ai_score: null, ai_scored_at: null, ai_category: null,
+                  ai_freeform: null, noga_code: null, noga_label: null,
+                  noga_level: null, noga_confidence: null,
+                  noga_classified_at: null, noga_path: null,
+                  noga_path_labels: null, review_status: null,
+                  contact_status: null, contact_name: null,
+                  contact_email: null, contact_phone: null,
+                  tags: null, purpose_keywords: null, tfidf_cluster: null,
+                  capital_nominal: null, capital_currency: null,
+                  cantonal_excerpt_web: null, translations: null,
+                  zefix_detail_web: null, address_city: null,
+                  address_zip: null, old_names: null, head_offices: null,
+                  further_head_offices: null, branch_offices: null,
+                  has_taken_over: null, was_taken_over_by: null,
+                  audit_companies: null, sogc_pub: null, sogc_date: null,
+                  first_sogc_date: null, deletion_date: null,
+                  ehraid: null, chid: null, lat: null, lon: null,
+                  business_model: null, purpose_language: h.lang ?? null,
+                  created_at: "", updated_at: "", notes: [],
+                } as import("@/lib/types").Company))}
+                isLoading={purposeLoading}
+                filters={{}}
+                onSort={() => {}}
+                onSelect={setSelectedCompany}
+                selectedId={selectedCompany?.id ?? null}
+              />
+            ) : (
+              <CompanyTable
+                companies={page?.items ?? []}
+                isLoading={companiesLoading}
+                filters={filters}
+                onSort={(sort) => patchFilters({ sort, page: 1 })}
+                onSelect={setSelectedCompany}
+                selectedId={selectedCompany?.id ?? null}
+              />
+            )}
           </div>
 
-          {/* Pagination */}
-          {page && page.pages > 1 && (
+          {/* Pagination — hidden in semantic mode (all results loaded at once) */}
+          {!purposeHits && page && page.pages > 1 && (
             <div className="border-t border-slate-100 bg-white shrink-0 px-4 py-2">
               <Pagination
                 page={page.page}

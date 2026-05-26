@@ -1,7 +1,9 @@
 """Global cross-entity search endpoint."""
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Query
+import os
+
+from fastapi import APIRouter, Depends, Query, Request
 from pydantic import BaseModel
 from sqlalchemy import func, desc, or_
 from sqlalchemy.orm import Session
@@ -35,6 +37,7 @@ class SemanticSearchOut(BaseModel):
 
 @router.get("/search/semantic", response_model=SemanticSearchOut)
 def semantic_search(
+    request: Request,
     q: str = Query(..., min_length=2, description="Free-text query to match against company purpose"),
     embedding_type: str = Query("purpose_clean", description="'purpose_clean' (boilerplate-stripped) or 'purpose_full'"),
     limit: int = Query(50, ge=1, le=200),
@@ -43,14 +46,28 @@ def semantic_search(
 ):
     """Semantic similarity search over company purpose embeddings.
 
-    Requires company purpose embeddings to be pre-computed via the
-    embed_purpose_full or embed_purpose_clean batch jobs.
+    Proxies to the ML worker pod when ML_WORKER_INTERNAL_URL is set so the
+    embedding model is never loaded in the normal app pod.
     """
-    from app.services.company_embedding_pipeline import search_companies_semantic
+    ml_url = os.getenv("ML_WORKER_INTERNAL_URL")
+    if ml_url:
+        import httpx
+        try:
+            r = httpx.get(
+                f"{ml_url}/api/v1/search/semantic",
+                params={"q": q, "embedding_type": embedding_type, "limit": limit},
+                headers={"cookie": request.headers.get("cookie", "")},
+                timeout=20.0,
+            )
+            r.raise_for_status()
+            return r.json()
+        except Exception:
+            pass  # fall through to local execution on ML worker failure
 
     if embedding_type not in ("purpose_clean", "purpose_full"):
         embedding_type = "purpose_clean"
 
+    from app.services.company_embedding_pipeline import search_companies_semantic
     hits = search_companies_semantic(db, q, embedding_type=embedding_type, limit=limit)
     results = [
         SemanticSearchResult(

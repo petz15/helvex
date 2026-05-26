@@ -37,6 +37,10 @@ spec:
               containerPort: 8000
               protocol: TCP
           env:
+            {{- if .Values.mlWorker.enabled }}
+            - name: ML_WORKER_INTERNAL_URL
+              value: "http://{{ include "helvex.fullname" . }}-ml-worker:8000"
+            {{- end }}
             {{- if and .Values.apiWorker.enabled .Values.mlWorker.enabled }}
             - name: DISABLE_JOB_WORKER
               value: "true"

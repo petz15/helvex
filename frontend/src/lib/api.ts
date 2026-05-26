@@ -642,6 +642,31 @@ export async function semanticSearch(q: string, topK = 8): Promise<SemanticSearc
   return res.json();
 }
 
+export interface PurposeSearchHit {
+  company_id: number;
+  name: string;
+  uid: string;
+  canton: string | null;
+  purpose: string | null;
+  similarity: number;
+  lang: string | null;
+}
+
+export interface PurposeSearchResponse {
+  query: string;
+  embedding_type: string;
+  results: PurposeSearchHit[];
+}
+
+export async function fetchPurposeSemanticSearch(q: string, limit = 50): Promise<PurposeSearchResponse> {
+  const res = await fetch(
+    `/api/v1/search/semantic?q=${encodeURIComponent(q)}&limit=${limit}`,
+    { credentials: "include" },
+  );
+  if (!res.ok) throw new ApiError(res.statusText, res.status);
+  return res.json();
+}
+
 export async function searchKeywords(q: string, limit = 20): Promise<{ keyword: string; count: number }[]> {
   const res = await fetch(`/api/v1/companies/keywords/search?q=${encodeURIComponent(q)}&limit=${limit}`, { credentials: "include" });
   if (!res.ok) return [];

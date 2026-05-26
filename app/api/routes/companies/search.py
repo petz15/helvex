@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+import os
+
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy.orm import Session
 
 from app import crud
@@ -48,28 +50,39 @@ def _fuzzy_score_items(
     ]
 
 
-@router.get("/semantic-search", summary="Cross-category search using text fuzzy matching")
+@router.get("/semantic-search", summary="Cross-category search; proxies to ML worker when available")
 def semantic_search(
+    request: Request,
     q: str = Query(..., min_length=2, description="Natural-language search query (DE/FR/IT/EN)"),
     top_k: int = Query(10, ge=1, le=50, description="Maximum results per category type"),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Return top matching clusters, categories, keywords, and NOGA codes for a free-text query.
-
-    Uses token-overlap fuzzy matching — intentionally avoids loading any ML model so this
-    endpoint is safe to call from the normal app pod (no OOM risk).
+    """Proxy to the ML worker pod if ML_WORKER_INTERNAL_URL is set (full embedding-based search).
+    Falls back to token-overlap fuzzy matching when the ML worker is unavailable.
     """
-    taxonomy = crud.get_taxonomy_stats(db)
+    ml_url = os.getenv("ML_WORKER_INTERNAL_URL")
+    if ml_url:
+        import httpx
+        try:
+            r = httpx.get(
+                f"{ml_url}/api/v1/companies/semantic-search",
+                params={"q": q, "top_k": top_k},
+                headers={"cookie": request.headers.get("cookie", "")},
+                timeout=15.0,
+            )
+            r.raise_for_status()
+            return r.json()
+        except Exception:
+            pass  # fall through to fuzzy on any ML worker failure
 
+    taxonomy = crud.get_taxonomy_stats(db)
     q_lower = q.lower()
     q_tokens = [t for t in q_lower.replace("-", " ").replace("_", " ").split() if len(t) > 1]
-
     clusters_raw = [(label, count) for label, count in (taxonomy.get("clusters") or [])]
     categories_raw = [(cat, count) for cat, count, *_ in (taxonomy.get("categories_enriched") or [])]
     keywords_raw = [(kw, count) for kw, count in (taxonomy.get("keywords") or [])]
     noga_raw = [(code_label, count) for code_label, count in (taxonomy.get("noga_codes") or [])]
-
     return {
         "query": q,
         "clusters": _fuzzy_score_items(clusters_raw, q_tokens, q_lower, top_k),
