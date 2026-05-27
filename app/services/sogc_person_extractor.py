@@ -100,6 +100,9 @@ _AUDITOR_EXCERPT_RE = re.compile(
     re.I,
 )
 
+# Alias/nickname clause: "genannt Carlo" (also known as)
+_GENANNT_RE = re.compile(r"^genannt\s+.+$", re.I)
+
 # Parts that signal start of non-name fields
 _NON_NAME_PREFIXES = re.compile(
     r"^(von|de|di|in|[àa]|mit|avec|con|staatsangehörig|ressortissant|cittadin|"
@@ -308,6 +311,10 @@ def _parse_person(raw_excerpt: str, change_type: str) -> dict | None:
         # Signature
         if _SIGNATURE_RE.match(p) or _SIGNATURE_FR_RE.match(p) or _SIGNATURE_IT_RE.match(p):
             signature_type = p[:128]
+            continue
+
+        # Alias/nickname clause ("genannt Carlo") — skip, not a role
+        if _GENANNT_RE.match(p):
             continue
 
         role_parts.append(p)

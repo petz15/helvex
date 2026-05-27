@@ -15,21 +15,24 @@ interface SearchClientProps {
   initialCantons: string[];
   initialStats: CompanyStats;
   initialFilters?: CompanyFilters;
+  basePath?: string;
+  className?: string;
 }
 
 const DEFAULT_FILTERS: CompanyFilters = { sort: "-updated", page: 1, page_size: 50 };
 
-function syncFiltersToUrl(filters: CompanyFilters, router: ReturnType<typeof useRouter>) {
+function syncFiltersToUrl(filters: CompanyFilters, router: ReturnType<typeof useRouter>, basePath: string) {
   const params = new URLSearchParams();
   for (const [k, v] of Object.entries(filters)) {
     const isDefault = (k === "sort" && v === "-updated") || (k === "page" && v === 1) || (k === "page_size" && v === 50);
     if (v !== undefined && v !== null && v !== "" && !isDefault) params.set(k, String(v));
   }
   const qs = params.toString();
-  router.replace(qs ? `/app/search?${qs}` : "/app/search", { scroll: false });
+  const sep = basePath.includes("?") ? "&" : "?";
+  router.replace(qs ? `${basePath}${sep}${qs}` : basePath, { scroll: false });
 }
 
-export function SearchClient({ initialCantons, initialStats, initialFilters }: SearchClientProps) {
+export function SearchClient({ initialCantons, initialStats, initialFilters, basePath = "/app/search", className }: SearchClientProps) {
   const router = useRouter();
   const { dict } = useI18n();
   const t = dict.app.search;
@@ -40,10 +43,10 @@ export function SearchClient({ initialCantons, initialStats, initialFilters }: S
   const setFilters = useCallback((update: CompanyFilters | ((f: CompanyFilters) => CompanyFilters)) => {
     setFiltersState(prev => {
       const next = typeof update === "function" ? update(prev) : update;
-      syncFiltersToUrl(next, router);
+      syncFiltersToUrl(next, router, basePath);
       return next;
     });
-  }, [router]);
+  }, [router, basePath]);
   const [selectedCompany, setSelectedCompany] = useState<Company | null>(null);
   const [, startTransition] = useTransition();
 
@@ -116,7 +119,7 @@ export function SearchClient({ initialCantons, initialStats, initialFilters }: S
   })();
 
   return (
-    <div className="flex flex-col h-[calc(100vh-3rem)] overflow-hidden">
+    <div className={className ?? "flex flex-col h-[calc(100vh-3rem)] overflow-hidden"}>
 
       {/* Filter bar (top, collapsible) */}
       <FilterBar

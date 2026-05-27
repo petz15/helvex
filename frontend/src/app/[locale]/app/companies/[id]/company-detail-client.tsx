@@ -571,7 +571,7 @@ export function CompanyDetailClient({ company: initial, readOnlyDemo = false, is
           <h2 className="text-base font-semibold text-slate-800">{t.companyinfo}</h2>
 
           {company.lat != null && company.lon != null && (
-            <div className="rounded-lg border border-slate-200 overflow-hidden">
+            <div className="rounded-lg border border-slate-200 overflow-hidden isolate">
               <div ref={mapRef} className="h-40 w-full" />
             </div>
           )}

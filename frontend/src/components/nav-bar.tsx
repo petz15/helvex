@@ -3,8 +3,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import useSWR from "swr";
 import { cn } from "@/lib/utils";
-import { Search, Compass, Map, Cog, Database, Activity, UserCircle, Shield, CreditCard, Menu, X, Tag, Globe, ChevronDown, Building2, Users, Newspaper, Network, ListTree } from "lucide-react";
-import { GlobalSearchTrigger } from "@/components/global-search";
+import { Search, Cog, Database, Activity, UserCircle, Shield, CreditCard, Menu, X, Tag, Globe, ChevronDown, Building2, Users } from "lucide-react";
 import { fetchCurrentUser } from "@/lib/api";
 import { HelvexMark } from "@/components/helvex-logo";
 import { useI18n } from "@/i18n/context";
@@ -62,13 +61,9 @@ export function NavBar() {
   const loggedOut = !isLoading && !me;
 
   const NAV_MAIN = [
-    { href: `/${locale}/app/search`, label: "Companies", icon: Search },
-    { href: `/${locale}/app/explorer`, label: t.explorer, icon: Compass },
-    { href: `/${locale}/app/noga`, label: t.noga, icon: ListTree },
-    { href: `/${locale}/app/map`, label: t.map, icon: Map },
+    { href: `/${locale}/app/search`, label: t.search ?? "Search", icon: Search },
+    { href: `/${locale}/app/companies`, label: t.companies ?? "Companies", icon: Building2 },
     { href: `/${locale}/app/people`, label: "People", icon: Users },
-    { href: `/${locale}/app/corporate`, label: "Corporate", icon: Network },
-    { href: `/${locale}/app/sogc`, label: "SHAB", icon: Newspaper },
     { href: `/${locale}/app/jobs`, label: t.jobs, icon: Activity },
   ];
 
@@ -103,7 +98,6 @@ export function NavBar() {
           <span className="text-2xl">Helvex</span>
         </Link>
 
-        {loggedIn && <div className="mr-4"><GlobalSearchTrigger locale={locale} /></div>}
 
         {/* Logged-in: app nav — desktop only */}
         {loggedIn && (

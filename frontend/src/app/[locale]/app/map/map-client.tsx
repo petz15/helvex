@@ -318,7 +318,7 @@ export function MapClient() {
           />
         </div>
 
-        <div className="relative min-h-0 flex-1">
+        <div className="relative min-h-0 flex-1 isolate">
           <div ref={mapRef} className="h-full w-full" />
           {loading && (
             <div className="pointer-events-none absolute top-2 right-2 z-[400] flex items-center gap-1.5 rounded-lg bg-white/90 px-2.5 py-1.5 text-xs text-slate-600 shadow">

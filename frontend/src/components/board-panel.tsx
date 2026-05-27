@@ -6,7 +6,7 @@ import useSWR from "swr";
 import { useParams, useRouter } from "next/navigation";
 import * as d3 from "d3";
 import { Users, Building2, AlertCircle, CheckCircle, X, BarChart2, Network } from "lucide-react";
-import { fetchCompanyPersons, fetchCompanyAuditors, reportPersonFlag, fetchCurrentUser } from "@/lib/api";
+import { fetchCompanyPersons, fetchCompanyAuditors, reportPersonFlag } from "@/lib/api";
 import type { SogcPersonAppearance, SogcAuditor } from "@/lib/types";
 
 // ── Dynamic role colours ───────────────────────────────────────────────────────
@@ -480,10 +480,11 @@ export function BoardPanel({ companyUid }: { companyUid: string }) {
   const params = useParams();
   const locale = (params?.locale as string) ?? "de";
   const [view, setView] = useState<"bar" | "network">("bar");
+  const [showPast, setShowPast] = useState(false);
 
   const { data: persons = [] } = useSWR(
-    `company-persons-${companyUid}`,
-    () => fetchCompanyPersons(companyUid, true),
+    `company-persons-all-${companyUid}`,
+    () => fetchCompanyPersons(companyUid),
     { revalidateOnFocus: false },
   );
   const { data: auditors = [] } = useSWR(
@@ -491,14 +492,13 @@ export function BoardPanel({ companyUid }: { companyUid: string }) {
     () => fetchCompanyAuditors(companyUid, true),
     { revalidateOnFocus: false },
   );
-  const { data: me } = useSWR("me", fetchCurrentUser, { revalidateOnFocus: false });
-  const isSuperAdmin = !!me?.is_superadmin;
 
   if (persons.length === 0 && auditors.length === 0) return null;
 
   const companyName = persons[0]?.company_name ?? companyUid;
   // Graph-relevant: role appointments only, deduplicated per entity
   const graphPersons = dedupeByEntityRole(persons.filter(isGraphRelevant));
+  const barPersons = showPast ? graphPersons : graphPersons.filter(p => p.is_current);
 
   return (
     <div className="bg-white rounded-xl border border-slate-200 p-5 shadow-sm">
@@ -512,19 +512,32 @@ export function BoardPanel({ companyUid }: { companyUid: string }) {
           </span>
         </h2>
         {persons.length > 0 && (
-          <div className="flex rounded-lg border border-slate-200 overflow-hidden text-xs bg-white">
-            <button
-              onClick={() => setView("bar")}
-              className={`flex items-center gap-1.5 px-2.5 py-1.5 transition-colors ${view === "bar" ? "bg-slate-900 text-white" : "text-slate-500 hover:bg-slate-50"}`}
-            >
-              <BarChart2 size={12} /> Bar
-            </button>
-            <button
-              onClick={() => setView("network")}
-              className={`flex items-center gap-1.5 px-2.5 py-1.5 border-l border-slate-200 transition-colors ${view === "network" ? "bg-slate-900 text-white" : "text-slate-500 hover:bg-slate-50"}`}
-            >
-              <Network size={12} /> Network
-            </button>
+          <div className="flex items-center gap-2">
+            {view === "bar" && (
+              <label className="flex items-center gap-1.5 text-xs text-slate-500 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={showPast}
+                  onChange={e => setShowPast(e.target.checked)}
+                  className="w-3 h-3 accent-slate-600"
+                />
+                Past
+              </label>
+            )}
+            <div className="flex rounded-lg border border-slate-200 overflow-hidden text-xs bg-white">
+              <button
+                onClick={() => setView("bar")}
+                className={`flex items-center gap-1.5 px-2.5 py-1.5 transition-colors ${view === "bar" ? "bg-slate-900 text-white" : "text-slate-500 hover:bg-slate-50"}`}
+              >
+                <BarChart2 size={12} /> Bar
+              </button>
+              <button
+                onClick={() => setView("network")}
+                className={`flex items-center gap-1.5 px-2.5 py-1.5 border-l border-slate-200 transition-colors ${view === "network" ? "bg-slate-900 text-white" : "text-slate-500 hover:bg-slate-50"}`}
+              >
+                <Network size={12} /> Network
+              </button>
+            </div>
           </div>
         )}
       </div>
@@ -533,7 +546,7 @@ export function BoardPanel({ companyUid }: { companyUid: string }) {
       {graphPersons.length > 0 && (
         <div className="mb-4">
           {view === "bar"
-            ? <RoleBarChart persons={graphPersons} locale={locale} />
+            ? <RoleBarChart persons={barPersons} locale={locale} />
             : <BoardNetworkGraph persons={graphPersons} companyName={companyName} locale={locale} />
           }
         </div>
