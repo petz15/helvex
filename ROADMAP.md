@@ -150,6 +150,7 @@
 
 ## Classification & Scoring
 
+- [ ] **NOGA cross-encoder reranking** — after bi-encoder retrieves top-20 NOGA candidates, rerank with a local cross-encoder (e.g. `cross-encoder/mmarco-mMiniLMv2-L12-H384`, ~120MB, no API cost). Fixes embedding-space collisions (e.g. wastewater equipment trader → coal mining) and action-verb blindness (Import/Vertrieb/Handelsbetrieb ignored by bi-encoder). ~150–400ms/company on CPU; limit to low-confidence companies (adjusted score <0.75 or top-2 within 0.03) to reduce volume ~70%. Also consider BM25 hybrid (replaces current token overlap) and a section-level pre-classifier (train 21-class A–U on existing high-confidence rows) as complementary improvements.
 - [ ] **LLM classification extensions** — add OpenAI (ChatGPT) alongside Claude; user-configurable classification prompt per LLM; user-adjustable criteria. Potentially add groq for even cheaper prices especially for the noga usecase. potential: groq (context length might be an issue if NOGA has to be provided), deepseek, 
 - [ ] **Custom review & proposal categories** — keep sensible defaults, allow users to define own categories per account
 - [ ] **Per-user scoring rules** — custom distance origin, keyword boosts/penalties, cluster weights; DB: `user_scoring_config` (1:1 with users) + `company_user_score` (per user/company); scoring service already accepts a config dict

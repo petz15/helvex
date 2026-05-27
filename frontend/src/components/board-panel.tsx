@@ -9,13 +9,26 @@ import { Users, Building2, AlertCircle, CheckCircle, X, BarChart2, Network } fro
 import { fetchCompanyPersons, fetchCompanyAuditors, reportPersonFlag, fetchCurrentUser } from "@/lib/api";
 import type { SogcPersonAppearance, SogcAuditor } from "@/lib/types";
 
-// ── Role colours ──────────────────────────────────────────────────────────────
+// ── Dynamic role colours ───────────────────────────────────────────────────────
 
-const ROLE_COLORS: Record<string, string> = {
-  director: "#dc2626",
-  officer:  "#2563eb",
-  other:    "#d97706",
-};
+// Deterministic hash → hue so the same role string always produces the same color.
+function roleToHue(role: string): number {
+  let h = 5381;
+  for (let i = 0; i < role.length; i++) h = ((h << 5) + h) ^ role.charCodeAt(i);
+  return Math.abs(h) % 360;
+}
+
+function roleColor(role: string): string {
+  if (!role) return "#94a3b8";
+  return `hsl(${roleToHue(role)},62%,42%)`;
+}
+
+// Extract a display name from the raw SOGC excerpt ("Lastname, Firstname, …")
+function parseName(raw: string | null): string {
+  if (!raw) return "—";
+  return raw.split(",").slice(0, 2).join(",").trim().slice(0, 36);
+}
+
 const FALLBACK_COLOR = "#94a3b8";
 
 // ── Confidence badge (superadmin only) ────────────────────────────────────────
@@ -171,65 +184,62 @@ function dedupeByEntityRole(persons: SogcPersonAppearance[]): SogcPersonAppearan
 
 // ── Role bar chart ────────────────────────────────────────────────────────────
 
-function RoleBarChart({ persons }: { persons: SogcPersonAppearance[] }) {
-  const filtered = dedupeByEntityRole(persons.filter(isGraphRelevant));
-  const roleCounts = new Map<string, { count: number; active: number; category: string }>();
-  for (const p of filtered) {
-    const role = p.role?.trim() || p.role_category || "—";
-    const ex = roleCounts.get(role);
-    if (ex) { ex.count++; if (p.is_current) ex.active++; }
-    else roleCounts.set(role, { count: 1, active: p.is_current ? 1 : 0, category: p.role_category ?? "other" });
-  }
+function RoleBarChart({ persons, locale }: { persons: SogcPersonAppearance[]; locale: string }) {
+  // Sort by role so same-colored rows are visually grouped
+  const sorted = [...persons].sort((a, b) => {
+    const ra = a.role?.trim() || a.role_category || "";
+    const rb = b.role?.trim() || b.role_category || "";
+    return ra.localeCompare(rb);
+  });
 
-  const entries = [...roleCounts.entries()].sort((a, b) => b[1].count - a[1].count);
-  const max = Math.max(...entries.map(([, v]) => v.count), 1);
+  if (!sorted.length) return null;
 
-  if (!entries.length) return null;
+  const uniqueRoles = [...new Set(sorted.map(p => p.role?.trim() || p.role_category || "—"))];
 
   return (
     <div>
-      <div className="space-y-2.5">
-        {entries.map(([role, { count, active, category }]) => {
-          const color = ROLE_COLORS[category] ?? FALLBACK_COLOR;
+      <div className="space-y-px">
+        {sorted.map(p => {
+          const role = p.role?.trim() || p.role_category || "—";
+          const color = roleColor(role);
+          const name = parseName(p.raw_excerpt);
           return (
-            <div key={role} className="flex items-center gap-3 min-w-0">
+            <Link
+              key={p.id}
+              href={`/${locale}/app/people/${p.person_entity_id}`}
+              className="flex items-center gap-2.5 rounded-md px-1 py-1 hover:bg-slate-50 transition-colors group"
+              style={{ opacity: p.is_current ? 1 : 0.45 }}
+            >
+              <div className="w-[3px] self-stretch rounded-full shrink-0 min-h-[24px]" style={{ background: color }} />
+              <span className="text-xs text-slate-700 group-hover:text-blue-600 transition-colors flex-1 truncate">
+                {name}
+              </span>
+              {!p.is_current && (
+                <span className="text-[9px] text-slate-400 shrink-0 italic">past</span>
+              )}
               <span
-                className="text-xs text-slate-600 shrink-0 text-right"
-                style={{ width: 200 }}
+                className="text-[10px] shrink-0 px-1.5 py-0.5 rounded-md font-medium max-w-[180px] truncate"
+                style={{ background: `${color}18`, color }}
                 title={role}
               >
-                {role.length > 30 ? role.slice(0, 28) + "…" : role}
+                {role.length > 28 ? role.slice(0, 26) + "…" : role}
               </span>
-              <div className="flex-1 h-5 rounded overflow-hidden relative" style={{ background: `${color}20` }}>
-                <div className="h-full rounded" style={{ width: `${(active / max) * 100}%`, background: color }} />
-                {count > active && (
-                  <div
-                    className="absolute inset-y-0 rounded"
-                    style={{
-                      left: `${(active / max) * 100}%`,
-                      width: `${((count - active) / max) * 100}%`,
-                      background: color,
-                      opacity: 0.25,
-                    }}
-                  />
-                )}
-              </div>
-              <span className="text-[11px] font-mono text-slate-500 shrink-0 w-10 text-right">
-                {active !== count ? `${active}/${count}` : String(count)}
-              </span>
-            </div>
+            </Link>
           );
         })}
       </div>
-      <div className="flex flex-wrap items-center gap-4 mt-4 pt-3 border-t border-slate-100 text-[11px] text-slate-400">
-        {Object.entries(ROLE_COLORS).map(([k, color]) => (
-          <span key={k} className="flex items-center gap-1.5">
-            <span className="w-3 h-2.5 inline-block rounded-sm" style={{ background: color }} />
-            {k}
-          </span>
-        ))}
-        <span className="ml-auto italic">active / total</span>
-      </div>
+
+      {/* Role legend */}
+      {uniqueRoles.length > 1 && (
+        <div className="flex flex-wrap gap-x-4 gap-y-1 mt-4 pt-3 border-t border-slate-100">
+          {uniqueRoles.map(role => (
+            <span key={role} className="flex items-center gap-1.5 text-[10px] text-slate-500">
+              <span className="w-2.5 h-2 inline-block rounded-sm shrink-0" style={{ background: roleColor(role) }} />
+              <span title={role}>{role.length > 30 ? role.slice(0, 28) + "…" : role}</span>
+            </span>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -290,14 +300,14 @@ function BoardNetworkGraph({
     persons.forEach((p, i) => {
       const angle = (i / n) * 2 * Math.PI - Math.PI / 2;
       const nid = `person-${p.id}`;
-      const label = p.raw_excerpt
-        ? p.raw_excerpt.split(",").slice(0, 2).join(",").trim().slice(0, 22)
-        : `#${p.person_entity_id}`;
+      const label = parseName(p.raw_excerpt).slice(0, 22);
+      const pRole = p.role?.trim() || p.role_category || "";
+      const pColor = roleColor(pRole);
       nodes.push({
         id: nid, type: "person",
         label,
         sublabel: p.role?.slice(0, 24),
-        color: ROLE_COLORS[p.role_category ?? ""] ?? FALLBACK_COLOR,
+        color: pColor,
         isActive: !!p.is_current,
         href: `/${locale}/app/people/${p.person_entity_id}`,
         x: W / 2 + R0 * Math.cos(angle),
@@ -306,7 +316,7 @@ function BoardNetworkGraph({
       links.push({
         source: "company", target: nid,
         isActive: !!p.is_current,
-        color: ROLE_COLORS[p.role_category ?? ""] ?? FALLBACK_COLOR,
+        color: pColor,
       });
     });
 
@@ -437,11 +447,11 @@ function BoardNetworkGraph({
       <div className="absolute bottom-2 right-2 text-[10px] text-slate-400 bg-white/80 rounded px-2 py-1 border border-slate-100 select-none">
         Scroll to zoom · drag · double-click to reset
       </div>
-      <div className="absolute top-2 left-2 bg-white/90 backdrop-blur-sm rounded-lg border border-slate-200 px-2.5 py-2 text-[11px] text-slate-500 space-y-1 shadow-sm">
-        {Object.entries(ROLE_COLORS).map(([k, color]) => (
-          <div key={k} className="flex items-center gap-1.5">
-            <span className="w-2.5 h-2 inline-block rounded-sm" style={{ background: color }} />
-            {k}
+      <div className="absolute top-2 left-2 bg-white/90 backdrop-blur-sm rounded-lg border border-slate-200 px-2.5 py-2 text-[11px] text-slate-500 space-y-1 shadow-sm max-w-[180px]">
+        {[...new Set(persons.map(p => p.role?.trim() || p.role_category || "—"))].map(role => (
+          <div key={role} className="flex items-center gap-1.5 min-w-0">
+            <span className="w-2.5 h-2 inline-block rounded-sm shrink-0" style={{ background: roleColor(role) }} />
+            <span className="truncate" title={role}>{role.length > 20 ? role.slice(0, 18) + "…" : role}</span>
           </div>
         ))}
       </div>
@@ -523,7 +533,7 @@ export function BoardPanel({ companyUid }: { companyUid: string }) {
       {graphPersons.length > 0 && (
         <div className="mb-4">
           {view === "bar"
-            ? <RoleBarChart persons={graphPersons} />
+            ? <RoleBarChart persons={graphPersons} locale={locale} />
             : <BoardNetworkGraph persons={graphPersons} companyName={companyName} locale={locale} />
           }
         </div>

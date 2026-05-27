@@ -715,8 +715,6 @@ def get_noga_hierarchy(db: Session, org_id: int | None = None) -> list[dict]:
     Each node: {code, label, level, own_count, count (aggregated), children}.
     Top-level sections are returned as the root list.
     """
-    from app.models.org_company_state import OrgCompanyState
-
     noga_cache = _load_noga_hierarchy()
     if not noga_cache:
         return []
@@ -724,11 +722,14 @@ def get_noga_hierarchy(db: Session, org_id: int | None = None) -> list[dict]:
     noga_data = noga_cache["noga_data"]
     parent_map = noga_cache["parent_map"]
 
-    query = db.query(Company.noga_code, Company.noga_label, Company.noga_level, func.count(Company.id).label("cnt"))
-    query = query.filter(Company.noga_code.isnot(None))
-    if org_id:
-        query = query.join(OrgCompanyState, (OrgCompanyState.company_id == Company.id) & (OrgCompanyState.org_id == org_id), isouter=False)
-    rows = query.group_by(Company.noga_code, Company.noga_label, Company.noga_level).all()
+    # Always count from the global companies table — NOGA is a taxonomy browser,
+    # not an org-specific pipeline view. OrgCompanyState is intentionally excluded.
+    query = (
+        db.query(Company.noga_code, func.count(Company.id).label("cnt"))
+        .filter(Company.noga_code.isnot(None))
+        .group_by(Company.noga_code)
+    )
+    rows = query.all()
 
     code_counts = {r.noga_code: r.cnt for r in rows}
 

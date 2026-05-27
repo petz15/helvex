@@ -62,7 +62,8 @@ def semantic_search(
             r.raise_for_status()
             return r.json()
         except Exception:
-            pass  # fall through to local execution on ML worker failure
+            # ML worker unreachable — return empty rather than loading the model locally
+            return SemanticSearchOut(results=[], embedding_type=embedding_type, query=q)
 
     if embedding_type not in ("purpose_clean", "purpose_full"):
         embedding_type = "purpose_clean"

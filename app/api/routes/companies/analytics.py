@@ -57,19 +57,18 @@ def get_category_stats(
     return crud.get_category_stats(db, category_type=type, value=value, org_id=effective_org_id)
 
 
-@router.get("/noga-hierarchy", summary="NOGA codes as a collapsible hierarchy with aggregated counts")
+@router.get("/noga-hierarchy", summary="NOGA codes as a collapsible hierarchy with global company counts")
 def get_noga_hierarchy(
-    org_id: int | None = Query(None),
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    _: User = Depends(get_current_user),
 ):
-    effective_org_id = org_id or current_user.org_id
-
-    if effective_org_id in _noga_hierarchy_cache:
-        hierarchy = _noga_hierarchy_cache[effective_org_id]
+    # Counts are always global — the taxonomy browser shows the full registry.
+    _GLOBAL = None
+    if _GLOBAL in _noga_hierarchy_cache:
+        hierarchy = _noga_hierarchy_cache[_GLOBAL]
     else:
-        hierarchy = crud.get_noga_hierarchy(db, org_id=effective_org_id)
-        _noga_hierarchy_cache[effective_org_id] = hierarchy
+        hierarchy = crud.get_noga_hierarchy(db, org_id=None)
+        _noga_hierarchy_cache[_GLOBAL] = hierarchy
 
     response = Response(content=json.dumps(hierarchy), media_type="application/json")
     response.headers["Cache-Control"] = "public, max-age=3600, s-maxage=86400"
