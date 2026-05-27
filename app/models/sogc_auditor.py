@@ -20,6 +20,9 @@ class SogcAuditor(Base):
     company_uid: Mapped[str | None] = mapped_column(
         String(20), ForeignKey("companies.uid", ondelete="SET NULL"), nullable=True, index=True
     )
+    company_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("companies.id", ondelete="SET NULL"), nullable=True, index=True
+    )
 
     pub_date: Mapped[str | None] = mapped_column(String(32), nullable=True, index=True)
     change_type: Mapped[str] = mapped_column(String(32), nullable=False)

@@ -1087,6 +1087,36 @@ def _run_job(app, job_id: int) -> None:  # noqa: C901
                 if resume_from:
                     done_msg += f" (resumed from {resume_from})"
 
+                # Auto-chain SOGC preprocessing and person extraction after a daily import.
+                # Only chain when shab_daily actually brought in new or updated publications.
+                if job.job_type == "shab_daily" and (stats.get("created", 0) + stats.get("updated", 0)) > 0:
+                    _CHAIN = [
+                        ("sogc_preprocess",      "SOGC preprocess — nightly auto (after shab_daily)"),
+                        ("extract_sogc_persons",  "SOGC person extraction — nightly auto (after shab_daily)"),
+                    ]
+                    queued_types: list[str] = []
+                    for chain_type, chain_label in _CHAIN:
+                        try:
+                            chain_job = crud.create_job(
+                                db,
+                                job_type=chain_type,
+                                label=chain_label,
+                                params={"mode": "missing"},
+                            )
+                            crud.create_event(
+                                db, job_id=chain_job.id, level="info",
+                                message=f"Auto-queued after shab_daily job #{job.id}",
+                            )
+                            queued_types.append(chain_type)
+                        except Exception:
+                            logger.warning(
+                                "Failed to auto-queue %s after shab_daily job #%s",
+                                chain_type, job.id, exc_info=True,
+                            )
+                    if queued_types:
+                        done_msg += f"; queued {', '.join(queued_types)}"
+                    kick_job_worker(app)
+
             elif job.job_type == "csv_export":
                 from app.services.csv_export import run_csv_export
                 from app.services.s3_client import is_configured

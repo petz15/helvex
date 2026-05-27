@@ -585,13 +585,13 @@ function TimelineEntryDB({ pub }: { pub: SogcPublicationDetail }) {
   );
 }
 
-export function SogcTimelineDB({ companyUid }: { companyUid: string }) {
+export function SogcTimelineDB({ companyId }: { companyId: number }) {
   const { dict } = useI18n();
   const t = dict.app.companydetail;
 
   const { data: publications = [], isLoading } = useSWR(
-    `company-publications-${companyUid}`,
-    () => fetchCompanyPublications(companyUid),
+    `company-publications-${companyId}`,
+    () => fetchCompanyPublications(companyId),
     { revalidateOnFocus: false },
   );
 
@@ -623,14 +623,14 @@ export function SogcTimelineDB({ companyUid }: { companyUid: string }) {
 
 // ─── DB-backed signers panel (derived from sogc_publications text) ─────────────
 
-export function SignersPanelDB({ companyUid }: { companyUid: string }) {
+export function SignersPanelDB({ companyId }: { companyId: number }) {
   const { dict } = useI18n();
   const t = dict.app.companydetail;
 
   // Shares the SWR cache with SogcTimelineDB — no extra network request
   const { data: publications = [] } = useSWR(
-    `company-publications-${companyUid}`,
-    () => fetchCompanyPublications(companyUid),
+    `company-publications-${companyId}`,
+    () => fetchCompanyPublications(companyId),
     { revalidateOnFocus: false },
   );
 

@@ -2060,22 +2060,22 @@ export async function globalSearch(q: string): Promise<GlobalSearchResult> {
   return res.json();
 }
 
-export async function fetchCompanyPersons(companyUid: string, is_current?: boolean): Promise<SogcPersonAppearance[]> {
+export async function fetchCompanyPersons(companyId: number, is_current?: boolean): Promise<SogcPersonAppearance[]> {
   const qs = is_current !== undefined ? `?is_current=${is_current}` : "";
-  const res = await fetch(`/api/v1/companies/${companyUid}/persons${qs}`, { credentials: "include" });
+  const res = await fetch(`/api/v1/companies/${companyId}/persons${qs}`, { credentials: "include" });
   if (!res.ok) return _handleErrorResponse(res);
   return res.json();
 }
 
-export async function fetchCompanyAuditors(companyUid: string, is_current?: boolean): Promise<SogcAuditor[]> {
+export async function fetchCompanyAuditors(companyId: number, is_current?: boolean): Promise<SogcAuditor[]> {
   const qs = is_current !== undefined ? `?is_current=${is_current}` : "";
-  const res = await fetch(`/api/v1/companies/${companyUid}/auditors${qs}`, { credentials: "include" });
+  const res = await fetch(`/api/v1/companies/${companyId}/auditors${qs}`, { credentials: "include" });
   if (!res.ok) return _handleErrorResponse(res);
   return res.json();
 }
 
-export async function fetchCompanyPublications(companyUid: string): Promise<SogcPublicationDetail[]> {
-  const res = await fetch(`/api/v1/companies/${companyUid}/publications`, { credentials: "include" });
+export async function fetchCompanyPublications(companyId: number): Promise<SogcPublicationDetail[]> {
+  const res = await fetch(`/api/v1/companies/${companyId}/publications`, { credentials: "include" });
   if (!res.ok) return _handleErrorResponse(res);
   return res.json();
 }
@@ -2124,9 +2124,9 @@ export async function searchCorporateRoles(params: {
   return res.json();
 }
 
-export async function fetchCompanyCorporateRoles(companyUid: string, is_current?: boolean): Promise<SogcCorporateRole[]> {
+export async function fetchCompanyCorporateRoles(companyId: number, is_current?: boolean): Promise<SogcCorporateRole[]> {
   const qs = is_current !== undefined ? `?is_current=${is_current}` : "";
-  const res = await fetch(`/api/v1/companies/${companyUid}/corporate-roles${qs}`, { credentials: "include" });
+  const res = await fetch(`/api/v1/companies/${companyId}/corporate-roles${qs}`, { credentials: "include" });
   if (!res.ok) return _handleErrorResponse(res);
   return res.json();
 }

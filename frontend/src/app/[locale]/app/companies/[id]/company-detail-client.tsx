@@ -703,16 +703,16 @@ export function CompanyDetailClient({ company: initial, readOnlyDemo = false, is
 
 
       {/* Structured board & officers from SOGC person graph */}
-      <BoardPanel companyUid={company.uid} />
+      <BoardPanel companyId={company.id} />
 
       {/* Corporate shareholders detected via CHE numbers in SOGC publications */}
-      <CorporateShareholdersPanel companyUid={company.uid} />
+      <CorporateShareholdersPanel companyId={company.id} />
 
       {/* Current signers derived from sogc_publications text (fallback when person graph is empty) */}
-      <SignersPanelDB companyUid={company.uid} />
+      <SignersPanelDB companyId={company.id} />
 
       {/* SHAB timeline from preprocessed sogc_publications table */}
-      <SogcTimelineDB companyUid={company.uid} />
+      <SogcTimelineDB companyId={company.id} />
 
       {/* Notes */}
       {!readOnlyDemo && <div className="bg-white rounded-xl border border-slate-200 p-5 shadow-sm">

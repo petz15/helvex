@@ -750,40 +750,40 @@ def get_auditor_clients(
 
 # ── Company-scoped endpoints ───────────────────────────────────────────────────
 
-@router.get("/companies/{company_uid}/persons", response_model=list[PersonAppearanceOut])
+@router.get("/companies/{company_id}/persons", response_model=list[PersonAppearanceOut])
 def get_company_persons(
-    company_uid: str,
+    company_id: int,
     is_current: bool | None = Query(None),
     db: Session = Depends(get_db),
     _: User = Depends(get_current_user),
 ):
     from app.models.sogc_person_appearance import SogcPersonAppearance
 
-    qry = db.query(SogcPersonAppearance).filter_by(company_uid=company_uid)
+    qry = db.query(SogcPersonAppearance).filter(SogcPersonAppearance.company_id == company_id)
     if is_current is not None:
         qry = qry.filter(SogcPersonAppearance.is_current == is_current)
     appearances = qry.order_by(SogcPersonAppearance.pub_date.desc()).all()
     return [PersonAppearanceOut.from_orm(a) for a in appearances]
 
 
-@router.get("/companies/{company_uid}/auditors", response_model=list[AuditorOut])
+@router.get("/companies/{company_id}/auditors", response_model=list[AuditorOut])
 def get_company_auditors(
-    company_uid: str,
+    company_id: int,
     is_current: bool | None = Query(None),
     db: Session = Depends(get_db),
     _: User = Depends(get_current_user),
 ):
     from app.models.sogc_auditor import SogcAuditor
 
-    qry = db.query(SogcAuditor).filter_by(company_uid=company_uid)
+    qry = db.query(SogcAuditor).filter(SogcAuditor.company_id == company_id)
     if is_current is not None:
         qry = qry.filter(SogcAuditor.is_current == is_current)
     return [AuditorOut.from_orm(a) for a in qry.order_by(SogcAuditor.pub_date.desc()).all()]
 
 
-@router.get("/companies/{company_uid}/publications", response_model=list[SogcPublicationOut])
+@router.get("/companies/{company_id}/publications", response_model=list[SogcPublicationOut])
 def get_company_publications(
-    company_uid: str,
+    company_id: int,
     limit: int = Query(200, ge=1, le=500),
     db: Session = Depends(get_db),
     _: User = Depends(get_current_user),
@@ -793,7 +793,7 @@ def get_company_publications(
 
     pubs = (
         db.query(SogcPublication)
-        .filter_by(company_uid=company_uid)
+        .filter(SogcPublication.company_id == company_id)
         .options(joinedload(SogcPublication.changes))
         .order_by(SogcPublication.pub_date.desc())
         .limit(limit)
@@ -896,16 +896,16 @@ def search_corporate_roles(
     return result
 
 
-@router.get("/companies/{company_uid}/corporate-roles", response_model=list[CorporateRoleOut])
+@router.get("/companies/{company_id}/corporate-roles", response_model=list[CorporateRoleOut])
 def get_company_corporate_roles(
-    company_uid: str,
+    company_id: int,
     is_current: bool | None = Query(None),
     db: Session = Depends(get_db),
     _: User = Depends(get_current_user),
 ):
     from app.models.sogc_corporate_role import SogcCorporateRole
 
-    qry = db.query(SogcCorporateRole).filter(SogcCorporateRole.company_uid == company_uid)
+    qry = db.query(SogcCorporateRole).filter(SogcCorporateRole.company_id == company_id)
     if is_current is not None:
         qry = qry.filter(SogcCorporateRole.is_current == is_current)
     roles = qry.order_by(SogcCorporateRole.pub_date.desc()).all()

@@ -20,13 +20,13 @@ function RoleBadge({ role, is_current }: { role: string | null; is_current: bool
   );
 }
 
-export function CorporateShareholdersPanel({ companyUid }: { companyUid: string }) {
+export function CorporateShareholdersPanel({ companyId }: { companyId: number }) {
   const params = useParams();
   const locale = (params?.locale as string) || "en";
 
   const { data: roles, isLoading } = useSWR<SogcCorporateRole[]>(
-    companyUid ? ["corporate-roles", companyUid] : null,
-    () => fetchCompanyCorporateRoles(companyUid),
+    companyId ? ["corporate-roles", companyId] : null,
+    () => fetchCompanyCorporateRoles(companyId),
     { revalidateOnFocus: false },
   );
 
@@ -56,7 +56,7 @@ export function CorporateShareholdersPanel({ companyUid }: { companyUid: string 
           </h2>
         </div>
         <Link
-          href={`/${locale}/app/corporate?company_uid=${companyUid}`}
+          href={`/${locale}/app/corporate?company_uid=${roles[0]?.company_uid ?? ""}`}
           className="text-[11px] text-blue-600 hover:text-blue-800 transition-colors flex items-center gap-1"
         >
           All <ExternalLink size={10} />

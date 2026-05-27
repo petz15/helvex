@@ -476,26 +476,26 @@ function AuditorCard({ auditor }: { auditor: SogcAuditor }) {
 
 // ── Board panel ───────────────────────────────────────────────────────────────
 
-export function BoardPanel({ companyUid }: { companyUid: string }) {
+export function BoardPanel({ companyId }: { companyId: number }) {
   const params = useParams();
   const locale = (params?.locale as string) ?? "de";
   const [view, setView] = useState<"bar" | "network">("bar");
   const [showPast, setShowPast] = useState(false);
 
   const { data: persons = [] } = useSWR(
-    `company-persons-all-${companyUid}`,
-    () => fetchCompanyPersons(companyUid),
+    `company-persons-all-${companyId}`,
+    () => fetchCompanyPersons(companyId),
     { revalidateOnFocus: false },
   );
   const { data: auditors = [] } = useSWR(
-    `company-auditors-${companyUid}`,
-    () => fetchCompanyAuditors(companyUid, true),
+    `company-auditors-${companyId}`,
+    () => fetchCompanyAuditors(companyId),
     { revalidateOnFocus: false },
   );
 
   if (persons.length === 0 && auditors.length === 0) return null;
 
-  const companyName = persons[0]?.company_name ?? companyUid;
+  const companyName = persons[0]?.company_name ?? String(companyId);
   // Graph-relevant: role appointments only, deduplicated per entity
   const graphPersons = dedupeByEntityRole(persons.filter(isGraphRelevant));
   const barPersons = showPast ? graphPersons : graphPersons.filter(p => p.is_current);
