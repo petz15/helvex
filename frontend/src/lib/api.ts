@@ -620,6 +620,17 @@ export async function fetchNogaHierarchy(): Promise<NogaNode[]> {
   return res.json();
 }
 
+export interface NogaAnnotation {
+  type: 'INCLUDES' | 'EXCLUDES' | 'INCLUDES_ALSO' | 'HIER_LEVEL';
+  text?: Record<string, string>;
+}
+
+export async function fetchNogaDescription(code: string): Promise<{ code: string; annotations: NogaAnnotation[] }> {
+  const res = await fetch(`/api/v1/companies/noga-description/${encodeURIComponent(code)}`, { credentials: "include" });
+  if (!res.ok) throw new ApiError(res.statusText, res.status);
+  return res.json();
+}
+
 export interface SemanticSearchResult {
   value: string;
   count: number;

@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import time
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import Response
 from sqlalchemy.orm import Session
 
@@ -74,6 +74,21 @@ def get_noga_hierarchy(
     response.headers["Cache-Control"] = "public, max-age=3600, s-maxage=86400"
     response.headers["ETag"] = f'"{hash(str(hierarchy)) & 0x7fffffff}"'
     return response
+
+
+@router.get("/noga-description/{code}", summary="NOGA annotations (includes/excludes) for a single code")
+def get_noga_description(
+    code: str,
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+):
+    from app.services.noga_lookup import load_noga_hierarchy
+    cache = load_noga_hierarchy()
+    noga_data = cache.get("noga_data", {})
+    node = noga_data.get(code) if noga_data else None
+    if not isinstance(node, dict):
+        raise HTTPException(status_code=404, detail="Code not found")
+    return {"code": code, "annotations": node.get("annotations", [])}
 
 
 @router.get("/market-segments", summary="NOGA section stats for the market map treemap")
