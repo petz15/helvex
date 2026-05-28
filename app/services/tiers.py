@@ -205,18 +205,18 @@ _LEGACY_TIER_MAP: dict[str, str] = {
 # features of the tiers below it).
 _TIER_FEATURES: dict[str, frozenset[str]] = {
     "free": frozenset(),
-    "simple": frozenset({"no_ads", "multi_user", "daily_notifications"}),
+    "simple": frozenset({"no_ads", "multi_user", "daily_notifications", "web_search"}),
     "explorer": frozenset({
-        "no_ads", "multi_user", "daily_notifications",
+        "no_ads", "multi_user", "daily_notifications", "web_search",
         "immediate_llm", "flex_auto_score_new",
     }),
     "researcher": frozenset({
-        "no_ads", "multi_user", "daily_notifications",
+        "no_ads", "multi_user", "daily_notifications", "web_search",
         "immediate_llm", "flex_auto_score_new",
         "llm_auto_score_new", "custom_ml_stopwords",
     }),
     "strategist": frozenset({
-        "no_ads", "multi_user", "daily_notifications",
+        "no_ads", "multi_user", "daily_notifications", "web_search",
         "immediate_llm", "flex_auto_score_new",
         "llm_auto_score_new", "custom_ml_stopwords",
         "byo_llm_keys", "api_access",
@@ -225,7 +225,7 @@ _TIER_FEATURES: dict[str, frozenset[str]] = {
     "custom": frozenset(),
     # "superadmin" tier has all features and unlimited rights
     "superadmin": frozenset({
-        "no_ads", "multi_user", "daily_notifications",
+        "no_ads", "multi_user", "daily_notifications", "web_search",
         "immediate_llm", "flex_auto_score_new",
         "llm_auto_score_new", "custom_ml_stopwords",
         "byo_llm_keys", "api_access",

@@ -20,6 +20,7 @@ from app.services import credits as credits_service
 from app.services.activity import log_activity
 from app.services.collection import enrich_company_website
 from app.services.scoring import is_social_lead_domain
+from app.services.tiers import has_feature
 
 from app.api.routes.companies._shared import (
     _ORG_FIELDS,
@@ -149,6 +150,12 @@ def google_search_for_company(
         key = f"user_{current_user.id}"
         check_rate_limit(key, "google_search", window=600, max_calls=30, detail="Too many Google search requests. Maximum 30 per 10 minutes.")
         if current_user.org_id:
+            org = db.get(Organization, current_user.org_id)
+            if not org or not has_feature(org, "web_search"):
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Website search is not available on the free plan. Upgrade to Simple or higher.",
+                )
             if not credits_service.check_and_deduct(
                 db,
                 current_user.org_id,

@@ -46,7 +46,8 @@ function LoginForm() {
   const { dict } = useI18n();
   const t = dict.auth.login;
 
-  const next = `/${locale}/app/search`;
+  const rawNext = searchParams?.get("next");
+  const next = rawNext && rawNext.startsWith("/") ? rawNext : `/${locale}/app/search`;
   const oauthError = searchParams?.get("oauth_error");
 
   const [email, setEmail] = useState("");
@@ -69,10 +70,8 @@ function LoginForm() {
         setError(body.detail ?? `Login failed (HTTP ${res.status})`);
         return;
       }
-      // Invalidate the SWR "me" cache so NavBar re-fetches the authenticated user immediately.
       await mutate("me");
-      router.refresh();
-      router.push(next);
+      window.location.href = next;
     } finally {
       setLoading(false);
     }
