@@ -37,7 +37,7 @@
 Helvex is a B2B company intelligence platform. It bulk-imports the entire Swiss commercial register (~700 k companies via the [Zefix](https://www.zefix.admin.ch) public REST API), enriches them with Google Search results, offline geocoding, TF-IDF clustering, and Claude AI scoring, and exposes them through a filterable dashboard.
 
 **Key workflows:**
-1. **Bulk import** — Zefix canton-by-canton, resumable
+1. **Bulk import** — Zefix canton-by-canton, resumable; now imports both ACTIVE and CANCELLED/BEING_CANCELLED companies by default (`active_only=False`)
 2. **Detail fetch + geocode** — swisstopo building-level precision
 3. **Website enrichment** — Serper.dev Google Search, daily quota-aware
 4. **AI scoring** — Claude Haiku via Anthropic API

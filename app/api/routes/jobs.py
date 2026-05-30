@@ -271,7 +271,7 @@ async def stream_active_jobs(db: Session = Depends(get_db), current_user: User =
 class BulkImportBody(BaseModel):
     cantons: list[str] | None = None
     start_from_canton: str | None = None  # skip cantons before this one
-    active_only: bool = True
+    active_only: bool = False
     delay: float = 0.5
     empty_abort_threshold: int = 100  # stop after this many consecutive empty prefixes
 
@@ -402,7 +402,8 @@ def trigger_bulk(body: BulkImportBody, request: Request, db: Session = Depends(g
     canton_list = [c.upper() for c in body.cantons] if body.cantons else None
     start_from = body.start_from_canton.upper() if body.start_from_canton else None
     scope = ', '.join(canton_list) if canton_list else 'all 26'
-    label = f"Bulk import — cantons: {scope}" + (f" (from {start_from})" if start_from else "")
+    status_scope = "active only" if body.active_only else "active + closed"
+    label = f"Bulk import — cantons: {scope} ({status_scope})" + (f" (from {start_from})" if start_from else "")
     job = _enqueue_or_http_error(
         request,
         job_type="bulk",

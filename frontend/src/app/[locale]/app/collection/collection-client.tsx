@@ -290,8 +290,8 @@ export function CollectionClient() {
           </Field>
           <div className="flex gap-6">
             <label className="flex items-center gap-2 text-sm text-slate-700">
-              <input type="checkbox" name="active_only" defaultChecked className={checkCls} />
-              Active companies only
+              <input type="checkbox" name="active_only" className={checkCls} />
+              Active companies only (uncheck to include closed/cancelled)
             </label>
           </div>
           <div className="grid grid-cols-2 gap-4">

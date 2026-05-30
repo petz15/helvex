@@ -47,6 +47,9 @@ Admin (superadmin actions)
 Jobs
   job_enqueued          — background job enqueued (type in meta.job_type)
   job_cancelled         — user cancelled a running job
+
+Navigation
+  page_viewed           — user navigated to a page (path in meta.path)
 """
 from __future__ import annotations
 
@@ -94,6 +97,8 @@ ACTIONS: frozenset[str] = frozenset({
     # jobs
     "job_enqueued",
     "job_cancelled",
+    # navigation
+    "page_viewed",
 })
 
 

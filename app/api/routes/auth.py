@@ -744,6 +744,7 @@ def record_page_view(
         meta={"path": body.path},
         ip=get_client_ip(request),
     )
+    db.commit()
 
 
 # ---------------------------------------------------------------------------

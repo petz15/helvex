@@ -785,6 +785,7 @@ def run_sogc_preprocess_batch(
                      Ignored when uids is provided (small targeted runs don't need it).
     """
     from sqlalchemy import or_, exists
+    from sqlalchemy.orm import load_only
 
     stats: dict[str, Any] = {
         "selected": 0,
@@ -794,8 +795,16 @@ def run_sogc_preprocess_batch(
         "errors": [],
     }
 
-    # Include companies that have sogc_pub OR a non-empty zefix_raw (fallback path)
-    q = db.query(Company).filter(
+    # Only load the columns preprocess_company_sogc_pub actually reads —
+    # avoids pulling zefix_raw (large JSONB), google_search_results_raw, etc.
+    q = db.query(Company).options(load_only(
+        Company.id,
+        Company.uid,
+        Company.canton,
+        Company.purpose_language,
+        Company.sogc_pub,
+        Company.zefix_raw,
+    )).filter(
         or_(Company.sogc_pub.isnot(None), Company.zefix_raw.isnot(None))
     )
 
@@ -805,8 +814,12 @@ def run_sogc_preprocess_batch(
             q = q.filter(Company.uid.in_(normalised))
 
     if mode == "missing":
-        already_done = db.query(SogcPublication.company_uid).distinct().subquery()
-        q = q.filter(~exists().where(already_done.c.company_uid == Company.uid))
+        # Direct correlated NOT EXISTS so PostgreSQL can use the
+        # ix_sogc_pub_uid_date index on company_uid rather than materialising
+        # a full DISTINCT subquery across all sogc_publications rows.
+        q = q.filter(
+            ~exists().where(SogcPublication.company_uid == Company.uid)
+        )
 
     # Cursor pagination: filter by id > last_id to avoid O(n²) OFFSET scans.
     # resume_from is treated as the last company.id already processed (not a row count).

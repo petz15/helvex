@@ -108,7 +108,7 @@ def handle_bulk(ctx: JobContext) -> tuple[dict, str]:
     stats = bulk_import_zefix(
         ctx.db,
         cantons=ctx.params.get("cantons"),
-        active_only=ctx.params.get("active_only", True),
+        active_only=ctx.params.get("active_only", False),
         request_delay=float(ctx.params.get("delay", 0.5)),
         resume=bool(ctx.params.get("resume", False)),
         start_from_canton=ctx.params.get("start_from_canton"),
