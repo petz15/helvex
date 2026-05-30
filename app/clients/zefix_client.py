@@ -49,9 +49,7 @@ def search_companies(
 ) -> list[ZefixSearchResult]:
     """Search for companies by name via the Zefix API."""
     url = f"{settings.zefix_api_base_url}/company/search"
-    payload: dict[str, Any] = {"name": name, "maxEntries": max_results, "languageKey": "en"}
-    if active_only:
-        payload["activeOnly"] = True
+    payload: dict[str, Any] = {"name": name, "maxEntries": max_results, "languageKey": "en", "activeOnly": active_only}
     if canton:
         payload["canton"] = canton.upper()
     if legal_form:
@@ -80,9 +78,8 @@ def fetch_companies_by_canton(
         "maxEntries": page_size,
         "offset": offset,
         "languageKey": "en",
+        "activeOnly": active_only,
     }
-    if active_only:
-        payload["activeOnly"] = True
 
     with httpx.Client(timeout=60.0) as client:
         response = client.post(url, json=payload, auth=_get_auth())
@@ -105,11 +102,10 @@ def fetch_companies_by_prefix(
         "name": prefix,
         "maxEntries": ZEFIX_MAX_ENTRIES,
         "languageKey": "en",
+        "activeOnly": active_only,
     }
     if canton:
         payload["canton"] = canton
-    if active_only:
-        payload["activeOnly"] = True
 
     with httpx.Client(timeout=60.0) as client:
         response = client.post(url, json=payload, auth=_get_auth())
