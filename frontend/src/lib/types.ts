@@ -102,6 +102,7 @@ export interface CompanyFilters {
   uid?: string;
   status?: string;
   has_website?: boolean;
+  active_only?: boolean;
   canton?: string;
   review_status?: string;
   contact_status?: string;

@@ -93,7 +93,10 @@ def _apply_filters(query, *, name_filter, uid_filter=None, canton, review_status
                    zefix_status=None, has_website=None,
                    legal_form=None, registered_after=None, registered_before=None,
                    sogc_after=None, sogc_before=None, shab_type=None,
-                   business_model=None, purpose_language=None):
+                   business_model=None, purpose_language=None,
+                   active_only: bool = True):
+    if active_only and not zefix_status and not shab_type:
+        query = query.filter(Company.status.notin_(list(_DELETED_STATUSES)))
     if zefix_status:
         query = query.filter(Company.status == zefix_status)
     if has_website is True:
@@ -345,6 +348,7 @@ def list_companies(
     shab_type: str | None = None,
     business_model: str | None = None,
     purpose_language: str | None = None,
+    active_only: bool = True,
     # kept for backward-compat with collection.py batch query
     limit: int | None = None,
     skip: int = 0,
@@ -393,6 +397,7 @@ def list_companies(
         shab_type=shab_type,
         business_model=business_model,
         purpose_language=purpose_language,
+        active_only=active_only,
     )
 
     if sort in ("combined_score", "-combined_score"):
@@ -465,6 +470,7 @@ def count_companies(
     shab_type: str | None = None,
     business_model: str | None = None,
     purpose_language: str | None = None,
+    active_only: bool = True,
 ) -> int:
     query = db.query(Company)
     query = _apply_filters(
@@ -510,6 +516,7 @@ def count_companies(
         shab_type=shab_type,
         business_model=business_model,
         purpose_language=purpose_language,
+        active_only=active_only,
     )
     return query.count()
 

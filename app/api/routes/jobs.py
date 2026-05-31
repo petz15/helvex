@@ -1183,6 +1183,7 @@ class CSVExportBody(BaseModel):
     exclude_noga_code: str | None = None
     exclude_noga_label: str | None = None
     exclude_noga_level: str | None = None
+    active_only: bool = True
 
 
 class CSVExportStatusOut(BaseModel):

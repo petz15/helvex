@@ -65,6 +65,7 @@ _FILTER_MAP: dict[str, str] = {
     "registered_after":         "registered_after",
     "registered_before":        "registered_before",
     "status":                   "zefix_status",  # frontend may use either key
+    "active_only":              "active_only",
 }
 
 

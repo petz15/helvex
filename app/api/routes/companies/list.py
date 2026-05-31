@@ -73,6 +73,7 @@ def list_companies(
     shab_type: str | None = Query(None, description="SHAB entry type: 'new' (HR01), 'mutation' (HR02), 'deleted' (HR03)"),
     business_model: str | None = Query(None, description="Filter by business model: b2b, b2c, b2g, mixed, or _none"),
     purpose_language: str | None = Query(None, description="Filter by detected purpose language: de, fr, it, en"),
+    active_only: bool = Query(True, description="When true (default), hide CANCELLED/BEING_CANCELLED companies"),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> CompanyPage:
@@ -127,6 +128,7 @@ def list_companies(
         shab_type=shab_type,
         business_model=business_model,
         purpose_language=purpose_language,
+        active_only=active_only,
     )
     total = crud.count_companies(db, **filter_kwargs)
     items = crud.list_companies(db, page=page, page_size=page_size, sort=sort, **filter_kwargs)
@@ -173,6 +175,7 @@ def export_companies_csv(
     exclude_noga_code: str | None = Query(None),
     exclude_noga_label: str | None = Query(None),
     exclude_noga_level: str | None = Query(None),
+    active_only: bool = Query(True, description="When true (default), exclude CANCELLED/BEING_CANCELLED companies"),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -239,6 +242,7 @@ def export_companies_csv(
         "exclude_noga_code": exclude_noga_code,
         "exclude_noga_label": exclude_noga_label,
         "exclude_noga_level": exclude_noga_level,
+        "active_only": active_only,
     }
 
     from app.schemas.job import JobOut

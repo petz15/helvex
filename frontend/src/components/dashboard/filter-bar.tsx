@@ -153,7 +153,7 @@ export function FilterBar({
   );
 
   const activeEntries = Object.entries(filters).filter(
-    ([k, v]) => !["page", "page_size", "sort"].includes(k) && v !== undefined && v !== ""
+    ([k, v]) => !["page", "page_size", "sort", "active_only"].includes(k) && v !== undefined && v !== ""
   ) as [keyof CompanyFilters, string | number][];
 
   const activeCount = activeEntries.length;
@@ -201,6 +201,15 @@ export function FilterBar({
           value={filters.uid ?? ""}
           onChange={(e) => set("uid", e.target.value)}
         />
+        <label className="flex items-center gap-1.5 text-xs text-slate-600 cursor-pointer shrink-0 select-none">
+          <input
+            type="checkbox"
+            className="rounded"
+            checked={filters.active_only !== false && filters.active_only !== ("false" as unknown as boolean)}
+            onChange={(e) => onChange({ ...filters, active_only: e.target.checked ? undefined : false, page: 1 })}
+          />
+          Active only
+        </label>
 
         {/* Expand/collapse advanced filters */}
         <button
