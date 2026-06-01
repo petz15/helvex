@@ -62,7 +62,7 @@ def _compute_dedup_key(job_type: str, org_id: int | None, params: dict) -> str |
     # These types allow at most one active job per org at a time.
     ONE_PER_ORG = {
         "bulk", "detail", "initial",
-        "shab_daily", "shab_backfill",
+        "shab_daily", "shab_backfill", "shab_archive",
         "recalculate_scores", "recalculate_google_scores",
         "reextract_purpose", "reextract_zefix_raw", "reclassify_noga",
         "build_noga_embeddings", "detect_language_bulk", "reclassify_low_conf_noga",

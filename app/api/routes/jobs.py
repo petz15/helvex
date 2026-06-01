@@ -957,6 +957,20 @@ class SogcPreprocessBody(BaseModel):
     batch_size: int = 500
 
 
+class ShabArchiveBody(BaseModel):
+    # Date-window mode (recommended for full historical import)
+    date_start: str | None = None    # ISO date YYYY-MM-DD; enables date-window mode
+    date_end: str | None = None      # ISO date YYYY-MM-DD; defaults to today
+    window_days: int = 28            # Days per API window (keep ≤28 to stay under 50K cap)
+    # Page mode (quick test when no dates given — limited to default 2018 window)
+    start_page: int = 0
+    end_page: int | None = None
+    # Common
+    page_size: int = 100
+    request_delay: float = 0.5
+    pdf_delay: float = 0.3
+
+
 _SHAB_BACKFILL_MIN_DATE = date(2016, 2, 3)
 
 
@@ -1035,6 +1049,50 @@ def trigger_shab_backfill(
             "from_date": from_date.isoformat(),
             "to_date": to_date.isoformat(),
             "request_delay": body.request_delay,
+        },
+        db=db,
+    )
+    return JobOut.from_orm_obj(job)
+
+
+@router.post("/collection/shab-archive", response_model=JobOut, status_code=status.HTTP_202_ACCEPTED)
+def trigger_shab_archive(
+    body: ShabArchiveBody,
+    request: Request,
+    db: Session = Depends(get_db),
+    _: User = Depends(require_superadmin),
+):
+    """Import historical SHAB publications directly from the shab.ch archive API.
+
+    Fetches the public archive page-by-page, downloads the PDF for each
+    HR01/HR02/HR03 entry, extracts text, and upserts into ``sogc_publications``
+    + ``sogc_changes``.  Supports pause/resume.
+
+    Unlike the Zefix-backed SHAB backfill this does not touch the companies
+    table — it only writes to the SOGC publication tables.  Use the SOGC
+    preprocess job afterwards to link publications to companies via UID.
+    """
+    if body.date_start:
+        label = (
+            f"SHAB archive import — {body.date_start} → {body.date_end or 'today'} "
+            f"({body.window_days}d windows)"
+        )
+    else:
+        end_label = f"→{body.end_page}" if body.end_page is not None else "→end"
+        label = f"SHAB archive import — pages {body.start_page}{end_label} (size={body.page_size})"
+    job = _enqueue_or_http_error(
+        request,
+        job_type="shab_archive",
+        label=label,
+        params={
+            "date_start": body.date_start,
+            "date_end": body.date_end,
+            "window_days": body.window_days,
+            "start_page": body.start_page,
+            "end_page": body.end_page,
+            "page_size": body.page_size,
+            "request_delay": body.request_delay,
+            "pdf_delay": body.pdf_delay,
         },
         db=db,
     )

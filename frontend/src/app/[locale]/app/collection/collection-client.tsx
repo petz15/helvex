@@ -481,6 +481,87 @@ export function CollectionClient() {
         </form>
       </Section>
 
+      <Section title="SHAB Archive Import (shab.ch)">
+        <form onSubmit={async e => {
+          e.preventDefault();
+          const fd = new FormData(e.currentTarget);
+          const dateStart = (fd.get("archive_date_start") as string)?.trim() || undefined;
+          const dateEnd = (fd.get("archive_date_end") as string)?.trim() || undefined;
+          const windowDays = parseInt(fd.get("archive_window_days") as string) || 28;
+          const startPage = parseInt(fd.get("archive_start_page") as string) || 0;
+          const endPageRaw = (fd.get("archive_end_page") as string)?.trim();
+          const endPage = endPageRaw ? parseInt(endPageRaw) : undefined;
+          const pageSize = parseInt(fd.get("archive_page_size") as string) || 100;
+          const requestDelay = parseFloat(fd.get("archive_request_delay") as string) || 0.5;
+          const pdfDelay = parseFloat(fd.get("archive_pdf_delay") as string) || 0.3;
+          await submit("collection/shab-archive", {
+            date_start: dateStart,
+            date_end: dateEnd,
+            window_days: windowDays,
+            start_page: startPage,
+            end_page: endPage,
+            page_size: pageSize,
+            request_delay: requestDelay,
+            pdf_delay: pdfDelay,
+          });
+        }} className="space-y-4">
+          <div>
+            <h2 className="text-sm font-semibold text-slate-800">SHAB archive import</h2>
+            <p className="mt-1 text-xs text-slate-500">
+              Fetches HR01/02/03 publications directly from{" "}
+              <span className="font-mono">shab.ch/api/v1/archive</span>.
+              Downloads each PDF, extracts text with MuPDF, runs change detection,
+              and upserts into <span className="font-mono">sogc_publications</span> +{" "}
+              <span className="font-mono">sogc_changes</span>.
+              Supports pause/resume. Entries use <span className="font-mono">sogc_id = shab_&#123;id&#125;</span>.
+            </p>
+            <p className="mt-1 text-xs text-amber-600 font-medium">
+              Date-window mode (recommended): set Start date to use chunked date ranges (~28 days/window, stays under API 50K cap). Leave dates empty for a quick page-based test on the 2018 window only.
+            </p>
+          </div>
+
+          <div className="border-t border-slate-100 pt-3">
+            <p className="text-xs font-semibold text-slate-600 mb-2">Date-window mode (full historical import)</p>
+            <div className="grid grid-cols-3 gap-4">
+              <Field label="Start date" hint="YYYY-MM-DD — enables date-window mode">
+                <input name="archive_date_start" type="date" className={inputCls} />
+              </Field>
+              <Field label="End date" hint="Leave empty for today">
+                <input name="archive_date_end" type="date" className={inputCls} />
+              </Field>
+              <Field label="Window (days)" hint="Days per API window; keep ≤ 28">
+                <input name="archive_window_days" type="number" min="1" max="28" defaultValue="28" className={inputCls} />
+              </Field>
+            </div>
+          </div>
+
+          <div className="border-t border-slate-100 pt-3">
+            <p className="text-xs font-semibold text-slate-600 mb-2">Page mode (quick test — 2018 window only)</p>
+            <div className="grid grid-cols-2 gap-4">
+              <Field label="Start page" hint="Leave 0 to start from page 0">
+                <input name="archive_start_page" type="number" min="0" defaultValue="0" className={inputCls} />
+              </Field>
+              <Field label="End page" hint="Inclusive; empty = all (max ~500)">
+                <input name="archive_end_page" type="number" min="0" className={inputCls} placeholder="e.g. 4" />
+              </Field>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-3 gap-4">
+            <Field label="Page size" hint="Entries per page">
+              <input name="archive_page_size" type="number" min="1" max="1000" defaultValue="100" className={inputCls} />
+            </Field>
+            <Field label="List delay (s)" hint="Between page list requests">
+              <input name="archive_request_delay" type="number" step="0.1" min="0.1" defaultValue="0.5" className={inputCls} />
+            </Field>
+            <Field label="PDF delay (s)" hint="Between PDF downloads">
+              <input name="archive_pdf_delay" type="number" step="0.05" min="0.05" defaultValue="0.3" className={inputCls} />
+            </Field>
+          </div>
+          <SubmitBtn loading={loading === "collection/shab-archive"} />
+        </form>
+      </Section>
+
       <Section title="SOGC Preprocess">
         <form onSubmit={async e => {
           e.preventDefault();

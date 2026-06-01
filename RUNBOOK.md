@@ -648,6 +648,11 @@ kubectl describe cluster helvex-pg -n helvex-prod
 # List completed/scheduled backups
 kubectl get backup -n helvex-prod
 kubectl get scheduledbackup -n helvex-prod
+
+# Scale pods
+kubectl scale deployment/helvex -n helvex-prod --replicas=2
+kubectl scale deployment/helvex -n helvex-prod --replicas=1
+
 ```
 
 ## 10b. TLS Troubleshooting: Let's Encrypt Rate Limit (429)

@@ -61,7 +61,8 @@ zefix_analyzer/
 │   │   ├── zefix_client.py     # Zefix REST API client
 │   │   ├── google_search_client.py  # Serper.dev wrapper
 │   │   ├── geocoding_client.py # Offline geocoder (swisstopo + GeoNames fallback)
-│   │   └── shab_client.py      # SHAB HR publications feed
+│   │   ├── shab_client.py      # SHAB HR publications feed (Zefix SOGC bydate)
+│   │   └── shab_archive_client.py  # shab.ch archive API + PDF extraction (pypdf)
 │   ├── api/
 │   │   ├── routes/
 │   │   │   ├── auth.py         # /api/v1/auth/*
@@ -93,7 +94,8 @@ zefix_analyzer/
 │       ├── language_detection.py    # Purpose language detection (multilingual)
 │       ├── cluster_pipeline.py # TF-IDF K-Means, HDBSCAN, semantic clustering
 │       ├── scoring.py          # Score computation (flex, web, AI, combined)
-│       ├── shab_import.py      # SHAB daily + backfill import
+│       ├── shab_import.py      # SHAB daily + backfill import (Zefix SOGC bydate)
+│       ├── shab_archive_import.py  # SHAB archive import from shab.ch (PDF-based)
 │       ├── job_worker.py       # Job dispatch (now: handler registry pattern)
 │       ├── job_handlers/       # Handler modules for each job type (24 types)
 │       ├── rate_limit.py       # Centralized rate limiting (no Redis)
@@ -750,6 +752,7 @@ The worker checks `cancel_requested` / `pause_requested` **between companies** (
 | `saved_view_alerts` | — | Sweep all orgs' alert-enabled saved views; email owner if new companies match since last check | ✓ One active per org; `ONE_PER_ORG` set |
 | `sogc_preprocess` | `mode`, `batch_size`, `uids` | Explode `sogc_pub` blobs into `sogc_publications` + `sogc_changes` rows; see §SOGC Preprocessing | — |
 | `repair_is_current` | `batch_size` | Recompute `is_current` flag for all existing `sogc_person_appearances` rows; fixes historical data before the temporal-ordering bug was corrected | — |
+| `shab_archive` | `start_page`, `end_page`, `page_size`, `request_delay`, `pdf_delay` | Fetch shab.ch archive, download PDFs, upsert `sogc_publications` + `sogc_changes`; resume via page cursor | ONE_PER_ORG |
 
 #### Org-scoped job execution
 
@@ -866,7 +869,28 @@ The `message` field contains the full HR publication narrative (single language;
 - `run_sogc_preprocess_batch(db, mode, uids, ...)` — batch over companies table with cursor pagination; `mode="missing"` skips already-processed companies, `mode="all"` reprocesses everything.
 - `run_sogc_publications_backfill(db, ...)` — iterates existing `sogc_publications` rows, re-applies encoding fix to stored texts, regenerates `sogc_changes`. Used via `mode="publications"` job param to retroactively fix rows written before the encoding/text-extraction fixes.
 
-**SHAB integration:** After every HR01/HR02 company upsert in `shab_import.py`, `preprocess_company_sogc_pub` is called fire-and-forget (errors logged, not raised), ensuring new publications are indexed immediately.
+**SHAB integration (Zefix-backed):** After every HR01/HR02 company upsert in `shab_import.py`, `preprocess_company_sogc_pub` is called fire-and-forget (errors logged, not raised), ensuring new publications are indexed immediately.
+
+### SHAB Archive Import — `app/services/shab_archive_import.py`
+
+Imports historical SHAB publications directly from the `shab.ch` public archive API (`https://www.shab.ch/api/v1/archive/public`). Unlike the Zefix-backed SHAB importer this source is PDF-based and does not touch the `companies` table.
+
+**Workflow:**
+1. `fetch_archive_page(page, size)` — paginates the archive list (`includeContent=false`).
+2. For each HR01/HR02/HR03 entry: `fetch_pdf_bytes(id)` → `extract_text_from_pdf()` (pypdf).
+3. Extract UID via regex (`CHE-xxx.xxx.xxx`), detect language (lingua + canton fallback).
+4. Upsert `SogcPublication` with extracted text; detect changes via `_detect_changes` from `sogc_preprocessor.py`.
+5. Supports pause/resume: `progress_done` stores the last completed page number.
+
+**sogc_id convention:** `"shab_{archive_id}"` (e.g. `"shab_4447021"`) — never collides with Zefix SOGC IDs (plain numeric strings).
+
+**Job type:** `shab_archive` — registered in `JOB_HANDLERS`, ONE_PER_ORG.
+
+**API endpoint:** `POST /api/v1/collection/shab-archive` (superadmin only).
+
+**Frontend:** Collection page → SHAB / SOGC group → "SHAB Archive Import (shab.ch)" section.
+
+**Dependency:** `pypdf>=4.0.0` added to `requirements.backend.txt`.
 
 ### SMTP — `app/services/email.py`
 

@@ -180,6 +180,15 @@ _SECTION_DEFS: list[tuple[re.Pattern, str, bool]] = [
     (re.compile(r"nouvelle\s+raison\s+sociale[^:.]*:", re.I), "name",           False),
     (re.compile(r"en\s+liquidation|dissolution[^:.]*:", re.I), "status",        False),
     (re.compile(r"fusion[^:.]*:",                      re.I), "merger",         False),
+    # ── French — SHAB archive PDF format (compact section headers) ───────────
+    # These section headers appear in SHAB PDF publications and differ from the
+    # verbose headers used in SOGC/Zefix text (e.g. "personnes démissionnaires").
+    (re.compile(r"personne\(s\)\s+et\s+signature\(s\)\s+radi[ée]{1,2}\(s\)\s*:", re.I), "person_removed", True),
+    (re.compile(r"personne\(s\)\s+inscrite\(s\)\s+nouvelles?\s+ou\s+mutante\(s\)\s*:", re.I), "person_changed", True),
+    (re.compile(r"personne\(s\)\s+inscrite\(s\)\s*:",        re.I), "person_added",   True),
+    (re.compile(r"but\s+de\s+l.entreprise\s*:",              re.I), "purpose",        False),
+    (re.compile(r"raison\s+sociale\s+(?:nouvelle|modifi[ée]e)[^:.]*:", re.I), "name", False),
+    (re.compile(r"si[eè]ge\s+(?:social\s+)?(?:nouveau|modifi[ée])[^:.]*:", re.I), "address", False),
     # ── Italian ──────────────────────────────────────────────────────────────
     (re.compile(r"persone\s+uscenti[^:]*:|firme\s+estinte[^:]*:", re.I), "person_removed", True),
     (re.compile(r"nuovi\s+membri[^:]*:|nuove\s+firme[^:]*:",      re.I), "person_added",   True),
