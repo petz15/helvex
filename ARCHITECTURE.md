@@ -543,6 +543,11 @@ alembic upgrade head
 - `0071` — Dropped 2 redundant combined_score functional indexes + 2 stale partial indexes (pre-column-rename names). `ix_companies_combined_score_stored` (stored column B-tree) is the correct index.
 - `0072` — Added `org_id` FK to `user_views`; backfilled from `users.org_id`; views are now org-scoped.
 - `fe7a997e322a` (prior session) — Dropped 8 never-read JSON blob columns from `companies` (`sogc_pub`, `further_head_offices`, `branch_offices`, `has_taken_over`, `was_taken_over_by`, `audit_companies`, `old_names`, `translations`).
+- `0090` — Added `ix_companies_name_trgm` GIN trigram index on `companies.name`. Fixes full-table seq-scan for `ILIKE '%term%'` name searches (B-tree cannot serve leading-wildcard patterns). `pg_trgm` extension already enabled from `0022`.
+
+**Request logging (`app/main.py` `api_request_logger`):**
+- Logs safe query params (`q`, `canton`, filter params) in every API request line via `qs=` field.
+- Emits `logger.warning` instead of `logger.info` for requests exceeding `_SLOW_REQUEST_MS` (500ms). Allows grep/alerting on `http.request` with `WARNING` level to surface slow searches.
 
 **Deferred Phase 4 items:**
 - `4.4` — Legacy per-user billing columns (`payment_customer_id`, `payment_subscription_id`, `subscription_status`) are still on `users`; confirmed actively used in billing/workspace routes — deferred indefinitely.

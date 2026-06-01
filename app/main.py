@@ -725,6 +725,28 @@ async def origin_gate(request: Request, call_next):
     return await call_next(request)
 
 
+_SLOW_REQUEST_MS = 500.0
+# Query params that are safe to log verbatim (not sensitive).
+_LOGGABLE_PARAMS = frozenset({
+    "q", "uid", "canton", "sort", "page", "page_size", "status",
+    "review_status", "contact_status", "ai_category", "tfidf_cluster",
+    "purpose_keywords", "noga_code", "noga_level", "business_model",
+    "purpose_language", "has_website", "active_only", "google_searched",
+    "min_web_score", "max_web_score", "min_flex_score", "max_flex_score",
+    "min_ai_score", "max_ai_score", "min_combined_score", "max_combined_score",
+})
+
+
+def _safe_query_str(request: Request) -> str:
+    """Return loggable query params, omitting any not in the allowlist."""
+    pairs = [
+        f"{k}={v}"
+        for k, v in request.query_params.items()
+        if k in _LOGGABLE_PARAMS and v
+    ]
+    return "&".join(pairs) if pairs else ""
+
+
 @app.middleware("http")
 async def api_request_logger(request: Request, call_next):
     """Emit concise request logs for API and diagnostics endpoints."""
@@ -738,24 +760,28 @@ async def api_request_logger(request: Request, call_next):
 
     started = time.perf_counter()
     client_host = request.client.host if request.client else "unknown"
+    qs = _safe_query_str(request)
     try:
         response = await call_next(request)
     except Exception:
         elapsed_ms = (time.perf_counter() - started) * 1000.0
         logger.exception(
-            "http.request_error method=%s path=%s client=%s duration_ms=%.1f",
+            "http.request_error method=%s path=%s qs=%s client=%s duration_ms=%.1f",
             request.method,
             path,
+            qs or "-",
             client_host,
             elapsed_ms,
         )
         raise
 
     elapsed_ms = (time.perf_counter() - started) * 1000.0
-    logger.info(
-        "http.request method=%s path=%s status=%s client=%s duration_ms=%.1f",
+    log_fn = logger.warning if elapsed_ms >= _SLOW_REQUEST_MS else logger.info
+    log_fn(
+        "http.request method=%s path=%s qs=%s status=%s client=%s duration_ms=%.1f",
         request.method,
         path,
+        qs or "-",
         response.status_code,
         client_host,
         elapsed_ms,
