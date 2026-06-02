@@ -313,6 +313,7 @@ def _maybe_sync(app, **kwargs) -> None:
 def _run_job(app, job_id: int) -> None:  # noqa: C901
     """Execute one job. `app` may be None when called from an RQ worker."""
     from app.metrics import record_job_duration, record_job_error, ACTIVE_JOBS
+    from app.services.job_handlers import JOB_HANDLERS as _JOB_HANDLERS
     
     job_start_time = time.monotonic()
 
@@ -1267,6 +1268,24 @@ def _run_job(app, job_id: int) -> None:  # noqa: C901
                 stats["stored_noga_confidence"] = company.noga_confidence
                 stats["stored_noga_path_labels"] = company.noga_path_labels
                 done_msg = f"NOGA explain complete for {company.name}"
+
+            elif job.job_type in _JOB_HANDLERS:
+                from app.services.job_handlers import JobContext, JOB_HANDLERS as _JH, JobWaitingExternalSignal
+                _ctx = JobContext(
+                    db=db,
+                    job=job,
+                    params=params,
+                    resume_from=resume_from,
+                    app=app,
+                    _assert_not_cancelled=_assert_not_cancelled,
+                    _maybe_sync=lambda **kw: _maybe_sync(app, **kw),
+                    _heartbeat=_heartbeat,
+                    _enqueue_job=enqueue_job,
+                )
+                try:
+                    stats, done_msg = _JH[job.job_type](_ctx)
+                except JobWaitingExternalSignal:
+                    raise _JobWaitingExternalSignal()
 
             else:
                 raise RuntimeError(f"Unsupported job type: {job.job_type}")
