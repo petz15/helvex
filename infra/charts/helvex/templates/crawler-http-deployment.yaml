@@ -1,0 +1,50 @@
+{{- if .Values.crawlerHttpWorker.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "helvex.fullname" . }}-crawler-http
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "helvex.labels" . | nindent 4 }}
+    app.kubernetes.io/component: crawler-http
+spec:
+  replicas: {{ .Values.crawlerHttpWorker.replicaCount }}
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "helvex.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: crawler-http
+  template:
+    metadata:
+      labels:
+        {{- include "helvex.labels" . | nindent 8 }}
+        app.kubernetes.io/component: crawler-http
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+      automountServiceAccountToken: false
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: crawler-http
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          env:
+            - name: JOB_TYPE_WHITELIST
+              value: "web_crawl_http,web_url_populate,web_select_url,web_crawl_single"
+          envFrom:
+            - secretRef:
+                name: {{ .Values.envSecretName }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: false
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            {{- toYaml .Values.crawlerHttpWorker.resources | nindent 12 }}
+{{- end }}

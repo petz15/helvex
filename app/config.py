@@ -27,6 +27,7 @@ class Settings(BaseSettings):
 
     google_search_enabled: bool = True
     serper_api_key: str = ""
+    scrapingdog_api_key: str = ""
     google_daily_quota: int = 100
 
     # Global URL exclusion: comma-separated keywords (case-insensitive) that, if present
@@ -59,6 +60,7 @@ class Settings(BaseSettings):
     s3_endpoint_url: str = ""          # e.g. "https://nbg1.your-objectstorage.com"
     s3_bucket_exports: str = ""        # "helvex-exports"
     s3_bucket_models: str = ""         # bucket for ML model artifacts (embeddings, vectorizers)
+    s3_bucket_crawl: str = ""          # bucket for raw crawled HTML pages
 
     # OAuth — Google and LinkedIn sign-in
     # In dev: set APP_BASE_URL=http://localhost:3000 and register

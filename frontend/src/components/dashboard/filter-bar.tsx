@@ -201,16 +201,6 @@ export function FilterBar({
           value={filters.uid ?? ""}
           onChange={(e) => set("uid", e.target.value)}
         />
-        <label className="flex items-center gap-1.5 text-xs text-slate-600 cursor-pointer shrink-0 select-none">
-          <input
-            type="checkbox"
-            className="rounded"
-            checked={filters.active_only !== false && filters.active_only !== ("false" as unknown as boolean)}
-            onChange={(e) => onChange({ ...filters, active_only: e.target.checked ? undefined : false, page: 1 })}
-          />
-          Active only
-        </label>
-
         {/* Expand/collapse advanced filters */}
         <button
           type="button"

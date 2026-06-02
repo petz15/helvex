@@ -26,3 +26,7 @@ sentence-transformers>=3.0.0
 lingua-language-detector>=2.0.0
 pgvector>=0.3.0
 PyMuPDF>=1.23.0
+beautifulsoup4>=4.12.0
+lxml>=5.0.0
+trafilatura>=1.12.0
+phonenumbers>=8.13.0

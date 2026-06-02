@@ -91,6 +91,7 @@ from app.services.job_handlers import (  # noqa: E402
     sogc_preprocess,
     sogc_repair,
     stopwords,
+    web_crawl,
     zefix_jobs,
 )
 
@@ -136,4 +137,10 @@ JOB_HANDLERS: dict[str, Callable[[JobContext], tuple[dict, str]]] = {
     "billing_renewal":           billing.handle_billing_renewal,
     # Saved view alerts
     "saved_view_alerts":         alerts.handle_saved_view_alerts,
+    # Web crawler
+    "web_url_populate":          web_crawl.handle_web_url_populate,
+    "web_crawl_http":            web_crawl.handle_web_crawl_http,
+    "web_crawl_playwright":      web_crawl.handle_web_crawl_playwright,
+    "web_crawl_single":          web_crawl.handle_web_crawl_single,
+    "web_select_url":            web_crawl.handle_web_select_url,
 }

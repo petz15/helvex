@@ -546,6 +546,16 @@ export function SettingsClient() {
         <Field label={dict.app.settings.admin.dailyQuota}>
           <input type="number" min="1" value={form.google_daily_quota ?? "100"} onChange={e => set("google_daily_quota", e.target.value)} className={inputCls} />
         </Field>
+        <Field label="Search provider" hint="Serper.dev uses POST; ScrapingDog uses google.ch with location/language context.">
+          <select
+            value={form.google_search_provider ?? "serper"}
+            onChange={e => set("google_search_provider", e.target.value)}
+            className={inputCls}
+          >
+            <option value="serper">Serper.dev</option>
+            <option value="scrapingdog">ScrapingDog</option>
+          </select>
+        </Field>
       </div>
 
       <SectionTitle title={dict.app.settings.admin.googleScoringFilters} />

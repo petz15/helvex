@@ -19,21 +19,18 @@
     - Definitely more overview of management
     - Potentially other verbände such as Anwaltsverband, lobbywatch etc
     - View of Auditoren
+    - CRM parts (add contact, etc)
+    - Brand and Product ranking via LLM (thx Tim G.)
+    - Data from SIMAP (augeschrieben + won) -> integrating government bodies might be somewhat difficult
+    - 
 
 ### MVP before public PROD
 - Tiers are enforced - partially done (not fully checked and web searches are not gated yet + always uses api instead of checking if data already exists)
-- Fix SHAB History!
 - Different SHAB import as fallback?
-- Clean code, completely clean up old code -> maybe only with better claude subscription
-- Decide on VAT if include or exclude
 - And Set up DEV env
-- Potentially transition away from redis already for prod. Dont fully see the use of it besides more complexity
 - Improve Explore page
 - Potentially add some features
     - notifications of new companies
-    - overview of SHAB changes cleanier, seperate page with preprocessing
-    - Overview of People mentioned in the SHAB. Search for them and connections between multiple companies (I think competitors have that)
-    - SIMAP
 
 ## PROD CHANGES
 - wordline notification url
@@ -48,29 +45,14 @@
 ### General fixes:
 - billing/payment/pricing
     - existing subscription then upgrading is not working
-- NOGA auf unternehmensseite falsch dargestellt und meistens nicht korrekt!
-- NOGA auf filter, sollte auch hierarchisch darstellen und mit richtiger bezeichnung
 - admin dashboard simple redirects non authorized users, maybe not the safest
 - NOGA: Zweigniederlassung ist falsch zbs: https://helvex.dicy.ch/app/companies/238698
-- NOGA nach embedding immernoch falsch aufgrund boiler sentences (oder anderweitige gründe)z.b. peter batt oder auch bedag AG. keine ahnung wieso es nicht funktioniert, eventuell wäre hier wirklich mal ein llm notewendig lokal oder per api (wobei kosten hier problematisch sind)
 - Make sure that users without access to BYOL API keys, always use the one provided by me (hidden not shown visible to the user)
 - Fix translations for all pages (only headers etc done, needs more)
-    - Such as filters
-    - information on pages
-    - Columns selection
-    - hover over effects are all in english
 - Tiers:
     - web results are not gated, immediately shown. Should have been atleast 1 week of pause form a simple tier. 
-- Page size is not working on company overview
 - superadmin payment transactions does not show payment method
-- more improvements to stopping words -> the LLM improvement i.e. script is not integrated into the website as far as I can tell. 
-- SHAB needs general fixes:
-    - Languages
-    - old Auditors showing up 
-    - enconding issue
-    - and more, best solved over preprocessing -> espcially for future management view. Preprocessing is not working quite correctly yet:
-        - Export from sogc_publications to sogc_changes are not the relevant parts. the raw_excerpt should hold all relevant information for that sogc change (which is extracted from the sogc_publications)
-        - the sogc_publications still have issues, language (id: 1976422 oder 1976562) not always detected correctly and encoding not fixed everywhere (id: 1976814 oder 1977166) -> even though it says fixed!
+- the sogc_publications still have issues, language (id: 1976422 oder 1976562) not always detected correctly and encoding not fixed everywhere (id: 1976814 oder 1977166) -> even though it says fixed!
 - Broad stop words for google search anything with vergleich in the domain name but not in the zweck or company name
 - API key management not working as intended. multiple bugs and no clear way to manage models. code needs to be checked how it deals with multiple providers and model when sending requests
 - NOGA v2: 366482 is terrible, how is this possible. 367779 another example. a part is too short zweck (difficult to mitigate unless website available) another part is the dirty gmbh text. 
@@ -78,28 +60,18 @@
 
 ### UI fixes:
 - Email notifications remove from billing -> should be fixed but untested
-- Remove AI preview
 - Show settings in explore page (currently only shown when there is no data but there is always data)
-- create a seperate section for organization. in general show all organizations the user is a part of. Add a button to move to new organization and remove the one in the header - chaning org takes a long time to load? or does it even. remove it any way
 - Company profile page improve the AD banner, too small! -> still an issue
-- Checkbox on the category detail page is not working
-- Category detail page has a number next to the title which is meaningless
-- Category detail page, an overlay how many companies have no scoring. which is weird that companies which have ai classification dont have a score...is it 0?
-- Settings page, move to explore or elsewhere -> technically org settings right? need to check if these are per org or per user
 - Move recaculate scores, jobs etc from settings to jobs? or elsewhere but not here. also these should only be available to certain orgs
 - updated at in company overview should represent when the last sogc update was. potentially generally overhaul company search/overview for a cleaner search for one company. in company search, remove the small preview of a company profile. not really necessary in my opinion or atleast remove the scores as those are meant for explorer
 - larger symbols and text in header
-- as soon as explorer has been opend, opening any other page requires atleast 10 seconds to load if not more if it loads at all
-- Add translations to pricing page and unify the public one and the private one
 - When map moves and a map marker is opend while more map markers load in, the currently opened map marker always closes QOL issue
-- If the purpose only is boilerplatte sentece, it is probably a holding company. might need to find general solution to this problem
 
 # Questions
 
 - should websearches be gated? or should they always remain private unless released by me (periodically?)?
     - if always private, some other organization updates a link, notify other orgs that their companies link has been updated (for free)
-- flex rescore free or monthly etc?
-- other features?
+- other features? and how to price what
 
 
 # Specific features
@@ -107,7 +79,6 @@
 ## Dashboard & UI
 
 - [ ] **Fix Branding** — potentially change the icon to have a red cross in the middle (change google and linkedin app connection icons)
-- [ ] **Add dark mode** — add dark mode
 - [ ] **Map Adress search slow** - map adress search is slow atleast on the first adress. cold warm issue?
 
 
@@ -141,9 +112,7 @@
 ## Company Profile
 
 
-- [ ] **Pre-processing company timeline** - process all shab timeline with a seperate table which then can be used for more features such as cleaner overview of changes, connections of people over multiple companies etc. past changes also with cancelled companies etc!
-- [ ] **Graph overview of relationships** — based on past SHAB changes and name changes, take overs etc -> create nicer visuals for timeline. evaluate js on the fly calculations vs backend/DB
-- [ ] **Cross-company person graph** — normalize sogcPub organ changes into `persons` / `company_persons` tables via a pipeline job; build a graph UI showing where signers appear across multiple companies, what roles they held, and when — enabling network analysis of directors, beneficial owners, and corporate groups -> could use a graph DB for that
+
 - [ ] **Do not immediatly show scoring unless explore has been setup for org or user** —
 
 
@@ -326,3 +295,6 @@ as a join key outside the person resolution pipeline (audit all callers first).
 - [X] **refund and other admin function** - check QOL of billing such as refunds and other methods. What happens when an automatic payment fails? -> subscription upgrades not working correctly, other functions not fully tested, definitely not complete. 
     - What happens to other users when an account is downgraded to free?
     - Subscription upgrade and downgrade flow
+- [X] **Pre-processing company timeline** - process all shab timeline with a seperate table which then can be used for more features such as cleaner overview of changes, connections of people over multiple companies etc. past changes also with cancelled companies etc!
+- [X] **Graph overview of relationships** — based on past SHAB changes and name changes, take overs etc -> create nicer visuals for timeline. evaluate js on the fly calculations vs backend/DB
+- [X] **Cross-company person graph** — normalize sogcPub organ changes into `persons` / `company_persons` tables via a pipeline job; build a graph UI showing where signers appear across multiple companies, what roles they held, and when — enabling network analysis of directors, beneficial owners, and corporate groups -> could use a graph DB for that

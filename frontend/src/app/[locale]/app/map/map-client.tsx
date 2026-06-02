@@ -17,14 +17,6 @@ const DEFAULT_FILTERS: CompanyFilters = { sort: "-combined_score", page: 1, page
 
 type WindowWithLeaflet = typeof window & { _L?: typeof import("leaflet") };
 
-function scoreColor(score: number | null): string {
-  if (score == null) return "#94a3b8";
-  if (score >= 70) return "#22c55e";
-  if (score >= 40) return "#f59e0b";
-  if (score >= 10) return "#f97316";
-  return "#94a3b8"; // unscored → neutral grey instead of alarming red
-}
-
 /** Cluster bubble color — count-based blue scale for a natural, non-alarming look. */
 function clusterColor(count: number): string {
   if (count >= 2000) return "#072179";
@@ -43,7 +35,6 @@ function buildPopup(f: MapFeature): string {
     `<strong><a href="/app/companies/${f.id}" style="color:#3b82f6;text-decoration:none">${f.name}</a></strong>`,
     f.canton ? `<span style="color:#64748b">${f.municipality ?? ""}, ${f.canton}</span>` : "",
     f.website ? `<a href="${f.website}" target="_blank" rel="noopener" style="color:#3b82f6">${f.website.replace(/^https?:\/\//, "")}</a>` : "",
-    `Web: ${f.web_score ?? "—"} · Flex: ${f.flex_score ?? "—"} · AI: ${f.ai_score ?? "—"}`,
     f.review ? `<em>${f.review.replace(/_/g, " ")}</em>` : "",
     `<a href="/app/companies/${f.id}" style="color:#3b82f6;font-size:11px">View profile →</a>`,
   ].filter(Boolean);
@@ -60,6 +51,8 @@ export function MapClient() {
   const filtersRef = useRef<CompanyFilters>(DEFAULT_FILTERS);
   // Ref to the latest loadViewport so Leaflet event handlers call the current closure
   const loadViewportRef = useRef<((f: CompanyFilters) => Promise<void>) | null>(null);
+  // Track the currently-open popup so we can restore it after a layer reload
+  const openPopupRef = useRef<{ latlng: [number, number]; content: string } | null>(null);
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -129,9 +122,8 @@ export function MapClient() {
     for (const group of byLocation.values()) {
       const f = group[0];
       if (group.length === 1) {
-        const color = scoreColor(f.ai_score ?? f.web_score ?? f.flex_score ?? null);
         const marker = L.circleMarker([f.lat, f.lon], {
-          radius: 6, fillColor: color, color: "#fff", weight: 1.5, fillOpacity: 0.85,
+          radius: 6, fillColor: "#3b82f6", color: "#fff", weight: 1.5, fillOpacity: 0.85,
         });
         marker.bindPopup(buildPopup(f), { maxWidth: 300 });
         layer.addLayer(marker);
@@ -172,6 +164,8 @@ export function MapClient() {
     if (!map) return;
     const zoom = Math.round(map.getZoom());
     const bounds = map.getBounds();
+    // Capture before renderMarkers/renderClusters clear layers and close the popup
+    const savedPopup = openPopupRef.current;
 
     const params = buildMapParams(f);
     params.min_lat = String(bounds.getSouth());
@@ -195,6 +189,16 @@ export function MapClient() {
         setTruncated(data.truncated);
         setClustered(false);
         renderMarkers(data.features);
+      }
+      // Restore the popup that was open before the layer reload
+      if (savedPopup) {
+        const L = (window as WindowWithLeaflet)._L;
+        if (L) {
+          L.popup({ maxWidth: 320, autoPan: false })
+            .setLatLng(savedPopup.latlng)
+            .setContent(savedPopup.content)
+            .openOn(map);
+        }
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load map data");
@@ -228,6 +232,17 @@ export function MapClient() {
             map.invalidateSize();
           });
       resizeObserver?.observe(mapRef.current!);
+
+      // Track open popup so it can be restored after layer reloads
+      map.on("popupopen", (e: any) => {
+        const ll = e.popup.getLatLng();
+        if (ll) {
+          openPopupRef.current = { latlng: [ll.lat, ll.lng], content: e.popup.getContent() as string };
+        }
+      });
+      map.on("popupclose", () => {
+        openPopupRef.current = null;
+      });
 
       // Reload whenever the viewport changes
       map.on("moveend zoomend", () => {

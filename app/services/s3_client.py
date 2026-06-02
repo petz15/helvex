@@ -82,3 +82,37 @@ def download_model_bytes(s3_key: str) -> bytes:
     buf = io.BytesIO()
     _client().download_fileobj(settings.s3_bucket_models, s3_key, buf)
     return buf.getvalue()
+
+
+# ---------------------------------------------------------------------------
+# Crawl HTML helpers (raw page HTML from web crawler)
+# ---------------------------------------------------------------------------
+
+def _crawl_bucket() -> str:
+    """Return the crawl bucket name, falling back to the models bucket if unset."""
+    from app.config import settings
+    return settings.s3_bucket_crawl or settings.s3_bucket_models
+
+
+def is_crawl_bucket_configured() -> bool:
+    from app.config import settings
+    return bool(settings.s3_access_key and settings.s3_secret_key and _crawl_bucket())
+
+
+def crawl_s3_key(company_id: int, page_type: str) -> str:
+    """Canonical S3 key for a crawled page. page_type: homepage|impressum|privacy|other."""
+    return f"crawl/{company_id}/{page_type}.html"
+
+
+def upload_crawl_html(html_bytes: bytes, s3_key: str) -> None:
+    import io
+    bucket = _crawl_bucket()
+    _client().upload_fileobj(io.BytesIO(html_bytes), bucket, s3_key)
+    logger.debug("Uploaded crawl HTML → s3://%s/%s (%d bytes)", bucket, s3_key, len(html_bytes))
+
+
+def download_crawl_html(s3_key: str) -> bytes:
+    import io
+    buf = io.BytesIO()
+    _client().download_fileobj(_crawl_bucket(), s3_key, buf)
+    return buf.getvalue()

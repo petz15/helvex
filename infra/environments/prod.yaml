@@ -72,6 +72,17 @@ mlWorker:
       cpu: "3"
       memory: 6Gi
 
+crawlerHttpWorker:
+  enabled: true
+  replicaCount: 2
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      cpu: "1"
+      memory: 1Gi
+
 postgres:
   enabled: true
   imageName: ghcr.io/cloudnative-pg/postgresql:16.4
@@ -82,7 +93,7 @@ postgres:
   s3EndpointUrl: "https://nbg1.your-objectstorage.com"
   s3BucketPath: "s3://helvex-backups/pg-prod/"
   backupSchedule: "0 0 2 * * *"
-  backupRetention: "7d"  # 7-day PITR window
+  backupRetention: "14d"  # 14-day PITR window
   backupPrune:
     enabled: true
     schedule: "0 4 * * 0"     # weekly Sunday 04:00 UTC

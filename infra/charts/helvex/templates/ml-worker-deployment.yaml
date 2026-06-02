@@ -44,7 +44,7 @@ spec:
           imagePullPolicy: {{ .Values.mlImage.pullPolicy }}
           env:
             - name: JOB_TYPE_WHITELIST
-              value: "reclassify_noga,build_noga_embeddings,detect_language_bulk,reclassify_low_conf_noga,tfidf_kmeans_cluster,recompute_keywords,reextract_keywords,cluster_analysis,discover_stopwords,noga_v2_explain,embed_purpose_full,embed_purpose_clean"
+              value: "reclassify_noga,build_noga_embeddings,detect_language_bulk,reclassify_low_conf_noga,tfidf_kmeans_cluster,recompute_keywords,reextract_keywords,cluster_analysis,discover_stopwords,noga_v2_explain,embed_purpose_full,embed_purpose_clean,web_crawl_http,web_crawl_playwright"
           envFrom:
             - secretRef:
                 name: {{ .Values.envSecretName }}

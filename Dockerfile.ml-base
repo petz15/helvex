@@ -13,6 +13,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY requirements.backend.txt requirements.ml.txt ./
 RUN pip install --no-cache-dir -r requirements.ml.txt
 
+# Playwright Chromium — cached until requirements.ml.txt changes
+RUN playwright install chromium --with-deps
+
 # spaCy model — cached until pip layer above changes
 RUN python -c "import spacy.cli; spacy.cli.download('de_core_news_md')"
 

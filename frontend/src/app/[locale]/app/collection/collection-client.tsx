@@ -1,11 +1,29 @@
 "use client";
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { Play, ChevronDown, ChevronUp, BrainCircuit } from "lucide-react";
+import { Play, ChevronDown, ChevronUp, BrainCircuit, Globe, ScanSearch, Zap } from "lucide-react";
 import useSWR from "swr";
 import { triggerJob, fetchCurrentUser } from "@/lib/api";
 import { useI18n } from "@/i18n/context";
 import { useApiErrorHandler } from "@/lib/use-api-error";
+
+/** Lightweight collapsible inside a form — no border, just a faint divider and indent */
+function SubSection({ title, children }: { title: string; children: React.ReactNode }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="border-t border-slate-100 pt-3">
+      <button
+        type="button"
+        onClick={() => setOpen(v => !v)}
+        className="flex items-center gap-1.5 text-xs font-medium text-slate-500 hover:text-slate-700 transition-colors mb-2"
+      >
+        {open ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
+        {title}
+      </button>
+      {open && <div className="space-y-3 pl-1">{children}</div>}
+    </div>
+  );
+}
 
 function Section({ title, children, defaultOpen = false }: { title: string; children: React.ReactNode; defaultOpen?: boolean }) {
   const [open, setOpen] = useState(defaultOpen);
@@ -181,9 +199,10 @@ function MlJobReference() {
   );
 }
 
-function GroupHeader({ label }: { label: string }) {
+function GroupHeader({ label, icon }: { label: string; icon?: React.ReactNode }) {
   return (
     <div className="flex items-center gap-3 pt-2">
+      {icon && <span className="text-emerald-600">{icon}</span>}
       <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider whitespace-nowrap">{label}</span>
       <div className="flex-1 h-px bg-slate-200" />
     </div>
@@ -375,7 +394,7 @@ export function CollectionClient() {
         </form>
       </Section>
 
-      <Section title="Batch enrichment (Google search)">
+      <Section title="URL Fetch (Serper.dev)">
         <form onSubmit={async e => {
           e.preventDefault();
           const fd = new FormData(e.currentTarget);
@@ -384,34 +403,247 @@ export function CollectionClient() {
             only_missing_website: fd.get("all_companies") !== "on",
             refresh_zefix: fd.get("refresh_zefix") === "on",
             run_google: true,
+            order_by: fd.get("order_by") as string || "flex_score_desc",
             canton: (fd.get("canton") as string)?.trim().toUpperCase() || null,
-            min_flex_score: parseInt(fd.get("min_flex_score") as string) || null,
+            noga_code: (fd.get("noga_code") as string)?.trim() || null,
+            min_zefix_score: parseInt(fd.get("min_flex_score") as string) || null,
+            purpose_keywords: (fd.get("purpose_keywords") as string)?.trim() || null,
           });
         }} className="space-y-4">
+          <p className="text-xs text-slate-500">
+            Fetches the best matching website URL for each company via Google (Serper.dev) and stores the scored candidates.
+            Run this before the Web Crawler — it provides the URL queue.
+          </p>
+
+          {/* Core fields */}
           <div className="grid grid-cols-2 gap-4">
-            <Field label="Limit">
+            <Field label="Limit" hint="Max companies to enrich in this run">
               <input name="limit" type="number" min="1" defaultValue="100" className={inputCls} />
             </Field>
-            <Field label="Canton">
-              <input name="canton" className={inputCls} placeholder="Any" />
+            <Field label="Order by" hint="Which companies are picked first">
+              <select name="order_by" className={inputCls}>
+                <option value="flex_score_desc">Flex score ↓ (highest first)</option>
+                <option value="combined_score_desc">Combined score ↓ (AI + Web + Flex)</option>
+                <option value="last_enriched_asc">Last enriched ↑ (stalest first)</option>
+                <option value="created_asc">Created ↑ (oldest registration first)</option>
+              </select>
             </Field>
           </div>
+
+          <div className="flex gap-6 flex-wrap">
+            <label className="flex items-center gap-2 text-sm text-slate-700">
+              <input type="checkbox" name="all_companies" className={checkCls} />
+              Include companies already with a website
+            </label>
+            <label className="flex items-center gap-2 text-sm text-slate-700">
+              <input type="checkbox" name="refresh_zefix" className={checkCls} />
+              Refresh Zefix data before searching
+            </label>
+          </div>
+
+          {/* Filters sub-section */}
+          <SubSection title="Filters &amp; Scope">
+            <div className="grid grid-cols-2 gap-4">
+              <Field label="Canton" hint="Leave blank for all cantons">
+                <input name="canton" className={inputCls} placeholder="e.g. ZH" />
+              </Field>
+              <Field label="NOGA code" hint="Prefix filter — e.g. 47 for retail, 62 for IT">
+                <input name="noga_code" className={inputCls} placeholder="e.g. 47" />
+              </Field>
+            </div>
+            <div className="grid grid-cols-2 gap-4 mt-3">
+              <Field label="Min flex score" hint="0–100, skip low-quality leads">
+                <input name="min_flex_score" type="number" min="0" max="100" className={inputCls} placeholder="—" />
+              </Field>
+              <Field label="Purpose keywords" hint="Comma-separated — e.g. software,saas">
+                <input name="purpose_keywords" className={inputCls} placeholder="—" />
+              </Field>
+            </div>
+          </SubSection>
+
+          <SubmitBtn loading={loading === "collection/batch"} />
+        </form>
+      </Section>
+
+      <GroupHeader label="Web Crawler" icon={<Globe size={13} />} />
+
+      {/* Crawler pipeline description */}
+      <div className="rounded-xl border border-emerald-100 bg-emerald-50/60 px-5 py-3.5 text-xs text-slate-600 space-y-1">
+        <p className="font-semibold text-slate-700 text-sm">Pipeline overview</p>
+        <p>
+          <span className="font-medium text-slate-800">1. URL Fetch</span> (above) — Serper.dev finds candidate URLs per company.
+        </p>
+        <p>
+          <span className="font-medium text-slate-800">2. Populate candidates</span> — seeds the crawler queue from stored Serper results.
+        </p>
+        <p>
+          <span className="font-medium text-slate-800">3. HTTP Crawl</span> — fast httpx pass; JS-heavy sites are flagged for Playwright.
+        </p>
+        <p>
+          <span className="font-medium text-slate-800">4. Playwright Crawl</span> — browser-rendered pass for JS/bot-protected sites (ML worker, idle-fill).
+        </p>
+      </div>
+
+      <Section title="Populate URL Candidates">
+        <form onSubmit={async e => {
+          e.preventDefault();
+          const fd = new FormData(e.currentTarget);
+          await submit("crawler/populate-urls", {
+            batch_size: parseInt(fd.get("batch_size") as string) || 500,
+          });
+        }} className="space-y-4">
+          <p className="text-xs text-slate-500">
+            Seeds <code className="bg-slate-100 px-1 rounded text-xs">company_url_candidates</code> and the crawler queue from stored Serper results.
+            Safe to re-run — existing candidates are updated, not duplicated.
+            Run after URL Fetch completes.
+          </p>
+          <SubSection title="Advanced">
+            <Field label="Batch size" hint="Companies processed per DB commit">
+              <input name="batch_size" type="number" min="50" defaultValue="500" className={cn(inputCls, "w-36")} />
+            </Field>
+          </SubSection>
+          <SubmitBtn loading={loading === "crawler/populate-urls"} />
+        </form>
+      </Section>
+
+      <Section title="Web Crawl — HTTP">
+        <form onSubmit={async e => {
+          e.preventDefault();
+          const fd = new FormData(e.currentTarget);
+          await submit("crawler/crawl-http", {
+            batch_size: parseInt(fd.get("batch_size") as string) || 20,
+            canton: (fd.get("canton") as string)?.trim().toUpperCase() || null,
+            max_pages: parseInt(fd.get("max_pages") as string) || 5,
+            rate_limit_delay: parseFloat(fd.get("rate_limit_delay") as string) || 0.5,
+          });
+        }} className="space-y-4">
+          <p className="text-xs text-slate-500">
+            Fast httpx crawler — no browser, handles most Swiss SME sites.
+            Sites needing JavaScript are automatically flagged and picked up by the Playwright job.
+            Runs on the <span className="font-medium">crawler-http</span> pods (2 parallel workers).
+          </p>
           <div className="grid grid-cols-2 gap-4">
-            <Field label="Min Flex score">
-              <input name="min_flex_score" type="number" min="0" max="100" className={inputCls} placeholder="—" />
+            <Field label="Pages per site" hint="Homepage counts as 1; finds impressum, privacy, contact, about, services">
+              <input name="max_pages" type="number" min="1" max="10" defaultValue="5" className={inputCls} />
+            </Field>
+            <Field label="Rate limit (s/domain)" hint="Min seconds between requests to the same domain — 0 to disable">
+              <input name="rate_limit_delay" type="number" min="0" max="10" step="0.1" defaultValue="0.5" className={inputCls} />
+            </Field>
+          </div>
+          <SubSection title="Filters &amp; Advanced">
+            <div className="grid grid-cols-2 gap-4">
+              <Field label="Canton" hint="Leave blank for all">
+                <input name="canton" className={inputCls} placeholder="Any" />
+              </Field>
+              <Field label="Batch size" hint="Companies claimed per SKIP LOCKED batch">
+                <input name="batch_size" type="number" min="1" defaultValue="20" className={inputCls} />
+              </Field>
+            </div>
+          </SubSection>
+          <SubmitBtn loading={loading === "crawler/crawl-http"} />
+        </form>
+      </Section>
+
+      <Section title="Web Crawl — Playwright (JS / bot-protected)">
+        <form onSubmit={async e => {
+          e.preventDefault();
+          const fd = new FormData(e.currentTarget);
+          await submit("crawler/crawl-playwright", {
+            batch_size: parseInt(fd.get("batch_size") as string) || 10,
+            canton: (fd.get("canton") as string)?.trim().toUpperCase() || null,
+            max_pages: parseInt(fd.get("max_pages") as string) || 5,
+            rate_limit_delay: parseFloat(fd.get("rate_limit_delay") as string) || 0.5,
+          });
+        }} className="space-y-4">
+          <p className="text-xs text-slate-500">
+            Chromium browser crawler with stealth patches — handles JavaScript-rendered pages and most bot-protection.
+            Runs on the <span className="font-medium">ML worker</span> during idle time and self-pauses when an ML job arrives.
+            Picks up sites flagged <code className="bg-slate-100 px-1 rounded text-xs">js_required</code> by the HTTP crawler automatically.
+          </p>
+          <div className="grid grid-cols-2 gap-4">
+            <Field label="Pages per site">
+              <input name="max_pages" type="number" min="1" max="10" defaultValue="5" className={inputCls} />
+            </Field>
+            <Field label="Rate limit (s/domain)">
+              <input name="rate_limit_delay" type="number" min="0" max="10" step="0.1" defaultValue="0.5" className={inputCls} />
+            </Field>
+          </div>
+          <SubSection title="Filters &amp; Advanced">
+            <div className="grid grid-cols-2 gap-4">
+              <Field label="Canton">
+                <input name="canton" className={inputCls} placeholder="Any" />
+              </Field>
+              <Field label="Batch size" hint="Lower = more frequent self-preemption checkpoints for ML jobs">
+                <input name="batch_size" type="number" min="1" defaultValue="10" className={inputCls} />
+              </Field>
+            </div>
+          </SubSection>
+          <SubmitBtn loading={loading === "crawler/crawl-playwright"} />
+        </form>
+      </Section>
+
+      <Section title="Web Crawl — Single Company">
+        <form onSubmit={async e => {
+          e.preventDefault();
+          const fd = new FormData(e.currentTarget);
+          const companyId = parseInt(fd.get("company_id") as string);
+          if (!companyId) { setError("Company ID is required"); return; }
+          await submit("crawler/crawl-single", {
+            company_id: companyId,
+            max_pages: parseInt(fd.get("max_pages") as string) || 5,
+            rate_limit_delay: parseFloat(fd.get("rate_limit_delay") as string) || 0.5,
+            force: fd.get("force") === "on",
+          });
+        }} className="space-y-4">
+          <p className="text-xs text-slate-500">
+            Crawl one company end-to-end: populates URL candidates if needed, tries HTTP first, escalates to
+            Playwright automatically if the site needs it. Useful for testing or re-crawling a specific company.
+          </p>
+          <div className="grid grid-cols-2 gap-4">
+            <Field label="Company ID" hint="Internal DB id (visible in company detail URL)">
+              <input name="company_id" type="number" min="1" required className={inputCls} placeholder="e.g. 12345" />
+            </Field>
+            <Field label="Pages per site">
+              <input name="max_pages" type="number" min="1" max="10" defaultValue="5" className={inputCls} />
             </Field>
           </div>
           <div className="flex gap-6 flex-wrap">
             <label className="flex items-center gap-2 text-sm text-slate-700">
-              <input type="checkbox" name="all_companies" className={checkCls} />
-              Include companies already with website
-            </label>
-            <label className="flex items-center gap-2 text-sm text-slate-700">
-              <input type="checkbox" name="refresh_zefix" className={checkCls} />
-              Refresh Zefix data
+              <input type="checkbox" name="force" className={checkCls} />
+              Force re-crawl (overwrite existing crawl results)
             </label>
           </div>
-          <SubmitBtn loading={loading === "collection/batch"} />
+          <SubSection title="Advanced">
+            <Field label="Rate limit (s/domain)">
+              <input name="rate_limit_delay" type="number" min="0" max="10" step="0.1" defaultValue="0.5" className={cn(inputCls, "w-32")} />
+            </Field>
+          </SubSection>
+          <SubmitBtn loading={loading === "crawler/crawl-single"} />
+        </form>
+      </Section>
+
+      <Section title="Switch URL Candidate">
+        <form onSubmit={async e => {
+          e.preventDefault();
+          const fd = new FormData(e.currentTarget);
+          const companyId = parseInt(fd.get("company_id") as string);
+          const candidateId = parseInt(fd.get("url_candidate_id") as string);
+          if (!companyId || !candidateId) { setError("Both Company ID and URL Candidate ID are required"); return; }
+          await submit("crawler/select-url", { company_id: companyId, url_candidate_id: candidateId });
+        }} className="space-y-4">
+          <p className="text-xs text-slate-500">
+            Promote a different Serper.dev result to the selected URL for a company and reset its crawl state to pending.
+            Use when the auto-selected URL was wrong — choose a better one from the stored candidates.
+          </p>
+          <div className="grid grid-cols-2 gap-4">
+            <Field label="Company ID">
+              <input name="company_id" type="number" min="1" required className={inputCls} />
+            </Field>
+            <Field label="URL Candidate ID" hint="Row id from company_url_candidates table">
+              <input name="url_candidate_id" type="number" min="1" required className={inputCls} />
+            </Field>
+          </div>
+          <SubmitBtn loading={loading === "crawler/select-url"} />
         </form>
       </Section>
 

@@ -225,7 +225,7 @@ async def worldline_return(
             transaction_id[:30] if transaction_id else "NONE",
         )
 
-        payment_method = payment_transactions._extract_payment_method_worldline(transaction)
+        payment_method = payment_transactions._extract_payment_method_worldline(result)
         cardholder_name = payment_transactions._extract_cardholder_name_worldline(result)
 
         amount_chf: float = 0.01

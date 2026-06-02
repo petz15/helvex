@@ -287,6 +287,10 @@ class BatchCollectBody(BaseModel):
     purpose_keywords: str | None = None
     tfidf_cluster: str | None = None
     review_status: str | None = None
+    # Ordering: flex_score_desc | combined_score_desc | last_enriched_asc | created_asc
+    order_by: str = "flex_score_desc"
+    # NOGA prefix filter — e.g. "47" matches all retail sub-codes
+    noga_code: str | None = None
 
 
 class InitialCollectBody(BaseModel):
@@ -1386,3 +1390,128 @@ def get_csv_export_status(
         total_matching=total_matching,
         upgrade_to=upgrade_to,
     )
+
+
+# ── Web crawler endpoints ──────────────────────────────────────────────────────
+
+class WebUrlPopulateBody(BaseModel):
+    batch_size: int = 500
+
+
+class WebCrawlBody(BaseModel):
+    batch_size: int = 20
+    canton: str | None = None
+    max_pages: int = 5           # total pages per domain (homepage + subpages)
+    rate_limit_delay: float = 0.5  # seconds between requests to the same domain (0 = disabled)
+
+
+class WebSelectUrlBody(BaseModel):
+    company_id: int
+    url_candidate_id: int
+
+
+@router.post("/crawler/populate-urls", response_model=JobOut, status_code=status.HTTP_202_ACCEPTED)
+def trigger_web_url_populate(
+    body: WebUrlPopulateBody,
+    request: Request,
+    db: Session = Depends(get_db),
+    _: User = Depends(require_superadmin),
+):
+    """Seed company_url_candidates from existing google_search_results_raw.
+
+    Run the Serper.dev batch enrichment job first so companies have stored results.
+    """
+    job = _enqueue_or_http_error(
+        request,
+        job_type="web_url_populate",
+        label="Web URL population — seed candidates from Serper results",
+        params=body.model_dump(),
+        db=db,
+    )
+    return JobOut.from_orm_obj(job)
+
+
+@router.post("/crawler/crawl-http", response_model=JobOut, status_code=status.HTTP_202_ACCEPTED)
+def trigger_web_crawl_http(
+    body: WebCrawlBody,
+    request: Request,
+    db: Session = Depends(get_db),
+    _: User = Depends(require_superadmin),
+):
+    """Trigger HTTP crawler — fast path using httpx, no browser."""
+    canton_label = f" — {body.canton}" if body.canton else ""
+    job = _enqueue_or_http_error(
+        request,
+        job_type="web_crawl_http",
+        label=f"HTTP crawler{canton_label}",
+        params=body.model_dump(),
+        db=db,
+    )
+    return JobOut.from_orm_obj(job)
+
+
+@router.post("/crawler/crawl-playwright", response_model=JobOut, status_code=status.HTTP_202_ACCEPTED)
+def trigger_web_crawl_playwright(
+    body: WebCrawlBody,
+    request: Request,
+    db: Session = Depends(get_db),
+    _: User = Depends(require_superadmin),
+):
+    """Trigger Playwright crawler — JS-rendering path for bot-protected / JS-heavy sites."""
+    canton_label = f" — {body.canton}" if body.canton else ""
+    job = _enqueue_or_http_error(
+        request,
+        job_type="web_crawl_playwright",
+        label=f"Playwright crawler{canton_label}",
+        params=body.model_dump(),
+        db=db,
+    )
+    return JobOut.from_orm_obj(job)
+
+
+class WebCrawlSingleBody(BaseModel):
+    company_id: int
+    max_pages: int = 5
+    rate_limit_delay: float = 0.5
+    force: bool = False  # re-crawl even if already crawled
+
+
+@router.post("/crawler/crawl-single", response_model=JobOut, status_code=status.HTTP_202_ACCEPTED)
+def trigger_web_crawl_single(
+    body: WebCrawlSingleBody,
+    request: Request,
+    db: Session = Depends(get_db),
+    _: User = Depends(require_superadmin),
+):
+    """Crawl a single company end-to-end.
+
+    Populates URL candidates from stored Serper results if needed, then crawls
+    via HTTP (with automatic Playwright fallback if JS rendering is required).
+    Pass force=true to re-crawl a company that has already been crawled.
+    """
+    job = _enqueue_or_http_error(
+        request,
+        job_type="web_crawl_single",
+        label=f"Single crawl — company {body.company_id}",
+        params=body.model_dump(),
+        db=db,
+    )
+    return JobOut.from_orm_obj(job)
+
+
+@router.post("/crawler/select-url", response_model=JobOut, status_code=status.HTTP_202_ACCEPTED)
+def trigger_web_select_url(
+    body: WebSelectUrlBody,
+    request: Request,
+    db: Session = Depends(get_db),
+    _: User = Depends(require_superadmin),
+):
+    """Switch the selected URL candidate for a company and reset its crawl state to pending."""
+    job = _enqueue_or_http_error(
+        request,
+        job_type="web_select_url",
+        label=f"Select URL candidate {body.url_candidate_id} for company {body.company_id}",
+        params=body.model_dump(),
+        db=db,
+    )
+    return JobOut.from_orm_obj(job)

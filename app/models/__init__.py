@@ -7,7 +7,10 @@ from app.models.boilerplate_candidate import BoilerplateCandidate
 from app.models.cluster_registry import ClusterRegistry
 from app.models.collection_run import CollectionRun
 from app.models.company import Company
+from app.models.company_crawl_state import CompanyCrawlState
 from app.models.company_purpose_keyword import CompanyPurposeKeyword
+from app.models.company_url_candidate import CompanyUrlCandidate
+from app.models.company_web_page import CompanyWebPage
 from app.models.company_tfidf_cluster import CompanyTfidfCluster
 from app.models.google_directory_domain import GoogleDirectoryDomain
 from app.models.google_stopword import GoogleStopword
@@ -38,7 +41,8 @@ from app.models.user_view import UserView
 __all__ = [
     "ActivityLog", "AppSetting", "AuditLog", "BillingTier", "BoilerplateCandidate",
     "BoilerplatePattern", "ClusterRegistry", "CollectionRun", "Company",
-    "CompanyPurposeKeyword", "CompanyTfidfCluster",
+    "CompanyCrawlState", "CompanyPurposeKeyword", "CompanyTfidfCluster",
+    "CompanyUrlCandidate", "CompanyWebPage",
     "GoogleDirectoryDomain", "GoogleStopword",
     "JobRun", "JobRunEvent", "Note", "OAuthAccount", "OrgCompanyState",
     "OrgCreditTransaction", "OrgMember", "OrgPaymentMethod", "OrgSetting",

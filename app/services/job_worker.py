@@ -76,9 +76,10 @@ def _compute_dedup_key(job_type: str, org_id: int | None, params: dict) -> str |
         "resolve_bisher_links",
         "repair_is_current",
         "saved_view_alerts",  # global singleton — org_id=None gives key "saved_view_alerts:None"
+        "web_url_populate", "web_crawl_http", "web_crawl_playwright",
     }
     # No dedup: every trigger creates a fresh independent job.
-    NO_DEDUP = {"batch", "csv_export"}
+    NO_DEDUP = {"batch", "csv_export", "web_select_url", "web_crawl_single"}
 
     if job_type in ("noga_v2_explain",):
         company_id = params.get("company_id")
@@ -755,6 +756,8 @@ def _run_job(app, job_id: int) -> None:  # noqa: C901
                     purpose_keywords=params.get("purpose_keywords"),
                     tfidf_cluster=params.get("tfidf_cluster"),
                     review_status=params.get("review_status"),
+                    order_by=params.get("order_by", "flex_score_desc"),
+                    noga_code=params.get("noga_code"),
                     status_cb=lambda m: (
                         _assert_not_cancelled(),
                         crud.update_progress(db, job, message=str(m)),

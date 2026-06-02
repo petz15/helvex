@@ -26,9 +26,10 @@
 13. [Kubernetes / Helm](#13-kubernetes--helm)
 14. [Terraform / Hetzner](#14-terraform--hetzner)
 15. [Local Development](#15-local-development)
-16. [Activity Log](#16-activity-log)
-17. [Common Bug-Fixing Cheatsheet](#17-common-bug-fixing-cheatsheet)
-18. [Background Job System — Design Evolution](#18-background-job-system--design-evolution)
+16. [Web Crawler Pipeline](#16-web-crawler-pipeline)
+17. [Activity Log](#17-activity-log)
+18. [Common Bug-Fixing Cheatsheet](#18-common-bug-fixing-cheatsheet)
+19. [Background Job System — Design Evolution](#19-background-job-system--design-evolution)
 
 ---
 
@@ -59,7 +60,8 @@ zefix_analyzer/
 │   ├── worker_entrypoint.py    # Entrypoint for RQ worker pod (if USE_RQ=true)
 │   ├── clients/                # External API wrappers (Zefix, Serper, Geocoding, SHAB)
 │   │   ├── zefix_client.py     # Zefix REST API client
-│   │   ├── google_search_client.py  # Serper.dev wrapper
+│   │   ├── google_search_client.py      # Serper.dev wrapper
+│   │   ├── scrapingdog_search_client.py # ScrapingDog wrapper (google.ch, per-company location/language)
 │   │   ├── geocoding_client.py # Offline geocoder (swisstopo + GeoNames fallback)
 │   │   ├── shab_client.py      # SHAB HR publications feed (Zefix SOGC bydate)
 │   │   └── shab_archive_client.py  # shab.ch archive API + PDF extraction (pypdf)
@@ -416,7 +418,8 @@ The core entity. Key columns:
 | `flex_score_breakdown` | JSON | Per-component flex score detail |
 | `website_url` | String | Top Google result URL (global master; see dual-write note) |
 | `web_score` | Integer 0-100 | Google name/location match quality |
-| `google_search_results_raw` | Text | Raw top-5 Serper results as JSON |
+| `google_search_results_raw` | Text | Scored organic results as JSON [{title, link, snippet, score}] |
+| `google_search_full_raw` | Text | Complete provider JSON (ScrapingDog only; null for Serper) |
 | `website_checked_at` | DateTime | Last Google enrichment timestamp |
 | `social_media_only` | Bool | True if only social media URLs were found |
 | `ai_score` | Integer 0-100 | Claude Haiku classification score |
@@ -793,11 +796,25 @@ For each `UserView` with `alert_enabled=True`:
 - Auth: Optional HTTP Basic (`ZEFIX_API_USERNAME` / `ZEFIX_API_PASSWORD`). The public API works without credentials but has lower rate limits.
 - Key methods: `search_companies()`, `fetch_companies_by_canton()`, `get_company(uid)`
 
-### Google Search (Serper.dev) — `app/api/google_search_client.py`
+### Google Search — `app/clients/google_search_client.py` (Serper) + `app/clients/scrapingdog_search_client.py` (ScrapingDog)
 
-- API key: `SERPER_API_KEY`
+Two pluggable providers. Active provider is controlled by the `google_search_provider` setting (`serper` | `scrapingdog`, default `serper`), switchable in the superadmin Settings → Admin tab without a restart.
+
+**Serper.dev** (`app/clients/google_search_client.py`):
+- API key: `SERPER_API_KEY` env var
+- POST to `google.serper.dev/search`; `gl=ch`, `hl=de`
+
+**ScrapingDog** (`app/clients/scrapingdog_search_client.py`):
+- API key: `scrapingdog_api_key` DB setting (takes precedence) or `SCRAPINGDOG_API_KEY` env var
+- GET to `api.scrapingdog.com/google/`; `domain=google.ch`, `country=ch`
+- Per-company context: `location="{address_zip} {municipality}, Switzerland"`, `language` from `purpose_language` (fallback `de`)
+- Returns full provider JSON (includes `local_results`, `organic_results`, `search_information`, pagination)
+- Full response stored in `google_search_full_raw` on `Company`
+
+**Common:**
 - Daily quota: `GOOGLE_DAILY_QUOTA` (default 100; free tier ~83)
 - Quota tracked in `app_settings` table; resets daily
+- `web_enrichment.py` dispatches to the active provider; scoring pipeline is identical for both
 
 ### Geocoding — `app/api/geocoding_client.py`
 
@@ -1710,7 +1727,78 @@ alembic upgrade head
 
 ---
 
-## 16. Activity Log
+## 16. Web Crawler Pipeline
+
+### Overview
+
+Two-phase pipeline that crawls ~210k Swiss company websites and stores raw HTML in S3. Extraction of structured data (contacts, services, etc.) is a separate future job.
+
+### Pod topology
+
+| Pod | Image | Job types | Node |
+|---|---|---|---|
+| `crawler-http` × 2 | `helvex-app` | `web_crawl_http`, `web_url_populate`, `web_select_url` | main node |
+| `ml-worker` | `helvex-ml` | + `web_crawl_http`, `web_crawl_playwright` (idle-fill) | ml node (cax21) |
+
+### Workflow
+
+```
+[Prerequisite] batch enrichment job → Serper.dev fills google_search_results_raw
+       ↓
+web_url_populate       reads google_search_results_raw → company_url_candidates
+                       creates company_crawl_state (status=pending, tier=http)
+       ↓
+web_crawl_http         SKIP LOCKED claim → httpx fetch
+  bot_blocked          → crawl_status=bot_blocked + bot_protection_type
+  js_required          → crawl_status=js_required, tier=playwright
+  http_error/timeout   → crawl_status=http_error|timeout + crawl_error_detail
+  no_content           → crawl_status=no_content
+  success              → HTML → S3, company_web_pages rows, crawl_status=crawled
+       ↓
+web_crawl_playwright   SKIP LOCKED claim tier=playwright|js_required
+                       same result handling, uses Playwright + playwright-stealth
+       ↓
+[Future] web_extract   company_web_pages WHERE needs_extraction=TRUE
+                       S3 HTML → trafilatura + phonenumbers → company_web_structured
+```
+
+### URL selection
+
+- `web_url_populate` auto-selects the highest-scoring Serper candidate per company.
+- `web_select_url` job (params: `company_id`, `url_candidate_id`) switches to a different candidate and resets crawl state.
+- Failure statuses are terminal until manually re-queued or URL switched.
+- Re-crawl: set `crawl_status='pending'` + optionally `next_crawl_at`.
+
+### Self-preemption (ML worker)
+
+`web_crawl_http` and `web_crawl_playwright` check for queued ML jobs in every progress callback. If an ML job is waiting, `pause_requested` is set and `JobPausedError` is raised — the crawl saves its progress and the ML job runs next.
+
+### New tables
+
+| Table | Purpose |
+|---|---|
+| `company_url_candidates` | Serper.dev URL candidates; one selected per company |
+| `company_crawl_state` | Per-company crawl status, tier, bot flags, re-crawl scheduling |
+| `company_web_pages` | Per-page crawl result; S3 key for raw HTML |
+
+### New files
+
+| File | Purpose |
+|---|---|
+| `app/services/crawler_common.py` | Shared utilities: bot detection, JS detection, subpage discovery, media counting |
+| `app/services/crawler_http.py` | httpx crawler |
+| `app/services/crawler_playwright.py` | Playwright crawler (lazy import — only available in ml image) |
+| `app/services/job_handlers/web_crawl.py` | Job handlers: populate, crawl_http, crawl_playwright, select_url |
+| `app/crud/crawler.py` | CRUD: upsert candidates, SKIP LOCKED claiming, save pages, ML preemption check |
+| `infra/charts/helvex/templates/crawler-http-deployment.yaml` | K8s deployment for HTTP crawler pods |
+
+### S3
+
+Raw HTML stored in `s3_bucket_crawl` under key `crawl/{company_id}/{page_type}.html`.
+
+---
+
+## 17. Activity Log
 
 ### Purpose
 
@@ -1780,7 +1868,7 @@ DELETE FROM activity_log WHERE created_at < now() - interval '90 days';
 
 ---
 
-## 17. Common Bug-Fixing Cheatsheet
+## 18. Common Bug-Fixing Cheatsheet
 
 ### Email verification not working
 - Verify `SMTP_HOST`, `SMTP_FROM`, `SMTP_USER`, `SMTP_PASSWORD` are set in prod
@@ -1850,7 +1938,7 @@ failure (missing API key, insufficient credits) — check the job event log.
 
 ---
 
-## 17. Background Job System — Design Evolution
+## 19. Background Job System — Design Evolution
 
 This section records the architectural changes made to the job system and the
 rationale behind each decision. Most of these decisions apply to **RQ mode** (optional separate worker process, production-intended). **Thread mode** (default, `USE_RQ=false`) is simpler: it polls the DB in-process and does not use Redis.

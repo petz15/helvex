@@ -78,6 +78,17 @@ mlWorker:
       cpu: "3"
       memory: 6Gi
 
+crawlerHttpWorker:
+  enabled: false
+  replicaCount: 2
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      cpu: "1"
+      memory: 1Gi
+
 
 # CloudNativePG PostgreSQL cluster
 postgres:

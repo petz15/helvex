@@ -1,2 +1,4 @@
 -r requirements.backend.txt
 hdbscan>=0.8.33
+playwright>=1.44.0
+playwright-stealth>=1.0.6

@@ -28,12 +28,22 @@ from app.services.scoring import (
 logger = logging.getLogger(__name__)
 
 
+def _active_provider(db: Session) -> str:
+    """Return 'serper' or 'scrapingdog' based on the DB setting."""
+    return (crud.get_setting(db, "google_search_provider", "serper") or "serper").strip().lower()
+
+
 def _google_search_ready(db: Session) -> tuple[bool, str | None]:
     enabled = (crud.get_setting(db, "google_search_enabled", "true") or "").strip().lower() == "true"
     if not enabled:
         return False, "Google search is disabled in Settings"
-    if not settings.serper_api_key:
-        return False, "SERPER_API_KEY is not configured (website search cannot run)"
+    provider = _active_provider(db)
+    if provider == "scrapingdog":
+        if not settings.scrapingdog_api_key:
+            return False, "SCRAPINGDOG_API_KEY is not configured (website search cannot run)"
+    else:
+        if not settings.serper_api_key:
+            return False, "SERPER_API_KEY is not configured (website search cannot run)"
     return True, None
 
 
@@ -97,26 +107,41 @@ def enrich_company_website(db: Session, company: Company, *, num: int = 10) -> t
     """Fetch top-N Google results, score each against the company profile, and persist.
 
     Stores all scored results in google_search_results_raw (JSON).
+    For ScrapingDog, also stores the complete provider JSON in google_search_full_raw.
     Sets website_url and web_score to the best-scoring result.
     Always sets website_checked_at so callers know a search was attempted.
     """
     from app.metrics import record_api_call, record_api_error
 
+    provider = _active_provider(db)
     now = datetime.now(tz=timezone.utc)
     _t0 = time.monotonic()
+    full_raw: dict | None = None
+
     try:
-        results = search_website(company.name, num=num)
+        if provider == "scrapingdog":
+            from app.clients.scrapingdog_search_client import search_website as sd_search
+            results, full_raw = sd_search(
+                company.name,
+                num=num,
+                zip_code=company.address_zip,
+                municipality=company.municipality,
+                purpose_language=company.purpose_language,
+            )
+        else:
+            results = search_website(company.name, num=num)
+
         duration = time.monotonic() - _t0
-        record_api_call("serper", duration, 200)
+        record_api_call(provider, duration, 200)
     except Exception as exc:
         duration = time.monotonic() - _t0
-        record_api_error("serper", "unknown")
-        logger.error("Google search failed for company_id=%d: %s", company.id, exc, exc_info=True)
+        record_api_error(provider, "unknown")
+        logger.error("Google search failed for company_id=%d provider=%s: %s", company.id, provider, exc, exc_info=True)
         return False, None
 
     logger.debug(
-        "google_search company_id=%d name=%r results=%d latency_ms=%.0f",
-        company.id, company.name, len(results), duration * 1000,
+        "google_search provider=%s company_id=%d name=%r results=%d latency_ms=%.0f",
+        provider, company.id, company.name, len(results), duration * 1000,
     )
 
     if not results:
@@ -126,6 +151,7 @@ def enrich_company_website(db: Session, company: Company, *, num: int = 10) -> t
             CompanyUpdate(
                 website_checked_at=now,
                 google_search_results_raw=json.dumps([]),
+                google_search_full_raw=json.dumps(full_raw) if full_raw is not None else None,
             ),
         )
         return False, None
@@ -144,6 +170,7 @@ def enrich_company_website(db: Session, company: Company, *, num: int = 10) -> t
             social_media_only=social_media_only,
             website_checked_at=now,
             google_search_results_raw=json.dumps(scored),
+            google_search_full_raw=json.dumps(full_raw) if full_raw is not None else None,
         ),
     )
     return True, best["link"]
@@ -264,6 +291,8 @@ def run_batch_collect(
     purpose_keywords: str | None = None,
     tfidf_cluster: str | None = None,
     review_status: str | None = None,
+    order_by: str = "flex_score_desc",
+    noga_code: str | None = None,
     status_cb: Any = None,
     abort_cb: Any = None,
 ) -> dict[str, Any]:
@@ -323,6 +352,8 @@ def run_batch_collect(
             query = query.filter(Company.review_status.is_(None))
         else:
             query = query.filter(Company.review_status == review_status)
+    if noga_code:
+        query = query.filter(Company.noga_code.like(f"{noga_code.strip()}%"))
 
     keep_n = max(0, int(limit)) + max(0, int(resume_from))
     if keep_n <= 0:
@@ -336,38 +367,64 @@ def run_batch_collect(
         total_w = sum(w for _, w in present)
         return float(sum(float(s) * w for s, w in present) / total_w)
 
-    heap: list[tuple[tuple[float, float, int], int]] = []
+    # Select and order companies based on order_by param.
+    # combined_score_desc uses a heap over all rows (handles NULL scores gracefully).
+    # Other orderings use a direct DB query with ORDER BY + LIMIT for efficiency.
+    if order_by == "flex_score_desc":
+        planned_ids = [
+            row[0] for row in
+            query.with_entities(Company.id)
+            .order_by(Company.flex_score.desc().nulls_last(), Company.id.desc())
+            .limit(keep_n).all()
+        ]
+    elif order_by == "last_enriched_asc":
+        planned_ids = [
+            row[0] for row in
+            query.with_entities(Company.id)
+            .order_by(Company.website_checked_at.asc().nulls_first(), Company.id.desc())
+            .limit(keep_n).all()
+        ]
+    elif order_by == "created_asc":
+        planned_ids = [
+            row[0] for row in
+            query.with_entities(Company.id)
+            .order_by(Company.id.asc())
+            .limit(keep_n).all()
+        ]
+    else:
+        # combined_score_desc (default): heap selection matching original behaviour
+        heap: list[tuple[tuple[float, float, int], int]] = []
 
-    row_query = query.with_entities(
-        Company.id,
-        Company.ai_score,
-        Company.web_score,
-        Company.flex_score,
-        Company.canton,
-        Company.municipality,
-        Company.lat,
-        Company.lon,
-    )
-
-    for row in row_query.yield_per(1000):
-        company_id = int(row.id)
-        score = _combined_score_values(row.ai_score, row.web_score, row.flex_score)
-        distance = distance_to_muri_km(
-            canton=row.canton,
-            municipality=row.municipality,
-            lat=row.lat,
-            lon=row.lon,
+        row_query = query.with_entities(
+            Company.id,
+            Company.ai_score,
+            Company.web_score,
+            Company.flex_score,
+            Company.canton,
+            Company.municipality,
+            Company.lat,
+            Company.lon,
         )
-        dist_val = float(distance) if distance is not None else float("inf")
-        nkey = (score, -dist_val, -company_id)
 
-        if len(heap) < keep_n:
-            heapq.heappush(heap, (nkey, company_id))
-        else:
-            if nkey > heap[0][0]:
-                heapq.heapreplace(heap, (nkey, company_id))
+        for row in row_query.yield_per(1000):
+            company_id = int(row.id)
+            score = _combined_score_values(row.ai_score, row.web_score, row.flex_score)
+            distance = distance_to_muri_km(
+                canton=row.canton,
+                municipality=row.municipality,
+                lat=row.lat,
+                lon=row.lon,
+            )
+            dist_val = float(distance) if distance is not None else float("inf")
+            nkey = (score, -dist_val, -company_id)
 
-    planned_ids = [cid for _, cid in sorted(heap, key=lambda x: x[0], reverse=True)]
+            if len(heap) < keep_n:
+                heapq.heappush(heap, (nkey, company_id))
+            else:
+                if nkey > heap[0][0]:
+                    heapq.heapreplace(heap, (nkey, company_id))
+
+        planned_ids = [cid for _, cid in sorted(heap, key=lambda x: x[0], reverse=True)]
     stats["selected"] = min(len(planned_ids), max(0, int(limit)) + max(0, int(resume_from)))
 
     start_idx = max(0, min(resume_from, len(planned_ids)))

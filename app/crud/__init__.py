@@ -1,4 +1,5 @@
 from app.crud.app_setting import get_all_settings, get_effective_setting, get_effective_settings_batch, get_setting, seed_defaults, set_setting
+from app.crud import crawler as crawler
 from app.crud.boilerplate import (
     create_boilerplate_pattern,
     delete_boilerplate_pattern,

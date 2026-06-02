@@ -40,6 +40,8 @@ class Company(Base):
     website_checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     # Top-5 Google results as JSON [{title, link, snippet, score}, ...] sorted by score desc
     google_search_results_raw: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Full provider JSON response (all fields: search_information, local_results, organic_results, etc.)
+    google_search_full_raw: Mapped[str | None] = mapped_column(Text, nullable=True)
     # 0-100 auto match score for the current website_url; None = not yet scored
     web_score: Mapped[int | None] = mapped_column(Integer, nullable=True)
     # True if Google only returned social media results (no real website found)

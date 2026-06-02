@@ -66,43 +66,44 @@ def _extract_cardholder_name_worldline(authorize_response: dict[str, Any]) -> st
 
 
 
-def _extract_payment_method_worldline(transaction: dict[str, Any]) -> str | None:
-    """Extract payment method from Saferpay Transaction object.
+def _extract_payment_method_worldline(authorize_response: dict[str, Any]) -> str | None:
+    """Extract payment method from a Saferpay Transaction/Authorize response.
 
-    Expected structure:
-    {
-      "PaymentMeans": {
-        "Card": {...} | "Twint": {...} | "BankAccount": {...} | etc.
-      }
-    }
+    Checks both Transaction.PaymentMeans and top-level PaymentMeans, since the
+    Saferpay API places PaymentMeans at the top level of the authorize response,
+    not inside the Transaction sub-object.
     """
-    if not isinstance(transaction, dict):
+    if not isinstance(authorize_response, dict):
         return None
 
-    payment_means = transaction.get("PaymentMeans")
-    if not isinstance(payment_means, dict):
+    def _check_means(payment_means: Any) -> str | None:
+        if not isinstance(payment_means, dict):
+            return None
+        if payment_means.get("Card"):
+            return "card"
+        if payment_means.get("Twint"):
+            return "twint"
+        if payment_means.get("BankAccount"):
+            return "bank_transfer"
+        if payment_means.get("DirectDebit"):
+            return "direct_debit"
+        if payment_means.get("Klarna"):
+            return "klarna"
+        if payment_means.get("PayPal"):
+            return "paypal"
+        if payment_means.get("Alipay"):
+            return "alipay"
         return None
 
-    # Check for Card
-    if payment_means.get("Card"):
-        return "card"
-    # Check for TWINT
-    if payment_means.get("Twint"):
-        return "twint"
-    # Check for Bank Transfer
-    if payment_means.get("BankAccount"):
-        return "bank_transfer"
-    # Check for other payment means
-    if payment_means.get("DirectDebit"):
-        return "direct_debit"
-    if payment_means.get("Klarna"):
-        return "klarna"
-    if payment_means.get("PayPal"):
-        return "paypal"
-    if payment_means.get("Alipay"):
-        return "alipay"
+    # Check Transaction.PaymentMeans first (some Saferpay flows nest it here)
+    transaction = authorize_response.get("Transaction")
+    if isinstance(transaction, dict):
+        found = _check_means(transaction.get("PaymentMeans"))
+        if found:
+            return found
 
-    return None
+    # Fall back to top-level PaymentMeans (standard Saferpay authorize response)
+    return _check_means(authorize_response.get("PaymentMeans"))
 
 
 def validate_transaction_status(status: str) -> PaymentStatus:
