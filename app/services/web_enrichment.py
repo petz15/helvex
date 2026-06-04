@@ -217,7 +217,7 @@ def recalculate_google_scores(
     """Recompute web_score from stored Google results for all companies."""
     stats: dict[str, Any] = {"updated": 0, "skipped": 0, "errors": []}
 
-    total = db.query(Company).count()
+    total = db.query(func.count(Company.id)).scalar() or 0
     offset = max(0, min(resume_from, total))
 
     while True:

@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from sqlalchemy import or_
+from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
 from app import crud
@@ -71,7 +71,7 @@ def reclassify_noga(
             )
         )
 
-    total = query.count()
+    total = query.with_entities(func.count(Company.id)).scalar() or 0
     stats["selected"] = total
 
     last_id: int = resume_from
@@ -169,7 +169,7 @@ def reclassify_low_confidence_noga(
         ),
     )
 
-    total = query.count()
+    total = query.with_entities(func.count(Company.id)).scalar() or 0
     stats["selected"] = total
     offset = 0
 

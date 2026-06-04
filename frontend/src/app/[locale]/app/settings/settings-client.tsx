@@ -406,10 +406,16 @@ export function SettingsClient() {
                     <input type="password" value={form.anthropic_api_key ?? ""} onChange={e => set("anthropic_api_key", e.target.value)} className={inputCls} placeholder={dict.app.settings.llm.apiKeyPlaceholder} />
                   </Field>
                   <Field label={dict.app.settings.llm.claudeModel} hint={dict.app.settings.llm.claudeModelHint}>
-                    <select value={(form as Record<string, string>).claude_model ?? "claude-haiku-4-5-20251001"} onChange={e => set("claude_model" as keyof AppSettings, e.target.value)} className={inputCls}>
+                    <select value={form.claude_model ?? "claude-haiku-4-5-20251001"} onChange={e => set("claude_model", e.target.value)} className={inputCls}>
                       <option value="claude-haiku-4-5-20251001">{dict.app.settings.llm.claudeHaikuOption}</option>
                       <option value="claude-sonnet-4-6">{dict.app.settings.llm.claudeSonnetOption}</option>
                       <option value="claude-opus-4-6">{dict.app.settings.llm.claudeOpusOption}</option>
+                    </select>
+                  </Field>
+                  <Field label="URL Search Provider" hint="Which provider fetches company URLs via Google Search. Serper.dev is a simple REST API; ScrapingDog queries google.ch with Swiss location context.">
+                    <select value={form.google_search_provider ?? "serper"} onChange={e => set("google_search_provider", e.target.value)} className={inputCls}>
+                      <option value="serper">Serper.dev</option>
+                      <option value="scrapingdog">ScrapingDog (google.ch)</option>
                     </select>
                   </Field>
                   <Field label={dict.app.settings.llm.targetDescription} hint={dict.app.settings.llm.targetDescriptionHint}>

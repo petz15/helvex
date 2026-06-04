@@ -713,7 +713,8 @@ def reextract_purpose_from_zefix_raw(
         "errors": [],
     }
 
-    total = db.query(Company).filter(Company.zefix_raw.isnot(None)).count()
+    from sqlalchemy import func as _func
+    total = db.query(_func.count(Company.id)).filter(Company.zefix_raw.isnot(None)).scalar() or 0
     offset = max(0, min(resume_from, total))
 
     while True:
@@ -846,7 +847,7 @@ def run_zefix_detail_collect(
         2. *cantons* filter — all DB companies in those cantons.
         3. No filter — all companies in the database.
     """
-    from sqlalchemy import or_, case
+    from sqlalchemy import or_, func
     from app.services.web_enrichment import rescore_from_stored_results
 
     stats: dict[str, Any] = {
@@ -860,13 +861,6 @@ def run_zefix_detail_collect(
     noga_enabled = True
 
     run = crud.create_run(db, "detail")
-
-    def _detail_priority_order(q):
-        has_detail = case(
-            (Company.zefix_raw.isnot(None), 1),
-            else_=0,
-        )
-        return q.order_by(has_detail.asc(), Company.flex_score.desc().nullslast(), Company.id.asc())
 
     _missing_details_filter = or_(
         Company.address.is_(None),
@@ -887,18 +881,42 @@ def run_zefix_detail_collect(
         start_idx = max(0, min(resume_from, total))
         companies_iter = iter(companies_list[start_idx:])
     else:
-        q = db.query(Company)
+        _BATCH = 500
+
+        count_q = db.query(func.count(Company.id))
         if cantons:
-            q = q.filter(Company.canton.in_(cantons))
+            count_q = count_q.filter(Company.canton.in_(cantons))
         if only_missing_details:
-            q = q.filter(_missing_details_filter)
-        q = _detail_priority_order(q)
-        rows: list[tuple[str, str | None]] = (
-            q.with_entities(Company.uid, Company.canton).all()
-        )
-        total = len(rows)
+            count_q = count_q.filter(_missing_details_filter)
+        total = count_q.scalar() or 0
         start_idx = max(0, min(resume_from, total))
-        companies_iter = iter(rows[start_idx:])
+
+        def _iter_companies():
+            last_id = 0
+            skipped = 0
+            while True:
+                batch_q = db.query(Company.uid, Company.canton, Company.id)
+                if cantons:
+                    batch_q = batch_q.filter(Company.canton.in_(cantons))
+                if only_missing_details:
+                    batch_q = batch_q.filter(_missing_details_filter)
+                batch = (
+                    batch_q
+                    .filter(Company.id > last_id)
+                    .order_by(Company.id.asc())
+                    .limit(_BATCH)
+                    .all()
+                )
+                if not batch:
+                    break
+                for row in batch:
+                    if skipped < start_idx:
+                        skipped += 1
+                        continue
+                    yield row
+                last_id = batch[-1].id
+
+        companies_iter = _iter_companies()
 
     stats["selected"] = total
 
@@ -1140,7 +1158,7 @@ def reextract_zefix_raw_fields(
         progress_cb: Callable(done, total, stats).
         abort_cb: Callable() that raises on cancellation.
     """
-    from sqlalchemy import or_
+    from sqlalchemy import func, or_
     from app.models.company import Company as CompanyModel
 
     target_fields = sorted(
@@ -1178,7 +1196,7 @@ def reextract_zefix_raw_fields(
 
     target_set = set(target_fields)
     q = q.order_by(CompanyModel.id)
-    total = q.count()
+    total = q.with_entities(func.count(CompanyModel.id)).scalar() or 0
     offset = max(0, min(resume_from, total))
     processed = offset
 

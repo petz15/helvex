@@ -54,7 +54,7 @@ def get_claude_default_model(db: Any, api_key: str | None = None) -> str:
     if not api_key:
         return _DEFAULT_MODEL
 
-    setting = crud.get_effective_setting(db, "claude_default_model", default="") or ""
+    setting = crud.get_effective_setting(db, "claude_model", default="") or ""
     return setting or _DEFAULT_MODEL
 
 

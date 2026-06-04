@@ -675,8 +675,9 @@ def run_sogc_publications_backfill(
         "errors": [],
     }
 
+    from sqlalchemy import func
     q = db.query(SogcPublication).order_by(SogcPublication.id.asc())
-    total = q.count()
+    total = q.with_entities(func.count(SogcPublication.id)).scalar() or 0
     stats["selected"] = total
 
     if status_cb:
@@ -793,7 +794,7 @@ def run_sogc_preprocess_batch(
         resume_from: Skip the first N qualifying companies (for resumption).
                      Ignored when uids is provided (small targeted runs don't need it).
     """
-    from sqlalchemy import or_, exists
+    from sqlalchemy import or_, exists, func
     from sqlalchemy.orm import load_only
 
     stats: dict[str, Any] = {
@@ -833,7 +834,7 @@ def run_sogc_preprocess_batch(
     # Cursor pagination: filter by id > last_id to avoid O(n²) OFFSET scans.
     # resume_from is treated as the last company.id already processed (not a row count).
     q = q.order_by(Company.id.asc())
-    total = q.count()
+    total = q.with_entities(func.count(Company.id)).scalar() or 0
     stats["selected"] = total
 
     if status_cb:

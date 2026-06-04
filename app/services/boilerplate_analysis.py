@@ -17,6 +17,7 @@ import re
 from collections import Counter
 from typing import Callable
 
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 logger = logging.getLogger(__name__)
@@ -325,7 +326,7 @@ def run_boilerplate_analysis(
     # Stream purpose texts in batches
     logger.info("boilerplate_analysis: loading purpose texts (limit=%d)", sample_limit)
     sentence_counter: Counter = Counter()
-    total = db.query(Company).filter(Company.purpose.isnot(None)).count()
+    total = db.query(func.count(Company.id)).filter(Company.purpose.isnot(None)).scalar() or 0
     total = min(total, sample_limit)
     batch_size = 5000
     offset = 0

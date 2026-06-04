@@ -7,6 +7,7 @@ import logging
 from datetime import datetime, timezone
 from typing import Any
 
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app import crud
@@ -104,7 +105,7 @@ def recalculate_flex_scores(
     raw_scores: dict[int, int | None] = {}
     breakdowns: dict[int, dict] = {}
 
-    total = db.query(Company).count()
+    total = db.query(func.count(Company.id)).scalar() or 0
     offset = max(0, min(resume_from, total))
 
     while True:
@@ -184,7 +185,7 @@ def re_geocode_all_companies(
     """
     stats: dict[str, Any] = {"geocoded": 0, "failed": 0, "skipped": 0, "errors": []}
 
-    total = db.query(Company).filter(Company.address.isnot(None)).count()
+    total = db.query(func.count(Company.id)).filter(Company.address.isnot(None)).scalar() or 0
     offset = max(0, min(resume_from, total))
 
     while True:

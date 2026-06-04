@@ -73,6 +73,7 @@ def detect_language_bulk(
 
     Safe to re-run — with only_missing=True skips companies that already have a language.
     """
+    from sqlalchemy import func
     from app import crud
     from app.models.company import Company
 
@@ -88,7 +89,7 @@ def detect_language_bulk(
     if only_missing:
         query = query.filter(Company.purpose_language.is_(None))
 
-    total = query.count()
+    total = query.with_entities(func.count(Company.id)).scalar() or 0
     stats["selected"] = total
     offset = 0
 

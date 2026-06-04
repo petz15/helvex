@@ -188,7 +188,7 @@ def run_resolve_bisher_links(
     """
     from app.models.sogc_person_entity import SogcPersonEntity
     from app.models.sogc_person_appearance import SogcPersonAppearance
-    from sqlalchemy import or_
+    from sqlalchemy import func, or_
 
     stats: dict = {
         "appearances_with_bisher": 0,
@@ -211,14 +211,14 @@ def run_resolve_bisher_links(
 
     # ── Step 2: Walk appearances with bisher fields, build hard links ──────────
     total = (
-        db.query(SogcPersonAppearance)
+        db.query(func.count(SogcPersonAppearance.id))
         .filter(
             or_(
                 SogcPersonAppearance.bisher_lastname.isnot(None),
                 SogcPersonAppearance.bisher_residence_municipality.isnot(None),
             )
         )
-        .count()
+        .scalar() or 0
     )
 
     if status_cb:

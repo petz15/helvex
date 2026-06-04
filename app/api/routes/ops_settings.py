@@ -46,6 +46,7 @@ class SettingsBody(BaseModel):
     scoring_claude_max_purpose_chars: str = "800"
     # Claude
     anthropic_api_key: str = ""
+    claude_model: str = "claude-haiku-4-5-20251001"
     claude_target_description: str = ""
     claude_classify_prompt: str = ""
     claude_classify_categories: str = ""
@@ -177,6 +178,9 @@ def save_settings(body: SettingsBody, db: Session = Depends(get_db), _: User = D
             crud.set_setting(db, key, defaults.get(key, v))
 
     crud.set_setting(db, "anthropic_api_key", body.anthropic_api_key.strip())
+    valid_models = {"claude-haiku-4-5-20251001", "claude-sonnet-4-6", "claude-opus-4-6"}
+    model = body.claude_model.strip()
+    crud.set_setting(db, "claude_model", model if model in valid_models else "claude-haiku-4-5-20251001")
     crud.set_setting(db, "claude_target_description", body.claude_target_description.strip())
     crud.set_setting(db, "claude_classify_prompt", body.claude_classify_prompt.strip())
     crud.set_setting(db, "claude_classify_categories", body.claude_classify_categories.strip())

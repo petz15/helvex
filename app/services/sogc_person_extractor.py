@@ -815,7 +815,7 @@ def run_extract_sogc_persons_batch(
     mode='all':     reprocess all person/auditor type changes.
     Cursor-based pagination on sogc_change.id for resume support.
     """
-    from sqlalchemy import exists
+    from sqlalchemy import exists, func
     from app.models.sogc_change import SogcChange
     from app.models.sogc_publication import SogcPublication
     from app.models.sogc_person_appearance import SogcPersonAppearance
@@ -848,7 +848,7 @@ def run_extract_sogc_persons_batch(
             ~exists().where(already_auditor.c.sogc_change_id == SogcChange.id),
         )
 
-    total = q.count()
+    total = q.with_entities(func.count(SogcChange.id)).scalar() or 0
     stats["selected"] = total
 
     if status_cb:
@@ -1010,6 +1010,7 @@ def run_repair_is_current(
     within each (entity, company) group without re-extracting excerpts.
     Safe to run multiple times.
     """
+    from sqlalchemy import func
     from app.models.sogc_person_entity import SogcPersonEntity
 
     stats: dict = {"entities_processed": 0, "errors": []}
@@ -1019,7 +1020,7 @@ def run_repair_is_current(
         .filter(SogcPersonEntity.merged_into_id.is_(None))
         .order_by(SogcPersonEntity.id.asc())
     )
-    total = entity_ids_q.count()
+    total = entity_ids_q.with_entities(func.count(SogcPersonEntity.id)).scalar() or 0
 
     if status_cb:
         status_cb(f"Repairing is_current: {total} entities to process")

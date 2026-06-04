@@ -1367,6 +1367,7 @@ def reextract_keywords_all(
 
     only_missing: if True, skip companies that already have purpose_keywords.
     """
+    from sqlalchemy import func
     from app.models.company import Company as CompanyModel
 
     if cfg is None:
@@ -1389,7 +1390,7 @@ def reextract_keywords_all(
     if limit:
         q = q.limit(limit)
 
-    total = q.count()
+    total = q.with_entities(func.count(CompanyModel.id)).scalar() or 0
     mappings: list[dict] = []
 
     for i, company in enumerate(q.yield_per(cfg.db_batch_size), start=1):

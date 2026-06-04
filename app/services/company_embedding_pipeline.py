@@ -16,7 +16,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 import numpy as np
-from sqlalchemy import text as sql_text
+from sqlalchemy import func, text as sql_text
 from sqlalchemy.orm import Session
 
 from app import crud
@@ -101,7 +101,7 @@ def _run_embed_batch(
     }
 
     query = _base_query(db, embedding_type, only_missing)
-    stats["selected"] = query.count()
+    stats["selected"] = query.with_entities(func.count(Company.id)).scalar() or 0
 
     last_id: int = resume_from
     processed = 0

@@ -40,7 +40,7 @@ class JobContext:
     def progress(self, done: int, total: int, stats: dict, msg: str) -> None:
         crud.update_progress(self.db, self.job, message=msg, done=done, total=total, stats=stats)
         crud.create_event(self.db, job_id=self.job.id, level="debug", message=msg)
-        self._maybe_sync(self.app, job_type=self.job.job_type, label=self.job.label, message=msg, stats=dict(stats), error=None, done=False)
+        self._maybe_sync(job_type=self.job.job_type, label=self.job.label, message=msg, stats=dict(stats), error=None, done=False)
         self._heartbeat()
 
     def progress_no_event(self, done: int, total: int, stats: dict, msg: str) -> None:
@@ -54,7 +54,7 @@ class JobContext:
         self._assert_not_cancelled()
         crud.update_progress(self.db, self.job, message=str(msg))
         crud.create_event(self.db, job_id=self.job.id, level="info", message=str(msg))
-        self._maybe_sync(self.app, job_type=self.job.job_type, label=self.job.label, message=str(msg),
+        self._maybe_sync(job_type=self.job.job_type, label=self.job.label, message=str(msg),
                          stats={}, error=None, done=False)
 
     def status_with_stats(self, msg: str) -> None:
@@ -63,12 +63,12 @@ class JobContext:
         self._assert_not_cancelled()
         crud.update_progress(self.db, self.job, message=str(msg))
         crud.create_event(self.db, job_id=self.job.id, level="info", message=str(msg))
-        self._maybe_sync(self.app, job_type=self.job.job_type, label=self.job.label, message=str(msg),
+        self._maybe_sync(job_type=self.job.job_type, label=self.job.label, message=str(msg),
                          stats=json.loads(self.job.stats_json) if self.job.stats_json else {},
                          error=None, done=False)
 
     def sync(self, msg: str, stats: dict, done: bool) -> None:
-        self._maybe_sync(self.app, job_type=self.job.job_type, label=self.job.label,
+        self._maybe_sync(job_type=self.job.job_type, label=self.job.label,
                          message=msg, stats=stats, error=None, done=done)
 
     def enqueue_job(self, **kwargs) -> Any:

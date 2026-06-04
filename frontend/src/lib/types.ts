@@ -207,6 +207,7 @@ export interface AppSettings {
   scoring_cancelled_score: string;
   scoring_claude_max_purpose_chars: string;
   anthropic_api_key: string;
+  claude_model: string;
   claude_target_description: string;
   claude_classify_prompt: string;
   claude_classify_categories: string;
