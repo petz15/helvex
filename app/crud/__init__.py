@@ -76,6 +76,7 @@ from app.crud.user_company_state import (
     update_user_ai_results,
 )
 from app.crud.job_run import (
+    atomic_claim_job,
     cancel_active_csv_exports,
     create_event,
     create_job,
@@ -168,6 +169,7 @@ __all__ = [
     "get_last_incomplete_bulk",
     "list_runs",
     # job run
+    "atomic_claim_job",
     "cancel_active_csv_exports",
     "get_latest_csv_export",
     "create_job",
