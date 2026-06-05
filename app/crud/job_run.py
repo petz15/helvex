@@ -2,7 +2,7 @@ import json
 from datetime import datetime, timezone
 from typing import Any
 
-from sqlalchemy import or_
+from sqlalchemy import or_, update as _sql_update
 from sqlalchemy.orm import Session
 
 from app.models.job_run_event import JobRunEvent
@@ -131,13 +131,41 @@ def get_next_queued_job(
     db: Session,
     job_type_whitelist: set[str] | None = None,
     job_type_blacklist: set[str] | None = None,
+    *,
+    skip_locked: bool = False,
 ) -> JobRun | None:
     q = db.query(JobRun).filter(JobRun.status == "queued")
     if job_type_whitelist:
         q = q.filter(JobRun.job_type.in_(job_type_whitelist))
     if job_type_blacklist:
         q = q.filter(JobRun.job_type.notin_(job_type_blacklist))
-    return q.order_by(JobRun.queued_at.asc()).first()
+    q = q.order_by(JobRun.queued_at.asc())
+    if skip_locked:
+        q = q.with_for_update(skip_locked=True)
+    return q.first()
+
+
+def atomic_claim_job(db: Session, job_id: int, *, message: str = "Starting…") -> bool:
+    """Atomically transition a job from queued/paused → running.
+
+    Returns True if this pod won the claim, False if another pod beat it to it.
+    Uses a single UPDATE WHERE so two pods racing for the same job_id can never
+    both succeed — only the first commit wins (rowcount=1), the other gets 0.
+    """
+    now = datetime.now(tz=timezone.utc)
+    result = db.execute(
+        _sql_update(JobRun)
+        .where(JobRun.id == job_id, JobRun.status.in_(["queued", "paused"]))
+        .values(
+            status="running",
+            cancel_requested=False,
+            started_at=now,
+            message=_job_message(message),
+        )
+        .execution_options(synchronize_session=False)
+    )
+    db.commit()
+    return result.rowcount == 1
 
 
 def list_queued_jobs(db: Session) -> list[JobRun]:

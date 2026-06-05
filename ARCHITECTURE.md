@@ -3,7 +3,7 @@
 > Internal documentation for bug fixing and onboarding.
 > **Stack:** FastAPI · PostgreSQL · K3s/Hetzner · Helm · Terraform · Next.js (Redis optional for RQ mode)
 > **Repo:** `helvex` (product name: Firmiq)
-> **Note:** This document was last updated May 2026 after Phase 1–3 refactoring. Phase 3.2 (Redis removal) remains planned but incomplete; Redis is still used in RQ mode.
+> **Note:** Last updated June 2026. Phase 3.2 (Redis removal) remains planned but incomplete; Redis is still used in RQ mode.
 
 ---
 
@@ -727,6 +727,11 @@ Strict-Transport-Security: max-age=31536000 (HTTPS only)
 - `_run_job()` dispatches via `JOB_HANDLERS[job_type](ctx)`, passing context (DB, params, progress callback, abort signal)
 - Handlers return `(stats_dict, done_message)` or raise typed exceptions (`JobPausedError`, `JobCancelledError`, `JobWaitingExternalSignal`)
 
+**Atomic job claiming (multi-pod safety)**
+- `crud.atomic_claim_job(db, job_id)` issues a single `UPDATE job_runs SET status='running' WHERE id=? AND status IN ('queued','paused')` and checks `rowcount == 1`
+- Only one pod wins the race even if both call `_run_job` simultaneously — the second UPDATE finds the row already `status='running'` and returns `rowcount=0`, causing an immediate return
+- `get_next_queued_job(..., skip_locked=True)` uses `SELECT ... FOR UPDATE SKIP LOCKED` so that when both idle pods poll simultaneously, each naturally claims a different queued job rather than both racing for the same one
+
 ### Job lifecycle
 
 ```
@@ -798,7 +803,7 @@ For each `UserView` with `alert_enabled=True`:
 
 ### Google Search — `app/clients/google_search_client.py` (Serper) + `app/clients/scrapingdog_search_client.py` (ScrapingDog)
 
-Two pluggable providers. Active provider is controlled by the `google_search_provider` setting (`serper` | `scrapingdog`, default `serper`), switchable in the superadmin Settings → Admin tab without a restart.
+Two pluggable providers. Active provider is controlled by the `google_search_provider` setting (`serper` | `scrapingdog`, default `serper`), switchable in the superadmin Settings → LLM tab (or Admin tab) without a restart.
 
 **Serper.dev** (`app/clients/google_search_client.py`):
 - API key: `SERPER_API_KEY` env var
@@ -837,7 +842,7 @@ Both are downloaded and compiled into SQLite databases **at Docker build time**.
 - **API key**: Resolved per-org via `get_effective_setting(db, "anthropic_api_key", org_id=...)`
   - Falls back to global `ANTHROPIC_API_KEY` env var if no org override
   - Never exposed in APIs (replaced with `anthropic_api_key_set: bool` in frontend)
-- **Model**: Claude Haiku (cheapest; ~$0.25 per 1000 companies)
+- **Model**: Configurable via `claude_model` key in `app_settings` (default: `claude-haiku-4-5-20251001`). Read at runtime by `get_claude_default_model()` in `app/services/claude.py`. Changeable in Settings → LLM tab without a restart. Valid values: `claude-haiku-4-5-20251001`, `claude-sonnet-4-6`, `claude-opus-4-6`.
 - **Used for**: `claude_classify` batch job, and `claude-preview` dry-run endpoint
 - **System prompt**: User-configurable via Settings API; resolved per-org
 - **Preflight check** (`_preflight_job`): Validates org has API key before queueing `claude_classify`
@@ -984,7 +989,7 @@ Classifies each company into the official Swiss NOGA 2025 taxonomy (~2000 level-
 
 **Per-company classification:**
 1. `detect_language_bulk` — Detects company purpose language (DE/FR/IT/EN) via lingua library; stores in `purpose_language`.
-2. `reclassify_noga` — Hybrid classifier: (60%) pgvector cosine similarity to language-matched NOGA embeddings + (40%) token overlap from company name/purpose/keywords. Returns `noga_code`, `noga_confidence` (0–1), and full ancestry path. Controlled by `embed_mode` parameter (see below).
+2. `reclassify_noga` — Hybrid classifier: (60%) pgvector cosine similarity to language-matched NOGA embeddings + (40%) token overlap from company name/purpose/keywords. Returns `noga_code`, `noga_confidence` (0–1), and full ancestry path. Controlled by `embed_mode` parameter (see below). **Important:** uses `query.with_entities(func.count(Company.id)).scalar()` (not `query.count()`) to count the working set — avoids PostgreSQL wrapping all 700k company columns in a subquery, which hit the 30 s statement timeout under peak nightly load.
 3. `reclassify_low_conf_noga` — Confidence-based refinement: re-runs classifier on companies below threshold (default 0.80), useful after rebuilding embeddings.
 
 **Why language-aware:** Embedding company purpose in French and matching it against French NOGA descriptions yields higher semantic similarity than cross-lingual matching. Confidence scores reflect this — typically 0.75–0.95 for clear industry classifications, 0.40–0.70 for ambiguous cases (candidates for API re-run).

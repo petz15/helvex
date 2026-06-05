@@ -323,10 +323,6 @@ def _run_job(app, job_id: int) -> None:  # noqa: C901
         if not job:
             return
 
-        # Guard against double-dispatch: another worker may have already picked this up
-        if job.status not in ("queued", "paused"):
-            return
-
         if job.status == "cancelled" or job.cancel_requested:
             _refund_job_credits_if_needed(db, job=job, reason="cancelled_before_start")
             crud.mark_cancelled(db, job, message="Cancelled before start")
@@ -335,7 +331,11 @@ def _run_job(app, job_id: int) -> None:  # noqa: C901
             record_job_duration(job.job_type, duration, "cancelled")
             return
 
-        crud.mark_running(db, job, message="Starting…")
+        # Atomic claim: UPDATE WHERE status IN ('queued','paused') — only one pod wins
+        if not crud.atomic_claim_job(db, job_id, message="Starting…"):
+            return  # another pod already claimed this job
+
+        db.refresh(job)  # sync in-memory state after the atomic UPDATE
         crud.create_event(db, job_id=job.id, level="info", message="Job started")
         _publish_job_update(job.org_id)
 
@@ -1452,7 +1452,7 @@ def _job_worker_loop(app) -> None:
     try:
         while True:
             with SessionLocal() as db:
-                next_job = crud.get_next_queued_job(db, job_type_whitelist=whitelist, job_type_blacklist=blacklist)
+                next_job = crud.get_next_queued_job(db, job_type_whitelist=whitelist, job_type_blacklist=blacklist, skip_locked=True)
                 if next_job is None:
                     if not continuous:
                         break
