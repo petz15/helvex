@@ -37,6 +37,8 @@ spec:
           env:
             - name: JOB_TYPE_WHITELIST
               value: "bulk,detail,initial,shab_daily,shab_backfill,shab_archive,sogc_preprocess,extract_sogc_persons,resolve_bisher_links,batch,re_geocode,recalculate_scores,recalculate_google_scores,reextract_purpose,reextract_zefix_raw,claude_classify,csv_export,analyze_boilerplate,billing_renewal,saved_view_alerts"
+            - name: JOB_WORKER_CONCURRENCY
+              value: "{{ .Values.apiWorker.concurrency }}"
             {{- if .Values.mlWorker.enabled }}
             - name: ML_WORKER_INTERNAL_URL
               value: "http://{{ include "helvex.fullname" . }}-ml-worker:8000"

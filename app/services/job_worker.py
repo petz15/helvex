@@ -1432,42 +1432,96 @@ _JOB_POLL_INTERVAL = int(os.environ.get("JOB_POLL_INTERVAL", "5"))
 _STALE_JOB_RECOVERY_INTERVAL = 180  # seconds between periodic stale-job sweeps
 
 
+_JOB_WORKER_CONCURRENCY = int(os.environ.get("JOB_WORKER_CONCURRENCY", "1"))
+
+
 def _job_worker_loop(app) -> None:
+    from concurrent.futures import ThreadPoolExecutor, wait as _fut_wait, FIRST_COMPLETED
+
     whitelist = _get_job_type_whitelist()
     blacklist = _get_job_type_blacklist()
-    # In split-worker mode (JOB_TYPE_WHITELIST set) the web pod can't kick this
-    # thread when new jobs arrives, so we poll continuously. In single-pod mode
-    # we break when idle and let enqueue_job() kick us via _ensure_job_worker().
     continuous = bool(whitelist)
+    concurrency = _JOB_WORKER_CONCURRENCY
+
     if whitelist:
-        logger.info("Job worker started (continuous poll) — handling job types: %s", ", ".join(sorted(whitelist)))
+        logger.info(
+            "Job worker started (continuous poll, concurrency=%d) — handling job types: %s",
+            concurrency, ", ".join(sorted(whitelist)),
+        )
     elif blacklist:
-        logger.info("Job worker started — handling all job types except: %s", ", ".join(sorted(blacklist)))
+        logger.info("Job worker started (concurrency=%d) — handling all job types except: %s", concurrency, ", ".join(sorted(blacklist)))
     else:
-        logger.info("Job worker started — handling all job types")
+        logger.info("Job worker started (concurrency=%d) — handling all job types", concurrency)
+
     app.state.job_worker_running = True
-    # Startup already ran requeue_interrupted_jobs; delay first periodic sweep so
-    # we don't double-recover jobs whose heartbeat hasn't gone stale yet.
     _last_recovery = time.monotonic()
+
+    def _poll_next():
+        with SessionLocal() as db:
+            return crud.get_next_queued_job(
+                db,
+                job_type_whitelist=whitelist,
+                job_type_blacklist=blacklist,
+                skip_locked=True,
+            )
+
+    def _periodic_recovery(db_session):
+        nonlocal _last_recovery
+        if time.monotonic() - _last_recovery >= _STALE_JOB_RECOVERY_INTERVAL:
+            recovered = crud.requeue_interrupted_jobs(db_session)
+            if recovered:
+                logger.info("Periodic stale-job sweep: recovered %d interrupted job(s)", recovered)
+            _last_recovery = time.monotonic()
+
     try:
-        while True:
-            with SessionLocal() as db:
-                next_job = crud.get_next_queued_job(db, job_type_whitelist=whitelist, job_type_blacklist=blacklist, skip_locked=True)
+        if concurrency == 1:
+            # Single-threaded fast path — zero overhead, original behaviour.
+            while True:
+                next_job = _poll_next()
                 if next_job is None:
                     if not continuous:
                         break
-                    # Periodically recover jobs whose heartbeat went stale after
-                    # startup (e.g. OOMKilled pods where the startup sweep ran
-                    # before the 120 s stale window elapsed).
-                    if time.monotonic() - _last_recovery >= _STALE_JOB_RECOVERY_INTERVAL:
-                        recovered = crud.requeue_interrupted_jobs(db)
-                        if recovered:
-                            logger.info("Periodic stale-job sweep: recovered %d interrupted job(s)", recovered)
-                        _last_recovery = time.monotonic()
+                    with SessionLocal() as db:
+                        _periodic_recovery(db)
                     time.sleep(_JOB_POLL_INTERVAL)
                     continue
-                next_id = next_job.id
-            _run_job(app, next_id)
+                _run_job(app, next_job.id)
+        else:
+            # Multi-threaded path: fill up to `concurrency` slots, wait for any
+            # to finish, then refill.  atomic_claim_job guarantees each job is
+            # claimed by exactly one thread even if two polls return the same id.
+            with ThreadPoolExecutor(max_workers=concurrency, thread_name_prefix="job-worker") as pool:
+                futures: set = set()
+                while True:
+                    # Drain completed futures (re-raise only unexpected errors;
+                    # _run_job catches and marks its own exceptions).
+                    done = {f for f in futures if f.done()}
+                    futures -= done
+                    for f in done:
+                        try:
+                            f.result()
+                        except Exception as exc:
+                            logger.error("Unexpected error from job thread: %s", exc, exc_info=True)
+
+                    with SessionLocal() as db:
+                        _periodic_recovery(db)
+
+                    # Fill empty slots.
+                    while len(futures) < concurrency:
+                        nj = _poll_next()
+                        if nj is None:
+                            break
+                        futures.add(pool.submit(_run_job, app, nj.id))
+
+                    if not futures:
+                        if not continuous:
+                            break
+                        time.sleep(_JOB_POLL_INTERVAL)
+                        continue
+
+                    # Block until a slot opens or the poll interval elapses,
+                    # then loop to refill.
+                    _fut_wait(futures, timeout=_JOB_POLL_INTERVAL, return_when=FIRST_COMPLETED)
     finally:
         app.state.job_worker_running = False
         with SessionLocal() as db:

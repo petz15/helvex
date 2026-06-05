@@ -58,6 +58,7 @@ imagePullSecrets: []
 apiWorker:
   enabled: false
   replicaCount: 1
+  concurrency: 2
   resources:
     requests:
       cpu: 250m
