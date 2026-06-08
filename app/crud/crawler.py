@@ -13,6 +13,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from sqlalchemy import text
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
 from app.models.company_crawl_state import CompanyCrawlState
@@ -33,40 +34,42 @@ def upsert_url_candidates(
 
     Each dict must have 'link' (url); optional: 'title', 'snippet', 'score', 'position'.
     Returns the upserted rows sorted by score descending.
-    On conflict (company_id, url) updates score/snippet/title/position.
+    Uses ON CONFLICT DO UPDATE so re-runs and concurrent jobs never raise UniqueViolation.
     """
     now = datetime.now(timezone.utc)
-    upserted: list[CompanyUrlCandidate] = []
+    rows = []
     for cand in candidates:
         url = cand.get("link") or cand.get("url")
         if not url:
             continue
-        existing = (
-            db.query(CompanyUrlCandidate)
-            .filter_by(company_id=company_id, url=url)
-            .first()
-        )
-        if existing:
-            existing.score = cand.get("score", existing.score)
-            existing.title = cand.get("title", existing.title)
-            existing.snippet = cand.get("snippet", existing.snippet)
-            existing.position = cand.get("position", existing.position)
-            upserted.append(existing)
-        else:
-            row = CompanyUrlCandidate(
-                company_id=company_id,
-                url=url,
-                title=cand.get("title"),
-                snippet=cand.get("snippet"),
-                score=cand.get("score"),
-                position=cand.get("position"),
-                status="pending",
-                source="serper",
-                first_seen_at=now,
-            )
-            db.add(row)
-            upserted.append(row)
+        rows.append({
+            "company_id": company_id,
+            "url": url,
+            "title": cand.get("title"),
+            "snippet": cand.get("snippet"),
+            "score": cand.get("score"),
+            "position": cand.get("position"),
+            "status": "pending",
+            "source": "serper",
+            "first_seen_at": now,
+        })
+
+    if not rows:
+        return []
+
+    stmt = pg_insert(CompanyUrlCandidate).values(rows)
+    stmt = stmt.on_conflict_do_update(
+        index_elements=["company_id", "url"],
+        set_={
+            "score": stmt.excluded.score,
+            "title": stmt.excluded.title,
+            "snippet": stmt.excluded.snippet,
+            "position": stmt.excluded.position,
+        },
+    ).returning(CompanyUrlCandidate)
+    result = db.execute(stmt)
     db.flush()
+    upserted = list(result.scalars())
     return sorted(upserted, key=lambda r: (r.score or 0), reverse=True)
 
 

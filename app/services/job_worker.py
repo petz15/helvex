@@ -1488,32 +1488,35 @@ def _job_worker_loop(app) -> None:
                 _run_job(app, next_job.id)
         else:
             # Multi-threaded path: fill up to `concurrency` slots, wait for any
-            # to finish, then refill.  atomic_claim_job guarantees each job is
-            # claimed by exactly one thread even if two polls return the same id.
+            # to finish, then refill.
+            # in_flight maps job_id → Future so we never submit the same job_id
+            # twice within one pod (which would happen because _poll_next() can
+            # return the same row twice before atomic_claim_job flips it to
+            # 'running').
+            from concurrent.futures import Future as _Future
             with ThreadPoolExecutor(max_workers=concurrency, thread_name_prefix="job-worker") as pool:
-                futures: set = set()
+                in_flight: dict[int, _Future] = {}
                 while True:
-                    # Drain completed futures (re-raise only unexpected errors;
-                    # _run_job catches and marks its own exceptions).
-                    done = {f for f in futures if f.done()}
-                    futures -= done
-                    for f in done:
-                        try:
-                            f.result()
-                        except Exception as exc:
-                            logger.error("Unexpected error from job thread: %s", exc, exc_info=True)
+                    # Drain completed futures.
+                    for job_id, f in list(in_flight.items()):
+                        if f.done():
+                            del in_flight[job_id]
+                            try:
+                                f.result()
+                            except Exception as exc:
+                                logger.error("Unexpected error from job thread: %s", exc, exc_info=True)
 
                     with SessionLocal() as db:
                         _periodic_recovery(db)
 
-                    # Fill empty slots.
-                    while len(futures) < concurrency:
+                    # Fill empty slots — skip IDs already in-flight.
+                    while len(in_flight) < concurrency:
                         nj = _poll_next()
-                        if nj is None:
+                        if nj is None or nj.id in in_flight:
                             break
-                        futures.add(pool.submit(_run_job, app, nj.id))
+                        in_flight[nj.id] = pool.submit(_run_job, app, nj.id)
 
-                    if not futures:
+                    if not in_flight:
                         if not continuous:
                             break
                         time.sleep(_JOB_POLL_INTERVAL)
@@ -1521,7 +1524,7 @@ def _job_worker_loop(app) -> None:
 
                     # Block until a slot opens or the poll interval elapses,
                     # then loop to refill.
-                    _fut_wait(futures, timeout=_JOB_POLL_INTERVAL, return_when=FIRST_COMPLETED)
+                    _fut_wait(list(in_flight.values()), timeout=_JOB_POLL_INTERVAL, return_when=FIRST_COMPLETED)
     finally:
         app.state.job_worker_running = False
         with SessionLocal() as db:

@@ -107,6 +107,7 @@ def handle_web_url_populate(ctx: JobContext) -> tuple[dict, str]:
             except Exception as exc:  # noqa: BLE001
                 stats["errors"].append(f"company {company_id}: {exc}")
                 logger.warning("web_url_populate error for company %d: %s", company_id, exc)
+                ctx.db.rollback()
 
         ctx.db.commit()
         done += len(rows)
