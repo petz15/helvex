@@ -142,6 +142,9 @@ def _run_crawl_batch(
     max_pages: int,
     rate_limit_delay: float,
     crawl_fn,
+    rerun: bool = False,
+    order_by: str = "company_id_asc",
+    limit: int | None = None,
 ) -> tuple[dict, str]:
     """Shared batch-crawl loop used by both HTTP and Playwright handlers.
 
@@ -159,6 +162,12 @@ def _run_crawl_batch(
     if released:
         ctx.event("info", f"Released {released} stuck in_progress rows from previous run")
 
+    if rerun and tier == "playwright":
+        reset_count = crawler_crud.reset_playwright_crawled(ctx.db, canton=canton)
+        ctx.db.commit()
+        if reset_count:
+            ctx.event("info", f"Rerun: reset {reset_count} previously crawled/failed playwright rows to pending")
+
     if tier == "playwright":
         count_sql = (
             "SELECT COUNT(*) FROM company_crawl_state "
@@ -172,6 +181,9 @@ def _run_crawl_batch(
             "WHERE crawl_status = 'pending' AND tier = :tier"
         )
         total = int(ctx.db.execute(text(count_sql), {"tier": tier}).scalar() or 0)
+
+    if limit is not None:
+        total = min(total, limit)
     done = 0
 
     try:
@@ -179,8 +191,12 @@ def _run_crawl_batch(
             ctx.assert_not_cancelled()
             _self_preempt_if_ml_queued(ctx)
 
+            if limit is not None and done >= limit:
+                break
+
+            claim_size = batch_size if limit is None else min(batch_size, limit - done)
             batch = crawler_crud.claim_crawl_batch(
-                ctx.db, tier=tier, batch_size=batch_size, canton=canton
+                ctx.db, tier=tier, batch_size=claim_size, canton=canton, order_by=order_by,
             )
             if not batch:
                 break
@@ -303,6 +319,7 @@ def handle_web_crawl_playwright(ctx: JobContext) -> tuple[dict, str]:
     """Playwright crawler. Claims companies where tier='playwright' or crawl_status='js_required'."""
     from app.services.crawler_playwright import crawl_company_playwright
 
+    limit_raw = ctx.params.get("limit")
     return _run_crawl_batch(
         ctx,
         tier="playwright",
@@ -311,6 +328,9 @@ def handle_web_crawl_playwright(ctx: JobContext) -> tuple[dict, str]:
         max_pages=int(ctx.params.get("max_pages", 5)),
         rate_limit_delay=float(ctx.params.get("rate_limit_delay", 0.5)),
         crawl_fn=crawl_company_playwright,
+        rerun=bool(ctx.params.get("rerun", False)),
+        order_by=str(ctx.params.get("order_by", "company_id_asc")),
+        limit=int(limit_raw) if limit_raw else None,
     )
 
 

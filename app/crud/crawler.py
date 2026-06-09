@@ -153,12 +153,51 @@ def get_or_create_crawl_state(
     return state
 
 
+_CRAWL_ORDER_BY: dict[str, str] = {
+    "company_id_asc":      "cs.company_id ASC",
+    "last_crawled_asc":    "cs.last_crawled_at ASC NULLS FIRST",
+    "flex_score_desc":     "c.flex_score DESC NULLS LAST, cs.company_id ASC",
+    "combined_score_desc": "c.combined_score DESC NULLS LAST, cs.company_id ASC",
+}
+
+
+def reset_playwright_crawled(db: Session, *, canton: str | None = None) -> int:
+    """Reset crawled/failed playwright-tier rows back to pending so they can be re-crawled.
+
+    Returns the number of rows updated.
+    """
+    canton_clause = ""
+    params: dict[str, Any] = {}
+    if canton:
+        canton_clause = (
+            "AND company_id IN "
+            "(SELECT id FROM companies WHERE canton = :canton)"
+        )
+        params["canton"] = canton
+
+    result = db.execute(
+        text(
+            f"UPDATE company_crawl_state "  # noqa: S608
+            f"SET crawl_status = 'pending', tier = 'playwright', "
+            f"    crawl_error_detail = NULL, bot_protected = FALSE, "
+            f"    bot_protection_type = NULL "
+            f"WHERE tier = 'playwright' "
+            f"  AND crawl_status IN ('crawled', 'bot_blocked', 'http_error', 'timeout', 'no_content') "
+            f"{canton_clause}"
+        ),
+        params,
+    )
+    db.flush()
+    return result.rowcount
+
+
 def claim_crawl_batch(
     db: Session,
     *,
     tier: str,
     batch_size: int = 20,
     canton: str | None = None,
+    order_by: str = "company_id_asc",
 ) -> list[CompanyCrawlState]:
     """Atomically claim a batch of crawl states via SELECT FOR UPDATE SKIP LOCKED.
 
@@ -168,11 +207,18 @@ def claim_crawl_batch(
     """
     now = datetime.now(timezone.utc)
 
-    canton_join = ""
-    canton_clause = ""
+    order_clause = _CRAWL_ORDER_BY.get(order_by, "cs.company_id ASC")
+    needs_company_join = order_by in ("flex_score_desc", "combined_score_desc")
+
     if canton:
-        canton_join = "JOIN companies c ON c.id = cs.company_id"
+        join_clause = "JOIN companies c ON c.id = cs.company_id"
         canton_clause = "AND c.canton = :canton"
+    elif needs_company_join:
+        join_clause = "JOIN companies c ON c.id = cs.company_id"
+        canton_clause = ""
+    else:
+        join_clause = ""
+        canton_clause = ""
 
     if tier == "playwright":
         # js_required rows have crawl_status='js_required', NOT 'pending', so
@@ -194,11 +240,12 @@ def claim_crawl_batch(
 
     sql = text(f"""
         SELECT cs.company_id FROM company_crawl_state cs
-        {canton_join}
+        {join_clause}
         WHERE {status_clause}
           AND (cs.next_crawl_at IS NULL OR cs.next_crawl_at <= :now)
           AND cs.selected_url_id IS NOT NULL
-        ORDER BY cs.company_id
+          {canton_clause}
+        ORDER BY {order_clause}
         LIMIT :limit
         FOR UPDATE SKIP LOCKED
     """)  # noqa: S608
