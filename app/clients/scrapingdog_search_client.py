@@ -31,6 +31,7 @@ def search_website(
     zip_code: str | None = None,
     municipality: str | None = None,
     purpose_language: str | None = None,
+    api_key: str | None = None,
 ) -> tuple[list[GoogleSearchResult], dict]:
     """Search for a company's website using the ScrapingDog Google Search API.
 
@@ -43,7 +44,8 @@ def search_website(
         ValueError: If the ScrapingDog API key is not configured.
         httpx.HTTPStatusError: If the API returns a non-2xx response.
     """
-    if not settings.scrapingdog_api_key:
+    key = api_key or settings.scrapingdog_api_key
+    if not key:
         raise ValueError("SCRAPINGDOG_API_KEY must be set to use ScrapingDog search.")
 
     # Build location string: "PLZ Municipality, Switzerland"
@@ -61,7 +63,7 @@ def search_website(
     lang = _LANG_MAP.get((purpose_language or "").lower(), "de")
 
     params = {
-        "api_key": settings.scrapingdog_api_key,
+        "api_key": key,
         "query": company_name,
         "results": min(max(1, num), 100),
         "country": "ch",

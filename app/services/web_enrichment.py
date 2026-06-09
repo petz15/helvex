@@ -33,17 +33,24 @@ def _active_provider(db: Session) -> str:
     return (crud.get_setting(db, "google_search_provider", "serper") or "serper").strip().lower()
 
 
+def _get_search_api_key(db: Session, provider: str) -> str:
+    """Return the active API key for the given provider: DB value takes priority over env."""
+    db_key = (crud.get_setting(db, f"{provider}_api_key", "") or "").strip()
+    if db_key:
+        return db_key
+    if provider == "scrapingdog":
+        return settings.scrapingdog_api_key or ""
+    return settings.serper_api_key or ""
+
+
 def _google_search_ready(db: Session) -> tuple[bool, str | None]:
     enabled = (crud.get_setting(db, "google_search_enabled", "true") or "").strip().lower() == "true"
     if not enabled:
         return False, "Google search is disabled in Settings"
     provider = _active_provider(db)
-    if provider == "scrapingdog":
-        if not settings.scrapingdog_api_key:
-            return False, "SCRAPINGDOG_API_KEY is not configured (website search cannot run)"
-    else:
-        if not settings.serper_api_key:
-            return False, "SERPER_API_KEY is not configured (website search cannot run)"
+    if not _get_search_api_key(db, provider):
+        key_name = "SCRAPINGDOG_API_KEY" if provider == "scrapingdog" else "SERPER_API_KEY"
+        return False, f"{key_name} is not configured (website search cannot run)"
     return True, None
 
 
@@ -119,6 +126,7 @@ def enrich_company_website(db: Session, company: Company, *, num: int = 10) -> t
     full_raw: dict | None = None
 
     try:
+        api_key = _get_search_api_key(db, provider)
         if provider == "scrapingdog":
             from app.clients.scrapingdog_search_client import search_website as sd_search
             results, full_raw = sd_search(
@@ -127,9 +135,10 @@ def enrich_company_website(db: Session, company: Company, *, num: int = 10) -> t
                 zip_code=company.address_zip,
                 municipality=company.municipality,
                 purpose_language=company.purpose_language,
+                api_key=api_key,
             )
         else:
-            results = search_website(company.name, num=num)
+            results = search_website(company.name, num=num, api_key=api_key)
 
         duration = time.monotonic() - _t0
         record_api_call(provider, duration, 200)

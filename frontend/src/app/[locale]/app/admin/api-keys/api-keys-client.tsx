@@ -10,15 +10,22 @@ import {
   fetchAdminOrgApiKeys,
   fetchAdminFunctionOverrides,
   fetchAdminStandardKeys,
+  fetchAdminSearchProviderKeys,
+  fetchSettings,
+  saveSettings,
   updateAdminPlatformApiKey,
   setAdminOrgApiKey,
   setAdminStandardKey,
   resetAdminStandardKey,
+  setAdminSearchProviderKey,
+  resetAdminSearchProviderKey,
   type PlatformApiKeyStatus,
   type OrgApiKeyConfig,
   type FunctionOverride,
   type StandardKeyInfo,
+  type SearchProviderKeyInfo,
 } from "@/lib/api";
+import type { AppSettings } from "@/lib/types";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -480,7 +487,174 @@ function FunctionsTab({ data }: { data: FunctionOverride[] | undefined }) {
 
 // ── Main ──────────────────────────────────────────────────────────────────────
 
-type Tab = "platform" | "standard" | "orgs" | "functions";
+type Tab = "platform" | "standard" | "orgs" | "functions" | "search";
+
+function SearchProviderKeysTab({
+  data,
+  onSaved,
+}: {
+  data: Record<string, SearchProviderKeyInfo> | undefined;
+  onSaved: () => void;
+}) {
+  const [editing, setEditing] = useState<string | null>(null);
+  const [keyInputs, setKeyInputs] = useState<Record<string, string>>({});
+  const [show, setShow] = useState<Record<string, boolean>>({});
+  const [saving, setSaving] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [providerSaving, setProviderSaving] = useState(false);
+  const { data: appSettings, mutate: mutateSettings } = useSWR<AppSettings>("settings", fetchSettings);
+  const activeProvider = (appSettings as Record<string, string> | undefined)?.google_search_provider ?? "serper";
+
+  async function handleProviderChange(provider: string) {
+    setProviderSaving(true);
+    try {
+      await saveSettings({ ...(appSettings ?? {}), google_search_provider: provider } as Partial<AppSettings>);
+      await mutateSettings();
+    } finally {
+      setProviderSaving(false);
+    }
+  }
+
+  async function handleSave(provider: string) {
+    const key = keyInputs[provider]?.trim();
+    if (!key) return;
+    setSaving(provider);
+    setError(null);
+    try {
+      await setAdminSearchProviderKey(provider, key);
+      setKeyInputs((prev) => ({ ...prev, [provider]: "" }));
+      setEditing(null);
+      onSaved();
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "Unknown error");
+    } finally {
+      setSaving(null);
+    }
+  }
+
+  async function handleReset(provider: string) {
+    setSaving(provider);
+    setError(null);
+    try {
+      await resetAdminSearchProviderKey(provider);
+      onSaved();
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "Unknown error");
+    } finally {
+      setSaving(null);
+    }
+  }
+
+  if (!data) return null;
+
+  return (
+    <div className="space-y-4">
+      {/* Active provider selector */}
+      <div className="bg-white rounded-xl border border-slate-200 p-4">
+        <div className="flex items-center justify-between gap-4">
+          <div>
+            <p className="text-sm font-medium text-slate-800">Active search provider</p>
+            <p className="text-xs text-slate-400 mt-0.5">Which provider is used for URL fetch jobs</p>
+          </div>
+          <div className="flex items-center gap-2">
+            <select
+              value={activeProvider}
+              onChange={(e) => void handleProviderChange(e.target.value)}
+              disabled={providerSaving || !appSettings}
+              className="text-sm border border-slate-200 rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-purple-300 disabled:opacity-60"
+            >
+              <option value="serper">Serper.dev</option>
+              <option value="scrapingdog">ScrapingDog (google.ch)</option>
+            </select>
+            {providerSaving && <Loader2 size={14} className="animate-spin text-slate-400" />}
+          </div>
+        </div>
+      </div>
+
+      <p className="text-xs text-slate-500">
+        API keys for Serper.dev and ScrapingDog. DB keys override the <code className="font-mono">.env</code> value.
+      </p>
+      {error && <p className="text-xs text-red-500">{error}</p>}
+      {Object.entries(data).map(([provider, info]) => (
+        <div key={provider} className="bg-white rounded-xl border border-slate-200 p-4">
+          <div className="flex items-start justify-between gap-3">
+            <div className="flex-1">
+              <div className="flex items-center gap-2 mb-0.5 flex-wrap">
+                <span className="text-sm font-medium text-slate-800">{info.providerName}</span>
+                {info.source !== "none" ? (
+                  <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] font-medium bg-emerald-100 text-emerald-700">
+                    <CheckCircle size={9} /> Configured
+                  </span>
+                ) : (
+                  <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] font-medium bg-slate-100 text-slate-500">
+                    <Lock size={9} /> Not set
+                  </span>
+                )}
+                {info.source === "db" && (
+                  <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-medium bg-blue-100 text-blue-700">DB</span>
+                )}
+                {info.source === "env" && (
+                  <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-medium bg-amber-100 text-amber-700">env</span>
+                )}
+              </div>
+              {info.keyFingerprint && (
+                <code className="text-xs font-mono text-slate-500">{info.keyFingerprint}</code>
+              )}
+            </div>
+            <div className="flex items-center gap-2 shrink-0">
+              {info.hasDbKey && (
+                <button
+                  onClick={() => void handleReset(provider)}
+                  disabled={saving === provider}
+                  className="flex items-center gap-1 text-xs text-red-500 hover:text-red-700 px-2 py-1 rounded border border-red-200 hover:bg-red-50 transition-colors disabled:opacity-40"
+                >
+                  {saving === provider ? <Loader2 size={11} className="animate-spin" /> : <Trash2 size={11} />}
+                  Remove DB key
+                </button>
+              )}
+              <button
+                onClick={() => setEditing(editing === provider ? null : provider)}
+                className="flex items-center gap-1 text-xs text-purple-600 hover:text-purple-800 px-2 py-1 rounded border border-purple-200 hover:bg-purple-50 transition-colors"
+              >
+                <Key size={11} />
+                {info.hasDbKey ? "Rotate" : "Set key"}
+              </button>
+            </div>
+          </div>
+
+          {editing === provider && (
+            <div className="mt-3 pt-3 border-t border-slate-100 flex gap-2">
+              <div className="relative flex-1">
+                <input
+                  type={show[provider] ? "text" : "password"}
+                  value={keyInputs[provider] ?? ""}
+                  onChange={(e) => setKeyInputs((prev) => ({ ...prev, [provider]: e.target.value }))}
+                  placeholder="Paste API key..."
+                  className="w-full text-sm border border-slate-200 rounded-lg px-3 py-1.5 pr-8 focus:outline-none focus:ring-2 focus:ring-purple-300"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShow((prev) => ({ ...prev, [provider]: !prev[provider] }))}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                >
+                  {show[provider] ? <EyeOff size={13} /> : <Eye size={13} />}
+                </button>
+              </div>
+              <button
+                onClick={() => void handleSave(provider)}
+                disabled={saving === provider || !keyInputs[provider]?.trim()}
+                className="px-3 py-1.5 text-xs bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:opacity-40 flex items-center gap-1.5 transition-colors"
+              >
+                {saving === provider && <Loader2 size={11} className="animate-spin" />}
+                Save
+              </button>
+            </div>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
 
 export default function ApiKeysClient() {
   const [tab, setTab] = useState<Tab>("platform");
@@ -497,17 +671,22 @@ export default function ApiKeysClient() {
   const { data: fnData, isLoading: loadingFn } =
     useSWR<FunctionOverride[]>("admin-api-keys-functions", fetchAdminFunctionOverrides);
 
+  const { data: searchData, isLoading: loadingSearch, mutate: mutateSearch } =
+    useSWR<Record<string, SearchProviderKeyInfo>>("admin-api-keys-search", fetchAdminSearchProviderKeys);
+
   const isLoading =
     (tab === "platform" && loadingPlatform) ||
     (tab === "standard" && loadingStandard) ||
     (tab === "orgs" && loadingOrgs) ||
-    (tab === "functions" && loadingFn);
+    (tab === "functions" && loadingFn) ||
+    (tab === "search" && loadingSearch);
 
   const TABS: { id: Tab; label: string }[] = [
     { id: "platform", label: "Platform Key" },
     { id: "standard", label: "Standard Keys" },
     { id: "orgs", label: "Per-Org Keys" },
     { id: "functions", label: "Function Overrides" },
+    { id: "search", label: "Search Provider Keys" },
   ];
 
   function handleRefresh() {
@@ -566,6 +745,9 @@ export default function ApiKeysClient() {
             <OrgsTab data={orgsData} onSaved={() => void mutateOrgs()} />
           )}
           {tab === "functions" && <FunctionsTab data={fnData} />}
+          {tab === "search" && (
+            <SearchProviderKeysTab data={searchData} onSaved={() => void mutateSearch()} />
+          )}
         </>
       )}
     </div>

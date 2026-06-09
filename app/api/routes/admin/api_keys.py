@@ -320,6 +320,71 @@ async def reset_standard_key(
     }
 
 
+_SEARCH_PROVIDERS = {
+    "serper": {"name": "Serper.dev", "env_attr": "serper_api_key"},
+    "scrapingdog": {"name": "ScrapingDog", "env_attr": "scrapingdog_api_key"},
+}
+
+
+@router.get("/search-provider-keys", dependencies=[Depends(require_superadmin)])
+async def list_search_provider_keys(db: Session = Depends(get_db)) -> dict:
+    """List configured search provider API keys (Serper.dev, ScrapingDog)."""
+    from app.config import settings as app_settings
+
+    result = {}
+    for provider, info in _SEARCH_PROVIDERS.items():
+        db_key = crud.get_setting(db, f"{provider}_api_key", "") or ""
+        env_key = getattr(app_settings, info["env_attr"], "") or ""
+        active_key = db_key or env_key
+        result[provider] = {
+            "provider": provider,
+            "providerName": info["name"],
+            "hasDbKey": bool(db_key),
+            "hasEnvKey": bool(env_key),
+            "keyFingerprint": _key_fingerprint(active_key) if active_key else None,
+            "source": "db" if db_key else ("env" if env_key else "none"),
+        }
+    return {"search_provider_keys": result}
+
+
+@router.post("/search-provider-keys/{provider}", dependencies=[Depends(require_superadmin)])
+async def set_search_provider_key(
+    provider: str,
+    body: UpdatePlatformKeyRequest,
+    db: Session = Depends(get_db),
+) -> dict:
+    """Set the API key for a search provider (stored in DB, overrides .env)."""
+    if provider not in _SEARCH_PROVIDERS:
+        raise HTTPException(status_code=400, detail=f"Unknown provider. Must be one of: {', '.join(_SEARCH_PROVIDERS)}")
+
+    crud.set_setting(db, f"{provider}_api_key", body.apiKey.strip())
+    logger.info("admin.set_search_provider_key provider=%s", provider)
+    return {
+        "message": f"{_SEARCH_PROVIDERS[provider]['name']} API key updated",
+        "provider": provider,
+        "fingerprint": _key_fingerprint(body.apiKey),
+    }
+
+
+@router.delete("/search-provider-keys/{provider}", dependencies=[Depends(require_superadmin)])
+async def reset_search_provider_key(
+    provider: str,
+    db: Session = Depends(get_db),
+) -> dict:
+    """Remove the DB override for a search provider key (falls back to .env)."""
+    if provider not in _SEARCH_PROVIDERS:
+        raise HTTPException(status_code=400, detail=f"Unknown provider: {provider}")
+
+    from app.models.app_setting import AppSetting
+    row = db.get(AppSetting, f"{provider}_api_key")
+    if row:
+        db.delete(row)
+        db.commit()
+
+    logger.info("admin.reset_search_provider_key provider=%s", provider)
+    return {"message": f"{_SEARCH_PROVIDERS[provider]['name']} DB key removed (falling back to .env)", "provider": provider}
+
+
 @router.get("/audit-log", dependencies=[Depends(require_superadmin)])
 async def get_audit_log(db: Session = Depends(get_db), limit: int = 50) -> dict:
     """Get audit log of API key changes."""

@@ -1964,6 +1964,40 @@ export async function resetAdminStandardKey(provider: string): Promise<void> {
   if (!res.ok) throw new Error(`Failed to reset standard key for ${provider}`);
 }
 
+export interface SearchProviderKeyInfo {
+  provider: string;
+  providerName: string;
+  hasDbKey: boolean;
+  hasEnvKey: boolean;
+  keyFingerprint: string | null;
+  source: "db" | "env" | "none";
+}
+
+export async function fetchAdminSearchProviderKeys(): Promise<Record<string, SearchProviderKeyInfo>> {
+  const res = await fetch("/api/v1/admin/api-keys/search-provider-keys", { credentials: "include" });
+  if (!res.ok) throw new Error("Failed to fetch search provider keys");
+  const data = await res.json();
+  return data.search_provider_keys;
+}
+
+export async function setAdminSearchProviderKey(provider: string, apiKey: string): Promise<void> {
+  const res = await fetch(`/api/v1/admin/api-keys/search-provider-keys/${provider}`, {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ apiKey }),
+  });
+  if (!res.ok) throw new Error(`Failed to set key for ${provider}`);
+}
+
+export async function resetAdminSearchProviderKey(provider: string): Promise<void> {
+  const res = await fetch(`/api/v1/admin/api-keys/search-provider-keys/${provider}`, {
+    method: "DELETE",
+    credentials: "include",
+  });
+  if (!res.ok) throw new Error(`Failed to reset key for ${provider}`);
+}
+
 // ── SOGC Persons ───────────────────────────────────────────────────────────────
 
 import type { SogcPersonEntity, SogcPersonAppearance, SogcAuditor, SogcPersonFlag, SogcPublicationDetail, GlobalSearchResult, SogcCorporateRole } from "./types";

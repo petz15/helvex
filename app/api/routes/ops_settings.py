@@ -24,6 +24,8 @@ class SettingsBody(BaseModel):
     google_daily_quota: str = "100"
     # "serper" | "scrapingdog"
     google_search_provider: str = "serper"
+    serper_api_key: str = ""
+    scrapingdog_api_key: str = ""
     # Scoring
     scoring_target_clusters: str = ""
     scoring_cluster_hit_points: str = "10"
@@ -114,7 +116,7 @@ class TfidfStopwordCreate(BaseModel):
 
 # ── Settings ───────────────────────────────────────────────────────────────────
 
-_SENSITIVE_KEYS = frozenset({"anthropic_api_key"})
+_SENSITIVE_KEYS = frozenset({"anthropic_api_key", "serper_api_key", "scrapingdog_api_key"})
 
 
 @router.get("/settings")
@@ -178,6 +180,10 @@ def save_settings(body: SettingsBody, db: Session = Depends(get_db), _: User = D
             crud.set_setting(db, key, defaults.get(key, v))
 
     crud.set_setting(db, "anthropic_api_key", body.anthropic_api_key.strip())
+    if body.serper_api_key.strip():
+        crud.set_setting(db, "serper_api_key", body.serper_api_key.strip())
+    if body.scrapingdog_api_key.strip():
+        crud.set_setting(db, "scrapingdog_api_key", body.scrapingdog_api_key.strip())
     valid_models = {"claude-haiku-4-5-20251001", "claude-sonnet-4-6", "claude-opus-4-6"}
     model = body.claude_model.strip()
     crud.set_setting(db, "claude_model", model if model in valid_models else "claude-haiku-4-5-20251001")

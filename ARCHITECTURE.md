@@ -1,9 +1,9 @@
 # Helvex — Architecture Reference
 
 > Internal documentation for bug fixing and onboarding.
-> **Stack:** FastAPI · PostgreSQL · K3s/Hetzner · Helm · Terraform · Next.js (Redis optional for RQ mode)
+> **Stack:** FastAPI · PostgreSQL · K3s/Hetzner · Helm · Terraform · Next.js
 > **Repo:** `helvex` (product name: Firmiq)
-> **Note:** Last updated June 2026. Phase 3.2 (Redis removal) remains planned but incomplete; Redis is still used in RQ mode.
+> **Note:** Last updated June 2026. Redis and RQ mode have been fully removed; the job worker is thread-only.
 
 ---
 
@@ -57,7 +57,6 @@ zefix_analyzer/
 │   ├── database.py             # SQLAlchemy engine + session factory
 │   ├── create_admin.py         # CLI: create superadmin user
 │   ├── run_collector.py        # CLI: run collection jobs outside HTTP
-│   ├── worker_entrypoint.py    # Entrypoint for RQ worker pod (if USE_RQ=true)
 │   ├── clients/                # External API wrappers (Zefix, Serper, Geocoding, SHAB)
 │   │   ├── zefix_client.py     # Zefix REST API client
 │   │   ├── google_search_client.py      # Serper.dev wrapper
@@ -141,7 +140,7 @@ zefix_analyzer/
 │   └── cleanup.yml             # Weekly GHCR image cleanup
 │
 ├── Dockerfile                  # Multi-stage Python 3.12 image
-├── docker-compose.yml          # Local dev (app + postgres + redis + nginx)
+├── docker-compose.yml          # Local dev (app + postgres + nginx)
 ├── entrypoint.sh               # Docker entrypoint: runs alembic upgrade then uvicorn
 ├── requirements.txt
 ├── pyproject.toml              # pytest config
@@ -610,7 +609,7 @@ never blocked.
 
 **Implementation (Thread mode, default):** In-memory sliding window using `defaultdict` of timestamps per IP/key. No external dependencies.
 
-**Note:** Phase 3.2 (Redis removal) is planned but not yet complete. Redis is still available for RQ mode (separate worker process) if needed in production.
+**Note:** Redis and RQ mode have been fully removed. Rate limiting is in-process only.
 
 | Endpoint | Limit | Window | Keyed by |
 |---|---|---|---|
@@ -716,9 +715,9 @@ Strict-Transport-Security: max-age=31536000 (HTTPS only)
 
 ### Implementation
 
-**Thread mode (default, `USE_RQ=false`)**
-- Single daemon thread (`app/services/job_worker.py`), polls `job_runs` table for `status=queued`
-- Executes jobs sequentially in-process
+**Thread mode (only mode — Redis/RQ removed)**
+- Daemon thread pool (`app/services/job_worker.py`), polls `job_runs` table for `status=queued`
+- Executes jobs concurrently via `ThreadPoolExecutor` (configurable `max_workers`)
 - No external dependencies; uses in-memory progress tracking
 - Set `DISABLE_JOB_WORKER=true` to suppress the thread (e.g., API-only pod)
 

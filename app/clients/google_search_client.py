@@ -11,12 +11,13 @@ from app.schemas.company import GoogleSearchResult
 _SERPER_URL = "https://google.serper.dev/search"
 
 
-def search_website(company_name: str, *, num: int = 5) -> list[GoogleSearchResult]:
+def search_website(company_name: str, *, num: int = 5, api_key: str | None = None) -> list[GoogleSearchResult]:
     """Search for a company's website using the Serper.dev API.
 
     Args:
         company_name: The company name to search for.
         num: Number of results to return (1-25).
+        api_key: Override API key; falls back to SERPER_API_KEY env var.
 
     Returns:
         A list of :class:`GoogleSearchResult` instances.
@@ -25,7 +26,8 @@ def search_website(company_name: str, *, num: int = 5) -> list[GoogleSearchResul
         ValueError: If the Serper API key is not configured.
         httpx.HTTPStatusError: If the Serper API returns a non-2xx response.
     """
-    if not settings.serper_api_key:
+    key = api_key or settings.serper_api_key
+    if not key:
         raise ValueError("SERPER_API_KEY must be set to use the search integration.")
 
     payload = {
@@ -35,7 +37,7 @@ def search_website(company_name: str, *, num: int = 5) -> list[GoogleSearchResul
         "hl": "de", # language for search results -> TODO: make gl/hl configurable per request if needed
     }
     headers = {
-        "X-API-KEY": settings.serper_api_key,
+        "X-API-KEY": key,
         "Content-Type": "application/json",
     }
 

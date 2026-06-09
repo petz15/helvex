@@ -3,7 +3,7 @@ import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { Play, ChevronDown, ChevronUp, BrainCircuit, Globe, ScanSearch, Zap } from "lucide-react";
 import useSWR from "swr";
-import { triggerJob, fetchCurrentUser } from "@/lib/api";
+import { triggerJob, fetchCurrentUser, fetchSettings } from "@/lib/api";
 import { useI18n } from "@/i18n/context";
 import { useApiErrorHandler } from "@/lib/use-api-error";
 
@@ -242,6 +242,10 @@ export function CollectionClient() {
   const [loading, setLoading] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  const { data: appSettings } = useSWR("settings", fetchSettings);
+  const searchProvider = (appSettings as Record<string, string> | undefined)?.google_search_provider ?? "serper";
+  const searchProviderLabel = searchProvider === "scrapingdog" ? "ScrapingDog" : "Serper.dev";
+
   // ML/job admin is superadmin-only — sales reps shouldn't see the dispatcher.
   const { data: me, isLoading: meLoading } = useSWR("me", fetchCurrentUser);
   useEffect(() => {
@@ -394,7 +398,7 @@ export function CollectionClient() {
         </form>
       </Section>
 
-      <Section title="URL Fetch (Serper.dev)">
+      <Section title={`URL Fetch (${searchProviderLabel})`}>
         <form onSubmit={async e => {
           e.preventDefault();
           const fd = new FormData(e.currentTarget);
@@ -411,8 +415,9 @@ export function CollectionClient() {
           });
         }} className="space-y-4">
           <p className="text-xs text-slate-500">
-            Fetches the best matching website URL for each company via Google (Serper.dev) and stores the scored candidates.
-            Run this before the Web Crawler — it provides the URL queue.
+            Fetches the best matching website URL for each company via {searchProviderLabel} and stores the scored candidates.
+            Run this before the Web Crawler — it provides the URL queue.{" "}
+            <a href="../settings?tab=admin" className="text-purple-600 hover:underline">Switch provider in Settings</a>.
           </p>
 
           {/* Core fields */}
