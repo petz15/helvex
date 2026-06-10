@@ -515,11 +515,14 @@ export function CollectionClient() {
         <form onSubmit={async e => {
           e.preventDefault();
           const fd = new FormData(e.currentTarget);
+          const limitRaw = parseInt(fd.get("limit") as string);
           await submit("crawler/crawl-http", {
             batch_size: parseInt(fd.get("batch_size") as string) || 20,
             canton: (fd.get("canton") as string)?.trim().toUpperCase() || null,
             max_pages: parseInt(fd.get("max_pages") as string) || 5,
             rate_limit_delay: parseFloat(fd.get("rate_limit_delay") as string) || 0.5,
+            order_by: fd.get("order_by") as string || "company_id_asc",
+            limit: isNaN(limitRaw) || limitRaw <= 0 ? null : limitRaw,
           });
         }} className="space-y-4">
           <p className="text-xs text-slate-500">
@@ -542,6 +545,17 @@ export function CollectionClient() {
               </Field>
               <Field label="Batch size" hint="Companies claimed per SKIP LOCKED batch">
                 <input name="batch_size" type="number" min="1" defaultValue="20" className={inputCls} />
+              </Field>
+              <Field label="Order by" hint="Which companies to process first">
+                <select name="order_by" className={inputCls}>
+                  <option value="company_id_asc">Company ID (default)</option>
+                  <option value="last_crawled_asc">Oldest crawled first</option>
+                  <option value="flex_score_desc">Flex score ↓</option>
+                  <option value="combined_score_desc">Combined score ↓</option>
+                </select>
+              </Field>
+              <Field label="Limit" hint="Max companies to process — leave blank for all">
+                <input name="limit" type="number" min="1" className={inputCls} placeholder="All" />
               </Field>
             </div>
           </SubSection>

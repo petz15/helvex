@@ -204,7 +204,7 @@ async def crawl_company_playwright(
     """
     try:
         from playwright.async_api import async_playwright
-        from playwright_stealth import stealth_async
+        from playwright_stealth import Stealth
     except ImportError as exc:
         raise RuntimeError(
             "Playwright is not installed in this image. "
@@ -214,7 +214,10 @@ async def crawl_company_playwright(
     result = CrawlResult()
     max_subpages = max(0, max_pages - 1)
 
-    async with async_playwright() as pw:
+    # Stealth().use_async() wraps async_playwright and auto-applies stealth
+    # patches to every new page/context before any navigation — replaces the
+    # old stealth_async(page) call that was removed in playwright-stealth 2.x.
+    async with Stealth().use_async(async_playwright()) as pw:
         browser = await pw.chromium.launch(headless=True, args=_LAUNCH_ARGS)
         context = await browser.new_context(
             viewport=_VIEWPORT,
@@ -227,9 +230,6 @@ async def crawl_company_playwright(
             ignore_https_errors=True,
         )
         page = await context.new_page()
-        # Apply stealth patches BEFORE first navigation — playwright-stealth
-        # injects JS overrides; doing it after goto would be too late.
-        await stealth_async(page)
 
         try:
             # ── Homepage ──────────────────────────────────────────────────

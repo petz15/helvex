@@ -138,7 +138,14 @@ def enrich_company_website(db: Session, company: Company, *, num: int = 10) -> t
                 api_key=api_key,
             )
         else:
-            results = search_website(company.name, num=num, api_key=api_key)
+            results = search_website(
+                company.name,
+                num=num,
+                zip_code=company.address_zip,
+                municipality=company.municipality,
+                purpose_language=company.purpose_language,
+                api_key=api_key,
+            )
 
         duration = time.monotonic() - _t0
         record_api_call(provider, duration, 200)

@@ -805,8 +805,9 @@ For each `UserView` with `alert_enabled=True`:
 Two pluggable providers. Active provider is controlled by the `google_search_provider` setting (`serper` | `scrapingdog`, default `serper`), switchable in the superadmin Settings → LLM tab (or Admin tab) without a restart.
 
 **Serper.dev** (`app/clients/google_search_client.py`):
-- API key: `SERPER_API_KEY` env var
-- POST to `google.serper.dev/search`; `gl=ch`, `hl=de`
+- API key: `serper_api_key` DB setting (takes precedence) or `SERPER_API_KEY` env var
+- POST to `google.serper.dev/search`; `gl=ch`
+- Per-company context: `location="{municipality}, Switzerland"`, `hl` from `purpose_language` (fallback `de`)
 
 **ScrapingDog** (`app/clients/scrapingdog_search_client.py`):
 - API key: `scrapingdog_api_key` DB setting (takes precedence) or `SCRAPINGDOG_API_KEY` env var
@@ -1741,13 +1742,13 @@ Two-phase pipeline that crawls ~210k Swiss company websites and stores raw HTML 
 
 | Pod | Image | Job types | Node |
 |---|---|---|---|
-| `crawler-http` × 2 | `helvex-app` | `web_crawl_http`, `web_url_populate`, `web_select_url` | main node |
-| `ml-worker` | `helvex-ml` | + `web_crawl_http`, `web_crawl_playwright` (idle-fill) | ml node (cax21) |
+| `crawler-http` × 2 | `helvex-app` | `web_crawl_http`, `web_url_populate`, `web_select_url`, `web_crawl_single` | main node |
+| `ml-worker` | `helvex-ml` | `web_crawl_http`, `web_crawl_playwright` (idle-fill) + all ML job types | ml node (cax21) |
 
 ### Workflow
 
 ```
-[Prerequisite] batch enrichment job → Serper.dev fills google_search_results_raw
+[Prerequisite] batch enrichment job → Serper/ScrapingDog fills google_search_results_raw
        ↓
 web_url_populate       reads google_search_results_raw → company_url_candidates
                        creates company_crawl_state (status=pending, tier=http)
@@ -1766,33 +1767,55 @@ web_crawl_playwright   SKIP LOCKED claim tier=playwright|js_required
                        S3 HTML → trafilatura + phonenumbers → company_web_structured
 ```
 
+### Job params — web_crawl_http and web_crawl_playwright
+
+Both share: `batch_size`, `canton`, `max_pages`, `rate_limit_delay`, `order_by`, `limit`.
+
+`order_by` values (applied via `claim_crawl_batch`):
+- `company_id_asc` — default, stable ordering
+- `last_crawled_asc` — oldest crawled first (useful for refresh runs)
+- `flex_score_desc` — highest flex score first (needs JOIN companies)
+- `combined_score_desc` — highest combined score first (needs JOIN companies)
+
+`limit` — stop after this many companies total; batch size is clamped to `min(batch_size, limit - done)`.
+
+Playwright-only: `rerun: bool` — calls `crawler_crud.reset_playwright_crawled()` before starting, which resets `crawl_status IN (crawled, bot_blocked, http_error, timeout, no_content)` rows with `tier=playwright` back to `pending`.
+
 ### URL selection
 
-- `web_url_populate` auto-selects the highest-scoring Serper candidate per company.
+- `web_url_populate` auto-selects the highest-scoring Serper/ScrapingDog candidate per company.
 - `web_select_url` job (params: `company_id`, `url_candidate_id`) switches to a different candidate and resets crawl state.
-- Failure statuses are terminal until manually re-queued or URL switched.
-- Re-crawl: set `crawl_status='pending'` + optionally `next_crawl_at`.
+- Failure statuses are terminal until manually re-queued, or use `rerun=True` on the playwright job.
 
 ### Self-preemption (ML worker)
 
 `web_crawl_http` and `web_crawl_playwright` check for queued ML jobs in every progress callback. If an ML job is waiting, `pause_requested` is set and `JobPausedError` is raised — the crawl saves its progress and the ML job runs next.
 
-### New tables
+### Key CRUD functions — `app/crud/crawler.py`
+
+| Function | Purpose |
+|---|---|
+| `claim_crawl_batch(db, tier, batch_size, canton, order_by)` | SKIP LOCKED claim; order_by controls sort |
+| `reset_playwright_crawled(db, canton)` | Reset crawled/failed playwright rows to pending for rerun |
+| `_CRAWL_ORDER_BY` | Dict mapping order_by string → SQL ORDER BY clause |
+| `release_in_progress_states(db, tier)` | Crash recovery — releases stuck in_progress rows |
+
+### Tables
 
 | Table | Purpose |
 |---|---|
-| `company_url_candidates` | Serper.dev URL candidates; one selected per company |
+| `company_url_candidates` | Serper/ScrapingDog URL candidates; one selected per company |
 | `company_crawl_state` | Per-company crawl status, tier, bot flags, re-crawl scheduling |
 | `company_web_pages` | Per-page crawl result; S3 key for raw HTML |
 
-### New files
+### Key files
 
 | File | Purpose |
 |---|---|
 | `app/services/crawler_common.py` | Shared utilities: bot detection, JS detection, subpage discovery, media counting |
 | `app/services/crawler_http.py` | httpx crawler |
 | `app/services/crawler_playwright.py` | Playwright crawler (lazy import — only available in ml image) |
-| `app/services/job_handlers/web_crawl.py` | Job handlers: populate, crawl_http, crawl_playwright, select_url |
+| `app/services/job_handlers/web_crawl.py` | Job handlers: `_run_crawl_batch` shared loop, per-type handlers |
 | `app/crud/crawler.py` | CRUD: upsert candidates, SKIP LOCKED claiming, save pages, ML preemption check |
 | `infra/charts/helvex/templates/crawler-http-deployment.yaml` | K8s deployment for HTTP crawler pods |
 

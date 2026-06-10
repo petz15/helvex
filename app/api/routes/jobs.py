@@ -1405,6 +1405,11 @@ class WebCrawlBody(BaseModel):
     rate_limit_delay: float = 0.5  # seconds between requests to the same domain (0 = disabled)
 
 
+class WebCrawlHttpBody(WebCrawlBody):
+    order_by: str = "company_id_asc"  # company_id_asc | last_crawled_asc | flex_score_desc | combined_score_desc
+    limit: int | None = None     # stop after this many companies (None = all)
+
+
 class WebCrawlPlaywrightBody(WebCrawlBody):
     batch_size: int = 10
     rerun: bool = False          # reset previously crawled/failed playwright rows before starting
@@ -1440,17 +1445,24 @@ def trigger_web_url_populate(
 
 @router.post("/crawler/crawl-http", response_model=JobOut, status_code=status.HTTP_202_ACCEPTED)
 def trigger_web_crawl_http(
-    body: WebCrawlBody,
+    body: WebCrawlHttpBody,
     request: Request,
     db: Session = Depends(get_db),
     _: User = Depends(require_superadmin),
 ):
     """Trigger HTTP crawler — fast path using httpx, no browser."""
-    canton_label = f" — {body.canton}" if body.canton else ""
+    parts = []
+    if body.canton:
+        parts.append(body.canton)
+    if body.order_by != "company_id_asc":
+        parts.append(body.order_by)
+    if body.limit:
+        parts.append(f"limit {body.limit}")
+    label = "HTTP crawler" + (f" — {', '.join(parts)}" if parts else "")
     job = _enqueue_or_http_error(
         request,
         job_type="web_crawl_http",
-        label=f"HTTP crawler{canton_label}",
+        label=label,
         params=body.model_dump(),
         db=db,
     )

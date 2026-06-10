@@ -10,13 +10,32 @@ from app.schemas.company import GoogleSearchResult
 
 _SERPER_URL = "https://google.serper.dev/search"
 
+_LANG_MAP = {
+    "de": "de",
+    "fr": "fr",
+    "it": "it",
+    "en": "en",
+    "rm": "de",  # Romansh — fall back to German
+}
 
-def search_website(company_name: str, *, num: int = 5, api_key: str | None = None) -> list[GoogleSearchResult]:
+
+def search_website(
+    company_name: str,
+    *,
+    num: int = 5,
+    zip_code: str | None = None,
+    municipality: str | None = None,
+    purpose_language: str | None = None,
+    api_key: str | None = None,
+) -> list[GoogleSearchResult]:
     """Search for a company's website using the Serper.dev API.
 
     Args:
         company_name: The company name to search for.
         num: Number of results to return (1-25).
+        zip_code: Swiss postal code for localised results.
+        municipality: Municipality name for localised results.
+        purpose_language: Company purpose language (de/fr/it/en/rm).
         api_key: Override API key; falls back to SERPER_API_KEY env var.
 
     Returns:
@@ -30,11 +49,21 @@ def search_website(company_name: str, *, num: int = 5, api_key: str | None = Non
     if not key:
         raise ValueError("SERPER_API_KEY must be set to use the search integration.")
 
+    lang = _LANG_MAP.get((purpose_language or "").lower(), "de")
+
+    # Build location string for Serper's `location` param: "Municipality, Switzerland"
+    location_parts = []
+    if municipality:
+        location_parts.append(municipality.strip())
+    location_parts.append("Switzerland")
+    location = ", ".join(location_parts)
+
     payload = {
         "q": company_name,
         "num": min(max(1, num), 25),
-        "gl": "ch", # geographic location for search results
-        "hl": "de", # language for search results -> TODO: make gl/hl configurable per request if needed
+        "gl": "ch",
+        "hl": lang,
+        "location": location,
     }
     headers = {
         "X-API-KEY": key,

@@ -302,6 +302,7 @@ def handle_web_crawl_http(ctx: JobContext) -> tuple[dict, str]:
     """HTTP-only crawler. Claims batches via SKIP LOCKED from company_crawl_state."""
     from app.services.crawler_http import crawl_company_http
 
+    limit_raw = ctx.params.get("limit")
     return _run_crawl_batch(
         ctx,
         tier="http",
@@ -310,6 +311,8 @@ def handle_web_crawl_http(ctx: JobContext) -> tuple[dict, str]:
         max_pages=int(ctx.params.get("max_pages", 5)),
         rate_limit_delay=float(ctx.params.get("rate_limit_delay", 0.5)),
         crawl_fn=crawl_company_http,
+        order_by=str(ctx.params.get("order_by", "company_id_asc")),
+        limit=int(limit_raw) if limit_raw else None,
     )
 
 

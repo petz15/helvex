@@ -89,16 +89,16 @@ def _key_fingerprint(key: str | None) -> str | None:
 
 @router.get("/platform", response_model=PlatformApiKeyResponse, dependencies=[Depends(require_superadmin)])
 async def get_platform_api_key_status(db: Session = Depends(get_db)) -> PlatformApiKeyResponse:
-    """Get platform-wide Claude API key status."""
-    from app.config import settings
+    """Get platform-wide Claude API key status. DB value takes priority over env."""
+    from app.config import settings as app_settings
 
-    key = settings.anthropic_api_key
-    status = "unconfigured"
-    if key:
-        status = "valid"  # In production, validate against Anthropic API
+    db_key = (crud.get_setting(db, "anthropic_api_key", "") or "").strip()
+    env_key = (app_settings.anthropic_api_key or "").strip()
+    key = db_key or env_key
+    key_status = "valid" if key else "unconfigured"
     return PlatformApiKeyResponse(
         keyFingerprint=_key_fingerprint(key),
-        status=status,
+        status=key_status,
         tokenUsageMonth=0,
         costMonth=0.0,
     )
@@ -109,12 +109,10 @@ async def update_platform_api_key(
     request: UpdatePlatformKeyRequest,
     db: Session = Depends(get_db),
 ) -> dict:
-    """Update platform API key. Key is validated and encrypted at rest."""
-    # In production:
-    # 1. Validate key format with Anthropic API
-    # 2. Encrypt with KMS before storing
-    # 3. Audit log this change
-    return {"message": "Platform API key updated", "status": "valid"}
+    """Store the platform-wide Anthropic API key in the DB (overrides .env value)."""
+    crud.set_setting(db, "anthropic_api_key", request.apiKey.strip())
+    logger.info("admin.update_platform_api_key fingerprint=%s", _key_fingerprint(request.apiKey))
+    return {"message": "Platform API key updated", "status": "valid", "fingerprint": _key_fingerprint(request.apiKey)}
 
 
 @router.get("/orgs", response_model=list[OrgApiKeyConfig], dependencies=[Depends(require_superadmin)])
@@ -387,15 +385,5 @@ async def reset_search_provider_key(
 
 @router.get("/audit-log", dependencies=[Depends(require_superadmin)])
 async def get_audit_log(db: Session = Depends(get_db), limit: int = 50) -> dict:
-    """Get audit log of API key changes."""
-    return {
-        "logs": [
-            {
-                "timestamp": "2025-05-02T14:23:00Z",
-                "action": "update_platform_key",
-                "actor": "superadmin@example.com",
-                "details": "Platform API key rotated",
-            },
-        ],
-        "total": 1,
-    }
+    """Get audit log of API key changes. Not yet implemented — returns empty list."""
+    return {"logs": [], "total": 0}
