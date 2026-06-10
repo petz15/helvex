@@ -14,7 +14,11 @@ COPY requirements.backend.txt requirements.ml.txt ./
 RUN pip install --no-cache-dir -r requirements.ml.txt
 
 # Playwright Chromium — cached until requirements.ml.txt changes
-RUN playwright install chromium --with-deps
+# Install to a fixed path so user 1000 (runAsUser in K8s) can find the binary
+# regardless of HOME directory resolution.
+ENV PLAYWRIGHT_BROWSERS_PATH=/app/.playwright-browsers
+RUN playwright install chromium --with-deps && \
+    chown -R 1000:1000 /app/.playwright-browsers
 
 # spaCy model — cached until pip layer above changes
 RUN python -c "import spacy.cli; spacy.cli.download('de_core_news_md')"
