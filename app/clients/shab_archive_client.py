@@ -194,6 +194,8 @@ def extract_text_from_pdf(pdf_bytes: bytes) -> str:
     Python parsers (pypdf, pdfminer) cannot resolve.
 
     Returns an empty string if PyMuPDF is unavailable or the PDF is unreadable.
+    The returned text preserves original newlines so that callers can run
+    structured-field extraction (UID, canton) before normalising for storage.
     """
     try:
         import fitz  # PyMuPDF — lazy import
@@ -207,6 +209,28 @@ def extract_text_from_pdf(pdf_bytes: bytes) -> str:
     except Exception as exc:
         logger.warning("PDF text extraction failed: %s", exc)
         return ""
+
+
+def normalize_pdf_text(text: str) -> str:
+    """Normalise raw PDF text for storage and downstream regex parsing.
+
+    SHAB PDFs use hard line-breaks, so the raw extract looks like:
+        "…mit Einzel-\\nunterschrift…"   (syllable break — word has no hyphen)
+        "Kommandit-\\nGesellschaft…"     (compound break — hyphen is part of word)
+
+    Three-step normalisation:
+    1. Syllable-break hyphens: ``word-\\n`` followed by lowercase → drop hyphen
+    2. Compound-break hyphens: ``word-\\n`` followed by uppercase → keep hyphen
+    3. Remaining newlines → single space; runs of spaces → single space
+    """
+    # Step 1: syllable break — "Einzelunter-\nschrift" → "Einzelunterschrift"
+    text = re.sub(r'-\n([a-zäöüß])', r'\1', text)
+    # Step 2: compound break — "Kommandit-\nGesellschaft" → "Kommandit-Gesellschaft"
+    text = re.sub(r'-\n([A-ZÄÖÜ])', r'-\1', text)
+    # Step 3: collapse all remaining newlines and tidy whitespace
+    text = re.sub(r'\n', ' ', text)
+    text = re.sub(r'  +', ' ', text)
+    return text.strip()
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────

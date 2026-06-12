@@ -19,8 +19,9 @@ def handle_shab_archive(ctx: JobContext) -> tuple[dict, str]:
     end_page = int(end_page_raw) if end_page_raw is not None else None
 
     page_size = int(ctx.params.get("page_size", 100))
-    request_delay = float(ctx.params.get("request_delay", 0.5))
-    pdf_delay = float(ctx.params.get("pdf_delay", 0.3))
+    request_delay = float(ctx.params.get("request_delay", 0.3))
+    pdf_delay = float(ctx.params.get("pdf_delay", 0.0))
+    pdf_workers = int(ctx.params.get("pdf_workers", 8))
 
     # resume_from is stored as progress_done (window count or page number)
     resume_from = ctx.resume_from or 0
@@ -32,8 +33,9 @@ def handle_shab_archive(ctx: JobContext) -> tuple[dict, str]:
                 f"Window {done}/{total} — "
                 f"{_stats.get('created', 0)} new, "
                 f"{_stats.get('updated', 0)} updated, "
-                f"{_stats.get('pdfs_downloaded', 0)} PDFs, "
-                f"{len(_stats.get('errors', []))} errors"
+                f"{_stats.get('pdfs_downloaded', 0)} PDFs"
+                + (f", {_stats.get('pdf_text_empty', 0)} no-text" if _stats.get('pdf_text_empty') else "")
+                + (f", {len(_stats.get('errors', []))} errors" if _stats.get('errors') else "")
             )
         else:
             msg = (
@@ -42,6 +44,7 @@ def handle_shab_archive(ctx: JobContext) -> tuple[dict, str]:
                 f"{_stats.get('created', 0)} new, "
                 f"{_stats.get('updated', 0)} updated, "
                 f"{_stats.get('pdfs_downloaded', 0)} PDFs"
+                + (f", {_stats.get('pdf_text_empty', 0)} no-text" if _stats.get('pdf_text_empty') else "")
             )
         ctx.progress(done, total, _stats, msg)
 
@@ -55,6 +58,7 @@ def handle_shab_archive(ctx: JobContext) -> tuple[dict, str]:
         page_size=page_size,
         request_delay=request_delay,
         pdf_delay=pdf_delay,
+        pdf_workers=pdf_workers,
         resume_from=resume_from,
         progress_cb=_progress,
         status_cb=lambda m: ctx.status_with_stats(m),
@@ -70,6 +74,8 @@ def handle_shab_archive(ctx: JobContext) -> tuple[dict, str]:
         f"{stats['updated']} updated, "
         f"{stats['skipped']} skipped"
     )
+    if stats.get("pdf_text_empty"):
+        done_msg += f", {stats['pdf_text_empty']} no-text PDFs"
     if stats["errors"]:
         done_msg += f", {len(stats['errors'])} errors"
     if stats.get("warnings"):

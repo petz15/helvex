@@ -33,6 +33,7 @@ from __future__ import annotations
 import json
 import logging
 import time
+from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
@@ -82,17 +83,65 @@ def _date_windows(
     return windows
 
 
+def _prefetch_pdfs_for_page(
+    entries: list[dict],
+    *,
+    pdf_workers: int,
+    stats: dict,
+) -> dict[str, bytes | None]:
+    """Download PDFs for all HR entries in a page concurrently.
+
+    Returns {archive_id: bytes} on success, {archive_id: None} on failure
+    (error already appended to stats["errors"]).  Non-HR entries are omitted.
+    ``stats["pdfs_downloaded"]`` is incremented here so _process_entry skips it.
+    """
+    from app.clients.shab_archive_client import (
+        fetch_pdf_bytes, parse_entry_fields, is_hr_heading,
+    )
+
+    hr_ids: list[str] = []
+    for entry in entries:
+        f = parse_entry_fields(entry)
+        aid = f.get("archive_id")
+        if aid and is_hr_heading(f.get("heading", ""), f.get("rubric", "")):
+            hr_ids.append(str(aid))
+
+    if not hr_ids:
+        return {}
+
+    def _dl(aid: str) -> tuple[str, bytes | Exception]:
+        try:
+            return aid, fetch_pdf_bytes(aid)
+        except Exception as exc:  # noqa: BLE001
+            return aid, exc
+
+    pdf_map: dict[str, bytes | None] = {}
+    with ThreadPoolExecutor(max_workers=min(pdf_workers, len(hr_ids))) as pool:
+        for aid, result in pool.map(_dl, hr_ids):
+            if isinstance(result, Exception):
+                stats["errors"].append(f"[{aid}] PDF failed: {result}")
+                pdf_map[aid] = None
+            else:
+                pdf_map[aid] = result
+                stats["pdfs_downloaded"] += 1
+
+    return pdf_map
+
+
 def _process_entry(
     db: Session,
     entry: dict,
     *,
     stats: dict,
     pdf_delay: float,
+    pdf_cache: dict[str, bytes | None] | None = None,
+    uid_map: dict[str, Any] | None = None,
 ) -> None:
     """Download PDF, extract text, upsert SogcPublication + SogcChanges."""
     from app.clients.shab_archive_client import (
         fetch_pdf_bytes,
         extract_text_from_pdf,
+        normalize_pdf_text,
         extract_uid_from_text,
         extract_canton_from_text,
         is_hr_heading,
@@ -124,18 +173,32 @@ def _process_entry(
     stats["hr_entries"] += 1
     sogc_id = _make_sogc_id(archive_id)
 
-    try:
-        pdf_bytes = fetch_pdf_bytes(archive_id)
-        stats["pdfs_downloaded"] += 1
-        time.sleep(pdf_delay)
-    except Exception as exc:
-        stats["errors"].append(f"[{archive_id}] PDF failed: {exc}")
-        return
+    if pdf_cache is not None:
+        # Concurrent mode — PDF was pre-fetched
+        cached = pdf_cache.get(str(archive_id))
+        if cached is None:
+            return  # download failed; error already in stats
+        pdf_bytes = cached
+        # pdfs_downloaded already incremented in _prefetch_pdfs_for_page
+    else:
+        try:
+            pdf_bytes = fetch_pdf_bytes(archive_id)
+            stats["pdfs_downloaded"] += 1
+            time.sleep(pdf_delay)
+        except Exception as exc:
+            stats["errors"].append(f"[{archive_id}] PDF failed: {exc}")
+            return
 
-    pdf_text = extract_text_from_pdf(pdf_bytes)
-    uid = extract_uid_from_text(pdf_text) if pdf_text else None
-    pdf_canton = extract_canton_from_text(pdf_text) if pdf_text else None
-    lang = _detect_lang(pdf_text or title, pdf_canton or canton)
+    pdf_text_raw = extract_text_from_pdf(pdf_bytes)
+    if not pdf_text_raw:
+        stats["pdf_text_empty"] += 1
+        logger.warning("SHAB archive: PDF text empty for id=%s (bytes=%d)", archive_id, len(pdf_bytes))
+    # Extract structured fields from raw text (canton regex relies on newlines)
+    uid = extract_uid_from_text(pdf_text_raw) if pdf_text_raw else None
+    pdf_canton = extract_canton_from_text(pdf_text_raw) if pdf_text_raw else None
+    lang = _detect_lang(pdf_text_raw or title, pdf_canton or canton)
+    # Normalise for storage: rejoin hyphenated line-breaks, collapse newlines
+    pdf_text = normalize_pdf_text(pdf_text_raw) if pdf_text_raw else ""
 
     texts: dict[str, str | None] = {"de": None, "fr": None, "it": None, "en": None}
     if pdf_text:
@@ -151,6 +214,8 @@ def _process_entry(
         "title": title,
         "source": "shab_archive",
     }
+    if uid:
+        raw_meta["extracted_uid"] = uid
 
     try:
         existing = db.query(SogcPublication).filter_by(sogc_id=sogc_id).first()
@@ -169,8 +234,10 @@ def _process_entry(
             pub.raw_json = json.dumps(raw_meta)
             pub.preprocessed_at = datetime.now(tz=timezone.utc)
             if uid and not pub.company_uid:
-                from app import crud
-                company = crud.get_company_by_uid(db, uid)
+                company = (uid_map or {}).get(uid) if uid_map is not None else None
+                if company is None and uid_map is None:
+                    from app import crud
+                    company = crud.get_company_by_uid(db, uid)
                 if company:
                     pub.company_uid = uid
                     pub.company_id = company.id
@@ -185,12 +252,15 @@ def _process_entry(
                 ))
             stats["updated"] += 1
         else:
-            company_uid = uid
+            company_uid = None
             company_id = None
             if uid:
-                from app import crud
-                company = crud.get_company_by_uid(db, uid)
+                company = (uid_map or {}).get(uid) if uid_map is not None else None
+                if company is None and uid_map is None:
+                    from app import crud
+                    company = crud.get_company_by_uid(db, uid)
                 if company:
+                    company_uid = uid
                     company_id = company.id
             pub = SogcPublication(
                 sogc_id=sogc_id,
@@ -238,6 +308,7 @@ def _paginate_window(
     page_size: int,
     request_delay: float,
     pdf_delay: float,
+    pdf_workers: int = 8,
     start_page: int = 0,
     stats: dict,
     abort_cb,
@@ -248,8 +319,10 @@ def _paginate_window(
     """Paginate one date window (or the default window if no dates given)."""
     from app.clients.shab_archive_client import (
         fetch_archive_page, get_entries, get_total_elements,
-        is_last_page,
+        is_last_page, extract_text_from_pdf, normalize_pdf_text,
+        extract_uid_from_text, parse_entry_fields, is_hr_heading,
     )
+    from app.models.company import Company
 
     page = start_page
     while True:
@@ -276,10 +349,48 @@ def _paginate_window(
             stats["errors"].append(f"Page {page} fetch failed: {exc}")
             break
 
-        for entry in get_entries(page_data):
+        all_entries = get_entries(page_data)
+
+        # ── Concurrent PDF download ───────────────────────────────────────────
+        pdf_cache: dict[str, bytes | None] | None = None
+        uid_map: dict[str, Any] | None = None
+
+        if pdf_workers > 1 and all_entries:
+            pdf_cache = _prefetch_pdfs_for_page(
+                all_entries, pdf_workers=pdf_workers, stats=stats,
+            )
+
+            # ── Batch UID lookup ──────────────────────────────────────────────
+            # Extract UIDs from every successfully-downloaded PDF so we can do
+            # a single IN query instead of one per entry.
+            uids: set[str] = set()
+            for aid, pdf_bytes in pdf_cache.items():
+                if pdf_bytes:
+                    raw = extract_text_from_pdf(pdf_bytes)
+                    uid = extract_uid_from_text(raw) if raw else None
+                    if uid:
+                        uids.add(uid)
+
+            if uids:
+                companies = (
+                    db.query(Company)
+                    .filter(Company.uid.in_(uids))
+                    .all()
+                )
+                uid_map = {c.uid: c for c in companies}
+            else:
+                uid_map = {}
+
+        for entry in all_entries:
             if abort_cb:
                 abort_cb()
-            _process_entry(db, entry, stats=stats, pdf_delay=pdf_delay)
+            _process_entry(
+                db, entry,
+                stats=stats,
+                pdf_delay=pdf_delay,
+                pdf_cache=pdf_cache,
+                uid_map=uid_map,
+            )
 
         stats["pages_fetched"] += 1
 
@@ -304,8 +415,9 @@ def import_shab_archive(
     window_days: int = 28,
     # Common
     page_size: int = 100,
-    request_delay: float = 0.5,
-    pdf_delay: float = 0.3,
+    request_delay: float = 0.3,
+    pdf_delay: float = 0.0,
+    pdf_workers: int = 8,
     resume_from: int = 0,
     progress_cb=None,
     status_cb=None,
@@ -326,6 +438,7 @@ def import_shab_archive(
         "entries_scanned": 0,
         "hr_entries": 0,
         "pdfs_downloaded": 0,
+        "pdf_text_empty": 0,
         "created": 0,
         "updated": 0,
         "skipped": 0,
@@ -370,6 +483,7 @@ def import_shab_archive(
                 page_size=page_size,
                 request_delay=request_delay,
                 pdf_delay=pdf_delay,
+                pdf_workers=pdf_workers,
                 stats=stats,
                 abort_cb=abort_cb,
                 progress_cb=progress_cb,
@@ -405,10 +519,39 @@ def import_shab_archive(
                 stats["errors"].append(f"Page {page}: {exc}")
                 break
 
-            for entry in get_entries(page_data):
+            all_entries = get_entries(page_data)
+            pdf_cache_p: dict[str, bytes | None] | None = None
+            uid_map_p: dict[str, Any] | None = None
+            if pdf_workers > 1 and all_entries:
+                pdf_cache_p = _prefetch_pdfs_for_page(
+                    all_entries, pdf_workers=pdf_workers, stats=stats,
+                )
+                from app.clients.shab_archive_client import (
+                    extract_text_from_pdf as _etf, extract_uid_from_text as _euid,
+                )
+                from app.models.company import Company as _Company
+                uids_p: set[str] = set()
+                for _aid, _pb in pdf_cache_p.items():
+                    if _pb:
+                        _raw = _etf(_pb)
+                        _uid = _euid(_raw) if _raw else None
+                        if _uid:
+                            uids_p.add(_uid)
+                if uids_p:
+                    uid_map_p = {
+                        c.uid: c
+                        for c in db.query(_Company).filter(_Company.uid.in_(uids_p)).all()
+                    }
+                else:
+                    uid_map_p = {}
+
+            for entry in all_entries:
                 if abort_cb:
                     abort_cb()
-                _process_entry(db, entry, stats=stats, pdf_delay=pdf_delay)
+                _process_entry(
+                    db, entry, stats=stats, pdf_delay=pdf_delay,
+                    pdf_cache=pdf_cache_p, uid_map=uid_map_p,
+                )
 
             stats["pages_fetched"] += 1
 
