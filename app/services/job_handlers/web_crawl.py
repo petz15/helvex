@@ -152,6 +152,12 @@ def _run_crawl_batch(
     Releases stuck in_progress rows at start (crash recovery) and in a
     finally block (pause/fail recovery), so no company ever gets stranded.
     """
+    from app.services import s3_client as _s3
+    if _s3.is_crawl_bucket_configured():
+        ok = _s3.check_crawl_s3_connectivity()
+        if not ok:
+            ctx.event("warning", "S3 crawl bucket unreachable or does not exist — HTML uploads disabled for this run")
+
     stats: dict = {
         "crawled": 0, "bot_blocked": 0, "js_required": 0,
         "http_error": 0, "timeout": 0, "no_content": 0, "errors": [],

@@ -8,6 +8,30 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
+# Process-scoped flag set by check_crawl_s3_connectivity() when the crawl
+# bucket is unreachable.  Prevents per-page upload hangs from blocking crawl jobs.
+_crawl_uploads_disabled: bool = False
+
+
+def check_crawl_s3_connectivity() -> bool:
+    """Probe the crawl bucket; disable uploads for this process if unreachable.
+
+    Returns True if the bucket is reachable, False if disabled.
+    Called once at crawl-job start so individual pages don't stall.
+    """
+    global _crawl_uploads_disabled
+    if not is_crawl_bucket_configured():
+        return False
+    try:
+        bucket = _crawl_bucket()
+        _client().head_bucket(Bucket=bucket)
+        _crawl_uploads_disabled = False
+        return True
+    except Exception as exc:  # noqa: BLE001
+        _crawl_uploads_disabled = True
+        logger.warning("Crawl S3 bucket unreachable — HTML uploads disabled for this run: %s", exc)
+        return False
+
 
 def _client():
     import boto3
@@ -107,6 +131,8 @@ def crawl_s3_key(company_id: int, page_type: str) -> str:
 
 
 def upload_crawl_html(html_bytes: bytes, s3_key: str) -> None:
+    if _crawl_uploads_disabled:
+        return
     import io
     bucket = _crawl_bucket()
     _client().upload_fileobj(io.BytesIO(html_bytes), bucket, s3_key)
