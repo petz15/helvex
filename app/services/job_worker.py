@@ -40,7 +40,14 @@ class JobCancelledError(Exception):
 
 
 class JobPausedError(Exception):
-    """Raised when a running job receives a pause request."""
+    """Raised when a running job receives a pause request.
+
+    Set requeue=True for preemption: the job is immediately re-queued instead
+    of staying paused, so another worker pod can pick it up right away.
+    """
+    def __init__(self, message: str = "", *, requeue: bool = False) -> None:
+        super().__init__(message)
+        self.requeue = requeue
 
 
 class JobEnqueueError(RuntimeError):
@@ -1317,12 +1324,17 @@ def _run_job(app, job_id: int) -> None:  # noqa: C901
             _publish_job_update(job.org_id)
             return
 
-        except JobPausedError:
+        except JobPausedError as _pause_exc:
             current_stats = json.loads(job.stats_json) if job.stats_json else {}
             done_n = job.progress_done or 0
             total_n = job.progress_total
-            pause_msg = f"Paused at {done_n}" + (f"/{total_n}" if total_n else "")
-            crud.mark_paused(db, job, message=pause_msg, stats=current_stats)
+            if _pause_exc.requeue:
+                pause_msg = f"Preempted at {done_n}" + (f"/{total_n}" if total_n else "") + " — requeued"
+                crud.mark_paused(db, job, message=pause_msg, stats=current_stats)
+                crud.resume_paused_job(db, job)
+            else:
+                pause_msg = f"Paused at {done_n}" + (f"/{total_n}" if total_n else "")
+                crud.mark_paused(db, job, message=pause_msg, stats=current_stats)
             crud.create_event(db, job_id=job.id, level="info", message=pause_msg)
             _maybe_sync(app, job_type=job.job_type, label=job.label, message=pause_msg, stats=current_stats, error=None, done=True)
             _publish_job_update(job.org_id)

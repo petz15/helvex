@@ -22,13 +22,15 @@ from app.services.job_worker import JobPausedError
 
 logger = logging.getLogger(__name__)
 
-# ML job types that the crawler should yield to when queued on the ML worker.
-# Matches the JOB_TYPE_WHITELIST on the ml-worker deployment minus crawler types.
+# High-priority job types that web_crawl_http should yield to when queued on
+# the ML worker.  Includes all ML/NOGA types plus web_crawl_playwright so that
+# HTTP idle-fill on the ML worker doesn't block playwright jobs from starting.
 _ML_JOB_TYPES: frozenset[str] = frozenset({
     "reclassify_noga", "build_noga_embeddings", "detect_language_bulk",
     "reclassify_low_conf_noga", "tfidf_kmeans_cluster", "recompute_keywords",
     "reextract_keywords", "cluster_analysis", "discover_stopwords",
     "noga_v2_explain", "embed_purpose_full", "embed_purpose_clean",
+    "web_crawl_playwright",
 })
 
 
@@ -45,8 +47,7 @@ def _self_preempt_if_ml_queued(ctx: JobContext) -> None:
         # Not running on ML worker — skip preemption check
         return
     if crawler_crud.has_queued_ml_job(ctx.db, _ML_JOB_TYPES):
-        crud.mark_pause_requested(ctx.db, ctx.job)
-        raise JobPausedError("ML job queued — crawler yielding")
+        raise JobPausedError("High-priority job queued — crawler yielding", requeue=True)
 
 
 # ── web_url_populate ──────────────────────────────────────────────────────────
