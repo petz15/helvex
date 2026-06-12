@@ -1895,6 +1895,40 @@ DELETE FROM activity_log WHERE created_at < now() - interval '90 days';
 
 ---
 
+## 19. Company Detail Page (Frontend)
+
+### Overview
+Full redesign of `frontend/src/app/[locale]/app/companies/[id]/company-detail-client.tsx` (server component: `page.tsx` fetches company + `is_superadmin` from `/api/v1/auth/me`).
+
+### Layout
+- **Sub-tab bar** — Overview (active) · Timeline · People · Documents · Financials; non-Overview tabs disabled until data grows. Sticky at top.
+- **Header card** — 56px avatar, H1 name + StatusPill, identity row (UID+copy, legal form, seat, language), action buttons (Share, Registry link, Website link, web-search trigger), **Admin dropdown** (superadmin only, purple), NOGA chip; below a divider: AI summary panel (1.55fr, gradient bg, sparkle eyebrow, `ai_freeform`, source chips) + key facts strip (1fr: Founded/Share capital/Size/Auditor).
+- **Body grid** — `1.55fr / 1fr`, gap 18px.
+  - **Main column:** `SogcTimelineDB`, `BoardPanel`, `CorporateShareholdersPanel`, `SignersPanelDB`, Corporate structure (head/branch/M&A/audit relations), Purpose (collapsible at 500 chars), Contact, Notes.
+  - **Sidebar:** ScoreRing + ScoreBar cards (combined ring, Web/AI/Flex bars), Location (Leaflet map + address), Website card or empty-state + inline "Find website" trigger, Keywords chips (purpose_keywords + tfidf_cluster), Classification (AI category + language), Source coverage 2-col checklist (Zefix/Purpose/NOGA/AI/Website/Geocoded/SOGC/AI score).
+
+### Superadmin dropdown (Admin menu)
+- Shown only when `isSuperadmin === true` (passed from server component).
+- Purple "Admin" button in header actions; uses `adminMenuRef` + mousedown outside-click listener to close.
+- Current items: **Change website** (opens website picker modal), **NOGA explain** (calls `handleNogaTest()`).
+- Extensible: add new `<button>` rows inside the dropdown `div` — no structural changes needed.
+
+### Website picker modal
+- Full-screen scrim modal (replaces old inline panel below header).
+- Shows all `googleResults` (from `google_search_results_raw`) including the current website.
+- Each row: score badge + color bar (≥70 green, 40–69 blue, <40 amber), title + URL + snippet, score explanation text (name + location + purpose match), "Use this" button (skipped on current website row).
+
+### Inline atoms (co-located in same file)
+- `StatusPill` — green/amber/red by status string.
+- `ScoreRing` — SVG donut, color by threshold (≥75 green `#15803d`, 45–74 blue `#2563eb`, <45 amber `#b45309`).
+- `ScoreBar` — label + mono value + filled bar.
+- `CoverageItem` — ✓ (green) / — (gray) with label.
+
+### Design tokens used
+Page bg `#f7f9fc`, card bg white, card border `#e6e8ec`, inner dividers `#eef0f3`, primary blue `#2563eb`, ink `#1f2733`, ink2 `#3f4854`, ink3 `#6b7480`, ink4 `#9aa2ad`. Body grid `1.55fr / 1fr`. Card radius `rounded-2xl` (16px). AI summary panel gradient `linear-gradient(180deg,#f7faff,#fff)` with `#cdddfb` border on NOGA chip.
+
+---
+
 ## 18. Guided Search Wizard (Frontend)
 
 ### Overview

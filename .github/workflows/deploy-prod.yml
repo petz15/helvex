@@ -58,7 +58,8 @@ jobs:
         contains(github.event.head_commit.message, '[deploy-app]') ||
         contains(github.event.head_commit.message, '[deploy-frontend]') ||
         contains(github.event.head_commit.message, '[deploy-backend]') ||
-        contains(github.event.head_commit.message, '[deploy-ml]')
+        contains(github.event.head_commit.message, '[deploy-ml]') ||
+        contains(github.event.head_commit.message, '[deploy-http]')
       ) && (
         (github.event_name != 'workflow_dispatch' && !contains(github.event.head_commit.message, '[deploy-frontend]') && !contains(github.event.head_commit.message, '[deploy-ml]')) ||
         (github.event_name == 'workflow_dispatch' && github.event.inputs.deploy_mode != 'frontend' && github.event.inputs.deploy_mode != 'ml')
@@ -290,7 +291,8 @@ jobs:
         contains(github.event.head_commit.message, '[deploy-app]') ||
         contains(github.event.head_commit.message, '[deploy-frontend]') ||
         contains(github.event.head_commit.message, '[deploy-backend]') ||
-        contains(github.event.head_commit.message, '[deploy-ml]')
+        contains(github.event.head_commit.message, '[deploy-ml]') ||
+        contains(github.event.head_commit.message, '[deploy-http]')
       )
     runs-on: helvex-prod
     environment: production
@@ -699,6 +701,15 @@ jobs:
           kubectl set env deployment/helvex-ml-worker -n helvex-prod \
             "JOB_TYPE_WHITELIST=${ML_WHITELIST}"
 
+      - name: Deploy crawler-http only
+        if: |
+          (github.event_name != 'workflow_dispatch' && contains(github.event.head_commit.message, '[deploy-http]')) ||
+          (github.event_name == 'workflow_dispatch' && github.event.inputs.deploy_mode == 'http')
+        run: |
+          kubectl set image deployment/helvex-crawler-http \
+            crawler-http=ghcr.io/${{ github.repository }}:${{ github.sha }} \
+            -n helvex-prod
+
       - name: Wait for PostgreSQL to be healthy
         if: |
           (github.event_name != 'workflow_dispatch' && contains(github.event.head_commit.message, '[deploy-prod]')) ||
@@ -749,6 +760,8 @@ jobs:
             kubectl rollout status deployment/helvex -n helvex-prod --timeout=360s
           elif echo "$COMMIT_MSG" | grep -qF '[deploy-ml]'; then
             kubectl rollout status deployment/helvex-ml-worker -n helvex-prod --timeout=360s
+          elif echo "$COMMIT_MSG" | grep -qF '[deploy-http]'; then
+            kubectl rollout status deployment/helvex-crawler-http -n helvex-prod --timeout=360s
           elif echo "$COMMIT_MSG" | grep -qF '[deploy-app]'; then
             kubectl rollout status deployment/helvex -n helvex-prod --timeout=360s
             kubectl rollout status deployment/helvex-api-worker -n helvex-prod --timeout=360s
