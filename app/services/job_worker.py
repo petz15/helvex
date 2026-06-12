@@ -1471,6 +1471,9 @@ def _job_worker_loop(app) -> None:
             recovered = crud.requeue_interrupted_jobs(db_session)
             if recovered:
                 logger.info("Periodic stale-job sweep: recovered %d interrupted job(s)", recovered)
+            resumed = crud.resume_all_paused_jobs(db_session, min_heartbeat_age_seconds=120)
+            if resumed:
+                logger.info("Periodic stale-job sweep: resumed %d paused job(s) with stale heartbeat", resumed)
             _last_recovery = time.monotonic()
 
     try:

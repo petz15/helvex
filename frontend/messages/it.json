@@ -31,6 +31,7 @@
     "acceptAll": "Accetta tutto"
   },
   "landing": {
+    "goToPlatform": "Vai alla piattaforma →",
     "hero": {
       "title": "Intelligenza sulle",
       "titleAccent": "aziende svizzere",
@@ -227,6 +228,51 @@
     }
   },
   "app": {
+    "guidedSearch": {
+      "orGuide": "o lasciati guidare",
+      "whatTitle": "Cosa stai cercando?",
+      "tiles": { "companies": "Aziende", "people": "Persone", "jobs": "Lavori" },
+      "tilesSub": {
+        "companies": "700.000+ registrate",
+        "people": "Fondatori, direttori, proprietari",
+        "jobs": "Posizioni aperte"
+      },
+      "skipAdvanced": "Vai ai filtri avanzati →",
+      "wizard": {
+        "steps": { "what": "COSA", "where": "DOVE", "industry": "SETTORE", "refine": "AFFINA", "review": "RIEPILOGO" },
+        "questions": {
+          "what": "Cosa stai cercando?",
+          "where": "Dove in Svizzera?",
+          "industry": "Quale settore?",
+          "refine": "Affina la ricerca",
+          "review": "Riepilogo della tua ricerca"
+        },
+        "subs": {
+          "what": "Scegli il tipo di risultato desiderato.",
+          "where": "Seleziona un cantone o mantieni tutta la Svizzera.",
+          "industry": "Inserisci una parola chiave o scegli una categoria.",
+          "refine": "Opzionale — filtra per forma giuridica o dimensione.",
+          "review": "Questi diventeranno filtri modificabili nella vista Aziende."
+        },
+        "allSwitzerland": "Tutta la Svizzera",
+        "back": "← Indietro",
+        "continue": "Continua →",
+        "skip": "Salta →",
+        "skipGuide": "Salta la guida",
+        "seeResults": "Vedi {n} risultati →",
+        "legalForm": "Forma giuridica",
+        "size": "Dimensione aziendale",
+        "anyForm": "Qualsiasi",
+        "anySize": "Qualsiasi",
+        "small": "Piccola 1–9",
+        "medium": "Media 10–249",
+        "large": "Grande 250+",
+        "industryPlaceholder": "es. software, ristoranti…",
+        "popularCategories": "Categorie popolari",
+        "editStep": "Modifica",
+        "progressOf": "{current}/{total}"
+      }
+    },
     "footer": {
       "impressum": "Informazioni legali",
       "datenschutz": "Privacy",

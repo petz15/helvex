@@ -3,12 +3,16 @@ import { useState, useCallback, useEffect, useMemo } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import useSWR from "swr";
-import { Search, Building2, Users, ListTree, ChevronRight, ChevronLeft, Globe, MapPin, ArrowRight } from "lucide-react";
+import {
+  Search, Building2, Users, ListTree, ChevronRight, ChevronLeft, Globe, MapPin, ArrowRight,
+  Briefcase, SlidersHorizontal,
+} from "lucide-react";
 import { fetchCompanies, fetchCantons, fetchNogaHierarchy, searchPersonEntities } from "@/lib/api";
 import type { NogaNode } from "@/lib/api";
-import type { Company, SogcPersonEntity } from "@/lib/types";
+import type { Company, SogcPersonEntity, CompanyFilters } from "@/lib/types";
 import { HelvexMark } from "@/components/helvex-logo";
 import { cn } from "@/lib/utils";
+import { GuidedWizard } from "@/components/guided-wizard";
 
 type Tab = "companies" | "people" | "noga";
 
@@ -312,6 +316,33 @@ export function SearchLandingClient({ locale }: SearchLandingClientProps) {
   const [nogaSection, setNogaSection] = useState("");
   const [page, setPage] = useState(1);
 
+  const [wizardOpen, setWizardOpen] = useState(false);
+  const [wizardStep, setWizardStep] = useState(0);
+  const [wizardScope, setWizardScope] = useState<"companies" | "people" | "jobs">("companies");
+
+  function openWizard(scope: "companies" | "people" | "jobs", step: number) {
+    setWizardScope(scope);
+    setWizardStep(step);
+    setWizardOpen(true);
+  }
+
+  function handleWizardComplete(filters: CompanyFilters, scope: string) {
+    setWizardOpen(false);
+    const params = new URLSearchParams();
+    if (scope === "people") {
+      if (filters.canton) params.set("canton", filters.canton);
+      params.set("tab", "people");
+      router.push(`/${locale}/app/search?${params}`);
+      return;
+    }
+    params.set("view", "list");
+    if (filters.canton) params.set("canton", filters.canton);
+    if (filters.noga_code) params.set("noga_code", filters.noga_code);
+    if (filters.legal_form) params.set("legal_form", filters.legal_form);
+    if (filters.sort) params.set("sort", filters.sort);
+    router.push(`/${locale}/app/companies?${params}`);
+  }
+
   useEffect(() => {
     if (!hasSearched) return;
     const params = new URLSearchParams();
@@ -352,10 +383,7 @@ export function SearchLandingClient({ locale }: SearchLandingClientProps) {
     fetchNogaHierarchy
   );
 
-  const { data: filterNogaHierarchy = [] } = useSWR(
-    hasSearched && tab === "companies" ? "noga-hierarchy" : null,
-    fetchNogaHierarchy
-  );
+  const { data: filterNogaHierarchy = [] } = useSWR("noga-hierarchy", fetchNogaHierarchy);
 
   const nogaMatches = useMemo(() => {
     if (!submittedQuery || nogaHierarchy.length === 0) return [];
@@ -379,50 +407,150 @@ export function SearchLandingClient({ locale }: SearchLandingClientProps) {
 
   const switchTab = useCallback((t: Tab) => { setTab(t); setPage(1); }, []);
 
-  // ── blank state ─────────────────────────────────────────────────────────────
+  // ── blank state (Landing C) ─────────────────────────────────────────────────
   if (!hasSearched) {
     return (
-      <div className="flex flex-col items-center justify-center min-h-[calc(100vh-5rem)] px-4"
-        style={{ background: "radial-gradient(ellipse 80% 50% at 50% 0%, #eff6ff 0%, #f8fafc 55%, #f8fafc 100%)" }}
-      >
-        {/* Logo — identical to header: blue-600 mark + bold tracking-tight text */}
-        <Link
-          href={`/${locale}/app/search`}
-          className="flex items-center gap-2 text-blue-600 font-bold tracking-tight mb-10 select-none"
+      <>
+        <div
+          className="flex flex-col items-center justify-center min-h-[calc(100vh-5rem)] px-4"
+          style={{ background: "linear-gradient(180deg, #ffffff 0%, #f3f7fd 55%, #eef3fb 100%)" }}
         >
-          <HelvexMark size={32} className="text-blue-600" />
-          <span className="text-2xl">Helvex</span>
-        </Link>
+          {/* Brand lockup */}
+          <Link
+            href={`/${locale}/app/search`}
+            className="flex items-center gap-2 text-blue-600 font-bold mb-8 select-none"
+          >
+            <HelvexMark size={28} className="text-blue-600" />
+            <span style={{ fontSize: "24px" }}>Helvex</span>
+          </Link>
 
-        <form onSubmit={handleSearch} className="w-full max-w-xl">
-          <div className="relative group">
-            <Search
-              size={17}
-              className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-blue-500 transition-colors pointer-events-none"
-            />
-            <input
-              autoFocus
-              type="text"
-              value={query}
-              onChange={e => handleQueryChange(e.target.value)}
-              placeholder="Search companies, people, NOGA…"
-              className="w-full pl-11 pr-28 py-3.5 text-sm rounded-xl border border-slate-200 bg-white shadow-sm
-                focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent
-                placeholder:text-slate-400 text-slate-900 transition-shadow"
-            />
+          {/* Search pill */}
+          <form onSubmit={handleSearch} className="w-full max-w-[760px]">
+            <div className="relative group">
+              <Search
+                size={17}
+                className="absolute left-4 top-1/2 -translate-y-1/2 pointer-events-none transition-colors"
+                style={{ color: "#9aa2ad" }}
+              />
+              <input
+                autoFocus={!wizardOpen}
+                type="text"
+                value={query}
+                onChange={e => handleQueryChange(e.target.value)}
+                placeholder="Search companies, people, NOGA…"
+                className="w-full pl-12 pr-36 py-4 text-[16px] rounded-2xl bg-white placeholder:text-[#9aa2ad] text-[#1f2733] focus:outline-none transition-all"
+                style={{
+                  border: "1.5px solid #2563eb",
+                  boxShadow: "0 2px 10px rgba(31,39,51,0.04)",
+                }}
+                onFocus={e => {
+                  e.currentTarget.style.boxShadow = "0 0 0 4px rgba(37,99,235,0.10), 0 10px 30px rgba(31,39,51,0.06)";
+                }}
+                onBlur={e => {
+                  e.currentTarget.style.boxShadow = "0 2px 10px rgba(31,39,51,0.04)";
+                }}
+              />
+              <button
+                type="submit"
+                className="absolute right-2 top-1/2 -translate-y-1/2 px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white text-[15px] font-semibold rounded-xl transition-colors"
+              >
+                Search →
+              </button>
+            </div>
+          </form>
+
+          {/* Hint */}
+          <p className="mt-3 text-[13px]" style={{ color: "#9aa2ad" }}>
+            700,000+ Swiss companies · press{" "}
+            <kbd className="px-1.5 py-0.5 bg-white border border-[#e6e8ec] rounded text-[10px] font-mono shadow-sm">
+              Enter
+            </kbd>{" "}
+            to search
+          </p>
+
+          {/* Divider */}
+          <div className="w-full max-w-[760px] flex items-center gap-3 my-7">
+            <div className="flex-1 h-px bg-[#e6e8ec]" />
+            <span className="text-[13.5px] font-semibold" style={{ color: "#6b7480" }}>
+              or let us guide you
+            </span>
+            <div className="flex-1 h-px bg-[#e6e8ec]" />
+          </div>
+
+          {/* What question */}
+          <p className="text-[19px] font-bold mb-4" style={{ color: "#1f2733" }}>
+            What are you looking for?
+          </p>
+
+          {/* 3 entry tiles */}
+          <div className="w-full max-w-[760px] flex gap-3">
             <button
-              type="submit"
-              className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold px-3 py-2 rounded-lg transition-colors"
+              type="button"
+              onClick={() => openWizard("companies", 1)}
+              className="flex-1 flex flex-col items-center gap-3 p-5 rounded-2xl text-center transition-all bg-[#eff4fe] border-[1.5px] border-blue-600 shadow-[0_6px_20px_rgba(37,99,235,0.07)]"
             >
-              Search <ArrowRight size={12} />
+              <div className="w-11 h-11 rounded-xl flex items-center justify-center bg-blue-600 text-white">
+                <Building2 size={22} />
+              </div>
+              <div>
+                <p className="text-[17px] font-semibold" style={{ color: "#1f2733" }}>Companies</p>
+                <p className="text-[13px] mt-0.5" style={{ color: "#6b7480" }}>700,000+ registered</p>
+              </div>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => openWizard("people", 1)}
+              className="flex-1 flex flex-col items-center gap-3 p-5 rounded-2xl text-center transition-all bg-white border border-[#e6e8ec] hover:border-slate-300 hover:bg-slate-50"
+            >
+              <div className="w-11 h-11 rounded-xl flex items-center justify-center bg-[#eff4fe] text-blue-600">
+                <Users size={22} />
+              </div>
+              <div>
+                <p className="text-[17px] font-semibold" style={{ color: "#1f2733" }}>People</p>
+                <p className="text-[13px] mt-0.5" style={{ color: "#6b7480" }}>Founders, directors, owners</p>
+              </div>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => openWizard("jobs", 1)}
+              className="flex-1 flex flex-col items-center gap-3 p-5 rounded-2xl text-center transition-all bg-white border border-[#e6e8ec] hover:border-slate-300 hover:bg-slate-50"
+            >
+              <div className="w-11 h-11 rounded-xl flex items-center justify-center bg-[#eff4fe] text-blue-600">
+                <Briefcase size={22} />
+              </div>
+              <div>
+                <p className="text-[17px] font-semibold" style={{ color: "#1f2733" }}>Jobs</p>
+                <p className="text-[13px] mt-0.5" style={{ color: "#6b7480" }}>Open positions</p>
+              </div>
             </button>
           </div>
-        </form>
 
-        <p className="mt-5 text-xs text-slate-400 text-center">
-          700,000+ Swiss companies · press <kbd className="px-1.5 py-0.5 bg-white border border-slate-200 rounded text-[10px] font-mono shadow-sm">Enter</kbd> to search
-        </p>
-      </div>
+          {/* Skip to advanced */}
+          <Link
+            href={`/${locale}/app/companies?view=list`}
+            className="mt-7 flex items-center gap-1.5 text-[13px] transition-colors hover:underline"
+            style={{ color: "#6b7480" }}
+          >
+            <SlidersHorizontal size={13} />
+            Skip to advanced filters →
+          </Link>
+        </div>
+
+        {/* Guided wizard overlay — keyed so it remounts with fresh state on each open */}
+        <GuidedWizard
+          key={wizardOpen ? `open-${wizardScope}-${wizardStep}` : "closed"}
+          open={wizardOpen}
+          initialStep={wizardStep}
+          initialScope={wizardScope}
+          locale={locale}
+          nogaHierarchy={filterNogaHierarchy}
+          cantons={cantons}
+          onComplete={handleWizardComplete}
+          onClose={() => setWizardOpen(false)}
+        />
+      </>
     );
   }
 

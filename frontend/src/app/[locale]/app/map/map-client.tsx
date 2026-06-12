@@ -32,11 +32,11 @@ function fmtNum(n: number): string {
 
 function buildPopup(f: MapFeature): string {
   const parts = [
-    `<strong><a href="/app/companies/${f.id}" style="color:#3b82f6;text-decoration:none">${f.name}</a></strong>`,
+    `<strong><a href="/app/companies/${f.id}" target="_blank" rel="noopener" style="color:#3b82f6;text-decoration:none">${f.name}</a></strong>`,
     f.canton ? `<span style="color:#64748b">${f.municipality ?? ""}, ${f.canton}</span>` : "",
     f.website ? `<a href="${f.website}" target="_blank" rel="noopener" style="color:#3b82f6">${f.website.replace(/^https?:\/\//, "")}</a>` : "",
     f.review ? `<em>${f.review.replace(/_/g, " ")}</em>` : "",
-    `<a href="/app/companies/${f.id}" style="color:#3b82f6;font-size:11px">View profile →</a>`,
+    `<a href="/app/companies/${f.id}" target="_blank" rel="noopener" style="color:#3b82f6;font-size:11px">View profile →</a>`,
   ].filter(Boolean);
   return parts.join("<br>");
 }
@@ -125,7 +125,7 @@ export function MapClient() {
         const marker = L.circleMarker([f.lat, f.lon], {
           radius: 6, fillColor: "#3b82f6", color: "#fff", weight: 1.5, fillOpacity: 0.85,
         });
-        marker.bindPopup(buildPopup(f), { maxWidth: 300 });
+        marker.bindPopup(buildPopup(f), { maxWidth: 300, autoPan: false });
         layer.addLayer(marker);
       } else {
         // Diamond icon with count for co-located companies

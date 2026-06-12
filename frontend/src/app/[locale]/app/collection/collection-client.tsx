@@ -521,6 +521,7 @@ export function CollectionClient() {
             canton: (fd.get("canton") as string)?.trim().toUpperCase() || null,
             max_pages: parseInt(fd.get("max_pages") as string) || 5,
             rate_limit_delay: parseFloat(fd.get("rate_limit_delay") as string) || 0.5,
+            rerun: fd.get("rerun") === "on",
             order_by: fd.get("order_by") as string || "company_id_asc",
             limit: isNaN(limitRaw) || limitRaw <= 0 ? null : limitRaw,
           });
@@ -559,6 +560,12 @@ export function CollectionClient() {
               </Field>
             </div>
           </SubSection>
+          <div className="flex items-center gap-2 mt-2">
+            <input type="checkbox" name="rerun" id="http-rerun" className="rounded" />
+            <label htmlFor="http-rerun" className="text-sm text-slate-700">
+              Rerun — reset previously crawled/failed sites (incl. js_required) back to pending
+            </label>
+          </div>
           <SubmitBtn loading={loading === "crawler/crawl-http"} />
         </form>
       </Section>

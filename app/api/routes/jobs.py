@@ -1406,6 +1406,7 @@ class WebCrawlBody(BaseModel):
 
 
 class WebCrawlHttpBody(WebCrawlBody):
+    rerun: bool = False          # reset previously crawled/failed HTTP rows (including js_required) before starting
     order_by: str = "company_id_asc"  # company_id_asc | last_crawled_asc | flex_score_desc | combined_score_desc
     limit: int | None = None     # stop after this many companies (None = all)
 
@@ -1454,6 +1455,8 @@ def trigger_web_crawl_http(
     parts = []
     if body.canton:
         parts.append(body.canton)
+    if body.rerun:
+        parts.append("rerun")
     if body.order_by != "company_id_asc":
         parts.append(body.order_by)
     if body.limit:

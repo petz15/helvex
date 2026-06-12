@@ -848,7 +848,7 @@ def run_extract_sogc_persons_batch(
             ~exists().where(already_auditor.c.sogc_change_id == SogcChange.id),
         )
 
-    total = q.with_entities(func.count(SogcChange.id)).scalar() or 0
+    total = q.order_by(None).with_entities(func.count(SogcChange.id)).scalar() or 0
     stats["selected"] = total
 
     if status_cb:
@@ -1020,7 +1020,7 @@ def run_repair_is_current(
         .filter(SogcPersonEntity.merged_into_id.is_(None))
         .order_by(SogcPersonEntity.id.asc())
     )
-    total = entity_ids_q.with_entities(func.count(SogcPersonEntity.id)).scalar() or 0
+    total = entity_ids_q.order_by(None).with_entities(func.count(SogcPersonEntity.id)).scalar() or 0
 
     if status_cb:
         status_cb(f"Repairing is_current: {total} entities to process")

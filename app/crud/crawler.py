@@ -161,6 +161,35 @@ _CRAWL_ORDER_BY: dict[str, str] = {
 }
 
 
+def reset_http_crawled(db: Session, *, canton: str | None = None) -> int:
+    """Reset all terminal HTTP-tier rows (including js_required escalations) back to pending.
+
+    Returns the number of rows updated.
+    """
+    canton_clause = ""
+    params: dict[str, Any] = {}
+    if canton:
+        canton_clause = (
+            "AND company_id IN "
+            "(SELECT id FROM companies WHERE canton = :canton)"
+        )
+        params["canton"] = canton
+
+    result = db.execute(
+        text(
+            f"UPDATE company_crawl_state "  # noqa: S608
+            f"SET crawl_status = 'pending', tier = 'http', "
+            f"    crawl_error_detail = NULL, bot_protected = FALSE, "
+            f"    bot_protection_type = NULL "
+            f"WHERE crawl_status IN ('crawled', 'bot_blocked', 'http_error', 'timeout', 'no_content', 'js_required') "
+            f"{canton_clause}"
+        ),
+        params,
+    )
+    db.flush()
+    return result.rowcount
+
+
 def reset_playwright_crawled(db: Session, *, canton: str | None = None) -> int:
     """Reset crawled/failed playwright-tier rows back to pending so they can be re-crawled.
 

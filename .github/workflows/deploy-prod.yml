@@ -355,6 +355,9 @@ jobs:
             --from-literal=S3_SECRET_KEY="${{ secrets.S3_SECRET_KEY }}" \
             --from-literal=S3_ENDPOINT_URL="${{ secrets.S3_ENDPOINT_URL }}" \
             --from-literal=S3_BUCKET_EXPORTS="${{ secrets.S3_BUCKET_EXPORTS }}" \
+            --from-literal=S3_BUCKET_MODELS="${{ secrets.S3_BUCKET_MODELS }}" \
+            --from-literal=S3_BUCKET_CRAWL="${{ secrets.S3_BUCKET_CRAWL }}" \
+            --from-literal=SCRAPINGDOG_API_KEY="${{ secrets.SCRAPINGDOG_API_KEY }}" \
             --from-literal=SMTP_HOST="${{ secrets.SMTP_HOST }}" \
             --from-literal=SMTP_PORT="${{ secrets.SMTP_PORT }}" \
             --from-literal=SMTP_USER="${{ secrets.SMTP_USER }}" \

@@ -162,7 +162,12 @@ def _run_crawl_batch(
     if released:
         ctx.event("info", f"Released {released} stuck in_progress rows from previous run")
 
-    if rerun and tier == "playwright":
+    if rerun and tier == "http":
+        reset_count = crawler_crud.reset_http_crawled(ctx.db, canton=canton)
+        ctx.db.commit()
+        if reset_count:
+            ctx.event("info", f"Rerun: reset {reset_count} previously crawled/failed HTTP rows to pending")
+    elif rerun and tier == "playwright":
         reset_count = crawler_crud.reset_playwright_crawled(ctx.db, canton=canton)
         ctx.db.commit()
         if reset_count:
@@ -311,6 +316,7 @@ def handle_web_crawl_http(ctx: JobContext) -> tuple[dict, str]:
         max_pages=int(ctx.params.get("max_pages", 5)),
         rate_limit_delay=float(ctx.params.get("rate_limit_delay", 0.5)),
         crawl_fn=crawl_company_http,
+        rerun=bool(ctx.params.get("rerun", False)),
         order_by=str(ctx.params.get("order_by", "company_id_asc")),
         limit=int(limit_raw) if limit_raw else None,
     )

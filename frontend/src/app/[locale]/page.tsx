@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { Database, Sparkles, Search, Building2, CheckCircle2 } from "lucide-react";
+import { LandingCtaButton } from "@/components/landing-cta-button";
 import type { LucideIcon } from "lucide-react";
 import { notFound } from "next/navigation";
 import { HelvexMark } from "@/components/helvex-logo";
@@ -127,9 +128,7 @@ export default async function LandingPage({ params }: { params: Promise<{ locale
           </h1>
           <p className="text-lg text-slate-500 leading-relaxed mb-8">{t.hero.subtitle}</p>
           <div className="flex flex-wrap items-center gap-3">
-            <Link href={`/${locale}/register`} className="px-5 py-2.5 rounded-lg bg-blue-600 text-white font-semibold text-sm hover:bg-blue-700 transition-colors shadow-sm">
-              {t.hero.cta}
-            </Link>
+            <LandingCtaButton locale={locale} variant="hero" className="px-5 py-2.5 rounded-lg bg-blue-600 text-white font-semibold text-sm hover:bg-blue-700 transition-colors shadow-sm" />
             <Link href={`/${locale}/demo/company`} className="px-5 py-2.5 rounded-lg border border-slate-200 text-slate-700 font-medium text-sm hover:bg-slate-50 transition-colors">
               {t.hero.demo}
             </Link>
@@ -237,9 +236,7 @@ export default async function LandingPage({ params }: { params: Promise<{ locale
           </div>
 
           <div className="mt-10 text-center">
-            <Link href={`/${locale}/register`} className="inline-block px-6 py-3 rounded-lg bg-blue-600 text-white font-semibold text-sm hover:bg-blue-700 transition-colors shadow-sm">
-              {t.features.cta}
-            </Link>
+            <LandingCtaButton locale={locale} variant="features" className="inline-block px-6 py-3 rounded-lg bg-blue-600 text-white font-semibold text-sm hover:bg-blue-700 transition-colors shadow-sm" />
           </div>
         </div>
       </section>
@@ -316,9 +313,7 @@ export default async function LandingPage({ params }: { params: Promise<{ locale
           </div>
 
           <div className="mt-10 text-center">
-            <Link href={`/${locale}/register`} className="inline-block px-6 py-3 rounded-lg bg-blue-600 text-white font-semibold text-sm hover:bg-blue-700 transition-colors shadow-sm">
-              {t.pricing.cta}
-            </Link>
+            <LandingCtaButton locale={locale} variant="pricing" className="inline-block px-6 py-3 rounded-lg bg-blue-600 text-white font-semibold text-sm hover:bg-blue-700 transition-colors shadow-sm" />
           </div>
         </div>
       </section>

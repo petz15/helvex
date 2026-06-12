@@ -31,6 +31,7 @@
     "acceptAll": "Accept all"
   },
   "landing": {
+    "goToPlatform": "Go to Platform →",
     "hero": {
       "title": "Swiss company",
       "titleAccent": "intelligence",
@@ -227,6 +228,51 @@
     }
   },
   "app": {
+    "guidedSearch": {
+      "orGuide": "or let us guide you",
+      "whatTitle": "What are you looking for?",
+      "tiles": { "companies": "Companies", "people": "People", "jobs": "Jobs" },
+      "tilesSub": {
+        "companies": "700,000+ registered",
+        "people": "Founders, directors, owners",
+        "jobs": "Open positions"
+      },
+      "skipAdvanced": "Skip to advanced filters →",
+      "wizard": {
+        "steps": { "what": "WHAT", "where": "WHERE", "industry": "INDUSTRY", "refine": "REFINE", "review": "REVIEW" },
+        "questions": {
+          "what": "What are you looking for?",
+          "where": "Where in Switzerland?",
+          "industry": "Which industry?",
+          "refine": "Refine your search",
+          "review": "Your search summary"
+        },
+        "subs": {
+          "what": "Choose the type of result you want to find.",
+          "where": "Select a canton or keep all of Switzerland.",
+          "industry": "Type a keyword or pick a popular category.",
+          "refine": "Optional — narrow by legal form or company size.",
+          "review": "These become editable filters in the Companies view."
+        },
+        "allSwitzerland": "All of Switzerland",
+        "back": "← Back",
+        "continue": "Continue →",
+        "skip": "Skip →",
+        "skipGuide": "Skip the guide",
+        "seeResults": "See {n} results →",
+        "legalForm": "Legal form",
+        "size": "Company size",
+        "anyForm": "Any",
+        "anySize": "Any",
+        "small": "Small 1–9",
+        "medium": "Medium 10–249",
+        "large": "Large 250+",
+        "industryPlaceholder": "e.g. software, restaurants…",
+        "popularCategories": "Popular categories",
+        "editStep": "Edit",
+        "progressOf": "{current}/{total}"
+      }
+    },
     "footer": {
       "impressum": "Impressum",
       "datenschutz": "Privacy Policy",

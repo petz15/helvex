@@ -464,21 +464,36 @@ def resume_paused_job(db: Session, job: JobRun) -> JobRun:
     return job
 
 
-def resume_all_paused_jobs(db: Session) -> int:
-    """Re-queue all paused jobs after a restart so they resume automatically.
+def resume_all_paused_jobs(
+    db: Session,
+    *,
+    min_heartbeat_age_seconds: int = 0,
+) -> int:
+    """Re-queue paused jobs after a restart so they resume automatically.
 
-    Called on startup after requeue_interrupted_jobs().  Jobs paused by the
-    graceful shutdown handler are re-queued here; jobs paused by user action
-    before the restart are also re-queued (documented behaviour — users who
-    want a job to stay paused should cancel it instead).
+    ``min_heartbeat_age_seconds`` guards against the K8s rolling-deploy race:
+    a dying pod pauses its job and Pod 2 starts almost simultaneously.  If the
+    paused job still has a recent heartbeat (< ``min_heartbeat_age_seconds``
+    old) the dying pod is still mid-batch, so we skip it here and let
+    ``_periodic_recovery`` pick it up once the heartbeat goes stale.
+    Pass 0 (default) to re-queue all paused jobs immediately.
     """
-    jobs = db.query(JobRun).filter(JobRun.status == "paused").all()
+    from datetime import timedelta
+    query = db.query(JobRun).filter(JobRun.status == "paused")
+    if min_heartbeat_age_seconds > 0:
+        stale_cutoff = datetime.now(tz=timezone.utc) - timedelta(seconds=min_heartbeat_age_seconds)
+        query = query.filter(
+            or_(
+                JobRun.last_heartbeat_at.is_(None),
+                JobRun.last_heartbeat_at < stale_cutoff,
+            )
+        )
+    jobs = query.all()
     for job in jobs:
         job.status = "queued"
         job.pause_requested = False
         job.started_at = None
         job.completed_at = None
-        # Preserve original queued_at so API created_at remains immutable.
         job.message = _job_message(f"Auto-resumed from {job.progress_done or 0} after restart")
     if jobs:
         db.commit()

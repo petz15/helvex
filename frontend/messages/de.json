@@ -31,6 +31,7 @@
     "acceptAll": "Alle akzeptieren"
   },
   "landing": {
+    "goToPlatform": "Zur Plattform →",
     "hero": {
       "title": "Schweizer Firmen",
       "titleAccent": "intelligenz",
@@ -248,6 +249,51 @@
     }
   },
   "app": {
+    "guidedSearch": {
+      "orGuide": "oder lass dich führen",
+      "whatTitle": "Was suchst du?",
+      "tiles": { "companies": "Unternehmen", "people": "Personen", "jobs": "Jobs" },
+      "tilesSub": {
+        "companies": "700.000+ eingetragen",
+        "people": "Gründer, Direktoren, Eigentümer",
+        "jobs": "Offene Stellen"
+      },
+      "skipAdvanced": "Zu erweiterten Filtern →",
+      "wizard": {
+        "steps": { "what": "WAS", "where": "WO", "industry": "BRANCHE", "refine": "VERFEINERN", "review": "ÜBERSICHT" },
+        "questions": {
+          "what": "Was suchst du?",
+          "where": "Wo in der Schweiz?",
+          "industry": "Welche Branche?",
+          "refine": "Suche verfeinern",
+          "review": "Deine Suchübersicht"
+        },
+        "subs": {
+          "what": "Wähle die Art des Ergebnisses aus.",
+          "where": "Wähle einen Kanton oder behalte die ganze Schweiz.",
+          "industry": "Gib ein Stichwort ein oder wähle eine Kategorie.",
+          "refine": "Optional — nach Rechtsform oder Unternehmensgrösse einschränken.",
+          "review": "Diese werden zu bearbeitbaren Filtern in der Unternehmensansicht."
+        },
+        "allSwitzerland": "Ganze Schweiz",
+        "back": "← Zurück",
+        "continue": "Weiter →",
+        "skip": "Überspringen →",
+        "skipGuide": "Anleitung überspringen",
+        "seeResults": "{n} Ergebnisse anzeigen →",
+        "legalForm": "Rechtsform",
+        "size": "Unternehmensgrösse",
+        "anyForm": "Alle",
+        "anySize": "Alle",
+        "small": "Klein 1–9",
+        "medium": "Mittel 10–249",
+        "large": "Gross 250+",
+        "industryPlaceholder": "z.B. Software, Restaurants…",
+        "popularCategories": "Beliebte Kategorien",
+        "editStep": "Bearbeiten",
+        "progressOf": "{current}/{total}"
+      }
+    },
     "footer": {
       "impressum": "Impressum",
       "datenschutz": "Datenschutz",

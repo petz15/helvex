@@ -1895,7 +1895,63 @@ DELETE FROM activity_log WHERE created_at < now() - interval '90 days';
 
 ---
 
-## 18. Common Bug-Fixing Cheatsheet
+## 18. Guided Search Wizard (Frontend)
+
+### Overview
+
+The `/app/search` blank state (Landing C) provides a guided entry into company discovery for new users, while keeping the search pill as the power-user express lane.
+
+### Files
+
+| File | Purpose |
+|---|---|
+| `frontend/src/app/[locale]/app/search/search-landing-client.tsx` | Landing C blank state + wizard state management + completion routing |
+| `frontend/src/components/guided-wizard.tsx` | 5-step modal wizard (Direction 1 — in-context card) |
+
+### Landing C layout
+
+Rendered when `!hasSearched`. Components top to bottom:
+- Brand lockup (HelvexMark + "Helvex")
+- Search pill (760px, `1.5px #2563eb` border) — express lane
+- Hint line with `<kbd>Enter</kbd>`
+- Divider "or let us guide you"
+- "What are you looking for?" heading + 3 entry tiles (Companies / People / Jobs)
+- "Skip to advanced filters →" link → `/app/companies?view=list`
+
+Clicking a tile → opens wizard at Step 2 (WHERE), with scope pre-answered from tile selection.
+
+### Wizard (GuidedWizard component)
+
+5-step modal over a `rgba(23,32,46,0.34)` scrim. State is local to the component; keyed by `open + scope + step` in the parent so it remounts with fresh state on each launch.
+
+Steps:
+1. **What** — Companies / People / Jobs tiles (single-select)
+2. **Where** — "All of Switzerland" chip or canton multi-select
+3. **Industry** — debounced typeahead + hardcoded popular-category chips (NOGA codes)
+4. **Refine** — legal form chips (single-select) + size segments (display-only, no backend field)
+5. **Review** — read-only summary rows, live result count via `fetchCompanies({page_size:1})`, "See N results →" button
+
+### Filter assembly on completion
+
+```typescript
+{ canton, noga_code, legal_form, sort: "-combined_score", page: 1, page_size: 50 }
+```
+
+Completion routing:
+- scope = `companies` / `jobs` → `router.push(/${locale}/app/companies?view=list&...)`
+- scope = `people` → `router.push(/${locale}/app/search?tab=people&...)`
+
+### NOGA typeahead
+
+Uses the already-cached `filterNogaHierarchy` SWR key (loaded eagerly on blank-state render) + client-side `flattenNoga()` + `matchesNoga()`. No extra API call. Popular chips encode standard NOGA sections (56, 62, 41, 86, 47, 70.22, 68, 10, 64).
+
+### i18n keys
+
+Added `app.guidedSearch` key to `messages/{en,de,fr,it}.json`. Component uses hardcoded strings for now (same pattern as the rest of `search-landing-client.tsx`).
+
+---
+
+## 19. Common Bug-Fixing Cheatsheet
 
 ### Email verification not working
 - Verify `SMTP_HOST`, `SMTP_FROM`, `SMTP_USER`, `SMTP_PASSWORD` are set in prod

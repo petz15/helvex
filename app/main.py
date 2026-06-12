@@ -407,7 +407,7 @@ def _recover_jobs_and_start_worker(app, app_state) -> None:
         with SessionLocal() as db:
             recovered = requeue_interrupted_jobs(db)
             recovered_abandoned = requeue_recent_abandoned_jobs(db)
-            resumed = resume_all_paused_jobs(db)
+            resumed = resume_all_paused_jobs(db, min_heartbeat_age_seconds=120)
             active_count = len(list_active_jobs(db))
             pruned = delete_old_finished_jobs(db, keep_days=30)
         kick_job_worker(app)
