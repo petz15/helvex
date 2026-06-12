@@ -145,6 +145,7 @@ def _run_crawl_batch(
     rerun: bool = False,
     order_by: str = "company_id_asc",
     limit: int | None = None,
+    company_timeout: float = 120.0,
 ) -> tuple[dict, str]:
     """Shared batch-crawl loop used by both HTTP and Playwright handlers.
 
@@ -215,13 +216,26 @@ def _run_crawl_batch(
 
                 try:
                     result = asyncio.run(
-                        crawl_fn(
-                            state.company_id,
-                            candidate.url,
-                            max_pages=max_pages,
-                            rate_limit_delay=rate_limit_delay,
+                        asyncio.wait_for(
+                            crawl_fn(
+                                state.company_id,
+                                candidate.url,
+                                max_pages=max_pages,
+                                rate_limit_delay=rate_limit_delay,
+                            ),
+                            timeout=company_timeout,
                         )
                     )
+                except asyncio.TimeoutError:
+                    crawler_crud.mark_crawl_failed(
+                        ctx.db, state, "timeout",
+                        f"Total crawl timeout after {company_timeout:.0f}s",
+                    )
+                    stats["timeout"] = stats.get("timeout", 0) + 1
+                    stats["errors"].append(
+                        f"company {state.company_id}: total timeout {company_timeout:.0f}s"
+                    )
+                    continue
                 except Exception as exc:  # noqa: BLE001
                     crawler_crud.mark_crawl_failed(ctx.db, state, "http_error", str(exc))
                     stats["errors"].append(f"company {state.company_id}: {exc}")
@@ -319,6 +333,7 @@ def handle_web_crawl_http(ctx: JobContext) -> tuple[dict, str]:
         rerun=bool(ctx.params.get("rerun", False)),
         order_by=str(ctx.params.get("order_by", "company_id_asc")),
         limit=int(limit_raw) if limit_raw else None,
+        company_timeout=float(ctx.params.get("company_timeout", 120.0)),
     )
 
 
@@ -340,6 +355,7 @@ def handle_web_crawl_playwright(ctx: JobContext) -> tuple[dict, str]:
         rerun=bool(ctx.params.get("rerun", False)),
         order_by=str(ctx.params.get("order_by", "company_id_asc")),
         limit=int(limit_raw) if limit_raw else None,
+        company_timeout=float(ctx.params.get("company_timeout", 180.0)),
     )
 
 

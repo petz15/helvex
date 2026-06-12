@@ -11,12 +11,14 @@ logger = logging.getLogger(__name__)
 
 def _client():
     import boto3
+    from botocore.config import Config
     from app.config import settings
     return boto3.client(
         "s3",
         aws_access_key_id=settings.s3_access_key,
         aws_secret_access_key=settings.s3_secret_key,
         endpoint_url=settings.s3_endpoint_url or None,
+        config=Config(connect_timeout=10, read_timeout=30, retries={"max_attempts": 2}),
     )
 
 
