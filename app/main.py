@@ -239,12 +239,12 @@ def _maybe_enqueue_billing_renewal(app) -> None:
     if now_local.hour != 1:
         return  # only run during the 01:00–01:59 window
 
-    from app.crud import create_event, create_job, list_jobs
+    from app.crud import create_event, list_jobs
     from app.database import SessionLocal
-    from app.services.job_worker import kick_job_worker
+    from app.services.job_worker import _enqueue_job_in_session, kick_job_worker
 
     with SessionLocal() as db:
-        # Check if a billing_renewal job has already run or is queued today.
+        # Primary guard: fast exit if billing_renewal already ran today.
         today_start = datetime.now(tz=timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
         recent = [
             j for j in list_jobs(db, limit=20)
@@ -255,7 +255,7 @@ def _maybe_enqueue_billing_renewal(app) -> None:
         if recent:
             return
 
-        job = create_job(
+        job = _enqueue_job_in_session(
             db,
             job_type="billing_renewal",
             label="Nightly subscription billing renewal (auto)",
@@ -309,17 +309,23 @@ def _maybe_enqueue_shab_daily(app) -> None:
     if now_local.hour != 2:
         return  # only run during the 02:00–02:59 window
 
-    from app.crud import create_event, create_job, has_shab_daily_run_today
+    from app.crud import create_event, has_shab_daily_run_today
     from app.database import SessionLocal
-    from app.services.job_worker import kick_job_worker
+    from app.services.job_worker import _enqueue_job_in_session, kick_job_worker
 
     yesterday = (datetime.now(tz=timezone.utc) - timedelta(days=1)).date()
 
     with SessionLocal() as db:
+        # Primary guard: fast exit if a shab_daily already ran/is running today.
+        # _enqueue_job_in_session below also does a dedup-key check, but this
+        # avoids the preflight overhead on most wakeups.
         if has_shab_daily_run_today(db):
-            return  # already queued or ran today
+            return
 
-        job = create_job(
+        # Use the dedup-aware enqueue so the dedup_key is stored in the new row.
+        # A second pod that wakes up minutes later will find the row via
+        # find_active_by_dedup_key and skip creating a duplicate.
+        job = _enqueue_job_in_session(
             db,
             job_type="shab_daily",
             label=f"SHAB daily import — {yesterday.isoformat()} (auto)",
@@ -350,16 +356,16 @@ def _maybe_enqueue_noga_nightly(app) -> None:
     if now_local.hour != 3:
         return
 
-    from app.crud import create_event, create_job
+    from app.crud import create_event
     from app.crud.job_run import has_noga_nightly_run_today
     from app.database import SessionLocal
-    from app.services.job_worker import kick_job_worker
+    from app.services.job_worker import _enqueue_job_in_session, kick_job_worker
 
     with SessionLocal() as db:
         if has_noga_nightly_run_today(db):
             return
 
-        job = create_job(
+        job = _enqueue_job_in_session(
             db,
             job_type="reclassify_noga",
             label="NOGA nightly classification — missing + stale (auto)",

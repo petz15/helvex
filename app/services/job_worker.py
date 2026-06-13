@@ -62,40 +62,36 @@ class _JobWaitingExternalSignal(Exception):
 def _compute_dedup_key(job_type: str, org_id: int | None, params: dict) -> str | None:
     """Return a dedup key for this job, or None if dedup is not enforced.
 
-    At most one *active* job (queued/running/paused/waiting_external) with the
-    same key is allowed per org.  Attempting to enqueue a duplicate returns the
-    existing job without charging credits.
-    """
-    # These types allow at most one active job per org at a time.
-    ONE_PER_ORG = {
-        "bulk", "detail", "initial",
-        "shab_daily", "shab_backfill", "shab_archive",
-        "recalculate_scores", "recalculate_google_scores",
-        "reextract_purpose", "reextract_zefix_raw", "reclassify_noga",
-        "build_noga_embeddings", "detect_language_bulk", "reclassify_low_conf_noga",
-        "embed_purpose_full", "embed_purpose_clean",
-        "re_geocode",
-        "tfidf_kmeans_cluster",
-        "recompute_keywords", "reextract_keywords",
-        "cluster_analysis", "discover_stopwords",
-        "sogc_preprocess",
-        "extract_sogc_persons",
-        "resolve_bisher_links",
-        "repair_is_current",
-        "saved_view_alerts",  # global singleton — org_id=None gives key "saved_view_alerts:None"
-        "web_url_populate", "web_crawl_http", "web_crawl_playwright",
-    }
-    # No dedup: every trigger creates a fresh independent job.
-    NO_DEDUP = {"batch", "csv_export", "web_select_url", "web_crawl_single"}
+    Default behaviour: one active job per type per org (key = "{type}:{org_id}").
+    The DB enforces this via a partial unique index on job_runs.dedup_key for
+    active statuses, so even simultaneous enqueues from multiple pods can only
+    produce one row.
 
-    if job_type in ("noga_v2_explain",):
+    Opt-out (NO_DEDUP): job types that are explicitly safe to run concurrently
+    — e.g. batch exports, per-URL crawls.  New job types get dedup automatically
+    without any code change here.
+
+    Special cases override the default key shape:
+    - claude_classify: content-hash key so distinct configs run concurrently
+    - noga_v2_explain: per-company key
+    """
+    # Types that genuinely support multiple concurrent runs per org.
+    # Everything else is deduplicated by default — add here to opt out.
+    # web_crawl_http / web_crawl_playwright: claim_crawl_batch uses SELECT FOR UPDATE
+    # SKIP LOCKED, so concurrent jobs claim disjoint rows — safe to run in parallel
+    # and essential for utilising multiple HTTP pods.
+    NO_DEDUP = {"batch", "csv_export", "web_select_url", "web_crawl_single",
+                "web_crawl_http", "web_crawl_playwright"}
+
+    # Per-entity dedup (not per-org-type).
+    if job_type == "noga_v2_explain":
         company_id = params.get("company_id")
         return f"{job_type}:{company_id}" if company_id is not None else None
 
     if job_type in NO_DEDUP:
         return None
-    if job_type in ONE_PER_ORG:
-        return f"{job_type}:{org_id}"
+
+    # claude_classify: distinct prompt configs may run concurrently.
     if job_type == "claude_classify":
         import hashlib as _hashlib
         relevant = {
@@ -110,7 +106,9 @@ def _compute_dedup_key(job_type: str, org_id: int | None, params: dict) -> str |
             json.dumps(relevant, sort_keys=True).encode()
         ).hexdigest()[:16]
         return f"claude_classify:{org_id}:{h}"
-    return None
+
+    # Default: one active job per type per org.
+    return f"{job_type}:{org_id}"
 
 
 def _publish_job_update(org_id: int | None) -> None:
@@ -1100,6 +1098,9 @@ def _run_job(app, job_id: int) -> None:  # noqa: C901
 
                 # Auto-chain SOGC preprocessing and person extraction after a daily import.
                 # Only chain when shab_daily actually brought in new or updated publications.
+                # Uses _enqueue_job_in_session (not crud.create_job) so the dedup key is
+                # stored and a second shab_daily run will find the already-queued job rather
+                # than creating a duplicate that collides with the first run.
                 if job.job_type == "shab_daily" and (stats.get("created", 0) + stats.get("updated", 0)) > 0:
                     _CHAIN = [
                         ("sogc_preprocess",      "SOGC preprocess — nightly auto (after shab_daily)"),
@@ -1108,7 +1109,7 @@ def _run_job(app, job_id: int) -> None:  # noqa: C901
                     queued_types: list[str] = []
                     for chain_type, chain_label in _CHAIN:
                         try:
-                            chain_job = crud.create_job(
+                            chain_job = _enqueue_job_in_session(
                                 db,
                                 job_type=chain_type,
                                 label=chain_label,
@@ -1619,7 +1620,24 @@ def _enqueue_job_in_session(
             "count": count,
             "cost": CREDIT_COSTS.get(action, 0) * count,
         }
-    job = crud.create_job(db, job_type=job_type, label=label, params=preflight_params, org_id=org_id, user_id=user_id, dedup_key=dedup_key, initial_stats=initial_stats if initial_stats else None)
+    from sqlalchemy.exc import IntegrityError as _IntegrityError
+    try:
+        job = crud.create_job(db, job_type=job_type, label=label, params=preflight_params, org_id=org_id, user_id=user_id, dedup_key=dedup_key, initial_stats=initial_stats if initial_stats else None)
+    except _IntegrityError:
+        # Two pods raced past the soft dedup check above and both tried to INSERT
+        # with the same dedup_key.  The DB partial unique index rejected the second
+        # insert.  Roll back and return the row the winning pod committed.
+        db.rollback()
+        if dedup_key is not None:
+            existing = crud.find_active_by_dedup_key(db, dedup_key)
+            if existing is not None:
+                logger.info(
+                    "Dedup race resolved via DB constraint: returning existing job %s (key=%s)",
+                    existing.id, dedup_key,
+                )
+                db.expunge(existing)
+                return existing
+        raise
     crud.create_event(db, job_id=job.id, level="info", message="Job queued")
     if warnings:
         for w in warnings:

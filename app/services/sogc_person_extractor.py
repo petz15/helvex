@@ -544,9 +544,17 @@ def _corporate_change_subtype(raw_excerpt: str, change_type: str) -> str:
 
 def _get_or_create_entity(db: Session, key: str, fields: dict):
     from app.models.sogc_person_entity import SogcPersonEntity
+    from sqlalchemy.exc import IntegrityError
 
     entity = db.query(SogcPersonEntity).filter_by(normalized_key=key).first()
-    if not entity:
+    if entity:
+        return entity
+
+    # Use a savepoint so a duplicate-key collision (same person seen twice in
+    # the same batch, or a race with a previous rollback expiring the identity
+    # map) only rolls back this insert, not the whole outer transaction.
+    sp = db.begin_nested()
+    try:
         entity = SogcPersonEntity(
             normalized_key=key,
             lastname=fields.get("lastname"),
@@ -557,7 +565,12 @@ def _get_or_create_entity(db: Session, key: str, fields: dict):
             confidence_level="medium",
         )
         db.add(entity)
-        db.flush()
+        sp.commit()
+    except IntegrityError:
+        sp.rollback()
+        entity = db.query(SogcPersonEntity).filter_by(normalized_key=key).first()
+        if entity is None:
+            raise
     return entity
 
 
@@ -878,6 +891,8 @@ def run_extract_sogc_persons_batch(
             if abort_cb:
                 abort_cb()
 
+            change_id = change.id  # capture before try — ORM access after IntegrityError raises PendingRollbackError
+
             if not change.raw_excerpt:
                 stats["skipped_no_excerpt"] += 1
                 continue
@@ -971,11 +986,11 @@ def run_extract_sogc_persons_batch(
                 stats["processed"] += 1
 
             except Exception as exc:
-                stats["errors"].append(f"change_id={change.id}: {type(exc).__name__}: {exc}")
                 try:
-                    db.rollback()
+                    db.rollback()  # must come first — session is in PendingRollbackError state
                 except Exception:
                     pass
+                stats["errors"].append(f"change_id={change_id}: {type(exc).__name__}: {exc}")
 
         # Update entity counts for this batch
         if touched_entity_ids:

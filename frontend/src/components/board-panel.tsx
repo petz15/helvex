@@ -487,13 +487,8 @@ export function BoardPanel({ companyId }: { companyId: number }) {
     () => fetchCompanyPersons(companyId),
     { revalidateOnFocus: false },
   );
-  const { data: auditors = [] } = useSWR(
-    `company-auditors-${companyId}`,
-    () => fetchCompanyAuditors(companyId),
-    { revalidateOnFocus: false },
-  );
 
-  if (persons.length === 0 && auditors.length === 0) return null;
+  if (persons.length === 0) return null;
 
   const companyName = persons[0]?.company_name ?? String(companyId);
   // Graph-relevant: role appointments only, deduplicated per entity
@@ -511,35 +506,33 @@ export function BoardPanel({ companyId }: { companyId: number }) {
             {graphPersons.filter(p => p.is_current).length} active · {graphPersons.length} total
           </span>
         </h2>
-        {persons.length > 0 && (
-          <div className="flex items-center gap-2">
-            {view === "bar" && (
-              <label className="flex items-center gap-1.5 text-xs text-slate-500 cursor-pointer select-none">
-                <input
-                  type="checkbox"
-                  checked={showPast}
-                  onChange={e => setShowPast(e.target.checked)}
-                  className="w-3 h-3 accent-slate-600"
-                />
-                Past
-              </label>
-            )}
-            <div className="flex rounded-lg border border-slate-200 overflow-hidden text-xs bg-white">
-              <button
-                onClick={() => setView("bar")}
-                className={`flex items-center gap-1.5 px-2.5 py-1.5 transition-colors ${view === "bar" ? "bg-slate-900 text-white" : "text-slate-500 hover:bg-slate-50"}`}
-              >
-                <BarChart2 size={12} /> Bar
-              </button>
-              <button
-                onClick={() => setView("network")}
-                className={`flex items-center gap-1.5 px-2.5 py-1.5 border-l border-slate-200 transition-colors ${view === "network" ? "bg-slate-900 text-white" : "text-slate-500 hover:bg-slate-50"}`}
-              >
-                <Network size={12} /> Network
-              </button>
-            </div>
+        <div className="flex items-center gap-2">
+          {view === "bar" && (
+            <label className="flex items-center gap-1.5 text-xs text-slate-500 cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={showPast}
+                onChange={e => setShowPast(e.target.checked)}
+                className="w-3 h-3 accent-slate-600"
+              />
+              Past
+            </label>
+          )}
+          <div className="flex rounded-lg border border-slate-200 overflow-hidden text-xs bg-white">
+            <button
+              onClick={() => setView("bar")}
+              className={`flex items-center gap-1.5 px-2.5 py-1.5 transition-colors ${view === "bar" ? "bg-slate-900 text-white" : "text-slate-500 hover:bg-slate-50"}`}
+            >
+              <BarChart2 size={12} /> Bar
+            </button>
+            <button
+              onClick={() => setView("network")}
+              className={`flex items-center gap-1.5 px-2.5 py-1.5 border-l border-slate-200 transition-colors ${view === "network" ? "bg-slate-900 text-white" : "text-slate-500 hover:bg-slate-50"}`}
+            >
+              <Network size={12} /> Network
+            </button>
           </div>
-        )}
+        </div>
       </div>
 
       {/* Visualization */}
@@ -551,19 +544,30 @@ export function BoardPanel({ companyId }: { companyId: number }) {
           }
         </div>
       )}
+    </div>
+  );
+}
 
-      {/* Auditors */}
-      {auditors.length > 0 && (
-        <div className={persons.length > 0 ? "pt-4 border-t border-slate-100" : ""}>
-          <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-wide mb-2 flex items-center gap-1">
-            <Building2 size={11} />
-            Auditors
-          </p>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-            {auditors.map(a => <AuditorCard key={a.id} auditor={a} />)}
-          </div>
-        </div>
-      )}
+// ── Auditors panel ────────────────────────────────────────────────────────────
+
+export function AuditorsPanel({ companyId }: { companyId: number }) {
+  const { data: auditors = [] } = useSWR(
+    `company-auditors-${companyId}`,
+    () => fetchCompanyAuditors(companyId),
+    { revalidateOnFocus: false },
+  );
+
+  if (auditors.length === 0) return null;
+
+  return (
+    <div className="bg-white rounded-xl border border-slate-200 p-5 shadow-sm">
+      <h2 className="text-sm font-semibold text-slate-700 flex items-center gap-1.5 mb-3">
+        <Building2 size={15} className="text-slate-400" />
+        Auditors
+      </h2>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+        {auditors.map(a => <AuditorCard key={a.id} auditor={a} />)}
+      </div>
     </div>
   );
 }

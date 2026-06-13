@@ -12,7 +12,7 @@ import { createNote, deleteNote, fetchCompany, runCompanyWebSearch, selectCompan
 import type { Company, Note, GoogleScoredResult } from "@/lib/types";
 import "leaflet/dist/leaflet.css";
 import { SignersPanelDB, SogcTimelineDB } from "@/components/sogc-history";
-import { BoardPanel } from "@/components/board-panel";
+import { BoardPanel, AuditorsPanel } from "@/components/board-panel";
 import { CorporateShareholdersPanel } from "@/components/corporate-shareholders-panel";
 import { useI18n } from "@/i18n/context";
 import { useApiErrorHandler } from "@/lib/use-api-error";
@@ -622,10 +622,32 @@ export function CompanyDetailClient({ company: initial, readOnlyDemo = false, is
 
             {/* Main column */}
             <div className="space-y-4">
-              <SogcTimelineDB companyId={company.id} />
+
+              {/* Purpose */}
+              {company.purpose && (
+                <div className="bg-white rounded-2xl border border-[#e6e8ec] p-5">
+                  <h2 className="font-bold mb-2 flex items-center gap-1.5" style={{ fontSize: 15, color: "#1f2733" }}>
+                    <FileText size={14} style={{ color: "#6b7480" }} /> {t.purpose}
+                  </h2>
+                  <div className="relative">
+                    <p className={cn("leading-relaxed whitespace-pre-wrap", !purposeExpanded && "max-h-40 overflow-hidden")}
+                      style={{ fontSize: 13, color: "#3f4854" }}>
+                      {company.purpose}
+                    </p>
+                    {!purposeExpanded && company.purpose.length > 500 && (
+                      <div className="absolute inset-x-0 bottom-0 h-10 bg-gradient-to-t from-white to-transparent" />
+                    )}
+                  </div>
+                  {company.purpose.length > 500 && (
+                    <button type="button" onClick={() => setPurposeExpanded(v => !v)}
+                      className="mt-2 hover:underline" style={{ fontSize: 12, color: "#2563eb" }}>
+                      {purposeExpanded ? t.showless : t.showmore}
+                    </button>
+                  )}
+                </div>
+              )}
+
               <BoardPanel companyId={company.id} />
-              <CorporateShareholdersPanel companyId={company.id} />
-              <SignersPanelDB companyId={company.id} />
 
               {/* Group / Corporate structure */}
               {hasStructureData && (
@@ -669,29 +691,11 @@ export function CompanyDetailClient({ company: initial, readOnlyDemo = false, is
                 </div>
               )}
 
-              {/* Purpose */}
-              {company.purpose && (
-                <div className="bg-white rounded-2xl border border-[#e6e8ec] p-5">
-                  <h2 className="font-bold mb-2 flex items-center gap-1.5" style={{ fontSize: 15, color: "#1f2733" }}>
-                    <FileText size={14} style={{ color: "#6b7480" }} /> {t.purpose}
-                  </h2>
-                  <div className="relative">
-                    <p className={cn("leading-relaxed whitespace-pre-wrap", !purposeExpanded && "max-h-40 overflow-hidden")}
-                      style={{ fontSize: 13, color: "#3f4854" }}>
-                      {company.purpose}
-                    </p>
-                    {!purposeExpanded && company.purpose.length > 500 && (
-                      <div className="absolute inset-x-0 bottom-0 h-10 bg-gradient-to-t from-white to-transparent" />
-                    )}
-                  </div>
-                  {company.purpose.length > 500 && (
-                    <button type="button" onClick={() => setPurposeExpanded(v => !v)}
-                      className="mt-2 hover:underline" style={{ fontSize: 12, color: "#2563eb" }}>
-                      {purposeExpanded ? t.showless : t.showmore}
-                    </button>
-                  )}
-                </div>
-              )}
+              <AuditorsPanel companyId={company.id} />
+
+              <SignersPanelDB companyId={company.id} />
+
+              <SogcTimelineDB companyId={company.id} />
 
               {/* Contact */}
               {(company.contact_name || company.contact_email || company.contact_phone) && (
@@ -712,76 +716,29 @@ export function CompanyDetailClient({ company: initial, readOnlyDemo = false, is
                   </div>
                 </div>
               )}
-
-              {/* Notes */}
-              {!readOnlyDemo && (
-                <div className="bg-white rounded-2xl border border-[#e6e8ec] p-5">
-                  <h2 className="font-bold mb-4" style={{ fontSize: 15, color: "#1f2733" }}>{t.notes} ({notes.length})</h2>
-                  <form onSubmit={handleAddNote} className="mb-4">
-                    <div className="flex gap-2">
-                      <textarea
-                        value={noteText}
-                        onChange={e => setNoteText(e.target.value)}
-                        placeholder={t.addnote}
-                        rows={2}
-                        className="flex-1 px-3 py-2 border border-[#e6e8ec] rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-300 resize-none"
-                        style={{ fontSize: 13 }}
-                      />
-                      <button type="submit" disabled={addingNote || !noteText.trim()}
-                        className="flex items-center gap-1.5 bg-[#2563eb] hover:bg-[#1d4ed8] disabled:opacity-50 text-white px-3 py-2 rounded-xl font-medium transition-colors self-start"
-                        style={{ fontSize: 13 }}>
-                        {addingNote ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} />}
-                        {t.addnote}
-                      </button>
-                    </div>
-                  </form>
-                  {notes.length === 0 && (
-                    <p className="text-center py-4" style={{ fontSize: 13, color: "#9aa2ad" }}>{t.nonotes}</p>
-                  )}
-                  <div className="space-y-2">
-                    {notes.map(n => (
-                      <div key={n.id} className="flex gap-3 rounded-xl p-3" style={{ background: "#f7f9fc" }}>
-                        <div className="h-8 w-8 rounded-full bg-[#eef0f3] flex items-center justify-center shrink-0 font-semibold"
-                          style={{ fontSize: 12, color: "#6b7480" }}>U</div>
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-2">
-                            <span className="font-semibold" style={{ fontSize: 12, color: "#6b7480" }}>{t.user}</span>
-                            <span style={{ fontSize: 12, color: "#9aa2ad" }}>{fmtRelativeTime(n.created_at)}</span>
-                          </div>
-                          <p className="whitespace-pre-wrap mt-0.5" style={{ fontSize: 13, color: "#1f2733" }}>{n.content}</p>
-                          <p className="mt-1" style={{ fontSize: 11, color: "#9aa2ad" }}>{fmtDateTime(n.created_at)}</p>
-                        </div>
-                        <button onClick={() => handleDeleteNote(n.id)} className="p-1 transition-colors shrink-0" style={{ color: "#9aa2ad" }}
-                          onMouseEnter={e => (e.currentTarget.style.color = "#ef4444")}
-                          onMouseLeave={e => (e.currentTarget.style.color = "#9aa2ad")}>
-                          <Trash2 size={14} />
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
             </div>
 
             {/* Sidebar */}
             <div className="space-y-4">
 
-              {/* Scoring */}
-              <div className="bg-white rounded-2xl border border-[#e6e8ec] p-5">
-                <h2 className="font-bold mb-4" style={{ fontSize: 15, color: "#1f2733" }}>Scores</h2>
-                <div className="flex items-center gap-4 mb-5">
-                  <ScoreRing value={Math.round(company.combined_score ?? 0)} size={72} />
-                  <div>
-                    <div className="font-semibold uppercase mb-0.5" style={{ fontSize: 12, letterSpacing: "0.04em", color: "#9aa2ad" }}>Combined</div>
-                    <div style={{ fontSize: 12, color: "#6b7480" }}>70% AI · 20% Web · 10% Flex</div>
+              {/* Scoring — only shown when at least one score has been computed */}
+              {(company.combined_score != null || company.ai_score != null || company.web_score != null) && (
+                <div className="bg-white rounded-2xl border border-[#e6e8ec] p-5">
+                  <h2 className="font-bold mb-4" style={{ fontSize: 15, color: "#1f2733" }}>Scores</h2>
+                  <div className="flex items-center gap-4 mb-5">
+                    <ScoreRing value={Math.round(company.combined_score ?? 0)} size={72} />
+                    <div>
+                      <div className="font-semibold uppercase mb-0.5" style={{ fontSize: 12, letterSpacing: "0.04em", color: "#9aa2ad" }}>Combined</div>
+                      <div style={{ fontSize: 12, color: "#6b7480" }}>70% AI · 20% Web · 10% Flex</div>
+                    </div>
+                  </div>
+                  <div className="space-y-3">
+                    <ScoreBar value={Math.round(company.web_score ?? 0)} label="Web" />
+                    <ScoreBar value={Math.round(company.ai_score ?? 0)} label="AI" />
+                    <ScoreBar value={Math.round(company.flex_score ?? 0)} label="Flex" />
                   </div>
                 </div>
-                <div className="space-y-3">
-                  <ScoreBar value={Math.round(company.web_score ?? 0)} label="Web" />
-                  <ScoreBar value={Math.round(company.ai_score ?? 0)} label="AI" />
-                  <ScoreBar value={Math.round(company.flex_score ?? 0)} label="Flex" />
-                </div>
-              </div>
+              )}
 
               {/* Location */}
               <div className="bg-white rounded-2xl border border-[#e6e8ec] overflow-hidden">
@@ -822,7 +779,7 @@ export function CompanyDetailClient({ company: initial, readOnlyDemo = false, is
                 </div>
                 {company.website_url ? (
                   <a href={company.website_url} target="_blank" rel="noopener noreferrer"
-                    className="flex items-center gap-2 hover:underline" style={{ fontSize: 13, color: "#2563eb" }}>
+                    className="flex items-center gap-2 min-w-0 hover:underline" style={{ fontSize: 13, color: "#2563eb" }}>
                     <Globe size={13} className="shrink-0" />
                     <span className="truncate">{company.website_url.replace(/^https?:\/\//, "")}</span>
                     <ExternalLink size={11} className="shrink-0" />
@@ -892,6 +849,57 @@ export function CompanyDetailClient({ company: initial, readOnlyDemo = false, is
                   <CoverageItem label="AI score" present={(company.ai_score ?? 0) > 0} />
                 </div>
               </div>
+
+              <CorporateShareholdersPanel companyId={company.id} />
+
+              {/* Notes */}
+              {!readOnlyDemo && (
+                <div className="bg-white rounded-2xl border border-[#e6e8ec] p-5">
+                  <h2 className="font-bold mb-4" style={{ fontSize: 15, color: "#1f2733" }}>{t.notes} ({notes.length})</h2>
+                  <form onSubmit={handleAddNote} className="mb-4">
+                    <div className="flex gap-2">
+                      <textarea
+                        value={noteText}
+                        onChange={e => setNoteText(e.target.value)}
+                        placeholder={t.addnote}
+                        rows={2}
+                        className="flex-1 px-3 py-2 border border-[#e6e8ec] rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-300 resize-none"
+                        style={{ fontSize: 13 }}
+                      />
+                      <button type="submit" disabled={addingNote || !noteText.trim()}
+                        className="flex items-center gap-1.5 bg-[#2563eb] hover:bg-[#1d4ed8] disabled:opacity-50 text-white px-3 py-2 rounded-xl font-medium transition-colors self-start"
+                        style={{ fontSize: 13 }}>
+                        {addingNote ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} />}
+                        {t.addnote}
+                      </button>
+                    </div>
+                  </form>
+                  {notes.length === 0 && (
+                    <p className="text-center py-4" style={{ fontSize: 13, color: "#9aa2ad" }}>{t.nonotes}</p>
+                  )}
+                  <div className="space-y-2">
+                    {notes.map(n => (
+                      <div key={n.id} className="flex gap-3 rounded-xl p-3" style={{ background: "#f7f9fc" }}>
+                        <div className="h-8 w-8 rounded-full bg-[#eef0f3] flex items-center justify-center shrink-0 font-semibold"
+                          style={{ fontSize: 12, color: "#6b7480" }}>U</div>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2">
+                            <span className="font-semibold" style={{ fontSize: 12, color: "#6b7480" }}>{t.user}</span>
+                            <span style={{ fontSize: 12, color: "#9aa2ad" }}>{fmtRelativeTime(n.created_at)}</span>
+                          </div>
+                          <p className="whitespace-pre-wrap mt-0.5" style={{ fontSize: 13, color: "#1f2733" }}>{n.content}</p>
+                          <p className="mt-1" style={{ fontSize: 11, color: "#9aa2ad" }}>{fmtDateTime(n.created_at)}</p>
+                        </div>
+                        <button onClick={() => handleDeleteNote(n.id)} className="p-1 transition-colors shrink-0" style={{ color: "#9aa2ad" }}
+                          onMouseEnter={e => (e.currentTarget.style.color = "#ef4444")}
+                          onMouseLeave={e => (e.currentTarget.style.color = "#9aa2ad")}>
+                          <Trash2 size={14} />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         </div>

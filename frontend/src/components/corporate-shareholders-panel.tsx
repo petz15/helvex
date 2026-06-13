@@ -1,9 +1,8 @@
 "use client";
 
-import Link from "next/link";
 import { useParams } from "next/navigation";
 import useSWR from "swr";
-import { Building2, ArrowRight, ExternalLink } from "lucide-react";
+import { Building2, ArrowRight } from "lucide-react";
 import { fetchCompanyCorporateRoles } from "@/lib/api";
 import type { SogcCorporateRole } from "@/lib/types";
 
@@ -45,22 +44,14 @@ export function CorporateShareholdersPanel({ companyId }: { companyId: number })
 
   return (
     <div className="bg-white rounded-xl border border-slate-200 p-5 shadow-sm">
-      <div className="flex items-center justify-between mb-4">
-        <div className="flex items-center gap-2">
-          <Building2 size={15} className="text-violet-500" />
-          <h2 className="text-sm font-semibold text-slate-800">
-            Corporate Shareholders
-            <span className="ml-2 text-[11px] font-normal text-slate-400">
-              ({roleRecords.length} role{roleRecords.length !== 1 ? "s" : ""}{capitalRecords.length > 0 ? ` · ${capitalRecords.length} capital change${capitalRecords.length !== 1 ? "s" : ""}` : ""})
-            </span>
-          </h2>
-        </div>
-        <Link
-          href={`/${locale}/app/corporate?company_uid=${roles[0]?.company_uid ?? ""}`}
-          className="text-[11px] text-blue-600 hover:text-blue-800 transition-colors flex items-center gap-1"
-        >
-          All <ExternalLink size={10} />
-        </Link>
+      <div className="flex items-center gap-2 mb-4">
+        <Building2 size={15} className="text-violet-500" />
+        <h2 className="text-sm font-semibold text-slate-800">
+          Corporate Shareholders
+          <span className="ml-2 text-[11px] font-normal text-slate-400">
+            ({roleRecords.length} role{roleRecords.length !== 1 ? "s" : ""}{capitalRecords.length > 0 ? ` · ${capitalRecords.length} capital change${capitalRecords.length !== 1 ? "s" : ""}` : ""})
+          </span>
+        </h2>
       </div>
 
       {/* Role appointments */}

@@ -2094,20 +2094,27 @@ In RQ mode with Redis, a **2 s periodic DB poll** runs alongside pub/sub to deli
 
 ### Job deduplication (idempotent enqueue)
 
-**Before:** Clicking "Run" twice created two identical jobs, charged credits twice, and ran redundant work.
+**Before:** Clicking "Run" twice created two identical jobs, charged credits twice, and ran redundant work. Nightly schedulers running on multiple pods each independently created jobs, causing duplicate downstream chains.
 
-**After:** `_compute_dedup_key()` in `job_worker.py` produces a key per (job_type, org_id, relevant params). Before inserting a new job, `find_active_by_dedup_key()` checks for an existing active job with the same key. If found, the existing job is returned and no credits are charged.
+**After (migration 0093):** Two-layer guarantee:
 
-**Dedup semantics by job type:**
+1. **App layer** — `_compute_dedup_key()` in `job_worker.py` produces a key before inserting. `find_active_by_dedup_key()` returns the existing job if one is active. Credits are not charged again.
+
+2. **DB layer** — partial unique index `ix_job_runs_dedup_active` on `job_runs(dedup_key) WHERE status IN ('queued','running','paused','waiting_external') AND dedup_key IS NOT NULL`. If two pods race past the app-layer check simultaneously, the DB rejects the second INSERT. `_enqueue_job_in_session` catches the `IntegrityError`, rolls back, re-queries the winning pod's row, and returns it.
+
+**Dedup semantics — default is "one active per org per type":**
 
 | Behaviour | Job types |
 |---|---|
-| One active per org | `bulk`, `detail`, `initial`, `recalculate_scores`, `recalculate_google_scores`, `reextract_purpose`, `reclassify_noga`, `re_geocode`, `tfidf_kmeans_cluster`, `discover_stopwords`, `recompute_keywords`, `cluster_analysis` |
-| One active per org + param hash | `claude_classify` (keyed on category/canton/prompt params) |
-| No dedup | `batch`, `csv_export` (cancel-before-enqueue used for csv_export instead) |
+| **Default** — one active per org | All job types not listed below |
+| One active per org + param hash | `claude_classify` (distinct prompt configs may run concurrently) |
+| Per-company | `noga_v2_explain` |
+| No dedup (parallel-safe) | `batch`, `csv_export`, `web_select_url`, `web_crawl_single` |
+
+New job types are automatically deduplicated without any code change. Add to `NO_DEDUP` only if the type genuinely supports concurrent runs.
 
 **Trade-offs:**
-- **Advantage:** Safe to click triggers multiple times; no wasted credits or duplicate DB writes.
+- **Advantage:** Safe to trigger multiple times from UI or multiple pods; no wasted credits or duplicate DB writes.
 - **Disadvantage:** A paused job with a dedup key blocks re-enqueue until it is resumed or cancelled. Users who want a fresh run must cancel first.
 
 ---

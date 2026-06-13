@@ -613,23 +613,31 @@ def preprocess_company_sogc_pub(db: Session, company: Company) -> int:
             pub.encoding_fixed = encoding_fixed
             pub.raw_json = json.dumps(entry)
         else:
-            pub = SogcPublication(
-                sogc_id=sogc_id,
-                company_uid=company.uid,
-                company_id=company.id,
-                pub_date=_extract_pub_date(entry),
-                sub_rubric=sub_rubric or None,
-                pub_number=pub_number,
-                text_de=texts["de"],
-                text_fr=texts["fr"],
-                text_it=texts["it"],
-                text_en=texts["en"],
-                detected_language=detected_language,
-                encoding_fixed=encoding_fixed,
-                raw_json=json.dumps(entry),
-            )
-            db.add(pub)
-            db.flush()  # get pub.id
+            from sqlalchemy.exc import IntegrityError as _IE
+            sp = db.begin_nested()
+            try:
+                pub = SogcPublication(
+                    sogc_id=sogc_id,
+                    company_uid=company.uid,
+                    company_id=company.id,
+                    pub_date=_extract_pub_date(entry),
+                    sub_rubric=sub_rubric or None,
+                    pub_number=pub_number,
+                    text_de=texts["de"],
+                    text_fr=texts["fr"],
+                    text_it=texts["it"],
+                    text_en=texts["en"],
+                    detected_language=detected_language,
+                    encoding_fixed=encoding_fixed,
+                    raw_json=json.dumps(entry),
+                )
+                db.add(pub)
+                sp.commit()
+            except _IE:
+                sp.rollback()
+                pub = db.query(SogcPublication).filter_by(sogc_id=sogc_id).first()
+                if pub is None:
+                    raise
 
         # Re-insert changes
         db.query(SogcChange).filter_by(sogc_publication_id=pub.id).delete()
@@ -854,6 +862,7 @@ def run_sogc_preprocess_batch(
         for company in batch:
             if abort_cb:
                 abort_cb()
+            company_uid = company.uid  # capture before try — ORM access after IntegrityError raises PendingRollbackError
             try:
                 n = preprocess_company_sogc_pub(db, company)
                 if n:
@@ -862,12 +871,12 @@ def run_sogc_preprocess_batch(
                 else:
                     stats["skipped_no_pub"] += 1
             except Exception as exc:  # noqa: BLE001
-                logger.warning("SOGC preprocess failed uid=%s: %s", company.uid, exc, exc_info=True)
-                stats["errors"].append(f"{company.uid}: {type(exc).__name__}: {exc}")
                 try:
-                    db.rollback()
+                    db.rollback()  # must come first — session is in PendingRollbackError state
                 except Exception:
                     pass
+                logger.warning("SOGC preprocess failed uid=%s: %s", company_uid, exc, exc_info=True)
+                stats["errors"].append(f"{company_uid}: {type(exc).__name__}: {exc}")
 
         db.commit()
         last_id = batch[-1].id
