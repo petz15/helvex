@@ -46,6 +46,7 @@ export interface Company {
   old_names: string | null;
   head_offices: string | null;
   further_head_offices: string | null;
+  parent_company_id: number | null;
   branch_offices: string | null;
   has_taken_over: string | null;
   was_taken_over_by: string | null;

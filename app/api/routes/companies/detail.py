@@ -70,6 +70,25 @@ def get_company(
     db.commit()
     result = _overlay(db_company, org_state)
     result = result.model_copy(update={"notes": [NoteRead.model_validate(n) for n in scoped_notes]})
+
+    parent_company_id: int | None = None
+    if db_company.head_offices:
+        try:
+            entries = json.loads(db_company.head_offices)
+            if isinstance(entries, dict):
+                entries = [entries]
+            for entry in entries:
+                uid = (entry.get("uid") or entry.get("UID") or "").strip()
+                if uid:
+                    parent = crud.get_company_by_uid(db, uid)
+                    if parent:
+                        parent_company_id = parent.id
+                    break
+        except (TypeError, ValueError):
+            pass
+    if parent_company_id is not None:
+        result = result.model_copy(update={"parent_company_id": parent_company_id})
+
     org: Organization | None = db.get(Organization, current_user.org_id) if current_user.org_id else None
     return _apply_web_results_gate(result, org, current_user.is_superadmin)
 

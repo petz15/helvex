@@ -195,25 +195,33 @@ function legalFormLabel(lf: CompanyShortEntry["legalForm"]): string {
   return "";
 }
 
-function RelatedCompaniesList({ items, label }: { items: CompanyShortEntry[]; label: string }) {
+function RelatedCompaniesList({ items, label, getLink }: { items: CompanyShortEntry[]; label: string; getLink?: (item: CompanyShortEntry, index: number) => string | undefined }) {
   if (items.length === 0) return null;
   return (
     <div>
       <dt className="text-[12px] font-semibold mb-1" style={{ color: "#6b7480" }}>{label}</dt>
       <dd className="space-y-1">
-        {items.map((c, i) => (
-          <div key={c.uid ?? i} className="text-[12px] flex items-center gap-1.5 flex-wrap" style={{ color: "#3f4854" }}>
+        {items.map((c, i) => {
+          const link = getLink?.(c, i);
+          const nameEl = link ? (
+            <Link href={link} className="font-medium hover:text-[#2563eb] hover:underline">{c.name ?? "—"}</Link>
+          ) : (
             <span className="font-medium">{c.name ?? "—"}</span>
-            {c.uid && <span className="font-mono" style={{ color: "#9aa2ad" }}>{c.uid}</span>}
-            {legalFormLabel(c.legalForm) && (
-              <Badge className="bg-slate-100 text-slate-500 text-xs">{legalFormLabel(c.legalForm)}</Badge>
-            )}
-            {c.legalSeat && <span style={{ color: "#9aa2ad" }}>{c.legalSeat}</span>}
-            {c.status && c.status !== "ACTIVE" && (
-              <Badge className="bg-red-50 text-red-600 text-xs">{c.status}</Badge>
-            )}
-          </div>
-        ))}
+          );
+          return (
+            <div key={c.uid ?? i} className="text-[12px] flex items-center gap-1.5 flex-wrap" style={{ color: "#3f4854" }}>
+              {nameEl}
+              {c.uid && <span className="font-mono" style={{ color: "#9aa2ad" }}>{c.uid}</span>}
+              {legalFormLabel(c.legalForm) && (
+                <Badge className="bg-slate-100 text-slate-500 text-xs">{legalFormLabel(c.legalForm)}</Badge>
+              )}
+              {c.legalSeat && <span style={{ color: "#9aa2ad" }}>{c.legalSeat}</span>}
+              {c.status && c.status !== "ACTIVE" && (
+                <Badge className="bg-red-50 text-red-600 text-xs">{c.status}</Badge>
+              )}
+            </div>
+          );
+        })}
       </dd>
     </div>
   );
@@ -682,7 +690,7 @@ export function CompanyDetailClient({ company: initial, readOnlyDemo = false, is
                         </dd>
                       </div>
                     )}
-                    <RelatedCompaniesList items={headOffices} label={t.headoffice} />
+                    <RelatedCompaniesList items={headOffices} label={t.headoffice} getLink={(_, i) => (i === 0 && company.parent_company_id) ? `/app/companies/${company.parent_company_id}` : undefined} />
                     <RelatedCompaniesList items={furtherHeadOffices} label={t.furtherheadoffices} />
                     <RelatedCompaniesList items={branchOffices} label={t.branchoffices} />
                     <RelatedCompaniesList items={hasTakenOver} label={t.hastakenover} />

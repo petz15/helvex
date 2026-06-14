@@ -159,6 +159,7 @@ class CompanyRead(CompanyBase):
 
     id: int
     purpose_language: str | None = None
+    parent_company_id: int | None = None
     website_checked_at: datetime | None = None
     google_search_results_raw: str | None = None
     web_score: int | None = None
