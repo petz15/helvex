@@ -841,6 +841,72 @@ export function CollectionClient() {
         </form>
       </Section>
 
+      <Section title="SIMAP Daily Import">
+        <form onSubmit={async e => {
+          e.preventDefault();
+          const fd = new FormData(e.currentTarget);
+          const date = (fd.get("simap_date") as string)?.trim() || null;
+          await submit("collection/simap-daily", {
+            date: date || undefined,
+            request_delay: parseFloat(fd.get("simap_delay") as string) || 0.12,
+          });
+        }} className="space-y-4">
+          <div>
+            <h2 className="text-sm font-semibold text-slate-800">SIMAP daily import</h2>
+            <p className="mt-1 text-xs text-slate-500">
+              Fetches contract award notices from{" "}
+              <span className="font-mono">simap.ch</span> for a single day.
+              Automatically runs nightly at 04:00 Zurich. Leave date empty to import yesterday.
+            </p>
+          </div>
+          <div className="grid grid-cols-2 gap-4">
+            <Field label="Date (YYYY-MM-DD)" hint="Leave empty for yesterday">
+              <input name="simap_date" type="date" className={inputCls} />
+            </Field>
+            <Field label="Request delay (seconds)" hint="Between SIMAP API calls">
+              <input name="simap_delay" type="number" step="0.01" min="0.05" defaultValue="0.12" className={inputCls} />
+            </Field>
+          </div>
+          <SubmitBtn loading={loading === "collection/simap-daily"} />
+        </form>
+      </Section>
+
+      <Section title="SIMAP Historical Backfill">
+        <form onSubmit={async e => {
+          e.preventDefault();
+          const fd = new FormData(e.currentTarget);
+          const fromDate = (fd.get("simap_from_date") as string)?.trim();
+          const toDate = (fd.get("simap_to_date") as string)?.trim() || undefined;
+          if (!fromDate) { setError("From date is required for SIMAP backfill"); return; }
+          await submit("collection/simap-backfill", {
+            from_date: fromDate,
+            to_date: toDate,
+            request_delay: parseFloat(fd.get("simap_backfill_delay") as string) || 0.12,
+          });
+        }} className="space-y-4">
+          <div>
+            <h2 className="text-sm font-semibold text-slate-800">SIMAP historical backfill</h2>
+            <p className="mt-1 text-xs text-slate-500">
+              Fetches all SIMAP contract awards across a date range. Set from date to{" "}
+              <span className="font-mono">2024-07-01</span> for a full history import (SIMAP launch date).
+              Leave &quot;to date&quot; empty to import through yesterday.
+            </p>
+          </div>
+          <div className="grid grid-cols-2 gap-4">
+            <Field label="From date (YYYY-MM-DD)" hint="Required — use 2024-07-01 for full history">
+              <input name="simap_from_date" type="date" defaultValue="2024-07-01" required className={inputCls} />
+            </Field>
+            <Field label="To date (YYYY-MM-DD)" hint="Leave empty for yesterday">
+              <input name="simap_to_date" type="date" className={inputCls} />
+            </Field>
+          </div>
+          <Field label="Request delay (seconds)">
+            <input name="simap_backfill_delay" type="number" step="0.01" min="0.05" defaultValue="0.12" className={cn(inputCls, "w-32")} />
+          </Field>
+          <SubmitBtn loading={loading === "collection/simap-backfill"} />
+        </form>
+      </Section>
+
       <Section title="SOGC Preprocess">
         <form onSubmit={async e => {
           e.preventDefault();

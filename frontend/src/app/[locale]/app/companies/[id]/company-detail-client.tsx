@@ -14,6 +14,7 @@ import "leaflet/dist/leaflet.css";
 import { SignersPanelDB, SogcTimelineDB } from "@/components/sogc-history";
 import { BoardPanel, AuditorsPanel } from "@/components/board-panel";
 import { CorporateShareholdersPanel } from "@/components/corporate-shareholders-panel";
+import { SimapPanel } from "@/components/simap-panel";
 import { useI18n } from "@/i18n/context";
 import { useApiErrorHandler } from "@/lib/use-api-error";
 
@@ -696,6 +697,8 @@ export function CompanyDetailClient({ company: initial, readOnlyDemo = false, is
               <SignersPanelDB companyId={company.id} />
 
               <SogcTimelineDB companyId={company.id} />
+
+              <SimapPanel companyId={company.id} />
 
               {/* Contact */}
               {(company.contact_name || company.contact_email || company.contact_phone) && (

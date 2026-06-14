@@ -1785,7 +1785,9 @@ web_crawl_playwright   SKIP LOCKED claim tier=playwright|js_required
        ↓ (parallel, different pod)
 web_extract            distinct companies WHERE company_web_pages.needs_extraction=TRUE
                        S3 HTML → trafilatura + regex/schema.org/phonenumbers
-                       → company_web_extract (1 resolved row/company, deduped)
+                       → company_web_extract PK (company_id, url_candidate_id)
+                         one row per company+URL tried; get_best_web_extract() selects
+                         highest-confidence row (then most recent) for downstream use
                        deterministic only; LLM enrichment deferred (see ROADMAP)
                        Runs concurrently with crawling: auto-triggered by _run_crawl_batch
                        when crawled > 0; dedup prevents stacking (one active instance only)
@@ -1867,7 +1869,7 @@ Grafana query: `rate(crawl_result_total[5m])` grouped by `tier` and `status`. Pe
 | `company_url_candidates` | Serper/ScrapingDog URL candidates; one selected per company |
 | `company_crawl_state` | Per-company crawl status, tier, bot flags, re-crawl scheduling |
 | `company_web_pages` | Per-page crawl result; S3 key for raw HTML; `needs_extraction` flag |
-| `company_web_extract` | One resolved structured-data row per company (emails, phones, socials, uid, address, languages, description, service_keywords) |
+| `company_web_extract` | PK `(company_id, url_candidate_id)` — one row per company+URL crawled; `get_best_web_extract()` picks highest-confidence row for display/scoring |
 
 ### Key files
 
@@ -1891,9 +1893,12 @@ Raw HTML stored in `s3_bucket_crawl` under key `crawl/{company_id}/{page_type}.h
 
 Deduplicated (one active per org). Claims distinct companies with `needs_extraction=TRUE`
 pages, downloads each page's HTML from S3, runs `crawler_extract.resolve_company_extract`
-(aggregates + dedups signals across pages), upserts one `company_web_extract` row, and flips
-`needs_extraction=FALSE`. Trigger: `POST /api/v1/crawler/extract` (superadmin). No API cost.
-The optional Claude Haiku enrichment layer is deferred — see ROADMAP.
+(aggregates + dedups signals across pages), upserts one `company_web_extract` row keyed by
+`(company_id, url_candidate_id)`, and flips `needs_extraction=FALSE`. When a company is
+later crawled via a different URL candidate a second row is written; `get_best_web_extract()`
+picks the highest-confidence one for downstream use. Trigger: `POST /api/v1/crawler/extract`
+(superadmin) or auto-triggered after each crawl batch. No API cost.
+The optional Claude Haiku enrichment layer and multi-candidate comparison UI are deferred — see ROADMAP.
 
 ---
 
@@ -2530,3 +2535,70 @@ Controls: "Past mandates" checkbox (rekeys SWR), segmented Timeline | Network to
 | `frontend/src/app/[locale]/app/people/page.tsx` + `people-client.tsx` | People search list (Persons + Auditors tabs). Person cards navigate to the detail page. Auditor cards expand inline with `AuditorDetailPanel` / `AuditorClientsTimeline`. |
 | `frontend/src/app/[locale]/app/people/[id]/page.tsx` | Server component — fetches `SogcPersonEntity` via `GET /sogc/persons/{id}`, passes to `PersonDetailClient`. |
 | `frontend/src/app/[locale]/app/people/[id]/person-detail-client.tsx` | Full-page person profile: dark slate-900 hero header (name, hometown, confidence, verified, identity notes, LinkedIn), role-breakdown stats strip, `TenureTimeline` (full-width Gantt), `NetworkGraph` (1100×620 SVG, wider radial layout), Timeline/Network toggle + Past checkbox. |
+
+## 21. SIMAP Public Procurement Import (Jun 2026)
+
+Imports contract award notices from [simap.ch](https://www.simap.ch) — Switzerland's public procurement platform. Enriches company profiles with a high-intent signal: companies that win public contracts are active, financially healthy, and qualified in their domain.
+
+### API
+
+Fully public, no auth. Three endpoints used:
+
+| Endpoint | Purpose |
+|---|---|
+| `GET /publications/v2/project/project-search` | Paginated award search by date range; multi-value `newestPubTypes` params must be **repeated**, not comma-joined |
+| `GET /publications/v1/project/{projectId}/publication-details/{pubId}` | Full award detail: vendors, price, CPV, lot info |
+| `GET /vendors/v1/vendor/{vendorId}/public` | Vendor profile → `uidNo` (CHE-xxx.xxx.xxx) for company matching |
+
+**Pagination:** Rolling cursor via `lastItem` (not integer offset). Cursor is stored in `job.stats_json["last_cursor"]` for resume support.
+
+**Language handling:** Text fields are Translation objects with de/fr/it/en slots. Only the `creationLanguage` slot is populated; other slots are null. Company matching is UID-based (not text-based) so this has no impact on matching accuracy.
+
+**Coverage:** ~300–900 award records/month. Swiss vendors have 100% CHE UID coverage; foreign vendors (~24%) are stored with `company_id = NULL`.
+
+### Tables
+
+| Table | Key |
+|---|---|
+| `simap_awards` | One row per award project (UNIQUE on `simap_project_id`) |
+| `simap_award_vendors` | One row per vendor per award; UNIQUE on `(award_id, simap_vendor_id)` |
+
+`SimapAward` stores: project/publication IDs, dates, pub_type, process/project type, multilingual title/authority/description (de/fr/it), CPV code, number of submissions, lot number + title, total price selection + range (for direct awards using a price range rather than per-vendor price).
+
+`SimapAwardVendor` stores: `company_id` FK (nullable), CHE UID, vendor name/country/city, price + currency, rank.
+
+Migration: `alembic/versions/0096_add_simap_awards.py`
+
+### Jobs
+
+| Job type | Params | Description |
+|---|---|---|
+| `simap_daily` | `date` (optional, default=yesterday), `request_delay` | Import one day of awards; runs nightly at 04:00 Zurich |
+| `simap_backfill` | `from_date` (required), `to_date` (optional), `request_delay` | Import full date range; resume support via `last_cursor` |
+
+**CRUD guard:** `has_simap_daily_run_today(db)` prevents double-import.
+
+**Auto-scheduler:** Added `_maybe_enqueue_simap_daily(app)` to the existing nightly scheduler thread in `app/main.py`. Runs at Zurich hour == 4 (04:00–04:59), after SHAB (02:xx) and NOGA (03:xx).
+
+**Dedup key:** `simap_daily:{org_id}` / `simap_backfill:{org_id}` — one active import at a time per org.
+
+### Files
+
+| File | Purpose |
+|---|---|
+| `app/clients/simap_client.py` | HTTP client for all three SIMAP endpoints; `best_title()` helper (DE→FR→IT→EN fallback) |
+| `app/models/simap_award.py` | `SimapAward` ORM model; `best_title()`, `best_proc_office()` methods |
+| `app/models/simap_award_vendor.py` | `SimapAwardVendor` ORM model |
+| `app/services/simap_import.py` | Core import function: paginates, fetches details + vendor profiles, upserts awards + vendors, matches CHE UIDs; returns stats |
+| `app/services/job_handlers/simap.py` | Job handler for both `simap_daily` and `simap_backfill`; resume via `last_cursor` in `stats_json` |
+| `app/crud/job_run.py` | `has_simap_daily_run_today()` guard (mirrors `has_shab_daily_run_today`) |
+| `frontend/src/components/simap-panel.tsx` | Company detail panel: useSWR on `GET /api/v1/companies/{id}/simap-awards`; renders award cards with price, authority, CPV; null-returns if no awards; show-more collapse after 3 |
+| `frontend/src/app/[locale]/app/collection/collection-client.tsx` | Admin trigger sections: "SIMAP Daily Import" + "SIMAP Historical Backfill" |
+
+### API Endpoints
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/api/v1/companies/{id}/simap-awards` | Awards where this company was a winning vendor (joined with vendor row for price) |
+| `POST` | `/api/v1/jobs/collection/simap-daily` | Trigger daily import (superadmin only) |
+| `POST` | `/api/v1/jobs/collection/simap-backfill` | Trigger backfill import with date range (superadmin only) |

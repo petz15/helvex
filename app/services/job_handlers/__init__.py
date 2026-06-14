@@ -86,6 +86,7 @@ from app.services.job_handlers import (  # noqa: E402
     noga,
     shab,
     shab_archive,
+    simap,
     sogc_entity_resolution,
     sogc_persons,
     sogc_preprocess,
@@ -123,6 +124,9 @@ JOB_HANDLERS: dict[str, Callable[[JobContext], tuple[dict, str]]] = {
     "analyze_boilerplate":       stopwords.handle_analyze_boilerplate,
     # Claude classification
     "claude_classify":           claude.handle_claude_classify,
+    # SIMAP
+    "simap_daily":               simap.handle_simap,
+    "simap_backfill":            simap.handle_simap,
     # SHAB / SOGC
     "shab_daily":                shab.handle_shab,
     "shab_backfill":             shab.handle_shab,

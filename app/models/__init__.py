@@ -32,6 +32,8 @@ from app.models.sogc_corporate_role import SogcCorporateRole
 from app.models.sogc_person_appearance import SogcPersonAppearance
 from app.models.sogc_person_entity import SogcPersonEntity
 from app.models.sogc_person_flag import SogcPersonFlag
+from app.models.simap_award import SimapAward
+from app.models.simap_award_vendor import SimapAwardVendor
 from app.models.sogc_publication import SogcPublication
 from app.models.tfidf_stopword import TfidfStopword
 from app.models.user import User
@@ -48,6 +50,7 @@ __all__ = [
     "JobRun", "JobRunEvent", "Note", "OAuthAccount", "OrgCompanyState",
     "OrgCreditTransaction", "OrgMember", "OrgPaymentMethod", "OrgSetting",
     "Organization", "PaymentTransaction",
+    "SimapAward", "SimapAwardVendor",
     "SogcAuditor", "SogcChange", "SogcCorporateRole", "SogcPersonAppearance", "SogcPersonEntity",
     "SogcPersonFlag", "SogcPublication",
     "TfidfStopword", "User", "UserCompanyState", "UserOrgSetting", "UserView",

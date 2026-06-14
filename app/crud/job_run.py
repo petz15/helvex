@@ -627,3 +627,27 @@ def has_shab_daily_run_today(db: Session) -> bool:
         .first()
         is not None
     )
+
+
+def has_simap_daily_run_today(db: Session) -> bool:
+    """Return True if a simap_daily job is active or successfully completed today (UTC).
+
+    Mirrors ``has_shab_daily_run_today`` — used by the 04:00 Zurich scheduler.
+    """
+    from datetime import timedelta
+
+    today_start = datetime.now(tz=timezone.utc).replace(
+        hour=0, minute=0, second=0, microsecond=0
+    )
+    today_end = today_start + timedelta(days=1)
+    return (
+        db.query(JobRun)
+        .filter(
+            JobRun.job_type == "simap_daily",
+            JobRun.queued_at >= today_start,
+            JobRun.queued_at < today_end,
+            JobRun.status.notin_(["failed", "cancelled"]),
+        )
+        .first()
+        is not None
+    )

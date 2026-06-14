@@ -268,11 +268,12 @@ def _maybe_enqueue_billing_renewal(app) -> None:
 
 
 def _start_nightly_shab_scheduler(app) -> None:
-    """Start a background daemon thread for nightly SHAB import and NOGA classification.
+    """Start a background daemon thread for nightly SHAB/SIMAP import and NOGA classification.
 
     Wakes every 10 minutes.
       02:00–02:59 Zurich → enqueues shab_daily for yesterday
       03:00–03:59 Zurich → enqueues reclassify_noga (missing + stale) on helvex-ml
+      04:00–04:59 Zurich → enqueues simap_daily for yesterday
     """
     import threading
     import time
@@ -288,6 +289,10 @@ def _start_nightly_shab_scheduler(app) -> None:
                 _maybe_enqueue_noga_nightly(app)
             except Exception:
                 _app_logger.warning("NOGA nightly scheduler iteration failed", exc_info=True)
+            try:
+                _maybe_enqueue_simap_daily(app)
+            except Exception:
+                _app_logger.warning("SIMAP daily scheduler iteration failed", exc_info=True)
 
     t = threading.Thread(target=_scheduler_loop, daemon=True, name="shab-nightly-scheduler")
     t.start()
@@ -335,6 +340,42 @@ def _maybe_enqueue_shab_daily(app) -> None:
 
     kick_job_worker(app)
     logger.info("shab_nightly_scheduler: enqueued shab_daily for %s", yesterday)
+
+
+def _maybe_enqueue_simap_daily(app) -> None:
+    """Enqueue a simap_daily job for yesterday if it's 04:00–04:59 Zurich time and not done yet."""
+    from datetime import datetime, timedelta, timezone
+
+    try:
+        from zoneinfo import ZoneInfo
+        tz_zurich = ZoneInfo("Europe/Zurich")
+    except Exception:  # noqa: BLE001
+        tz_zurich = timezone(timedelta(hours=1))
+
+    now_local = datetime.now(tz=tz_zurich)
+    if now_local.hour != 4:
+        return
+
+    from app.crud import create_event, has_simap_daily_run_today
+    from app.database import SessionLocal
+    from app.services.job_worker import _enqueue_job_in_session, kick_job_worker
+
+    yesterday = (datetime.now(tz=timezone.utc) - timedelta(days=1)).date()
+
+    with SessionLocal() as db:
+        if has_simap_daily_run_today(db):
+            return
+
+        job = _enqueue_job_in_session(
+            db,
+            job_type="simap_daily",
+            label=f"SIMAP daily import — {yesterday.isoformat()} (auto)",
+            params={"date": yesterday.isoformat(), "request_delay": 0.12},
+        )
+        create_event(db, job_id=job.id, level="info", message="Auto-queued by nightly scheduler")
+
+    kick_job_worker(app)
+    logger.info("shab_nightly_scheduler: enqueued simap_daily for %s", yesterday)
 
 
 def _maybe_enqueue_noga_nightly(app) -> None:

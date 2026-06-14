@@ -1059,6 +1059,105 @@ def trigger_shab_backfill(
     return JobOut.from_orm_obj(job)
 
 
+# ── SIMAP award import triggers ───────────────────────────────────────────────
+
+_SIMAP_EARLIEST_DATE_STR = "2024-07-01"
+
+
+class SimapDailyBody(BaseModel):
+    date: str | None = None       # ISO date YYYY-MM-DD; defaults to yesterday
+    request_delay: float = 0.12
+
+
+class SimapBackfillBody(BaseModel):
+    from_date: str                # ISO date YYYY-MM-DD, required
+    to_date: str | None = None    # defaults to yesterday
+    request_delay: float = 0.12
+
+
+@router.post("/collection/simap-daily", response_model=JobOut, status_code=status.HTTP_202_ACCEPTED)
+def trigger_simap_daily(
+    body: SimapDailyBody,
+    request: Request,
+    db: Session = Depends(get_db),
+    _: User = Depends(require_superadmin),
+):
+    """Import SIMAP award publications for a single day (default: yesterday)."""
+    from datetime import date, timedelta, timezone
+    from datetime import datetime as _dt
+
+    if body.date:
+        try:
+            target = date.fromisoformat(body.date)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=f"Invalid date: {exc}") from exc
+    else:
+        target = (_dt.now(tz=timezone.utc) - timedelta(days=1)).date()
+
+    label = f"SIMAP daily import — {target.isoformat()}"
+    job = _enqueue_or_http_error(
+        request,
+        job_type="simap_daily",
+        label=label,
+        params={"date": target.isoformat(), "request_delay": body.request_delay},
+        db=db,
+    )
+    return JobOut.from_orm_obj(job)
+
+
+@router.post("/collection/simap-backfill", response_model=JobOut, status_code=status.HTTP_202_ACCEPTED)
+def trigger_simap_backfill(
+    body: SimapBackfillBody,
+    request: Request,
+    db: Session = Depends(get_db),
+    _: User = Depends(require_superadmin),
+):
+    """Import all SIMAP award publications for a date range.
+
+    SIMAP launched in July 2024 — use from_date=2024-07-01 for full history.
+    """
+    from datetime import date, timedelta, timezone
+    from datetime import datetime as _dt
+
+    _earliest = date.fromisoformat(_SIMAP_EARLIEST_DATE_STR)
+
+    try:
+        from_date = date.fromisoformat(body.from_date)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=f"Invalid from_date: {exc}") from exc
+
+    if body.to_date:
+        try:
+            to_date = date.fromisoformat(body.to_date)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=f"Invalid to_date: {exc}") from exc
+    else:
+        to_date = (_dt.now(tz=timezone.utc) - timedelta(days=1)).date()
+
+    if from_date > to_date:
+        raise HTTPException(status_code=400, detail="from_date must be on or before to_date")
+    if from_date < _earliest:
+        raise HTTPException(
+            status_code=400,
+            detail=f"from_date must be on or after {_SIMAP_EARLIEST_DATE_STR} (SIMAP launch date)",
+        )
+
+    days = (to_date - from_date).days + 1
+    label = f"SIMAP backfill — {from_date} → {to_date} ({days} day{'s' if days != 1 else ''})"
+    job = _enqueue_or_http_error(
+        request,
+        job_type="simap_backfill",
+        label=label,
+        params={
+            "from_date": from_date.isoformat(),
+            "to_date": to_date.isoformat(),
+            "request_delay": body.request_delay,
+        },
+        db=db,
+    )
+    return JobOut.from_orm_obj(job)
+
+
 @router.post("/collection/shab-archive", response_model=JobOut, status_code=status.HTTP_202_ACCEPTED)
 def trigger_shab_archive(
     body: ShabArchiveBody,

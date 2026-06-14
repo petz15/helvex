@@ -3,16 +3,20 @@
 from __future__ import annotations
 
 import json
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel
-from sqlalchemy.orm import Session
+from sqlalchemy import select
+from sqlalchemy.orm import Session, joinedload
 
 from app import crud
 from app.auth import get_current_user
 from app.services.rate_limit import check_rate_limit
 from app.database import get_db
 from app.models.organization import Organization
+from app.models.simap_award import SimapAward
+from app.models.simap_award_vendor import SimapAwardVendor
 from app.models.user import User
 from app.schemas.company import CompanyCreate, CompanyRead, CompanyUpdate, GoogleSearchResult
 from app.schemas.note import NoteRead
@@ -334,3 +338,65 @@ def select_company_website(
     )
     db.commit()
     return updated
+
+
+@router.get("/{company_id}/simap-awards", summary="Get SIMAP contract awards for a company")
+def get_company_simap_awards(
+    company_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> list[dict[str, Any]]:
+    """Return all SIMAP contract award records where this company was a winning vendor."""
+    db_company = crud.get_company(db, company_id)
+    if not db_company:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Company not found")
+
+    rows = db.execute(
+        select(SimapAwardVendor)
+        .where(SimapAwardVendor.company_id == company_id)
+        .options(joinedload(SimapAwardVendor.award))
+        .order_by(SimapAwardVendor.id.desc())
+    ).scalars().all()
+
+    result = []
+    for v in rows:
+        a = v.award
+        result.append({
+            "id": a.id,
+            "publication_date": a.publication_date.isoformat() if a.publication_date else None,
+            "award_decision_date": a.award_decision_date.isoformat() if a.award_decision_date else None,
+            "title_de": a.title_de,
+            "title_fr": a.title_fr,
+            "title_it": a.title_it,
+            "best_title": a.best_title(),
+            "proc_office_name_de": a.proc_office_name_de,
+            "proc_office_name_fr": a.proc_office_name_fr,
+            "proc_office_name_it": a.proc_office_name_it,
+            "best_proc_office": a.best_proc_office(),
+            "pub_type": a.pub_type,
+            "process_type": a.process_type,
+            "project_type": a.project_type,
+            "project_subtype": a.project_subtype,
+            "cpv_code": a.cpv_code,
+            "order_description_de": a.order_description_de,
+            "order_description_fr": a.order_description_fr,
+            "order_description_it": a.order_description_it,
+            "number_of_submissions": a.number_of_submissions,
+            "lot_number": a.lot_number,
+            "lot_title_de": a.lot_title_de,
+            "lot_title_fr": a.lot_title_fr,
+            "lot_title_it": a.lot_title_it,
+            "project_number": a.project_number,
+            "publication_number": a.publication_number,
+            # Vendor-specific fields for this company
+            "price": float(v.price) if v.price is not None else None,
+            "price_currency": v.price_currency,
+            "rank": v.rank,
+            # Total price range (when individual price is not set)
+            "total_price_selection": a.total_price_selection,
+            "total_price_range_min": float(a.total_price_range_min) if a.total_price_range_min is not None else None,
+            "total_price_range_max": float(a.total_price_range_max) if a.total_price_range_max is not None else None,
+            "total_price_currency": a.total_price_currency,
+        })
+
+    return result

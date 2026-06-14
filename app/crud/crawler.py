@@ -288,6 +288,7 @@ def claim_crawl_batch(
     states = (
         db.query(CompanyCrawlState)
         .filter(CompanyCrawlState.company_id.in_(company_ids))
+        .order_by(CompanyCrawlState.company_id)  # deterministic order prevents lock-inversion deadlock
         .all()
     )
     for s in states:
@@ -498,16 +499,41 @@ def get_extractable_pages(db: Session, company_id: int) -> list[CompanyWebPage]:
     )
 
 
-def upsert_web_extract(db: Session, company_id: int, data: dict) -> None:
-    """Insert or replace the resolved structured-extract row for a company."""
+def upsert_web_extract(db: Session, company_id: int, url_candidate_id: int, data: dict) -> None:
+    """Insert or update the extraction row for a (company, URL candidate) pair."""
     now = datetime.now(timezone.utc)
-    values = {"company_id": company_id, "extracted_at": now, **data}
+    values = {
+        "company_id": company_id,
+        "url_candidate_id": url_candidate_id,
+        "extracted_at": now,
+        **data,
+    }
     stmt = pg_insert(CompanyWebExtract).values(**values)
     update_cols = {k: getattr(stmt.excluded, k) for k in data}
     update_cols["extracted_at"] = stmt.excluded.extracted_at
-    stmt = stmt.on_conflict_do_update(index_elements=["company_id"], set_=update_cols)
+    stmt = stmt.on_conflict_do_update(
+        index_elements=["company_id", "url_candidate_id"],
+        set_=update_cols,
+    )
     db.execute(stmt)
     db.flush()
+
+
+def get_best_web_extract(db: Session, company_id: int) -> "CompanyWebExtract | None":
+    """Return the highest-confidence extraction result for a company.
+
+    When a company has been crawled via multiple URL candidates, picks the row
+    with the highest confidence score. Ties are broken by most recent extracted_at.
+    """
+    return (
+        db.query(CompanyWebExtract)
+        .filter(CompanyWebExtract.company_id == company_id)
+        .order_by(
+            CompanyWebExtract.confidence.desc().nulls_last(),
+            CompanyWebExtract.extracted_at.desc(),
+        )
+        .first()
+    )
 
 
 def mark_pages_extracted(db: Session, company_id: int) -> int:

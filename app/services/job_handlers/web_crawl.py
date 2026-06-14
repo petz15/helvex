@@ -204,6 +204,7 @@ def _run_crawl_batch(
     if limit is not None:
         total = min(total, limit)
     done = 0
+    _playwright_enqueued = False  # trigger at most once per run
 
     try:
         while True:
@@ -264,7 +265,7 @@ def _run_crawl_batch(
                     if (
                         tier == "http"
                         and fs == "bot_blocked"
-                        and result.bot_protection_type in ("cloudflare", "js_challenge")
+                        and result.bot_protection_type in ("cloudflare", "js_challenge", "captcha")
                     ):
                         # Hard bot block on the HTTP tier — hand off to Playwright
                         # (real browser) instead of failing terminally.
@@ -323,6 +324,22 @@ def _run_crawl_batch(
             ctx.db.commit()
             done += len(batch)
 
+            # When the HTTP tier finds js_required companies, kick off playwright
+            # automatically. One job drains all js_required rows via SKIP LOCKED.
+            if tier == "http" and stats.get("js_required", 0) > 0 and not _playwright_enqueued:
+                try:
+                    ctx.enqueue_job(
+                        job_type="web_crawl_playwright",
+                        label="Playwright crawl (auto — js_required)",
+                        params={},
+                        org_id=None,
+                        user_id=ctx.job.user_id,
+                    )
+                    ctx.db.commit()
+                    _playwright_enqueued = True
+                except Exception as exc:  # noqa: BLE001
+                    logger.debug("Auto-enqueue web_crawl_playwright skipped: %s", exc)
+
             # Trigger extraction after each batch so it runs in parallel on a
             # separate pod. Dedup returns the existing job if one is already
             # running (no-op). When extraction finishes mid-crawl, the next
@@ -351,11 +368,21 @@ def _run_crawl_batch(
             crud.create_event(ctx.db, job_id=ctx.job.id, level="debug", message=msg)
 
     finally:
+        # Roll back any aborted transaction first so the session is clean.
+        # Without this a deadlock (or any mid-batch DB error) leaves the
+        # session in InFailedSqlTransaction and the release UPDATE below fails too.
+        try:
+            ctx.db.rollback()
+        except Exception:
+            pass
         # Release any in_progress rows we claimed but didn't finish
-        # (covers pause, cancel, unexpected exception)
-        still_stuck = crawler_crud.release_in_progress_states(ctx.db, tier=tier)
-        if still_stuck:
-            ctx.db.commit()
+        # (covers pause, cancel, unexpected exception, deadlock rollback)
+        try:
+            still_stuck = crawler_crud.release_in_progress_states(ctx.db, tier=tier)
+            if still_stuck:
+                ctx.db.commit()
+        except Exception as exc:
+            logger.warning("release_in_progress_states failed during cleanup: %s", exc)
 
     tier_label = "Playwright" if tier == "playwright" else "HTTP"
     done_msg = (
@@ -443,6 +470,9 @@ def handle_web_extract(ctx: JobContext) -> tuple[dict, str]:
             ctx.assert_not_cancelled()
             try:
                 pages = crawler_crud.get_extractable_pages(ctx.db, company_id)
+                # All pages for one company share the same url_candidate_id
+                # (delete_web_pages_for_company wipes old pages before each crawl).
+                url_candidate_id = pages[0].url_candidate_id if pages else None
                 page_blobs: list[tuple[str, bytes]] = []
                 for p in pages:
                     try:
@@ -453,8 +483,8 @@ def handle_web_extract(ctx: JobContext) -> tuple[dict, str]:
                         logger.debug("S3 download failed for %s: %s", p.s3_key_html, exc)
 
                 data = crawler_extract.resolve_company_extract(page_blobs) if page_blobs else {}
-                if data:
-                    crawler_crud.upsert_web_extract(ctx.db, company_id, data)
+                if data and url_candidate_id is not None:
+                    crawler_crud.upsert_web_extract(ctx.db, company_id, url_candidate_id, data)
                     stats["extracted"] += 1
                 else:
                     stats["empty"] += 1

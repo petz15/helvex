@@ -11,17 +11,16 @@
 
 
 - **Major features**: 
-    - Webcrawler for company websites
+    - Webcrawler for company websites -> started, needs to be checked
     - Linkedin unoffical API or scraper for people finder/graph and get more information
     - API access
     - Integrations with other products such as appollo etc?
     - other industry specific directories
-    - Definitely more overview of management
     - Potentially other verbände such as Anwaltsverband, lobbywatch etc
-    - View of Auditoren
-    - CRM parts (add contact, etc)
+    - View of Auditoren -> started needs to be checked
+    - CRM parts (add contact, etc) -> there are github projects I could use?
     - Brand and Product ranking via LLM (thx Tim G.)
-    - Data from SIMAP (augeschrieben + won) -> integrating government bodies might be somewhat difficult
+    - Data from SIMAP (augeschrieben + won) -> integrating government bodies might be somewhat difficult -> started need be checked, government bodies are not done yet (potentially this could be simply be added as other companies or extented bodies?) 
     - 
 
 ### MVP before public PROD
@@ -98,11 +97,19 @@
 ## Company Data
 
 - [ ] **Historic SHAB import** - from the official SHAB website, get all the pre 2018 SHAB publications -> and then use them for my sogc stuff. need merge logic from the current zefix imports to avoid duplications and keep manageable. needs pdf parsing
+
+- [ ] **SIMAP archive backfill** — import historical procurement award data from `archiv.simap.ch` (covers pre-July-2024 data; the current `simap_backfill` job only covers July 2024+ via `simap.ch/api`).
+  - **API:** `POST https://archiv.simap.ch/api/search` with `type_cd_ob: "OB02,OB08"` (Zuschläge); integer-paged (`pageNo`/`recordsPerPage`); detail via `GET /api/detail?meldungsnummer={id}` (returns JSON). Vendor data is in `OB02.SPEC.OB02.AWARD.PRIM.CONTRACTOR.LIST.PRIM.CONTRACTOR` — name + address, **no CHE UID**.
+  - **Company matching — name index approach:** Since the archive has no CHE UIDs, matching requires a name-based lookup. Build a `{normalized_name → company_id}` index at job start from: (1) `companies.name` (current), (2) `sogc_changes.raw_excerpt` where `change_type='name'` (historical renamed-to names), (3) bisher-pattern extraction from those same excerpts (renamed-from names). Normalize: lowercase, strip legal suffixes (AG/GmbH/SA/Sàrl), collapse whitespace. Use vendor `ZIPCODE` (4-digit PLZ) as a tiebreaker only when the normalized name maps to multiple companies — never as a required constraint. If ambiguous after ZIP tiebreak → `company_id = NULL`. Past addresses from SOGC (`change_type='address'`) are free-form text and too noisy to use reliably; skip.
+  - **⚠ Blocked on complete SOGC/SHAB history:** The name index quality is directly proportional to SOGC coverage. Without full historical SHAB imports (pre-2018 PDF archive + full eSHAB data), companies that renamed before our SOGC window will be missed entirely. Run this backfill only after Historic SHAB import and eSHAB data are complete.
+  - **Implementation:** New `app/clients/simap_archive_client.py` + `app/services/simap_archive_import.py` (name index builder + paginated import). Reuses existing `simap_awards` / `simap_award_vendors` tables. New job type `simap_archive_backfill`, admin trigger in collection page. Resume via stored `page_no` in `stats_json`.
 - [ ] **CSV export** — export current filtered/sorted dashboard view as CSV; include all visible columns; respect active filters and column selection -> somewhat exists but not fully operational yet. No way to set which columns the CSV exports currently!
 - [ ] **Web crawler** — crawl company websites to extract description, contact info, product/service keywords; store as structured fields; feed into scoring and classification; replace/supplement current Google scrape
 - [ ] **Web extract — LLM enrichment layer** — on top of the deterministic `web_extract` job (emails/phones/UID/socials/keywords), add an optional Claude Haiku layer that summarizes the cleaned main text into a company description + service summary + category hint. Must be tier/credit-gated (reuse `claude_classify` gating + batch-API pattern); run only on cleaned text to bound tokens; never ungated. Deferred from the phase-1 crawler ingestion build.
 - [ ] **Web crawler — external paid scrape fallback tier** — a 3rd `tier=external` last resort for hard Cloudflare/CAPTCHA sites that defeat both httpx (curl_cffi impersonation) and Playwright. Reuse the existing ScrapingDog integration pattern (`scrapingdog_search_client.py`); gate by org/credits so cost is bounded to the few sites that need it. Deferred from the phase-2 bot-protection build.
 - [ ] **Web extract — company-profile UI** — surface extracted contacts (emails/phones/socials), address, UID, languages, and description on the company detail page, sourced from `company_web_extract`. Decide placement/QOL (per CLAUDE.md frontend-wiring rule). Deferred from the phase-1 crawler ingestion build.
+- [ ] **Web extract — multi-candidate comparison & discard UI** — `company_web_extract` now has PK `(company_id, url_candidate_id)`, so a company crawled with multiple URL candidates accumulates one row per candidate. `get_best_web_extract()` auto-selects the highest-confidence row, but there is no UI to compare candidates side-by-side, promote a lower-ranked one manually, or prune stale low-quality rows. Build a per-company extract comparison panel (crawler admin or company detail) with promote/discard actions. Also: surface the winning candidate in company scoring once web_extract signals are wired into combined_score.
+- [ ] **Web extract — wire into combined_score** — `web_score` already uses Serper result quality (URL presence + domain match). `company_web_extract` now provides richer signals (UID match, email/phone presence, description quality, keyword count). Replace or supplement `web_score` computation with these deterministic extraction signals to reduce dependence on the Google Search quality. Requires scoring.py changes and a `recalculate_scores` run.
 - [ ] **Google results & scoring** — Improve the selection and scoring of google results
 - [ ] **NOGA Data** — add NOGA data (or similar) which is something other sites have such as business-monitor.ch or moneyhouse.ch -> first implementation done via AI classification; needs improvement preferably without AI or optional with AI; displaying is not looking too good yet; only shows the level it is confident in but not the full hierarchy -> NOGA classification should be done via AI
 - [ ] **Free tier**- show some limited or teaser data for free tier

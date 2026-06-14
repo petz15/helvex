@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import DateTime, Float, ForeignKey, Integer, String, Text, func
+from sqlalchemy import BigInteger, DateTime, Float, ForeignKey, Integer, PrimaryKeyConstraint, String, Text, func
 from sqlalchemy.dialects.postgresql import ARRAY
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.types import JSON, TypeDecorator
@@ -24,19 +24,27 @@ class _ArrayOfText(TypeDecorator):
 class CompanyWebExtract(Base):
     """Resolved structured data extracted from a company's crawled web pages.
 
-    One row per company (the latest extraction), aggregated across all of its
-    crawled pages in ``company_web_pages``. Contact signals (emails, phones,
-    socials) repeat across pages — they are deduplicated here at write time so
-    downstream consumers (scoring, NOGA, profile) read a single resolved view.
+    One row per (company, URL candidate). When a company is crawled via multiple
+    URL candidates the best row (highest confidence, then most recent) is returned
+    by get_best_web_extract(). This lets downstream code compare results across
+    candidates and discard lower-quality ones without losing history.
 
     Produced by the ``web_extract`` job from raw HTML stored in S3. No API cost:
     trafilatura main-text extraction + deterministic parsers only.
     """
 
     __tablename__ = "company_web_extract"
+    __table_args__ = (
+        PrimaryKeyConstraint("company_id", "url_candidate_id"),
+    )
 
     company_id: Mapped[int] = mapped_column(
-        Integer, ForeignKey("companies.id", ondelete="CASCADE"), primary_key=True, nullable=False
+        Integer, ForeignKey("companies.id", ondelete="CASCADE"), nullable=False
+    )
+    url_candidate_id: Mapped[int] = mapped_column(
+        BigInteger,
+        ForeignKey("company_url_candidates.id", ondelete="CASCADE"),
+        nullable=False,
     )
     emails: Mapped[list[str] | None] = mapped_column(_ArrayOfText, nullable=True)
     phones: Mapped[list[str] | None] = mapped_column(_ArrayOfText, nullable=True)
