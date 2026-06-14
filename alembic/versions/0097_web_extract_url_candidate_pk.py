@@ -7,16 +7,16 @@ so multiple results can coexist per company (one per URL tried). The best row
 Rows that cannot be linked to a candidate (no crawl state / no selected URL) are
 deleted — they will be regenerated on the next web_extract run with proper linkage.
 
-Revision ID: 0096
-Revises: 0095
+Revision ID: 0097
+Revises: 0096
 Create Date: 2026-06-14
 """
 
 import sqlalchemy as sa
 from alembic import op
 
-revision: str = "0096"
-down_revision: str = "0095"
+revision: str = "0097"
+down_revision: str = "0096"
 branch_labels = None
 depends_on = None
 

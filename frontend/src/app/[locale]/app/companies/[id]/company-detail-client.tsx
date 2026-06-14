@@ -690,7 +690,7 @@ export function CompanyDetailClient({ company: initial, readOnlyDemo = false, is
                         </dd>
                       </div>
                     )}
-                    <RelatedCompaniesList items={headOffices} label={t.headoffice} getLink={(_, i) => (i === 0 && company.parent_company_id) ? `/app/companies/${company.parent_company_id}` : undefined} />
+                    <RelatedCompaniesList items={headOffices} label={t.headoffice} getLink={(_, i) => (i === 0 && company.parent_company_id != null) ? `/app/companies/${company.parent_company_id}` : undefined} />
                     <RelatedCompaniesList items={furtherHeadOffices} label={t.furtherheadoffices} />
                     <RelatedCompaniesList items={branchOffices} label={t.branchoffices} />
                     <RelatedCompaniesList items={hasTakenOver} label={t.hastakenover} />
