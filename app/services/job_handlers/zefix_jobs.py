@@ -145,8 +145,10 @@ def handle_batch(ctx: JobContext) -> tuple[dict, str]:
         status_cb=lambda m: ctx.status_with_stats(m),
         abort_cb=ctx.assert_not_cancelled,
     )
+    from app.services.web_enrichment import _active_provider
+    provider = _active_provider(ctx.db)
     done_msg = (
-        f"Done — {stats['google_enriched']} enriched, "
+        f"Done [{provider}] — {stats['google_enriched']} enriched, "
         f"{stats['google_no_result']} no result, {len(stats['errors'])} errors"
     )
     if stats.get("warnings"):

@@ -95,6 +95,7 @@ class CompanyUpdate(BaseModel):
     zefix_raw: str | None = None
     google_search_results_raw: str | None = None
     google_search_full_raw: str | None = None
+    google_search_params: dict | None = None
     web_score: int | None = None
     social_media_only: bool | None = None
     review_status: str | None = None

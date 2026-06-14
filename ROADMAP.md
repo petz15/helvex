@@ -56,6 +56,7 @@
 - Broad stop words for google search anything with vergleich in the domain name but not in the zweck or company name
 - API key management not working as intended. multiple bugs and no clear way to manage models. code needs to be checked how it deals with multiple providers and model when sending requests
 - NOGA v2: 366482 is terrible, how is this possible. 367779 another example. a part is too short zweck (difficult to mitigate unless website available) another part is the dirty gmbh text. 
+- Scrapingdog: check some url results, I found one where it gave me results from other countries but I cant recreate id: 46434 recruit4u
 
 
 ### UI fixes:
@@ -99,6 +100,9 @@
 - [ ] **Historic SHAB import** - from the official SHAB website, get all the pre 2018 SHAB publications -> and then use them for my sogc stuff. need merge logic from the current zefix imports to avoid duplications and keep manageable. needs pdf parsing
 - [ ] **CSV export** — export current filtered/sorted dashboard view as CSV; include all visible columns; respect active filters and column selection -> somewhat exists but not fully operational yet. No way to set which columns the CSV exports currently!
 - [ ] **Web crawler** — crawl company websites to extract description, contact info, product/service keywords; store as structured fields; feed into scoring and classification; replace/supplement current Google scrape
+- [ ] **Web extract — LLM enrichment layer** — on top of the deterministic `web_extract` job (emails/phones/UID/socials/keywords), add an optional Claude Haiku layer that summarizes the cleaned main text into a company description + service summary + category hint. Must be tier/credit-gated (reuse `claude_classify` gating + batch-API pattern); run only on cleaned text to bound tokens; never ungated. Deferred from the phase-1 crawler ingestion build.
+- [ ] **Web crawler — external paid scrape fallback tier** — a 3rd `tier=external` last resort for hard Cloudflare/CAPTCHA sites that defeat both httpx (curl_cffi impersonation) and Playwright. Reuse the existing ScrapingDog integration pattern (`scrapingdog_search_client.py`); gate by org/credits so cost is bounded to the few sites that need it. Deferred from the phase-2 bot-protection build.
+- [ ] **Web extract — company-profile UI** — surface extracted contacts (emails/phones/socials), address, UID, languages, and description on the company detail page, sourced from `company_web_extract`. Decide placement/QOL (per CLAUDE.md frontend-wiring rule). Deferred from the phase-1 crawler ingestion build.
 - [ ] **Google results & scoring** — Improve the selection and scoring of google results
 - [ ] **NOGA Data** — add NOGA data (or similar) which is something other sites have such as business-monitor.ch or moneyhouse.ch -> first implementation done via AI classification; needs improvement preferably without AI or optional with AI; displaying is not looking too good yet; only shows the level it is confident in but not the full hierarchy -> NOGA classification should be done via AI
 - [ ] **Free tier**- show some limited or teaser data for free tier

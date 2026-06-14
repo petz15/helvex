@@ -159,6 +159,176 @@ def get_analytics(
     }
 
 
+# ── Crawler admin ──────────────────────────────────────────────────────────────
+
+@router.get("/crawler/stats", summary="Crawler pipeline health summary (superadmin)")
+def get_crawler_stats(
+    db: Session = Depends(get_db),
+    _: User = Depends(_require_superadmin),
+) -> dict:
+    """Aggregate counts across all crawler tables for the superadmin health page."""
+    from sqlalchemy import text as _text
+
+    status_rows = db.execute(_text(
+        "SELECT crawl_status, COUNT(*) FROM company_crawl_state GROUP BY crawl_status"
+    )).fetchall()
+    status_counts = {row[0]: int(row[1]) for row in status_rows}
+
+    tier_rows = db.execute(_text(
+        "SELECT tier, COUNT(*) FROM company_crawl_state "
+        "WHERE crawl_status NOT IN ('no_website') GROUP BY tier"
+    )).fetchall()
+    tier_counts = {row[0]: int(row[1]) for row in tier_rows}
+
+    cand_rows = db.execute(_text(
+        "SELECT status, COUNT(*) FROM company_url_candidates GROUP BY status"
+    )).fetchall()
+    candidate_counts = {row[0]: int(row[1]) for row in cand_rows}
+
+    page_row = db.execute(_text(
+        "SELECT COUNT(*), "
+        "  COUNT(s3_key_html), "
+        "  COUNT(*) FILTER (WHERE needs_extraction = TRUE) "
+        "FROM company_web_pages"
+    )).fetchone()
+    pages_total = int(page_row[0]) if page_row else 0
+    pages_in_s3 = int(page_row[1]) if page_row else 0
+    pages_needing_extraction = int(page_row[2]) if page_row else 0
+
+    extract_row = db.execute(_text(
+        "SELECT COUNT(*), AVG(confidence) FROM company_web_extract"
+    )).fetchone()
+    companies_extracted = int(extract_row[0]) if extract_row else 0
+    avg_confidence = round(float(extract_row[1]), 3) if extract_row and extract_row[1] else None
+
+    return {
+        "status_counts": status_counts,
+        "tier_counts": tier_counts,
+        "candidate_counts": candidate_counts,
+        "pages_total": pages_total,
+        "pages_in_s3": pages_in_s3,
+        "pages_needing_extraction": pages_needing_extraction,
+        "companies_extracted": companies_extracted,
+        "avg_confidence": avg_confidence,
+    }
+
+
+@router.get("/crawler/failures", summary="Recent terminal crawl failures (superadmin)")
+def get_crawler_failures(
+    page: int = Query(1, ge=1),
+    page_size: int = Query(50, ge=1, le=200),
+    status_filter: str | None = Query(None),
+    db: Session = Depends(get_db),
+    _: User = Depends(_require_superadmin),
+) -> dict:
+    """Paginated list of companies in a terminal failure state, newest first."""
+    from sqlalchemy import text as _text
+
+    terminal = ("bot_blocked", "http_error", "timeout", "no_content", "no_website")
+    if status_filter and status_filter in terminal:
+        where_status = f"cs.crawl_status = '{status_filter}'"
+    else:
+        where_status = "cs.crawl_status IN ('bot_blocked','http_error','timeout','no_content','no_website')"
+
+    offset = (page - 1) * page_size
+
+    total_row = db.execute(_text(
+        f"SELECT COUNT(*) FROM company_crawl_state cs WHERE {where_status}"  # noqa: S608
+    )).scalar()
+    total = int(total_row or 0)
+
+    rows = db.execute(_text(
+        f"""
+        SELECT cs.company_id, c.name, c.uid,
+               uc.url,
+               cs.crawl_status, cs.bot_protection_type, cs.crawl_error_detail,
+               cs.consecutive_failures, cs.tier, cs.last_crawled_at
+        FROM company_crawl_state cs
+        JOIN companies c ON c.id = cs.company_id
+        LEFT JOIN company_url_candidates uc
+               ON uc.id = cs.selected_url_id
+        WHERE {where_status}
+        ORDER BY cs.last_crawled_at DESC NULLS LAST
+        LIMIT :limit OFFSET :offset
+        """  # noqa: S608
+    ), {"limit": page_size, "offset": offset}).fetchall()
+
+    items = [
+        {
+            "company_id": r[0],
+            "company_name": r[1],
+            "company_uid": r[2],
+            "url": r[3],
+            "crawl_status": r[4],
+            "bot_protection_type": r[5],
+            "crawl_error_detail": r[6],
+            "consecutive_failures": r[7],
+            "tier": r[8],
+            "last_crawled_at": r[9].isoformat() if r[9] else None,
+        }
+        for r in rows
+    ]
+    return {"items": items, "total": total, "page": page, "page_size": page_size}
+
+
+@router.post("/jobs/crawler/reset-http", summary="Reset terminal HTTP-tier crawl failures to pending (superadmin)")
+def crawler_reset_http(
+    db: Session = Depends(get_db),
+    actor: User = Depends(_require_superadmin),
+) -> dict:
+    from app.crud.crawler import reset_http_crawled
+    count = reset_http_crawled(db)
+    db.commit()
+    logger.info("superadmin %s reset %d HTTP crawler failures", actor.email, count)
+    return {"reset": count}
+
+
+@router.post("/jobs/crawler/reset-playwright", summary="Reset terminal Playwright-tier crawl failures to pending (superadmin)")
+def crawler_reset_playwright(
+    db: Session = Depends(get_db),
+    actor: User = Depends(_require_superadmin),
+) -> dict:
+    from app.crud.crawler import reset_playwright_crawled
+    count = reset_playwright_crawled(db)
+    db.commit()
+    logger.info("superadmin %s reset %d Playwright crawler failures", actor.email, count)
+    return {"reset": count}
+
+
+@router.post("/jobs/crawler/populate-urls", summary="Enqueue web_url_populate backfill job (superadmin)")
+def crawler_populate_urls(
+    db: Session = Depends(get_db),
+    actor: User = Depends(_require_superadmin),
+) -> dict:
+    from app.services.job_worker import enqueue_job
+    job = enqueue_job(
+        db,
+        job_type="web_url_populate",
+        label="URL candidate backfill (superadmin)",
+        params={"batch_size": 500},
+        org_id=None,
+        user_id=actor.id,
+    )
+    return {"job_id": job.id, "status": job.status}
+
+
+@router.post("/jobs/crawler/extract", summary="Enqueue web_extract job (superadmin)")
+def crawler_run_extract(
+    db: Session = Depends(get_db),
+    actor: User = Depends(_require_superadmin),
+) -> dict:
+    from app.services.job_worker import enqueue_job
+    job = enqueue_job(
+        db,
+        job_type="web_extract",
+        label="HTML extraction (superadmin)",
+        params={},
+        org_id=None,
+        user_id=actor.id,
+    )
+    return {"job_id": job.id, "status": job.status}
+
+
 @router.post("/jobs/saved-view-alerts", summary="Manually trigger saved-view alert check (superadmin)")
 def trigger_saved_view_alerts(
     db: Session = Depends(get_db),

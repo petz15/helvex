@@ -79,27 +79,66 @@ _SUBPAGE_PRIORITY: list[tuple[str, frozenset[str]]] = [
     ("services",  _SERVICES_KEYWORDS),
 ]
 
-# ── User-agent pool ────────────────────────────────────────────────────────────
-# Deterministic selection per company_id so UA stays consistent across the
-# homepage + subpages of a single crawl session.
+# ── Browser profile pool (UA + matching client hints) ──────────────────────────
+# Deterministic selection per company_id so the UA + Sec-Ch-Ua headers stay
+# consistent across the homepage + subpages of a single crawl session.
+#
+# Each entry pairs a User-Agent with the Client-Hint headers a real instance of
+# that browser sends. Sending a Chrome UA *without* Sec-Ch-Ua headers (the old
+# behaviour) is itself a bot tell that Cloudflare/Akamai flag — couple them so
+# they can never disagree. Firefox/Safari send no Sec-Ch-Ua (sec_ch_ua=None).
 
-_UA_POOL: list[str] = [
-    # Chrome — Windows
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
-    # Chrome — macOS
-    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
-    # Firefox — Windows
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:126.0) Gecko/20100101 Firefox/126.0",
-    # Chrome — Linux
-    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
-    # Safari — macOS
-    "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_4_1) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4.1 Safari/605.1.15",
+@dataclass(frozen=True)
+class BrowserProfile:
+    user_agent: str
+    sec_ch_ua: str | None       # None for Firefox/Safari (they don't send it)
+    platform: str               # Sec-Ch-Ua-Platform value (quoted)
+    impersonate: str            # curl_cffi impersonation target
+
+
+_PROFILE_POOL: list[BrowserProfile] = [
+    BrowserProfile(
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+        '"Google Chrome";v="131", "Chromium";v="131", "Not_A Brand";v="24"', '"Windows"', "chrome131",
+    ),
+    BrowserProfile(
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+        '"Google Chrome";v="131", "Chromium";v="131", "Not_A Brand";v="24"', '"macOS"', "chrome131",
+    ),
+    BrowserProfile(
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:133.0) Gecko/20100101 Firefox/133.0",
+        None, '"Windows"', "firefox133",
+    ),
+    BrowserProfile(
+        "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+        '"Google Chrome";v="131", "Chromium";v="131", "Not_A Brand";v="24"', '"Linux"', "chrome131",
+    ),
+    BrowserProfile(
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_4_1) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4.1 Safari/605.1.15",
+        None, '"macOS"', "safari17_0",
+    ),
 ]
+
+
+def pick_browser_profile(company_id: int) -> BrowserProfile:
+    """Deterministic browser profile for this company (UA + matching client hints)."""
+    return _PROFILE_POOL[company_id % len(_PROFILE_POOL)]
 
 
 def pick_user_agent(company_id: int) -> str:
     """Return a deterministic UA for this company so all its pages share the same UA."""
-    return _UA_POOL[company_id % len(_UA_POOL)]
+    return _PROFILE_POOL[company_id % len(_PROFILE_POOL)].user_agent
+
+
+def client_hint_headers(profile: BrowserProfile) -> dict[str, str]:
+    """Sec-Ch-Ua* headers consistent with the profile. Empty for non-Chromium UAs."""
+    if not profile.sec_ch_ua:
+        return {}
+    return {
+        "Sec-Ch-Ua": profile.sec_ch_ua,
+        "Sec-Ch-Ua-Mobile": "?0",
+        "Sec-Ch-Ua-Platform": profile.platform,
+    }
 
 
 # ── Accept-Language header (shared by HTTP and Playwright) ─────────────────────
@@ -254,6 +293,43 @@ def find_subpage_links(
             break
 
     return dict(list(type_to_url.items())[:max_subpages])
+
+
+def classify_urls_by_path(
+    urls: list[str],
+    base_url: str,
+    *,
+    exclude_types: set[str] | None = None,
+    max_needed: int = 4,
+) -> dict[str, str]:
+    """Classify a flat URL list (e.g. from a sitemap) into subpage types by path.
+
+    Matches the same `_SUBPAGE_PRIORITY` keyword sets used for nav-link discovery,
+    but against the URL path only (no anchor text — there is none for sitemap URLs).
+    Used to fill subpage slots that homepage nav links didn't cover.
+    """
+    exclude = exclude_types or set()
+    base_host = urlparse(base_url).netloc
+    type_to_url: dict[str, str] = {}
+
+    for url in urls:
+        parsed = urlparse(url)
+        if parsed.netloc != base_host:
+            continue
+        path = parsed.path.lower()
+        for page_type, keywords in _SUBPAGE_PRIORITY:
+            if page_type in exclude or page_type in type_to_url:
+                continue
+            # Compare against path segments; keywords may contain spaces, so also
+            # check a hyphen/underscore-normalised form of the path.
+            norm = path.replace("-", " ").replace("_", " ").replace("/", " ")
+            if any(kw in norm for kw in keywords):
+                type_to_url[page_type] = parsed._replace(fragment="").geturl()
+                break
+        if len(type_to_url) >= max_needed:
+            break
+
+    return type_to_url
 
 
 # ── Bot/JS detection ───────────────────────────────────────────────────────────

@@ -126,6 +126,10 @@ class Company(Base):
     purpose_language: Mapped[str | None] = mapped_column(String(8), nullable=True, index=True)
     # Raw JSON from Zefix API stored for reference
     zefix_raw: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Exact search params sent to the Google Search API for this company's last search.
+    # Keys: q, provider, gl/country, hl/language, location.
+    # Stored so bad results (wrong language, wrong location) can be diagnosed after the fact.
+    google_search_params: Mapped[dict | None] = mapped_column(JSON, nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False

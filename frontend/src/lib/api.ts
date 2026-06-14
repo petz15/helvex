@@ -2165,3 +2165,82 @@ export async function fetchCompanyCorporateRoles(companyId: number, is_current?:
   if (!res.ok) return _handleErrorResponse(res);
   return res.json();
 }
+
+// ── Admin crawler health ───────────────────────────────────────────────────────
+
+export interface AdminCrawlerStats {
+  status_counts: Record<string, number>;
+  tier_counts: Record<string, number>;
+  candidate_counts: Record<string, number>;
+  pages_total: number;
+  pages_in_s3: number;
+  pages_needing_extraction: number;
+  companies_extracted: number;
+  avg_confidence: number | null;
+}
+
+export interface AdminCrawlerFailure {
+  company_id: number;
+  company_name: string;
+  company_uid: string;
+  url: string | null;
+  crawl_status: string;
+  bot_protection_type: string | null;
+  crawl_error_detail: string | null;
+  consecutive_failures: number;
+  tier: string;
+  last_crawled_at: string | null;
+}
+
+export async function fetchAdminCrawlerStats(): Promise<AdminCrawlerStats> {
+  const res = await fetch("/api/v1/admin/crawler/stats", { credentials: "include" });
+  if (!res.ok) throw new Error("Failed to fetch crawler stats");
+  return res.json();
+}
+
+export async function fetchAdminCrawlerFailures(params?: {
+  page?: number;
+  page_size?: number;
+  status_filter?: string;
+}): Promise<AdminPage<AdminCrawlerFailure>> {
+  const url = buildUrl("/api/v1/admin/crawler/failures", params as Record<string, string | number | undefined | null>);
+  const res = await fetch(url, { credentials: "include" });
+  if (!res.ok) throw new Error("Failed to fetch crawler failures");
+  return res.json();
+}
+
+export async function crawlerResetHttp(): Promise<{ reset: number }> {
+  const res = await fetch("/api/v1/admin/jobs/crawler/reset-http", {
+    method: "POST",
+    credentials: "include",
+  });
+  if (!res.ok) throw new Error("Failed to reset HTTP failures");
+  return res.json();
+}
+
+export async function crawlerResetPlaywright(): Promise<{ reset: number }> {
+  const res = await fetch("/api/v1/admin/jobs/crawler/reset-playwright", {
+    method: "POST",
+    credentials: "include",
+  });
+  if (!res.ok) throw new Error("Failed to reset Playwright failures");
+  return res.json();
+}
+
+export async function crawlerPopulateUrls(): Promise<{ job_id: number; status: string }> {
+  const res = await fetch("/api/v1/admin/jobs/crawler/populate-urls", {
+    method: "POST",
+    credentials: "include",
+  });
+  if (!res.ok) throw new Error("Failed to enqueue populate-urls job");
+  return res.json();
+}
+
+export async function crawlerRunExtract(): Promise<{ job_id: number; status: string }> {
+  const res = await fetch("/api/v1/admin/jobs/crawler/extract", {
+    method: "POST",
+    credentials: "include",
+  });
+  if (!res.ok) throw new Error("Failed to enqueue extract job");
+  return res.json();
+}

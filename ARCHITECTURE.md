@@ -308,6 +308,12 @@ HTML routes (browser, in `main.py`):
 |---|---|---|---|
 | GET | `/api/v1/admin/analytics` | Superadmin | Platform analytics: org counts, MRR estimate, top credit consumers, job volumes |
 | POST | `/api/v1/admin/jobs/saved-view-alerts` | Superadmin | Manually trigger saved-view alert sweep (also runs nightly via cron) |
+| GET | `/api/v1/admin/crawler/stats` | Superadmin | Crawler health: status/tier/candidate counts, page storage, extraction coverage |
+| GET | `/api/v1/admin/crawler/failures` | Superadmin | Paginated terminal crawl failures with company name, URL, error detail |
+| POST | `/api/v1/admin/jobs/crawler/reset-http` | Superadmin | Reset HTTP-tier terminal failures back to pending |
+| POST | `/api/v1/admin/jobs/crawler/reset-playwright` | Superadmin | Reset Playwright-tier terminal failures back to pending |
+| POST | `/api/v1/admin/jobs/crawler/populate-urls` | Superadmin | Enqueue `web_url_populate` backfill job |
+| POST | `/api/v1/admin/jobs/crawler/extract` | Superadmin | Enqueue `web_extract` job (also triggered automatically after each crawl batch) |
 | … | (other existing admin routes) | | |
 
 #### CSV Export status — `app/api/routes/jobs.py`
@@ -419,6 +425,7 @@ The core entity. Key columns:
 | `web_score` | Integer 0-100 | Google name/location match quality |
 | `google_search_results_raw` | Text | Scored organic results as JSON [{title, link, snippet, score}] |
 | `google_search_full_raw` | Text | Complete provider JSON (ScrapingDog only; null for Serper) |
+| `google_search_params` | JSON | Exact params sent to search API: provider, q, gl, hl, location, municipality, address_zip, purpose_language_raw — diagnose wrong-language/location results |
 | `website_checked_at` | DateTime | Last Google enrichment timestamp |
 | `social_media_only` | Bool | True if only social media URLs were found |
 | `ai_score` | Integer 0-100 | Claude Haiku classification score |
@@ -1736,36 +1743,57 @@ alembic upgrade head
 
 ### Overview
 
-Two-phase pipeline that crawls ~210k Swiss company websites and stores raw HTML in S3. Extraction of structured data (contacts, services, etc.) is a separate future job.
+Three-phase pipeline: crawl ~210k Swiss company websites → store raw HTML in S3 → extract structured data (contacts, UID, socials, keywords) into `company_web_extract`.
 
 ### Pod topology
 
 | Pod | Image | Job types | Node |
 |---|---|---|---|
-| `crawler-http` × 2 | `helvex-app` | `web_crawl_http`, `web_url_populate`, `web_select_url`, `web_crawl_single` | main node |
+| `crawler-http` × 2 | `helvex-app` | `web_crawl_http`, `web_url_populate`, `web_select_url`, `web_crawl_single`, **`web_extract`** | main node |
+| `api-worker` | `helvex-app` | `web_extract` (+ many others) | main node |
 | `ml-worker` | `helvex-ml` | `web_crawl_http`, `web_crawl_playwright` (idle-fill) + all ML job types | ml node (cax21) |
+
+`web_extract` is in both `crawler-http` and `api-worker` whitelists. With two crawler-http pods this enables the parallel pipeline: Pod A crawls, Pod B extracts — independently, with no shared resources. If both pods are busy crawling, api-worker picks up extraction instead.
 
 ### Workflow
 
 ```
-[Prerequisite] batch enrichment job → Serper/ScrapingDog fills google_search_results_raw
+batch enrichment job   → Serper/ScrapingDog fills google_search_results_raw
+                         auto-populates company_url_candidates (upsert safe on
+                         existing crawled candidates) + creates company_crawl_state
+                         only if no candidate is selected yet — preserves manual
+                         URL selection. web_url_populate job still available as
+                         a backfill tool for companies enriched before this change.
        ↓
-web_url_populate       reads google_search_results_raw → company_url_candidates
-                       creates company_crawl_state (status=pending, tier=http)
-       ↓
-web_crawl_http         SKIP LOCKED claim → httpx fetch
-  bot_blocked          → crawl_status=bot_blocked + bot_protection_type
+web_crawl_http         SKIP LOCKED claim → robots/sitemap discovery → httpx fetch
+                       (Sec-Ch-Ua client hints + HTTP/2; streaming body read
+                        capped at MAX_PAGE_BYTES before decompression fills memory;
+                        curl_cffi Chrome-TLS impersonation fallback on bot-block)
+  bot_blocked          → cloudflare/js_challenge escalate to js_required (→ Playwright);
+                         other types → crawl_status=bot_blocked
   js_required          → crawl_status=js_required, tier=playwright
-  http_error/timeout   → crawl_status=http_error|timeout + crawl_error_detail
+  http_error/timeout   → backoff retry via next_crawl_at (≤3×), then terminal
   no_content           → crawl_status=no_content
-  success              → HTML → S3, company_web_pages rows, crawl_status=crawled
-       ↓
+  success              → HTML → S3 (keyed crawl/{company_id}/{url_candidate_id}/{page}.html),
+                         company_web_pages rows, crawl_status=crawled
+                         Prometheus: crawl_result_total{tier, status} incremented per outcome
+                         **auto-enqueues web_extract** (dedup returns existing if already running)
+       ↓ (parallel)
 web_crawl_playwright   SKIP LOCKED claim tier=playwright|js_required
-                       same result handling, uses Playwright + playwright-stealth
-       ↓
-[Future] web_extract   company_web_pages WHERE needs_extraction=TRUE
-                       S3 HTML → trafilatura + phonenumbers → company_web_structured
+                       Playwright + stealth; resource-blocking (no img/font/media),
+                       wait_until=load, optional real-Chrome channel (PLAYWRIGHT_CHANNEL)
+       ↓ (parallel, different pod)
+web_extract            distinct companies WHERE company_web_pages.needs_extraction=TRUE
+                       S3 HTML → trafilatura + regex/schema.org/phonenumbers
+                       → company_web_extract (1 resolved row/company, deduped)
+                       deterministic only; LLM enrichment deferred (see ROADMAP)
+                       Runs concurrently with crawling: auto-triggered by _run_crawl_batch
+                       when crawled > 0; dedup prevents stacking (one active instance only)
 ```
+
+Both crawler tiers run robots.txt + sitemap.xml discovery (`crawler_sitemap.py`) before
+page selection: sitemap URLs fill subpage slots the homepage nav misses, and the robots
+`Crawl-delay` raises the per-domain rate limit.
 
 ### Job params — web_crawl_http and web_crawl_playwright
 
@@ -1783,9 +1811,41 @@ Playwright-only: `rerun: bool` — calls `crawler_crud.reset_playwright_crawled(
 
 ### URL selection
 
-- `web_url_populate` auto-selects the highest-scoring Serper/ScrapingDog candidate per company.
-- `web_select_url` job (params: `company_id`, `url_candidate_id`) switches to a different candidate and resets crawl state.
+- **Automatic (new):** `run_batch_collect` upserts candidates immediately after each Google enrich. `select_best_candidate` only fires if no candidate is selected, so re-enriching a company never demotes a manually-chosen or already-crawled URL.
+- **`web_url_populate`:** backfill job for companies enriched before the auto-populate was added; idempotent.
+- **`web_select_url`** (params: `company_id`, `url_candidate_id`): switch to a specific candidate, resets crawl state.
 - Failure statuses are terminal until manually re-queued, or use `rerun=True` on the playwright job.
+
+### S3 key layout
+
+```
+crawl/{company_id}/{url_candidate_id}/{page_type}.html
+```
+
+Each crawl session (URL candidate) gets its own prefix, so switching a company to a different URL and re-crawling does not overwrite earlier HTML. The `s3_key_html` stored in `company_web_pages` always points to the exact key for that crawl.
+
+### Large-response / zip-bomb protection
+
+- **httpx:** `_fetch` uses `client.stream()` — decompression is streamed and halted at `MAX_PAGE_BYTES` (5 MB). A gzip bomb never fully expands in memory.
+- **Content-Length check:** if `Content-Length` header already exceeds the cap, the body is skipped entirely before downloading.
+- **Playwright:** body is captured via `page.content()` (browser-level) and then sliced to `MAX_PAGE_BYTES` in Python. The `company_timeout` (120s) prevents hangs.
+- **curl_cffi fallback:** `resp.content[:MAX_PAGE_BYTES]` — curl decompresses internally before the slice; risk is low given it's a rarely-used fallback path.
+
+### Error measurement
+
+Crawl outcomes feed `crawl_result_total{tier, status}` Prometheus counter (in `app/metrics.py`) at every outcome point in `_run_crawl_batch`:
+
+| status | meaning |
+|---|---|
+| `crawled` | success |
+| `js_required` | HTTP→Playwright escalation |
+| `bot_blocked` | hard block, not escalated |
+| `http_error` | non-bot HTTP failure |
+| `timeout` | per-page or total timeout |
+| `no_content` | near-empty body |
+| `error` | unexpected exception |
+
+Grafana query: `rate(crawl_result_total[5m])` grouped by `tier` and `status`. Per-company detail lives in `company_crawl_state.crawl_status` + `crawl_error_detail` for targeted re-queue or candidate switch.
 
 ### Self-preemption (ML worker)
 
@@ -1806,22 +1866,34 @@ Playwright-only: `rerun: bool` — calls `crawler_crud.reset_playwright_crawled(
 |---|---|
 | `company_url_candidates` | Serper/ScrapingDog URL candidates; one selected per company |
 | `company_crawl_state` | Per-company crawl status, tier, bot flags, re-crawl scheduling |
-| `company_web_pages` | Per-page crawl result; S3 key for raw HTML |
+| `company_web_pages` | Per-page crawl result; S3 key for raw HTML; `needs_extraction` flag |
+| `company_web_extract` | One resolved structured-data row per company (emails, phones, socials, uid, address, languages, description, service_keywords) |
 
 ### Key files
 
 | File | Purpose |
 |---|---|
-| `app/services/crawler_common.py` | Shared utilities: bot detection, JS detection, subpage discovery, media counting |
-| `app/services/crawler_http.py` | httpx crawler |
-| `app/services/crawler_playwright.py` | Playwright crawler (lazy import — only available in ml image) |
-| `app/services/job_handlers/web_crawl.py` | Job handlers: `_run_crawl_batch` shared loop, per-type handlers |
-| `app/crud/crawler.py` | CRUD: upsert candidates, SKIP LOCKED claiming, save pages, ML preemption check |
+| `app/services/crawler_common.py` | Shared utilities: browser profiles + client hints, bot/JS detection, nav + sitemap subpage discovery, media counting |
+| `app/services/crawler_sitemap.py` | robots.txt + sitemap.xml discovery (URLs + crawl-delay); best-effort |
+| `app/services/crawler_http.py` | httpx crawler (HTTP/2, client hints, curl_cffi impersonation fallback) |
+| `app/services/crawler_playwright.py` | Playwright crawler (lazy import; resource-blocking, optional Chrome channel) |
+| `app/services/crawler_extract.py` | Deterministic structured-data extractor (trafilatura + regex/schema.org/phonenumbers) |
+| `app/services/job_handlers/web_crawl.py` | Job handlers: `_run_crawl_batch` shared loop, `handle_web_extract`, per-type handlers |
+| `app/crud/crawler.py` | CRUD: upsert candidates, SKIP LOCKED claiming, save pages, retry backoff, extraction claim/upsert |
 | `infra/charts/helvex/templates/crawler-http-deployment.yaml` | K8s deployment for HTTP crawler pods |
 
 ### S3
 
-Raw HTML stored in `s3_bucket_crawl` under key `crawl/{company_id}/{page_type}.html`.
+Raw HTML stored in `s3_bucket_crawl` under key `crawl/{company_id}/{page_type}.html`. The
+`web_extract` job reads these via `s3_client.download_crawl_html`.
+
+### web_extract job
+
+Deduplicated (one active per org). Claims distinct companies with `needs_extraction=TRUE`
+pages, downloads each page's HTML from S3, runs `crawler_extract.resolve_company_extract`
+(aggregates + dedups signals across pages), upserts one `company_web_extract` row, and flips
+`needs_extraction=FALSE`. Trigger: `POST /api/v1/crawler/extract` (superadmin). No API cost.
+The optional Claude Haiku enrichment layer is deferred — see ROADMAP.
 
 ---
 

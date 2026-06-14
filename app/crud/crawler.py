@@ -18,6 +18,7 @@ from sqlalchemy.orm import Session
 
 from app.models.company_crawl_state import CompanyCrawlState
 from app.models.company_url_candidate import CompanyUrlCandidate
+from app.models.company_web_extract import CompanyWebExtract
 from app.models.company_web_page import CompanyWebPage
 
 logger = logging.getLogger(__name__)
@@ -333,6 +334,33 @@ def mark_crawl_failed(
     db.flush()
 
 
+def schedule_crawl_retry(
+    db: Session,
+    state: CompanyCrawlState,
+    status: str,
+    detail: str | None = None,
+    *,
+    base_delay_minutes: int = 30,
+) -> None:
+    """Reschedule a transient failure for a later retry instead of failing terminally.
+
+    Keeps crawl_status='pending' (so the same tier re-claims it) but sets
+    next_crawl_at into the future using exponential backoff on consecutive_failures.
+    The claim query already filters on next_crawl_at, so the row is skipped until
+    the backoff elapses. Caller decides when retries are exhausted.
+    """
+    from datetime import timedelta
+
+    now = datetime.now(timezone.utc)
+    state.consecutive_failures = (state.consecutive_failures or 0) + 1
+    backoff = base_delay_minutes * (2 ** (state.consecutive_failures - 1))
+    state.crawl_status = "pending"
+    state.last_crawled_at = now
+    state.next_crawl_at = now + timedelta(minutes=backoff)
+    state.crawl_error_detail = f"retry ({status}): {detail}" if detail else f"retry ({status})"
+    db.flush()
+
+
 def reset_crawl_for_recrawl(db: Session, state: CompanyCrawlState) -> None:
     """Reset a terminal crawl state back to pending for a re-crawl attempt."""
     state.crawl_status = "pending"
@@ -424,6 +452,77 @@ def save_web_page(
     db.add(page)
     db.flush()
     return page
+
+
+# ── Web extraction (web_extract job) ────────────────────────────────────────────
+
+def count_companies_pending_extraction(db: Session) -> int:
+    """Number of distinct companies with at least one page awaiting extraction."""
+    return int(db.execute(
+        text(
+            "SELECT COUNT(DISTINCT company_id) FROM company_web_pages "
+            "WHERE needs_extraction = TRUE AND s3_key_html IS NOT NULL"
+        )
+    ).scalar() or 0)
+
+
+def claim_companies_for_extraction(db: Session, batch_size: int = 200) -> list[int]:
+    """Return distinct company_ids that have unextracted pages with stored HTML.
+
+    web_extract is deduplicated (one active job per org), so no row-level locking
+    is needed — a single worker drains the queue. Ordered by company_id for
+    deterministic, resumable progress.
+    """
+    rows = db.execute(
+        text(
+            "SELECT DISTINCT company_id FROM company_web_pages "
+            "WHERE needs_extraction = TRUE AND s3_key_html IS NOT NULL "
+            "ORDER BY company_id "
+            "LIMIT :limit"
+        ),
+        {"limit": batch_size},
+    ).fetchall()
+    return [r[0] for r in rows]
+
+
+def get_extractable_pages(db: Session, company_id: int) -> list[CompanyWebPage]:
+    """All pages for a company that have stored HTML and still need extraction."""
+    return (
+        db.query(CompanyWebPage)
+        .filter(
+            CompanyWebPage.company_id == company_id,
+            CompanyWebPage.needs_extraction.is_(True),
+            CompanyWebPage.s3_key_html.isnot(None),
+        )
+        .all()
+    )
+
+
+def upsert_web_extract(db: Session, company_id: int, data: dict) -> None:
+    """Insert or replace the resolved structured-extract row for a company."""
+    now = datetime.now(timezone.utc)
+    values = {"company_id": company_id, "extracted_at": now, **data}
+    stmt = pg_insert(CompanyWebExtract).values(**values)
+    update_cols = {k: getattr(stmt.excluded, k) for k in data}
+    update_cols["extracted_at"] = stmt.excluded.extracted_at
+    stmt = stmt.on_conflict_do_update(index_elements=["company_id"], set_=update_cols)
+    db.execute(stmt)
+    db.flush()
+
+
+def mark_pages_extracted(db: Session, company_id: int) -> int:
+    """Flip needs_extraction=FALSE + stamp extracted_at for a company's pages."""
+    now = datetime.now(timezone.utc)
+    result = db.execute(
+        text(
+            "UPDATE company_web_pages "
+            "SET needs_extraction = FALSE, extracted_at = :now "
+            "WHERE company_id = :cid AND needs_extraction = TRUE"
+        ),
+        {"now": now, "cid": company_id},
+    )
+    db.flush()
+    return result.rowcount
 
 
 # ── Job queue helpers ──────────────────────────────────────────────────────────

@@ -36,7 +36,7 @@ spec:
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           env:
             - name: JOB_TYPE_WHITELIST
-              value: "web_crawl_http,web_url_populate,web_select_url,web_crawl_single"
+              value: "web_crawl_http,web_url_populate,web_select_url,web_crawl_single,web_extract"
           envFrom:
             - secretRef:
                 name: {{ .Values.envSecretName }}

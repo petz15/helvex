@@ -16,6 +16,7 @@ from sqlalchemy import text
 
 from app import crud
 from app.crud import crawler as crawler_crud
+from app.metrics import record_crawl_result
 from app.models.company_url_candidate import CompanyUrlCandidate
 from app.services.job_handlers import JobContext
 from app.services.job_worker import JobPausedError
@@ -32,6 +33,11 @@ _ML_JOB_TYPES: frozenset[str] = frozenset({
     "noga_v2_explain", "embed_purpose_full", "embed_purpose_clean",
     "web_crawl_playwright",
 })
+
+# Transient failures (timeout / connection error) get this many backoff retries
+# before being marked terminally failed. Bot blocks and js_required are handled
+# separately (escalation to Playwright), not retried in place.
+_MAX_CRAWL_RETRIES = 3
 
 
 def _self_preempt_if_ml_queued(ctx: JobContext) -> None:
@@ -126,7 +132,7 @@ def handle_web_url_populate(ctx: JobContext) -> tuple[dict, str]:
     done_msg = (
         f"Done — {stats['processed']} companies, "
         f"{stats['candidates_created']} URL candidates, "
-        f"{stats['skipped_no_results']} skipped (no Serper results), "
+        f"{stats['skipped_no_results']} skipped (no search results), "
         f"{len(stats['errors'])} errors"
     )
     return stats, done_msg
@@ -227,6 +233,7 @@ def _run_crawl_batch(
                             crawl_fn(
                                 state.company_id,
                                 candidate.url,
+                                url_candidate_id=candidate.id,
                                 max_pages=max_pages,
                                 rate_limit_delay=rate_limit_delay,
                             ),
@@ -242,30 +249,51 @@ def _run_crawl_batch(
                     stats["errors"].append(
                         f"company {state.company_id}: total timeout {company_timeout:.0f}s"
                     )
+                    record_crawl_result(tier, "timeout")
                     continue
                 except Exception as exc:  # noqa: BLE001
                     crawler_crud.mark_crawl_failed(ctx.db, state, "http_error", str(exc))
                     stats["errors"].append(f"company {state.company_id}: {exc}")
+                    record_crawl_result(tier, "error")
                     continue
 
                 now = datetime.now(timezone.utc)
 
                 if result.failure_status:
-                    crawler_crud.mark_crawl_failed(
-                        ctx.db, state,
-                        status=result.failure_status,
-                        detail=result.failure_detail,
-                        bot_protection_type=result.bot_protection_type,
-                    )
-                    stats[result.failure_status] = stats.get(result.failure_status, 0) + 1
+                    fs = result.failure_status
+                    if (
+                        tier == "http"
+                        and fs == "bot_blocked"
+                        and result.bot_protection_type in ("cloudflare", "js_challenge")
+                    ):
+                        # Hard bot block on the HTTP tier — hand off to Playwright
+                        # (real browser) instead of failing terminally.
+                        crawler_crud.mark_crawl_failed(ctx.db, state, "js_required")
+                        stats["js_required"] = stats.get("js_required", 0) + 1
+                        record_crawl_result(tier, "js_required")
+                    elif (
+                        fs in ("timeout", "http_error")
+                        and (state.consecutive_failures or 0) < _MAX_CRAWL_RETRIES
+                    ):
+                        # Transient — reschedule with exponential backoff.
+                        crawler_crud.schedule_crawl_retry(ctx.db, state, fs, result.failure_detail)
+                        stats[fs] = stats.get(fs, 0) + 1
+                        record_crawl_result(tier, fs)
+                    else:
+                        crawler_crud.mark_crawl_failed(
+                            ctx.db, state,
+                            status=fs,
+                            detail=result.failure_detail,
+                            bot_protection_type=result.bot_protection_type,
+                        )
+                        stats[fs] = stats.get(fs, 0) + 1
+                        record_crawl_result(tier, fs)
                     candidate.last_crawled_at = now
                 elif result.needs_playwright:
                     crawler_crud.mark_crawl_failed(ctx.db, state, "js_required")
                     stats["js_required"] += 1
+                    record_crawl_result(tier, "js_required")
                 else:
-                    # Delete stale rows from previous crawls before inserting
-                    # fresh ones. S3 key is keyed by (company_id, page_type)
-                    # so re-crawling overwrites the file; old rows would be stale.
                     crawler_crud.delete_web_pages_for_company(ctx.db, state.company_id)
                     pages_crawled = []
                     for p in result.pages:
@@ -290,9 +318,27 @@ def _run_crawl_batch(
                     candidate.status = "crawled"
                     candidate.last_crawled_at = now
                     stats["crawled"] += 1
+                    record_crawl_result(tier, "crawled")
 
             ctx.db.commit()
             done += len(batch)
+
+            # Trigger extraction after each batch so it runs in parallel on a
+            # separate pod. Dedup returns the existing job if one is already
+            # running (no-op). When extraction finishes mid-crawl, the next
+            # batch creates a fresh job — keeping extraction continuously fed.
+            if stats["crawled"] > 0:
+                try:
+                    ctx.enqueue_job(
+                        job_type="web_extract",
+                        label="HTML extraction (auto)",
+                        params={},
+                        org_id=None,
+                        user_id=ctx.job.user_id,
+                    )
+                    ctx.db.commit()
+                except Exception as exc:  # noqa: BLE001
+                    logger.debug("Auto-enqueue web_extract skipped: %s", exc)
 
             tier_label = "Playwright" if tier == "playwright" else "HTTP"
             msg = (
@@ -366,6 +412,84 @@ def handle_web_crawl_playwright(ctx: JobContext) -> tuple[dict, str]:
     )
 
 
+# ── web_extract ───────────────────────────────────────────────────────────────
+
+def handle_web_extract(ctx: JobContext) -> tuple[dict, str]:
+    """Extract structured data from crawled HTML stored in S3.
+
+    Claims companies with pages flagged needs_extraction=TRUE, downloads each
+    page's HTML from S3, runs the deterministic extractor, and upserts one
+    resolved row per company into company_web_extract. Marks pages extracted so
+    they are not reprocessed. No API cost.
+    """
+    from app.services import crawler_extract
+    from app.services import s3_client as _s3
+
+    batch_size = int(ctx.params.get("batch_size", 200))
+    stats: dict = {"extracted": 0, "empty": 0, "s3_errors": 0, "errors": []}
+
+    total = crawler_crud.count_companies_pending_extraction(ctx.db)
+    done = 0
+
+    while True:
+        ctx.assert_not_cancelled()
+        _self_preempt_if_ml_queued(ctx)
+
+        company_ids = crawler_crud.claim_companies_for_extraction(ctx.db, batch_size=batch_size)
+        if not company_ids:
+            break
+
+        for company_id in company_ids:
+            ctx.assert_not_cancelled()
+            try:
+                pages = crawler_crud.get_extractable_pages(ctx.db, company_id)
+                page_blobs: list[tuple[str, bytes]] = []
+                for p in pages:
+                    try:
+                        html = _s3.download_crawl_html(p.s3_key_html)
+                        page_blobs.append((p.page_type, html))
+                    except Exception as exc:  # noqa: BLE001
+                        stats["s3_errors"] += 1
+                        logger.debug("S3 download failed for %s: %s", p.s3_key_html, exc)
+
+                data = crawler_extract.resolve_company_extract(page_blobs) if page_blobs else {}
+                if data:
+                    crawler_crud.upsert_web_extract(ctx.db, company_id, data)
+                    stats["extracted"] += 1
+                else:
+                    stats["empty"] += 1
+                # Always mark processed so the queue drains even when nothing is found.
+                crawler_crud.mark_pages_extracted(ctx.db, company_id)
+            except Exception as exc:  # noqa: BLE001
+                stats["errors"].append(f"company {company_id}: {exc}")
+                logger.warning("web_extract error for company %d: %s", company_id, exc)
+                ctx.db.rollback()
+                # Mark processed in a fresh transaction so a poison row can't loop forever.
+                try:
+                    crawler_crud.mark_pages_extracted(ctx.db, company_id)
+                    ctx.db.commit()
+                except Exception:  # noqa: BLE001
+                    ctx.db.rollback()
+                continue
+
+        ctx.db.commit()
+        done += len(company_ids)
+        msg = (
+            f"Extracted {done}/{total} — {stats['extracted']} with data, "
+            f"{stats['empty']} empty, {stats['s3_errors']} S3 errors, "
+            f"{len(stats['errors'])} errors"
+        )
+        crud.update_progress(ctx.db, ctx.job, message=msg, done=done, total=total, stats=dict(stats))
+        crud.create_event(ctx.db, job_id=ctx.job.id, level="debug", message=msg)
+
+    done_msg = (
+        f"Extraction done — {stats['extracted']} companies with structured data, "
+        f"{stats['empty']} empty, {stats['s3_errors']} S3 errors, "
+        f"{len(stats['errors'])} errors"
+    )
+    return stats, done_msg
+
+
 # ── web_select_url ────────────────────────────────────────────────────────────
 
 def handle_web_select_url(ctx: JobContext) -> tuple[dict, str]:
@@ -420,7 +544,7 @@ def handle_web_crawl_single(ctx: JobContext) -> tuple[dict, str]:
     raw_json = company[1]
     if not raw_json:
         raise ValueError(
-            f"Company {company_id} has no Serper.dev results. "
+            f"Company {company_id} has no Google search results stored. "
             "Run the batch enrichment job first."
         )
 
@@ -461,13 +585,23 @@ def handle_web_crawl_single(ctx: JobContext) -> tuple[dict, str]:
 
     # ── Step 3: try HTTP, escalate to Playwright if needed ───────────────
     result = asyncio.run(
-        crawl_company_http(company_id, selected.url, max_pages=max_pages, rate_limit_delay=rate_limit_delay)
+        crawl_company_http(
+            company_id, selected.url,
+            url_candidate_id=selected.id,
+            max_pages=max_pages,
+            rate_limit_delay=rate_limit_delay,
+        )
     )
 
     if result.needs_playwright:
         ctx.status(f"JS rendering required — switching to Playwright for {selected.url}…")
         result = asyncio.run(
-            crawl_company_playwright(company_id, selected.url, max_pages=max_pages, rate_limit_delay=rate_limit_delay)
+            crawl_company_playwright(
+                company_id, selected.url,
+                url_candidate_id=selected.id,
+                max_pages=max_pages,
+                rate_limit_delay=rate_limit_delay,
+            )
         )
 
     # ── Step 4: store results ─────────────────────────────────────────────

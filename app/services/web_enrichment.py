@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session
 from app import crud
 from app.clients.google_search_client import search_website
 from app.config import settings
+from app.crud import crawler as crawler_crud
 from app.models.company import Company
 from app.schemas.company import CompanyUpdate
 from app.services._pipeline_utils import _is_control_signal_exception
@@ -104,7 +105,7 @@ def _score_google_results_for_company(db: Session, company: Company, raw_results
                 purpose_stopwords=purpose_stopwords,
                 position=idx,
             )
-        scored.append({**row, "score": s})
+        scored.append({**row, "score": s, "position": idx})
 
     scored.sort(key=lambda x: x["score"], reverse=True)
     return scored
@@ -124,6 +125,27 @@ def enrich_company_website(db: Session, company: Company, *, num: int = 10) -> t
     now = datetime.now(tz=timezone.utc)
     _t0 = time.monotonic()
     full_raw: dict | None = None
+
+    # Build and store exactly what we send so bad results can be diagnosed later
+    _lang_map = {"de": "de", "fr": "fr", "it": "it", "en": "en", "rm": "de"}
+    _hl = _lang_map.get((company.purpose_language or "").lower(), "de")
+    _loc_parts = []
+    if company.address_zip:
+        _loc_parts.append(company.address_zip.strip())
+    if company.municipality:
+        _loc_parts.append(company.municipality.strip())
+    _loc_parts.append("Switzerland")
+    _location = " ".join(_loc_parts) if provider == "scrapingdog" else f"{company.municipality or ''}, Switzerland".strip(", ")
+    search_params = {
+        "provider": provider,
+        "q": company.name,
+        "gl": "ch",
+        "hl": _hl,
+        "location": _location,
+        "purpose_language_raw": company.purpose_language,
+        "municipality": company.municipality,
+        "address_zip": company.address_zip,
+    }
 
     try:
         api_key = _get_search_api_key(db, provider)
@@ -168,6 +190,7 @@ def enrich_company_website(db: Session, company: Company, *, num: int = 10) -> t
                 website_checked_at=now,
                 google_search_results_raw=json.dumps([]),
                 google_search_full_raw=json.dumps(full_raw) if full_raw is not None else None,
+                google_search_params=search_params,
             ),
         )
         return False, None
@@ -187,6 +210,7 @@ def enrich_company_website(db: Session, company: Company, *, num: int = 10) -> t
             website_checked_at=now,
             google_search_results_raw=json.dumps(scored),
             google_search_full_raw=json.dumps(full_raw) if full_raw is not None else None,
+            google_search_params=search_params,
         ),
     )
     return True, best["link"]
@@ -473,6 +497,26 @@ def run_batch_collect(
                 enriched, _ = enrich_company_website(db, current)
                 if enriched:
                     stats["google_enriched"] += 1
+                    # Auto-populate url_candidates so the crawler can pick up new
+                    # URLs immediately without a separate web_url_populate job.
+                    # upsert is safe on existing rows (only updates score/title/snippet).
+                    # select_best_candidate only fires when no candidate is selected yet —
+                    # preserves any manually-chosen or already-crawled selection.
+                    try:
+                        raw = current.google_search_results_raw
+                        candidates = crawler_crud.parse_google_results_raw(raw) if raw else []
+                        if candidates:
+                            crawler_crud.upsert_url_candidates(db, current.id, candidates)
+                            if not crawler_crud.get_selected_candidate(db, current.id):
+                                best = crawler_crud.select_best_candidate(db, current.id)
+                                crawler_crud.get_or_create_crawl_state(
+                                    db, current.id,
+                                    selected_url_id=best.id if best else None,
+                                )
+                    except Exception as exc_inner:  # noqa: BLE001
+                        logger.warning(
+                            "URL candidate sync failed for %s: %s", current.uid, exc_inner
+                        )
                 else:
                     stats["google_no_result"] += 1
             except Exception as exc:  # noqa: BLE001

@@ -1418,6 +1418,10 @@ class WebCrawlPlaywrightBody(WebCrawlBody):
     limit: int | None = None     # stop after this many companies (None = all)
 
 
+class WebExtractBody(BaseModel):
+    batch_size: int = 200
+
+
 class WebSelectUrlBody(BaseModel):
     company_id: int
     url_candidate_id: int
@@ -1432,12 +1436,12 @@ def trigger_web_url_populate(
 ):
     """Seed company_url_candidates from existing google_search_results_raw.
 
-    Run the Serper.dev batch enrichment job first so companies have stored results.
+    Run the batch enrichment job first so companies have stored search results.
     """
     job = _enqueue_or_http_error(
         request,
         job_type="web_url_populate",
-        label="Web URL population — seed candidates from Serper results",
+        label="Web URL population — seed candidates from search results",
         params=body.model_dump(),
         db=db,
     )
@@ -1524,6 +1528,28 @@ def trigger_web_crawl_single(
         request,
         job_type="web_crawl_single",
         label=f"Single crawl — company {body.company_id}",
+        params=body.model_dump(),
+        db=db,
+    )
+    return JobOut.from_orm_obj(job)
+
+
+@router.post("/crawler/extract", response_model=JobOut, status_code=status.HTTP_202_ACCEPTED)
+def trigger_web_extract(
+    body: WebExtractBody,
+    request: Request,
+    db: Session = Depends(get_db),
+    _: User = Depends(require_superadmin),
+):
+    """Extract structured data (contacts, UID, socials, keywords) from crawled HTML.
+
+    Reads raw HTML stored in S3 by the crawlers and writes one resolved row per
+    company into company_web_extract. Deterministic only — no API cost.
+    """
+    job = _enqueue_or_http_error(
+        request,
+        job_type="web_extract",
+        label="Web extraction — structured data from crawled HTML",
         params=body.model_dump(),
         db=db,
     )

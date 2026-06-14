@@ -66,6 +66,16 @@ DB_CONNECTION_POOL_SIZE = Gauge(
 )
 
 
+# Crawler metrics
+CRAWL_RESULT_TOTAL = Counter(
+    "crawl_result_total",
+    "Total crawl outcomes per tier and final status",
+    labelnames=["tier", "status"],
+    # tier: http | playwright
+    # status: crawled | bot_blocked | js_required | http_error | timeout | no_content | error
+)
+
+
 # Worker thread metrics
 WORKER_THREAD_RUNNING = Gauge(
     "worker_thread_running",
@@ -110,6 +120,15 @@ def record_api_call(api_name: str, duration_seconds: float, status_code: int) ->
     API_CALL_DURATION_SECONDS.labels(api_name=api_name, status_code=status_code).observe(
         duration_seconds
     )
+
+
+def record_crawl_result(tier: str, status: str) -> None:
+    """Record a single-company crawl outcome.
+
+    tier: "http" or "playwright"
+    status: "crawled" | "bot_blocked" | "js_required" | "http_error" | "timeout" | "no_content" | "error"
+    """
+    CRAWL_RESULT_TOTAL.labels(tier=tier, status=status).inc()
 
 
 def record_api_error(api_name: str, error_type: str) -> None:

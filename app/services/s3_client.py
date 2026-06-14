@@ -125,8 +125,15 @@ def is_crawl_bucket_configured() -> bool:
     return bool(settings.s3_access_key and settings.s3_secret_key and _crawl_bucket())
 
 
-def crawl_s3_key(company_id: int, page_type: str) -> str:
-    """Canonical S3 key for a crawled page. page_type: homepage|impressum|privacy|other."""
+def crawl_s3_key(company_id: int, page_type: str, url_candidate_id: int | None = None) -> str:
+    """Canonical S3 key for a crawled page.
+
+    Includes url_candidate_id so re-crawling a different URL does not overwrite
+    HTML from a previous crawl. Falls back to the legacy flat path when no
+    candidate id is available (e.g. tests, one-off scripts).
+    """
+    if url_candidate_id is not None:
+        return f"crawl/{company_id}/{url_candidate_id}/{page_type}.html"
     return f"crawl/{company_id}/{page_type}.html"
 
 

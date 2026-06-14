@@ -1,0 +1,382 @@
+"use client";
+import { useState, useCallback } from "react";
+import useSWR from "swr";
+import {
+  Globe, RefreshCw, Loader2, AlertTriangle, CheckCircle2,
+  Clock, ShieldAlert, ChevronLeft, ChevronRight, RotateCcw, ListPlus, Cpu,
+} from "lucide-react";
+import {
+  fetchAdminCrawlerStats,
+  fetchAdminCrawlerFailures,
+  crawlerResetHttp,
+  crawlerResetPlaywright,
+  crawlerPopulateUrls,
+  crawlerRunExtract,
+  type AdminCrawlerStats,
+  type AdminCrawlerFailure,
+} from "@/lib/api";
+
+const STATUS_LABELS: Record<string, string> = {
+  pending: "Pending",
+  in_progress: "In progress",
+  crawled: "Crawled",
+  bot_blocked: "Bot blocked",
+  js_required: "JS required",
+  http_error: "HTTP error",
+  timeout: "Timeout",
+  no_content: "No content",
+  no_website: "No website",
+};
+
+const STATUS_COLOURS: Record<string, string> = {
+  crawled: "bg-green-100 text-green-800",
+  pending: "bg-blue-100 text-blue-700",
+  in_progress: "bg-blue-100 text-blue-700",
+  js_required: "bg-amber-100 text-amber-800",
+  bot_blocked: "bg-red-100 text-red-800",
+  http_error: "bg-red-100 text-red-800",
+  timeout: "bg-orange-100 text-orange-800",
+  no_content: "bg-slate-100 text-slate-600",
+  no_website: "bg-slate-100 text-slate-500",
+};
+
+function Badge({ status }: { status: string }) {
+  return (
+    <span className={`inline-block px-2 py-0.5 rounded-full text-xs font-medium ${STATUS_COLOURS[status] ?? "bg-slate-100 text-slate-600"}`}>
+      {STATUS_LABELS[status] ?? status}
+    </span>
+  );
+}
+
+function KpiCard({ label, value, sub, icon: Icon, colour }: {
+  label: string; value: string | number; sub?: string;
+  icon: React.ElementType; colour: string;
+}) {
+  return (
+    <div className="bg-white rounded-xl border border-slate-200 p-4 flex items-start gap-3">
+      <div className={`mt-0.5 p-2 rounded-lg ${colour}`}>
+        <Icon size={16} className="text-current" />
+      </div>
+      <div>
+        <p className="text-xs text-slate-500">{label}</p>
+        <p className="text-xl font-semibold text-slate-900 tabular-nums">{value}</p>
+        {sub && <p className="text-xs text-slate-400 mt-0.5">{sub}</p>}
+      </div>
+    </div>
+  );
+}
+
+function Section({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
+      <div className="px-4 py-3 border-b border-slate-100">
+        <h2 className="text-sm font-semibold text-slate-700">{title}</h2>
+      </div>
+      <div className="p-4">{children}</div>
+    </div>
+  );
+}
+
+const TERMINAL = ["bot_blocked", "http_error", "timeout", "no_content", "no_website"] as const;
+type TerminalStatus = (typeof TERMINAL)[number] | "";
+
+export function CrawlerAdminClient() {
+  const [banner, setBanner] = useState<{ kind: "success" | "error"; msg: string } | null>(null);
+  const [acting, setActing] = useState<string | null>(null);
+  const [page, setPage] = useState(1);
+  const [statusFilter, setStatusFilter] = useState<TerminalStatus>("");
+
+  const flash = useCallback((kind: "success" | "error", msg: string) => {
+    setBanner({ kind, msg });
+    setTimeout(() => setBanner(null), 5000);
+  }, []);
+
+  const { data: stats, isLoading: statsLoading, error: statsError, mutate: mutateStats } =
+    useSWR<AdminCrawlerStats>("admin-crawler-stats", fetchAdminCrawlerStats);
+
+  const swrFailuresKey = `admin-crawler-failures-${page}-${statusFilter}`;
+  const { data: failures, isLoading: failuresLoading, mutate: mutateFailures } =
+    useSWR(swrFailuresKey, () =>
+      fetchAdminCrawlerFailures({ page, page_size: 50, status_filter: statusFilter || undefined })
+    );
+
+  const mutateAll = useCallback(() => {
+    void mutateStats();
+    void mutateFailures();
+  }, [mutateStats, mutateFailures]);
+
+  async function doAction(key: string, fn: () => Promise<{ reset?: number; job_id?: number }>) {
+    setActing(key);
+    try {
+      const res = await fn();
+      if ("reset" in res) flash("success", `Reset ${res.reset} rows to pending.`);
+      else flash("success", `Job #${res.job_id} enqueued.`);
+      mutateAll();
+    } catch (e) {
+      flash("error", e instanceof Error ? e.message : "Action failed");
+    } finally {
+      setActing(null);
+    }
+  }
+
+  const s = stats;
+  const crawled = s?.status_counts["crawled"] ?? 0;
+  const pending = (s?.status_counts["pending"] ?? 0) + (s?.status_counts["in_progress"] ?? 0);
+  const jsRequired = s?.status_counts["js_required"] ?? 0;
+  const totalFailed = TERMINAL.reduce((n, k) => n + (s?.status_counts[k] ?? 0), 0);
+  const totalCandidates = Object.values(s?.candidate_counts ?? {}).reduce((a, b) => a + b, 0);
+
+  const failureItems: AdminCrawlerFailure[] = failures?.items ?? [];
+  const totalFailures = failures?.total ?? 0;
+  const totalPages = Math.ceil(totalFailures / 50);
+
+  return (
+    <div className="p-6 max-w-6xl space-y-6">
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-lg font-semibold text-slate-800 flex items-center gap-2">
+            <Globe size={18} className="text-purple-600" /> Web Crawler Health
+          </h1>
+          <p className="text-xs text-slate-400 mt-0.5">Pipeline status · superadmin only</p>
+        </div>
+        <button
+          onClick={mutateAll}
+          className="flex items-center gap-1.5 text-xs text-slate-500 hover:text-slate-700 px-2.5 py-1.5 rounded-lg border border-slate-200 hover:bg-slate-50 transition-colors"
+        >
+          <RefreshCw size={12} /> Refresh
+        </button>
+      </div>
+
+      {/* Banner */}
+      {banner && (
+        <div className={`rounded-lg border px-4 py-2.5 text-sm ${
+          banner.kind === "success"
+            ? "border-green-200 bg-green-50 text-green-800"
+            : "border-red-200 bg-red-50 text-red-800"
+        }`}>
+          {banner.msg}
+        </div>
+      )}
+
+      {statsLoading && (
+        <div className="flex items-center justify-center h-32 text-slate-400">
+          <Loader2 size={20} className="animate-spin" />
+        </div>
+      )}
+
+      {statsError && (
+        <div className="p-6 text-sm text-red-500">
+          Failed to load crawler stats.{" "}
+          <button onClick={() => void mutateStats()} className="underline">Retry</button>
+        </div>
+      )}
+
+      {s && (
+        <>
+          {/* KPI row */}
+          <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+            <KpiCard label="Crawled" value={crawled.toLocaleString()} icon={CheckCircle2} colour="bg-green-50 text-green-600" />
+            <KpiCard label="Pending" value={pending.toLocaleString()} icon={Clock} colour="bg-blue-50 text-blue-600" />
+            <KpiCard label="Playwright queue" value={jsRequired.toLocaleString()} icon={Globe} colour="bg-amber-50 text-amber-600" />
+            <KpiCard label="Terminal failures" value={totalFailed.toLocaleString()} icon={AlertTriangle} colour="bg-red-50 text-red-500" />
+            <KpiCard label="Extracted" value={s.companies_extracted.toLocaleString()} sub={s.avg_confidence != null ? `avg conf ${(s.avg_confidence * 100).toFixed(0)}%` : undefined} icon={ShieldAlert} colour="bg-purple-50 text-purple-600" />
+          </div>
+
+          <div className="grid md:grid-cols-3 gap-4">
+            {/* Status breakdown */}
+            <Section title="Crawl status">
+              <table className="w-full text-sm">
+                <tbody>
+                  {Object.entries(STATUS_LABELS).map(([key, label]) => {
+                    const count = s.status_counts[key] ?? 0;
+                    if (count === 0 && !["crawled", "pending", "bot_blocked"].includes(key)) return null;
+                    return (
+                      <tr key={key} className="border-b border-slate-50 last:border-0">
+                        <td className="py-1.5"><Badge status={key} /></td>
+                        <td className="py-1.5 text-right font-mono font-medium text-slate-800 tabular-nums">
+                          {count.toLocaleString()}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </Section>
+
+            {/* URL candidates */}
+            <Section title="URL candidates">
+              <table className="w-full text-sm">
+                <tbody>
+                  {[["pending", "Pending"], ["selected", "Selected"], ["crawled", "Crawled"], ["rejected", "Rejected"]].map(([key, label]) => (
+                    <tr key={key} className="border-b border-slate-50 last:border-0">
+                      <td className="py-1.5 text-slate-600">{label}</td>
+                      <td className="py-1.5 text-right font-mono font-medium text-slate-800 tabular-nums">
+                        {(s.candidate_counts[key] ?? 0).toLocaleString()}
+                      </td>
+                    </tr>
+                  ))}
+                  <tr className="border-t border-slate-200">
+                    <td className="pt-2 text-xs text-slate-400">Total</td>
+                    <td className="pt-2 text-right font-mono text-xs text-slate-500 tabular-nums">{totalCandidates.toLocaleString()}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </Section>
+
+            {/* Page / S3 coverage */}
+            <Section title="Page storage">
+              <table className="w-full text-sm">
+                <tbody>
+                  {[
+                    ["Pages in DB", s.pages_total],
+                    ["Pages in S3", s.pages_in_s3],
+                    ["Awaiting extraction", s.pages_needing_extraction],
+                  ].map(([label, val]) => (
+                    <tr key={label as string} className="border-b border-slate-50 last:border-0">
+                      <td className="py-1.5 text-slate-600">{label}</td>
+                      <td className="py-1.5 text-right font-mono font-medium text-slate-800 tabular-nums">
+                        {(val as number).toLocaleString()}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </Section>
+          </div>
+
+          {/* Actions */}
+          <Section title="Actions">
+            <div className="flex flex-wrap gap-3">
+              <button
+                onClick={() => doAction("reset-http", crawlerResetHttp)}
+                disabled={acting !== null}
+                className="flex items-center gap-2 px-3 py-2 text-sm rounded-lg border border-slate-200 hover:bg-slate-50 disabled:opacity-50 transition-colors"
+              >
+                {acting === "reset-http" ? <Loader2 size={14} className="animate-spin" /> : <RotateCcw size={14} />}
+                Reset HTTP failures
+              </button>
+              <button
+                onClick={() => doAction("reset-playwright", crawlerResetPlaywright)}
+                disabled={acting !== null}
+                className="flex items-center gap-2 px-3 py-2 text-sm rounded-lg border border-slate-200 hover:bg-slate-50 disabled:opacity-50 transition-colors"
+              >
+                {acting === "reset-playwright" ? <Loader2 size={14} className="animate-spin" /> : <RotateCcw size={14} />}
+                Reset Playwright failures
+              </button>
+              <button
+                onClick={() => doAction("populate", crawlerPopulateUrls)}
+                disabled={acting !== null}
+                className="flex items-center gap-2 px-3 py-2 text-sm rounded-lg border border-amber-200 bg-amber-50 hover:bg-amber-100 text-amber-800 disabled:opacity-50 transition-colors"
+              >
+                {acting === "populate" ? <Loader2 size={14} className="animate-spin" /> : <ListPlus size={14} />}
+                Backfill URL candidates
+              </button>
+              <button
+                onClick={() => doAction("extract", crawlerRunExtract)}
+                disabled={acting !== null}
+                className="flex items-center gap-2 px-3 py-2 text-sm rounded-lg border border-purple-200 bg-purple-50 hover:bg-purple-100 text-purple-800 disabled:opacity-50 transition-colors"
+              >
+                {acting === "extract" ? <Loader2 size={14} className="animate-spin" /> : <Cpu size={14} />}
+                Run extraction
+              </button>
+            </div>
+            <p className="text-xs text-slate-400 mt-3">
+              "Reset HTTP failures" moves bot_blocked / http_error / timeout / no_content rows (HTTP tier) back to pending so they are re-crawled.
+              "Reset Playwright failures" does the same for the Playwright tier.
+              "Backfill URL candidates" enqueues a job that reads stored Google results and populates company_url_candidates for companies that were enriched before auto-populate was added.
+              "Run extraction" manually enqueues HTML extraction — this also triggers automatically after each successful crawl batch.
+            </p>
+          </Section>
+        </>
+      )}
+
+      {/* Terminal failures table */}
+      <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
+        <div className="px-4 py-3 border-b border-slate-100 flex items-center justify-between gap-3">
+          <h2 className="text-sm font-semibold text-slate-700">Terminal failures</h2>
+          <select
+            value={statusFilter}
+            onChange={e => { setStatusFilter(e.target.value as TerminalStatus); setPage(1); }}
+            className="text-xs border border-slate-200 rounded-lg px-2 py-1 text-slate-600 bg-white"
+          >
+            <option value="">All failure types</option>
+            {TERMINAL.map(s => (
+              <option key={s} value={s}>{STATUS_LABELS[s]}</option>
+            ))}
+          </select>
+        </div>
+
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead className="bg-slate-50 border-b border-slate-200">
+              <tr>
+                <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">Company</th>
+                <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">URL</th>
+                <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">Status</th>
+                <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">Detail</th>
+                <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">Tier / Fails</th>
+                <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">Last crawled</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {failuresLoading && (
+                <tr><td colSpan={6} className="px-4 py-8 text-center text-slate-400"><Loader2 size={16} className="animate-spin inline" /></td></tr>
+              )}
+              {!failuresLoading && failureItems.length === 0 && (
+                <tr><td colSpan={6} className="px-4 py-8 text-center text-xs text-slate-400">No terminal failures.</td></tr>
+              )}
+              {failureItems.map(f => (
+                <tr key={f.company_id} className="hover:bg-slate-50 transition-colors">
+                  <td className="px-4 py-3">
+                    <p className="font-medium text-slate-800 truncate max-w-[180px]">{f.company_name}</p>
+                    <p className="text-xs text-slate-400 font-mono">{f.company_uid}</p>
+                  </td>
+                  <td className="px-4 py-3 max-w-[200px]">
+                    {f.url
+                      ? <a href={f.url} target="_blank" rel="noopener noreferrer" className="text-xs text-blue-600 hover:underline truncate block">{f.url}</a>
+                      : <span className="text-xs text-slate-400">—</span>
+                    }
+                  </td>
+                  <td className="px-4 py-3"><Badge status={f.crawl_status} /></td>
+                  <td className="px-4 py-3 max-w-[220px]">
+                    <span className="text-xs text-slate-500 truncate block" title={f.crawl_error_detail ?? undefined}>
+                      {f.bot_protection_type ? <span className="text-orange-600 font-medium">{f.bot_protection_type} · </span> : null}
+                      {f.crawl_error_detail ?? "—"}
+                    </span>
+                  </td>
+                  <td className="px-4 py-3">
+                    <span className="text-xs font-mono text-slate-600">{f.tier}</span>
+                    {f.consecutive_failures > 0 && (
+                      <span className="ml-1.5 text-xs text-red-500">×{f.consecutive_failures}</span>
+                    )}
+                  </td>
+                  <td className="px-4 py-3 text-xs text-slate-400 whitespace-nowrap">
+                    {f.last_crawled_at
+                      ? new Date(f.last_crawled_at).toLocaleDateString("de-CH", { day: "2-digit", month: "2-digit", year: "2-digit", hour: "2-digit", minute: "2-digit" })
+                      : "—"
+                    }
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+
+        {totalPages > 1 && (
+          <div className="px-4 py-3 border-t border-slate-100 flex items-center justify-between text-xs text-slate-500">
+            <span>{totalFailures.toLocaleString()} failures · page {page}/{totalPages}</span>
+            <div className="flex gap-1">
+              <button onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page === 1} className="p-1.5 rounded hover:bg-slate-100 disabled:opacity-40">
+                <ChevronLeft size={14} />
+              </button>
+              <button onClick={() => setPage(p => Math.min(totalPages, p + 1))} disabled={page === totalPages} className="p-1.5 rounded hover:bg-slate-100 disabled:opacity-40">
+                <ChevronRight size={14} />
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
