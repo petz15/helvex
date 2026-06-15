@@ -195,14 +195,14 @@ function legalFormLabel(lf: CompanyShortEntry["legalForm"]): string {
   return "";
 }
 
-function RelatedCompaniesList({ items, label, getLink }: { items: CompanyShortEntry[]; label: string; getLink?: (item: CompanyShortEntry, index: number) => string | undefined }) {
+function RelatedCompaniesList({ items, label, getLink }: { items: CompanyShortEntry[]; label: string; getLink?: (item: CompanyShortEntry) => string | undefined }) {
   if (items.length === 0) return null;
   return (
     <div>
       <dt className="text-[12px] font-semibold mb-1" style={{ color: "#6b7480" }}>{label}</dt>
       <dd className="space-y-1">
         {items.map((c, i) => {
-          const link = getLink?.(c, i);
+          const link = getLink?.(c);
           const nameEl = link ? (
             <Link href={link} className="font-medium hover:text-[#2563eb] hover:underline">{c.name ?? "—"}</Link>
           ) : (
@@ -284,6 +284,10 @@ export function CompanyDetailClient({ company: initial, readOnlyDemo = false, is
   const auditCompanies = parseJsonList<CompanyShortEntry>(company.audit_companies);
   const oldNames = parseJsonList<OldNameEntry>(company.old_names);
   const translations = parseJsonList<string>(company.translations);
+
+  const resolvedUids = company.resolved_uids ?? {};
+  const getRelatedLink = (c: CompanyShortEntry) =>
+    c.uid && resolvedUids[c.uid] ? `/app/companies/${resolvedUids[c.uid]}` : undefined;
 
   const hasStructureData =
     headOffices.length > 0 || furtherHeadOffices.length > 0 ||
@@ -656,6 +660,8 @@ export function CompanyDetailClient({ company: initial, readOnlyDemo = false, is
                 </div>
               )}
 
+              <SimapPanel companyId={company.id} />
+
               <BoardPanel companyId={company.id} />
 
               {/* Group / Corporate structure */}
@@ -690,12 +696,12 @@ export function CompanyDetailClient({ company: initial, readOnlyDemo = false, is
                         </dd>
                       </div>
                     )}
-                    <RelatedCompaniesList items={headOffices} label={t.headoffice} getLink={(_, i) => (i === 0 && company.parent_company_id != null) ? `/app/companies/${company.parent_company_id}` : undefined} />
-                    <RelatedCompaniesList items={furtherHeadOffices} label={t.furtherheadoffices} />
-                    <RelatedCompaniesList items={branchOffices} label={t.branchoffices} />
-                    <RelatedCompaniesList items={hasTakenOver} label={t.hastakenover} />
-                    <RelatedCompaniesList items={wasTakenOverBy} label={t.wastakenoverby} />
-                    <RelatedCompaniesList items={auditCompanies} label={t.auditcompanies} />
+                    <RelatedCompaniesList items={headOffices} label={t.headoffice} getLink={getRelatedLink} />
+                    <RelatedCompaniesList items={furtherHeadOffices} label={t.furtherheadoffices} getLink={getRelatedLink} />
+                    <RelatedCompaniesList items={branchOffices} label={t.branchoffices} getLink={getRelatedLink} />
+                    <RelatedCompaniesList items={hasTakenOver} label={t.hastakenover} getLink={getRelatedLink} />
+                    <RelatedCompaniesList items={wasTakenOverBy} label={t.wastakenoverby} getLink={getRelatedLink} />
+                    <RelatedCompaniesList items={auditCompanies} label={t.auditcompanies} getLink={getRelatedLink} />
                   </dl>
                 </div>
               )}
@@ -705,8 +711,6 @@ export function CompanyDetailClient({ company: initial, readOnlyDemo = false, is
               <SignersPanelDB companyId={company.id} />
 
               <SogcTimelineDB companyId={company.id} />
-
-              <SimapPanel companyId={company.id} />
 
               {/* Contact */}
               {(company.contact_name || company.contact_email || company.contact_phone) && (

@@ -64,6 +64,7 @@ export interface Company {
   created_at: string;
   updated_at: string;
   notes: Note[];
+  resolved_uids?: Record<string, number>;
 }
 
 export interface GoogleScoredResult {

@@ -144,7 +144,11 @@ def _apply_filters(query, *, name_filter, uid_filter=None, canton, review_status
             Company.old_names.ilike(f"%{name_filter}%"),
         ))
     if uid_filter:
-        query = query.filter(Company.uid.ilike(f"%{uid_filter}%"))
+        # Normalize compact form (CHE442723833) → CHE-442.723.833 for ILIKE matching
+        import re as _re
+        _m = _re.match(r'^CHE(\d{9})$', uid_filter.strip().upper())
+        uid_filter_norm = f"CHE-{_m.group(1)[:3]}.{_m.group(1)[3:6]}.{_m.group(1)[6:]}" if _m else uid_filter
+        query = query.filter(Company.uid.ilike(f"%{uid_filter_norm}%"))
     if canton:
         query = query.filter(Company.canton == canton)
     if review_status == "_none":

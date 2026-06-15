@@ -176,6 +176,7 @@ class CompanyRead(CompanyBase):
     created_at: datetime
     updated_at: datetime
     notes: list[NoteRead] = []
+    resolved_uids: dict[str, int] = {}
 
 
 class CompanyPage(BaseModel):

@@ -1,7 +1,7 @@
 "use client";
 
 import useSWR from "swr";
-import { Building2, Award, ChevronDown, ChevronUp } from "lucide-react";
+import { Building2, Award, ChevronDown, ChevronUp, ExternalLink } from "lucide-react";
 import { useState } from "react";
 
 interface SimapAward {
@@ -19,6 +19,7 @@ interface SimapAward {
   lot_number: number | null;
   project_number: string | null;
   publication_number: string | null;
+  simap_publication_id: string | null;
   price: number | null;
   price_currency: string | null;
   total_price_selection: string | null;
@@ -65,9 +66,22 @@ function AwardCard({ award }: { award: SimapAward }) {
         <p className="text-sm font-medium text-slate-800 leading-snug line-clamp-2">
           {award.best_title || `Project ${award.project_number}`}
         </p>
-        {pubDate && (
-          <span className="text-xs text-slate-400 whitespace-nowrap shrink-0">{pubDate}</span>
-        )}
+        <div className="flex items-center gap-2 shrink-0">
+          {pubDate && (
+            <span className="text-xs text-slate-400 whitespace-nowrap">{pubDate}</span>
+          )}
+          {award.simap_publication_id && (
+            <a
+              href={`https://www.simap.ch/notices/${award.simap_publication_id}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-slate-400 hover:text-blue-600 transition-colors"
+              title="View on simap.ch"
+            >
+              <ExternalLink size={12} />
+            </a>
+          )}
+        </div>
       </div>
 
       {award.best_proc_office && (

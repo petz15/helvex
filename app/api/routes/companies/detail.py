@@ -89,6 +89,36 @@ def get_company(
     if parent_company_id is not None:
         result = result.model_copy(update={"parent_company_id": parent_company_id})
 
+    # Resolve UIDs from all related-company JSON fields to company IDs in one query
+    def _collect_uids(raw: str | None) -> list[str]:
+        if not raw:
+            return []
+        try:
+            entries = json.loads(raw)
+            if isinstance(entries, dict):
+                entries = [entries]
+            return [e["uid"] for e in entries if isinstance(e, dict) and e.get("uid")]
+        except Exception:
+            return []
+
+    all_uids: set[str] = set()
+    for field_val in (
+        db_company.head_offices, db_company.further_head_offices,
+        db_company.branch_offices, db_company.has_taken_over,
+        db_company.was_taken_over_by, db_company.audit_companies,
+    ):
+        all_uids.update(_collect_uids(field_val))
+
+    resolved_uids: dict[str, int] = {}
+    if all_uids:
+        from app.models.company import Company as CompanyModel
+        rows = db.execute(
+            select(CompanyModel.uid, CompanyModel.id).where(CompanyModel.uid.in_(all_uids))
+        ).all()
+        resolved_uids = {row.uid: row.id for row in rows}
+    if resolved_uids:
+        result = result.model_copy(update={"resolved_uids": resolved_uids})
+
     org: Organization | None = db.get(Organization, current_user.org_id) if current_user.org_id else None
     return _apply_web_results_gate(result, org, current_user.is_superadmin)
 
@@ -407,6 +437,7 @@ def get_company_simap_awards(
             "lot_title_it": a.lot_title_it,
             "project_number": a.project_number,
             "publication_number": a.publication_number,
+            "simap_publication_id": a.simap_publication_id,
             # Vendor-specific fields for this company
             "price": float(v.price) if v.price is not None else None,
             "price_currency": v.price_currency,

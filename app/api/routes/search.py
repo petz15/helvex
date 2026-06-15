@@ -132,15 +132,28 @@ def global_search(
     term_lower = f"%{q.lower()}%"
 
     import json as _json
+    import re as _re
+
+    # Normalize compact UID (CHE442723833) → CHE-442.723.833
+    _uid_m = _re.match(r'^CHE(\d{9})$', q.strip().upper())
+    uid_term = f"CHE-{_uid_m.group(1)[:3]}.{_uid_m.group(1)[3:6]}.{_uid_m.group(1)[6:]}" if _uid_m else q.strip()
+    uid_is_query = bool(_re.match(r'^CHE[-\d.]{9,13}$', q.strip().upper()))
+
+    company_filter = or_(
+        Company.name.ilike(term),
+        Company.old_names.ilike(term),
+        *(
+            [Company.uid.ilike(f"%{uid_term}%")]
+            if uid_is_query else []
+        ),
+    )
 
     companies = (
         db.query(Company)
-        .filter(or_(
-            Company.name.ilike(term),
-            Company.old_names.ilike(term),
-        ))
+        .filter(company_filter)
         .order_by(
-            # Exact current-name matches first
+            # UID exact matches first, then current-name matches
+            (Company.uid.ilike(uid_term)).desc() if uid_is_query else func.lower(Company.name).like(term_lower).desc(),
             func.lower(Company.name).like(term_lower).desc(),
             Company.name,
         )
