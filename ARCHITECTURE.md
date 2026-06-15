@@ -1881,8 +1881,9 @@ Grafana query: `rate(crawl_result_total[5m])` grouped by `tier` and `status`. Pe
 | `app/services/crawler_playwright.py` | Playwright crawler (lazy import; resource-blocking, optional Chrome channel) |
 | `app/services/crawler_extract.py` | Deterministic structured-data extractor (trafilatura + regex/schema.org/phonenumbers) |
 | `app/services/job_handlers/web_crawl.py` | Job handlers: `_run_crawl_batch` shared loop, `handle_web_extract`, per-type handlers |
-| `app/crud/crawler.py` | CRUD: upsert candidates, SKIP LOCKED claiming, save pages, retry backoff, extraction claim/upsert |
+| `app/crud/crawler.py` | CRUD: upsert candidates, SKIP LOCKED claiming, save pages, retry backoff, extraction claim/upsert, `get_best_web_extract` |
 | `infra/charts/helvex/templates/crawler-http-deployment.yaml` | K8s deployment for HTTP crawler pods |
+| `frontend/src/components/website-panel.tsx` | Company-detail "Website" tab: extracted contacts/socials/content + per-page crawl-coverage debug table (POC) |
 
 ### S3
 
@@ -1899,6 +1900,16 @@ later crawled via a different URL candidate a second row is written; `get_best_w
 picks the highest-confidence one for downstream use. Trigger: `POST /api/v1/crawler/extract`
 (superadmin) or auto-triggered after each crawl batch. No API cost.
 The optional Claude Haiku enrichment layer and multi-candidate comparison UI are deferred — see ROADMAP.
+
+### Company-detail "Website" tab (POC)
+
+`GET /api/v1/companies/{id}/web-extract` returns the best extract (`get_best_web_extract`)
+plus per-page crawl coverage (`company_web_pages`) and the candidate count. Rendered by
+`website-panel.tsx` in a new "Website" sub-tab on the company detail page: source strip
+(URL/confidence/method/date), contact + socials cards, content card (description/languages/
+keywords), and a crawl-coverage table (page type, HTTP status, lang, word/image/video counts,
+contact-form + HTML-stored flags). Empty fields render as muted "—" so extraction gaps are
+visible — this is a diagnostic POC for assessing extraction quality, not the final UX.
 
 ---
 

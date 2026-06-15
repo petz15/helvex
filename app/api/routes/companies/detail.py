@@ -7,14 +7,18 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session, joinedload
 
 from app import crud
+from app.crud import crawler as crawler_crud
 from app.auth import get_current_user
 from app.services.rate_limit import check_rate_limit
 from app.database import get_db
 from app.models.organization import Organization
+from app.models.company_url_candidate import CompanyUrlCandidate
+from app.models.company_web_extract import CompanyWebExtract
+from app.models.company_web_page import CompanyWebPage
 from app.models.simap_award import SimapAward
 from app.models.simap_award_vendor import SimapAwardVendor
 from app.models.user import User
@@ -450,3 +454,79 @@ def get_company_simap_awards(
         })
 
     return result
+
+
+@router.get("/{company_id}/web-extract", summary="Get crawled-website structured extract for a company")
+def get_company_web_extract(
+    company_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Return the best web_extract row plus per-page crawl coverage (POC / debug view).
+
+    The "best" extract is the highest-confidence row across all URL candidates
+    crawled for this company. `pages` lists every crawled page (any candidate) so
+    crawl coverage and content depth can be inspected.
+    """
+    db_company = crud.get_company(db, company_id)
+    if not db_company:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Company not found")
+
+    extract = crawler_crud.get_best_web_extract(db, company_id)
+    candidate_count = db.execute(
+        select(func.count())
+        .select_from(CompanyWebExtract)
+        .where(CompanyWebExtract.company_id == company_id)
+    ).scalar() or 0
+
+    extract_out: dict[str, Any] | None = None
+    if extract is not None:
+        candidate = db.get(CompanyUrlCandidate, extract.url_candidate_id)
+        web_uid = (extract.uid or "").replace(" ", "").upper() or None
+        zefix_uid = (db_company.uid or "").replace(" ", "").upper() or None
+        extract_out = {
+            "url_candidate_id": extract.url_candidate_id,
+            "url": candidate.url if candidate else None,
+            "title": candidate.title if candidate else None,
+            "emails": extract.emails or [],
+            "phones": extract.phones or [],
+            "socials": extract.socials or {},
+            "address": extract.address,
+            "uid": extract.uid,
+            "uid_matches_zefix": (web_uid == zefix_uid) if (web_uid and zefix_uid) else None,
+            "languages": extract.languages or [],
+            "description": extract.description,
+            "service_keywords": extract.service_keywords or [],
+            "extraction_method": extract.extraction_method,
+            "confidence": extract.confidence,
+            "page_count": extract.page_count,
+            "extracted_at": extract.extracted_at.isoformat() if extract.extracted_at else None,
+        }
+
+    pages = db.execute(
+        select(CompanyWebPage)
+        .where(CompanyWebPage.company_id == company_id)
+        .order_by(CompanyWebPage.page_type)
+    ).scalars().all()
+    pages_out = [
+        {
+            "page_type": p.page_type,
+            "url": p.url,
+            "final_url": p.final_url,
+            "http_status": p.http_status,
+            "lang": p.lang,
+            "word_count": p.word_count,
+            "image_count": p.image_count,
+            "video_count": p.video_count,
+            "has_contact_form": p.has_contact_form,
+            "has_html": p.s3_key_html is not None,
+            "crawled_at": p.crawled_at.isoformat() if p.crawled_at else None,
+        }
+        for p in pages
+    ]
+
+    return {
+        "extract": extract_out,
+        "pages": pages_out,
+        "candidate_count": int(candidate_count),
+    }

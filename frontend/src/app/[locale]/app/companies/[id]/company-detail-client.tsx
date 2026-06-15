@@ -15,6 +15,7 @@ import { SignersPanelDB, SogcTimelineDB } from "@/components/sogc-history";
 import { BoardPanel, AuditorsPanel } from "@/components/board-panel";
 import { CorporateShareholdersPanel } from "@/components/corporate-shareholders-panel";
 import { SimapPanel } from "@/components/simap-panel";
+import { WebsitePanel } from "@/components/website-panel";
 import { useI18n } from "@/i18n/context";
 import { useApiErrorHandler } from "@/lib/use-api-error";
 
@@ -411,7 +412,9 @@ export function CompanyDetailClient({ company: initial, readOnlyDemo = false, is
     }
   }
 
-  const SUB_TABS = ["Overview", "Timeline", "People", "Documents", "Financials"] as const;
+  const SUB_TABS = ["Overview", "Website", "Timeline", "People", "Documents", "Financials"] as const;
+  const ENABLED_TABS = new Set<(typeof SUB_TABS)[number]>(["Overview", "Website"]);
+  const [activeTab, setActiveTab] = useState<(typeof SUB_TABS)[number]>("Overview");
 
   return (
     <>
@@ -419,15 +422,22 @@ export function CompanyDetailClient({ company: initial, readOnlyDemo = false, is
       <div className="bg-white border-b border-[#eef0f3] sticky top-0 z-40">
         <div className="max-w-[1240px] mx-auto px-10">
           <div className="flex">
-            {SUB_TABS.map((tab, i) => (
-              <button key={tab} type="button" disabled={i > 0}
-                className={cn(
-                  "px-4 py-3 text-[13px] font-semibold border-b-2 transition-colors",
-                  i === 0 ? "border-[#2563eb] text-[#2563eb]" : "border-transparent text-[#9aa2ad] cursor-not-allowed"
-                )}>
-                {tab}
-              </button>
-            ))}
+            {SUB_TABS.map((tab) => {
+              const enabled = ENABLED_TABS.has(tab);
+              const active = activeTab === tab;
+              return (
+                <button key={tab} type="button" disabled={!enabled}
+                  onClick={() => enabled && setActiveTab(tab)}
+                  className={cn(
+                    "px-4 py-3 text-[13px] font-semibold border-b-2 transition-colors",
+                    active ? "border-[#2563eb] text-[#2563eb]"
+                    : enabled ? "border-transparent text-[#6b7480] hover:text-[#1f2733]"
+                    : "border-transparent text-[#9aa2ad] cursor-not-allowed"
+                  )}>
+                  {tab}
+                </button>
+              );
+            })}
           </div>
         </div>
       </div>
@@ -630,7 +640,15 @@ export function CompanyDetailClient({ company: initial, readOnlyDemo = false, is
             </div>
           </div>
 
-          {/* ── Body grid ── */}
+          {/* ── Website tab ── */}
+          {activeTab === "Website" && (
+            <div className="mt-[18px]">
+              <WebsitePanel companyId={company.id} />
+            </div>
+          )}
+
+          {/* ── Body grid (Overview tab) ── */}
+          {activeTab === "Overview" && (
           <div className="mt-[18px] grid gap-[18px]" style={{ gridTemplateColumns: "1.55fr 1fr", alignItems: "start" }}>
 
             {/* Main column */}
@@ -917,6 +935,7 @@ export function CompanyDetailClient({ company: initial, readOnlyDemo = false, is
               )}
             </div>
           </div>
+          )}
         </div>
       </div>
 
