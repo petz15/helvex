@@ -5,7 +5,9 @@ import { useSearchParams, useRouter, usePathname } from "next/navigation";
 import { mutate } from "swr";
 import { useI18n } from "@/i18n/context";
 
-function OAuthButtons({ orContinueWith }: { orContinueWith: string }) {
+function OAuthButtons({ orContinueWith, next }: { orContinueWith: string; next: string }) {
+  const googleHref = `/api/v1/auth/google/authorize?next=${encodeURIComponent(next)}`;
+  const linkedinHref = `/api/v1/auth/linkedin/authorize?next=${encodeURIComponent(next)}`;
   return (
     <div className="flex flex-col gap-2 mt-4">
       <div className="flex items-center gap-2 text-xs text-slate-400">
@@ -14,7 +16,7 @@ function OAuthButtons({ orContinueWith }: { orContinueWith: string }) {
         <div className="flex-1 border-t border-slate-200" />
       </div>
       <a
-        href="/api/v1/auth/google/authorize"
+        href={googleHref}
         className="flex items-center justify-center gap-2 rounded border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 transition-colors"
       >
         <svg width="18" height="18" viewBox="0 0 18 18" aria-hidden="true">
@@ -26,7 +28,7 @@ function OAuthButtons({ orContinueWith }: { orContinueWith: string }) {
         Google
       </a>
       <a
-        href="/api/v1/auth/linkedin/authorize"
+        href={linkedinHref}
         className="flex items-center justify-center gap-2 rounded border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 transition-colors"
       >
         <svg width="18" height="18" viewBox="0 0 18 18" fill="#0A66C2" aria-hidden="true">
@@ -126,7 +128,7 @@ function LoginForm() {
           </button>
         </form>
 
-        <OAuthButtons orContinueWith={t.orContinueWith} />
+        <OAuthButtons orContinueWith={t.orContinueWith} next={next} />
 
         <p className="mt-4 text-center text-sm text-slate-500">
           {t.noAccount}{" "}

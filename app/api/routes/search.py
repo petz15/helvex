@@ -92,6 +92,7 @@ class CompanySnippet(BaseModel):
     canton: str | None
     legal_form: str | None
     status: str | None
+    matched_old_name: str | None = None
 
 
 class PersonSnippet(BaseModel):
@@ -130,29 +131,75 @@ def global_search(
     term = f"%{q}%"
     term_lower = f"%{q.lower()}%"
 
+    import json as _json
+
     companies = (
         db.query(Company)
-        .filter(Company.name.ilike(term))
-        .order_by(Company.name)
+        .filter(or_(
+            Company.name.ilike(term),
+            Company.old_names.ilike(term),
+        ))
+        .order_by(
+            # Exact current-name matches first
+            func.lower(Company.name).like(term_lower).desc(),
+            Company.name,
+        )
         .limit(limit)
         .all()
     )
+
+    def _find_old_name_match(raw_json: str | None, needle: str) -> str | None:
+        if not raw_json:
+            return None
+        try:
+            entries = _json.loads(raw_json)
+            nl = needle.lower().strip("%")
+            for entry in entries:
+                n = entry.get("name", "")
+                if n and nl in n.lower():
+                    return n
+        except Exception:
+            pass
+        return None
+
     company_snippets = [
         CompanySnippet(
             id=c.id, uid=c.uid, name=c.name,
             canton=c.canton, legal_form=c.legal_form, status=c.status,
+            matched_old_name=(
+                None if q.lower() in c.name.lower()
+                else _find_old_name_match(c.old_names, q)
+            ),
         )
         for c in companies
     ]
+
+    q_parts = q.lower().split()
+    if len(q_parts) >= 2:
+        # "Hans Müller" — try first+last in both orders
+        first_part = f"%{q_parts[0]}%"
+        rest_part = f"%{' '.join(q_parts[1:])}%"
+        person_filter = or_(
+            func.lower(SogcPersonEntity.lastname).like(term_lower),
+            func.lower(SogcPersonEntity.firstname).like(term_lower),
+            # firstname matches first token, lastname matches rest
+            (func.lower(SogcPersonEntity.firstname).like(first_part) &
+             func.lower(SogcPersonEntity.lastname).like(rest_part)),
+            # lastname matches first token, firstname matches rest
+            (func.lower(SogcPersonEntity.lastname).like(first_part) &
+             func.lower(SogcPersonEntity.firstname).like(rest_part)),
+        )
+    else:
+        person_filter = or_(
+            func.lower(SogcPersonEntity.lastname).like(term_lower),
+            func.lower(SogcPersonEntity.firstname).like(term_lower),
+        )
 
     persons = (
         db.query(SogcPersonEntity)
         .filter(
             SogcPersonEntity.merged_into_id.is_(None),
-            or_(
-                func.lower(SogcPersonEntity.lastname).like(term_lower),
-                func.lower(SogcPersonEntity.firstname).like(term_lower),
-            ),
+            person_filter,
         )
         .order_by(SogcPersonEntity.active_company_count.desc())
         .limit(limit)

@@ -511,6 +511,7 @@ import httpx as _httpx
 from fastapi.responses import RedirectResponse as _Redirect
 
 _OAUTH_STATE_COOKIE = "oauth_state"
+_OAUTH_NEXT_COOKIE = "oauth_next"
 _OAUTH_STATE_MAX_AGE = 600  # 10 minutes
 
 
@@ -539,18 +540,21 @@ def _oauth_callback_uri(request: Request, provider: str) -> str:
 
 
 def _set_session(response: _Redirect, user_id: int, *, is_https: bool) -> None:
+    # lax (not strict) is required here: after the OAuth redirect from Google
+    # the browser treats the chain as cross-site-initiated, so strict cookies
+    # are not sent on the following same-site redirect and auth breaks.
     response.set_cookie(
         key=COOKIE_NAME,
         value=create_session_cookie(user_id),
         httponly=True,
-        samesite="strict",
+        samesite="lax",
         secure=is_https,
         max_age=8 * 3600,
     )
 
 
 @router.get("/google/authorize", include_in_schema=False)
-async def google_authorize(request: Request) -> _Redirect:
+async def google_authorize(request: Request, next: str | None = None) -> _Redirect:
     from app.config import settings as _s
     if not _s.google_client_id:
         raise HTTPException(status_code=503, detail="Google sign-in is not configured")
@@ -567,6 +571,9 @@ async def google_authorize(request: Request) -> _Redirect:
     is_https = request.url.scheme == "https" or forwarded_proto.split(",")[0].strip().lower() == "https"
     response = _Redirect(url=f"https://accounts.google.com/o/oauth2/v2/auth?{params}", status_code=302)
     response.set_cookie(_OAUTH_STATE_COOKIE, state, httponly=True, max_age=_OAUTH_STATE_MAX_AGE, samesite="lax", secure=is_https)
+    # Persist the intended post-login destination across the OAuth redirect
+    safe_next = next if (next and next.startswith("/") and "//" not in next) else "/app/search"
+    response.set_cookie(_OAUTH_NEXT_COOKIE, safe_next, httponly=True, max_age=_OAUTH_STATE_MAX_AGE, samesite="lax", secure=is_https)
     return response
 
 
@@ -626,9 +633,13 @@ async def google_callback(
 
     forwarded_proto = request.headers.get("x-forwarded-proto", "")
     is_https = request.url.scheme == "https" or forwarded_proto.split(",")[0].strip().lower() == "https"
-    response = _Redirect(url=f"{_public_base_url(request)}/app/search", status_code=302)
+    next_url = request.cookies.get(_OAUTH_NEXT_COOKIE, "/app/search")
+    if not next_url.startswith("/") or "//" in next_url:
+        next_url = "/app/search"
+    response = _Redirect(url=f"{_public_base_url(request)}{next_url}", status_code=302)
     _set_session(response, user.id, is_https=is_https)
     response.delete_cookie(_OAUTH_STATE_COOKIE)
+    response.delete_cookie(_OAUTH_NEXT_COOKIE)
     return response
 
 
@@ -637,7 +648,7 @@ async def google_callback(
 # ---------------------------------------------------------------------------
 
 @router.get("/linkedin/authorize", include_in_schema=False)
-async def linkedin_authorize(request: Request) -> _Redirect:
+async def linkedin_authorize(request: Request, next: str | None = None) -> _Redirect:
     from app.config import settings as _s
     if not _s.linkedin_client_id:
         raise HTTPException(status_code=503, detail="LinkedIn sign-in is not configured")
@@ -653,6 +664,8 @@ async def linkedin_authorize(request: Request) -> _Redirect:
     is_https = request.url.scheme == "https" or forwarded_proto.split(",")[0].strip().lower() == "https"
     response = _Redirect(url=f"https://www.linkedin.com/oauth/v2/authorization?{params}", status_code=302)
     response.set_cookie(_OAUTH_STATE_COOKIE, state, httponly=True, max_age=_OAUTH_STATE_MAX_AGE, samesite="lax", secure=is_https)
+    safe_next = next if (next and next.startswith("/") and "//" not in next) else "/app/search"
+    response.set_cookie(_OAUTH_NEXT_COOKIE, safe_next, httponly=True, max_age=_OAUTH_STATE_MAX_AGE, samesite="lax", secure=is_https)
     return response
 
 
@@ -713,9 +726,13 @@ async def linkedin_callback(
 
     forwarded_proto = request.headers.get("x-forwarded-proto", "")
     is_https = request.url.scheme == "https" or forwarded_proto.split(",")[0].strip().lower() == "https"
-    response = _Redirect(url=f"{_public_base_url(request)}/app/search", status_code=302)
+    next_url = request.cookies.get(_OAUTH_NEXT_COOKIE, "/app/search")
+    if not next_url.startswith("/") or "//" in next_url:
+        next_url = "/app/search"
+    response = _Redirect(url=f"{_public_base_url(request)}{next_url}", status_code=302)
     _set_session(response, user.id, is_https=is_https)
     response.delete_cookie(_OAUTH_STATE_COOKIE)
+    response.delete_cookie(_OAUTH_NEXT_COOKIE)
     return response
 
 

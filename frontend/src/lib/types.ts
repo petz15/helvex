@@ -397,6 +397,7 @@ export interface GlobalCompanySnippet {
   canton: string | null;
   legal_form: string | null;
   status: string | null;
+  matched_old_name: string | null;
 }
 
 export interface GlobalPersonSnippet {

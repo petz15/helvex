@@ -139,7 +139,10 @@ def _apply_filters(query, *, name_filter, uid_filter=None, canton, review_status
     elif shab_type == "deleted":
         query = query.filter(Company.status.in_(list(_DELETED_STATUSES)))
     if name_filter:
-        query = query.filter(Company.name.ilike(f"%{name_filter}%"))
+        query = query.filter(or_(
+            Company.name.ilike(f"%{name_filter}%"),
+            Company.old_names.ilike(f"%{name_filter}%"),
+        ))
     if uid_filter:
         query = query.filter(Company.uid.ilike(f"%{uid_filter}%"))
     if canton:

@@ -136,8 +136,23 @@ function ScoreBadge({ score }: { score: number | null }) {
   );
 }
 
-function CompanyRow({ company, locale }: { company: Company; locale: string }) {
+function findMatchedOldName(oldNamesJson: string | null, query: string): string | null {
+  if (!oldNamesJson || !query) return null;
+  try {
+    const entries: { name?: string }[] = JSON.parse(oldNamesJson);
+    const ql = query.toLowerCase();
+    for (const e of entries) {
+      if (e.name && e.name.toLowerCase().includes(ql)) return e.name;
+    }
+  } catch { /* ignore */ }
+  return null;
+}
+
+function CompanyRow({ company, locale, query }: { company: Company; locale: string; query?: string }) {
   const domain = domainFromUrl(company.website_url);
+  const matchedOldName = query && !company.name.toLowerCase().includes(query.toLowerCase())
+    ? findMatchedOldName(company.old_names ?? null, query)
+    : null;
   return (
     <Link
       href={`/${locale}/app/companies/${company.id}`}
@@ -180,7 +195,12 @@ function CompanyRow({ company, locale }: { company: Company; locale: string }) {
           )}
         </div>
 
-        {company.purpose && (
+        {matchedOldName && (
+          <p className="mt-1 text-[11px] text-amber-600 leading-none">
+            formerly: {matchedOldName}
+          </p>
+        )}
+        {!matchedOldName && company.purpose && (
           <p className="mt-1.5 text-[11px] text-slate-400 leading-relaxed line-clamp-1">
             {company.purpose}
           </p>
@@ -708,7 +728,7 @@ export function SearchLandingClient({ locale }: SearchLandingClientProps) {
                 <ResultsHeader total={companiesPage.total} query={submittedQuery} />
               )}
               {(companiesPage?.items ?? []).map(c => (
-                <CompanyRow key={c.id} company={c} locale={locale} />
+                <CompanyRow key={c.id} company={c} locale={locale} query={submittedQuery} />
               ))}
               <Pagination page={page} total={companiesPage?.total ?? 0} pageSize={25} onPage={setPage} />
             </>
