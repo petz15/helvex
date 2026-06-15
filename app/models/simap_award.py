@@ -31,10 +31,10 @@ class SimapAward(Base):
     award_decision_date: Mapped[date | None] = mapped_column(Date, nullable=True)
 
     # Publication classification
-    pub_type: Mapped[str | None] = mapped_column(String(30), nullable=True)       # award / direct_award
-    process_type: Mapped[str | None] = mapped_column(String(30), nullable=True)   # open / selective / direct / invitation
-    project_type: Mapped[str | None] = mapped_column(String(30), nullable=True)   # tender / competition / study_contract
-    project_subtype: Mapped[str | None] = mapped_column(String(30), nullable=True)  # service / construction / supply
+    pub_type: Mapped[str | None] = mapped_column(String(100), nullable=True)       # award / direct_award
+    process_type: Mapped[str | None] = mapped_column(String(100), nullable=True)  # open / selective / direct / invitation
+    project_type: Mapped[str | None] = mapped_column(String(100), nullable=True)  # tender / competition / study_contract
+    project_subtype: Mapped[str | None] = mapped_column(String(100), nullable=True)  # e.g. overall_performance_competition
     creation_language: Mapped[str | None] = mapped_column(String(2), nullable=True)
 
     # Multilingual text (only creation_language slot is filled by SIMAP for most records)

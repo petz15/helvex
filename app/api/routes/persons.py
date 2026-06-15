@@ -302,16 +302,29 @@ def search_persons(
 ):
     from app.models.sogc_person_entity import SogcPersonEntity
     from app.models.sogc_person_appearance import SogcPersonAppearance
-    from sqlalchemy import case, func
+    from sqlalchemy import case, func, or_
 
     qry = db.query(SogcPersonEntity).filter(SogcPersonEntity.merged_into_id.is_(None))
 
     if q:
         term = f"%{q.lower()}%"
-        qry = qry.filter(
-            (func.lower(SogcPersonEntity.lastname).like(term)) |
-            (func.lower(SogcPersonEntity.firstname).like(term))
-        )
+        parts = q.lower().split()
+        if len(parts) >= 2:
+            first_part = f"%{parts[0]}%"
+            rest_part = f"%{' '.join(parts[1:])}%"
+            qry = qry.filter(or_(
+                func.lower(SogcPersonEntity.lastname).like(term),
+                func.lower(SogcPersonEntity.firstname).like(term),
+                (func.lower(SogcPersonEntity.firstname).like(first_part) &
+                 func.lower(SogcPersonEntity.lastname).like(rest_part)),
+                (func.lower(SogcPersonEntity.lastname).like(first_part) &
+                 func.lower(SogcPersonEntity.firstname).like(rest_part)),
+            ))
+        else:
+            qry = qry.filter(or_(
+                func.lower(SogcPersonEntity.lastname).like(term),
+                func.lower(SogcPersonEntity.firstname).like(term),
+            ))
     if hometown:
         qry = qry.filter(func.lower(SogcPersonEntity.hometown_municipality).like(f"%{hometown.lower()}%"))
     if confidence_level:
