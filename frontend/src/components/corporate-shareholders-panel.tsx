@@ -66,7 +66,7 @@ export function CorporateShareholdersPanel({ companyId }: { companyId: number })
             >
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2 flex-wrap mb-0.5">
-                  <span className="text-sm font-medium text-slate-800 truncate">
+                  <span className="text-sm font-medium text-slate-800 break-words">
                     {r.entity_name ?? "—"}
                   </span>
                   {r.entity_che && (
@@ -102,11 +102,11 @@ export function CorporateShareholdersPanel({ companyId }: { companyId: number })
               <div key={r.id} className="flex items-start justify-between gap-3 rounded-lg px-3 py-2 bg-amber-50/40">
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2 flex-wrap">
-                    <span className="text-xs font-medium text-slate-700 truncate">{r.entity_name ?? "—"}</span>
+                    <span className="text-xs font-medium text-slate-700 break-words">{r.entity_name ?? "—"}</span>
                     {r.entity_che && <span className="text-[10px] text-slate-400 font-mono">{r.entity_che}</span>}
                   </div>
                   {r.role_details && (
-                    <p className="text-[10px] text-slate-500 truncate mt-0.5" title={r.role_details}>{r.role_details}</p>
+                    <p className="text-[10px] text-slate-500 break-words mt-0.5">{r.role_details}</p>
                   )}
                 </div>
                 <div className="shrink-0 text-[10px] text-slate-400">{r.pub_date ?? ""}</div>

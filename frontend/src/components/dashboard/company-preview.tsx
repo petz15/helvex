@@ -57,7 +57,7 @@ export function CompanyPreview({ company: incoming, onClose, onUpdated, classNam
             {initials}
           </div>
           <div className="min-w-0">
-            <h2 className="font-semibold text-slate-800 text-sm leading-snug truncate flex items-center gap-1">
+            <h2 className="font-semibold text-slate-800 text-sm leading-snug break-words flex items-center gap-1 flex-wrap">
               {company.name}
               {company.zefix_detail_web && (
                 <a href={company.zefix_detail_web} target="_blank" rel="noopener noreferrer" className="text-slate-400 hover:text-blue-600 shrink-0" title="View on Zefix">

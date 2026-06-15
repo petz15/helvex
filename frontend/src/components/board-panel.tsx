@@ -133,7 +133,7 @@ function PersonCard({
         <div className="flex items-start justify-between gap-1">
           <Link
             href={`/${locale}/app/people/${appearance.person_entity_id}`}
-            className="text-sm font-medium text-slate-800 hover:text-blue-600 leading-tight truncate"
+            className="text-sm font-medium text-slate-800 hover:text-blue-600 leading-tight break-words"
           >
             {displayName}
           </Link>
@@ -146,7 +146,7 @@ function PersonCard({
           </button>
         </div>
         {appearance.role && (
-          <p className="text-xs text-slate-500 leading-tight truncate">{appearance.role}</p>
+          <p className="text-xs text-slate-500 leading-tight break-words">{appearance.role}</p>
         )}
         {isSuperAdmin && (
           <div className="mt-0.5"><ConfidenceBadge level="medium" /></div>
