@@ -361,10 +361,12 @@ jobs:
           fi
           if ! command -v helmfile &>/dev/null; then
             HELMFILE_VERSION=0.171.0
-            curl -sfLO "https://github.com/helmfile/helmfile/releases/download/v${HELMFILE_VERSION}/helmfile_${HELMFILE_VERSION}_checksums.txt"
-            curl -sfLo /tmp/helmfile.tar.gz "https://github.com/helmfile/helmfile/releases/download/v${HELMFILE_VERSION}/helmfile_${HELMFILE_VERSION}_linux_amd64.tar.gz"
-            grep "helmfile_${HELMFILE_VERSION}_linux_amd64.tar.gz" "helmfile_${HELMFILE_VERSION}_checksums.txt" | (cd /tmp && sha256sum -c -)
-            tar -xzf /tmp/helmfile.tar.gz -C /tmp && sudo mv /tmp/helmfile /usr/local/bin/helmfile
+            ( cd /tmp && \
+              curl -sfLO "https://github.com/helmfile/helmfile/releases/download/v${HELMFILE_VERSION}/helmfile_${HELMFILE_VERSION}_checksums.txt" && \
+              curl -sfLO "https://github.com/helmfile/helmfile/releases/download/v${HELMFILE_VERSION}/helmfile_${HELMFILE_VERSION}_linux_amd64.tar.gz" && \
+              grep "helmfile_${HELMFILE_VERSION}_linux_amd64.tar.gz" "helmfile_${HELMFILE_VERSION}_checksums.txt" | sha256sum -c - && \
+              tar -xzf "helmfile_${HELMFILE_VERSION}_linux_amd64.tar.gz" )
+            sudo mv /tmp/helmfile /usr/local/bin/helmfile
           fi
           if ! helm plugin list | grep -q diff; then
             helm plugin install https://github.com/databus23/helm-diff

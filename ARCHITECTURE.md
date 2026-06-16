@@ -1163,6 +1163,8 @@ Quality depends on:
 4. **Hierarchy path** — walk `noga_lookup.json` via `parentCode` links to build full ancestry (section → division → group → class → type).
 5. **Multilingual labels:** Section labels for the `market-segments` API are derived directly from `noga_lookup.json` using `_collect_multilang_text()` — all four language variants (DE/FR/IT/EN) are available without hardcoding.
 
+**Progress-count performance (`include_stale`):** [app/services/noga_pipeline.py](app/services/noga_pipeline.py) `reclassify_noga`'s `include_stale` mode ORs `noga_code IS NULL` with a cross-column comparison (`noga_classified_at < updated_at - interval`), which can't be served by a btree index and forces a full table scan — this timed out in production (job 692, 2026-06-16) even after bumping `statement_timeout` to 120s. The exact `COUNT(*)` for this path was replaced with a cheap planner estimate (`pg_class.reltuples`) since it's only used for progress display, not iteration logic. The plain `only_missing_noga` (non-stale) path keeps an exact, index-backed count via the `ix_companies_no_noga_code` partial index added in migration 0102.
+
 **Outputs to DB per company:**
 - `noga_code` — best-matching code (e.g. `"263001"`)
 - `noga_label` — German description

@@ -71,14 +71,18 @@ def reclassify_noga(
             )
         )
 
-    # The missing+stale filter ORs an IS NULL check with a cross-column
-    # comparison (noga_classified_at < updated_at - interval), which can't be
-    # served by a btree index and forces a full table scan. The engine-wide
-    # 30s statement_timeout (app/database.py) is tuned for interactive API
-    # requests and is too tight for this background-job count under load —
-    # bump it for this one statement only (resets to 30s on next commit).
-    db.execute(text("SET LOCAL statement_timeout = '120000'"))
-    total = query.with_entities(func.count(Company.id)).scalar() or 0
+    if include_stale:
+        # The stale filter ORs an IS NULL check with a cross-column comparison
+        # (noga_classified_at < updated_at - interval), which can't be served
+        # by a btree index — it forces a full table scan no matter how high
+        # statement_timeout is set (already tried bumping to 120s; still timed
+        # out under load on the 700k-row table). For progress-display purposes
+        # an exact count isn't needed, so use the planner's cheap row estimate
+        # instead of scanning the table.
+        total = db.execute(text("SELECT reltuples::bigint FROM pg_class WHERE relname = 'companies'")).scalar() or 0
+    else:
+        # noga_code IS NULL alone is served by ix_companies_no_noga_code.
+        total = query.with_entities(func.count(Company.id)).scalar() or 0
     stats["selected"] = total
 
     last_id: int = resume_from
