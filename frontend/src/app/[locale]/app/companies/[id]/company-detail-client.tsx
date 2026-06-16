@@ -419,7 +419,7 @@ export function CompanyDetailClient({ company: initial, readOnlyDemo = false, is
   return (
     <>
       {/* Sub-tab bar */}
-      <div className="bg-white border-b border-[#eef0f3] sticky top-0 z-40">
+      <div className="bg-white border-b border-[#eef0f3] sticky top-0 z-30">
         <div className="max-w-[1240px] mx-auto px-10">
           <div className="flex">
             {SUB_TABS.map((tab) => {

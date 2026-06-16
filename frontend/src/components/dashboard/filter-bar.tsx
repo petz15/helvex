@@ -1,5 +1,5 @@
 "use client";
-import { useState, useCallback } from "react";
+import { useState, useCallback, useRef, useEffect } from "react";
 import { X, SlidersHorizontal, ChevronDown, Bookmark, BookmarkCheck, Trash2, Bell, BellOff } from "lucide-react";
 import { cn, formatClusterLabel } from "@/lib/utils";
 import { Combobox } from "./combobox";
@@ -47,6 +47,62 @@ function ProTag() {
     >
       Pro
     </span>
+  );
+}
+
+function CantonMultiSelect({
+  value, options, onChange, placeholder,
+}: {
+  value: string | undefined;
+  options: string[];
+  onChange: (value: string | undefined) => void;
+  placeholder: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  const selected = value ? value.split(",").map((s) => s.trim()).filter(Boolean) : [];
+
+  useEffect(() => {
+    function onClickOutside(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    }
+    document.addEventListener("mousedown", onClickOutside);
+    return () => document.removeEventListener("mousedown", onClickOutside);
+  }, []);
+
+  const toggle = (c: string) => {
+    const next = selected.includes(c) ? selected.filter((x) => x !== c) : [...selected, c];
+    onChange(next.length > 0 ? next.join(",") : undefined);
+  };
+
+  const label = selected.length === 0 ? placeholder : selected.length === 1 ? selected[0] : `${selected.length} cantons`;
+
+  return (
+    <div ref={ref} className="relative flex-1 min-w-[5.5rem] sm:flex-none">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        className={cn(selectCls, "w-full sm:w-32 text-left truncate", selected.length === 0 && "text-slate-500")}
+      >
+        {label}
+      </button>
+      <ChevronDown size={13} className={cn("pointer-events-none absolute right-2 top-2 text-slate-400 transition-transform", open && "rotate-180")} />
+      {open && (
+        <div className="absolute z-50 mt-1 w-44 max-h-60 overflow-y-auto rounded border border-slate-200 bg-white shadow-lg text-sm">
+          {options.map((c) => (
+            <label key={c} className="flex items-center gap-2 px-2 py-1.5 hover:bg-blue-50 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={selected.includes(c)}
+                onChange={() => toggle(c)}
+                className="accent-blue-600"
+              />
+              {c}
+            </label>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -178,19 +234,35 @@ export function FilterBar({
           value={filters.q ?? ""}
           onChange={(e) => set("q", e.target.value)}
         />
-        <div className="relative flex-1 min-w-[5.5rem] sm:flex-none">
-          <select className={cn(selectCls, "w-full sm:w-32")} value={filters.canton ?? ""}
-            onChange={(e) => set("canton", e.target.value)}>
-            <option value="">{t.canton}</option>
-            {cantons.map((c) => <option key={c} value={c}>{c}</option>)}
-          </select>
-          <ChevronDown size={13} className="pointer-events-none absolute right-2 top-2 text-slate-400" />
-        </div>
+        <CantonMultiSelect
+          value={filters.canton}
+          options={cantons}
+          onChange={(v) => set("canton", v)}
+          placeholder={t.canton}
+        />
         <div className="relative flex-1 min-w-[7rem] sm:flex-none">
           <select className={cn(selectCls, "w-full sm:w-36")} value={filters.status ?? ""}
             onChange={(e) => set("status" as keyof CompanyFilters, e.target.value)}>
             <option value="">{t.status}</option>
             {ZEFIX_STATUSES.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
+          </select>
+          <ChevronDown size={13} className="pointer-events-none absolute right-2 top-2 text-slate-400" />
+        </div>
+        <div className="relative flex-1 min-w-[7rem] sm:flex-none">
+          <select
+            className={cn(selectCls, "w-full sm:w-32")}
+            value={filters.has_website === undefined ? "" : String(filters.has_website)}
+            onChange={(e) =>
+              onChange({
+                ...filters,
+                has_website: e.target.value === "" ? undefined : e.target.value === "true",
+                page: 1,
+              })
+            }
+          >
+            <option value="">Website: Any</option>
+            <option value="true">Has website</option>
+            <option value="false">No website</option>
           </select>
           <ChevronDown size={13} className="pointer-events-none absolute right-2 top-2 text-slate-400" />
         </div>
@@ -228,16 +300,16 @@ export function FilterBar({
         {/* Active filter chips — multi-value fields split into individual chips */}
         <div className="flex flex-wrap gap-1.5 w-full sm:flex-1 sm:w-auto min-w-0">
           {activeEntries
-            .filter(([k]) => !["q", "uid", "canton", "status"].includes(String(k)))
+            .filter(([k]) => !["q", "uid", "canton", "status", "has_website"].includes(String(k)))
             .flatMap(([k, v]) => {
               const label = CHIP_LABELS[k] ?? String(k).replace(/_/g, " ");
               const isExclude = String(k).startsWith("exclude_");
               const strVal = String(v);
               // Split comma-separated multi-select fields into individual chips
               const MULTI_KEYS: (keyof CompanyFilters)[] = [
-                "ai_category", "tfidf_cluster", "purpose_keywords", "noga_code", "noga_level",
+                "ai_category", "tfidf_cluster", "purpose_keywords", "noga_code", "noga_label", "noga_level",
                 "exclude_ai_category", "exclude_tfidf_cluster", "exclude_purpose_keywords",
-                "exclude_noga_code", "exclude_noga_level",
+                "exclude_noga_code", "exclude_noga_label", "exclude_noga_level",
               ];
               const CLUSTER_KEYS: (keyof CompanyFilters)[] = ["tfidf_cluster", "exclude_tfidf_cluster"];
               if (MULTI_KEYS.includes(k) && strVal.includes(",")) {

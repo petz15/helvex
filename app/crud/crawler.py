@@ -536,6 +536,23 @@ def get_best_web_extract(db: Session, company_id: int) -> "CompanyWebExtract | N
     )
 
 
+def reset_extraction_flags(db: Session) -> int:
+    """Flag every crawled page that has stored HTML for re-extraction.
+
+    Lets the extractor be improved and re-run against HTML already in S3 — no
+    re-crawl, no network cost. Pages already pending stay pending. Returns the
+    number of newly-flagged (previously extracted) pages.
+    """
+    result = db.execute(
+        text(
+            "UPDATE company_web_pages SET needs_extraction = TRUE "
+            "WHERE s3_key_html IS NOT NULL AND needs_extraction = FALSE"
+        )
+    )
+    db.flush()
+    return result.rowcount
+
+
 def mark_pages_extracted(db: Session, company_id: int) -> int:
     """Flip needs_extraction=FALSE + stamp extracted_at for a company's pages."""
     now = datetime.now(timezone.utc)

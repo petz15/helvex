@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import BigInteger, DateTime, Float, ForeignKey, Integer, PrimaryKeyConstraint, String, Text, func
+from sqlalchemy import BigInteger, Boolean, DateTime, Float, ForeignKey, Integer, PrimaryKeyConstraint, String, Text, func
 from sqlalchemy.dialects.postgresql import ARRAY
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.types import JSON, TypeDecorator
@@ -54,6 +54,14 @@ class CompanyWebExtract(Base):
     address: Mapped[str | None] = mapped_column(Text, nullable=True)
     # Swiss UID (CHE-xxx.xxx.xxx) — a verifiable company-match signal
     uid: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    # True if site UID == Zefix UID (verified site); False if it contradicts;
+    # None if the site exposed no UID to compare.
+    uid_matches_zefix: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    # Management / contact names parsed from the impressum (role-labelled + NER).
+    persons: Mapped[list[str] | None] = mapped_column(_ArrayOfText, nullable=True)
+    # True if no UID was found but company name + zip/city address both match
+    # Zefix exactly — a weaker but still solid fallback verification signal.
+    name_address_verified: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     # Languages the site is offered in (hreflang / <html lang>)
     languages: Mapped[list[str] | None] = mapped_column(_ArrayOfText, nullable=True)
     # Short description (schema.org / OpenGraph / meta description)

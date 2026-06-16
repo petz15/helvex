@@ -138,19 +138,29 @@ def _apply_filters(query, *, name_filter, uid_filter=None, canton, review_status
         )
     elif shab_type == "deleted":
         query = query.filter(Company.status.in_(list(_DELETED_STATUSES)))
+    if name_filter or uid_filter:
+        import re as _re
     if name_filter:
-        query = query.filter(or_(
+        _uid_m = _re.match(r'^CHE(\d{9})$', name_filter.strip().upper())
+        name_uid_norm = (
+            f"CHE-{_uid_m.group(1)[:3]}.{_uid_m.group(1)[3:6]}.{_uid_m.group(1)[6:]}"
+            if _uid_m else None
+        )
+        name_conditions = [
             Company.name.ilike(f"%{name_filter}%"),
             Company.old_names.ilike(f"%{name_filter}%"),
-        ))
+        ]
+        if name_uid_norm:
+            name_conditions.append(Company.uid.ilike(f"%{name_uid_norm}%"))
+        query = query.filter(or_(*name_conditions))
     if uid_filter:
         # Normalize compact form (CHE442723833) → CHE-442.723.833 for ILIKE matching
-        import re as _re
         _m = _re.match(r'^CHE(\d{9})$', uid_filter.strip().upper())
         uid_filter_norm = f"CHE-{_m.group(1)[:3]}.{_m.group(1)[3:6]}.{_m.group(1)[6:]}" if _m else uid_filter
         query = query.filter(Company.uid.ilike(f"%{uid_filter_norm}%"))
     if canton:
-        query = query.filter(Company.canton == canton)
+        terms = [t.strip() for t in canton.split(",") if t.strip()]
+        query = query.filter(Company.canton.in_(terms)) if len(terms) > 1 else query.filter(Company.canton == terms[0])
     if review_status == "_none":
         query = query.filter(Company.review_status.is_(None))
     elif review_status:
@@ -244,7 +254,8 @@ def _apply_filters(query, *, name_filter, uid_filter=None, canton, review_status
             ))
         query = query.filter(or_(*conditions))
     if noga_label:
-        query = query.filter(Company.noga_label.ilike(f"%{noga_label}%"))
+        terms = [t.strip() for t in noga_label.split(",") if t.strip()]
+        query = query.filter(or_(*[Company.noga_label.ilike(f"%{t}%") for t in terms]))
     if noga_level:
         terms = [t.strip() for t in noga_level.split(",") if t.strip()]
         query = query.filter(Company.noga_level.in_(terms))

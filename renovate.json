@@ -1,0 +1,61 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["config:recommended"],
+  "timezone": "Europe/Zurich",
+  "schedule": ["before 6am every weekday"],
+  "prConcurrentLimit": 5,
+  "enabledManagers": [
+    "github-actions",
+    "pip_requirements",
+    "npm",
+    "dockerfile",
+    "helmfile",
+    "terraform",
+    "custom.regex"
+  ],
+  "packageRules": [
+    {
+      "description": "Patch and digest bumps (incl. SHA-pinned GitHub Actions) are low-risk — auto-merge once CI is green.",
+      "matchUpdateTypes": ["patch", "digest"],
+      "automerge": true,
+      "automergeType": "branch",
+      "platformAutomerge": true
+    },
+    {
+      "description": "Minor/major bumps need a human look — never auto-merge.",
+      "matchUpdateTypes": ["minor", "major"],
+      "automerge": false
+    },
+    {
+      "description": "K3s, Postgres/CNPG, and Helm/Helmfile itself are deliberately hand-pinned (see runbook.md) — never auto-merge even on patch, since these require the documented upgrade procedure.",
+      "matchPackageNames": ["k3s-io/k3s", "ghcr.io/cloudnative-pg/postgresql", "helm/helm", "helmfile/helmfile"],
+      "automerge": false,
+      "labels": ["needs-manual-upgrade-procedure"]
+    }
+  ],
+  "customManagers": [
+    {
+      "customType": "regex",
+      "description": "K3s version pinned in Terraform — see runbook.md for the bump procedure.",
+      "fileMatch": ["^infra/terraform/envs/prod/variables\\.tf$"],
+      "matchStrings": ["default\\s*=\\s*\"(?<currentValue>v[\\d.]+\\+k3s\\d+)\""],
+      "depNameTemplate": "k3s-io/k3s",
+      "datasourceTemplate": "github-releases"
+    },
+    {
+      "customType": "regex",
+      "description": "CNPG-bundled PostgreSQL image default in the Helm chart.",
+      "fileMatch": ["^infra/charts/helvex/templates/postgres-cluster\\.yaml$"],
+      "matchStrings": ["default \"(?<depName>ghcr\\.io/cloudnative-pg/postgresql):(?<currentValue>[\\w.-]+)\""],
+      "datasourceTemplate": "docker"
+    }
+  ],
+  "vulnerabilityAlerts": {
+    "enabled": true,
+    "automerge": false
+  },
+  "lockFileMaintenance": {
+    "enabled": true,
+    "schedule": ["before 6am on monday"]
+  }
+}

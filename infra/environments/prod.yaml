@@ -28,6 +28,7 @@ ingress:
   host: helvex.dicy.ch
   tls: true
   tlsSecret: helvex-tls
+  exposeDocs: false
   annotations:
     traefik.ingress.kubernetes.io/router.entrypoints: websecure
     traefik.ingress.kubernetes.io/router.tls: "true"

@@ -73,25 +73,25 @@ jobs:
       USE_QEMU: ${{ (github.event_name == 'workflow_dispatch' && github.event.inputs.qemu_backend == 'true') || (github.event_name != 'workflow_dispatch' && vars.BUILD_QEMU_BACKEND == 'true') }}
       BUILD_PLATFORMS: ${{ ((github.event_name == 'workflow_dispatch' && github.event.inputs.qemu_backend == 'true') || (github.event_name != 'workflow_dispatch' && vars.BUILD_QEMU_BACKEND == 'true')) && 'linux/amd64,linux/arm64' || 'linux/amd64' }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
 
       - name: Log in to GHCR
-        uses: docker/login-action@v3
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GHCR_PAT != '' && secrets.GHCR_PAT || secrets.GITHUB_TOKEN }}
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
 
       - name: Set up QEMU
         if: env.USE_QEMU == 'true'
-        uses: docker/setup-qemu-action@v3
+        uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3
 
       - name: Build and push backend
         id: build
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
         with:
           context: .
           push: true
@@ -108,8 +108,16 @@ jobs:
           cache-from: type=gha,scope=backend
           cache-to: type=gha,mode=max,scope=backend
 
+      - name: Scan image for vulnerabilities
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: ghcr.io/${{ github.repository }}:${{ github.sha }}
+          format: table
+          severity: CRITICAL,HIGH
+          exit-code: "0" # report-only — see roadmap.md for promoting to a hard gate
+
       - name: Install cosign
-        uses: sigstore/cosign-installer@v3
+        uses: sigstore/cosign-installer@398d4b0eeef1380460a10c8013a76f728fb906ac # v3
 
       - name: Sign image
         continue-on-error: true
@@ -142,24 +150,24 @@ jobs:
       USE_QEMU: ${{ github.event_name != 'workflow_dispatch' || github.event.inputs.qemu_ml_base == 'true' || github.event.inputs.qemu_ml == 'true' }}
       BUILD_PLATFORMS: ${{ (github.event_name != 'workflow_dispatch' || github.event.inputs.qemu_ml_base == 'true' || github.event.inputs.qemu_ml == 'true') && 'linux/amd64,linux/arm64' || 'linux/amd64' }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
 
       - name: Log in to GHCR
-        uses: docker/login-action@v3
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GHCR_PAT != '' && secrets.GHCR_PAT || secrets.GITHUB_TOKEN }}
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
 
       - name: Set up QEMU
         if: env.USE_QEMU == 'true'
-        uses: docker/setup-qemu-action@v3
+        uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3
 
       - name: Build and push ml-base
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
         with:
           context: .
           file: Dockerfile.ml-base
@@ -169,6 +177,14 @@ jobs:
           tags: ghcr.io/${{ github.repository }}-ml-base:latest
           cache-from: type=gha,scope=ml-base
           cache-to: type=gha,mode=max,scope=ml-base
+
+      - name: Scan image for vulnerabilities
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: ghcr.io/${{ github.repository }}-ml-base:latest
+          format: table
+          severity: CRITICAL,HIGH
+          exit-code: "0" # report-only — see roadmap.md for promoting to a hard gate
 
   build-ml:
     # Fast build: just copies app code on top of ml-base.
@@ -183,24 +199,24 @@ jobs:
       USE_QEMU: ${{ github.event_name != 'workflow_dispatch' || github.event.inputs.qemu_ml_base == 'true' || github.event.inputs.qemu_ml == 'true' }}
       BUILD_PLATFORMS: ${{ (github.event_name != 'workflow_dispatch' || github.event.inputs.qemu_ml_base == 'true' || github.event.inputs.qemu_ml == 'true') && 'linux/amd64,linux/arm64' || 'linux/amd64' }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
 
       - name: Log in to GHCR
-        uses: docker/login-action@v3
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GHCR_PAT != '' && secrets.GHCR_PAT || secrets.GITHUB_TOKEN }}
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
 
       - name: Set up QEMU
         if: env.USE_QEMU == 'true'
-        uses: docker/setup-qemu-action@v3
+        uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3
 
       - name: Build and push ml worker
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
         with:
           context: .
           file: Dockerfile.ml
@@ -216,6 +232,14 @@ jobs:
             BUILD_GIT_SHA=${{ github.sha }}
           cache-from: type=gha,scope=ml-worker
           cache-to: type=gha,mode=max,scope=ml-worker
+
+      - name: Scan image for vulnerabilities
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: ghcr.io/${{ github.repository }}-ml:${{ github.sha }}
+          format: table
+          severity: CRITICAL,HIGH
+          exit-code: "0" # report-only — see roadmap.md for promoting to a hard gate
 
   build-frontend:
     if: |
@@ -239,24 +263,24 @@ jobs:
       USE_QEMU: ${{ (github.event_name == 'workflow_dispatch' && github.event.inputs.qemu_frontend == 'true') || (github.event_name != 'workflow_dispatch' && vars.BUILD_QEMU_FRONTEND == 'true') }}
       BUILD_PLATFORMS: ${{ ((github.event_name == 'workflow_dispatch' && github.event.inputs.qemu_frontend == 'true') || (github.event_name != 'workflow_dispatch' && vars.BUILD_QEMU_FRONTEND == 'true')) && 'linux/amd64,linux/arm64' || 'linux/amd64' }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
 
       - name: Log in to GHCR
-        uses: docker/login-action@v3
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GHCR_PAT != '' && secrets.GHCR_PAT || secrets.GITHUB_TOKEN }}
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
 
       - name: Set up QEMU
         if: env.USE_QEMU == 'true'
-        uses: docker/setup-qemu-action@v3
+        uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3
 
       - name: Build and push frontend
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
         with:
           context: ./frontend
           push: true
@@ -275,6 +299,14 @@ jobs:
             NEXT_PUBLIC_UMAMI_SCRIPT_URL=${{ secrets.NEXT_PUBLIC_UMAMI_SCRIPT_URL }}
           cache-from: type=gha,scope=frontend
           cache-to: type=gha,mode=max,scope=frontend
+
+      - name: Scan image for vulnerabilities
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: ghcr.io/${{ github.repository }}-frontend:${{ github.sha }}
+          format: table
+          severity: CRITICAL,HIGH
+          exit-code: "0" # report-only — see roadmap.md for promoting to a hard gate
 
   # ── Deploy ────────────────────────────────────────────────────────────────
   deploy:
@@ -299,23 +331,35 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
         with:
           fetch-depth: 0
 
       - name: Setup tools
         run: |
+          set -euo pipefail
           # Skip installs if tools are already present on the self-hosted runner.
           if ! command -v kubectl &>/dev/null; then
-            curl -LO "https://dl.k8s.io/release/$(curl -Ls https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+            KUBECTL_VERSION=$(curl -Ls https://dl.k8s.io/release/stable.txt)
+            curl -sfLO "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/amd64/kubectl"
+            curl -sfLO "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/amd64/kubectl.sha256"
+            echo "$(cat kubectl.sha256)  kubectl" | sha256sum -c -
             chmod +x kubectl && sudo mv kubectl /usr/local/bin/kubectl
           fi
           if ! command -v helm &>/dev/null; then
-            curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+            HELM_VERSION=3.21.1
+            curl -sfLO "https://get.helm.sh/helm-v${HELM_VERSION}-linux-amd64.tar.gz"
+            curl -sfLO "https://get.helm.sh/helm-v${HELM_VERSION}-linux-amd64.tar.gz.sha256sum"
+            sha256sum -c "helm-v${HELM_VERSION}-linux-amd64.tar.gz.sha256sum"
+            tar -xzf "helm-v${HELM_VERSION}-linux-amd64.tar.gz"
+            sudo mv linux-amd64/helm /usr/local/bin/helm
+            chmod +x /usr/local/bin/helm
           fi
           if ! command -v helmfile &>/dev/null; then
             HELMFILE_VERSION=0.171.0
-            curl -Lo /tmp/helmfile.tar.gz https://github.com/helmfile/helmfile/releases/download/v${HELMFILE_VERSION}/helmfile_${HELMFILE_VERSION}_linux_amd64.tar.gz
+            curl -sfLO "https://github.com/helmfile/helmfile/releases/download/v${HELMFILE_VERSION}/helmfile_${HELMFILE_VERSION}_checksums.txt"
+            curl -sfLo /tmp/helmfile.tar.gz "https://github.com/helmfile/helmfile/releases/download/v${HELMFILE_VERSION}/helmfile_${HELMFILE_VERSION}_linux_amd64.tar.gz"
+            grep "helmfile_${HELMFILE_VERSION}_linux_amd64.tar.gz" "helmfile_${HELMFILE_VERSION}_checksums.txt" | (cd /tmp && sha256sum -c -)
             tar -xzf /tmp/helmfile.tar.gz -C /tmp && sudo mv /tmp/helmfile /usr/local/bin/helmfile
           fi
           if ! helm plugin list | grep -q diff; then

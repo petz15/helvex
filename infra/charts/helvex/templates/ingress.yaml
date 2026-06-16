@@ -1,4 +1,16 @@
 {{- if .Values.ingress.enabled }}
+{{- if .Values.ingress.rateLimit.enabled }}
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: {{ include "helvex.fullname" . }}-ratelimit
+  namespace: {{ .Release.Namespace }}
+spec:
+  rateLimit:
+    average: {{ .Values.ingress.rateLimit.average }}
+    burst: {{ .Values.ingress.rateLimit.burst }}
+---
+{{- end }}
 {{- if .Values.ingress.tls }}
 # Redirect HTTP → HTTPS via a Traefik Middleware + a separate Ingress on the web entrypoint
 apiVersion: traefik.io/v1alpha1
@@ -41,9 +53,14 @@ metadata:
   namespace: {{ .Release.Namespace }}
   labels:
     {{- include "helvex.labels" . | nindent 4 }}
-  {{- with .Values.ingress.annotations }}
+  {{- if or .Values.ingress.rateLimit.enabled .Values.ingress.annotations }}
   annotations:
+    {{- if .Values.ingress.rateLimit.enabled }}
+    traefik.ingress.kubernetes.io/router.middlewares: {{ .Release.Namespace }}-{{ include "helvex.fullname" . }}-ratelimit@kubernetescrd
+    {{- end }}
+    {{- with .Values.ingress.annotations }}
     {{- toYaml . | nindent 4 }}
+    {{- end }}
   {{- end }}
 spec:
   ingressClassName: traefik
@@ -72,6 +89,7 @@ spec:
                 name: {{ include "helvex.fullname" . }}
                 port:
                   number: {{ .Values.service.port }}
+          {{- if .Values.ingress.exposeDocs }}
           - path: /docs
             pathType: Prefix
             backend:
@@ -79,6 +97,7 @@ spec:
                 name: {{ include "helvex.fullname" . }}
                 port:
                   number: {{ .Values.service.port }}
+          {{- end }}
           - path: /static
             pathType: Prefix
             backend:

@@ -34,3 +34,6 @@ beautifulsoup4>=4.12.0
 lxml>=5.0.0
 trafilatura>=1.12.0
 phonenumbers>=8.13.0
+extruct>=0.18.0
+cleanco>=2.2
+python-stdnum>=1.20

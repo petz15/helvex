@@ -15,7 +15,8 @@ from datetime import date, datetime, timedelta, timezone
 from typing import Any, Callable
 
 import httpx
-from sqlalchemy import select, text
+
+from sqlalchemy import literal_column
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
@@ -107,20 +108,21 @@ def _extract_award_row(proj: dict, detail: dict) -> dict[str, Any]:
 
 def _upsert_award(db: Session, row: dict[str, Any]) -> tuple[SimapAward, bool]:
     """Insert or update a simap_award row. Returns (award, created)."""
-    existing = db.execute(
-        select(SimapAward).where(SimapAward.simap_project_id == row["simap_project_id"])
-    ).scalar_one_or_none()
-
-    if existing is None:
-        award = SimapAward(**row)
-        db.add(award)
-        db.flush()
-        return award, True
-    else:
-        for k, v in row.items():
-            setattr(existing, k, v)
-        db.flush()
-        return existing, False
+    update_cols = {k: v for k, v in row.items() if k != "simap_project_id"}
+    stmt = (
+        pg_insert(SimapAward)
+        .values(**row)
+        .on_conflict_do_update(
+            index_elements=["simap_project_id"],
+            set_=update_cols,
+        )
+        .returning(SimapAward.id, literal_column("(xmax = 0)").label("inserted"))
+    )
+    result = db.execute(stmt)
+    award_id, created = result.one()
+    db.expire_all()
+    award = db.get(SimapAward, award_id)
+    return award, bool(created)
 
 
 def _upsert_vendor(
@@ -137,13 +139,6 @@ def _upsert_vendor(
     price_val = price_obj.get("price")
     currency = price_obj.get("currency")
 
-    existing = db.execute(
-        select(SimapAwardVendor).where(
-            SimapAwardVendor.award_id == award.id,
-            SimapAwardVendor.simap_vendor_id == simap_vendor_id,
-        )
-    ).scalar_one_or_none()
-
     fields = {
         "award_id": award.id,
         "company_id": company_id,
@@ -157,16 +152,18 @@ def _upsert_vendor(
         "price_currency": currency,
         "rank": vendor_data.get("rank"),
     }
-
-    if existing is None:
-        db.add(SimapAwardVendor(**fields))
-        db.flush()
-        return True
-    else:
-        for k, v in fields.items():
-            setattr(existing, k, v)
-        db.flush()
-        return False
+    update_cols = {k: v for k, v in fields.items() if k not in ("award_id", "simap_vendor_id")}
+    stmt = (
+        pg_insert(SimapAwardVendor)
+        .values(**fields)
+        .on_conflict_do_update(
+            constraint="uq_simap_award_vendor",
+            set_=update_cols,
+        )
+        .returning(literal_column("(xmax = 0)").label("inserted"))
+    )
+    created = bool(db.execute(stmt).scalar())
+    return created
 
 
 def import_simap_awards(

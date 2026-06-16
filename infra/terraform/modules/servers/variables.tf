@@ -57,6 +57,16 @@ variable "k3s_token" {
   description = "Shared secret used by K3s workers to join the cluster."
 }
 
+variable "k3s_version" {
+  type        = string
+  description = "Pinned K3s release (e.g. v1.35.5+k3s1). Never install 'latest' on a server — an upstream compromise or breaking release would roll out untested. Check current stable: https://update.k3s.io/v1-release/channels/stable"
+}
+
+variable "admin_cidrs" {
+  type        = list(string)
+  description = "CIDRs allowed to SSH in. Also used to scope sudo on the control-plane node via pam_access, as defense-in-depth behind the firewall rule."
+}
+
 variable "db_volume_size_gb" {
   type        = number
   default     = 80

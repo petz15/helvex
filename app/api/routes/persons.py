@@ -28,6 +28,8 @@ class PersonEntityOut(BaseModel):
     verified_at: str | None
     appearance_count: int
     active_company_count: int
+    total_company_count: int
+    role_categories: list[str]
     linkedin_url: str | None
     linkedin_verified_at: str | None
     merged_into_id: int | None
@@ -36,7 +38,14 @@ class PersonEntityOut(BaseModel):
     updated_at: str
 
     @classmethod
-    def from_orm(cls, e, residence: str | None = None, active_company_count: int | None = None) -> "PersonEntityOut":
+    def from_orm(
+        cls,
+        e,
+        residence: str | None = None,
+        active_company_count: int | None = None,
+        total_company_count: int | None = None,
+        role_categories: list[str] | None = None,
+    ) -> "PersonEntityOut":
         return cls(
             id=e.id,
             normalized_key=e.normalized_key,
@@ -51,6 +60,8 @@ class PersonEntityOut(BaseModel):
             verified_at=e.verified_at.isoformat() if e.verified_at else None,
             appearance_count=e.appearance_count,
             active_company_count=active_company_count if active_company_count is not None else e.active_company_count,
+            total_company_count=total_company_count if total_company_count is not None else e.active_company_count,
+            role_categories=role_categories or [],
             linkedin_url=e.linkedin_url,
             linkedin_verified_at=e.linkedin_verified_at.isoformat() if e.linkedin_verified_at else None,
             merged_into_id=e.merged_into_id,
@@ -292,6 +303,8 @@ def search_persons(
     confidence_level: str | None = Query(None),
     nationality: str | None = Query(None),
     min_active_companies: int | None = Query(None, ge=0),
+    min_total_companies: int | None = Query(None, ge=0, description="Distinct companies ever (current + past)"),
+    role_category: str | None = Query(None, description="Comma-separated: director, officer, other"),
     is_verified: bool | None = Query(None),
     is_current: bool | None = Query(None, description="Filter entities with at least one current appearance"),
     sort_by: str | None = Query(None, description="'companies' (default), 'confidence', or 'appearances'"),
@@ -343,6 +356,24 @@ def search_persons(
                 SogcPersonAppearance.is_current.is_(True),
             )
         )
+    if role_category:
+        from sqlalchemy import exists as sql_exists
+        terms = [t.strip() for t in role_category.split(",") if t.strip()]
+        qry = qry.filter(
+            sql_exists().where(
+                SogcPersonAppearance.person_entity_id == SogcPersonEntity.id,
+                SogcPersonAppearance.role_category.in_(terms),
+            )
+        )
+    if min_total_companies is not None:
+        company_count_subq = (
+            db.query(SogcPersonAppearance.person_entity_id)
+            .filter(SogcPersonAppearance.company_id.isnot(None))
+            .group_by(SogcPersonAppearance.person_entity_id)
+            .having(func.count(func.distinct(SogcPersonAppearance.company_id)) >= min_total_companies)
+            .subquery()
+        )
+        qry = qry.filter(SogcPersonEntity.id.in_(db.query(company_count_subq.c.person_entity_id)))
 
     if sort_by == "confidence":
         conf_order = case(
@@ -388,7 +419,46 @@ def search_persons(
         )
         active_count_map = {pe_id: cnt for pe_id, cnt in active_rows}
 
-    return [PersonEntityOut.from_orm(e, residence_map.get(e.id), active_count_map.get(e.id, e.active_company_count)) for e in entities]
+        # Distinct companies ever held a role at (current + past), and the set
+        # of distinct role categories — both read straight from already-imported
+        # SOGC appearances, no extra preprocessing job needed.
+        total_rows = (
+            db.query(SogcPersonAppearance.person_entity_id, func.count(func.distinct(SogcPersonAppearance.company_id)))
+            .filter(
+                SogcPersonAppearance.person_entity_id.in_(entity_ids),
+                SogcPersonAppearance.company_id.isnot(None),
+            )
+            .group_by(SogcPersonAppearance.person_entity_id)
+            .all()
+        )
+        total_company_map = {pe_id: cnt for pe_id, cnt in total_rows}
+
+        role_rows = (
+            db.query(SogcPersonAppearance.person_entity_id, SogcPersonAppearance.role_category)
+            .filter(
+                SogcPersonAppearance.person_entity_id.in_(entity_ids),
+                SogcPersonAppearance.role_category.isnot(None),
+            )
+            .distinct()
+            .all()
+        )
+        role_categories_map: dict[int, list[str]] = {}
+        for pe_id, rc in role_rows:
+            role_categories_map.setdefault(pe_id, []).append(rc)
+    else:
+        total_company_map = {}
+        role_categories_map = {}
+
+    return [
+        PersonEntityOut.from_orm(
+            e,
+            residence_map.get(e.id),
+            active_count_map.get(e.id, e.active_company_count),
+            total_company_map.get(e.id, 0),
+            role_categories_map.get(e.id, []),
+        )
+        for e in entities
+    ]
 
 
 @router.get("/sogc/persons/flags", response_model=list[PersonFlagOut])

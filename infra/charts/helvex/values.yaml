@@ -1,5 +1,11 @@
 # Default values — overridden by infra/environments/{dev,prod}.yaml
 
+# K3s cluster networking — must match --cluster-cidr / the Hetzner private
+# subnet set in infra/terraform (control-plane.yaml.tpl, prod tfvars).
+network:
+  podCidr: "10.244.0.0/16"
+  nodeSubnetCidr: "10.0.1.0/24"
+
 image:
   repository: localhost:5000/helvex-app
   tag: latest
@@ -34,6 +40,11 @@ ingress:
   host: helvex.dicy.ch
   tls: false
   tlsSecret: ""
+  exposeDocs: true   # set false in prod — Swagger UI/OpenAPI schema shouldn't be public
+  rateLimit:
+    enabled: true
+    average: 50   # requests/second sustained, per source IP
+    burst: 100
   annotations: {}
 
 # Name of the K8s Secret that holds all env vars (created via Doppler operator or manually)

@@ -1,0 +1,46 @@
+{{- if .Values.postgres.enabled }}
+# Scoped to Postgres only (not app/frontend/worker pods) — kubelet liveness/
+# readiness probes originate from the node's IP rather than a pod identity,
+# so a blanket default-deny-ingress policy across the whole namespace would
+# silently break probes everywhere unless every policy also carries the
+# node-subnet ipBlock below. Limiting this to the highest-value target
+# (the database) keeps that risk contained to one pod set. See roadmap.md.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "helvex.fullname" . }}-pg-netpol
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "helvex.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      cnpg.io/cluster: {{ include "helvex.fullname" . }}-pg
+  policyTypes:
+    - Ingress
+  ingress:
+    # App-tier pods that actually connect to Postgres
+    - from:
+        - podSelector:
+            matchExpressions:
+              - key: app.kubernetes.io/component
+                operator: In
+                values: ["app", "api-worker", "ml-worker", "crawler-http"]
+      ports:
+        - protocol: TCP
+          port: 5432
+    # CNPG operator (reconciliation, status/webhook callbacks)
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: cnpg-system
+    # Other instances in the same Postgres cluster (streaming replication)
+    - from:
+        - podSelector:
+            matchLabels:
+              cnpg.io/cluster: {{ include "helvex.fullname" . }}-pg
+    # Kubelet probes — these come from the node IP, not a pod/namespace selector
+    - from:
+        - ipBlock:
+            cidr: {{ .Values.network.nodeSubnetCidr }}
+{{- end }}

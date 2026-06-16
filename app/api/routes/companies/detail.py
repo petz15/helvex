@@ -93,7 +93,11 @@ def get_company(
     if parent_company_id is not None:
         result = result.model_copy(update={"parent_company_id": parent_company_id})
 
-    # Resolve UIDs from all related-company JSON fields to company IDs in one query
+    # Resolve UIDs from all related-company JSON fields to company IDs in one query.
+    # UIDs in the Zefix JSON may be compact (CHE233785975) or formatted (CHE-233.785.975);
+    # normalise them before the DB lookup since we store CHE-xxx.xxx.xxx.
+    from app.clients.zefix_client import _normalise_uid as _norm_uid
+
     def _collect_uids(raw: str | None) -> list[str]:
         if not raw:
             return []
@@ -101,7 +105,14 @@ def get_company(
             entries = json.loads(raw)
             if isinstance(entries, dict):
                 entries = [entries]
-            return [e["uid"] for e in entries if isinstance(e, dict) and e.get("uid")]
+            result_uids = []
+            for e in entries:
+                if not isinstance(e, dict):
+                    continue
+                raw_uid = e.get("uid") or e.get("UID") or ""
+                if raw_uid:
+                    result_uids.append(_norm_uid(str(raw_uid)))
+            return result_uids
         except Exception:
             return []
 
@@ -120,8 +131,36 @@ def get_company(
             select(CompanyModel.uid, CompanyModel.id).where(CompanyModel.uid.in_(all_uids))
         ).all()
         resolved_uids = {row.uid: row.id for row in rows}
+
+    # Build a reverse map: original (possibly compact) JSON uid → company_id,
+    # so the frontend lookup (which uses the raw uid from JSON) still works.
     if resolved_uids:
-        result = result.model_copy(update={"resolved_uids": resolved_uids})
+        # Re-scan JSON entries to map raw uid → company_id via the normalised key
+        raw_to_company: dict[str, int] = {}
+        for field_val in (
+            db_company.head_offices, db_company.further_head_offices,
+            db_company.branch_offices, db_company.has_taken_over,
+            db_company.was_taken_over_by, db_company.audit_companies,
+        ):
+            if not field_val:
+                continue
+            try:
+                entries = json.loads(field_val)
+                if isinstance(entries, dict):
+                    entries = [entries]
+                for e in entries:
+                    if not isinstance(e, dict):
+                        continue
+                    raw_uid = e.get("uid") or e.get("UID") or ""
+                    if not raw_uid:
+                        continue
+                    norm = _norm_uid(str(raw_uid))
+                    if norm in resolved_uids:
+                        raw_to_company[str(raw_uid)] = resolved_uids[norm]
+                        raw_to_company[norm] = resolved_uids[norm]
+            except Exception:
+                pass
+        result = result.model_copy(update={"resolved_uids": raw_to_company})
 
     org: Organization | None = db.get(Organization, current_user.org_id) if current_user.org_id else None
     return _apply_web_results_gate(result, org, current_user.is_superadmin)
@@ -494,6 +533,8 @@ def get_company_web_extract(
             "address": extract.address,
             "uid": extract.uid,
             "uid_matches_zefix": (web_uid == zefix_uid) if (web_uid and zefix_uid) else None,
+            "name_address_verified": bool(extract.name_address_verified),
+            "persons": extract.persons or [],
             "languages": extract.languages or [],
             "description": extract.description,
             "service_keywords": extract.service_keywords or [],

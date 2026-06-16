@@ -181,21 +181,25 @@ export function NavBar() {
             <button className="p-2 text-slate-600 hover:text-slate-900 rounded-lg hover:bg-slate-100 transition-colors">
               <Globe size={18} />
             </button>
-            <div className="absolute right-0 top-full mt-1 hidden group-hover:flex flex-col bg-white border border-slate-200 rounded-lg shadow-lg z-50">
-              {SUPPORTED_LOCALES.map((loc) => (
-                <button
-                  key={loc}
-                  onClick={() => switchLocale(loc)}
-                  className={cn(
-                    "px-4 py-2 text-sm text-left transition-colors whitespace-nowrap",
-                    loc === locale
-                      ? "bg-blue-100 text-blue-700 font-medium"
-                      : "text-slate-700 hover:bg-slate-100"
-                  )}
-                >
-                  {LOCALE_LABELS[loc]}
-                </button>
-              ))}
+            {/* No gap between button and panel — pt-1 (not mt-1) keeps the hoverable
+                area contiguous so the dropdown doesn't vanish while crossing into it. */}
+            <div className="absolute right-0 top-full hidden group-hover:block pt-1 z-50">
+              <div className="flex flex-col bg-white border border-slate-200 rounded-lg shadow-lg">
+                {SUPPORTED_LOCALES.map((loc) => (
+                  <button
+                    key={loc}
+                    onClick={() => switchLocale(loc)}
+                    className={cn(
+                      "px-4 py-2 text-sm text-left transition-colors whitespace-nowrap",
+                      loc === locale
+                        ? "bg-blue-100 text-blue-700 font-medium"
+                        : "text-slate-700 hover:bg-slate-100"
+                    )}
+                  >
+                    {LOCALE_LABELS[loc]}
+                  </button>
+                ))}
+              </div>
             </div>
           </div>
 

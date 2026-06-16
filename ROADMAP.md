@@ -109,7 +109,12 @@
 - [ ] **Web crawler — external paid scrape fallback tier** — a 3rd `tier=external` last resort for hard Cloudflare/CAPTCHA sites that defeat both httpx (curl_cffi impersonation) and Playwright. Reuse the existing ScrapingDog integration pattern (`scrapingdog_search_client.py`); gate by org/credits so cost is bounded to the few sites that need it. Deferred from the phase-2 bot-protection build.
 - [ ] **Web extract — company-profile UI** — surface extracted contacts (emails/phones/socials), address, UID, languages, and description on the company detail page, sourced from `company_web_extract`. Decide placement/QOL (per CLAUDE.md frontend-wiring rule). Deferred from the phase-1 crawler ingestion build.
 - [ ] **Web extract — multi-candidate comparison & discard UI** — `company_web_extract` now has PK `(company_id, url_candidate_id)`, so a company crawled with multiple URL candidates accumulates one row per candidate. `get_best_web_extract()` auto-selects the highest-confidence row, but there is no UI to compare candidates side-by-side, promote a lower-ranked one manually, or prune stale low-quality rows. Build a per-company extract comparison panel (crawler admin or company detail) with promote/discard actions. Also: surface the winning candidate in company scoring once web_extract signals are wired into combined_score.
-- [ ] **Web extract — wire into combined_score** — `web_score` already uses Serper result quality (URL presence + domain match). `company_web_extract` now provides richer signals (UID match, email/phone presence, description quality, keyword count). Replace or supplement `web_score` computation with these deterministic extraction signals to reduce dependence on the Google Search quality. Requires scoring.py changes and a `recalculate_scores` run.
+- [x] **Web extract — wire into web_score** — Done: `scoring.adjust_web_score_for_extraction()` adjusts the raw Serper `web_score` using `uid_matches_zefix` (+40 match / −50 mismatch, capped/floored) and the new `name_address_verified` fallback signal (+20, when no UID found but name+address match Zefix exactly). Wired into `handle_web_extract`, recomputed idempotently from the raw score each run so re-extraction doesn't compound it. See architecture.md §16.
+  - [ ] **Still open** — `Company.compute_combined_score` does not currently use `web_score` at all (discovered drift from the documented 0.70 AI / 0.20 Web / 0.10 Flex formula). The above only patches `web_score` itself; revisit whether/how to fold `web_score` back into `combined_score`.
+- [ ] **Web extract — UID-mismatch candidate quarantine** — when `uid_matches_zefix=False` the crawl almost certainly hit the wrong site (wrong Google result). Auto-reject that URL candidate and promote/crawl the next one. Closes the loop on the recurring "wrong website / wrong country" Serper issues. The mismatch count is already surfaced on the crawler admin coverage card.
+- [ ] **Web extract — LLM description/summary layer** — deterministic description is meta/OG or first paragraph; often weak. Add the deferred Claude Haiku layer to summarise cleaned main text into a description + service summary + category hint (tier/credit-gated, run on cleaned text only). Re-extract loop (`/admin/jobs/crawler/reextract`) means this can be layered on stored HTML without re-crawling.
+- [ ] **Web extract — persons → People graph** — `persons` (impressum management names) are now extracted. Resolve them against SOGC person records / signers and feed the People-finder/graph feature.
+- [ ] **Web extract — extractor quality tuning** — using the coverage dashboard, raise low-fill fields. Likely next: address parser recall (many SME impressums use non-standard formats), bigram keyword quality (reuse `discover_stopwords`/`analyze_boilerplate` outputs), phone fax-vs-tel disambiguation.
 - [ ] **Google results & scoring** — Improve the selection and scoring of google results
 - [ ] **NOGA Data** — add NOGA data (or similar) which is something other sites have such as business-monitor.ch or moneyhouse.ch -> first implementation done via AI classification; needs improvement preferably without AI or optional with AI; displaying is not looking too good yet; only shows the level it is confident in but not the full hierarchy -> NOGA classification should be done via AI
 - [ ] **Free tier**- show some limited or teaser data for free tier
@@ -177,6 +182,20 @@
 - [ ] **verify api security** - Test and verify the security of the API  which is pretty open (how is it secured against attackers, bots and crawlers/unofficial APIs). 
 - [ ] **A General pass over security not jsut api** - WAF, bot protection etc
 - [ ] **Testing suite** — introduce consistent testing suite
+
+### Security audit pass (Jun 2026) — review before treating as settled
+
+Implemented per [architecture.md §22](architecture.md#22-security-hardening-pass-jun-2026) and
+[runbook.md §25](runbook.md#25-keeping-k3s-and-the-servers-up-to-date). None of this has been
+deployed/tested against the live prod cluster yet — review the Helm/Terraform/workflow diffs
+before the next `[deploy-prod]` push.
+
+- [ ] **Postgres HA (`instances: 2`) intentionally NOT implemented** — cost/architecture decision requiring your explicit sign-off, not auto-implemented. Prod currently runs a single Postgres instance.
+- [ ] **Validate the new Postgres-only `NetworkPolicy`** — scoped to only the Postgres pods (app-tier pods, `cnpg-system`, same-cluster replicas, node-subnet `ipBlock` for kubelet probes) rather than a namespace-wide default-deny, as a judgment call to limit blast radius. Not yet validated against a live cluster — test in dev first that backups/replication/app traffic still work.
+- [ ] **Decide when to make Trivy image scanning a hard deploy gate** — currently report-only (`exit-code: "0"` in `deploy-prod.yml`). Flip to `exit-code: "1"` once you've reviewed what it flags against current base images, to avoid unexpectedly blocking a prod deploy.
+- [ ] **Add Trivy scanning to `deploy-dev.yml`** — currently prod-only; lower priority.
+- [ ] **Confirm Renovate is actually active on this repo** — `renovate.json` is committed but needs the Renovate GitHub App (or equivalent) installed/enabled before it opens any PRs.
+- [ ] **Re-confirm `admin_cidrs` covers how you actually connect** — scoped sudo + PAM now reject SSH/sudo from any IP outside `admin_cidrs` (`infra/terraform/envs/prod/variables.tf`). If your admin IP changes without updating this first, you lock yourself out of the control-plane.
 
 
 

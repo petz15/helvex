@@ -2008,6 +2008,8 @@ export async function searchPersonEntities(params: {
   confidence_level?: string;
   nationality?: string;
   min_active_companies?: number;
+  min_total_companies?: number;
+  role_category?: string;
   is_verified?: boolean;
   is_current?: boolean;
   sort_by?: string;
@@ -2020,6 +2022,8 @@ export async function searchPersonEntities(params: {
   if (params.confidence_level) qs.set("confidence_level", params.confidence_level);
   if (params.nationality) qs.set("nationality", params.nationality);
   if (params.min_active_companies !== undefined) qs.set("min_active_companies", String(params.min_active_companies));
+  if (params.min_total_companies !== undefined) qs.set("min_total_companies", String(params.min_total_companies));
+  if (params.role_category) qs.set("role_category", params.role_category);
   if (params.is_verified !== undefined) qs.set("is_verified", String(params.is_verified));
   if (params.is_current !== undefined) qs.set("is_current", String(params.is_current));
   if (params.sort_by) qs.set("sort_by", params.sort_by);
@@ -2177,6 +2181,10 @@ export interface AdminCrawlerStats {
   pages_needing_extraction: number;
   companies_extracted: number;
   avg_confidence: number | null;
+  field_coverage: Record<string, number>;
+  uid_match: number;
+  uid_mismatch: number;
+  name_address_verified: number;
 }
 
 export interface AdminCrawlerFailure {
@@ -2242,5 +2250,14 @@ export async function crawlerRunExtract(): Promise<{ job_id: number; status: str
     credentials: "include",
   });
   if (!res.ok) throw new Error("Failed to enqueue extract job");
+  return res.json();
+}
+
+export async function crawlerReextract(): Promise<{ flagged: number; job_id: number; status: string }> {
+  const res = await fetch("/api/v1/admin/jobs/crawler/reextract", {
+    method: "POST",
+    credentials: "include",
+  });
+  if (!res.ok) throw new Error("Failed to enqueue re-extract job");
   return res.json();
 }

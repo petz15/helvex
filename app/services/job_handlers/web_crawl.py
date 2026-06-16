@@ -449,11 +449,15 @@ def handle_web_extract(ctx: JobContext) -> tuple[dict, str]:
     resolved row per company into company_web_extract. Marks pages extracted so
     they are not reprocessed. No API cost.
     """
+    import json
+
+    from app.models.company import Company
     from app.services import crawler_extract
     from app.services import s3_client as _s3
+    from app.services import scoring
 
     batch_size = int(ctx.params.get("batch_size", 200))
-    stats: dict = {"extracted": 0, "empty": 0, "s3_errors": 0, "errors": []}
+    stats: dict = {"extracted": 0, "empty": 0, "s3_errors": 0, "errors": [], "rescored": 0}
 
     total = crawler_crud.count_companies_pending_extraction(ctx.db)
     done = 0
@@ -466,6 +470,17 @@ def handle_web_extract(ctx: JobContext) -> tuple[dict, str]:
         if not company_ids:
             break
 
+        # Batch-fetch name + Zefix UID + address for verification-aware extraction.
+        meta_rows = ctx.db.execute(
+            text(
+                "SELECT id, name, uid, address_zip, address_city, web_score, "
+                "google_search_results_raw, ai_score, noga_confidence, purpose_keywords "
+                "FROM companies WHERE id = ANY(:ids)"
+            ),
+            {"ids": company_ids},
+        ).fetchall()
+        meta = {r[0]: r for r in meta_rows}
+
         for company_id in company_ids:
             ctx.assert_not_cancelled()
             try:
@@ -473,6 +488,10 @@ def handle_web_extract(ctx: JobContext) -> tuple[dict, str]:
                 # All pages for one company share the same url_candidate_id
                 # (delete_web_pages_for_company wipes old pages before each crawl).
                 url_candidate_id = pages[0].url_candidate_id if pages else None
+                # Prefer the homepage URL for domain/name matching; else first page.
+                site_url = next((p.url for p in pages if p.page_type == "homepage"), None)
+                if site_url is None and pages:
+                    site_url = pages[0].url
                 page_blobs: list[tuple[str, bytes]] = []
                 for p in pages:
                     try:
@@ -482,10 +501,54 @@ def handle_web_extract(ctx: JobContext) -> tuple[dict, str]:
                         stats["s3_errors"] += 1
                         logger.debug("S3 download failed for %s: %s", p.s3_key_html, exc)
 
-                data = crawler_extract.resolve_company_extract(page_blobs) if page_blobs else {}
+                row = meta.get(company_id)
+                cname = row[1] if row else None
+                czefix_uid = row[2] if row else None
+                czip = row[3] if row else None
+                ccity = row[4] if row else None
+                data = crawler_extract.resolve_company_extract(
+                    page_blobs,
+                    company_name=cname,
+                    zefix_uid=czefix_uid,
+                    site_url=site_url,
+                    company_zip=czip,
+                    company_city=ccity,
+                ) if page_blobs else {}
                 if data and url_candidate_id is not None:
                     crawler_crud.upsert_web_extract(ctx.db, company_id, url_candidate_id, data)
                     stats["extracted"] += 1
+
+                    # Idempotent web_score adjustment: always recompute from the raw
+                    # (un-adjusted) Serper score using the BEST extract across all of
+                    # this company's URL candidates, so repeated re-extracts or a later
+                    # extraction from a different candidate don't compound or regress it.
+                    best = crawler_crud.get_best_web_extract(ctx.db, company_id)
+                    raw_score_json = row[6] if row else None
+                    base_score = None
+                    if raw_score_json:
+                        try:
+                            parsed = json.loads(raw_score_json)
+                            base_score = parsed[0]["score"] if parsed else None
+                        except Exception:  # noqa: BLE001
+                            base_score = None
+                    if base_score is not None and best is not None:
+                        new_web_score = scoring.adjust_web_score_for_extraction(
+                            base_score,
+                            uid_matches_zefix=best.uid_matches_zefix,
+                            name_address_verified=bool(best.name_address_verified),
+                        )
+                        prev_web_score = row[5] if row else None
+                        if new_web_score != prev_web_score:
+                            ai_score = row[7] if row else None
+                            noga_confidence = row[8] if row else None
+                            purpose_keywords = row[9] if row else None
+                            ctx.db.query(Company).filter(Company.id == company_id).update({
+                                "web_score": new_web_score,
+                                "combined_score": Company.compute_combined_score(
+                                    ai_score, noga_confidence, purpose_keywords
+                                ),
+                            })
+                            stats["rescored"] += 1
                 else:
                     stats["empty"] += 1
                 # Always mark processed so the queue drains even when nothing is found.

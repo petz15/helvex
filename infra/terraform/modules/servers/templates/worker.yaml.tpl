@@ -10,7 +10,7 @@ runcmd:
       sleep 5
     done
 
-    curl -sfL https://get.k3s.io | K3S_TOKEN="${token}" K3S_URL="https://${cp_ip}:6443" sh -s - agent \
+    curl -sfL https://get.k3s.io | INSTALL_K3S_VERSION="${k3s_version}" K3S_TOKEN="${token}" K3S_URL="https://${cp_ip}:6443" sh -s - agent \
       --node-ip=${private_ip} \
       --flannel-iface=enp7s0 \
       ${join(" ", [for l in node_labels : "--node-label=${l}"])}${length(node_taints) > 0 ? " \\\n+      " : ""}${join(" ", [for t in node_taints : "--node-taint=${t}"])}

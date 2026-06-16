@@ -12,7 +12,7 @@ import type { NogaNode } from "@/lib/api";
 import type { Company, SogcPersonEntity, CompanyFilters } from "@/lib/types";
 import { HelvexMark } from "@/components/helvex-logo";
 import { cn } from "@/lib/utils";
-import { GuidedWizard } from "@/components/guided-wizard";
+import { GuidedWizard, type WizardFilters } from "@/components/guided-wizard";
 
 type Tab = "companies" | "people" | "noga";
 
@@ -243,7 +243,7 @@ function PersonRow({ person, locale }: { person: SogcPersonEntity; locale: strin
             {person.confidence_level}
           </span>
         </div>
-        <div className="flex items-center gap-2 mt-1.5">
+        <div className="flex items-center gap-2 mt-1.5 flex-wrap">
           {person.hometown_municipality && (
             <span className="text-[11px] text-slate-400 flex items-center gap-0.5 leading-none">
               <MapPin size={9} className="opacity-50 shrink-0" />
@@ -252,10 +252,15 @@ function PersonRow({ person, locale }: { person: SogcPersonEntity; locale: strin
           )}
           <span className={cn(
             "text-[11px] font-semibold leading-none",
-            person.active_company_count > 0 ? "text-blue-600" : "text-slate-400"
+            person.total_company_count > 0 ? "text-blue-600" : "text-slate-400"
           )}>
-            {person.active_company_count} {person.active_company_count === 1 ? "company" : "companies"}
+            {person.total_company_count} {person.total_company_count === 1 ? "company" : "companies"}
           </span>
+          {person.role_categories.map(rc => (
+            <span key={rc} className="text-[10px] font-medium px-1.5 py-0.5 rounded-full border border-slate-200 bg-slate-50 text-slate-600 capitalize leading-none">
+              {rc}
+            </span>
+          ))}
         </div>
       </div>
 
@@ -335,6 +340,9 @@ export function SearchLandingClient({ locale }: SearchLandingClientProps) {
   const [legalForm, setLegalForm] = useState("");
   const [nogaSection, setNogaSection] = useState("");
   const [page, setPage] = useState(1);
+  const [personRoleCategory, setPersonRoleCategory] = useState("");
+  const [personMinCompanies, setPersonMinCompanies] = useState(0);
+  const personFiltersActive = !!personRoleCategory || personMinCompanies > 0;
 
   const [wizardOpen, setWizardOpen] = useState(false);
   const [wizardStep, setWizardStep] = useState(0);
@@ -346,13 +354,20 @@ export function SearchLandingClient({ locale }: SearchLandingClientProps) {
     setWizardOpen(true);
   }
 
-  function handleWizardComplete(filters: CompanyFilters, scope: string) {
+  function handleWizardComplete(filters: WizardFilters, scope: string) {
     setWizardOpen(false);
     const params = new URLSearchParams();
     if (scope === "people") {
       if (filters.canton) params.set("canton", filters.canton);
+      if (filters.role_category) params.set("role_category", filters.role_category);
+      if (filters.min_total_companies) params.set("min_total_companies", String(filters.min_total_companies));
       params.set("tab", "people");
-      router.push(`/${locale}/app/search?${params}`);
+      router.push(`/${locale}/app/search?${params}`, { scroll: false });
+      setTab("people");
+      setPersonRoleCategory(filters.role_category ?? "");
+      setPersonMinCompanies(filters.min_total_companies ?? 0);
+      setPage(1);
+      setHasSearched(true);
       return;
     }
     params.set("view", "list");
@@ -391,10 +406,16 @@ export function SearchLandingClient({ locale }: SearchLandingClientProps) {
   );
 
   const { data: people = [], isLoading: loadingPeople } = useSWR(
-    hasSearched && tab === "people" && submittedQuery
-      ? ["search-landing-people", submittedQuery, page]
+    hasSearched && tab === "people" && (submittedQuery || personFiltersActive)
+      ? ["search-landing-people", submittedQuery, personRoleCategory, personMinCompanies, page]
       : null,
-    () => searchPersonEntities({ q: submittedQuery, limit: 25, offset: (page - 1) * 25 }),
+    () => searchPersonEntities({
+      q: submittedQuery || undefined,
+      role_category: personRoleCategory || undefined,
+      min_total_companies: personMinCompanies > 0 ? personMinCompanies : undefined,
+      limit: 25,
+      offset: (page - 1) * 25,
+    }),
     { keepPreviousData: true }
   );
 
@@ -507,9 +528,9 @@ export function SearchLandingClient({ locale }: SearchLandingClientProps) {
             <button
               type="button"
               onClick={() => openWizard("companies", 1)}
-              className="flex-1 flex flex-col items-center gap-3 p-5 rounded-2xl text-center transition-all bg-[#eff4fe] border-[1.5px] border-blue-600 shadow-[0_6px_20px_rgba(37,99,235,0.07)]"
+              className="flex-1 flex flex-col items-center gap-3 p-5 rounded-2xl text-center transition-all bg-white border border-[#e6e8ec] hover:border-slate-300 hover:bg-slate-50"
             >
-              <div className="w-11 h-11 rounded-xl flex items-center justify-center bg-blue-600 text-white">
+              <div className="w-11 h-11 rounded-xl flex items-center justify-center bg-[#eff4fe] text-blue-600">
                 <Building2 size={22} />
               </div>
               <div>
@@ -738,13 +759,13 @@ export function SearchLandingClient({ locale }: SearchLandingClientProps) {
           {tab === "people" && (
             <>
               {loadingPeople && !people.length && <SkeletonRows />}
-              {!loadingPeople && !submittedQuery && (
+              {!loadingPeople && !submittedQuery && !personFiltersActive && (
                 <EmptyState title="Enter a name above" sub="Press Enter or click Search to see results" />
               )}
-              {!loadingPeople && submittedQuery && people.length === 0 && (
+              {!loadingPeople && (submittedQuery || personFiltersActive) && people.length === 0 && (
                 <EmptyState
-                  title={`No people found for "${submittedQuery}"`}
-                  sub="Try searching by last name"
+                  title={submittedQuery ? `No people found for "${submittedQuery}"` : "No people match these filters"}
+                  sub="Try searching by last name, or loosen the role/company filters"
                 />
               )}
               {people.length > 0 && (

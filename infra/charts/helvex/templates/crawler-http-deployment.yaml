@@ -36,15 +36,21 @@ spec:
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           env:
             - name: JOB_TYPE_WHITELIST
-              value: "web_crawl_http,web_url_populate,web_select_url,web_crawl_single,web_extract"
+              value: "web_crawl_http,web_url_populate,web_select_url,web_crawl_single"
           envFrom:
             - secretRef:
                 name: {{ .Values.envSecretName }}
           securityContext:
             allowPrivilegeEscalation: false
-            readOnlyRootFilesystem: false
+            readOnlyRootFilesystem: true
             capabilities:
               drop: ["ALL"]
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
           resources:
             {{- toYaml .Values.crawlerHttpWorker.resources | nindent 12 }}
+      volumes:
+        - name: tmp
+          emptyDir: {}
 {{- end }}

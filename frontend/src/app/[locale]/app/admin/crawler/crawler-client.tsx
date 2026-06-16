@@ -3,7 +3,7 @@ import { useState, useCallback } from "react";
 import useSWR from "swr";
 import {
   Globe, RefreshCw, Loader2, AlertTriangle, CheckCircle2,
-  Clock, ShieldAlert, ChevronLeft, ChevronRight, RotateCcw, ListPlus, Cpu,
+  Clock, ShieldAlert, ChevronLeft, ChevronRight, RotateCcw, ListPlus, Cpu, Recycle,
 } from "lucide-react";
 import {
   fetchAdminCrawlerStats,
@@ -12,6 +12,7 @@ import {
   crawlerResetPlaywright,
   crawlerPopulateUrls,
   crawlerRunExtract,
+  crawlerReextract,
   type AdminCrawlerStats,
   type AdminCrawlerFailure,
 } from "@/lib/api";
@@ -105,11 +106,12 @@ export function CrawlerAdminClient() {
     void mutateFailures();
   }, [mutateStats, mutateFailures]);
 
-  async function doAction(key: string, fn: () => Promise<{ reset?: number; job_id?: number }>) {
+  async function doAction(key: string, fn: () => Promise<{ reset?: number; flagged?: number; job_id?: number }>) {
     setActing(key);
     try {
       const res = await fn();
-      if ("reset" in res) flash("success", `Reset ${res.reset} rows to pending.`);
+      if ("reset" in res && res.reset != null) flash("success", `Reset ${res.reset} rows to pending.`);
+      else if ("flagged" in res && res.flagged != null) flash("success", `Flagged ${res.flagged.toLocaleString()} pages — job #${res.job_id} enqueued.`);
       else flash("success", `Job #${res.job_id} enqueued.`);
       mutateAll();
     } catch (e) {
@@ -245,6 +247,53 @@ export function CrawlerAdminClient() {
             </Section>
           </div>
 
+          {/* Extraction field coverage */}
+          <Section title="Extraction field coverage">
+            {s.companies_extracted === 0 ? (
+              <p className="text-sm text-slate-400">No extractions yet.</p>
+            ) : (
+              <>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                  {([
+                    ["Email", "emails"], ["Phone", "phones"], ["UID", "uid"], ["Address", "address"],
+                    ["Description", "description"], ["Keywords", "service_keywords"], ["Persons", "persons"], ["Socials", "socials"],
+                  ] as const).map(([label, key]) => {
+                    const n = s.field_coverage?.[key] ?? 0;
+                    const pct = s.companies_extracted > 0 ? Math.round((n / s.companies_extracted) * 100) : 0;
+                    const barColour = pct >= 60 ? "bg-green-500" : pct >= 30 ? "bg-amber-500" : "bg-red-400";
+                    return (
+                      <div key={key}>
+                        <div className="flex items-center justify-between mb-1">
+                          <span className="text-xs text-slate-500">{label}</span>
+                          <span className="text-xs font-medium text-slate-700 tabular-nums">{pct}%</span>
+                        </div>
+                        <div className="h-1.5 rounded-full bg-slate-100 overflow-hidden">
+                          <div className={`h-full ${barColour}`} style={{ width: `${pct}%` }} />
+                        </div>
+                        <p className="text-[10px] text-slate-400 mt-0.5 tabular-nums">{n.toLocaleString()} / {s.companies_extracted.toLocaleString()}</p>
+                      </div>
+                    );
+                  })}
+                </div>
+                {/* UID verification — the strongest correctness signal */}
+                <div className="flex flex-wrap gap-4 mt-4 pt-3 border-t border-slate-100 text-xs">
+                  <span className="inline-flex items-center gap-1.5 text-green-700">
+                    <CheckCircle2 size={13} /> UID verified: <strong className="tabular-nums">{s.uid_match.toLocaleString()}</strong>
+                  </span>
+                  <span className="inline-flex items-center gap-1.5 text-red-600">
+                    <AlertTriangle size={13} /> UID mismatch (likely wrong site): <strong className="tabular-nums">{s.uid_mismatch.toLocaleString()}</strong>
+                  </span>
+                  <span className="inline-flex items-center gap-1.5 text-green-700">
+                    <CheckCircle2 size={13} /> Name+address verified (no UID): <strong className="tabular-nums">{s.name_address_verified.toLocaleString()}</strong>
+                  </span>
+                  <span className="text-slate-400">
+                    Avg confidence: <strong className="text-slate-600">{s.avg_confidence != null ? `${(s.avg_confidence * 100).toFixed(0)}%` : "—"}</strong>
+                  </span>
+                </div>
+              </>
+            )}
+          </Section>
+
           {/* Actions */}
           <Section title="Actions">
             <div className="flex flex-wrap gap-3">
@@ -280,12 +329,21 @@ export function CrawlerAdminClient() {
                 {acting === "extract" ? <Loader2 size={14} className="animate-spin" /> : <Cpu size={14} />}
                 Run extraction
               </button>
+              <button
+                onClick={() => doAction("reextract", crawlerReextract)}
+                disabled={acting !== null}
+                className="flex items-center gap-2 px-3 py-2 text-sm rounded-lg border border-indigo-200 bg-indigo-50 hover:bg-indigo-100 text-indigo-800 disabled:opacity-50 transition-colors"
+              >
+                {acting === "reextract" ? <Loader2 size={14} className="animate-spin" /> : <Recycle size={14} />}
+                Re-extract all (no re-crawl)
+              </button>
             </div>
             <p className="text-xs text-slate-400 mt-3">
               "Reset HTTP failures" moves bot_blocked / http_error / timeout / no_content rows (HTTP tier) back to pending so they are re-crawled.
               "Reset Playwright failures" does the same for the Playwright tier.
               "Backfill URL candidates" enqueues a job that reads stored Google results and populates company_url_candidates for companies that were enriched before auto-populate was added.
               "Run extraction" manually enqueues HTML extraction — this also triggers automatically after each successful crawl batch.
+              "Re-extract all" flags every crawled page (HTML already in S3) for re-processing and runs extraction — use after improving the extractor; no crawl cost.
             </p>
           </Section>
         </>

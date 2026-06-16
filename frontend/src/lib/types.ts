@@ -292,6 +292,8 @@ export interface SogcPersonEntity {
   verified_at: string | null;
   appearance_count: number;
   active_company_count: number;
+  total_company_count: number;
+  role_categories: string[];
   linkedin_url: string | null;
   linkedin_verified_at: string | null;
   merged_into_id: number | null;

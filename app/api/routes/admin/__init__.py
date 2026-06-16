@@ -196,10 +196,30 @@ def get_crawler_stats(
     pages_needing_extraction = int(page_row[2]) if page_row else 0
 
     extract_row = db.execute(_text(
-        "SELECT COUNT(*), AVG(confidence) FROM company_web_extract"
+        "SELECT COUNT(*), AVG(confidence), "
+        "  COUNT(emails), COUNT(phones), COUNT(uid), COUNT(address), "
+        "  COUNT(description), COUNT(service_keywords), COUNT(persons), "
+        "  COUNT(socials), "
+        "  COUNT(*) FILTER (WHERE uid_matches_zefix IS TRUE), "
+        "  COUNT(*) FILTER (WHERE uid_matches_zefix IS FALSE), "
+        "  COUNT(*) FILTER (WHERE name_address_verified IS TRUE) "
+        "FROM company_web_extract"
     )).fetchone()
     companies_extracted = int(extract_row[0]) if extract_row else 0
     avg_confidence = round(float(extract_row[1]), 3) if extract_row and extract_row[1] else None
+    field_coverage = {
+        "emails": int(extract_row[2]) if extract_row else 0,
+        "phones": int(extract_row[3]) if extract_row else 0,
+        "uid": int(extract_row[4]) if extract_row else 0,
+        "address": int(extract_row[5]) if extract_row else 0,
+        "description": int(extract_row[6]) if extract_row else 0,
+        "service_keywords": int(extract_row[7]) if extract_row else 0,
+        "persons": int(extract_row[8]) if extract_row else 0,
+        "socials": int(extract_row[9]) if extract_row else 0,
+    }
+    uid_match = int(extract_row[10]) if extract_row else 0
+    uid_mismatch = int(extract_row[11]) if extract_row else 0
+    name_address_verified = int(extract_row[12]) if extract_row else 0
 
     return {
         "status_counts": status_counts,
@@ -210,6 +230,10 @@ def get_crawler_stats(
         "pages_needing_extraction": pages_needing_extraction,
         "companies_extracted": companies_extracted,
         "avg_confidence": avg_confidence,
+        "field_coverage": field_coverage,
+        "uid_match": uid_match,
+        "uid_mismatch": uid_mismatch,
+        "name_address_verified": name_address_verified,
     }
 
 
@@ -327,6 +351,31 @@ def crawler_run_extract(
         user_id=actor.id,
     )
     return {"job_id": job.id, "status": job.status}
+
+
+@router.post("/jobs/crawler/reextract", summary="Re-extract all crawled HTML without re-crawling (superadmin)")
+def crawler_reextract(
+    db: Session = Depends(get_db),
+    actor: User = Depends(_require_superadmin),
+) -> dict:
+    """Flag every crawled page (HTML already in S3) for re-extraction, then run web_extract.
+
+    Use after improving the extractor: reprocesses all stored HTML at no crawl cost.
+    """
+    from app.crud.crawler import reset_extraction_flags
+    from app.services.job_worker import enqueue_job
+    flagged = reset_extraction_flags(db)
+    db.commit()
+    job = enqueue_job(
+        db,
+        job_type="web_extract",
+        label="Re-extract all crawled HTML (superadmin)",
+        params={},
+        org_id=None,
+        user_id=actor.id,
+    )
+    logger.info("superadmin %s flagged %d pages for re-extraction", actor.email, flagged)
+    return {"flagged": flagged, "job_id": job.id, "status": job.status}
 
 
 @router.post("/jobs/saved-view-alerts", summary="Manually trigger saved-view alert check (superadmin)")

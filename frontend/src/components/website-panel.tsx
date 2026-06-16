@@ -2,8 +2,8 @@
 
 import useSWR from "swr";
 import {
-  Globe, Mail, Phone, MapPin, Link2, Languages, Tag, FileText,
-  CheckCircle2, AlertTriangle, ExternalLink, Loader2, Hash,
+  Globe, Mail, MapPin, Link2, Languages, Tag, FileText,
+  CheckCircle2, AlertTriangle, ExternalLink, Loader2, Hash, Users,
 } from "lucide-react";
 
 interface WebExtract {
@@ -16,6 +16,8 @@ interface WebExtract {
   address: string | null;
   uid: string | null;
   uid_matches_zefix: boolean | null;
+  name_address_verified: boolean;
+  persons: string[];
   languages: string[];
   description: string | null;
   service_keywords: string[];
@@ -181,8 +183,13 @@ export function WebsitePanel({ companyId }: { companyId: number }) {
         <Card title="Contact" icon={Mail}>
           <Field label="Emails" empty={!extract?.emails.length}>
             <div className="space-y-0.5">
-              {extract?.emails.map(e => (
-                <a key={e} href={`mailto:${e}`} className="block text-blue-600 hover:underline">{e}</a>
+              {extract?.emails.map((e, i) => (
+                <a key={e} href={`mailto:${e}`} className="flex items-center gap-1.5 text-blue-600 hover:underline">
+                  {e}
+                  {i === 0 && (
+                    <span className="text-[10px] px-1.5 py-px rounded-full bg-blue-50 text-blue-600 border border-blue-200">primary</span>
+                  )}
+                </a>
               ))}
             </div>
           </Field>
@@ -210,6 +217,11 @@ export function WebsitePanel({ companyId }: { companyId: number }) {
               {extract?.uid_matches_zefix === false && (
                 <span className="inline-flex items-center gap-1 text-[11px] text-red-600">
                   <AlertTriangle size={12} /> differs from Zefix
+                </span>
+              )}
+              {extract?.uid_matches_zefix == null && extract?.name_address_verified && (
+                <span className="inline-flex items-center gap-1 text-[11px] text-green-700">
+                  <CheckCircle2 size={12} /> name + address verified
                 </span>
               )}
             </span>
@@ -251,6 +263,15 @@ export function WebsitePanel({ companyId }: { companyId: number }) {
             {extract?.service_keywords.map(k => (
               <span key={k} className="inline-flex items-center gap-1 text-[12px] px-2 py-0.5 rounded-full bg-slate-100 text-slate-600">
                 <Tag size={10} /> {k}
+              </span>
+            ))}
+          </div>
+        </Field>
+        <Field label="People" empty={!extract?.persons.length}>
+          <div className="flex flex-wrap gap-1.5">
+            {extract?.persons.map(p => (
+              <span key={p} className="inline-flex items-center gap-1 text-[12px] px-2 py-0.5 rounded-full bg-indigo-50 text-indigo-700">
+                <Users size={10} /> {p}
               </span>
             ))}
           </div>

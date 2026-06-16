@@ -91,3 +91,9 @@ variable "k3s_token" {
   sensitive = true
   description = "Shared secret for K3s cluster — generate with: openssl rand -hex 32"
 }
+
+variable "k3s_version" {
+  type        = string
+  default     = "v1.35.5+k3s1"
+  description = "Pinned K3s release for both control-plane and workers. Check/bump via https://update.k3s.io/v1-release/channels/stable — see runbook.md for the upgrade procedure."
+}

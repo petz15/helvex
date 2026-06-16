@@ -24,7 +24,10 @@ spec:
       wal_compression: "on"
       checkpoint_completion_target: "0.9"
     pg_hba:
-      - host all all 0.0.0.0/0 scram-sha-256
+      # Restrict to in-cluster pod traffic only (was 0.0.0.0/0) — no client
+      # connects from outside the K3s pod network, so this closes off the
+      # database to anything that reaches the cluster network unexpectedly.
+      - host all all {{ .Values.network.podCidr }} scram-sha-256
 
   bootstrap:
     {{- if .Values.postgres.restoreFromBackup }}

@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from sqlalchemy import func, or_
+from sqlalchemy import func, or_, text
 from sqlalchemy.orm import Session
 
 from app import crud
@@ -71,6 +71,13 @@ def reclassify_noga(
             )
         )
 
+    # The missing+stale filter ORs an IS NULL check with a cross-column
+    # comparison (noga_classified_at < updated_at - interval), which can't be
+    # served by a btree index and forces a full table scan. The engine-wide
+    # 30s statement_timeout (app/database.py) is tuned for interactive API
+    # requests and is too tight for this background-job count under load —
+    # bump it for this one statement only (resets to 30s on next commit).
+    db.execute(text("SET LOCAL statement_timeout = '120000'"))
     total = query.with_entities(func.count(Company.id)).scalar() or 0
     stats["selected"] = total
 
@@ -169,6 +176,7 @@ def reclassify_low_confidence_noga(
         ),
     )
 
+    db.execute(text("SET LOCAL statement_timeout = '120000'"))
     total = query.with_entities(func.count(Company.id)).scalar() or 0
     stats["selected"] = total
     offset = 0

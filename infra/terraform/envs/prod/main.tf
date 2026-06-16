@@ -32,6 +32,8 @@ module "servers" {
   servers               = local.merged_servers
   db_volume_size_gb     = 0
   k3s_token             = var.k3s_token
+  k3s_version           = var.k3s_version
+  admin_cidrs           = var.admin_cidrs
 }
 
 # Load balancer — targets only k3s nodes (not the DB node)

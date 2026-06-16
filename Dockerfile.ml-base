@@ -20,8 +20,14 @@ ENV PLAYWRIGHT_BROWSERS_PATH=/app/.playwright-browsers
 RUN playwright install chromium --with-deps && \
     chown -R 1000:1000 /app/.playwright-browsers
 
-# spaCy model — cached until pip layer above changes
-RUN python -c "import spacy.cli; spacy.cli.download('de_core_news_md')"
+# spaCy models — cached until pip layer above changes
+# de_core_news_md: clustering pipeline (lemmatization, NER disabled there)
+# fr/it/en (sm): NER-only, used by crawler_extract.py to extract person names
+# from impressum/about pages in the company's detected language.
+RUN python -c "import spacy.cli; spacy.cli.download('de_core_news_md')" && \
+    python -c "import spacy.cli; spacy.cli.download('fr_core_news_sm')" && \
+    python -c "import spacy.cli; spacy.cli.download('it_core_news_sm')" && \
+    python -c "import spacy.cli; spacy.cli.download('en_core_web_sm')"
 
 # Geocoding datasets — only geocoding_client.py is needed (stdlib + httpx, no other app imports)
 # Copying the minimal package structure so the import path works.

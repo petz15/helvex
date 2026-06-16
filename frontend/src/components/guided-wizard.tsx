@@ -24,7 +24,14 @@ interface WizardState {
   nogaCodes: string[];
   legalForm: string;
   sizeBucket: SizeBucket;
+  roleCategories: string[];
+  minCompanies: number;
 }
+
+export type WizardFilters = CompanyFilters & {
+  role_category?: string;
+  min_total_companies?: number;
+};
 
 export interface GuidedWizardProps {
   open: boolean;
@@ -33,7 +40,7 @@ export interface GuidedWizardProps {
   locale: string;
   nogaHierarchy: NogaNode[];
   cantons: string[];
-  onComplete: (filters: CompanyFilters, scope: string) => void;
+  onComplete: (filters: WizardFilters, scope: string) => void;
   onClose: () => void;
 }
 
@@ -45,7 +52,7 @@ const POPULAR_INDUSTRIES = [
   { label: "Construction", code: "41" },
   { label: "Healthcare", code: "86" },
   { label: "Retail trade", code: "47" },
-  { label: "Consulting", code: "70.22" },
+  { label: "Consulting", code: "702" },
   { label: "Real estate", code: "68" },
   { label: "Manufacturing", code: "10" },
   { label: "Finance & insurance", code: "64" },
@@ -60,21 +67,45 @@ const SIZE_OPTIONS: Array<{ label: string; value: SizeBucket }> = [
   { label: "Large 250+", value: "large" },
 ];
 
-const STEP_LABELS = ["WHAT", "WHERE", "INDUSTRY", "REFINE", "REVIEW"];
-const STEP_QUESTIONS = [
-  "What are you looking for?",
-  "Where in Switzerland?",
-  "Which industry?",
-  "Refine your search",
-  "Your search summary",
+const ROLE_CATEGORIES = [
+  { label: "Director", value: "director" },
+  { label: "Officer", value: "officer" },
 ];
-const STEP_SUBS = [
-  "Choose the type of result you want to find.",
-  "Select a canton or keep all of Switzerland.",
-  "Type a keyword or pick a popular category.",
-  "Optional — narrow by legal form or company size.",
-  "These become editable filters in the Companies view.",
+
+const MIN_COMPANIES_OPTIONS = [
+  { label: "Any", value: 0 },
+  { label: "1+", value: 1 },
+  { label: "3+", value: 3 },
+  { label: "5+", value: 5 },
 ];
+
+function stepLabels(scope: Scope): string[] {
+  return scope === "people"
+    ? ["WHAT", "WHERE", "ROLE", "REFINE", "REVIEW"]
+    : ["WHAT", "WHERE", "INDUSTRY", "REFINE", "REVIEW"];
+}
+function stepQuestions(scope: Scope): string[] {
+  return scope === "people"
+    ? ["What are you looking for?", "Where in Switzerland?", "Role & involvement", "Refine your search", "Your search summary"]
+    : ["What are you looking for?", "Where in Switzerland?", "Which industry?", "Refine your search", "Your search summary"];
+}
+function stepSubs(scope: Scope): string[] {
+  return scope === "people"
+    ? [
+        "Choose the type of result you want to find.",
+        "Select a canton or keep all of Switzerland.",
+        "Filter by role and how many companies they've been linked to.",
+        "Optional — narrow by legal form or company size.",
+        "These become editable filters in the People view.",
+      ]
+    : [
+        "Choose the type of result you want to find.",
+        "Select a canton or keep all of Switzerland.",
+        "Type a keyword or pick a popular category.",
+        "Optional — narrow by legal form or company size.",
+        "These become editable filters in the Companies view.",
+      ];
+}
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -91,7 +122,16 @@ function matchesNoga(node: NogaNode, q: string): boolean {
   );
 }
 
-function wizardToFilters(state: WizardState): CompanyFilters {
+function wizardToFilters(state: WizardState): WizardFilters {
+  if (state.scope === "people") {
+    return {
+      canton: state.allSwitzerland ? undefined : (state.cantons.join(",") || undefined),
+      role_category: state.roleCategories.join(",") || undefined,
+      min_total_companies: state.minCompanies > 0 ? state.minCompanies : undefined,
+      page: 1,
+      page_size: 50,
+    };
+  }
   return {
     canton: state.allSwitzerland ? undefined : (state.cantons.join(",") || undefined),
     noga_code: state.nogaCodes.join(",") || undefined,
@@ -201,6 +241,8 @@ export function GuidedWizard({
     nogaCodes: [],
     legalForm: "",
     sizeBucket: "",
+    roleCategories: [],
+    minCompanies: 0,
   });
 
   const [typeaheadQuery, setTypeaheadQuery] = useState("");
@@ -237,10 +279,10 @@ export function GuidedWizard({
       .slice(0, 6);
   }, [debouncedQuery, flatNodes, state.nogaCodes]);
 
-  // Live result count for review step
+  // Live result count for review step (companies/jobs only — people count isn't a cheap fetch here)
   const reviewFilters = useMemo(() => wizardToFilters(state), [state]);
   const { data: countPage } = useSWR(
-    state.step === 4 ? ["wizard-count", JSON.stringify(reviewFilters)] : null,
+    state.step === 4 && state.scope !== "people" ? ["wizard-count", JSON.stringify(reviewFilters)] : null,
     () => fetchCompanies({ ...reviewFilters, page_size: 1 }),
     { keepPreviousData: true }
   );
@@ -263,9 +305,23 @@ export function GuidedWizard({
     });
   }, []);
 
+  const toggleRoleCategory = useCallback((value: string) => {
+    setState(s => ({
+      ...s,
+      roleCategories: s.roleCategories.includes(value)
+        ? s.roleCategories.filter(c => c !== value)
+        : [...s.roleCategories, value],
+    }));
+  }, []);
+
   const handleContinue = useCallback(() => {
     if (state.step === 4) {
       onComplete(wizardToFilters(state), state.scope);
+      return;
+    }
+    // People scope has no Refine step (legal form / size don't apply to people).
+    if (state.step === 2 && state.scope === "people") {
+      setState(s => ({ ...s, step: 4 }));
       return;
     }
     setState(s => ({ ...s, step: s.step + 1 }));
@@ -273,12 +329,19 @@ export function GuidedWizard({
 
   const handleBack = useCallback(() => {
     if (state.step === 0) { onClose(); return; }
+    if (state.step === 4 && state.scope === "people") {
+      setState(s => ({ ...s, step: 2 }));
+      return;
+    }
     setState(s => ({ ...s, step: s.step - 1 }));
-  }, [state.step, onClose]);
+  }, [state.step, state.scope, onClose]);
 
   if (!open) return null;
 
-  const { step, scope, cantons: selectedCantons, allSwitzerland, nogaCodes, legalForm, sizeBucket } = state;
+  const { step, scope, cantons: selectedCantons, allSwitzerland, nogaCodes, legalForm, sizeBucket, roleCategories, minCompanies } = state;
+  const labels = stepLabels(scope);
+  const questions = stepQuestions(scope);
+  const subs = stepSubs(scope);
   const resultCount = countPage?.total;
   const continueLabel = step === 4
     ? resultCount !== undefined ? `See ${resultCount.toLocaleString()} results →` : "See results →"
@@ -322,15 +385,15 @@ export function GuidedWizard({
           </div>
 
           <p className="font-mono text-[11px] font-bold tracking-[0.08em] uppercase text-blue-600 mb-3">
-            STEP {step + 1} · {STEP_LABELS[step]}
+            STEP {step + 1} · {labels[step]}
           </p>
           <p
             className="text-[27px] font-bold text-[#1f2733] leading-tight"
             style={{ letterSpacing: "-0.02em" }}
           >
-            {STEP_QUESTIONS[step]}
+            {questions[step]}
           </p>
-          <p className="text-[15px] text-[#6b7480] mt-1">{STEP_SUBS[step]}</p>
+          <p className="text-[15px] text-[#6b7480] mt-1">{subs[step]}</p>
         </div>
 
         {/* ── Body ───────────────────────────────────────────────────────────── */}
@@ -359,8 +422,31 @@ export function GuidedWizard({
             </div>
           )}
 
-          {/* Step 3 – Industry */}
-          {step === 2 && (
+          {/* Step 3 – Role & Involvement (people) */}
+          {step === 2 && scope === "people" && (
+            <div className="space-y-6">
+              <div>
+                <p className="text-[13px] font-bold text-[#1f2733] mb-3">Role</p>
+                <div className="flex flex-wrap gap-2">
+                  <Chip label="Any" selected={roleCategories.length === 0} onClick={() => setState(s => ({ ...s, roleCategories: [] }))} />
+                  {ROLE_CATEGORIES.map(({ label, value }) => (
+                    <Chip key={value} label={label} selected={roleCategories.includes(value)} onClick={() => toggleRoleCategory(value)} />
+                  ))}
+                </div>
+              </div>
+              <div>
+                <p className="text-[13px] font-bold text-[#1f2733] mb-3">Companies involved with (current + past)</p>
+                <div className="flex flex-wrap gap-2">
+                  {MIN_COMPANIES_OPTIONS.map(({ label, value }) => (
+                    <Chip key={value} label={label} selected={minCompanies === value} onClick={() => setState(s => ({ ...s, minCompanies: value }))} />
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Step 3 – Industry (companies/jobs) */}
+          {step === 2 && scope !== "people" && (
             <div className="space-y-4">
               {nogaCodes.length > 0 && (
                 <div className="flex flex-wrap gap-1.5">
@@ -472,25 +558,43 @@ export function GuidedWizard({
                 value={allSwitzerland ? "All of Switzerland" : selectedCantons.join(", ")}
                 onEdit={() => setState(s => ({ ...s, step: 1 }))}
               />
-              <ReviewRow
-                icon={ListTree}
-                label="Industry"
-                value={nogaCodes.length > 0 ? nogaCodes.map(c => nogaLabelMap[c] || c).join(", ") : "Any"}
-                onEdit={() => setState(s => ({ ...s, step: 2 }))}
-              />
-              <ReviewRow
-                icon={SlidersHorizontal}
-                label="Refine"
-                value={
-                  [
-                    legalForm ? `Legal form: ${legalForm}` : null,
-                    sizeBucket ? `Size: ${SIZE_OPTIONS.find(o => o.value === sizeBucket)?.label}` : null,
-                  ].filter(Boolean).join(" · ") || "Any"
-                }
-                onEdit={() => setState(s => ({ ...s, step: 3 }))}
-              />
+              {scope === "people" ? (
+                <ReviewRow
+                  icon={Users}
+                  label="Role & involvement"
+                  value={
+                    [
+                      roleCategories.length > 0
+                        ? roleCategories.map(v => ROLE_CATEGORIES.find(r => r.value === v)?.label || v).join(", ")
+                        : null,
+                      minCompanies > 0 ? `${minCompanies}+ companies` : null,
+                    ].filter(Boolean).join(" · ") || "Any"
+                  }
+                  onEdit={() => setState(s => ({ ...s, step: 2 }))}
+                />
+              ) : (
+                <>
+                  <ReviewRow
+                    icon={ListTree}
+                    label="Industry"
+                    value={nogaCodes.length > 0 ? nogaCodes.map(c => nogaLabelMap[c] || c).join(", ") : "Any"}
+                    onEdit={() => setState(s => ({ ...s, step: 2 }))}
+                  />
+                  <ReviewRow
+                    icon={SlidersHorizontal}
+                    label="Refine"
+                    value={
+                      [
+                        legalForm ? `Legal form: ${legalForm}` : null,
+                        sizeBucket ? `Size: ${SIZE_OPTIONS.find(o => o.value === sizeBucket)?.label}` : null,
+                      ].filter(Boolean).join(" · ") || "Any"
+                    }
+                    onEdit={() => setState(s => ({ ...s, step: 3 }))}
+                  />
+                </>
+              )}
 
-              {resultCount !== undefined && (
+              {scope === "companies" && resultCount !== undefined && (
                 <div className="mt-4 flex items-center gap-2 px-4 py-3 bg-blue-50 rounded-xl border border-blue-100">
                   <span className="text-[13px] font-semibold text-blue-700">
                     {resultCount.toLocaleString()} companies match your filters

@@ -34,12 +34,15 @@ locals {
       v.role == "k3s-control-plane"
       ? templatefile("${path.module}/templates/control-plane.yaml.tpl", {
           token                 = var.k3s_token
+          k3s_version           = var.k3s_version
           private_ip            = v.private_ip
           public_ip             = hcloud_primary_ip.cp[k].ip_address
           node_name             = "${var.name_prefix}-${k}"
+          admin_cidrs           = var.admin_cidrs
         })
       : templatefile("${path.module}/templates/worker.yaml.tpl", {
           token                 = var.k3s_token
+          k3s_version           = var.k3s_version
           private_ip            = v.private_ip
           cp_ip                 = local.cp_ip
           node_labels           = v.node_labels

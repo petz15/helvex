@@ -30,6 +30,7 @@
 17. [Activity Log](#17-activity-log)
 18. [Common Bug-Fixing Cheatsheet](#18-common-bug-fixing-cheatsheet)
 19. [Background Job System — Design Evolution](#19-background-job-system--design-evolution)
+22. [Security Hardening Pass (Jun 2026)](#22-security-hardening-pass-jun-2026)
 
 ---
 
@@ -314,6 +315,8 @@ HTML routes (browser, in `main.py`):
 | POST | `/api/v1/admin/jobs/crawler/reset-playwright` | Superadmin | Reset Playwright-tier terminal failures back to pending |
 | POST | `/api/v1/admin/jobs/crawler/populate-urls` | Superadmin | Enqueue `web_url_populate` backfill job |
 | POST | `/api/v1/admin/jobs/crawler/extract` | Superadmin | Enqueue `web_extract` job (also triggered automatically after each crawl batch) |
+| POST | `/api/v1/admin/jobs/crawler/reextract` | Superadmin | Flag all crawled S3 HTML for re-extraction + run `web_extract` (no re-crawl) |
+| GET | `/api/v1/companies/{id}/web-extract` | Authenticated | Best web extract + per-page crawl coverage for the company detail "Website" tab |
 | … | (other existing admin routes) | | |
 
 #### CSV Export status — `app/api/routes/jobs.py`
@@ -1592,7 +1595,7 @@ Workflow-dispatch `deploy_mode` input mirrors the same logic.
 
 #### Deploy steps (on `helvex-prod` self-hosted runner)
 
-1. kubectl / helm / helmfile checked with `command -v` — only installed if missing (cached between runs)
+1. kubectl / helm / helmfile checked with `command -v` — only installed if missing (cached between runs); each download is checksum-verified (`sha256sum -c`) rather than piped directly to a shell/`tar`
 2. Ensure K8s secrets exist (`helvex-env`, `ghcr-pull-secret`, `arc-github-app`)
 3. Bootstrap CRDs (`[deploy-prod]` only): cert-manager + CloudNativePG
 4. Resolve PostgreSQL backup server names from S3 pointer file
@@ -1600,12 +1603,18 @@ Workflow-dispatch `deploy_mode` input mirrors the same logic.
 6. Rollout wait scoped to the deployed component(s)
 7. Bump minor semver tag (`[deploy-prod]` / `[deploy-app]`)
 
+Each of the four image build/push steps (backend, ml-base, ml, frontend) is followed by an `aquasecurity/trivy-action` scan (`severity: CRITICAL,HIGH`, `exit-code: "0"` — report-only, not a hard gate yet; see [roadmap.md](roadmap.md)). Trivy scanning is in `deploy-prod.yml` only, not `deploy-dev.yml`.
+
 Backend image is signed with Cosign after push.
 
 ### `cleanup.yml` — weekly cron (Sun 02:00 UTC)
 
 - Delete untagged GHCR images
 - Retain last 5 tagged versions
+
+### Action pinning & dependency updates
+
+All third-party `uses:` references across `ci.yml`, `deploy-dev.yml`, `deploy-prod.yml`, and `cleanup.yml` are pinned to immutable 40-character commit SHAs (`uses: <action>@<sha> # vX.Y.Z`), not mutable tags. `renovate.json` (repo root) keeps these pins current — see [runbook.md §25](runbook.md#25-keeping-k3s-and-the-servers-up-to-date) for the full update policy (patch/digest auto-merges; minor/major and K3s/Postgres/Helm/Helmfile pins require manual review).
 
 ---
 
@@ -1638,9 +1647,10 @@ cert-manager → cloudnative-pg → arc-controller → arc-rbac → arc-runner-s
 | `postgres-backup-schedule.yaml` | ScheduledBackup | S3 backups, retention via Helm values |
 | `redis.yaml` | Deployment + Service | Redis for job queue + rate limiting |
 | `service.yaml` | Service | ClusterIP for backend |
-| `ingress.yaml` | Ingress | Traefik routing; TLS via cert-manager |
+| `ingress.yaml` | Ingress + Middleware | Traefik routing; TLS via cert-manager; rate-limit Middleware (`ingress.rateLimit`); `/docs` path gated by `ingress.exposeDocs` (off in prod) |
 | `clusterissuer.yaml` | ClusterIssuer | Let's Encrypt |
 | `networkpolicy.yaml` | NetworkPolicy | Isolates helvex namespace |
+| `postgres-networkpolicy.yaml` | NetworkPolicy | Postgres-only ingress allowlist: app-tier pods, `cnpg-system` operator, same-cluster replicas, node-subnet `ipBlock` (kubelet probes bypass pod selectors) — see [roadmap.md](roadmap.md) for scoping caveats |
 | `servicemonitor.yaml` | ServiceMonitor | Prometheus scrapes `/metrics` |
 
 **Pod security (all pods):**
@@ -1650,7 +1660,16 @@ securityContext:
   runAsUser: 1000
   allowPrivilegeEscalation: false
   capabilities: { drop: [ALL] }
+  readOnlyRootFilesystem: true   # all 5 deployments (app, frontend, api-worker, ml-worker, crawler-http)
 automountServiceAccountToken: false
+```
+Each deployment mounts an `emptyDir` for `/tmp` (and, for the frontend, an additional `emptyDir` at `/app/.next/cache` for Next.js Image Optimization) to provide writable scratch space under the read-only root filesystem.
+
+**Networking values (`values.yaml`, `network:` key)** — single source of truth referenced by `postgres-cluster.yaml` (`pg_hba`, now scoped to `network.podCidr` instead of `0.0.0.0/0`) and `postgres-networkpolicy.yaml` (`network.nodeSubnetCidr`):
+```yaml
+network:
+  podCidr: "10.244.0.0/16"        # K3s --cluster-cidr
+  nodeSubnetCidr: "10.0.1.0/24"   # Hetzner private node subnet
 ```
 
 **Health probes (backend pod):**
@@ -1686,9 +1705,15 @@ automountServiceAccountToken: false
 | Module | Resources created |
 |---|---|
 | `network` | Hetzner VPC `10.0.0.0/16`, subnet `10.0.1.0/24` (eu-central zone) — avoids K3s internal ranges `10.42/43.x.x` |
-| `firewall` | Inbound: SSH (22), HTTP (80), HTTPS (443) from configured admin CIDRs; outbound: all |
+| `firewall` | Inbound: SSH (22), HTTP (80), HTTPS (443) from configured admin CIDRs; outbound: all except ICMP (restricted) |
 | `servers` | Control plane `cx23` (static IPv4, K3s init via cloud-init); worker/DB node `cx33` (taint: `helvex.io/role=database:NoSchedule`) |
 | `loadbalancer` | Hetzner LB (`lb11`); targets all non-DB nodes; health check on `GET /health` |
+
+### Server access hardening (`control-plane.yaml.tpl` cloud-init)
+
+- **K3s/Helm/Helmfile installs are checksum-verified** during cloud-init (not bare `curl \| sh`), and `k3s_version` is pinned via the Terraform variable rather than tracking `latest`. Changing `k3s_version` only affects newly-provisioned/replaced nodes — see [runbook.md §25](runbook.md#25-keeping-k3s-and-the-servers-up-to-date) for why this can't patch already-running nodes (`hcloud_server.user_data` forces replacement, and `db1` has no separate Hetzner Volume — `db_volume_size_gb = 0` — so a recreate is destructive without a verified backup).
+- **`ubuntu` user passwordless sudo is scoped**, not blanket: `/etc/sudoers.d/ubuntu` only allows `systemctl {restart,start,stop,status} k3s`, `journalctl -u k3s [-f]`, `apt-get update`, `apt-get upgrade -y`, `reboot`. Anything broader (manual K3s binary upgrades, `dist-upgrade`, root-owned config edits) requires direct root SSH.
+- **PAM (`pam_access`) restricts SSH/sudo to `admin_cidrs`** (`/etc/security/access.conf`, wired into `/etc/pam.d/sshd`) — connections from outside the configured admin IP range(s) are rejected at the PAM layer before any password/key prompt, independent of the Hetzner Cloud Firewall rules. Update `admin_cidrs` in `infra/terraform/envs/prod/variables.tf` if the admin IP changes.
 
 ### Applying changes
 
@@ -1749,11 +1774,11 @@ Three-phase pipeline: crawl ~210k Swiss company websites → store raw HTML in S
 
 | Pod | Image | Job types | Node |
 |---|---|---|---|
-| `crawler-http` × 2 | `helvex-app` | `web_crawl_http`, `web_url_populate`, `web_select_url`, `web_crawl_single`, **`web_extract`** | main node |
-| `api-worker` | `helvex-app` | `web_extract` (+ many others) | main node |
-| `ml-worker` | `helvex-ml` | `web_crawl_http`, `web_crawl_playwright` (idle-fill) + all ML job types | ml node (cax21) |
+| `crawler-http` × 2 | `helvex-app` | `web_crawl_http`, `web_url_populate`, `web_select_url`, `web_crawl_single` | main node |
+| `api-worker` | `helvex-app` | (many others, no longer `web_extract`) | main node |
+| `ml-worker` | `helvex-ml` | `web_crawl_http`, `web_crawl_playwright` (idle-fill), **`web_extract`** + all ML job types | ml node (cax21) |
 
-`web_extract` is in both `crawler-http` and `api-worker` whitelists. With two crawler-http pods this enables the parallel pipeline: Pod A crawls, Pod B extracts — independently, with no shared resources. If both pods are busy crawling, api-worker picks up extraction instead.
+`web_extract` runs **only on `ml-worker`** — it is the only image with the spaCy NER models (`fr/it/en_core_news_sm`, `de_core_news_md`) bundled (see `Dockerfile.ml-base`). This replaces the earlier "Pod A crawls, Pod B extracts" parallelism on `crawler-http`/`api-worker`: extraction no longer runs concurrently with crawling on the main node, it queues for ml-worker instead. Trade-off accepted to keep spaCy off the main-node app image.
 
 ### Workflow
 
@@ -1869,7 +1894,7 @@ Grafana query: `rate(crawl_result_total[5m])` grouped by `tier` and `status`. Pe
 | `company_url_candidates` | Serper/ScrapingDog URL candidates; one selected per company |
 | `company_crawl_state` | Per-company crawl status, tier, bot flags, re-crawl scheduling |
 | `company_web_pages` | Per-page crawl result; S3 key for raw HTML; `needs_extraction` flag |
-| `company_web_extract` | PK `(company_id, url_candidate_id)` — one row per company+URL crawled; `get_best_web_extract()` picks highest-confidence row for display/scoring |
+| `company_web_extract` | PK `(company_id, url_candidate_id)` — one row per company+URL crawled; `get_best_web_extract()` picks highest-confidence row for display/scoring. Includes `uid_matches_zefix` (verification flag), `name_address_verified` (migration `0100`, fallback verification when no UID found), and `persons` (impressum management names + spaCy NER names) |
 
 ### Key files
 
@@ -1901,15 +1926,105 @@ picks the highest-confidence one for downstream use. Trigger: `POST /api/v1/craw
 (superadmin) or auto-triggered after each crawl batch. No API cost.
 The optional Claude Haiku enrichment layer and multi-candidate comparison UI are deferred — see ROADMAP.
 
+### Extraction logic (`crawler_extract.py`)
+
+`resolve_company_extract(pages, *, company_name, zefix_uid, site_url, company_zip=None, company_city=None)`
+aggregates per-page signals into one verification-aware record. All optional third-party
+libraries below are imported lazily inside the relevant function with a `try/except ImportError`
+fallback to the prior regex-only behaviour — required because this module is imported eagerly
+in every process image (app and ml), so it must stay importable where a given package isn't
+installed.
+
+- **UID verification** — UID candidates are regex-matched, then validated with `stdnum.ch.uid.is_valid()`
+  (checksum) and canonically formatted with `stdnum.ch.uid.format()`; checksum failures are
+  dropped instead of accepted as false positives. The validated UID is compared to the Zefix
+  UID. Match → near-1.0 confidence (proof the crawl hit the right site); mismatch → penalised
+  (≤0.4, likely a wrong Google result); no UID → confidence leans on a **name-match ratio**
+  (distinctive company-name tokens present in title/URL/body, after stripping legal-entity
+  suffixes via `cleanco.basename()`).
+- **Name+address fallback verification** — when no UID was found (`uid_matches is None`) but
+  the name-match ratio is effectively exact (`>= 0.999`) and the extracted address contains
+  both the company's Zefix zip and city (`_address_matches_company`), `name_address_verified`
+  is set True. This feeds its own confidence branch (`deterministic+name_address_verified`,
+  confidence up to 0.95) and is a weaker but still solid alternative to UID verification for
+  sites that don't publish their UID.
+- **Address** — schema.org JSON-LD first, then Microdata/RDFa (via `extruct`, `uniform=True`,
+  normalized into the same `{"@type", ...}` shape and merged through `_walk_jsonld` — catches
+  older Swiss SME sites that predate JSON-LD), else a Swiss postal-pattern parser over impressum
+  text (street + `PLZ City`).
+- **Persons** — two passes, merged and deduped: (1) management/contact names following role
+  labels (Geschäftsführer / Directeur / Amministratore / CEO …) parsed via regex from
+  impressum/about text; (2) spaCy NER (`_extract_persons_ner`, PER/PERSON entities) over the
+  same text in the company's detected language, catching names not adjacent to a role label
+  (e.g. team-page bios). NER models are loaded once per language and cached
+  (`_spacy_ner_cache`); pipeline is trimmed to `{ner, tok2vec, transformer}` only. Runs only on
+  `ml-worker` (see Pod topology) since that's the only image with the models bundled.
+- **Emails** — ranked best-first: same-domain role mailboxes > same-domain > role > rest;
+  free-webmail demoted; each candidate is syntax-validated with
+  `email_validator.validate_email(check_deliverability=False)` before ranking. `emails[0]` is
+  the primary contact.
+- **Keywords** — bigram-preferring miner (multi-word phrases beat single tokens) over
+  homepage/about/services main text, expanded multilingual stopwords.
+- **Description** — meta/OG first, else first paragraph of trafilatura main text.
+
+Confidence and `extraction_method` (`deterministic` / `+uid_verified` / `+uid_mismatch` /
+`+name_address_verified`) feed `get_best_web_extract()` so the best candidate wins automatically.
+
+New dependencies (in `requirements.backend.txt`, shared by `helvex-app` and `helvex-ml` since
+`requirements.ml.txt` includes the base file): `extruct`, `cleanco`, `python-stdnum`,
+`email-validator` (all pure-Python, safe on both images). spaCy NER models
+(`fr_core_news_sm`, `it_core_news_sm`, `en_core_web_sm`, plus the pre-existing
+`de_core_news_md`) are downloaded only in `Dockerfile.ml-base` — this is why `web_extract`
+job routing was moved to ml-worker only (see Pod topology above).
+
+### web_score adjustment from extraction signals
+
+`scoring.adjust_web_score_for_extraction(base_web_score, *, uid_matches_zefix, name_address_verified)`
+(in `app/services/scoring.py`) nudges the Serper-based `web_score` using on-site verification
+found during extraction:
+- UID found and matches Zefix → **+40** (capped at 100)
+- UID found but does not match Zefix → **−50** (floored at 0)
+- No UID, but `name_address_verified` → **+20**
+
+`base_web_score` must always be the **raw, un-adjusted** score
+(`google_search_results_raw[0]["score"]`), never the currently-stored `company.web_score` —
+this keeps repeated re-extraction (e.g. via the `reextract` admin action, which re-runs
+extraction without re-crawling) idempotent instead of compounding the adjustment each run.
+
+Wired into `handle_web_extract` (`app/services/job_handlers/web_crawl.py`): after each
+successful per-company upsert, `get_best_web_extract()` re-selects the best extract across
+all of that company's URL candidates (not necessarily the one just processed), recomputes
+`web_score` from the raw Serper score + the best extract's verification signals, and — only
+if the value actually changed — updates `companies.web_score` and recomputes
+`combined_score` via `Company.compute_combined_score`. Tracked via a `stats["rescored"]`
+counter on the job result.
+
+Note: this only adjusts `web_score`, not the `combined_score` formula itself. As of this
+change, `Company.compute_combined_score` does **not** use `web_score` in its weighting
+(it currently only combines AI score, NOGA confidence, and purpose keywords) — this is a
+known drift from the 0.70/0.20/0.10 AI/Web/Flex formula documented elsewhere in this file.
+Flagged but intentionally left unchanged pending a separate decision on the broader formula.
+
+### Re-extract without re-crawl
+
+`POST /api/v1/admin/jobs/crawler/reextract` (superadmin) flags every crawled page with stored
+S3 HTML (`reset_extraction_flags`) and enqueues `web_extract`. Reprocesses all ~200k sites at
+zero crawl cost — the iterate loop for improving the extractor. Button on the crawler admin page.
+
 ### Company-detail "Website" tab (POC)
 
 `GET /api/v1/companies/{id}/web-extract` returns the best extract (`get_best_web_extract`)
 plus per-page crawl coverage (`company_web_pages`) and the candidate count. Rendered by
-`website-panel.tsx` in a new "Website" sub-tab on the company detail page: source strip
-(URL/confidence/method/date), contact + socials cards, content card (description/languages/
-keywords), and a crawl-coverage table (page type, HTTP status, lang, word/image/video counts,
-contact-form + HTML-stored flags). Empty fields render as muted "—" so extraction gaps are
-visible — this is a diagnostic POC for assessing extraction quality, not the final UX.
+`website-panel.tsx` in a new "Website" sub-tab: source strip (URL/confidence/method/date),
+contact card (ranked emails with "primary" tag, phones, address, UID with Zefix-match badge),
+socials, content card (description/languages/keywords/people), and a crawl-coverage table.
+Empty fields render as muted "—" so extraction gaps are visible. The UID field shows a
+"name + address verified" badge when no UID was found but `name_address_verified` is true.
+
+The crawler admin page (`/app/admin/crawler`) adds a **field-coverage** card: per-field fill
+rates (% of extracted companies with email/phone/uid/address/description/keywords/persons/
+socials), UID verified vs mismatch counts, and average confidence — the at-a-glance "what is
+the extractor missing at scale" view.
 
 ---
 
@@ -2046,26 +2161,36 @@ Clicking a tile → opens wizard at Step 2 (WHERE), with scope pre-answered from
 
 5-step modal over a `rgba(23,32,46,0.34)` scrim. State is local to the component; keyed by `open + scope + step` in the parent so it remounts with fresh state on each launch.
 
-Steps:
+Steps (3 differs by scope — `stepLabels()`/`stepQuestions()`/`stepSubs()` in `guided-wizard.tsx` branch on `state.scope`; step 4 is skipped entirely for `people` since legal form/size don't apply):
 1. **What** — Companies / People / Jobs tiles (single-select)
 2. **Where** — "All of Switzerland" chip or canton multi-select
-3. **Industry** — debounced typeahead + hardcoded popular-category chips (NOGA codes)
-4. **Refine** — legal form chips (single-select) + size segments (display-only, no backend field)
-5. **Review** — read-only summary rows, live result count via `fetchCompanies({page_size:1})`, "See N results →" button
+3. **Industry** (companies/jobs) — debounced typeahead + hardcoded popular-category chips (NOGA codes), e.g. "Consulting" → `702`
+   **Role & Involvement** (people) — role chips (Director/Officer, multi-select) + "companies involved with" min-count chips (Any/1+/3+/5+)
+4. **Refine** (companies/jobs only) — legal form chips (single-select) + size segments (display-only, no backend field)
+5. **Review** — read-only summary rows; live result count via `fetchCompanies({page_size:1})` for companies/jobs only (skipped for people — not a cheap count here); "See N results →" button
 
 ### Filter assembly on completion
 
+Companies/jobs:
 ```typescript
 { canton, noga_code, legal_form, sort: "-combined_score", page: 1, page_size: 50 }
 ```
+People:
+```typescript
+{ canton, role_category, min_total_companies, page: 1, page_size: 50 }
+```
 
 Completion routing:
-- scope = `companies` / `jobs` → `router.push(/${locale}/app/companies?view=list&...)`
-- scope = `people` → `router.push(/${locale}/app/search?tab=people&...)`
+- scope = `companies` / `jobs` → `router.push(/${locale}/app/companies?view=list&...)` (fresh page mount reads querystring)
+- scope = `people` → stays on `/app/search`; `handleWizardComplete` sets `tab`/`personRoleCategory`/`personMinCompanies`/`hasSearched` local state directly (a `router.push` querystring-only change on the same mounted route does **not** re-sync local `useState`, so state must be set explicitly) and also pushes the querystring for shareable URLs
+
+### People results without a name query
+
+`search-landing-client.tsx`'s people tab originally required a non-empty `submittedQuery` to fetch/show anything — i.e. filter-only searches (role/company-count from the wizard, no name typed) showed nothing. Fixed via `personFiltersActive = !!personRoleCategory || personMinCompanies > 0`; the SWR gate and empty-state copy now treat "query OR active filters" as "has searched".
 
 ### NOGA typeahead
 
-Uses the already-cached `filterNogaHierarchy` SWR key (loaded eagerly on blank-state render) + client-side `flattenNoga()` + `matchesNoga()`. No extra API call. Popular chips encode standard NOGA sections (56, 62, 41, 86, 47, 70.22, 68, 10, 64).
+Uses the already-cached `filterNogaHierarchy` SWR key (loaded eagerly on blank-state render) + client-side `flattenNoga()` + `matchesNoga()`. No extra API call. Popular chips encode standard NOGA codes (56, 62, 41, 86, 47, 702, 68, 10, 64) — note NOGA codes are undotted digit strings, not dotted decimal notation.
 
 ### i18n keys
 
@@ -2074,6 +2199,15 @@ Added `app.guidedSearch` key to `messages/{en,de,fr,it}.json`. Component uses ha
 ---
 
 ## 19. Common Bug-Fixing Cheatsheet
+
+### NOGA nightly job runs multiple times / fails then retries
+`reclassify_noga`'s upfront `COUNT(*)` (used for progress %) ORs an `IS NULL` check with a cross-column comparison (`noga_classified_at < updated_at - interval`), which can't use a btree index and forces a sequential scan. Under load this exceeds the engine-wide 30s `statement_timeout` (`app/database.py`), the job fails, and `_maybe_enqueue_noga_nightly` (`app/main.py`) re-enqueues it within the same 03:00–03:59 window since `has_noga_nightly_run_today` (`app/crud/job_run.py`) deliberately excludes failed/cancelled runs (so a crash doesn't block retry). Fix: `db.execute(text("SET LOCAL statement_timeout = '120000'"))` scoped to just that one COUNT statement in `reclassify_noga()` and `reclassify_low_confidence_noga()` (`app/services/noga_pipeline.py`) — resets to 30s on next commit, doesn't affect interactive API requests.
+
+### Company filter bar: multi-canton / multi-noga-label silently match nothing
+`_apply_filters()` in `app/crud/company.py` is the single shared filter builder for `list_companies`/`count_companies`. The guided wizard already comma-joins multi-select values (e.g. `canton="ZH,BE"`), but the canton filter did an exact-equality check against the whole string and noga_label did a single literal `ILIKE`, so any multi-value selection matched zero rows. Fixed by splitting on `,` and using `.in_()` (canton) / `or_(*[...ilike...])` (noga_label). `has_website` was already fully wired end-to-end (route → crud → `lib/api.ts`) — only the filter-bar UI control was missing.
+
+### Header dropdown covered by a page's sticky bar
+`NavBar`'s header (`frontend/src/components/nav-bar.tsx`) and a page's own sticky sub-bar (e.g. the company-detail sub-tab bar, `company-detail-client.tsx`) are siblings, not nested — if both use the same `z-*`, they're separate stacking contexts tied at the same level, and CSS resolves ties by DOM order (the later element wins), so a page's sticky bar can paint over a dropdown that visually overflows out of the header above it. Fix: keep in-page sticky bars at a lower z-index than the header (header `z-40` > page sticky bars `z-30`). Also: hover-triggered dropdowns (`group-hover`) must have zero gap between the trigger and the panel (use `pt-N` on the dropdown wrapper, not `mt-N`) — a margin gap is a dead zone where the cursor leaves the hoverable box mid-transit, instantly closing the menu.
 
 ### Email verification not working
 - Verify `SMTP_HOST`, `SMTP_FROM`, `SMTP_USER`, `SMTP_PASSWORD` are set in prod
@@ -2499,6 +2633,12 @@ mandates: MandateItem[]          # one per company
 2. Batch-fetch `company_id`/`company_name` from `companies` table.
 3. For each company, fetch co-directors: join `sogc_person_appearances` → `sogc_person_entities` filtered to same company, excluding the central entity. Aggregate `active_company_count` per co-director.
 
+### Person Search API
+
+`GET /api/v1/sogc/persons/search` (`app/api/routes/persons.py`) — filters: `q`, `hometown`, `confidence_level`, `nationality`, `min_active_companies`, `min_total_companies` (distinct companies ever, current+past), `role_category` (comma-separated `director`/`officer`/`other`, matched via `EXISTS` against `sogc_person_appearances`), `is_verified`, `is_current`, `sort_by`.
+
+`PersonEntityOut` includes `total_company_count` (distinct `company_id` count from `sogc_person_appearances`, current+past) and `role_categories` (distinct list). Both are computed per-request in two `GROUP BY person_entity_id` queries scoped to just the current page's `entity_ids` (same batching pattern as the existing `active_count_map`/residence lookups in this endpoint) — no precomputation/preprocessing job, reads straight off the already-imported appearances table, `person_entity_id` is indexed.
+
 ### Jobs
 
 | Job type | Endpoint | Worker | Description |
@@ -2604,6 +2744,21 @@ Migration: `alembic/versions/0096_add_simap_awards.py`
 | `app/services/job_handlers/simap.py` | Job handler for both `simap_daily` and `simap_backfill`; resume via `last_cursor` in `stats_json` |
 | `app/crud/job_run.py` | `has_simap_daily_run_today()` guard (mirrors `has_shab_daily_run_today`) |
 | `frontend/src/components/simap-panel.tsx` | Company detail panel: useSWR on `GET /api/v1/companies/{id}/simap-awards`; renders award cards with price, authority, CPV; null-returns if no awards; show-more collapse after 3 |
+
+## 22. Security Hardening Pass (Jun 2026)
+
+Implemented findings from a security audit. All changes pending user review — see [roadmap.md](roadmap.md).
+
+- **Control-plane access:** scoped `ubuntu` passwordless sudo to a short command allowlist (§14); added `pam_access` restricting SSH/sudo to `admin_cidrs`.
+- **Server provisioning:** K3s/Helm/Helmfile installs in cloud-init are now checksum-verified and version-pinned (not `latest`); Hetzner firewall restricts ICMP + egress (§14).
+- **Pod hardening:** `readOnlyRootFilesystem: true` + `/tmp` (and frontend `/app/.next/cache`) `emptyDir` mounts on all 5 deployments (§13).
+- **Database network exposure:** `pg_hba` restricted from `0.0.0.0/0` to `network.podCidr`; new Postgres-only `NetworkPolicy` (§13) allowlisting app-tier pods, the `cnpg-system` operator, same-cluster replicas, and the node subnet (for kubelet probes).
+- **Ingress:** `/docs` (Swagger UI) gated behind `ingress.exposeDocs` (off in prod); Traefik rate-limit `Middleware` added (§13).
+- **CI/CD supply chain:** all third-party GitHub Actions pinned to commit SHAs; `aquasecurity/trivy-action` image scanning added to `deploy-prod.yml` (report-only); pipe-to-bash tool installs in `deploy-prod.yml` replaced with checksum-verified downloads (§12).
+- **Dependency updates:** `renovate.json` added — patch/digest auto-merge, minor/major and K3s/Postgres/Helm/Helmfile pins require manual review (§12, [runbook.md §25](runbook.md#25-keeping-k3s-and-the-servers-up-to-date)).
+- **Not implemented:** Postgres HA (`instances: 2`) — cost/architecture decision requiring explicit sign-off, intentionally left to the user.
+
+Full operational procedures (K3s upgrades, OS patching, Renovate review cadence): [runbook.md §25](runbook.md#25-keeping-k3s-and-the-servers-up-to-date).
 | `frontend/src/app/[locale]/app/collection/collection-client.tsx` | Admin trigger sections: "SIMAP Daily Import" + "SIMAP Historical Backfill" |
 
 ### API Endpoints

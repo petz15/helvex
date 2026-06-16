@@ -9,6 +9,32 @@ from app.config import settings
 
 logger = logging.getLogger(__name__)
 
+
+def adjust_web_score_for_extraction(
+    base_web_score: int | float | None,
+    *,
+    uid_matches_zefix: bool | None,
+    name_address_verified: bool,
+) -> int | None:
+    """Adjust the Serper-based web_score using crawl-verified extraction signals.
+
+    base_web_score must be the raw, un-adjusted score (google_search_results_raw[0]["score"])
+    so repeated calls (e.g. after a no-recrawl re-extract) stay idempotent instead of
+    compounding. +40/-50 dominate when a Swiss UID was found on-site; +20 is a weaker
+    fallback when no UID was present but name+address matched exactly.
+    """
+    if base_web_score is None:
+        return None
+    delta = 0
+    if uid_matches_zefix is True:
+        delta += 40
+    elif uid_matches_zefix is False:
+        delta -= 50
+    if name_address_verified:
+        delta += 20
+    return max(0, min(100, round(base_web_score) + delta))
+
+
 # Domains that are business directories, social networks, or government registries.
 _DIRECTORY_DOMAINS = {
     "wikipedia.org",

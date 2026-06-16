@@ -30,6 +30,10 @@ General fixes, recovery procedures, and operational checklists.
 19. [Saved View Alerts](#19-saved-view-alerts)
 20. [Admin Analytics Dashboard](#20-admin-analytics-dashboard)
 21. [Email Notification Opt-Out (per org)](#21-email-notification-opt-out-per-org)
+22. [Boilerplate & Stopword Maintenance](#22-boilerplate--stopword-maintenance)
+23. [New Company Classification (Incremental)](#23-new-company-classification-incremental)
+24. [Semantic Search Tuning](#24-semantic-search-tuning)
+25. [Keeping K3s and the Servers Up to Date](#25-keeping-k3s-and-the-servers-up-to-date)
 
 ---
 
@@ -1938,4 +1942,56 @@ The semantic search endpoint (`GET /api/v1/companies/semantic-search`) uses the 
 ```bash
 kubectl rollout restart -n helvex-prod deployment/helvex
 ```
+
+---
+
+## 25. Keeping K3s and the Servers Up to Date
+
+See [roadmap.md](roadmap.md) for the review status of the security hardening this section documents.
+
+### Why this can't just be a Terraform apply
+
+K3s version is pinned (not "latest") in `infra/terraform/envs/prod/variables.tf` (`k3s_version`), but changing it and running `terraform apply` does **not** patch already-running nodes. Hetzner's `hcloud_server.user_data` (cloud-init) forces full server **replacement** on change. For the control-plane node that means cluster downtime; for `db1` it means **data loss** — `db_volume_size_gb = 0` in prod, so CloudNativePG's PostgreSQL volumes are local-path PVs on the node's root disk, not a separate Hetzner Volume that survives a recreate.
+
+`k3s_version` in Terraform only governs newly-provisioned or replaced nodes. Upgrading nodes that are already running is always a manual, in-place step (below).
+
+### Upgrading K3s on a running node
+
+1. Check the current stable release: https://update.k3s.io/v1-release/channels/stable
+2. SSH in as **root**, not `ubuntu` — the install script needs unrestricted root, and the `ubuntu` user's passwordless sudo is intentionally scoped to a short allowlist (see next section):
+   ```bash
+   ssh root@<node-public-ip>
+   ```
+3. Re-run the install script with the target version. It detects the existing install, replaces the binary, and restarts the `k3s`/`k3s-agent` systemd service automatically — idempotent, a few seconds of API server downtime, no data loss:
+   ```bash
+   curl -sfL https://get.k3s.io | INSTALL_K3S_VERSION=v1.35.x+k3s1 sh -
+   ```
+4. Control-plane first: confirm with `kubectl get nodes -o wide` (new version shown) and `kubectl get pods -A` (everything recovers), then repeat the same command on each worker/agent node.
+5. Once every node is confirmed upgraded, bump `k3s_version` in `infra/terraform/envs/prod/variables.tf` to match and commit. This documents the running state and is what *future* node replacements will install — it is not itself an upgrade trigger.
+6. Renovate (see below) opens a PR against that same Terraform variable whenever a new K3s release ships — treat it as a reminder to run this procedure, not something to merge-and-forget; merging alone changes nothing running.
+
+### Patching the underlying Ubuntu servers
+
+The `ubuntu` admin user has a deliberately narrow passwordless-sudo allowlist (`/etc/sudoers.d/ubuntu`, provisioned by `control-plane.yaml.tpl`): `systemctl {restart,start,stop,status} k3s`, `journalctl -u k3s [-f]`, `apt-get update`, `apt-get upgrade -y`, `reboot`. That's enough for routine OS patching:
+
+```bash
+ssh ubuntu@<node-public-ip>
+sudo apt-get update
+sudo apt-get upgrade -y
+# If the upgrade pulled a new kernel, reboot to apply it:
+sudo reboot
+```
+
+Patch one node at a time; control-plane last if it's the same day as a K3s upgrade — rebooting it briefly drops `kubectl` access, while workers keep serving traffic via Traefik in the meantime. For anything beyond the allowlisted commands (`apt-get dist-upgrade`, package removal, root-owned config edits), use the root SSH path from step 2 above — the same SSH key authenticates as both `ubuntu` and `root`.
+
+Both SSH paths are further restricted at the PAM layer (`/etc/security/access.conf`, wired into `/etc/pam.d/sshd`) to the `admin_cidrs` Terraform variable — connections from any other source IP are rejected before a password/key prompt, regardless of the Hetzner Cloud Firewall rules. If your admin IP changes, update `admin_cidrs` in `infra/terraform/envs/prod/variables.tf` and run `terraform plan` first to confirm it only touches the firewall/cloud-init resources, not a node recreate.
+
+### Renovate-managed dependency updates
+
+`renovate.json` (repo root) watches pip (`requirements*.txt`), npm (`frontend/`), Dockerfiles, GitHub Actions (SHA-pinned — Renovate updates both the digest and the version comment), Helmfile chart versions (cert-manager, CloudNativePG operator, ARC), plus two custom regex watchers for the Terraform-pinned K3s version and the CNPG-bundled PostgreSQL image tag.
+
+- **Patch/digest updates** (including GitHub Actions digest bumps) auto-merge once CI is green — low risk, no manual step.
+- **Minor/major updates** open a PR but never auto-merge — review the changelog, especially for `cloudnative-pg`/CNPG operator and `cert-manager` (both manage stateful/TLS-critical infra), before merging and running `helmfile -e prod apply`.
+- **K3s, the CNPG Postgres image, Helm, and Helmfile** never auto-merge even on patch — merging the PR only updates the *pinned version string*; you still need to run the manual upgrade procedure above (K3s) or `helmfile apply` (Helm chart versions). Merging alone changes nothing running.
+- Renovate runs before 6am on weekdays (Europe/Zurich). Check PRs weekly; an accumulating backlog of major-version PRs is a signal to schedule a maintenance window, not something to ignore.
 
