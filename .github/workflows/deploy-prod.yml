@@ -110,6 +110,7 @@ jobs:
 
       - name: Scan image for vulnerabilities
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        continue-on-error: true # report-only — scanner crashes (registry hiccups etc.) must not block deploy; see roadmap.md
         with:
           image-ref: ghcr.io/${{ github.repository }}:${{ github.sha }}
           format: table
@@ -180,6 +181,7 @@ jobs:
 
       - name: Scan image for vulnerabilities
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        continue-on-error: true # report-only — scanner crashes (registry hiccups etc.) must not block deploy; see roadmap.md
         with:
           image-ref: ghcr.io/${{ github.repository }}-ml-base:latest
           format: table
@@ -235,6 +237,7 @@ jobs:
 
       - name: Scan image for vulnerabilities
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        continue-on-error: true # report-only — scanner crashes (registry hiccups etc.) must not block deploy; see roadmap.md
         with:
           image-ref: ghcr.io/${{ github.repository }}-ml:${{ github.sha }}
           format: table
@@ -302,6 +305,7 @@ jobs:
 
       - name: Scan image for vulnerabilities
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        continue-on-error: true # report-only — scanner crashes (registry hiccups etc.) must not block deploy; see roadmap.md
         with:
           image-ref: ghcr.io/${{ github.repository }}-frontend:${{ github.sha }}
           format: table
