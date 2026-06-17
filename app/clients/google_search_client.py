@@ -27,7 +27,7 @@ def search_website(
     municipality: str | None = None,
     purpose_language: str | None = None,
     api_key: str | None = None,
-) -> list[GoogleSearchResult]:
+) -> tuple[list[GoogleSearchResult], dict]:
     """Search for a company's website using the Serper.dev API.
 
     Args:
@@ -82,7 +82,7 @@ def search_website(
 
     data = response.json()
     items = data.get("organic", [])
-    return [
+    parsed = [
         GoogleSearchResult(
             title=item.get("title", ""),
             link=item.get("link", ""),
@@ -90,3 +90,4 @@ def search_website(
         )
         for item in items
     ]
+    return parsed, data

@@ -73,6 +73,7 @@ _ROLE_DIRECTOR_KEYWORDS = {
     "mitglied des vr", "präsident des verwaltungsrates", "vizepräsident",
     "administrateur", "administratrice", "président du conseil",
     "vice-président du conseil", "membre du conseil",
+    "président", "présidente",
     "consigliere", "presidente del consiglio", "membro del consiglio",
     "vorsitzende", "vorsitzender",
 }
@@ -82,8 +83,27 @@ _ROLE_OFFICER_KEYWORDS = {
     "direktor", "direktorin", "ceo", "prokura", "prokurist", "prokuristin",
     "directeur général", "directrice générale", "fondé de procuration",
     "fondée de procuration", "directeur", "directrice",
+    "gérant", "gérante",
     "direttore", "direttrice", "gerente",
 }
+
+# French narrative sentence forms (FOSC publications without structured section headers)
+# "Lastname Firstname n'est plus gérant; sa signature est radiée."
+_FR_NARRATIVE_REMOVAL_RE = re.compile(
+    r"^(.+?)\s+n['’]est\s+plus\s+([^;,]+)",
+    re.I | re.UNICODE,
+)
+# "Lastname Firstname est nommé(e) gérant(e)"
+_FR_NARRATIVE_ADDITION_RE = re.compile(
+    r"^(.+?)\s+est\s+nomm[eé]e?\s+([^;,]+)",
+    re.I | re.UNICODE,
+)
+
+# "sans signature" — French FOSC explicit no-signature clause
+_NO_SIGNATURE_FR_RE = re.compile(r"^sans\s+signature$", re.I)
+
+# Name particles that attach to the surname ("de Bentzmann Maxime" → "de Bentzmann" + "Maxime")
+_NAME_PARTICLES = frozenset({"de", "von", "van", "del", "della", "di", "la", "le", "du", "des"})
 
 # Auditor/revision-body keywords — an excerpt matching this is a legal entity
 # (auditor firm), not a natural person.  Such excerpts appear under person_added/
@@ -115,6 +135,25 @@ _NON_NAME_PREFIXES = re.compile(
 
 
 # ── Normalisation ──────────────────────────────────────────────────────────────
+
+def _split_fr_narrative_name(name_str: str) -> tuple[str, str, str]:
+    """Split a space-separated French narrative name into (lastname, firstname, hometown).
+
+    Swiss FOSC narrative form writes names without a comma separator:
+      "Domenget Benoit-Etienne"  → ("Domenget", "Benoit-Etienne", "")
+      "de Bentzmann Maxime"      → ("de Bentzmann", "Maxime", "")  [particle prefix]
+      "Akriche Vivianne"         → ("Akriche", "Vivianne", "")
+    """
+    tokens = name_str.split()
+    if not tokens:
+        return name_str, "", ""
+    if len(tokens) == 1:
+        return tokens[0], "", ""
+    if tokens[0].lower() in _NAME_PARTICLES and len(tokens) >= 3:
+        # Particle stays with surname; last token is the firstname
+        return " ".join(tokens[:-1]), tokens[-1], ""
+    return tokens[0], " ".join(tokens[1:]), ""
+
 
 def _normalize(text: str) -> str:
     """NFKD-lowercase, strip combining chars, collapse whitespace."""
@@ -230,6 +269,38 @@ def _parse_person(raw_excerpt: str, change_type: str) -> dict | None:
 
     text, bisher_role = _strip_bisher(raw_excerpt.strip().rstrip("."))
     bisher_parsed = _parse_bisher_fields(bisher_role)
+
+    # French narrative form: "Lastname Firstname n'est plus gérant" / "est nommée gérante"
+    # These lack comma separators and must be parsed before the normal comma-split path.
+    _fr_m = _FR_NARRATIVE_REMOVAL_RE.match(text) or _FR_NARRATIVE_ADDITION_RE.match(text)
+    if _fr_m:
+        name_part = _fr_m.group(1).strip()
+        role_word = _fr_m.group(2).strip() if _fr_m.group(2) else None
+        if "," not in name_part and name_part:
+            lastname, firstname, hometown = _split_fr_narrative_name(name_part)
+            if lastname:
+                _role = role_word[:256] if role_word else None
+                return {
+                    "lastname": lastname[:256],
+                    "firstname": firstname[:256] if firstname else None,
+                    "title": None,
+                    "hometown_municipality": hometown[:256] if hometown else None,
+                    "residence_municipality": None,
+                    "is_foreign": False,
+                    "nationality": None,
+                    "role": _role,
+                    "role_category": _classify_role(_role),
+                    "signature_type": None,
+                    "bisher_role": bisher_role[:256] if bisher_role else None,
+                    "bisher_residence_municipality": bisher_parsed.get("bisher_residence_municipality"),
+                    "bisher_lastname": bisher_parsed.get("bisher_lastname"),
+                    "bisher_firstname": bisher_parsed.get("bisher_firstname"),
+                    "bisher_is_foreign": bisher_parsed.get("bisher_is_foreign"),
+                    "bisher_nationality": bisher_parsed.get("bisher_nationality"),
+                    "is_current": change_type != "person_removed",
+                    "normalized_key": _normalize_key(lastname, firstname, hometown),
+                }
+
     parts = [p.strip() for p in text.split(",") if p.strip()]
     if not parts:
         return None
@@ -309,7 +380,7 @@ def _parse_person(raw_excerpt: str, change_type: str) -> dict | None:
             continue
 
         # Signature
-        if _SIGNATURE_RE.match(p) or _SIGNATURE_FR_RE.match(p) or _SIGNATURE_IT_RE.match(p):
+        if _SIGNATURE_RE.match(p) or _SIGNATURE_FR_RE.match(p) or _SIGNATURE_IT_RE.match(p) or _NO_SIGNATURE_FR_RE.match(p):
             signature_type = p[:128]
             continue
 

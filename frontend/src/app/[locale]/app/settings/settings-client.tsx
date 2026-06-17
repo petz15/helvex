@@ -412,12 +412,6 @@ export function SettingsClient() {
                       <option value="claude-opus-4-6">{dict.app.settings.llm.claudeOpusOption}</option>
                     </select>
                   </Field>
-                  <Field label="URL Search Provider" hint="Which provider fetches company URLs via Google Search. Serper.dev is a simple REST API; ScrapingDog queries google.ch with Swiss location context.">
-                    <select value={form.google_search_provider ?? "serper"} onChange={e => set("google_search_provider", e.target.value)} className={inputCls}>
-                      <option value="serper">Serper.dev</option>
-                      <option value="scrapingdog">ScrapingDog (google.ch)</option>
-                    </select>
-                  </Field>
                   <Field label={dict.app.settings.llm.targetDescription} hint={dict.app.settings.llm.targetDescriptionHint}>
                     <textarea rows={4} value={form.claude_target_description ?? ""} onChange={e => set("claude_target_description", e.target.value)} className={textareaCls} />
                   </Field>
@@ -551,16 +545,6 @@ export function SettingsClient() {
         </Field>
         <Field label={dict.app.settings.admin.dailyQuota}>
           <input type="number" min="1" value={form.google_daily_quota ?? "100"} onChange={e => set("google_daily_quota", e.target.value)} className={inputCls} />
-        </Field>
-        <Field label="Search provider" hint="Serper.dev uses POST; ScrapingDog uses google.ch with location/language context.">
-          <select
-            value={form.google_search_provider ?? "serper"}
-            onChange={e => set("google_search_provider", e.target.value)}
-            className={inputCls}
-          >
-            <option value="serper">Serper.dev</option>
-            <option value="scrapingdog">ScrapingDog</option>
-          </select>
         </Field>
       </div>
 

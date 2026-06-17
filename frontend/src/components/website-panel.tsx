@@ -1,10 +1,16 @@
 "use client";
 
+import { useState } from "react";
 import useSWR from "swr";
 import {
   Globe, Mail, MapPin, Link2, Languages, Tag, FileText,
   CheckCircle2, AlertTriangle, ExternalLink, Loader2, Hash, Users,
+  ChevronUp, Trash2, Flag, RefreshCw,
 } from "lucide-react";
+import {
+  fetchAllWebExtracts, promoteWebExtract, discardWebExtract, runCompanyWebSearch,
+  type WebExtractSummary,
+} from "@/lib/api";
 
 interface WebExtract {
   url_candidate_id: number;
@@ -92,11 +98,149 @@ const SOCIAL_LABELS: Record<string, string> = {
   instagram: "Instagram", twitter: "Twitter / X", youtube: "YouTube",
 };
 
-export function WebsitePanel({ companyId }: { companyId: number }) {
-  const { data, error, isLoading } = useSWR(
+function ConfBadge({ conf }: { conf: number | null }) {
+  if (conf == null) return <span className="text-slate-300 text-[11px]">—</span>;
+  const pct = (conf * 100).toFixed(0);
+  const cls = conf >= 0.75 ? "text-green-700 bg-green-50 border-green-200"
+    : conf >= 0.5 ? "text-amber-700 bg-amber-50 border-amber-200"
+    : "text-red-700 bg-red-50 border-red-200";
+  return <span className={`text-[11px] px-1.5 py-0.5 rounded-full border ${cls}`}>{pct}%</span>;
+}
+
+function AllExtractsPanel({ companyId, bestCandidateId, onMutate }: {
+  companyId: number;
+  bestCandidateId: number | undefined;
+  onMutate: () => void;
+}) {
+  const { data: extracts, mutate } = useSWR<WebExtractSummary[]>(
+    `web-extracts-all-${companyId}`,
+    () => fetchAllWebExtracts(companyId),
+  );
+  const [acting, setActing] = useState<number | null>(null);
+
+  if (!extracts || extracts.length <= 1) return null;
+
+  async function handlePromote(candidateId: number) {
+    setActing(candidateId);
+    try {
+      await promoteWebExtract(companyId, candidateId);
+      void mutate();
+      onMutate();
+    } finally {
+      setActing(null);
+    }
+  }
+
+  async function handleDiscard(candidateId: number) {
+    setActing(candidateId);
+    try {
+      await discardWebExtract(companyId, candidateId);
+      void mutate();
+      onMutate();
+    } finally {
+      setActing(null);
+    }
+  }
+
+  return (
+    <Card title={`All URL candidates (${extracts.length})`} icon={Globe}>
+      <div className="overflow-x-auto -m-1 p-1">
+        <table className="w-full text-[12px]">
+          <thead>
+            <tr className="text-slate-400 border-b border-slate-100">
+              <th className="text-left font-medium py-1.5 pr-3">URL</th>
+              <th className="text-center font-medium py-1.5 pr-3">Conf</th>
+              <th className="text-center font-medium py-1.5 pr-3">UID</th>
+              <th className="text-left font-medium py-1.5 pr-3">Status</th>
+              <th className="text-center font-medium py-1.5 pr-3">Flag</th>
+              <th className="py-1.5" />
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-50">
+            {extracts.map(ex => {
+              const isBest = ex.url_candidate_id === bestCandidateId;
+              return (
+                <tr key={ex.url_candidate_id} className={`${isBest ? "bg-blue-50/40" : ""} hover:bg-slate-50 transition-colors`}>
+                  <td className="py-1.5 pr-3 max-w-[220px]">
+                    {ex.url
+                      ? <a href={ex.url} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline truncate block flex items-center gap-1">
+                          {ex.url} <ExternalLink size={10} className="shrink-0" />
+                        </a>
+                      : <span className="text-slate-300">—</span>
+                    }
+                    {isBest && <span className="text-[10px] text-blue-600 font-medium">best</span>}
+                  </td>
+                  <td className="py-1.5 pr-3 text-center"><ConfBadge conf={ex.confidence} /></td>
+                  <td className="py-1.5 pr-3 text-center">
+                    {ex.uid_matches_zefix === true
+                      ? <CheckCircle2 size={13} className="text-green-600 inline" />
+                      : ex.uid_matches_zefix === false
+                      ? <AlertTriangle size={13} className="text-red-500 inline" />
+                      : <span className="text-slate-300 text-[11px]">—</span>
+                    }
+                  </td>
+                  <td className="py-1.5 pr-3">
+                    <span className={`text-[10px] px-1.5 py-0.5 rounded-full border ${
+                      ex.candidate_status === "selected" ? "bg-blue-50 text-blue-700 border-blue-200"
+                      : ex.candidate_status === "rejected" ? "bg-red-50 text-red-700 border-red-200"
+                      : "bg-slate-50 text-slate-500 border-slate-200"
+                    }`}>{ex.candidate_status ?? "—"}</span>
+                  </td>
+                  <td className="py-1.5 pr-3 text-center">
+                    {ex.review_flag && (
+                      <span title={ex.review_flag}>
+                        <Flag size={12} className="text-amber-500 inline" />
+                      </span>
+                    )}
+                  </td>
+                  <td className="py-1.5 text-right">
+                    <div className="flex items-center gap-1 justify-end">
+                      {!isBest && (
+                        <button
+                          onClick={() => handlePromote(ex.url_candidate_id)}
+                          disabled={acting !== null}
+                          title="Promote to best"
+                          className="p-1 rounded hover:bg-green-50 text-green-600 disabled:opacity-40"
+                        >
+                          {acting === ex.url_candidate_id ? <Loader2 size={12} className="animate-spin" /> : <ChevronUp size={12} />}
+                        </button>
+                      )}
+                      <button
+                        onClick={() => handleDiscard(ex.url_candidate_id)}
+                        disabled={acting !== null || isBest}
+                        title="Discard & reject"
+                        className="p-1 rounded hover:bg-red-50 text-red-500 disabled:opacity-40"
+                      >
+                        <Trash2 size={12} />
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </Card>
+  );
+}
+
+export function WebsitePanel({ companyId, isSuperadmin = false }: { companyId: number; isSuperadmin?: boolean }) {
+  const { data, error, isLoading, mutate } = useSWR(
     `web-extract-${companyId}`,
     () => fetchWebExtract(companyId),
   );
+  const [rerunning, setRerunning] = useState(false);
+
+  async function handleRerunSearch() {
+    setRerunning(true);
+    try {
+      await runCompanyWebSearch(companyId);
+      await mutate();
+    } finally {
+      setRerunning(false);
+    }
+  }
 
   if (isLoading) {
     return (
@@ -122,6 +266,16 @@ export function WebsitePanel({ companyId }: { companyId: number }) {
         <p className="text-xs text-slate-400 mt-1">
           Run the web crawler to fetch and extract website data.
         </p>
+        {isSuperadmin && (
+          <button
+            onClick={handleRerunSearch}
+            disabled={rerunning}
+            className="mt-4 inline-flex items-center gap-1.5 text-[12px] px-3 py-1.5 rounded-lg border border-purple-200 text-purple-700 hover:bg-purple-50 disabled:opacity-50 transition-colors"
+          >
+            {rerunning ? <Loader2 size={12} className="animate-spin" /> : <RefreshCw size={12} />}
+            {rerunning ? "Searching…" : "Rerun web search"}
+          </button>
+        )}
       </div>
     );
   }
@@ -169,6 +323,16 @@ export function WebsitePanel({ companyId }: { companyId: number }) {
           <span className="text-[11px] px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 border border-amber-200">
             {data!.candidate_count} URL candidates extracted
           </span>
+        )}
+        {isSuperadmin && (
+          <button
+            onClick={handleRerunSearch}
+            disabled={rerunning}
+            className="ml-auto flex items-center gap-1.5 text-[12px] px-2.5 py-1 rounded-lg border border-purple-200 text-purple-700 hover:bg-purple-50 disabled:opacity-50 transition-colors"
+          >
+            {rerunning ? <Loader2 size={12} className="animate-spin" /> : <RefreshCw size={12} />}
+            {rerunning ? "Searching…" : "Rerun search"}
+          </button>
         )}
       </div>
 
@@ -324,6 +488,13 @@ export function WebsitePanel({ companyId }: { companyId: number }) {
           </div>
         )}
       </Card>
+
+      {/* ── Multi-candidate comparison ── */}
+      <AllExtractsPanel
+        companyId={companyId}
+        bestCandidateId={extract?.url_candidate_id}
+        onMutate={() => void mutate()}
+      />
     </div>
   );
 }

@@ -27,6 +27,8 @@ class Company(Base):
     name: Mapped[str] = mapped_column(String(512), nullable=False, index=True)
     legal_form: Mapped[str | None] = mapped_column(String(128), nullable=True, index=True)
     status: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    # Import origin: 'zefix' | 'shab_stub' | NULL (legacy rows without source)
+    source: Mapped[str | None] = mapped_column(String(32), nullable=True, index=True)
     municipality: Mapped[str | None] = mapped_column(String(256), nullable=True)
     canton: Mapped[str | None] = mapped_column(String(8), nullable=True)
     purpose: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -143,17 +145,17 @@ class Company(Base):
         ai_score: int | None,
         noga_confidence: float | None = None,
         purpose_keywords: str | None = None,
-        # Legacy params kept for backward-compat with old call sites
         web_score: int | None = None,
+        # Legacy unused params kept for backward-compat with old call sites
         flex_score: int | None = None,
         w_ai: float = 0.60,
         w_web: float = 0.0,
         w_flex: float = 0.0,
     ) -> float | None:
-        """Relevance score: ai_score×0.60 + noga_confidence×100×0.25 + keyword_density×100×0.15.
+        """Relevance score incorporating all available signals.
 
-        If ai_score is absent, remaining weights renormalise to 0.62/0.38.
-        Returns None when all components are absent.
+        See scoring.compute_relevance_score for the full formula.
+        web_score is optional; when provided it becomes a 20% weight component.
         """
         from app.services.scoring import compute_relevance_score as _compute
 
@@ -164,6 +166,7 @@ class Company(Base):
         c.ai_score = ai_score
         c.noga_confidence = noga_confidence
         c.purpose_keywords = purpose_keywords
+        c.web_score = web_score
         return _compute(c)
 
     notes: Mapped[list["Note"]] = relationship("Note", back_populates="company", cascade="all, delete-orphan")  # noqa: F821

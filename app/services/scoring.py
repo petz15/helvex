@@ -35,7 +35,8 @@ def adjust_web_score_for_extraction(
     return max(0, min(100, round(base_web_score) + delta))
 
 
-# Domains that are business directories, social networks, or government registries.
+# Domains that are business directories or government registries — never crawl these
+# as company websites; they show aggregated data, not the company's own site.
 _DIRECTORY_DOMAINS = {
     "wikipedia.org",
     "zefix.admin.ch",
@@ -46,26 +47,34 @@ _DIRECTORY_DOMAINS = {
     "yelp.com",
     "local.ch",
     "yellowpages.ch",
+    "yellowpages.swiss",
+    "yellowpages.com",
     "directories.ch",
     "scout24.ch",
     "homegate.ch",
+    "flatfox.ch",
+    "newhome.ch",
+    "immoscout24.ch",
+    "immowelt.ch",
     "companyhouse.ch",
     "handelsregister.ch",
     "hr-register.ch",
     "rocketreach.co",
+    "rocketreach.com",
     "kununu.com",
     "crunchbase.com",
-    "rocketreach.com",
     "tiger.ch",
     "help.ch",
     "kompass.ch",
+    "kompass.com",
     "spheriq.ch",
     "treuhandsuisse.ch",
+    "treuhandsuisse-zh.ch",
+    "treuhandvergleich.ch",
     "fiduciairesuisse-vd.ch",
     "business-monitor.ch",
     "graph.swiss",
     "swiss-arc.ch",
-    "kompass.com",
     "northdata.com",
     "northdata.de",
     "northdata.eu",
@@ -77,9 +86,6 @@ _DIRECTORY_DOMAINS = {
     "maptons.com",
     "pappers.ch",
     "kanzleiwelten.com",
-    "yellowpages.swiss",
-    "yellowpages.ch",
-    "yellowpages.com",
     "lixt.com",
     "swissbiotech.org",
     "ofri.ch",
@@ -91,17 +97,37 @@ _DIRECTORY_DOMAINS = {
     "comparis.ch",
     "admin.ch",
     "sogenda.ch",
-    "treuhandsuisse-zh.ch",
     "ccis.ch",
     "konsumentenschutz.ch",
     "konsumentenbewertung.ch",
     "psychologie.ch",
-    "immoscout24.ch",
-    "immowelt.ch",
-    "homegate.ch",
-    "flatfox.ch",
-    "newhome.ch",
+    "startups.ch",
+    "gr-firmen.ch",
+    "firma.ch",
+    "firmenguru.ch",
+    "promove.ch",
+    "jobup.ch",
+    "jobscout24.ch",
+    "emplois-fribourg.ch",
+    "jobs.ch",
 }
+
+# Social-media domains — we extract social profiles from crawl data already;
+# crawling these as if they were a company website gives misleading results.
+_SOCIAL_DOMAINS = {
+    "linkedin.com",
+    "xing.com",
+    "facebook.com",
+    "instagram.com",
+    "twitter.com",
+    "x.com",
+    "youtube.com",
+    "tiktok.com",
+    "pinterest.com",
+}
+
+# Combined set of domains that should never be used as crawl targets.
+CRAWL_BLOCKED_DOMAINS: frozenset[str] = frozenset(_DIRECTORY_DOMAINS | _SOCIAL_DOMAINS)
 
 
 def get_default_directory_domains() -> set[str]:
@@ -142,9 +168,16 @@ _SOCIAL_LEAD_DOMAINS = {
 _LEGAL_FORM_WORDS = {"ag", "gmbh", "sa", "sarl", "sàrl", "kg", "og", "llc", "ltd", "inc", "co", "spa"}
 
 # URL path pattern for municipal/local company directories (not in _DIRECTORY_DOMAINS).
-# Matches pages like /unternehmensverzeichnis/, /firmenverzeichnis/, /verzeichnis/, etc.
+# Matches German /verzeichnis/, French /membres/, /annuaire/, /repertoire/, Italian /elenco/.
 _LOCAL_DIRECTORY_PATH_RE = re.compile(
-    r"(?:unternehmens|firmen|branchen|betriebs)?verzeichnis", re.IGNORECASE
+    r"(?:unternehmens|firmen|branchen|betriebs)?verzeichnis"
+    r"|/membres/"          # FR: association members listing
+    r"|/annuaire/"         # FR: business directory
+    r"|/repertoire/"       # FR: repertoire/listing
+    r"|/bottin/"           # FR: business directory
+    r"|/elenco-aziende/"   # IT: company listing
+    r"|/aziende/",         # IT: companies listing
+    re.IGNORECASE,
 )
 
 # Words to exclude when extracting keywords from the purpose field
@@ -967,14 +1000,18 @@ def compute_zefix_score(**kwargs) -> int:
 
 
 def compute_relevance_score(company) -> float | None:
-    """Relevance score formula: ai×0.60 + noga_confidence×100×0.25 + keyword_density×100×0.15.
+    """Relevance score formula incorporating all available signals.
 
-    If ai_score is absent, renormalise remaining weights to 0.625 / 0.375.
+    Base formula (no web_score): ai×0.60 + noga_confidence×100×0.25 + keyword_density×100×0.15
+    With web_score:               ai×0.50 + web_score×0.20 + noga_confidence×100×0.20 + keyword_density×100×0.10
+
+    Any absent component's weight is redistributed proportionally among the rest.
     Returns None when all components are absent.
     """
     ai = company.ai_score
     noga_conf = company.noga_confidence  # float 0-1
     purpose_kw = company.purpose_keywords  # comma-separated string or None
+    web = getattr(company, "web_score", None)  # 0-100, None if not yet crawled
 
     # keyword_density: 10+ keywords → 1.0, 0 keywords → 0.0
     if purpose_kw and purpose_kw.strip():
@@ -984,29 +1021,32 @@ def compute_relevance_score(company) -> float | None:
         kw_density = 0.0
 
     noga_score = float(noga_conf) * 100.0 if noga_conf is not None else None
+    web_score = float(web) if web is not None else None
 
-    if ai is None:
-        # No AI score — renormalise the remaining two components
-        if noga_score is None and kw_density == 0.0:
-            return None
-        w_noga, w_kw = 0.625, 0.375
-        total_w = (w_noga if noga_score is not None else 0.0) + (w_kw if kw_density > 0.0 else 0.0)
-        if total_w == 0.0:
-            return None
-        val = (
-            ((noga_score or 0.0) * w_noga if noga_score is not None else 0.0)
-            + (kw_density * 100.0 * w_kw if kw_density > 0.0 else 0.0)
-        ) / total_w
-        return round(max(0.0, min(100.0, val)), 1)
+    if web_score is not None:
+        # Extended formula including web_score
+        components = [
+            (float(ai) if ai is not None else None, 0.50),
+            (web_score, 0.20),
+            (noga_score, 0.20),
+            (kw_density * 100.0 if kw_density > 0.0 else None, 0.10),
+        ]
     else:
-        # AI score present — full formula
-        if noga_score is None and kw_density == 0.0:
-            return round(max(0.0, min(100.0, float(ai) * 0.60 / 0.60)), 1)
-        noga_part = (noga_score or 0.0) * 0.25
-        kw_part = kw_density * 100.0 * 0.15
-        ai_part = float(ai) * 0.60
-        val = ai_part + noga_part + kw_part
-        return round(max(0.0, min(100.0, val)), 1)
+        # Original formula without web_score
+        components = [
+            (float(ai) if ai is not None else None, 0.60),
+            (noga_score, 0.25),
+            (kw_density * 100.0 if kw_density > 0.0 else None, 0.15),
+        ]
+
+    present = [(v, w) for v, w in components if v is not None]
+    if not present:
+        return None
+    total_w = sum(w for _, w in present)
+    if total_w == 0.0:
+        return None
+    val = sum(v * w for v, w in present) / total_w
+    return round(max(0.0, min(100.0, val)), 1)
 
 
 def normalize_raw_scores(

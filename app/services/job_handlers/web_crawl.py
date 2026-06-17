@@ -69,10 +69,27 @@ def handle_web_url_populate(ctx: JobContext) -> tuple[dict, str]:
     enrichment job first).
     """
     batch_size = int(ctx.params.get("batch_size", 500))
-    stats: dict = {"processed": 0, "candidates_created": 0, "skipped_no_results": 0, "errors": []}
+    stats: dict = {
+        "processed": 0, "candidates_created": 0,
+        "skipped_no_results": 0, "skipped_branch": 0, "errors": [],
+    }
+
+    # Exclude Zweigniederlassungen: legal_form_uid 0108 (Swiss branch) and 0111 (foreign branch).
+    # These don't have independent websites — crawling them wastes quota and produces false matches.
+    _BRANCH_LEGAL_FORM_UIDS_SQL = "('0108', '0111')"
+    _BRANCH_NAME_FILTER = (
+        "AND lower(name) NOT LIKE '%zweigniederlassung%' "
+        "AND lower(name) NOT LIKE '%succursale%' "
+        "AND lower(name) NOT LIKE '%filiale di%'"
+    )
+    _BASE_WHERE = (
+        "WHERE google_search_results_raw IS NOT NULL "
+        f"AND (legal_form_uid IS NULL OR legal_form_uid NOT IN {_BRANCH_LEGAL_FORM_UIDS_SQL}) "
+        f"{_BRANCH_NAME_FILTER}"
+    )
 
     total_q = ctx.db.execute(
-        text("SELECT COUNT(*) FROM companies WHERE google_search_results_raw IS NOT NULL")
+        text(f"SELECT COUNT(*) FROM companies {_BASE_WHERE}")
     ).scalar() or 0
     total = int(total_q)
 
@@ -85,8 +102,8 @@ def handle_web_url_populate(ctx: JobContext) -> tuple[dict, str]:
 
         rows = ctx.db.execute(
             text(
-                "SELECT id, google_search_results_raw FROM companies "
-                "WHERE google_search_results_raw IS NOT NULL "
+                f"SELECT id, google_search_results_raw FROM companies "
+                f"{_BASE_WHERE} "
                 "ORDER BY id "
                 "LIMIT :limit OFFSET :offset"
             ),
@@ -133,6 +150,7 @@ def handle_web_url_populate(ctx: JobContext) -> tuple[dict, str]:
         f"Done — {stats['processed']} companies, "
         f"{stats['candidates_created']} URL candidates, "
         f"{stats['skipped_no_results']} skipped (no search results), "
+        f"{stats.get('skipped_branch', 0)} skipped (branch offices), "
         f"{len(stats['errors'])} errors"
     )
     return stats, done_msg
@@ -485,44 +503,79 @@ def handle_web_extract(ctx: JobContext) -> tuple[dict, str]:
             ctx.assert_not_cancelled()
             try:
                 pages = crawler_crud.get_extractable_pages(ctx.db, company_id)
-                # All pages for one company share the same url_candidate_id
-                # (delete_web_pages_for_company wipes old pages before each crawl).
-                url_candidate_id = pages[0].url_candidate_id if pages else None
-                # Prefer the homepage URL for domain/name matching; else first page.
-                site_url = next((p.url for p in pages if p.page_type == "homepage"), None)
-                if site_url is None and pages:
-                    site_url = pages[0].url
-                page_blobs: list[tuple[str, bytes]] = []
-                for p in pages:
-                    try:
-                        html = _s3.download_crawl_html(p.s3_key_html)
-                        page_blobs.append((p.page_type, html))
-                    except Exception as exc:  # noqa: BLE001
-                        stats["s3_errors"] += 1
-                        logger.debug("S3 download failed for %s: %s", p.s3_key_html, exc)
-
                 row = meta.get(company_id)
                 cname = row[1] if row else None
                 czefix_uid = row[2] if row else None
                 czip = row[3] if row else None
                 ccity = row[4] if row else None
-                data = crawler_extract.resolve_company_extract(
-                    page_blobs,
-                    company_name=cname,
-                    zefix_uid=czefix_uid,
-                    site_url=site_url,
-                    company_zip=czip,
-                    company_city=ccity,
-                ) if page_blobs else {}
-                if data and url_candidate_id is not None:
-                    crawler_crud.upsert_web_extract(ctx.db, company_id, url_candidate_id, data)
-                    stats["extracted"] += 1
 
-                    # Idempotent web_score adjustment: always recompute from the raw
-                    # (un-adjusted) Serper score using the BEST extract across all of
-                    # this company's URL candidates, so repeated re-extracts or a later
-                    # extraction from a different candidate don't compound or regress it.
-                    best = crawler_crud.get_best_web_extract(ctx.db, company_id)
+                # Group pages by url_candidate_id — a company can have pages from
+                # multiple candidates (primary + fallback), each producing its own
+                # extract row. Processing them separately keeps the PK clean.
+                pages_by_candidate: dict[int, list] = {}
+                for p in pages:
+                    if p.url_candidate_id is not None:
+                        pages_by_candidate.setdefault(p.url_candidate_id, []).append(p)
+
+                any_extracted = False
+                for url_candidate_id, cand_pages in pages_by_candidate.items():
+                    site_url = next(
+                        (p.url for p in cand_pages if p.page_type == "homepage"),
+                        cand_pages[0].url if cand_pages else None,
+                    )
+                    page_blobs: list[tuple[str, bytes]] = []
+                    for p in cand_pages:
+                        try:
+                            html = _s3.download_crawl_html(p.s3_key_html)
+                            page_blobs.append((p.page_type, html))
+                        except Exception as exc:  # noqa: BLE001
+                            stats["s3_errors"] += 1
+                            logger.debug("S3 download failed for %s: %s", p.s3_key_html, exc)
+
+                    data = crawler_extract.resolve_company_extract(
+                        page_blobs,
+                        company_name=cname,
+                        zefix_uid=czefix_uid,
+                        site_url=site_url,
+                        company_zip=czip,
+                        company_city=ccity,
+                    ) if page_blobs else {}
+                    if data:
+                        # Cross-UID attribution: if a UID was found on the page but
+                        # belongs to a different company, wire the URL to that company
+                        # as a candidate and flag this extract for human review.
+                        if data.get("uid_matches_zefix") is False and data.get("uid"):
+                            found_uid = data["uid"]
+                            other = crud.get_company_by_uid(ctx.db, found_uid)
+                            if other is not None and other.id != company_id:
+                                data["review_flag"] = "uid_mismatch_cross_ref"
+                                other_best = crawler_crud.get_best_web_extract(ctx.db, other.id)
+                                if (
+                                    other_best is None
+                                    or (other_best.confidence or 0) < (data.get("confidence") or 0)
+                                ):
+                                    page_url = site_url or (cand_pages[0].url if cand_pages else None)
+                                    if page_url:
+                                        try:
+                                            crawler_crud.add_cross_attributed_url_candidate(
+                                                ctx.db, other.id, page_url
+                                            )
+                                            stats["cross_attributed"] = stats.get("cross_attributed", 0) + 1
+                                        except Exception:  # noqa: BLE001
+                                            pass
+                        crawler_crud.upsert_web_extract(ctx.db, company_id, url_candidate_id, data)
+                        stats["extracted"] += 1
+                        any_extracted = True
+                    else:
+                        stats["empty"] += 1
+
+                if not pages_by_candidate:
+                    stats["empty"] += 1
+
+                # Idempotent web_score adjustment using the BEST extract across all
+                # candidates. Done once per company after all candidate groups are processed.
+                best = crawler_crud.get_best_web_extract(ctx.db, company_id)
+                if best is not None:
                     raw_score_json = row[6] if row else None
                     base_score = None
                     if raw_score_json:
@@ -531,7 +584,7 @@ def handle_web_extract(ctx: JobContext) -> tuple[dict, str]:
                             base_score = parsed[0]["score"] if parsed else None
                         except Exception:  # noqa: BLE001
                             base_score = None
-                    if base_score is not None and best is not None:
+                    if base_score is not None:
                         new_web_score = scoring.adjust_web_score_for_extraction(
                             base_score,
                             uid_matches_zefix=best.uid_matches_zefix,
@@ -545,12 +598,48 @@ def handle_web_extract(ctx: JobContext) -> tuple[dict, str]:
                             ctx.db.query(Company).filter(Company.id == company_id).update({
                                 "web_score": new_web_score,
                                 "combined_score": Company.compute_combined_score(
-                                    ai_score, noga_confidence, purpose_keywords
+                                    ai_score, noga_confidence, purpose_keywords,
+                                    web_score=new_web_score,
                                 ),
                             })
                             stats["rescored"] += 1
-                else:
-                    stats["empty"] += 1
+
+                    # UID-mismatch auto-quarantine: reject the wrong-site candidate
+                    # so it's never re-selected. Always triggers a fallback crawl.
+                    if any_extracted and best.uid_matches_zefix is False:
+                        crawler_crud.reject_url_candidate(ctx.db, best.url_candidate_id)
+                        stats["quarantined"] = stats.get("quarantined", 0) + 1
+
+                    # Fallback: if UID mismatch, or no UID found with low confidence,
+                    # try the next untried, non-blocked URL candidate.
+                    if (
+                        any_extracted
+                        and (
+                            best.uid_matches_zefix is False
+                            or (best.uid_matches_zefix is None and (best.confidence or 0) < 0.65)
+                        )
+                    ):
+                        already_tried = set(pages_by_candidate.keys())
+                        fallback = crawler_crud.get_next_crawlable_candidate(
+                            ctx.db, company_id, exclude_candidate_ids=already_tried
+                        )
+                        if fallback is not None:
+                            try:
+                                ctx.enqueue_job(
+                                    job_type="web_crawl_single",
+                                    label=f"Fallback crawl candidate {fallback.id} for company {company_id}",
+                                    params={
+                                        "company_id": company_id,
+                                        "url_candidate_id": fallback.id,
+                                        "max_pages": 3,
+                                    },
+                                    org_id=ctx.job.org_id,
+                                    user_id=ctx.job.user_id,
+                                )
+                                stats["fallbacks"] = stats.get("fallbacks", 0) + 1
+                            except Exception:  # noqa: BLE001
+                                pass  # Dedup hit or queue full — not fatal
+
                 # Always mark processed so the queue drains even when nothing is found.
                 crawler_crud.mark_pages_extracted(ctx.db, company_id)
             except Exception as exc:  # noqa: BLE001
@@ -607,13 +696,16 @@ def handle_web_crawl_single(ctx: JobContext) -> tuple[dict, str]:
 
     Params:
       company_id        (required) — DB id of the company
+      url_candidate_id  (optional) — target a specific URL candidate without changing the
+                                     selection; used by the web_extract fallback mechanism.
+                                     When set, existing pages are preserved (not deleted).
       max_pages         (optional, default 5)
       rate_limit_delay  (optional, default 0.5)
       force             (optional, default false) — re-crawl even if already crawled
 
     Flow:
       1. Check company has google_search_results_raw → populate candidates if needed
-      2. Ensure crawl_state exists with a selected URL
+      2. Ensure crawl_state exists with a selected URL (or use the specified candidate)
       3. Try HTTP crawler; escalate to Playwright if js_required
       4. Store results
     """
@@ -621,6 +713,9 @@ def handle_web_crawl_single(ctx: JobContext) -> tuple[dict, str]:
     from app.services.crawler_playwright import crawl_company_playwright
 
     company_id = int(ctx.params["company_id"])
+    target_candidate_id: int | None = (
+        int(ctx.params["url_candidate_id"]) if ctx.params.get("url_candidate_id") else None
+    )
     max_pages = int(ctx.params.get("max_pages", 5))
     rate_limit_delay = float(ctx.params.get("rate_limit_delay", 0.5))
     force = bool(ctx.params.get("force", False))
@@ -647,34 +742,47 @@ def handle_web_crawl_single(ctx: JobContext) -> tuple[dict, str]:
     else:
         upserted = []
 
-    # Select best candidate if none is selected yet
-    selected = crawler_crud.get_selected_candidate(ctx.db, company_id)
-    if not selected:
-        selected = crawler_crud.select_best_candidate(ctx.db, company_id)
-    if not selected:
-        ctx.db.commit()
-        return {"company_id": company_id}, f"No crawlable URL found for company {company_id}"
+    # ── Resolve which candidate to crawl ─────────────────────────────────
+    # target_candidate_id: crawl a specific candidate (fallback mode) without
+    # changing the primary selection or deleting existing pages.
+    # No target: normal flow — use/pick the selected candidate.
+    is_fallback = target_candidate_id is not None
+    if is_fallback:
+        selected = ctx.db.get(crawler_crud.CompanyUrlCandidate, target_candidate_id)
+        if not selected or selected.company_id != company_id:
+            return {"company_id": company_id}, f"Candidate {target_candidate_id} not found for company {company_id}"
+        if crawler_crud.is_crawl_blocked(selected.url):
+            return {"company_id": company_id}, f"Candidate {target_candidate_id} is on the crawl blocklist"
+    else:
+        # Select best candidate if none is selected yet
+        selected = crawler_crud.get_selected_candidate(ctx.db, company_id)
+        if not selected:
+            selected = crawler_crud.select_best_candidate(ctx.db, company_id)
+        if not selected:
+            ctx.db.commit()
+            return {"company_id": company_id}, f"No crawlable URL found for company {company_id}"
 
-    # ── Step 2: ensure crawl state exists ────────────────────────────────
-    state = crawler_crud.get_or_create_crawl_state(ctx.db, company_id, selected.id)
+    # ── Step 2: ensure crawl state exists (normal mode only) ─────────────
+    if not is_fallback:
+        state = crawler_crud.get_or_create_crawl_state(ctx.db, company_id, selected.id)
 
-    if not force and state.crawl_status == "crawled":
-        ctx.db.commit()
-        return (
-            {"company_id": company_id, "url": selected.url, "skipped": True},
-            f"Company {company_id} already crawled — pass force=true to re-crawl",
-        )
+        if not force and state.crawl_status == "crawled":
+            ctx.db.commit()
+            return (
+                {"company_id": company_id, "url": selected.url, "skipped": True},
+                f"Company {company_id} already crawled — pass force=true to re-crawl",
+            )
 
-    # Reset state if forcing or if previously failed
-    if force or state.crawl_status not in ("pending", "in_progress"):
-        state.crawl_status = "pending"
-        state.tier = "http"
-        state.bot_protected = False
-        state.bot_protection_type = None
-        state.crawl_error_detail = None
+        # Reset state if forcing or if previously failed
+        if force or state.crawl_status not in ("pending", "in_progress"):
+            state.crawl_status = "pending"
+            state.tier = "http"
+            state.bot_protected = False
+            state.bot_protection_type = None
+            state.crawl_error_detail = None
 
     ctx.db.commit()
-    ctx.status(f"Crawling {selected.url}…")
+    ctx.status(f"Crawling {selected.url}{'  (fallback candidate)' if is_fallback else ''}…")
 
     # ── Step 3: try HTTP, escalate to Playwright if needed ───────────────
     result = asyncio.run(
@@ -715,7 +823,10 @@ def handle_web_crawl_single(ctx: JobContext) -> tuple[dict, str]:
         }
         return stats, f"Crawl failed ({result.failure_status}): {result.failure_detail}"
 
-    crawler_crud.delete_web_pages_for_company(ctx.db, company_id)
+    # In fallback mode: keep existing pages from other candidates intact.
+    # In normal mode: wipe old pages before saving the fresh crawl.
+    if not is_fallback:
+        crawler_crud.delete_web_pages_for_company(ctx.db, company_id)
     pages_crawled = []
     for p in result.pages:
         crawler_crud.save_web_page(
@@ -736,7 +847,8 @@ def handle_web_crawl_single(ctx: JobContext) -> tuple[dict, str]:
         )
         pages_crawled.append(p.page_type)
 
-    crawler_crud.mark_crawl_done(ctx.db, state, pages_crawled)
+    if not is_fallback:
+        crawler_crud.mark_crawl_done(ctx.db, state, pages_crawled)
     selected.status = "crawled"
     selected.last_crawled_at = now
     ctx.db.commit()

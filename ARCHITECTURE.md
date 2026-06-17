@@ -160,6 +160,8 @@ zefix_analyzer/
 3. Recover interrupted background jobs → kick worker thread
 4. Auto-enqueue one-time re-geocode job if not already done
 
+**Migration serialization across pods:** `entrypoint.sh` runs `alembic upgrade head` before exec'ing the app, and step 1 above runs it again in-process — and every one of the 5 deployments (app, frontend, api-worker, ml-worker, crawler-http ×2) does both, independently, on every pod start/restart. A plain `op.add_column` isn't idempotent, so concurrent sessions racing for the same migration's `ACCESS EXCLUSIVE` table lock would previously queue and get killed by the engine-wide 30s `statement_timeout` (`app/database.py`) before any of them finished — observed in production as a `0098 → 0099` migration repeatedly failing across unrelated deploys (`crawler-http` uses a `Recreate` strategy, so a normal deploy alone produces several concurrent migration attempts). Fixed in [alembic/env.py](alembic/env.py): `run_migrations_online()` now takes a session-level Postgres advisory lock (key `727001`) for the duration of the migration connection, with `statement_timeout` disabled on that connection only — every other pod simply waits its turn instead of contending for the table lock.
+
 **Middleware stack (applied top-to-bottom):**
 
 | Middleware | File:line | Purpose |
@@ -495,6 +497,27 @@ Views are scoped per-user per-org. `list_views` returns rows matching `org_id = 
 
 Migrations: `0052_add_user_view_alert_fields`, `0072_add_org_id_to_user_views`
 
+#### `CompanyError` — `app/models/company_error.py`
+
+Per-company pipeline failure log. Written by services during batch jobs; reviewed in the admin Error Center.
+
+| Column | Notes |
+|---|---|
+| `company_id` | FK → companies.id (nullable — job-level errors have no company) |
+| `error_source` | `web_enrichment` \| `zefix_import` \| `geocoding` \| `noga` |
+| `error_type` | `enrich_failed` \| `import_failed` \| `geocode_failed` \| `extract_failed` |
+| `message` | Human-readable error message |
+| `detail_json` | JSON blob with extra context (URL, HTTP status, etc.) |
+| `job_run_id` | FK → job_runs.id (optional context) |
+| `resolved_at` / `resolved_by` | Cleared when admin applies a data correction |
+| `ignored` | True if admin dismissed without formal fix |
+
+Instrumented in: `app/services/web_enrichment.py` (per-company Google search failures), `app/services/zefix_import.py` (per-UID import failures).
+
+CRUD: `app/crud/company_error.py` — `log_error()` deduplicates active errors per (company, source).
+Admin endpoints: `GET /admin/errors`, `POST /admin/errors/{id}/resolve`, `POST /admin/errors/{id}/ignore`, `PATCH /admin/companies/{id}/correct`.
+Frontend: `frontend/src/app/[locale]/app/admin/errors/` — Error Center page with data quality dashboard + tabbed error list + inline correction panel.
+
 #### Other models
 
 | Model | Table | Purpose |
@@ -770,6 +793,7 @@ The worker checks `cancel_requested` / `pause_requested` **between companies** (
 | `sogc_preprocess` | `mode`, `batch_size`, `uids` | Explode `sogc_pub` blobs into `sogc_publications` + `sogc_changes` rows; see §SOGC Preprocessing | — |
 | `repair_is_current` | `batch_size` | Recompute `is_current` flag for all existing `sogc_person_appearances` rows; fixes historical data before the temporal-ordering bug was corrected | — |
 | `shab_archive` | `start_page`, `end_page`, `page_size`, `request_delay`, `pdf_delay` | Fetch shab.ch archive, download PDFs, upsert `sogc_publications` + `sogc_changes`; resume via page cursor | ONE_PER_ORG |
+| `link_sogc_stubs` | `batch_size` | Back-fill `company_id` on existing `sogc_publications` + `sogc_person_appearances` rows; creates `shab_stub` Company rows for unknown UIDs — no API calls | — |
 
 #### Org-scoped job execution
 
@@ -905,14 +929,20 @@ The `message` field contains the full HR publication narrative (single language;
 
 ### SHAB Archive Import — `app/services/shab_archive_import.py`
 
-Imports historical SHAB publications directly from the `shab.ch` public archive API (`https://www.shab.ch/api/v1/archive/public`). Unlike the Zefix-backed SHAB importer this source is PDF-based and does not touch the `companies` table.
+Imports historical SHAB publications directly from the `shab.ch` public archive API (`https://www.shab.ch/api/v1/archive/public`). PDF-based; links publications to the `companies` table and creates stub entries for cancelled companies absent from Zefix.
 
 **Workflow:**
 1. `fetch_archive_page(page, size)` — paginates the archive list (`includeContent=false`).
 2. For each HR01/HR02/HR03 entry: `fetch_pdf_bytes(id)` → `extract_text_from_pdf()` (pypdf).
 3. Extract UID via regex (`CHE-xxx.xxx.xxx`), detect language (lingua + canton fallback).
-4. Upsert `SogcPublication` with extracted text; detect changes via `_detect_changes` from `sogc_preprocessor.py`.
-5. Supports pause/resume: `progress_done` stores the last completed page number.
+4. `_resolve_company_for_shab(db, uid, title, canton, pub_date, uid_map, stats)` — looks up the company by UID (batch cache → DB). Three outcomes:
+   - **Found, same name** — link publication to company; no change.
+   - **Found, different name** — merge SHAB title as a historical name into `company.old_names` (`{"name": ..., "source": "shab_archive", "date": ...}`), then link.
+   - **Not found** — create a `Company` stub with `source="shab_stub"`, `status="CANCELLED"`, `uid`, `name` (from API title), `canton`, `first_sogc_date`; add to batch `uid_map` to avoid duplicates within the same page.
+5. Upsert `SogcPublication` with extracted text; detect changes via `_detect_changes` from `sogc_preprocessor.py`.
+6. Supports pause/resume: `progress_done` stores the last completed page number.
+
+**Company source field:** `companies.source` distinguishes import origin: `"zefix"` (bulk/detail import), `"shab_stub"` (stub created by SHAB archive). Legacy rows have `NULL`. If a stub later appears in a Zefix import, `source` is updated to `"zefix"` automatically (included in `REEXTRACTABLE_FIELDS`). Stubs have `status="CANCELLED"` so they are excluded from the lead dashboard by the existing `_DELETED_STATUSES` filter.
 
 **sogc_id convention:** `"shab_{archive_id}"` (e.g. `"shab_4447021"`) — never collides with Zefix SOGC IDs (plain numeric strings).
 
@@ -923,6 +953,22 @@ Imports historical SHAB publications directly from the `shab.ch` public archive 
 **Frontend:** Collection page → SHAB / SOGC group → "SHAB Archive Import (shab.ch)" section.
 
 **Dependency:** `pypdf>=4.0.0` added to `requirements.backend.txt`.
+
+### Link SOGC Stubs — `run_link_sogc_stubs` in `app/services/shab_archive_import.py`
+
+Back-fills `company_id` on `sogc_publications` and `sogc_person_appearances` rows that already have a `company_uid` but no `company_id`. Works entirely from already-imported DB data — no API calls or PDF downloads.
+
+**Algorithm (keyset-paginated, batch_size UIDs per commit):**
+1. Find distinct `company_uid` WHERE `company_uid IS NOT NULL AND company_id IS NULL` in `sogc_publications`, ordered alphabetically for cursor pagination.
+2. For each batch: bulk-fetch matching `Company` rows.
+3. For UIDs without a Company row: read `raw_json["title"]` (SHAB archive format) or `raw_json["meta"]["title"]["de"]` from one publication to get a display name; create a `shab_stub` Company (same savepoint + IntegrityError pattern as `_resolve_company_for_shab`).
+4. Bulk-update `sogc_publications.company_id` and `sogc_person_appearances.company_id` via SQLAlchemy `update()` statements.
+
+**Job type:** `link_sogc_stubs` — registered in `JOB_HANDLERS`.
+
+**API endpoint:** `POST /api/v1/collection/link-sogc-stubs` (superadmin only).
+
+**Frontend:** Collection page → "Link SOGC Stubs" section (after SHAB Archive Import).
 
 ### SMTP — `app/services/email.py`
 
@@ -2027,6 +2073,90 @@ The crawler admin page (`/app/admin/crawler`) adds a **field-coverage** card: pe
 rates (% of extracted companies with email/phone/uid/address/description/keywords/persons/
 socials), UID verified vs mismatch counts, and average confidence — the at-a-glance "what is
 the extractor missing at scale" view.
+
+### combined_score formula (web_score wired in)
+
+`compute_relevance_score(company)` in `app/services/scoring.py` now reads `company.web_score` when
+available and uses a 4-component formula: `ai×0.50 + web_score×0.20 + noga_confidence×100×0.20 +
+keyword_density×100×0.10`. When `web_score` is absent (no Serper result yet) the original
+3-component formula `ai×0.60 + noga×100×0.25 + kw×100×0.15` is used. Absent components always
+renormalise proportionally so partial data still produces a meaningful score.
+
+`Company.compute_combined_score(ai, noga, kw, web_score=None)` passes `web_score` through to the
+above formula. All call sites in `enrich_company_website`, `rescore_from_stored_results`,
+`handle_web_extract`, `claude_classify`, and `geocoding_pipeline` now pass `web_score`.
+
+### UID-mismatch candidate auto-quarantine
+
+When `handle_web_extract` finds that the best extract has `uid_matches_zefix = False`, it calls
+`reject_url_candidate(db, url_candidate_id)` in `app/crud/crawler.py` to mark the wrong-site
+candidate as `rejected`. It then unconditionally triggers a fallback crawl of the next untried
+candidate (previously only triggered for low-confidence / no-UID cases). The `quarantined` counter
+in job stats tracks how many candidates were auto-rejected per run.
+
+### Review flags UI
+
+`GET /api/v1/admin/crawler/review-flags` returns paginated extract rows where `review_flag IS NOT
+NULL`. The crawler admin page shows a "Review flags" table when any flags exist, with links to the
+company and the crawled URL so the superadmin can navigate to the Website tab and promote/discard
+candidates directly. The KPI row includes a "Flagged for review" card from the `review_flag_count`
+field in `/admin/crawler/stats`.
+
+### Multi-candidate extract comparison (Website panel)
+
+`GET /api/v1/companies/{id}/web-extracts` returns all extract rows (one per URL candidate),
+ordered by confidence desc. `POST .../promote` switches the selected URL candidate and clears
+the `review_flag`. `DELETE .../discard` deletes the extract row and rejects the candidate.
+
+The `WebsitePanel` (`frontend/src/components/website-panel.tsx`) now shows an **"All URL
+candidates"** card when more than one extract row exists. Each row shows the URL, confidence,
+UID match status, candidate status, review flag (flag icon), and promote/discard action buttons.
+The currently-best row is highlighted in blue.
+
+### NOGA fix for Zweigniederlassungen
+
+`reclassify_noga` in `app/services/noga_pipeline.py` now bypasses the `only_missing_noga` guard
+for detected branch offices (`is_branch_office(company) == True`). Previously, a branch with a
+stale/wrong NOGA code was skipped when `only_missing_noga=True` because it already had a code.
+Now branches always re-run `apply_noga_classification`, which inherits the parent's NOGA if
+available or clears it if the parent can't be resolved. The `branches_handled` counter tracks
+this separately from normal classifications.
+
+### Domain blocklist auto-detection
+
+`get_high_frequency_candidate_domains(db, min_companies, limit)` in `app/crud/crawler.py` runs a
+SQL GROUP BY over `company_url_candidates` to find hostnames (www-stripped) appearing for many
+distinct companies. These are surfaced in the crawler admin page under **"High-frequency candidate
+domains"** with a configurable threshold (default 30). Each row shows the company count, whether
+the domain is already in the blocklist (`google_directory_domains`), and a one-click **Block**
+button that calls `POST /api/v1/settings/google-directory-domains`.
+
+Admin API: `GET /api/v1/admin/crawler/candidate-domain-stats?min_companies=30&limit=100` —
+returns `[{domain, company_count, already_blocked}]`.
+
+### Cross-UID attribution (mismatched UID cross-reference)
+
+During `web_extract`, if `uid_matches_zefix = False` (a UID was found on a crawled page but it
+belongs to a different company), `handle_web_extract` looks up `companies WHERE uid = found_uid`.
+If the company that owns the UID has no extract or a lower-confidence extract than the current
+page, `add_cross_attributed_url_candidate(db, other.id, url)` adds the current page URL as a
+`pending` URL candidate for that company (tagged "[cross-UID attribution]"). The current
+extract's `review_flag` is set to `"uid_mismatch_cross_ref"` so it is visible during review.
+
+Migration `0103` adds `review_flag TEXT NULL` to `company_web_extract`.
+
+### Branch office skip (Zweigniederlassung)
+
+Zweigniederlassungen (branch offices) don't have independent websites. Two places now exclude them:
+
+1. **`handle_web_url_populate`** — SQL WHERE filters out `legal_form_uid IN ('0108', '0111')` and
+   name containing "zweigniederlassung", "succursale", "filiale di". This stops branch offices from
+   ever getting URL candidates.
+
+2. **`run_batch_collect`** (`web_enrichment.py`) — ORM filter on the same criteria prevents branch
+   offices from being selected for Google/Serper enrichment, saving API quota.
+
+`legal_form_uid` `0108` = branch of Swiss company; `0111` = branch of foreign company.
 
 ---
 

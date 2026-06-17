@@ -1,4 +1,4 @@
-"""Handler for the shab_archive job type."""
+"""Handlers for shab_archive and link_sogc_stubs job types."""
 
 from __future__ import annotations
 
@@ -82,4 +82,39 @@ def handle_shab_archive(ctx: JobContext) -> tuple[dict, str]:
         done_msg += f", {len(stats['warnings'])} warnings"
     if resume_from:
         done_msg += f" (resumed from {resume_from})"
+    return stats, done_msg
+
+
+def handle_link_sogc_stubs(ctx: JobContext) -> tuple[dict, str]:
+    from app.services.shab_archive_import import run_link_sogc_stubs
+
+    batch_size = int(ctx.params.get("batch_size", 500))
+
+    def _progress(done: int, total: int, _stats: dict) -> None:
+        ctx.assert_not_cancelled()
+        msg = (
+            f"{done:,}/{total:,} UIDs — "
+            f"{_stats.get('stubs_created', 0)} stubs, "
+            f"{_stats.get('publications_linked', 0)} pubs linked, "
+            f"{_stats.get('appearances_linked', 0)} appearances linked"
+            + (f", {len(_stats.get('errors', []))} errors" if _stats.get('errors') else "")
+        )
+        ctx.progress(done, total, _stats, msg)
+
+    stats = run_link_sogc_stubs(
+        ctx.db,
+        batch_size=batch_size,
+        progress_cb=_progress,
+        status_cb=lambda m: ctx.status_with_stats(m),
+        abort_cb=ctx.assert_not_cancelled,
+    )
+
+    done_msg = (
+        f"Done — {stats['uids_scanned']:,} UIDs scanned, "
+        f"{stats['stubs_created']} stubs created, "
+        f"{stats['publications_linked']:,} publications linked, "
+        f"{stats['appearances_linked']:,} appearances linked"
+    )
+    if stats["errors"]:
+        done_msg += f", {len(stats['errors'])} errors"
     return stats, done_msg

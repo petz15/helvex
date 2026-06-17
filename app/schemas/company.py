@@ -20,6 +20,7 @@ class CompanyBase(BaseModel):
     name: str
     legal_form: str | None = None
     status: str | None = None
+    source: str | None = None
     municipality: str | None = None
     canton: str | None = None
     purpose: str | None = None

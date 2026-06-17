@@ -6,7 +6,7 @@ import secrets
 from datetime import datetime, timezone
 from typing import Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel, Field
 from sqlalchemy import func
 from sqlalchemy.orm import Session
@@ -18,6 +18,7 @@ from app.models.organization import Organization
 from app.models.payment_transaction import PaymentTransaction
 from app.models.user import User
 from app.schemas.billing import BillingTierRead
+from app.schemas.company_error import CompanyCorrection
 from app.services import credits as credits_service
 from app.services import payments as payments_service
 from app.services.tiers import TIER_ID_BY_NAME, get_billing_tier_names, get_billing_tiers
@@ -202,7 +203,8 @@ def get_crawler_stats(
         "  COUNT(socials), "
         "  COUNT(*) FILTER (WHERE uid_matches_zefix IS TRUE), "
         "  COUNT(*) FILTER (WHERE uid_matches_zefix IS FALSE), "
-        "  COUNT(*) FILTER (WHERE name_address_verified IS TRUE) "
+        "  COUNT(*) FILTER (WHERE name_address_verified IS TRUE), "
+        "  COUNT(*) FILTER (WHERE review_flag IS NOT NULL) "
         "FROM company_web_extract"
     )).fetchone()
     companies_extracted = int(extract_row[0]) if extract_row else 0
@@ -220,6 +222,7 @@ def get_crawler_stats(
     uid_match = int(extract_row[10]) if extract_row else 0
     uid_mismatch = int(extract_row[11]) if extract_row else 0
     name_address_verified = int(extract_row[12]) if extract_row else 0
+    review_flag_count = int(extract_row[13]) if extract_row else 0
 
     return {
         "status_counts": status_counts,
@@ -234,6 +237,7 @@ def get_crawler_stats(
         "uid_match": uid_match,
         "uid_mismatch": uid_mismatch,
         "name_address_verified": name_address_verified,
+        "review_flag_count": review_flag_count,
     }
 
 
@@ -321,12 +325,13 @@ def crawler_reset_playwright(
 
 @router.post("/jobs/crawler/populate-urls", summary="Enqueue web_url_populate backfill job (superadmin)")
 def crawler_populate_urls(
+    request: Request,
     db: Session = Depends(get_db),
     actor: User = Depends(_require_superadmin),
 ) -> dict:
     from app.services.job_worker import enqueue_job
     job = enqueue_job(
-        db,
+        request.app,
         job_type="web_url_populate",
         label="URL candidate backfill (superadmin)",
         params={"batch_size": 500},
@@ -338,12 +343,13 @@ def crawler_populate_urls(
 
 @router.post("/jobs/crawler/extract", summary="Enqueue web_extract job (superadmin)")
 def crawler_run_extract(
+    request: Request,
     db: Session = Depends(get_db),
     actor: User = Depends(_require_superadmin),
 ) -> dict:
     from app.services.job_worker import enqueue_job
     job = enqueue_job(
-        db,
+        request.app,
         job_type="web_extract",
         label="HTML extraction (superadmin)",
         params={},
@@ -355,6 +361,7 @@ def crawler_run_extract(
 
 @router.post("/jobs/crawler/reextract", summary="Re-extract all crawled HTML without re-crawling (superadmin)")
 def crawler_reextract(
+    request: Request,
     db: Session = Depends(get_db),
     actor: User = Depends(_require_superadmin),
 ) -> dict:
@@ -367,7 +374,7 @@ def crawler_reextract(
     flagged = reset_extraction_flags(db)
     db.commit()
     job = enqueue_job(
-        db,
+        request.app,
         job_type="web_extract",
         label="Re-extract all crawled HTML (superadmin)",
         params={},
@@ -378,15 +385,95 @@ def crawler_reextract(
     return {"flagged": flagged, "job_id": job.id, "status": job.status}
 
 
+@router.get("/crawler/review-flags", summary="Extracts flagged for human review (superadmin)")
+def get_crawler_review_flags(
+    page: int = Query(1, ge=1),
+    page_size: int = Query(50, ge=1, le=200),
+    db: Session = Depends(get_db),
+    _: User = Depends(_require_superadmin),
+) -> dict:
+    """Return paginated extract rows with a non-null review_flag.
+
+    Each row includes the company name/UID and the URL that was crawled,
+    so the reviewer can inspect and decide whether the attribution is correct.
+    """
+    from sqlalchemy import text as _text
+    offset = (page - 1) * page_size
+    total_row = db.execute(_text(
+        "SELECT COUNT(*) FROM company_web_extract WHERE review_flag IS NOT NULL"
+    )).fetchone()
+    total = int(total_row[0]) if total_row else 0
+
+    rows = db.execute(_text("""
+        SELECT
+            e.company_id,
+            c.name AS company_name,
+            c.uid AS company_uid,
+            e.url_candidate_id,
+            uc.url AS candidate_url,
+            e.uid AS found_uid,
+            e.uid_matches_zefix,
+            e.confidence,
+            e.review_flag,
+            e.extracted_at
+        FROM company_web_extract e
+        JOIN companies c ON c.id = e.company_id
+        LEFT JOIN company_url_candidates uc ON uc.id = e.url_candidate_id
+        WHERE e.review_flag IS NOT NULL
+        ORDER BY e.extracted_at DESC
+        LIMIT :limit OFFSET :offset
+    """), {"limit": page_size, "offset": offset}).fetchall()
+
+    items = [
+        {
+            "company_id": r[0],
+            "company_name": r[1],
+            "company_uid": r[2],
+            "url_candidate_id": r[3],
+            "candidate_url": r[4],
+            "found_uid": r[5],
+            "uid_matches_zefix": r[6],
+            "confidence": round(float(r[7]), 3) if r[7] else None,
+            "review_flag": r[8],
+            "extracted_at": r[9].isoformat() if r[9] else None,
+        }
+        for r in rows
+    ]
+    return {"items": items, "total": total, "page": page, "page_size": page_size}
+
+
+@router.get("/crawler/candidate-domain-stats", summary="Frequent URL candidate domains for blocklist review (superadmin)")
+def get_candidate_domain_stats(
+    min_companies: int = Query(50, ge=1, le=10000),
+    limit: int = Query(100, ge=1, le=500),
+    db: Session = Depends(get_db),
+    _: User = Depends(_require_superadmin),
+) -> list[dict]:
+    """Return hostnames appearing as URL candidates for many distinct companies.
+
+    Useful for surfacing new aggregator/directory domains that should be added
+    to the crawl blocklist. Each entry includes an 'already_blocked' flag so
+    the UI can distinguish new candidates from already-managed ones.
+    """
+    from app.crud.crawler import get_high_frequency_candidate_domains
+    from app.crud.google_scoring_filter import get_active_google_directory_domains
+    domains = get_high_frequency_candidate_domains(db, min_companies=min_companies, limit=limit)
+    blocked = get_active_google_directory_domains(db)
+    for d in domains:
+        d["already_blocked"] = d["domain"] in blocked
+    return domains
+
+
 @router.post("/jobs/saved-view-alerts", summary="Manually trigger saved-view alert check (superadmin)")
 def trigger_saved_view_alerts(
+    request: Request,
     db: Session = Depends(get_db),
     actor: User = Depends(_require_superadmin),
 ) -> dict:
     """Enqueue a one-off saved_view_alerts job. The nightly cron calls this automatically."""
     from app.services.job_worker import enqueue_job
     job = enqueue_job(
-        db,
+        request.app,
         job_type="saved_view_alerts",
         label="Saved view alerts",
         params={},
@@ -948,6 +1035,204 @@ def list_credit_transactions(
         "page": page,
         "page_size": page_size,
     }
+
+
+# ── Error Center ───────────────────────────────────────────────────────────────
+
+@router.get("/data-quality/summary", summary="Data quality overview across all pipeline stages (superadmin)")
+def get_data_quality_summary(
+    db: Session = Depends(get_db),
+    _: User = Depends(_require_superadmin),
+) -> dict:
+    """Aggregate completeness stats per pipeline stage for the Error Center dashboard."""
+    from sqlalchemy import text as _text
+
+    row = db.execute(_text("""
+        SELECT
+            COUNT(*)                                                    AS total,
+            COUNT(website_url)                                          AS has_website,
+            COUNT(web_score)                                            AS has_web_score,
+            COUNT(ai_score)                                             AS has_ai_score,
+            COUNT(noga_code)                                            AS has_noga,
+            COUNT(*) FILTER (WHERE noga_confidence >= 0.8)             AS has_noga_high_conf,
+            COUNT(lat)                                                  AS has_geocoded
+        FROM companies
+    """)).fetchone()
+
+    total = int(row[0]) if row else 1
+
+    def pct(n):
+        return round(int(n or 0) / total * 100, 1) if total else 0.0
+
+    extract_row = db.execute(_text("""
+        SELECT COUNT(DISTINCT company_id) FROM company_web_extract
+    """)).fetchone()
+    has_extract = int(extract_row[0]) if extract_row else 0
+
+    crawl_row = db.execute(_text("""
+        SELECT
+            COUNT(*) FILTER (WHERE crawl_status IN ('bot_blocked','http_error','timeout','no_content','no_website')) AS terminal,
+            COUNT(*) FILTER (WHERE crawl_status = 'bot_blocked')  AS bot_blocked,
+            COUNT(*) FILTER (WHERE crawl_status = 'http_error')   AS http_error,
+            COUNT(*) FILTER (WHERE crawl_status = 'timeout')      AS timeout_err
+        FROM company_crawl_state
+    """)).fetchone()
+
+    review_row = db.execute(_text("""
+        SELECT
+            COUNT(*) FILTER (WHERE review_flag IS NOT NULL) AS flags,
+            COUNT(*) FILTER (WHERE uid_matches_zefix IS FALSE) AS uid_mismatch
+        FROM company_web_extract
+    """)).fetchone()
+
+    error_row = db.execute(_text("""
+        SELECT COUNT(*) FROM company_errors
+        WHERE resolved_at IS NULL AND NOT ignored
+    """)).fetchone()
+
+    return {
+        "total_companies": total,
+        "pct_website_url": pct(row[1]),
+        "pct_web_score": pct(row[2]),
+        "pct_web_extract": pct(has_extract),
+        "pct_ai_score": pct(row[3]),
+        "pct_noga_code": pct(row[4]),
+        "pct_noga_high_conf": pct(row[5]),
+        "pct_geocoded": pct(row[6]),
+        "crawler_terminal_count": int(crawl_row[0] or 0) if crawl_row else 0,
+        "crawler_bot_blocked": int(crawl_row[1] or 0) if crawl_row else 0,
+        "crawler_http_error": int(crawl_row[2] or 0) if crawl_row else 0,
+        "crawler_timeout": int(crawl_row[3] or 0) if crawl_row else 0,
+        "review_flag_count": int(review_row[0] or 0) if review_row else 0,
+        "uid_mismatch_count": int(review_row[1] or 0) if review_row else 0,
+        "active_pipeline_errors": int(error_row[0] or 0) if error_row else 0,
+    }
+
+
+@router.get("/errors", summary="Paginated pipeline error list from company_errors (superadmin)")
+def list_pipeline_errors(
+    page: int = Query(1, ge=1),
+    page_size: int = Query(50, ge=1, le=200),
+    source: str | None = Query(None, description="Filter by error_source"),
+    show_resolved: bool = Query(False),
+    db: Session = Depends(get_db),
+    _: User = Depends(_require_superadmin),
+) -> dict:
+    from app.crud.company_error import get_errors
+    return get_errors(db, page=page, page_size=page_size, source=source, show_resolved=show_resolved)
+
+
+@router.post("/errors/{error_id}/resolve", summary="Mark a pipeline error as resolved (superadmin)")
+def resolve_pipeline_error(
+    error_id: int,
+    db: Session = Depends(get_db),
+    actor: User = Depends(_require_superadmin),
+) -> dict:
+    from app.crud.company_error import resolve_error
+    err = resolve_error(db, error_id, actor.id)
+    if not err:
+        raise HTTPException(status_code=404, detail="Error not found")
+    db.commit()
+    return {"ok": True, "id": error_id}
+
+
+@router.post("/errors/{error_id}/ignore", summary="Ignore a pipeline error (superadmin)")
+def ignore_pipeline_error(
+    error_id: int,
+    db: Session = Depends(get_db),
+    _: User = Depends(_require_superadmin),
+) -> dict:
+    from app.crud.company_error import ignore_error
+    err = ignore_error(db, error_id)
+    if not err:
+        raise HTTPException(status_code=404, detail="Error not found")
+    db.commit()
+    return {"ok": True, "id": error_id}
+
+
+@router.get("/errors/job-failures", summary="Paginated list of failed job_runs (superadmin)")
+def list_job_failures(
+    page: int = Query(1, ge=1),
+    page_size: int = Query(50, ge=1, le=200),
+    db: Session = Depends(get_db),
+    _: User = Depends(_require_superadmin),
+) -> dict:
+    from app.models.job_run import JobRun
+    query = db.query(JobRun).filter(JobRun.status == "failed")
+    total = query.count()
+    rows = (
+        query.order_by(JobRun.completed_at.desc().nullslast())
+        .offset((page - 1) * page_size)
+        .limit(page_size)
+        .all()
+    )
+    items = [
+        {
+            "id": r.id,
+            "job_type": r.job_type,
+            "label": r.label,
+            "org_id": r.org_id,
+            "error": r.error,
+            "message": r.message,
+            "stats_json": r.stats_json,
+            "queued_at": r.queued_at.isoformat() if r.queued_at else None,
+            "completed_at": r.completed_at.isoformat() if r.completed_at else None,
+        }
+        for r in rows
+    ]
+    return {"items": items, "total": total, "page": page, "page_size": page_size}
+
+
+@router.patch("/companies/{company_id}/correct", summary="Inline data correction for a company (superadmin)")
+def correct_company_data(
+    company_id: int,
+    body: CompanyCorrection,
+    db: Session = Depends(get_db),
+    actor: User = Depends(_require_superadmin),
+) -> dict:
+    """Apply admin data corrections to a company and resolve all its active pipeline errors."""
+    from app.models.company import Company
+    from app.crud.company_error import resolve_company_errors
+    from app.services.scoring import compute_relevance_score
+
+    company = db.get(Company, company_id)
+    if not company:
+        raise HTTPException(status_code=404, detail="Company not found")
+
+    changed = False
+    if body.website_url is not None:
+        company.website_url = body.website_url or None
+        changed = True
+    if body.purpose is not None:
+        company.purpose = body.purpose or None
+        changed = True
+    if body.noga_code is not None:
+        company.noga_code = body.noga_code or None
+        changed = True
+    if body.noga_label is not None:
+        company.noga_label = body.noga_label or None
+        changed = True
+    if body.address_city is not None:
+        company.address_city = body.address_city or None
+        changed = True
+    if body.address_zip is not None:
+        company.address_zip = body.address_zip or None
+        changed = True
+    if body.ai_category is not None:
+        company.ai_category = body.ai_category or None
+        changed = True
+    if body.ai_score is not None:
+        company.ai_score = body.ai_score
+        changed = True
+
+    if changed:
+        company.combined_score = compute_relevance_score(company)
+
+    resolved = resolve_company_errors(db, company_id, actor.id)
+    db.commit()
+
+    logger.info("admin.correct actor=%s company=%s resolved=%d", actor.id, company_id, resolved)
+    return {"ok": True, "company_id": company_id, "errors_resolved": resolved}
 
 
 @router.get("/orgs/{org_id}/payment-transactions", summary="List payment transactions for org (superadmin)")

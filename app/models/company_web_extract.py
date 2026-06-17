@@ -74,6 +74,10 @@ class CompanyWebExtract(Base):
     confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
     # Number of crawled pages that fed this extraction
     page_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # Set when this extract row requires human review.
+    # Values: "uid_mismatch_cross_ref" (UID found but belongs to another company),
+    # "uid_cross_attributed" (URL added because UID matched this company from another crawl).
+    review_flag: Mapped[str | None] = mapped_column(Text, nullable=True)
     extracted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False

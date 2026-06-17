@@ -229,7 +229,14 @@ def detect_page_language(soup: BeautifulSoup) -> str | None:
     meta = soup.find("meta", attrs={"http-equiv": re.compile("content-language", re.I)})
     if meta and meta.get("content"):
         return str(meta["content"])[:16]
-    return None
+    # Content-based fallback when HTML metadata is absent (many Swiss SME sites don't set lang=).
+    # Delegates to the shared lingua detector already used by the NOGA pipeline.
+    try:
+        from app.services.language_detection import detect_purpose_language
+        body = soup.get_text(separator=" ", strip=True)[:2000]
+        return detect_purpose_language(body)
+    except Exception:
+        return None
 
 
 def count_media(soup: BeautifulSoup) -> tuple[int, int]:

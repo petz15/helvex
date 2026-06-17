@@ -3,7 +3,7 @@ import { useState, useCallback } from "react";
 import useSWR from "swr";
 import {
   Globe, RefreshCw, Loader2, AlertTriangle, CheckCircle2,
-  Clock, ShieldAlert, ChevronLeft, ChevronRight, RotateCcw, ListPlus, Cpu, Recycle,
+  Clock, ShieldAlert, ChevronLeft, ChevronRight, RotateCcw, ListPlus, ShieldBan, Flag,
 } from "lucide-react";
 import {
   fetchAdminCrawlerStats,
@@ -11,10 +11,13 @@ import {
   crawlerResetHttp,
   crawlerResetPlaywright,
   crawlerPopulateUrls,
-  crawlerRunExtract,
-  crawlerReextract,
+  fetchCandidateDomainStats,
+  blockDomain,
+  fetchCrawlerReviewFlags,
   type AdminCrawlerStats,
   type AdminCrawlerFailure,
+  type CandidateDomainStat,
+  type ReviewFlagItem,
 } from "@/lib/api";
 
 const STATUS_LABELS: Record<string, string> = {
@@ -86,6 +89,9 @@ export function CrawlerAdminClient() {
   const [acting, setActing] = useState<string | null>(null);
   const [page, setPage] = useState(1);
   const [statusFilter, setStatusFilter] = useState<TerminalStatus>("");
+  const [domainThreshold, setDomainThreshold] = useState(30);
+  const [blockingDomain, setBlockingDomain] = useState<string | null>(null);
+  const [reviewPage, setReviewPage] = useState(1);
 
   const flash = useCallback((kind: "success" | "error", msg: string) => {
     setBanner({ kind, msg });
@@ -101,10 +107,34 @@ export function CrawlerAdminClient() {
       fetchAdminCrawlerFailures({ page, page_size: 50, status_filter: statusFilter || undefined })
     );
 
+  const { data: domainStats, isLoading: domainLoading, mutate: mutateDomains } =
+    useSWR<CandidateDomainStat[]>(
+      `admin-domain-stats-${domainThreshold}`,
+      () => fetchCandidateDomainStats(domainThreshold),
+    );
+
+  const { data: reviewFlags, isLoading: reviewLoading } = useSWR(
+    `admin-review-flags-${reviewPage}`,
+    () => fetchCrawlerReviewFlags({ page: reviewPage, page_size: 50 }),
+  );
+
   const mutateAll = useCallback(() => {
     void mutateStats();
     void mutateFailures();
   }, [mutateStats, mutateFailures]);
+
+  async function handleBlockDomain(domain: string) {
+    setBlockingDomain(domain);
+    try {
+      await blockDomain(domain);
+      flash("success", `${domain} added to blocklist.`);
+      void mutateDomains();
+    } catch (e) {
+      flash("error", e instanceof Error ? e.message : "Failed to block domain");
+    } finally {
+      setBlockingDomain(null);
+    }
+  }
 
   async function doAction(key: string, fn: () => Promise<{ reset?: number; flagged?: number; job_id?: number }>) {
     setActing(key);
@@ -177,12 +207,13 @@ export function CrawlerAdminClient() {
       {s && (
         <>
           {/* KPI row */}
-          <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+          <div className="grid grid-cols-2 md:grid-cols-6 gap-3">
             <KpiCard label="Crawled" value={crawled.toLocaleString()} icon={CheckCircle2} colour="bg-green-50 text-green-600" />
             <KpiCard label="Pending" value={pending.toLocaleString()} icon={Clock} colour="bg-blue-50 text-blue-600" />
             <KpiCard label="Playwright queue" value={jsRequired.toLocaleString()} icon={Globe} colour="bg-amber-50 text-amber-600" />
             <KpiCard label="Terminal failures" value={totalFailed.toLocaleString()} icon={AlertTriangle} colour="bg-red-50 text-red-500" />
             <KpiCard label="Extracted" value={s.companies_extracted.toLocaleString()} sub={s.avg_confidence != null ? `avg conf ${(s.avg_confidence * 100).toFixed(0)}%` : undefined} icon={ShieldAlert} colour="bg-purple-50 text-purple-600" />
+            <KpiCard label="Flagged for review" value={(s.review_flag_count ?? 0).toLocaleString()} icon={Flag} colour="bg-amber-50 text-amber-600" />
           </div>
 
           <div className="grid md:grid-cols-3 gap-4">
@@ -321,33 +352,160 @@ export function CrawlerAdminClient() {
                 {acting === "populate" ? <Loader2 size={14} className="animate-spin" /> : <ListPlus size={14} />}
                 Backfill URL candidates
               </button>
-              <button
-                onClick={() => doAction("extract", crawlerRunExtract)}
-                disabled={acting !== null}
-                className="flex items-center gap-2 px-3 py-2 text-sm rounded-lg border border-purple-200 bg-purple-50 hover:bg-purple-100 text-purple-800 disabled:opacity-50 transition-colors"
-              >
-                {acting === "extract" ? <Loader2 size={14} className="animate-spin" /> : <Cpu size={14} />}
-                Run extraction
-              </button>
-              <button
-                onClick={() => doAction("reextract", crawlerReextract)}
-                disabled={acting !== null}
-                className="flex items-center gap-2 px-3 py-2 text-sm rounded-lg border border-indigo-200 bg-indigo-50 hover:bg-indigo-100 text-indigo-800 disabled:opacity-50 transition-colors"
-              >
-                {acting === "reextract" ? <Loader2 size={14} className="animate-spin" /> : <Recycle size={14} />}
-                Re-extract all (no re-crawl)
-              </button>
             </div>
             <p className="text-xs text-slate-400 mt-3">
               "Reset HTTP failures" moves bot_blocked / http_error / timeout / no_content rows (HTTP tier) back to pending so they are re-crawled.
               "Reset Playwright failures" does the same for the Playwright tier.
               "Backfill URL candidates" enqueues a job that reads stored Google results and populates company_url_candidates for companies that were enriched before auto-populate was added.
-              "Run extraction" manually enqueues HTML extraction — this also triggers automatically after each successful crawl batch.
-              "Re-extract all" flags every crawled page (HTML already in S3) for re-processing and runs extraction — use after improving the extractor; no crawl cost.
+              To trigger extraction or re-extract all HTML, use the Collection page.
             </p>
           </Section>
         </>
       )}
+
+      {/* Review flags table */}
+      {(s?.review_flag_count ?? 0) > 0 && (
+        <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
+          <div className="px-4 py-3 border-b border-slate-100 flex items-center justify-between gap-3">
+            <h2 className="text-sm font-semibold text-slate-700 flex items-center gap-1.5">
+              <Flag size={14} className="text-amber-500" /> Extracts flagged for review
+            </h2>
+            <p className="text-xs text-slate-400">
+              UID found on crawled page belongs to a different company. Review and promote/discard from the company's Website tab.
+            </p>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="bg-slate-50 border-b border-slate-200">
+                <tr>
+                  <th className="text-left px-4 py-2.5 text-xs font-semibold text-slate-500 uppercase tracking-wide">Company</th>
+                  <th className="text-left px-4 py-2.5 text-xs font-semibold text-slate-500 uppercase tracking-wide">Crawled URL</th>
+                  <th className="text-left px-4 py-2.5 text-xs font-semibold text-slate-500 uppercase tracking-wide">Found UID</th>
+                  <th className="text-right px-4 py-2.5 text-xs font-semibold text-slate-500 uppercase tracking-wide">Conf</th>
+                  <th className="text-left px-4 py-2.5 text-xs font-semibold text-slate-500 uppercase tracking-wide">Flag</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {reviewLoading && (
+                  <tr><td colSpan={5} className="px-4 py-6 text-center text-slate-400"><Loader2 size={16} className="animate-spin inline" /></td></tr>
+                )}
+                {!reviewLoading && (reviewFlags?.items ?? []).map((f: ReviewFlagItem) => (
+                  <tr key={`${f.company_id}-${f.url_candidate_id}`} className="hover:bg-slate-50 transition-colors">
+                    <td className="px-4 py-2.5">
+                      <a href={`/app/companies/${f.company_id}`} className="font-medium text-slate-800 hover:text-blue-600 truncate block max-w-[180px]">{f.company_name}</a>
+                      <p className="text-xs text-slate-400 font-mono">{f.company_uid}</p>
+                    </td>
+                    <td className="px-4 py-2.5 max-w-[200px]">
+                      {f.candidate_url
+                        ? <a href={f.candidate_url} target="_blank" rel="noopener noreferrer" className="text-xs text-blue-600 hover:underline truncate block">{f.candidate_url}</a>
+                        : <span className="text-xs text-slate-400">—</span>
+                      }
+                    </td>
+                    <td className="px-4 py-2.5 text-xs font-mono text-slate-700">{f.found_uid ?? "—"}</td>
+                    <td className="px-4 py-2.5 text-right text-xs text-slate-600 tabular-nums">
+                      {f.confidence != null ? `${(f.confidence * 100).toFixed(0)}%` : "—"}
+                    </td>
+                    <td className="px-4 py-2.5">
+                      <span className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-full px-2 py-0.5">{f.review_flag}</span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          {(reviewFlags?.total ?? 0) > 50 && (
+            <div className="px-4 py-3 border-t border-slate-100 flex items-center justify-between text-xs text-slate-500">
+              <span>{reviewFlags!.total.toLocaleString()} flagged · page {reviewPage}/{Math.ceil(reviewFlags!.total / 50)}</span>
+              <div className="flex gap-1">
+                <button onClick={() => setReviewPage(p => Math.max(1, p - 1))} disabled={reviewPage === 1} className="p-1.5 rounded hover:bg-slate-100 disabled:opacity-40"><ChevronLeft size={14} /></button>
+                <button onClick={() => setReviewPage(p => Math.min(Math.ceil(reviewFlags!.total / 50), p + 1))} disabled={reviewPage === Math.ceil(reviewFlags!.total / 50)} className="p-1.5 rounded hover:bg-slate-100 disabled:opacity-40"><ChevronRight size={14} /></button>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* High-frequency candidate domains */}
+      <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
+        <div className="px-4 py-3 border-b border-slate-100 flex items-center justify-between gap-3 flex-wrap">
+          <div>
+            <h2 className="text-sm font-semibold text-slate-700 flex items-center gap-1.5">
+              <ShieldBan size={14} className="text-orange-500" /> High-frequency candidate domains
+            </h2>
+            <p className="text-xs text-slate-400 mt-0.5">
+              Domains appearing as URL candidates for many companies — potential aggregators/directories to block.
+            </p>
+          </div>
+          <div className="flex items-center gap-2 text-xs text-slate-600">
+            <label className="whitespace-nowrap">Min companies:</label>
+            <select
+              value={domainThreshold}
+              onChange={e => setDomainThreshold(Number(e.target.value))}
+              className="border border-slate-200 rounded-lg px-2 py-1 text-slate-600 bg-white"
+            >
+              {[10, 20, 30, 50, 100, 200].map(n => (
+                <option key={n} value={n}>{n}</option>
+              ))}
+            </select>
+            <button
+              onClick={() => void mutateDomains()}
+              className="flex items-center gap-1 px-2 py-1 rounded border border-slate-200 hover:bg-slate-50"
+            >
+              <RefreshCw size={11} /> Reload
+            </button>
+          </div>
+        </div>
+        {domainLoading ? (
+          <div className="p-6 flex justify-center text-slate-400"><Loader2 size={18} className="animate-spin" /></div>
+        ) : !domainStats || domainStats.length === 0 ? (
+          <p className="px-4 py-6 text-xs text-slate-400">No domains above threshold.</p>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="bg-slate-50 border-b border-slate-200">
+                <tr>
+                  <th className="text-left px-4 py-2.5 text-xs font-semibold text-slate-500 uppercase tracking-wide">Domain</th>
+                  <th className="text-right px-4 py-2.5 text-xs font-semibold text-slate-500 uppercase tracking-wide">Companies</th>
+                  <th className="text-right px-4 py-2.5 text-xs font-semibold text-slate-500 uppercase tracking-wide">Status</th>
+                  <th className="px-4 py-2.5" />
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {domainStats.map(d => (
+                  <tr key={d.domain} className="hover:bg-slate-50 transition-colors">
+                    <td className="px-4 py-2.5 font-mono text-slate-800 text-xs">{d.domain}</td>
+                    <td className="px-4 py-2.5 text-right font-mono font-semibold text-slate-700 tabular-nums">{d.company_count.toLocaleString()}</td>
+                    <td className="px-4 py-2.5 text-right">
+                      {d.already_blocked ? (
+                        <span className="inline-flex items-center gap-1 text-xs text-green-700 bg-green-50 border border-green-200 rounded-full px-2 py-0.5">
+                          <CheckCircle2 size={11} /> Blocked
+                        </span>
+                      ) : (
+                        <span className="text-xs text-slate-400">Not blocked</span>
+                      )}
+                    </td>
+                    <td className="px-4 py-2.5 text-right">
+                      {!d.already_blocked && (
+                        <button
+                          onClick={() => handleBlockDomain(d.domain)}
+                          disabled={blockingDomain !== null}
+                          className="flex items-center gap-1 px-2 py-1 text-xs rounded border border-red-200 text-red-700 hover:bg-red-50 disabled:opacity-50 transition-colors"
+                        >
+                          {blockingDomain === d.domain
+                            ? <Loader2 size={11} className="animate-spin" />
+                            : <ShieldBan size={11} />
+                          }
+                          Block
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
 
       {/* Terminal failures table */}
       <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">

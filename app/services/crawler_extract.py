@@ -22,6 +22,7 @@ from dataclasses import dataclass, field
 from urllib.parse import urlparse
 
 from app.services.crawler_common import parse_soup
+from app.services.language_detection import detect_purpose_language as _lingua_detect
 
 logger = logging.getLogger(__name__)
 
@@ -39,7 +40,19 @@ _STREET_RE = re.compile(
     re.IGNORECASE,
 )
 # Swiss postal code + town: 4 digits + capitalised town.
-_PLZ_CITY_RE = re.compile(r"\b(\d{4})\s+([A-ZÄÖÜ][A-Za-zÀ-ÿ.\-]+(?:[ \-][A-ZÄÖÜ][A-Za-zÀ-ÿ.\-]+){0,2})")
+# Trailing /SecondName handles bilingual cities (e.g. "2500 Biel/Bienne").
+_PLZ_CITY_RE = re.compile(
+    r"\b(\d{4})\s+([A-ZÄÖÜ][A-Za-zÀ-ÿ.\-]+(?:[ \-][A-ZÄÖÜ][A-Za-zÀ-ÿ.\-]+){0,2}"
+    r"(?:\/[A-ZÄÖÜ][A-Za-zÀ-ÿ\-]+)?)"
+)
+
+# Preposition-based Swiss addresses without an explicit street-type suffix.
+# Covers rural patterns like "Im Schwand 3", "Am Bach 8", "Auf der Höhe 12".
+_STREET_NO_SUFFIX_RE = re.compile(
+    r"\b((?:Im|Am|An\s+der|Auf\s+der|In\s+der|Beim?|Zur?|Hinter|Unter|Ober|Neben|Vor)\s+"
+    r"[A-Za-zÀ-ÿäöüÄÖÜ]+(?:\s+[A-Za-zÀ-ÿäöüÄÖÜ]+)?\s+\d+[a-zA-Z]?)",
+    re.IGNORECASE,
+)
 
 # Role labels (DE/FR/IT/EN) → capture the following 1–3 capitalised name tokens.
 _PERSON_RE = re.compile(
@@ -232,7 +245,14 @@ def _extract_languages(soup) -> set[str]:
         hl = str(link["hreflang"])[:2].lower()
         if hl and hl != "x-":
             langs.add(hl)
-    return {l for l in langs if len(l) == 2 and l.isalpha()}
+    langs = {l for l in langs if len(l) == 2 and l.isalpha()}
+    # Lingua content-based fallback when no HTML metadata declares a language
+    if not langs:
+        body = soup.get_text(separator=" ", strip=True)
+        detected = _lingua_detect(body[:2000])
+        if detected:
+            langs.add(detected)
+    return langs
 
 
 def _address_from_text(text: str) -> str | None:
@@ -250,6 +270,11 @@ def _address_from_text(text: str) -> str | None:
         pass  # keep the last (closest to PLZ)
     if street_match:
         return f"{street_match.group(1).strip()}, {plz_city}"[:300]
+    # Fallback: preposition-based addresses without an explicit street suffix
+    # (e.g. "Im Schwand 3", "Am Bach 8") — common in rural cantons.
+    no_suffix = _STREET_NO_SUFFIX_RE.search(window)
+    if no_suffix:
+        return f"{no_suffix.group(1).strip()}, {plz_city}"[:300]
     return plz_city[:300]
 
 
@@ -452,6 +477,32 @@ def _main_text(html_str: str) -> str:
         return ""
 
 
+def _extract_from_address_tag(soup) -> str | None:
+    """Parse Swiss address from semantic <address> HTML elements."""
+    for addr in soup.find_all("address"):
+        text = addr.get_text(separator="\n", strip=True)
+        result = _address_from_text(text)
+        if result:
+            return result
+    return None
+
+
+def _contact_page_text(html_str: str) -> str:
+    """Text extraction for impressum/contact pages.
+
+    Bypasses trafilatura (favor_precision strips contact blocks as boilerplate)
+    and uses BeautifulSoup instead so address/phone/email lines are preserved.
+    Tries <address> tags first; falls back to stripped full-body text.
+    """
+    soup = parse_soup(html_str)
+    addr_tags = soup.find_all("address")
+    if addr_tags:
+        return "\n".join(t.get_text(separator="\n", strip=True) for t in addr_tags)
+    for tag in soup(["script", "style", "noscript"]):
+        tag.decompose()
+    return soup.get_text(separator="\n", strip=True)[:10000]
+
+
 # ── Public API ───────────────────────────────────────────────────────────────
 
 # Pages whose main text we mine for keywords / address / persons.
@@ -475,8 +526,16 @@ def extract_page(html: bytes, page_type: str = "") -> PageSignals:
     out.title = _extract_title(soup)
     _extract_jsonld(soup, out)
     _extract_microdata_rdfa(html_str, out)
+    # Semantic <address> tag — more targeted than free-text regex, less than JSON-LD.
+    if not out.address:
+        out.address = _extract_from_address_tag(soup)
     if page_type in _TEXT_PAGES:
-        out.text = _main_text(html_str)
+        # Impressum/contact pages: trafilatura's precision filter discards contact
+        # blocks as boilerplate, so use BeautifulSoup text extraction instead.
+        if page_type in ("impressum", "contact"):
+            out.text = _contact_page_text(html_str)
+        else:
+            out.text = _main_text(html_str)
     return out
 
 
@@ -578,7 +637,7 @@ def resolve_company_extract(
     phones: set[str] = set()
     socials: dict[str, str] = {}
     languages: set[str] = set()
-    uid: str | None = None
+    uid_by_page: dict[str, str] = {}  # page_type -> uid (impressum preferred below)
     address: str | None = None
     description: str | None = None
     titles: list[str] = []
@@ -597,7 +656,8 @@ def resolve_company_extract(
         languages |= sig.languages
         for k, v in sig.socials.items():
             socials.setdefault(k, v)
-        uid = uid or sig.uid
+        if sig.uid:
+            uid_by_page[page_type] = sig.uid
         if sig.title:
             titles.append(sig.title)
         if sig.address and (address is None or page_type == "impressum"):
@@ -633,6 +693,13 @@ def resolve_company_extract(
             description = para[:1000]
 
     # ── Verification: site UID vs Zefix UID ──────────────────────────────────
+    # Prefer impressum UID — it's the authoritative legal page.
+    # Homepage may carry a parent/holding company's UID instead.
+    uid = (
+        uid_by_page.get("impressum")
+        or uid_by_page.get("contact")
+        or next(iter(uid_by_page.values()), None)
+    )
     site_uid_n = _norm_uid(uid)
     zefix_uid_n = _norm_uid(zefix_uid)
     uid_matches: bool | None = None

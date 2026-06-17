@@ -104,16 +104,22 @@ def reclassify_noga(
 
         for company in batch:
             try:
-                if only_missing_noga and not include_stale and company.noga_code:
+                from app.services.noga import is_branch_office
+                is_branch = is_branch_office(company)
+
+                # Branch offices always get re-processed regardless of only_missing_noga:
+                # they inherit NOGA from their parent rather than running the classifier,
+                # so even a company with an existing (potentially wrong) code must be re-run
+                # to inherit from the parent once the parent's NOGA is available.
+                if only_missing_noga and not include_stale and company.noga_code and not is_branch:
                     stats["skipped_existing"] += 1
                     continue
 
-                if only_detailed_raw and not (company.purpose or "").strip():
+                if only_detailed_raw and not (company.purpose or "").strip() and not is_branch:
                     stats["skipped_not_detailed"] += 1
                     continue
 
-                from app.services.noga import is_branch_office
-                if is_branch_office(company):
+                if is_branch:
                     stats["branches_handled"] = stats.get("branches_handled", 0) + 1
 
                 vec_out: list = []

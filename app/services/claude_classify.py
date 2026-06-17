@@ -210,7 +210,8 @@ def claude_classify_batch(
 
     def _refresh_combined(company: Company) -> None:
         company.combined_score = Company.compute_combined_score(
-            company.ai_score, company.noga_confidence, company.purpose_keywords
+            company.ai_score, company.noga_confidence, company.purpose_keywords,
+            web_score=company.web_score,
         )
 
     def _apply_single(company: Company, response_text: str) -> None:

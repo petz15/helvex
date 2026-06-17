@@ -75,25 +75,31 @@ def upsert_url_candidates(
 
 
 def select_best_candidate(db: Session, company_id: int) -> CompanyUrlCandidate | None:
-    """Mark the highest-scoring pending candidate as 'selected'.
+    """Mark the highest-scoring non-blocked pending candidate as 'selected'.
 
     Any existing 'selected' row for this company is demoted back to 'pending'.
-    Returns the newly selected candidate, or None if no pending candidates exist.
+    Directory sites and social media (CRAWL_BLOCKED_DOMAINS) are skipped so the
+    crawler never tries to scrape moneyhouse.ch, LinkedIn, etc. as company websites.
+    Returns the newly selected candidate, or None if no crawlable candidates exist.
     """
+    from app.services.scoring import CRAWL_BLOCKED_DOMAINS
+
     # Demote current selection
     db.query(CompanyUrlCandidate).filter_by(company_id=company_id, status="selected").update(
         {"status": "pending"}, synchronize_session=False
     )
-    best = (
+    candidates = (
         db.query(CompanyUrlCandidate)
         .filter_by(company_id=company_id, status="pending")
         .order_by(CompanyUrlCandidate.score.desc().nullslast())
-        .first()
+        .all()
     )
-    if best:
-        best.status = "selected"
-        db.flush()
-    return best
+    for best in candidates:
+        if not is_crawl_blocked(best.url, CRAWL_BLOCKED_DOMAINS):
+            best.status = "selected"
+            db.flush()
+            return best
+    return None
 
 
 def switch_selected_candidate(
@@ -607,3 +613,150 @@ def parse_google_results_raw(raw_json: str) -> list[dict[str, Any]]:
         return json.loads(raw_json) if raw_json else []
     except (ValueError, TypeError):
         return []
+
+
+# ── Domain-level crawl filter ──────────────────────────────────────────────────
+
+def _extract_apex_domain(url: str) -> str:
+    """Return 'example.ch' from any URL. Empty string on parse error."""
+    try:
+        from urllib.parse import urlparse as _up
+        host = _up(url).hostname or ""
+        parts = host.lstrip("www.").split(".")
+        return ".".join(parts[-2:]) if len(parts) >= 2 else host
+    except Exception:  # noqa: BLE001
+        return ""
+
+
+def is_crawl_blocked(url: str, blocked: frozenset[str] | set[str] | None = None) -> bool:
+    """Return True if the URL's domain is on the crawl blocklist.
+
+    Uses the module-level CRAWL_BLOCKED_DOMAINS set by default (directory sites +
+    social media). Pass a custom set to override (e.g. with DB-managed entries merged in).
+    """
+    if blocked is None:
+        from app.services.scoring import CRAWL_BLOCKED_DOMAINS
+        blocked = CRAWL_BLOCKED_DOMAINS
+    domain = _extract_apex_domain(url)
+    return bool(domain and domain in blocked)
+
+
+def get_next_crawlable_candidate(
+    db: Session,
+    company_id: int,
+    exclude_candidate_ids: set[int],
+    blocked: frozenset[str] | set[str] | None = None,
+) -> CompanyUrlCandidate | None:
+    """Return the next-best URL candidate eligible for a fallback crawl.
+
+    Skips: already-tried candidates (exclude_candidate_ids), candidates that
+    already have pages in S3 (meaning a crawl was attempted), and domains on
+    the crawl blocklist. Returns the highest-score remaining candidate, or None.
+    """
+    if blocked is None:
+        from app.services.scoring import CRAWL_BLOCKED_DOMAINS
+        blocked = CRAWL_BLOCKED_DOMAINS
+
+    # Candidates that already have at least one page saved (attempted before)
+    attempted_subq = (
+        db.query(CompanyWebPage.url_candidate_id)
+        .filter(CompanyWebPage.company_id == company_id)
+        .subquery()
+    )
+    candidates = (
+        db.query(CompanyUrlCandidate)
+        .filter(
+            CompanyUrlCandidate.company_id == company_id,
+            CompanyUrlCandidate.status.in_(["pending", "selected"]),
+            ~CompanyUrlCandidate.id.in_(db.query(attempted_subq.c.url_candidate_id)),
+        )
+        .order_by(CompanyUrlCandidate.score.desc().nullslast())
+        .all()
+    )
+    for c in candidates:
+        if c.id in exclude_candidate_ids:
+            continue
+        if is_crawl_blocked(c.url, blocked):
+            continue
+        return c
+    return None
+
+
+def reject_url_candidate(db: Session, url_candidate_id: int) -> None:
+    """Mark a URL candidate as rejected (wrong site, UID mismatch, etc.)."""
+    db.query(CompanyUrlCandidate).filter(CompanyUrlCandidate.id == url_candidate_id).update(
+        {"status": "rejected"}, synchronize_session=False
+    )
+    db.flush()
+
+
+# ── Domain frequency analysis ──────────────────────────────────────────────────
+
+def get_high_frequency_candidate_domains(
+    db: Session,
+    min_companies: int = 50,
+    limit: int = 100,
+) -> list[dict]:
+    """Return hostnames that appear as URL candidates for many distinct companies.
+
+    Useful for surfacing new directory/aggregator domains that should be added
+    to the crawl blocklist. Hostname is the bare domain (www. stripped).
+    """
+    rows = db.execute(
+        text(
+            """
+            SELECT
+                regexp_replace(
+                    split_part(
+                        regexp_replace(lower(url), '^https?://', ''),
+                        '/', 1
+                    ),
+                    '^www\\.', ''
+                ) AS hostname,
+                count(distinct company_id) AS company_count
+            FROM company_url_candidates
+            WHERE url IS NOT NULL AND url <> ''
+            GROUP BY 1
+            HAVING count(distinct company_id) >= :min_companies
+            ORDER BY company_count DESC
+            LIMIT :limit
+            """
+        ),
+        {"min_companies": min_companies, "limit": limit},
+    ).fetchall()
+    return [{"domain": str(r[0]), "company_count": int(r[1])} for r in rows]
+
+
+# ── Cross-company UID attribution ──────────────────────────────────────────────
+
+def add_cross_attributed_url_candidate(
+    db: Session,
+    company_id: int,
+    url: str,
+    score: float = 0.5,
+) -> CompanyUrlCandidate | None:
+    """Add a URL candidate for a company discovered via cross-UID attribution.
+
+    Called when web_extract finds a UID on a page that matches a *different*
+    company than the one being extracted. The URL is added to the other company
+    as a low-score candidate (not auto-selected) so it can be crawled later.
+    Does nothing if the URL already exists for this company.
+    """
+    existing = (
+        db.query(CompanyUrlCandidate)
+        .filter(CompanyUrlCandidate.company_id == company_id, CompanyUrlCandidate.url == url)
+        .first()
+    )
+    if existing:
+        return existing
+    candidate = CompanyUrlCandidate(
+        company_id=company_id,
+        url=url,
+        score=score,
+        status="pending",
+        title="[cross-UID attribution]",
+        snippet="Added automatically: UID found on this URL matched this company during another company's crawl.",
+    )
+    db.add(candidate)
+    db.flush()
+    return candidate

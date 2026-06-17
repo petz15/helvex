@@ -69,6 +69,7 @@ jobs:
       contents: read
       packages: write
       id-token: write
+      security-events: write
     env:
       USE_QEMU: ${{ (github.event_name == 'workflow_dispatch' && github.event.inputs.qemu_backend == 'true') || (github.event_name != 'workflow_dispatch' && vars.BUILD_QEMU_BACKEND == 'true') }}
       BUILD_PLATFORMS: ${{ ((github.event_name == 'workflow_dispatch' && github.event.inputs.qemu_backend == 'true') || (github.event_name != 'workflow_dispatch' && vars.BUILD_QEMU_BACKEND == 'true')) && 'linux/amd64,linux/arm64' || 'linux/amd64' }}
@@ -108,14 +109,30 @@ jobs:
           cache-from: type=gha,scope=backend
           cache-to: type=gha,mode=max,scope=backend
 
-      - name: Scan image for vulnerabilities
+      - name: Scan image for vulnerabilities (backend)
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         continue-on-error: true # report-only — scanner crashes (registry hiccups etc.) must not block deploy; see roadmap.md
         with:
           image-ref: ghcr.io/${{ github.repository }}:${{ github.sha }}
-          format: table
+          format: sarif
+          output: trivy-backend.sarif
           severity: CRITICAL,HIGH
           exit-code: "0" # report-only — see roadmap.md for promoting to a hard gate
+
+      - name: Upload Trivy results to GitHub Security tab (backend)
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3 # Renovate will SHA-pin on first run
+        with:
+          sarif_file: trivy-backend.sarif
+          category: trivy-backend
+
+      - name: Upload Trivy results as artifact (backend)
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: trivy-backend-${{ github.sha }}
+          path: trivy-backend.sarif
+          if-no-files-found: ignore
 
       - name: Install cosign
         uses: sigstore/cosign-installer@398d4b0eeef1380460a10c8013a76f728fb906ac # v3
@@ -146,6 +163,7 @@ jobs:
     permissions:
       contents: read
       packages: write
+      security-events: write
     env:
       # On push: always build multi-arch for ML. On workflow_dispatch: respect the inputs.
       USE_QEMU: ${{ github.event_name != 'workflow_dispatch' || github.event.inputs.qemu_ml_base == 'true' || github.event.inputs.qemu_ml == 'true' }}
@@ -179,14 +197,30 @@ jobs:
           cache-from: type=gha,scope=ml-base
           cache-to: type=gha,mode=max,scope=ml-base
 
-      - name: Scan image for vulnerabilities
+      - name: Scan image for vulnerabilities (ml-base)
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         continue-on-error: true # report-only — scanner crashes (registry hiccups etc.) must not block deploy; see roadmap.md
         with:
           image-ref: ghcr.io/${{ github.repository }}-ml-base:latest
-          format: table
+          format: sarif
+          output: trivy-ml-base.sarif
           severity: CRITICAL,HIGH
           exit-code: "0" # report-only — see roadmap.md for promoting to a hard gate
+
+      - name: Upload Trivy results to GitHub Security tab (ml-base)
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3 # Renovate will SHA-pin on first run
+        with:
+          sarif_file: trivy-ml-base.sarif
+          category: trivy-ml-base
+
+      - name: Upload Trivy results as artifact (ml-base)
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: trivy-ml-base-${{ github.sha }}
+          path: trivy-ml-base.sarif
+          if-no-files-found: ignore
 
   build-ml:
     # Fast build: just copies app code on top of ml-base.
@@ -196,6 +230,7 @@ jobs:
     permissions:
       contents: read
       packages: write
+      security-events: write
     env:
       # On push: always build multi-arch for ML. On workflow_dispatch: respect the inputs.
       USE_QEMU: ${{ github.event_name != 'workflow_dispatch' || github.event.inputs.qemu_ml_base == 'true' || github.event.inputs.qemu_ml == 'true' }}
@@ -235,14 +270,30 @@ jobs:
           cache-from: type=gha,scope=ml-worker
           cache-to: type=gha,mode=max,scope=ml-worker
 
-      - name: Scan image for vulnerabilities
+      - name: Scan image for vulnerabilities (ml)
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         continue-on-error: true # report-only — scanner crashes (registry hiccups etc.) must not block deploy; see roadmap.md
         with:
           image-ref: ghcr.io/${{ github.repository }}-ml:${{ github.sha }}
-          format: table
+          format: sarif
+          output: trivy-ml.sarif
           severity: CRITICAL,HIGH
           exit-code: "0" # report-only — see roadmap.md for promoting to a hard gate
+
+      - name: Upload Trivy results to GitHub Security tab (ml)
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3 # Renovate will SHA-pin on first run
+        with:
+          sarif_file: trivy-ml.sarif
+          category: trivy-ml
+
+      - name: Upload Trivy results as artifact (ml)
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: trivy-ml-${{ github.sha }}
+          path: trivy-ml.sarif
+          if-no-files-found: ignore
 
   build-frontend:
     if: |
@@ -262,6 +313,7 @@ jobs:
     permissions:
       contents: read
       packages: write
+      security-events: write
     env:
       USE_QEMU: ${{ (github.event_name == 'workflow_dispatch' && github.event.inputs.qemu_frontend == 'true') || (github.event_name != 'workflow_dispatch' && vars.BUILD_QEMU_FRONTEND == 'true') }}
       BUILD_PLATFORMS: ${{ ((github.event_name == 'workflow_dispatch' && github.event.inputs.qemu_frontend == 'true') || (github.event_name != 'workflow_dispatch' && vars.BUILD_QEMU_FRONTEND == 'true')) && 'linux/amd64,linux/arm64' || 'linux/amd64' }}
@@ -303,14 +355,30 @@ jobs:
           cache-from: type=gha,scope=frontend
           cache-to: type=gha,mode=max,scope=frontend
 
-      - name: Scan image for vulnerabilities
+      - name: Scan image for vulnerabilities (frontend)
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         continue-on-error: true # report-only — scanner crashes (registry hiccups etc.) must not block deploy; see roadmap.md
         with:
           image-ref: ghcr.io/${{ github.repository }}-frontend:${{ github.sha }}
-          format: table
+          format: sarif
+          output: trivy-frontend.sarif
           severity: CRITICAL,HIGH
           exit-code: "0" # report-only — see roadmap.md for promoting to a hard gate
+
+      - name: Upload Trivy results to GitHub Security tab (frontend)
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3 # Renovate will SHA-pin on first run
+        with:
+          sarif_file: trivy-frontend.sarif
+          category: trivy-frontend
+
+      - name: Upload Trivy results as artifact (frontend)
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: trivy-frontend-${{ github.sha }}
+          path: trivy-frontend.sarif
+          if-no-files-found: ignore
 
   # ── Deploy ────────────────────────────────────────────────────────────────
   deploy:

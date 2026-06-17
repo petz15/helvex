@@ -571,3 +571,107 @@ def get_company_web_extract(
         "pages": pages_out,
         "candidate_count": int(candidate_count),
     }
+
+
+@router.get("/{company_id}/web-extracts", summary="All URL candidate extracts for a company")
+def get_all_web_extracts(
+    company_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> list[dict[str, Any]]:
+    """Return all extract rows for a company, one per URL candidate, ordered by confidence desc."""
+    db_company = crud.get_company(db, company_id)
+    if not db_company:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Company not found")
+
+    extracts = (
+        db.query(CompanyWebExtract)
+        .filter(CompanyWebExtract.company_id == company_id)
+        .order_by(
+            CompanyWebExtract.confidence.desc().nulls_last(),
+            CompanyWebExtract.extracted_at.desc(),
+        )
+        .all()
+    )
+    result = []
+    for ex in extracts:
+        candidate = db.get(CompanyUrlCandidate, ex.url_candidate_id)
+        result.append({
+            "url_candidate_id": ex.url_candidate_id,
+            "url": candidate.url if candidate else None,
+            "candidate_status": candidate.status if candidate else None,
+            "emails": ex.emails or [],
+            "phones": ex.phones or [],
+            "uid": ex.uid,
+            "uid_matches_zefix": ex.uid_matches_zefix,
+            "name_address_verified": bool(ex.name_address_verified),
+            "confidence": ex.confidence,
+            "extraction_method": ex.extraction_method,
+            "page_count": ex.page_count,
+            "review_flag": ex.review_flag,
+            "extracted_at": ex.extracted_at.isoformat() if ex.extracted_at else None,
+        })
+    return result
+
+
+@router.post("/{company_id}/web-extracts/{url_candidate_id}/promote", summary="Promote a URL candidate to best extract")
+def promote_web_extract(
+    company_id: int,
+    url_candidate_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Switch the selected URL candidate to the given one and reset others to pending."""
+    db_company = crud.get_company(db, company_id)
+    if not db_company:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Company not found")
+
+    extract = (
+        db.query(CompanyWebExtract)
+        .filter(
+            CompanyWebExtract.company_id == company_id,
+            CompanyWebExtract.url_candidate_id == url_candidate_id,
+        )
+        .first()
+    )
+    if not extract:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Extract not found for this candidate")
+
+    # Switch URL candidate selection
+    candidate = crawler_crud.switch_selected_candidate(db, company_id, url_candidate_id)
+    if candidate is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="URL candidate not found")
+
+    # Clear review_flag on the promoted extract
+    extract.review_flag = None
+    db.flush()
+    db.commit()
+    return {"company_id": company_id, "url_candidate_id": url_candidate_id, "url": candidate.url}
+
+
+@router.delete("/{company_id}/web-extracts/{url_candidate_id}", summary="Discard an extract / reject its URL candidate")
+def discard_web_extract(
+    company_id: int,
+    url_candidate_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Delete the extract row and mark the URL candidate as rejected."""
+    from app.crud.crawler import reject_url_candidate
+    db_company = crud.get_company(db, company_id)
+    if not db_company:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Company not found")
+
+    extract = (
+        db.query(CompanyWebExtract)
+        .filter(
+            CompanyWebExtract.company_id == company_id,
+            CompanyWebExtract.url_candidate_id == url_candidate_id,
+        )
+        .first()
+    )
+    if extract:
+        db.delete(extract)
+    reject_url_candidate(db, url_candidate_id)
+    db.commit()
+    return {"company_id": company_id, "url_candidate_id": url_candidate_id, "discarded": True}

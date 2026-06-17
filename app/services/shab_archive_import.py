@@ -66,6 +66,100 @@ def _detect_lang(text: str, canton: str | None) -> str:
     return "de"
 
 
+def _append_shab_old_name(existing_json: str | None, name: str, pub_date: str | None) -> str:
+    """Append a SHAB-sourced historical name to the company's old_names JSON array.
+
+    Idempotent — skips entries whose "name" already appears in the list.
+    """
+    try:
+        entries = json.loads(existing_json) if existing_json else []
+        if not isinstance(entries, list):
+            entries = []
+    except Exception:
+        entries = []
+    if any(e.get("name") == name for e in entries):
+        return existing_json or "[]"
+    entries.append({"name": name, "source": "shab_archive", "date": pub_date})
+    return json.dumps(entries)
+
+
+def _resolve_company_for_shab(
+    db: Session,
+    uid: str | None,
+    title: str | None,
+    canton: str | None,
+    pub_date: str | None,
+    uid_map: dict[str, Any] | None,
+    stats: dict,
+    *,
+    merge_old_name: bool = True,
+) -> tuple[str | None, int | None]:
+    """Return (company_uid, company_id) for a SHAB publication.
+
+    Lookup order: uid_map batch cache → DB.  If the company is found and
+    the SHAB title differs from its canonical name, the title is recorded
+    as a historical name in old_names (merge_old_name=True path only, used
+    for new publications; re-imports skip this to avoid duplicate entries).
+
+    If no company is found, a minimal stub is created with source='shab_stub'
+    and status='CANCELLED'.  The stub is added to uid_map so subsequent
+    entries in the same page batch reuse it without hitting the DB.
+    """
+    if not uid:
+        return None, None
+
+    # 1. Batch cache, then DB
+    company = None
+    if uid_map is not None:
+        company = uid_map.get(uid)
+    if company is None:
+        from app import crud
+        company = crud.get_company_by_uid(db, uid)
+
+    if company is not None:
+        if merge_old_name and title and title.strip() and title.strip() != company.name:
+            company.old_names = _append_shab_old_name(
+                company.old_names, title.strip(), pub_date
+            )
+            db.flush()
+        if uid_map is not None:
+            uid_map[uid] = company
+        return uid, company.id
+
+    # 2. Company absent — create a stub for cancelled companies not in Zefix
+    if not title or not title.strip():
+        return uid, None  # no name available; link uid only
+
+    from app.models.company import Company as CompanyModel
+    from sqlalchemy.exc import IntegrityError
+
+    stub = CompanyModel(
+        uid=uid,
+        name=title.strip()[:512],
+        status="CANCELLED",
+        source="shab_stub",
+        canton=(canton or "")[:8] or None,
+        first_sogc_date=pub_date,
+        sogc_date=pub_date,
+    )
+    sp = db.begin_nested()
+    try:
+        db.add(stub)
+        sp.commit()
+    except IntegrityError:
+        sp.rollback()
+        from app import crud
+        stub = crud.get_company_by_uid(db, uid)
+        if stub is None:
+            raise
+
+    db.flush()
+    stats["stubs_created"] = stats.get("stubs_created", 0) + 1
+    if uid_map is not None:
+        uid_map[uid] = stub
+    return uid, stub.id
+
+
 def _date_windows(
     date_start: str,
     date_end: str,
@@ -234,13 +328,15 @@ def _process_entry(
             pub.raw_json = json.dumps(raw_meta)
             pub.preprocessed_at = datetime.now(tz=timezone.utc)
             if uid and not pub.company_uid:
-                company = (uid_map or {}).get(uid) if uid_map is not None else None
-                if company is None and uid_map is None:
-                    from app import crud
-                    company = crud.get_company_by_uid(db, uid)
-                if company:
-                    pub.company_uid = uid
-                    pub.company_id = company.id
+                # Re-import: link company if not yet linked; skip name merging
+                # (already done on first import) to avoid duplicate old_names entries.
+                comp_uid, comp_id = _resolve_company_for_shab(
+                    db, uid, title, pdf_canton or canton, pub_date,
+                    uid_map, stats, merge_old_name=False,
+                )
+                if comp_uid:
+                    pub.company_uid = comp_uid
+                    pub.company_id = comp_id
             db.query(SogcChange).filter_by(sogc_publication_id=pub.id).delete()
             db.flush()
             for ch in change_dicts:
@@ -252,20 +348,14 @@ def _process_entry(
                 ))
             stats["updated"] += 1
         else:
-            company_uid = None
-            company_id = None
-            if uid:
-                company = (uid_map or {}).get(uid) if uid_map is not None else None
-                if company is None and uid_map is None:
-                    from app import crud
-                    company = crud.get_company_by_uid(db, uid)
-                if company:
-                    company_uid = uid
-                    company_id = company.id
+            comp_uid, comp_id = _resolve_company_for_shab(
+                db, uid, title, pdf_canton or canton, pub_date,
+                uid_map, stats, merge_old_name=True,
+            )
             pub = SogcPublication(
                 sogc_id=sogc_id,
-                company_uid=company_uid,
-                company_id=company_id,
+                company_uid=comp_uid,
+                company_id=comp_id,
                 pub_date=pub_date,
                 sub_rubric=rubric,
                 pub_number=pub_number,
@@ -441,6 +531,7 @@ def import_shab_archive(
         "pdf_text_empty": 0,
         "created": 0,
         "updated": 0,
+        "stubs_created": 0,
         "skipped": 0,
         "errors": [],
         "warnings": [],
@@ -563,5 +654,183 @@ def import_shab_archive(
             if is_last_page(page_data):
                 break
             page += 1
+
+    return stats
+
+
+def run_link_sogc_stubs(
+    db: Session,
+    *,
+    batch_size: int = 500,
+    progress_cb=None,
+    status_cb=None,
+    abort_cb=None,
+) -> dict[str, Any]:
+    """Back-fill company_id on sogc_publications and sogc_person_appearances.
+
+    Works entirely from existing DB data — no API calls or PDF downloads.
+    Finds all distinct company_uid values that have no company_id yet, then
+    either links the existing Company row or creates a shab_stub for unknown UIDs.
+
+    Uses keyset pagination (alphabetical by uid) to handle large row counts.
+    """
+    from sqlalchemy import text, update
+    from app.models.sogc_publication import SogcPublication
+    from app.models.sogc_person_appearance import SogcPersonAppearance
+    from app.models.company import Company as CompanyModel
+    from sqlalchemy.exc import IntegrityError
+
+    stats: dict[str, Any] = {
+        "uids_scanned": 0,
+        "stubs_created": 0,
+        "already_linked": 0,
+        "publications_linked": 0,
+        "appearances_linked": 0,
+        "errors": [],
+    }
+
+    if status_cb:
+        status_cb("Counting unlinked UIDs…")
+
+    # Count for progress reporting (approximate; doesn't need to be exact)
+    count_row = db.execute(
+        text(
+            "SELECT COUNT(DISTINCT company_uid) FROM sogc_publications "
+            "WHERE company_uid IS NOT NULL AND company_id IS NULL"
+        )
+    ).fetchone()
+    total_uids = count_row[0] if count_row else 0
+
+    if status_cb:
+        status_cb(f"Found {total_uids:,} unlinked UIDs — starting back-fill…")
+
+    cursor_uid = ""  # keyset: start before first UID alphabetically
+    done = 0
+
+    while True:
+        if abort_cb:
+            abort_cb()
+
+        # Fetch next batch of distinct UIDs that are unlinked, cursor-paginated
+        rows = db.execute(
+            text(
+                "SELECT DISTINCT company_uid FROM sogc_publications "
+                "WHERE company_uid IS NOT NULL AND company_id IS NULL "
+                "  AND company_uid > :cursor "
+                "ORDER BY company_uid LIMIT :lim"
+            ),
+            {"cursor": cursor_uid, "lim": batch_size},
+        ).fetchall()
+
+        if not rows:
+            break
+
+        uids: list[str] = [r[0] for r in rows]
+        cursor_uid = uids[-1]
+
+        # Bulk-fetch matching companies
+        companies = (
+            db.query(CompanyModel)
+            .filter(CompanyModel.uid.in_(uids))
+            .all()
+        )
+        uid_to_company: dict[str, CompanyModel] = {c.uid: c for c in companies}
+
+        for uid in uids:
+            if abort_cb:
+                abort_cb()
+            stats["uids_scanned"] += 1
+
+            try:
+                company = uid_to_company.get(uid)
+
+                if company is None:
+                    # Need a stub — extract best available name from a publication
+                    pub_row = db.execute(
+                        text(
+                            "SELECT raw_json FROM sogc_publications "
+                            "WHERE company_uid = :uid AND raw_json IS NOT NULL "
+                            "LIMIT 1"
+                        ),
+                        {"uid": uid},
+                    ).fetchone()
+
+                    title: str | None = None
+                    canton: str | None = None
+                    pub_date: str | None = None
+                    if pub_row and pub_row[0]:
+                        try:
+                            rj = json.loads(pub_row[0])
+                            # SHAB archive format
+                            title = rj.get("title") or rj.get("meta", {}).get("title", {}).get("de")
+                            canton = rj.get("canton")
+                            pub_date = rj.get("pub_date")
+                        except Exception:
+                            pass
+
+                    if not title:
+                        # No usable name; link uid only (company_id stays NULL)
+                        continue
+
+                    stub = CompanyModel(
+                        uid=uid,
+                        name=title.strip()[:512],
+                        status="CANCELLED",
+                        source="shab_stub",
+                        canton=(canton or "")[:8] or None,
+                        first_sogc_date=pub_date,
+                        sogc_date=pub_date,
+                    )
+                    sp = db.begin_nested()
+                    try:
+                        db.add(stub)
+                        sp.commit()
+                    except IntegrityError:
+                        sp.rollback()
+                        from app import crud
+                        stub = crud.get_company_by_uid(db, uid)
+                        if stub is None:
+                            raise
+
+                    db.flush()
+                    company = stub
+                    uid_to_company[uid] = stub
+                    stats["stubs_created"] += 1
+                else:
+                    stats["already_linked"] += 1
+
+                company_id = company.id
+
+                # Bulk-update publications
+                pub_result = db.execute(
+                    update(SogcPublication)
+                    .where(
+                        SogcPublication.company_uid == uid,
+                        SogcPublication.company_id.is_(None),
+                    )
+                    .values(company_id=company_id)
+                )
+                stats["publications_linked"] += pub_result.rowcount
+
+                # Bulk-update person appearances
+                app_result = db.execute(
+                    update(SogcPersonAppearance)
+                    .where(
+                        SogcPersonAppearance.company_uid == uid,
+                        SogcPersonAppearance.company_id.is_(None),
+                    )
+                    .values(company_id=company_id)
+                )
+                stats["appearances_linked"] += app_result.rowcount
+
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("link_sogc_stubs error for uid=%s: %s", uid, exc)
+                stats["errors"].append(f"{uid}: {exc}")
+
+        db.commit()
+        done += len(uids)
+
+        if progress_cb:
+            progress_cb(done, total_uids, stats)
 
     return stats

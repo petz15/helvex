@@ -1202,6 +1202,32 @@ def trigger_shab_archive(
     return JobOut.from_orm_obj(job)
 
 
+class LinkSogcStubsBody(BaseModel):
+    batch_size: int = 500
+
+
+@router.post("/collection/link-sogc-stubs", response_model=JobOut, status_code=status.HTTP_202_ACCEPTED)
+def trigger_link_sogc_stubs(
+    body: LinkSogcStubsBody,
+    request: Request,
+    db: Session = Depends(get_db),
+    _: User = Depends(require_superadmin),
+):
+    """Back-fill company_id on sogc_publications/sogc_person_appearances from existing data.
+
+    Creates shab_stub Company rows for UIDs not yet in the companies table.
+    No API calls — works entirely from already-imported sogc_publications rows.
+    """
+    job = _enqueue_or_http_error(
+        request,
+        job_type="link_sogc_stubs",
+        label="Link SOGC stubs from existing publications",
+        params={"batch_size": body.batch_size},
+        db=db,
+    )
+    return JobOut.from_orm_obj(job)
+
+
 @router.post("/collection/sogc-preprocess", response_model=JobOut, status_code=status.HTTP_202_ACCEPTED)
 def trigger_sogc_preprocess(
     body: SogcPreprocessBody,
@@ -1650,6 +1676,29 @@ def trigger_web_extract(
         job_type="web_extract",
         label="Web extraction — structured data from crawled HTML",
         params=body.model_dump(),
+        db=db,
+    )
+    return JobOut.from_orm_obj(job)
+
+
+@router.post("/crawler/reextract", response_model=JobOut, status_code=status.HTTP_202_ACCEPTED)
+def trigger_web_reextract(
+    request: Request,
+    db: Session = Depends(get_db),
+    _: User = Depends(require_superadmin),
+):
+    """Flag every crawled page (HTML already in S3) for re-extraction, then run web_extract.
+
+    Use after improving the extractor — reprocesses all stored HTML at zero crawl cost.
+    """
+    from app.crud.crawler import reset_extraction_flags
+    reset_extraction_flags(db)
+    db.commit()
+    job = _enqueue_or_http_error(
+        request,
+        job_type="web_extract",
+        label="Re-extract all crawled HTML (no re-crawl)",
+        params={},
         db=db,
     )
     return JobOut.from_orm_obj(job)

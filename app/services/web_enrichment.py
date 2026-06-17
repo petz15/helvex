@@ -62,6 +62,81 @@ def _google_scoring_overrides(db: Session) -> tuple[set[str], set[str]]:
     return stopwords, directory_domains
 
 
+def _enrich_organic_result(organic: dict) -> dict:
+    """Return {title, link, snippet} with snippet enriched from all available provider fields.
+
+    Both Serper and ScrapingDog return richer signals alongside the basic snippet:
+    - ScrapingDog: inline_snippet (often the full visible page text), extended_sitelinks titles
+    - Serper: sitelinks with per-link snippets
+
+    Merging these into the scored snippet means municipality/name signals in inline
+    text or navigation labels are picked up even when the main snippet is very short.
+    """
+    title = (organic.get("title") or "").strip()
+    link = (organic.get("link") or "").strip()
+    snippet = (organic.get("snippet") or "").strip()
+
+    parts: list[str] = [snippet] if snippet else []
+
+    # ScrapingDog: inline_snippet — often the best content signal
+    inline = (organic.get("inline_snippet") or "").strip()
+    if inline and inline != snippet:
+        parts.append(inline)
+
+    # ScrapingDog: extended_sitelinks [{title, link}, ...]
+    for sl in (organic.get("extended_sitelinks") or [])[:5]:
+        t = (sl.get("title") or "").strip()
+        if t and t not in title:
+            parts.append(t)
+
+    # Serper: sitelinks [{title, link, snippet?}, ...]
+    for sl in (organic.get("sitelinks") or [])[:5]:
+        t = (sl.get("title") or "").strip()
+        sl_snip = (sl.get("snippet") or "").strip()
+        if t and t not in title:
+            parts.append(t)
+        if sl_snip:
+            parts.append(sl_snip)
+
+    return {"title": title, "link": link, "snippet": " ".join(parts)}
+
+
+def _organic_results_from_full_raw(full_raw: dict) -> list[dict]:
+    """Extract the organic results list from either a Serper or ScrapingDog full response."""
+    # ScrapingDog uses organic_results; Serper uses organic
+    return full_raw.get("organic_results") or full_raw.get("organic") or []
+
+
+def _enrich_stored_results(stored: list[dict], full_raw_json: str | None) -> list[dict]:
+    """Re-enrich stored {title,link,snippet,score} rows from full_raw if available.
+
+    Used by rescore paths so old stored results get the same enrichment as new ones.
+    Falls back to stored results unchanged when full_raw is absent.
+    """
+    if not full_raw_json:
+        return stored
+    try:
+        full_raw = json.loads(full_raw_json)
+    except (ValueError, TypeError):
+        return stored
+    organics = _organic_results_from_full_raw(full_raw)
+    if not organics:
+        return stored
+    enriched_by_link: dict[str, dict] = {
+        (o.get("link") or "").rstrip("/"): _enrich_organic_result(o)
+        for o in organics
+    }
+    result: list[dict] = []
+    for row in stored:
+        key = (row.get("link") or "").rstrip("/")
+        if key in enriched_by_link:
+            merged = {**row, "snippet": enriched_by_link[key]["snippet"]}
+            result.append(merged)
+        else:
+            result.append(row)
+    return result
+
+
 def _score_google_results_for_company(db: Session, company: Company, raw_results: list[dict]) -> list[dict]:
     """Score and sort Google results for one company using current scoring rules."""
     if not raw_results:
@@ -160,7 +235,7 @@ def enrich_company_website(db: Session, company: Company, *, num: int = 10) -> t
                 api_key=api_key,
             )
         else:
-            results = search_website(
+            results, full_raw = search_website(
                 company.name,
                 num=num,
                 zip_code=company.address_zip,
@@ -188,14 +263,17 @@ def enrich_company_website(db: Session, company: Company, *, num: int = 10) -> t
             company,
             CompanyUpdate(
                 website_checked_at=now,
-                google_search_results_raw=json.dumps([]),
-                google_search_full_raw=json.dumps(full_raw) if full_raw is not None else None,
+                google_search_results_raw=json.dumps([], ensure_ascii=False),
+                google_search_full_raw=json.dumps(full_raw, ensure_ascii=False) if full_raw is not None else None,
                 google_search_params=search_params,
             ),
         )
         return False, None
 
-    raw_results = [{"title": r.title, "link": r.link, "snippet": r.snippet or ""} for r in results]
+    if full_raw is not None:
+        raw_results = [_enrich_organic_result(o) for o in _organic_results_from_full_raw(full_raw)]
+    else:
+        raw_results = [{"title": r.title, "link": r.link, "snippet": r.snippet or ""} for r in results]
     scored = _score_google_results_for_company(db, company, raw_results)
     best = scored[0]
     social_media_only = is_social_lead_domain(best["link"])
@@ -208,9 +286,13 @@ def enrich_company_website(db: Session, company: Company, *, num: int = 10) -> t
             web_score=best["score"],
             social_media_only=social_media_only,
             website_checked_at=now,
-            google_search_results_raw=json.dumps(scored),
-            google_search_full_raw=json.dumps(full_raw) if full_raw is not None else None,
+            google_search_results_raw=json.dumps(scored, ensure_ascii=False),
+            google_search_full_raw=json.dumps(full_raw, ensure_ascii=False) if full_raw is not None else None,
             google_search_params=search_params,
+            combined_score=Company.compute_combined_score(
+                company.ai_score, company.noga_confidence, company.purpose_keywords,
+                web_score=best["score"],
+            ),
         ),
     )
     return True, best["link"]
@@ -232,6 +314,7 @@ def rescore_from_stored_results(db: Session, company: Company) -> bool:
     if not stored:
         return False
 
+    stored = _enrich_stored_results(stored, getattr(company, "google_search_full_raw", None))
     rescored = _score_google_results_for_company(db, company, stored)
     best = rescored[0]
     crud.update_company(
@@ -241,7 +324,11 @@ def rescore_from_stored_results(db: Session, company: Company) -> bool:
             website_url=best["link"],
             web_score=best["score"],
             social_media_only=is_social_lead_domain(best["link"]),
-            google_search_results_raw=json.dumps(rescored),
+            google_search_results_raw=json.dumps(rescored, ensure_ascii=False),
+            combined_score=Company.compute_combined_score(
+                company.ai_score, company.noga_confidence, company.purpose_keywords,
+                web_score=best["score"],
+            ),
         ),
     )
     return True
@@ -289,6 +376,9 @@ def recalculate_google_scores(
                     stats["skipped"] += 1
                     continue
 
+                raw_results = _enrich_stored_results(
+                    raw_results, getattr(company, "google_search_full_raw", None)
+                )
                 rescored = _score_google_results_for_company(db, company, raw_results)
                 if not rescored:
                     stats["skipped"] += 1
@@ -298,9 +388,10 @@ def recalculate_google_scores(
                 company.website_url = best["link"]
                 company.web_score = best["score"]
                 company.social_media_only = is_social_lead_domain(best["link"])
-                company.google_search_results_raw = json.dumps(rescored)
+                company.google_search_results_raw = json.dumps(rescored, ensure_ascii=False)
                 company.combined_score = Company.compute_combined_score(
-                    company.ai_score, company.noga_confidence, company.purpose_keywords
+                    company.ai_score, company.noga_confidence, company.purpose_keywords,
+                    web_score=company.web_score,
                 )
                 stats["updated"] += 1
             except Exception as exc:  # noqa: BLE001
@@ -370,7 +461,17 @@ def run_batch_collect(
             )
             limit = available
 
+    # Branch offices (Zweigniederlassung) don't have independent websites;
+    # skip them to avoid wasting Serper quota on sites that redirect to the parent.
+    _BRANCH_LEGAL_FORM_UIDS = ("0108", "0111")
     query = db.query(Company)
+    query = query.filter(
+        or_(Company.legal_form_uid.is_(None), Company.legal_form_uid.notin_(_BRANCH_LEGAL_FORM_UIDS))
+    ).filter(
+        ~Company.name.ilike("%zweigniederlassung%"),
+        ~Company.name.ilike("%succursale%"),
+        ~Company.name.ilike("%filiale di%"),
+    )
     if only_missing_website:
         query = query.filter(or_(Company.website_url.is_(None), Company.website_url == ""))
     if canton:
@@ -522,6 +623,13 @@ def run_batch_collect(
             except Exception as exc:  # noqa: BLE001
                 logger.warning("Google search failed for %s: %s", current.uid, exc)
                 stats["errors"].append(f"Google search {current.uid} [{type(exc).__name__}]: {exc}")
+                try:
+                    from app.crud.company_error import log_error as _log_err
+                    _log_err(db, company_id=current.id, source="web_enrichment",
+                             error_type="enrich_failed", message=str(exc))
+                    db.flush()
+                except Exception:  # noqa: BLE001
+                    pass
 
         if progress_cb:
             progress_cb(i, stats["selected"], stats)

@@ -10,6 +10,15 @@
     - Data from eSHAB: has much mor than just changes in companies
 
 
+- **Architecture — Company table normalization** (medium effort, high long-term value):
+    Currently `companies` is a ~60-column fat-row table that tightly couples Zefix raw data, scoring, NOGA, TF-IDF, and geocoding. This works while every company comes from Zefix, but is a growing liability as we add non-Zefix sources (SHAB stubs, future people-only entities, etc.).
+    Recommended split:
+    - `company_zefix_data` side-table for `zefix_raw`, `zefix_*` admin IDs, `sogc_pub`, `old_names`, `translations` — stubs simply have no row here instead of NULLs everywhere
+    - Keep scoring (`flex/web/ai/combined`), NOGA, and geocoding on the main table — these are query-critical and JOINs on 700k rows are expensive
+    - Keep TF-IDF on the main table for the same reason
+    Discriminator: use the new `source` column (`zefix` / `shab_stub`) already added to distinguish row origin. Existing `org_company_state` dual-write pattern is unaffected.
+    Trade-off: cleans up the data model and makes multi-source ingestion first-class; costs a JOIN in the Zefix import path and all detail-view endpoints.
+
 - **Major features**: 
     - Webcrawler for company websites -> started, needs to be checked
     - Linkedin unoffical API or scraper for people finder/graph and get more information
@@ -21,7 +30,7 @@
     - CRM parts (add contact, etc) -> there are github projects I could use?
     - Brand and Product ranking via LLM (thx Tim G.)
     - Data from SIMAP (augeschrieben + won) -> integrating government bodies might be somewhat difficult -> started need be checked, government bodies are not done yet (potentially this could be simply be added as other companies or extented bodies?) 
-    - 
+    - SIMAP suche anbieten bzw verbesserte suchmaske
 
 ### MVP before public PROD
 - Tiers are enforced - partially done (not fully checked and web searches are not gated yet + always uses api instead of checking if data already exists)
@@ -45,7 +54,7 @@
 - billing/payment/pricing
     - existing subscription then upgrading is not working
 - admin dashboard simple redirects non authorized users, maybe not the safest
-- NOGA: Zweigniederlassung ist falsch zbs: https://helvex.dicy.ch/app/companies/238698
+- ~~NOGA: Zweigniederlassung ist falsch~~ — Fixed: branch offices now bypass `only_missing_noga` guard and always re-run `apply_noga_classification` to inherit from parent.
 - Make sure that users without access to BYOL API keys, always use the one provided by me (hidden not shown visible to the user)
 - Fix translations for all pages (only headers etc done, needs more)
 - Tiers:
@@ -108,10 +117,10 @@
 - [ ] **Web extract — LLM enrichment layer** — on top of the deterministic `web_extract` job (emails/phones/UID/socials/keywords), add an optional Claude Haiku layer that summarizes the cleaned main text into a company description + service summary + category hint. Must be tier/credit-gated (reuse `claude_classify` gating + batch-API pattern); run only on cleaned text to bound tokens; never ungated. Deferred from the phase-1 crawler ingestion build.
 - [ ] **Web crawler — external paid scrape fallback tier** — a 3rd `tier=external` last resort for hard Cloudflare/CAPTCHA sites that defeat both httpx (curl_cffi impersonation) and Playwright. Reuse the existing ScrapingDog integration pattern (`scrapingdog_search_client.py`); gate by org/credits so cost is bounded to the few sites that need it. Deferred from the phase-2 bot-protection build.
 - [ ] **Web extract — company-profile UI** — surface extracted contacts (emails/phones/socials), address, UID, languages, and description on the company detail page, sourced from `company_web_extract`. Decide placement/QOL (per CLAUDE.md frontend-wiring rule). Deferred from the phase-1 crawler ingestion build.
-- [ ] **Web extract — multi-candidate comparison & discard UI** — `company_web_extract` now has PK `(company_id, url_candidate_id)`, so a company crawled with multiple URL candidates accumulates one row per candidate. `get_best_web_extract()` auto-selects the highest-confidence row, but there is no UI to compare candidates side-by-side, promote a lower-ranked one manually, or prune stale low-quality rows. Build a per-company extract comparison panel (crawler admin or company detail) with promote/discard actions. Also: surface the winning candidate in company scoring once web_extract signals are wired into combined_score.
+- [x] **Web extract — multi-candidate comparison & discard UI** — Done: `WebsitePanel` shows "All URL candidates" card with confidence badge, UID match icon, candidate status, review flag, and promote/discard actions per row. Backend: `GET /{id}/web-extracts`, `POST .../promote`, `DELETE .../discard`. Crawler admin shows review flags table and high-frequency domain stats.
 - [x] **Web extract — wire into web_score** — Done: `scoring.adjust_web_score_for_extraction()` adjusts the raw Serper `web_score` using `uid_matches_zefix` (+40 match / −50 mismatch, capped/floored) and the new `name_address_verified` fallback signal (+20, when no UID found but name+address match Zefix exactly). Wired into `handle_web_extract`, recomputed idempotently from the raw score each run so re-extraction doesn't compound it. See architecture.md §16.
-  - [ ] **Still open** — `Company.compute_combined_score` does not currently use `web_score` at all (discovered drift from the documented 0.70 AI / 0.20 Web / 0.10 Flex formula). The above only patches `web_score` itself; revisit whether/how to fold `web_score` back into `combined_score`.
-- [ ] **Web extract — UID-mismatch candidate quarantine** — when `uid_matches_zefix=False` the crawl almost certainly hit the wrong site (wrong Google result). Auto-reject that URL candidate and promote/crawl the next one. Closes the loop on the recurring "wrong website / wrong country" Serper issues. The mismatch count is already surfaced on the crawler admin coverage card.
+- [x] **Web extract — wire web_score into combined_score** — Done: `compute_relevance_score` now uses a 4-component formula when `web_score` is present (`ai×0.50 + web×0.20 + noga×0.20 + kw×0.10`); falls back to 3-component when absent. All call sites updated. Absent components renormalise proportionally.
+- [x] **Web extract — UID-mismatch candidate quarantine** — Done: when best extract has `uid_matches_zefix=False`, `handle_web_extract` calls `reject_url_candidate()` and unconditionally triggers fallback crawl of the next candidate. `quarantined` counter in job stats tracks this per run.
 - [ ] **Web extract — LLM description/summary layer** — deterministic description is meta/OG or first paragraph; often weak. Add the deferred Claude Haiku layer to summarise cleaned main text into a description + service summary + category hint (tier/credit-gated, run on cleaned text only). Re-extract loop (`/admin/jobs/crawler/reextract`) means this can be layered on stored HTML without re-crawling.
 - [ ] **Web extract — persons → People graph** — `persons` (impressum management names) are now extracted. Resolve them against SOGC person records / signers and feed the People-finder/graph feature.
 - [ ] **Web extract — extractor quality tuning** — using the coverage dashboard, raise low-fill fields. Likely next: address parser recall (many SME impressums use non-standard formats), bigram keyword quality (reuse `discover_stopwords`/`analyze_boilerplate` outputs), phone fax-vs-tel disambiguation.
@@ -197,7 +206,11 @@ before the next `[deploy-prod]` push.
 - [ ] **Confirm Renovate is actually active on this repo** — `renovate.json` is committed but needs the Renovate GitHub App (or equivalent) installed/enabled before it opens any PRs.
 - [ ] **Re-confirm `admin_cidrs` covers how you actually connect** — scoped sudo + PAM now reject SSH/sudo from any IP outside `admin_cidrs` (`infra/terraform/envs/prod/variables.tf`). If your admin IP changes without updating this first, you lock yourself out of the control-plane.
 
+### Migration lock fix (Jun 2026) — verify on next deploy
 
+Prod logs (2026-06-07, 06-14, 06-16) showed migration `0098 → 0099` (plain `ADD COLUMN` on `company_web_extract`) repeatedly failing with `QueryCanceled: canceling statement due to statement timeout` — every deploy attempt was hitting this, meaning migrations 0099–0102 had likely never actually landed in prod despite being committed. Root cause: all 5 deployments (app, frontend, api-worker, ml-worker, crawler-http ×2) run `alembic upgrade head` independently (both `entrypoint.sh` and the `app/main.py` lifespan), so a normal deploy alone produces several concurrent sessions racing for the same `ACCESS EXCLUSIVE` table lock, getting killed by the 30s `statement_timeout` before any finish. Fixed via a Postgres advisory lock in [alembic/env.py](alembic/env.py) (see [architecture.md](architecture.md#entry-point-appmainpy)) so pods serialize instead of racing.
+
+- [ ] **Confirm the next `[deploy-prod]` actually applies migrations 0099–0102 cleanly** — this is the first deploy since the advisory-lock fix; watch the migration logs for the lock-wait behavior instead of timeout errors.
 
 ## Architecture & Refactoring
 - [ ] **API key management** — token creation/revocation UI for org admins to manage their API credentials; currently only available via admin panel

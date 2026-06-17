@@ -1,0 +1,60 @@
+name: Monthly infra maintenance reminder
+
+on:
+  schedule:
+    # 08:00 Zurich time on the 1st of every month (UTC+1 winter / UTC+2 summer; 07:00 UTC covers both).
+    - cron: "0 7 1 * *"
+  workflow_dispatch: # allow manual trigger
+
+permissions:
+  issues: write
+
+jobs:
+  open-reminder:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Open monthly maintenance issue
+        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
+        with:
+          script: |
+            const today = new Date().toISOString().split('T')[0];
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `[infra] Monthly maintenance checklist — ${today}`,
+              labels: ["infra", "maintenance"],
+              body: [
+                "## Monthly infra maintenance checklist",
+                "",
+                "Work through these in order. Check each box as done.",
+                "",
+                "### Renovate PR backlog",
+                "- [ ] Scan open Renovate PRs — patch/digest should have auto-merged already; act on any that didn't",
+                "- [ ] Review any **minor/major** bumps: check changelog before merging, especially `cloudnative-pg`, `cert-manager`, Helm, Helmfile",
+                "- [ ] **K3s or CNPG Postgres image PR?** — merging alone changes nothing running; see [runbook.md §25](../blob/main/runbook.md#25-keeping-k3s-and-the-servers-up-to-date) for the in-place upgrade procedure",
+                "",
+                "### OS patching (one node at a time, control-plane last)",
+                "```",
+                "ssh ubuntu@<node-ip>",
+                "sudo apt-get update && sudo apt-get upgrade -y",
+                "# if a new kernel was pulled:",
+                "sudo reboot",
+                "```",
+                "- [ ] worker node(s) patched and healthy",
+                "- [ ] control-plane patched and healthy (`kubectl get nodes` shows Ready)",
+                "",
+                "### Container image CVEs (Trivy)",
+                "- [ ] Check the last `deploy-prod` run's Trivy scan output — currently report-only, no hard gate",
+                "- [ ] Any CRITICAL/HIGH findings? If yes, update the base image or open a tracking issue",
+                "",
+                "### Access controls",
+                "- [ ] `admin_cidrs` in `infra/terraform/envs/prod/variables.tf` still matches your current admin IP",
+                "  — SSH and passwordless sudo now hard-reject any IP outside this list at the PAM layer; wrong value = lockout",
+                "",
+                "### Backups",
+                "- [ ] Spot-check that the latest S3 restore-point file is recent (`s3://helvex-backups/pg-prod/restore-point.json`)",
+                "",
+                "---",
+                "_Opened automatically by `.github/workflows/infra-maintenance-reminder.yml`. Close when done._",
+              ].join("\n"),
+            });

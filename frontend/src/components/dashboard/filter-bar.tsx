@@ -139,6 +139,7 @@ function ScoreRange({
 
 const CHIP_LABELS: Partial<Record<keyof CompanyFilters, string>> = {
   q: "Name", uid: "UID", canton: "Canton", review_status: "Review", contact_status: "Contact",
+  has_website: "Website",
   google_searched: "Web search", tags: "Tags", ai_category: "AI Class.",
   tfidf_cluster: "Cluster", purpose_keywords: "Keyword",
   noga_code: "NOGA code", noga_label: "NOGA label", noga_level: "NOGA level",
@@ -248,24 +249,6 @@ export function FilterBar({
           </select>
           <ChevronDown size={13} className="pointer-events-none absolute right-2 top-2 text-slate-400" />
         </div>
-        <div className="relative flex-1 min-w-[7rem] sm:flex-none">
-          <select
-            className={cn(selectCls, "w-full sm:w-32")}
-            value={filters.has_website === undefined ? "" : String(filters.has_website)}
-            onChange={(e) =>
-              onChange({
-                ...filters,
-                has_website: e.target.value === "" ? undefined : e.target.value === "true",
-                page: 1,
-              })
-            }
-          >
-            <option value="">Website: Any</option>
-            <option value="true">Has website</option>
-            <option value="false">No website</option>
-          </select>
-          <ChevronDown size={13} className="pointer-events-none absolute right-2 top-2 text-slate-400" />
-        </div>
         <input
           type="text"
           className={cn(inputCls, "flex-1 min-w-[5.5rem] sm:flex-none sm:w-36")}
@@ -300,7 +283,7 @@ export function FilterBar({
         {/* Active filter chips — multi-value fields split into individual chips */}
         <div className="flex flex-wrap gap-1.5 w-full sm:flex-1 sm:w-auto min-w-0">
           {activeEntries
-            .filter(([k]) => !["q", "uid", "canton", "status", "has_website"].includes(String(k)))
+            .filter(([k]) => !["q", "uid", "canton", "status"].includes(String(k)))
             .flatMap(([k, v]) => {
               const label = CHIP_LABELS[k] ?? String(k).replace(/_/g, " ");
               const isExclude = String(k).startsWith("exclude_");
@@ -350,7 +333,11 @@ export function FilterBar({
                   )}
                 >
                   <span className="text-slate-400">{label}:</span>
-                  <span>{CLUSTER_KEYS.includes(k) ? formatClusterLabel(strVal) : strVal.replace(/^_none$/, "none").replace(/^_any$/, "any")}</span>
+                  <span>
+                    {k === "has_website"
+                      ? (strVal === "true" ? "Yes" : "No")
+                      : CLUSTER_KEYS.includes(k) ? formatClusterLabel(strVal) : strVal.replace(/^_none$/, "none").replace(/^_any$/, "any")}
+                  </span>
                   <button type="button" onClick={() => unset(k)} className="text-slate-400 hover:text-slate-700">
                     <X size={11} />
                   </button>
@@ -532,6 +519,27 @@ export function FilterBar({
                   <option value="it">🇮🇹 Italian</option>
                   <option value="en">🇬🇧 English</option>
                   <option value="rm">Romansh</option>
+                </select>
+                <ChevronDown size={13} className="pointer-events-none absolute right-2 top-2 text-slate-400" />
+              </div>
+            </div>
+            <div>
+              <Label>Website</Label>
+              <div className="relative">
+                <select
+                  className={cn(selectCls)}
+                  value={filters.has_website === undefined ? "" : String(filters.has_website)}
+                  onChange={(e) =>
+                    onChange({
+                      ...filters,
+                      has_website: e.target.value === "" ? undefined : e.target.value === "true",
+                      page: 1,
+                    })
+                  }
+                >
+                  <option value="">Any</option>
+                  <option value="true">Has website</option>
+                  <option value="false">No website</option>
                 </select>
                 <ChevronDown size={13} className="pointer-events-none absolute right-2 top-2 text-slate-400" />
               </div>

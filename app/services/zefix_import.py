@@ -191,6 +191,7 @@ def _extract_company_fields(
     return CompanyCreate(
         uid=uid_normalised,
         name=name,
+        source="zefix",
         legal_form=legal_form_display,
         legal_form_id=legal_form_id,
         legal_form_uid=legal_form_uid,
@@ -688,6 +689,15 @@ def initial_collect(
             if _is_control_signal_exception(exc):
                 raise
             stats["errors"].append(f"UID {uid_clean} [{type(exc).__name__}]: {exc}")
+            try:
+                from app.crud.company_error import log_error as _log_err
+                from app.crud import get_company_by_uid as _get_co
+                _co = _get_co(db, uid_clean)
+                _log_err(db, company_id=_co.id if _co else None, source="zefix_import",
+                         error_type="import_failed", message=f"{uid_clean}: {exc}")
+                db.flush()
+            except Exception:  # noqa: BLE001
+                pass
         if progress_cb:
             progress_cb(idx, total, stats)
 
@@ -1103,7 +1113,7 @@ def _extract_fields_direct(raw: dict[str, Any], target_fields: set[str]) -> dict
 
 REEXTRACTABLE_FIELDS: frozenset[str] = frozenset({
     "name", "legal_form", "legal_form_id", "legal_form_uid", "legal_form_short_name",
-    "status", "municipality", "canton", "purpose",
+    "status", "source", "municipality", "canton", "purpose",
     "address", "address_city", "address_zip",
     "ehraid", "chid", "legal_seat_id", "sogc_date", "deletion_date",
     "capital_nominal", "capital_currency",

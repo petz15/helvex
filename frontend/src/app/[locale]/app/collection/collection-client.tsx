@@ -694,6 +694,28 @@ export function CollectionClient() {
         </form>
       </Section>
 
+      <Section title="Web Extract — Structured Data">
+        <form onSubmit={async e => { e.preventDefault(); await submit("crawler/extract", { batch_size: 200 }); }} className="space-y-4">
+          <p className="text-xs text-slate-500">
+            Extract structured data (contacts, UID, address, socials, keywords, persons) from HTML already stored in S3.
+            Only processes pages flagged <code className="bg-slate-100 px-1 rounded text-xs">needs_extraction=TRUE</code>.
+            No re-crawl, no network cost.
+          </p>
+          <SubmitBtn loading={loading === "crawler/extract"} />
+        </form>
+      </Section>
+
+      <Section title="Re-extract All (no re-crawl)">
+        <form onSubmit={async e => { e.preventDefault(); await submit("crawler/reextract", {}); }} className="space-y-4">
+          <p className="text-xs text-slate-500">
+            Flags <strong>every</strong> previously-extracted page (HTML in S3) for re-processing, then runs extraction.
+            Use after improving the extractor to reprocess all ~200k stored HTML files at zero crawl cost.
+            Pages whose S3 HTML is missing are skipped gracefully.
+          </p>
+          <SubmitBtn loading={loading === "crawler/reextract"} />
+        </form>
+      </Section>
+
       <GroupHeader label="SHAB / SOGC" />
 
       <Section title="SHAB Daily Import">
@@ -838,6 +860,28 @@ export function CollectionClient() {
             </Field>
           </div>
           <SubmitBtn loading={loading === "collection/shab-archive"} />
+        </form>
+      </Section>
+
+      <Section title="Link SOGC Stubs">
+        <p className="text-sm text-gray-500 mb-3">
+          Back-fills <code>company_id</code> on already-imported SOGC publications and person appearances.
+          Creates minimal <em>shab_stub</em> Company rows for UIDs absent from the companies table.
+          No API calls — works entirely from existing database data.
+        </p>
+        <form onSubmit={async e => {
+          e.preventDefault();
+          const fd = new FormData(e.currentTarget);
+          await submit("collection/link-sogc-stubs", {
+            batch_size: parseInt(fd.get("stubs_batch_size") as string) || 500,
+          });
+        }}>
+          <div className="grid grid-cols-2 gap-4 mb-4">
+            <Field label="Batch size" hint="UIDs processed per DB commit">
+              <input name="stubs_batch_size" type="number" min="50" max="2000" defaultValue="500" className={inputCls} />
+            </Field>
+          </div>
+          <SubmitBtn loading={loading === "collection/link-sogc-stubs"} />
         </form>
       </Section>
 

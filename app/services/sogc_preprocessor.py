@@ -180,6 +180,8 @@ _SECTION_DEFS: list[tuple[re.Pattern, str, bool]] = [
     (re.compile(r"nouvelle\s+raison\s+sociale[^:.]*:", re.I), "name",           False),
     (re.compile(r"en\s+liquidation|dissolution[^:.]*:", re.I), "status",        False),
     (re.compile(r"fusion[^:.]*:",                      re.I), "merger",         False),
+    # Dynamic role-header form: "Nouvelle gérante:", "Nouveau directeur:", etc.
+    (re.compile(r"(?:nouveau[x]?|nouvelle[s]?)\s+(?:gérant|gérante|président|présidente|administrateur|administratrice|directeur|directrice|membre|associé|associée|liquidateur|liquidatrice)[^:]{0,25}:", re.I), "person_added", True),
     # ── French — SHAB archive PDF format (compact section headers) ───────────
     # These section headers appear in SHAB PDF publications and differ from the
     # verbose headers used in SOGC/Zefix text (e.g. "personnes démissionnaires").
@@ -220,7 +222,7 @@ _CORRECTION_RE = re.compile(
 # trigger false-positive section matches.
 # Matches up to and including the closing "Publ. XXXXXXXX). " pattern.
 _SOGC_HEADER_RE = re.compile(
-    r"^.+?\((?:SHAB|No\.?\s*FOSC|FF\s*\d)[^)]+\)\.\s*",
+    r"^.+?\((?:SHAB|No\.?\s*FOSC|FOSC|FF\s*\d)[^)]+\)\.\s*",
     re.DOTALL | re.I,
 )
 
@@ -277,6 +279,9 @@ _SENTENCE_PATTERNS: list[tuple[re.Pattern, str]] = [
     (re.compile(r"réduction\s+(?:\w+\s+)?du\s+capital", re.I), "capital"),
     # French — share transfer restriction embedded in content (not as section header)
     (re.compile(r"restriction\s+de\s+transmissibilité", re.I), "restriction"),
+    # French — narrative person changes (FOSC publications without section headers)
+    (re.compile(r"\bn['’]est\s+plus\s+\w", re.I), "person_removed"),
+    (re.compile(r"\best\s+nomm[eé]e?\s+\w", re.I), "person_added"),
     # French — insolvency
     (re.compile(r"procédure\s+de\s+(?:faillite|liquidation)", re.I), "status"),
     (re.compile(r"sursis\s+concordataire", re.I), "status"),

@@ -2185,6 +2185,67 @@ export interface AdminCrawlerStats {
   uid_match: number;
   uid_mismatch: number;
   name_address_verified: number;
+  review_flag_count: number;
+}
+
+export interface ReviewFlagItem {
+  company_id: number;
+  company_name: string;
+  company_uid: string;
+  url_candidate_id: number;
+  candidate_url: string | null;
+  found_uid: string | null;
+  uid_matches_zefix: boolean | null;
+  confidence: number | null;
+  review_flag: string;
+  extracted_at: string | null;
+}
+
+export async function fetchCrawlerReviewFlags(params?: { page?: number; page_size?: number }): Promise<AdminPage<ReviewFlagItem>> {
+  const qs = new URLSearchParams();
+  if (params?.page) qs.set("page", String(params.page));
+  if (params?.page_size) qs.set("page_size", String(params.page_size));
+  const res = await fetch(`/api/v1/admin/crawler/review-flags?${qs}`, { credentials: "include" });
+  if (!res.ok) throw new Error("Failed to load review flags");
+  return res.json();
+}
+
+export interface WebExtractSummary {
+  url_candidate_id: number;
+  url: string | null;
+  candidate_status: string | null;
+  emails: string[];
+  phones: string[];
+  uid: string | null;
+  uid_matches_zefix: boolean | null;
+  name_address_verified: boolean;
+  confidence: number | null;
+  extraction_method: string | null;
+  page_count: number | null;
+  review_flag: string | null;
+  extracted_at: string | null;
+}
+
+export async function fetchAllWebExtracts(companyId: number): Promise<WebExtractSummary[]> {
+  const res = await fetch(`/api/v1/companies/${companyId}/web-extracts`, { credentials: "include" });
+  if (!res.ok) throw new Error("Failed to load extracts");
+  return res.json();
+}
+
+export async function promoteWebExtract(companyId: number, urlCandidateId: number): Promise<void> {
+  const res = await fetch(`/api/v1/companies/${companyId}/web-extracts/${urlCandidateId}/promote`, {
+    method: "POST",
+    credentials: "include",
+  });
+  if (!res.ok) throw new Error("Failed to promote extract");
+}
+
+export async function discardWebExtract(companyId: number, urlCandidateId: number): Promise<void> {
+  const res = await fetch(`/api/v1/companies/${companyId}/web-extracts/${urlCandidateId}`, {
+    method: "DELETE",
+    credentials: "include",
+  });
+  if (!res.ok) throw new Error("Failed to discard extract");
 }
 
 export interface AdminCrawlerFailure {
@@ -2260,4 +2321,147 @@ export async function crawlerReextract(): Promise<{ flagged: number; job_id: num
   });
   if (!res.ok) throw new Error("Failed to enqueue re-extract job");
   return res.json();
+}
+
+export interface CandidateDomainStat {
+  domain: string;
+  company_count: number;
+  already_blocked: boolean;
+}
+
+export async function fetchCandidateDomainStats(minCompanies = 30): Promise<CandidateDomainStat[]> {
+  const res = await fetch(
+    `/api/v1/admin/crawler/candidate-domain-stats?min_companies=${minCompanies}&limit=100`,
+    { credentials: "include" },
+  );
+  if (!res.ok) throw new Error("Failed to load domain stats");
+  return res.json();
+}
+
+export async function blockDomain(domain: string): Promise<void> {
+  const res = await fetch("/api/v1/settings/google-directory-domains", {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ value: domain, description: `Auto-detected: high URL candidate frequency` }),
+  });
+  if (!res.ok) throw new Error(`Failed to block ${domain}`);
+}
+
+// ── Error Center ───────────────────────────────────────────────────────────────
+
+export interface DataQualitySummary {
+  total_companies: number;
+  pct_website_url: number;
+  pct_web_score: number;
+  pct_web_extract: number;
+  pct_ai_score: number;
+  pct_noga_code: number;
+  pct_noga_high_conf: number;
+  pct_geocoded: number;
+  crawler_terminal_count: number;
+  crawler_bot_blocked: number;
+  crawler_http_error: number;
+  crawler_timeout: number;
+  review_flag_count: number;
+  uid_mismatch_count: number;
+  active_pipeline_errors: number;
+}
+
+export interface PipelineError {
+  id: number;
+  company_id: number | null;
+  company_name: string | null;
+  company_uid: string | null;
+  error_source: string;
+  error_type: string;
+  message: string | null;
+  detail_json: string | null;
+  job_run_id: number | null;
+  created_at: string;
+  resolved_at: string | null;
+  ignored: boolean;
+}
+
+export interface JobFailure {
+  id: number;
+  job_type: string;
+  label: string;
+  org_id: number | null;
+  error: string | null;
+  message: string | null;
+  stats_json: string | null;
+  queued_at: string | null;
+  completed_at: string | null;
+}
+
+export interface CompanyCorrection {
+  website_url?: string | null;
+  purpose?: string | null;
+  noga_code?: string | null;
+  noga_label?: string | null;
+  address_city?: string | null;
+  address_zip?: string | null;
+  ai_category?: string | null;
+  ai_score?: number | null;
+}
+
+export async function fetchDataQualitySummary(): Promise<DataQualitySummary> {
+  const res = await fetch("/api/v1/admin/data-quality/summary", { credentials: "include" });
+  if (!res.ok) throw new Error("Failed to load data quality summary");
+  return res.json();
+}
+
+export async function fetchPipelineErrors(params?: {
+  page?: number;
+  page_size?: number;
+  source?: string;
+  show_resolved?: boolean;
+}): Promise<AdminPage<PipelineError>> {
+  const qs = new URLSearchParams();
+  if (params?.page) qs.set("page", String(params.page));
+  if (params?.page_size) qs.set("page_size", String(params.page_size));
+  if (params?.source) qs.set("source", params.source);
+  if (params?.show_resolved) qs.set("show_resolved", "true");
+  const res = await fetch(`/api/v1/admin/errors?${qs}`, { credentials: "include" });
+  if (!res.ok) throw new Error("Failed to load pipeline errors");
+  return res.json();
+}
+
+export async function fetchJobFailures(params?: {
+  page?: number;
+  page_size?: number;
+}): Promise<AdminPage<JobFailure>> {
+  const qs = new URLSearchParams();
+  if (params?.page) qs.set("page", String(params.page));
+  if (params?.page_size) qs.set("page_size", String(params.page_size));
+  const res = await fetch(`/api/v1/admin/errors/job-failures?${qs}`, { credentials: "include" });
+  if (!res.ok) throw new Error("Failed to load job failures");
+  return res.json();
+}
+
+export async function resolveAdminError(errorId: number): Promise<void> {
+  const res = await fetch(`/api/v1/admin/errors/${errorId}/resolve`, {
+    method: "POST",
+    credentials: "include",
+  });
+  if (!res.ok) throw new Error("Failed to resolve error");
+}
+
+export async function ignoreAdminError(errorId: number): Promise<void> {
+  const res = await fetch(`/api/v1/admin/errors/${errorId}/ignore`, {
+    method: "POST",
+    credentials: "include",
+  });
+  if (!res.ok) throw new Error("Failed to ignore error");
+}
+
+export async function correctCompanyData(companyId: number, data: CompanyCorrection): Promise<void> {
+  const res = await fetch(`/api/v1/admin/companies/${companyId}/correct`, {
+    method: "PATCH",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  });
+  if (!res.ok) throw new Error("Failed to save correction");
 }

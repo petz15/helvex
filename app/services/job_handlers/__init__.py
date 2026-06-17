@@ -131,6 +131,7 @@ JOB_HANDLERS: dict[str, Callable[[JobContext], tuple[dict, str]]] = {
     "shab_daily":                shab.handle_shab,
     "shab_backfill":             shab.handle_shab,
     "shab_archive":              shab_archive.handle_shab_archive,
+    "link_sogc_stubs":           shab_archive.handle_link_sogc_stubs,
     "sogc_preprocess":           sogc_preprocess.handle_sogc_preprocess,
     "extract_sogc_persons":      sogc_persons.handle_extract_sogc_persons,
     "resolve_bisher_links":      sogc_entity_resolution.handle_resolve_bisher_links,
