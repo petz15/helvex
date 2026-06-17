@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, prod_init]
   pull_request:
 
 jobs:
@@ -57,7 +57,7 @@ jobs:
           cache: pip
 
       - name: Install dependencies
-        run: pip install -r requirements.backend.txt pytest pytest-asyncio ruff pip-audit
+        run: pip install -r requirements.backend.txt "pytest>=9.0.3" pytest-asyncio ruff pip-audit
 
       - name: Lint
         run: python -m ruff check app/
