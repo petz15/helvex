@@ -402,11 +402,11 @@ jobs:
     environment: production
     permissions:
       contents: write
-      workflows: write
     steps:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
         with:
           fetch-depth: 0
+          token: ${{ secrets.GH_WORKFLOW_PAT }}
 
       - name: Setup tools
         run: |
