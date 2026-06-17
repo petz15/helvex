@@ -31,6 +31,7 @@
     - Brand and Product ranking via LLM (thx Tim G.)
     - Data from SIMAP (augeschrieben + won) -> integrating government bodies might be somewhat difficult -> started need be checked, government bodies are not done yet (potentially this could be simply be added as other companies or extented bodies?) 
     - SIMAP suche anbieten bzw verbesserte suchmaske
+    - epublikationen für weitere dinge wie betreibungen
 
 ### MVP before public PROD
 - Tiers are enforced - partially done (not fully checked and web searches are not gated yet + always uses api instead of checking if data already exists)
