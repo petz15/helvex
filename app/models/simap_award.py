@@ -1,7 +1,6 @@
 from datetime import date, datetime
 
-from sqlalchemy import Date, DateTime, Float, Integer, Numeric, String, Text, func
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy import Date, DateTime, Integer, Numeric, String, Text, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
@@ -72,7 +71,7 @@ class SimapAward(Base):
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
 
-    vendors: Mapped[list["SimapAwardVendor"]] = relationship(
+    vendors: Mapped[list["SimapAwardVendor"]] = relationship(  # noqa: F821
         "SimapAwardVendor", back_populates="award", cascade="all, delete-orphan"
     )
 

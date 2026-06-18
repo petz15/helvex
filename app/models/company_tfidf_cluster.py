@@ -1,6 +1,5 @@
 """Company-to-TFIDF-Cluster many-to-many relationship."""
 from sqlalchemy import Column, Integer, String, ForeignKey, Index
-from sqlalchemy.orm import relationship
 
 from app.database import Base
 

@@ -46,9 +46,9 @@ class User(Base):
     # Role within the org: owner | admin | member | viewer
     org_role: Mapped[str] = mapped_column(String(32), nullable=False, default="member")
 
-    org: Mapped["Organization | None"] = relationship("Organization", back_populates="users", foreign_keys=[org_id])
-    oauth_accounts: Mapped[list["OAuthAccount"]] = relationship("OAuthAccount", back_populates="user", cascade="all, delete-orphan")
-    org_memberships: Mapped[list["OrgMember"]] = relationship("OrgMember", back_populates="user", cascade="all, delete-orphan")
+    org: Mapped["Organization | None"] = relationship("Organization", back_populates="users", foreign_keys=[org_id])  # noqa: F821
+    oauth_accounts: Mapped[list["OAuthAccount"]] = relationship("OAuthAccount", back_populates="user", cascade="all, delete-orphan")  # noqa: F821
+    org_memberships: Mapped[list["OrgMember"]] = relationship("OrgMember", back_populates="user", cascade="all, delete-orphan")  # noqa: F821
 
     @property
     def tier(self) -> str:

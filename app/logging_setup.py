@@ -4,11 +4,8 @@ All logs are emitted as JSON to stdout for Grafana/ELK stack integration.
 Each log entry includes: timestamp, level, logger name, message, and context (latency, result codes, errors).
 """
 
-import json
 import logging
-import os
 import sys
-import time
 from logging import LogRecord
 from pythonjsonlogger import jsonlogger
 

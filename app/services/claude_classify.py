@@ -16,8 +16,8 @@ from app.services.claude import (
     _system_param as _claude_system_param,
     claude_batch_create,
     claude_batch_iter_results,
+    claude_batch_poll,
     claude_call,
-    resolve_claude_api_key,
     strip_fences,
 )
 from app.services.noga import _strip_purpose_boilerplate

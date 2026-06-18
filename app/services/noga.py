@@ -403,7 +403,7 @@ def _classify_v2_with_embedding(
     vec_list = query_vec.tolist() if isinstance(query_vec, np.ndarray) else list(query_vec)
     vec_str = "[" + ",".join(f"{x:.8f}" for x in vec_list) + "]"
 
-    def _global_search(l: str) -> list:
+    def _global_search(lang: str) -> list:
         return db.execute(sql_text("""
             WITH q AS (SELECT CAST(:vec AS vector) AS v)
             SELECT noga_code, level_no, 1 - (embedding <=> q.v) AS similarity
@@ -411,7 +411,7 @@ def _classify_v2_with_embedding(
             WHERE  lang = :lang AND ann_type = 'includes'
             ORDER  BY embedding <=> q.v
             LIMIT  50
-        """), {"vec": vec_str, "lang": l}).fetchall()
+        """), {"vec": vec_str, "lang": lang}).fetchall()
 
     rows = _global_search(lang)
     if not rows and lang != _DEFAULT_LANG:
@@ -642,7 +642,7 @@ def classify_company_noga_v2(db: Session, company: Company) -> dict:
     vec_list = query_vec.tolist() if isinstance(query_vec, np.ndarray) else list(query_vec)
     vec_str = "[" + ",".join(f"{x:.8f}" for x in vec_list) + "]"
 
-    def _global_search(l: str) -> list:
+    def _global_search(lang: str) -> list:
         return db.execute(sql_text("""
             WITH q AS (SELECT CAST(:vec AS vector) AS v)
             SELECT noga_code, level_no, 1 - (embedding <=> q.v) AS similarity
@@ -650,7 +650,7 @@ def classify_company_noga_v2(db: Session, company: Company) -> dict:
             WHERE  lang = :lang AND ann_type = 'includes'
             ORDER  BY embedding <=> q.v
             LIMIT  50
-        """), {"vec": vec_str, "lang": l}).fetchall()
+        """), {"vec": vec_str, "lang": lang}).fetchall()
 
     rows = _global_search(lang)
     if not rows and lang != _DEFAULT_LANG:

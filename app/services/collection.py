@@ -181,8 +181,6 @@ from app.services.zefix_import import (  # noqa: E402
     run_zefix_detail_collect,
     _extract_company_fields,
     _extract_purpose_from_raw,
-    _is_control_signal_exception,
-    _sleep_with_abort,
 )
 
 from app.services.web_enrichment import (  # noqa: E402
@@ -191,7 +189,6 @@ from app.services.web_enrichment import (  # noqa: E402
     rescore_from_stored_results,
     run_batch_collect,
     _google_search_ready,
-    _google_scoring_overrides,
 )
 
 from app.services.geocoding_pipeline import (  # noqa: E402
@@ -208,7 +205,6 @@ from app.services.noga_pipeline import (  # noqa: E402
 from app.services.claude_classify import (  # noqa: E402
     claude_classify_batch,
     resume_claude_batch,
-    _DEFAULT_CLAUDE_PROMPT,
 )
 
 from app.services.language_detection import detect_language_bulk  # noqa: E402

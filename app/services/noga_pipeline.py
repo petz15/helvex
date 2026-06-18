@@ -42,9 +42,6 @@ def reclassify_noga(
         "errors": [],
     }
 
-    # Load boilerplate patterns once for the whole run (shared with embedding pipeline).
-    boilerplate_patterns = crud.get_active_boilerplate_patterns(db)
-
     query = db.query(Company)
     if only_missing_noga and not include_stale:
         query = query.filter(Company.noga_code.is_(None))

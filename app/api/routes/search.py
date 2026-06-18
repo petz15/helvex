@@ -237,7 +237,7 @@ def global_search(
         )
         .filter(
             SogcAuditor.auditor_name_normalized.like(term_lower),
-            or_(SogcAuditor.is_current == True, SogcAuditor.is_current.is_(None)),
+            or_(SogcAuditor.is_current == True, SogcAuditor.is_current.is_(None)),  # noqa: E712
         )
         .group_by(SogcAuditor.auditor_uid, SogcAuditor.auditor_name, SogcAuditor.auditor_location)
         .order_by(desc("client_count"))

@@ -1,5 +1,4 @@
 import asyncio
-import html as _html
 import logging
 import os
 import pathlib
@@ -32,32 +31,27 @@ if sys.version_info >= (3, 12):
     ForwardRef._evaluate = _patched_evaluate  # type: ignore[method-assign]
 # ──────────────────────────────────────────────────────────────────────────────
 
-from alembic import command as alembic_command
-from alembic.config import Config as AlembicConfig
-from fastapi import Depends, FastAPI, Form, Query, Request, status
-from fastapi.middleware.gzip import GZipMiddleware
-from fastapi.responses import HTMLResponse, RedirectResponse
-from fastapi.staticfiles import StaticFiles
-from sqlalchemy import inspect as sa_inspect
-from sqlalchemy.orm import Session
+from alembic import command as alembic_command  # noqa: E402
+from alembic.config import Config as AlembicConfig  # noqa: E402
+from fastapi import Depends, FastAPI, Request  # noqa: E402
+from fastapi.middleware.gzip import GZipMiddleware  # noqa: E402
+from fastapi.responses import HTMLResponse, RedirectResponse  # noqa: E402
+from fastapi.staticfiles import StaticFiles  # noqa: E402
+from sqlalchemy import inspect as sa_inspect  # noqa: E402
 
-from app import crud
-from app.auth import (
+from app.auth import (  # noqa: E402
     COOKIE_NAME,
     _SESSION_MAX_AGE,
     _user_id_from_request,
     create_session_cookie,
     decode_session_cookie,
     get_current_user,
-    get_client_ip,
-    is_login_allowed,
-    record_login_failure,
 )
-from app.config import settings
-from app.database import Base, engine, get_db
-from app.services.job_worker import kick_job_worker
-from app.services.scoring import get_default_scoring_config
-from app.api.routes import admin_router, auth_router, billing_router, clusters_router, companies_router, invites_router, jobs_router, map_router, notes_router, orgs_router, persons_router, search_router, settings_router, views_router, workspace_router
+from app.config import settings  # noqa: E402
+from app.database import Base, engine  # noqa: E402
+from app.services.job_worker import kick_job_worker  # noqa: E402
+from app.services.scoring import get_default_scoring_config  # noqa: E402
+from app.api.routes import admin_router, auth_router, billing_router, clusters_router, companies_router, invites_router, jobs_router, map_router, notes_router, orgs_router, persons_router, search_router, settings_router, views_router, workspace_router  # noqa: E402
 
 # Paths that do NOT require authentication
 _PUBLIC_PREFIXES = (
@@ -531,7 +525,7 @@ _MAX_BODY_SIZE = 10 * 1024 * 1024  # 10 MB
 
 app.mount("/static", StaticFiles(directory="app/static"), name="static")
 
-from prometheus_fastapi_instrumentator import Instrumentator
+from prometheus_fastapi_instrumentator import Instrumentator  # noqa: E402
 Instrumentator().instrument(app).expose(app, endpoint="/metrics", include_in_schema=False)
 
 app.include_router(admin_router, prefix="/api/v1")

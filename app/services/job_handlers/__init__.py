@@ -10,7 +10,7 @@ waiting_external without completing it (used by claude_classify batch path).
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, Callable
 
 from sqlalchemy.orm import Session

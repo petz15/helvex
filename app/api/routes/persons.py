@@ -788,9 +788,9 @@ def search_auditors(
         conditions.append(SogcAuditor.auditor_legal_form.ilike(f"%{legal_form}%"))
     if is_current is True:
         # treat NULL as current (historical data predates the is_current field being set)
-        conditions.append(or_(SogcAuditor.is_current == True, SogcAuditor.is_current.is_(None)))
+        conditions.append(or_(SogcAuditor.is_current == True, SogcAuditor.is_current.is_(None)))  # noqa: E712
     elif is_current is False:
-        conditions.append(SogcAuditor.is_current == False)
+        conditions.append(SogcAuditor.is_current == False)  # noqa: E712
 
     rows = (
         db.query(SogcAuditor, CompanyModel.id, CompanyModel.name)
@@ -817,9 +817,9 @@ def get_auditor_clients(
 
     conditions = [SogcAuditor.auditor_uid == auditor_uid]
     if is_current is True:
-        conditions.append(or_(SogcAuditor.is_current == True, SogcAuditor.is_current.is_(None)))
+        conditions.append(or_(SogcAuditor.is_current == True, SogcAuditor.is_current.is_(None)))  # noqa: E712
     elif is_current is False:
-        conditions.append(SogcAuditor.is_current == False)
+        conditions.append(SogcAuditor.is_current == False)  # noqa: E712
 
     rows = (
         db.query(SogcAuditor, CompanyModel.id, CompanyModel.name)
@@ -950,7 +950,6 @@ def search_corporate_roles(
 ):
     from app.models.sogc_corporate_role import SogcCorporateRole
     from app.models.company import Company as CompanyModel
-    from sqlalchemy import func
 
     qry = db.query(SogcCorporateRole)
 

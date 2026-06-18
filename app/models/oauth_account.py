@@ -24,4 +24,4 @@ class OAuthAccount(Base):
         default=lambda: datetime.now(tz=timezone.utc),
     )
 
-    user: Mapped["User"] = relationship("User", back_populates="oauth_accounts")
+    user: Mapped["User"] = relationship("User", back_populates="oauth_accounts")  # noqa: F821

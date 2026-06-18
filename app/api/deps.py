@@ -4,7 +4,7 @@ from __future__ import annotations
 from fastapi import Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
-from app.auth import get_current_user, require_verified_email
+from app.auth import require_verified_email
 from app.database import get_db
 from app.models.org_member import OrgMember
 from app.models.organization import Organization

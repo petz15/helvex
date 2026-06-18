@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import logging
 import time
-from datetime import date, datetime, timedelta, timezone
+from datetime import date
 from typing import Any, Callable
 
 import httpx
@@ -51,7 +51,6 @@ def _extract_award_row(proj: dict, detail: dict) -> dict[str, Any]:
     base = detail.get("base") or {}
     decision = detail.get("decision") or {}
     procurement = detail.get("procurement") or {}
-    project_info = detail.get("project-info") or {}
     lot = detail.get("lot")
 
     title = proj.get("title") or {}

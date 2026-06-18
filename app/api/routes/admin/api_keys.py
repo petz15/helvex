@@ -4,16 +4,16 @@ from __future__ import annotations
 
 import logging
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
-
-logger = logging.getLogger(__name__)
 
 from app import crud
 from app.auth import require_superadmin
 from app.database import get_db
 from app.models.organization import Organization
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api-keys", tags=["admin"])
 

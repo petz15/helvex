@@ -245,7 +245,7 @@ def _extract_languages(soup) -> set[str]:
         hl = str(link["hreflang"])[:2].lower()
         if hl and hl != "x-":
             langs.add(hl)
-    langs = {l for l in langs if len(l) == 2 and l.isalpha()}
+    langs = {lang for lang in langs if len(lang) == 2 and lang.isalpha()}
     # Lingua content-based fallback when no HTML metadata declares a language
     if not langs:
         body = soup.get_text(separator=" ", strip=True)

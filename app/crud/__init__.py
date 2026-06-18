@@ -25,9 +25,9 @@ from app.crud.google_scoring_filter import (
     list_google_directory_domains,
     list_google_stopwords,
     list_tfidf_stopwords,
-    seed_default_directory_domains,
-    seed_default_google_stopwords,
-    seed_default_tfidf_stopwords,
+    seed_default_directory_domains,  # noqa: F401
+    seed_default_google_stopwords,  # noqa: F401
+    seed_default_tfidf_stopwords,  # noqa: F401
     update_google_directory_domain,
     update_google_stopword,
     update_tfidf_stopword,
@@ -92,10 +92,10 @@ from app.crud.job_run import (
     list_jobs_for_user,
     list_org_jobs,
     list_queued_jobs,
-    has_noga_nightly_run_today,
-    has_shab_daily_run_today,
-    has_simap_daily_run_today,
-    list_waiting_llm_batches,
+    has_noga_nightly_run_today,  # noqa: F401
+    has_shab_daily_run_today,  # noqa: F401
+    has_simap_daily_run_today,  # noqa: F401
+    list_waiting_llm_batches,  # noqa: F401
     mark_cancel_requested,
     mark_cancelled,
     mark_completed,
@@ -103,7 +103,7 @@ from app.crud.job_run import (
     mark_pause_requested,
     mark_paused,
     mark_running,
-    mark_waiting_external,
+    mark_waiting_external,  # noqa: F401
     requeue_interrupted_jobs,
     requeue_recent_abandoned_jobs,
     resume_all_paused_jobs,

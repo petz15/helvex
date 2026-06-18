@@ -74,7 +74,6 @@ def classify_new_companies_inline(
 
 def _run_noga_batch(db: Session, companies: list, stats: dict) -> None:
     from app.services.noga import apply_noga_classification
-    from app import crud
 
     mappings = []
     for company in companies:

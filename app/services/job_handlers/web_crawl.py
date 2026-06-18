@@ -738,9 +738,7 @@ def handle_web_crawl_single(ctx: JobContext) -> tuple[dict, str]:
 
     candidates = crawler_crud.parse_google_results_raw(raw_json)
     if candidates:
-        upserted = crawler_crud.upsert_url_candidates(ctx.db, company_id, candidates)
-    else:
-        upserted = []
+        crawler_crud.upsert_url_candidates(ctx.db, company_id, candidates)
 
     # ── Resolve which candidate to crawl ─────────────────────────────────
     # target_candidate_id: crawl a specific candidate (fallback mode) without

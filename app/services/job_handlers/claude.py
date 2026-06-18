@@ -10,7 +10,9 @@ def handle_claude_classify(ctx: JobContext) -> tuple[dict, str]:
     from app import crud
 
     _org_id = ctx.job.org_id
-    _eff = lambda key, default="": crud.get_effective_setting(ctx.db, key, org_id=_org_id, default=default)
+
+    def _eff(key: str, default: str = "") -> str:
+        return crud.get_effective_setting(ctx.db, key, org_id=_org_id, default=default)
 
     from app.services.claude import resolve_claude_api_key
     _api_key = resolve_claude_api_key(ctx.db, _org_id)

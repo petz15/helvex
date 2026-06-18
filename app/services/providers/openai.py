@@ -169,7 +169,6 @@ def openai_batch_create(
 
     # Create temporary file and submit
     import tempfile
-    import jsonl
 
     with tempfile.NamedTemporaryFile(mode='w', suffix='.jsonl', delete=False) as f:
         for br in batch_requests:

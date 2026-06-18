@@ -13,10 +13,14 @@ import os
 import threading
 import time
 import traceback
+from typing import TYPE_CHECKING, Any
 
 from app import crud
 from app.database import SessionLocal
 from sqlalchemy.orm import Session
+
+if TYPE_CHECKING:
+    from app.models.job_run import JobRun
 
 logger = logging.getLogger(__name__)
 
@@ -239,7 +243,7 @@ def _apply_credit_deduction_if_needed(
 def _refund_job_credits_if_needed(
     db: Session,
     *,
-    job: "JobRun",  # type: ignore[name-defined]
+    job: JobRun,
     reason: str,
 ) -> None:
     """Issue a credit refund for a job that was charged at enqueue but never completed.
@@ -318,7 +322,7 @@ def _maybe_sync(app, **kwargs) -> None:
 
 def _run_job(app, job_id: int) -> None:  # noqa: C901
     """Execute one job. `app` may be None when called from an RQ worker."""
-    from app.metrics import record_job_duration, record_job_error, ACTIVE_JOBS
+    from app.metrics import record_job_duration
     from app.services.job_handlers import JOB_HANDLERS as _JOB_HANDLERS
     
     job_start_time = time.monotonic()
@@ -475,7 +479,7 @@ def _run_job(app, job_id: int) -> None:  # noqa: C901
                     done_msg += f" (resumed from {resume_from})"
 
             elif job.job_type == "reextract_zefix_raw":
-                from app.services.zefix_import import reextract_zefix_raw_fields, REEXTRACTABLE_FIELDS
+                from app.services.zefix_import import reextract_zefix_raw_fields
 
                 def _progress(done: int, total: int, stats: dict) -> None:
                     _assert_not_cancelled()
@@ -966,7 +970,9 @@ def _run_job(app, job_id: int) -> None:  # noqa: C901
                 from app.services.claude import resolve_claude_api_key
 
                 _org_id = job.org_id
-                _eff = lambda key, default="": crud.get_effective_setting(db, key, org_id=_org_id, default=default)
+
+                def _eff(key: str, default: str = "") -> str:
+                    return crud.get_effective_setting(db, key, org_id=_org_id, default=default)
                 _api_key = resolve_claude_api_key(db, _org_id)
                 _use_batch = bool(params.get("use_batch_api", False))
 
@@ -1040,7 +1046,7 @@ def _run_job(app, job_id: int) -> None:  # noqa: C901
                 done_msg = f"Done — {stats['classified']} classified, {stats['skipped']} skipped, ~{tokens} tokens, {len(stats['errors'])} errors"
 
             elif job.job_type in ("shab_daily", "shab_backfill"):
-                from datetime import date as _date, timedelta as _td
+                from datetime import date as _date
                 from app.services.shab_import import import_shab_publications, yesterday
 
                 if job.job_type == "shab_daily":
@@ -1373,7 +1379,7 @@ def _run_job(app, job_id: int) -> None:  # noqa: C901
 def _maybe_send_job_notification(
     db: Session,
     *,
-    job: "Any",
+    job: Any,
     event: str,
     stats: dict | None = None,
     summary: str | None = None,

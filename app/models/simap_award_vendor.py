@@ -46,5 +46,5 @@ class SimapAwardVendor(Base):
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
 
-    award: Mapped["SimapAward"] = relationship("SimapAward", back_populates="vendors")
-    company: Mapped["Company"] = relationship("Company")  # type: ignore[name-defined]
+    award: Mapped["SimapAward"] = relationship("SimapAward", back_populates="vendors")  # noqa: F821
+    company: Mapped["Company"] = relationship("Company")  # noqa: F821

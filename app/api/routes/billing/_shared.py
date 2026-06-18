@@ -5,33 +5,23 @@ from __future__ import annotations
 import json
 import logging
 import threading
-from datetime import datetime, timedelta, timezone
 from typing import Literal
 from urllib.parse import urlencode, urlparse
 
-from fastapi import Depends, HTTPException, status
+from fastapi import HTTPException, status
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_current_org, require_org_role
-from app.auth import get_current_user
-from app.database import SessionLocal, get_db
-from app.models.org_credit_transaction import OrgCreditTransaction
-from app.models.org_member import OrgMember
+from app.database import SessionLocal
 from app.models.organization import Organization
 from app.models.payment_transaction import PaymentTransaction
 from app.models.user import User
-from app.schemas.billing import BillingAddress, BillingTierRead
+from app.schemas.billing import BillingAddress
 from app.services.billing_addresses import get_default_billing_address
-from app.services import payment_transactions, payments
+from app.services import payments
 from app.services.tiers import (
-    TIER_RANK,
-    get_billing_tier_by_slug,
-    get_billing_tiers,
     get_tier_price_chf,
-    get_tier_yearly_price_chf,
-    normalize_tier,
 )
 
 logger = logging.getLogger(__name__)

@@ -74,7 +74,6 @@ def detect_language_bulk(
     Safe to re-run — with only_missing=True skips companies that already have a language.
     """
     from sqlalchemy import func
-    from app import crud
     from app.models.company import Company
 
     stats = {

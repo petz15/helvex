@@ -19,7 +19,6 @@ from app.models.organization import Organization
 from app.models.company_url_candidate import CompanyUrlCandidate
 from app.models.company_web_extract import CompanyWebExtract
 from app.models.company_web_page import CompanyWebPage
-from app.models.simap_award import SimapAward
 from app.models.simap_award_vendor import SimapAwardVendor
 from app.models.user import User
 from app.schemas.company import CompanyCreate, CompanyRead, CompanyUpdate, GoogleSearchResult

@@ -11,7 +11,6 @@ Zefix SOGC IDs are stored as plain numeric strings and will never collide.
 
 from __future__ import annotations
 
-import io
 import logging
 import random
 import re

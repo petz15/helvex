@@ -1,5 +1,4 @@
 from sqlalchemy.orm import Session
-from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from app.models.google_directory_domain import GoogleDirectoryDomain
 from app.models.google_stopword import GoogleStopword

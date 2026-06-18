@@ -1,6 +1,6 @@
 """Saved dashboard views (per user)."""
 import json
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from app.auth import get_current_user

@@ -16,8 +16,6 @@ import time
 from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
-logger = logging.getLogger(__name__)
-
 from sqlalchemy.orm import Session
 
 from app import crud
@@ -30,6 +28,8 @@ from app.clients.shab_client import (
 )
 from app.schemas.company import CompanyUpdate
 from app.services.collection import enrich_company, import_company_from_zefix_uid
+
+logger = logging.getLogger(__name__)
 
 # UIDs queued for detail fetch are collected during import and submitted
 # as a single job at the end to avoid enqueuing hundreds of tiny jobs.

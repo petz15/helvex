@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from fastapi import HTTPException, Request, status
 
-from app.auth import check_public_rate_limit, get_client_ip
+from app.auth import check_public_rate_limit
 from app.models.user import User
 
 

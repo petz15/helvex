@@ -66,5 +66,5 @@ def handle_simap(ctx: JobContext) -> tuple[dict, str]:
     if stats.get("errors"):
         done_msg += f", {len(stats['errors'])} errors"
     if resume_cursor:
-        done_msg += f" (resumed)"
+        done_msg += " (resumed)"
     return stats, done_msg

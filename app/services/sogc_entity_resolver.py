@@ -28,7 +28,6 @@ handle same-company mutations that reveal a prior state.
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
 from typing import Callable
 
 from sqlalchemy.orm import Session
@@ -143,7 +142,7 @@ def _recompute_after_merge(db: Session, entity_id: int) -> None:
     from app.models.sogc_person_entity import SogcPersonEntity
     from app.models.sogc_person_appearance import SogcPersonAppearance
     from app.services.sogc_person_extractor import _recompute_entity_confidence
-    from sqlalchemy import func, distinct, or_
+    from sqlalchemy import func
 
     entity = db.get(SogcPersonEntity, entity_id)
     if entity is None:

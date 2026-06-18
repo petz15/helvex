@@ -14,15 +14,15 @@ to always succeed without modifying the balance.
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
+from datetime import datetime
 
 from sqlalchemy.orm import Session
 
-logger = logging.getLogger(__name__)
-
 from app.models.org_credit_transaction import OrgCreditTransaction
 from app.models.organization import Organization
-from app.services.tiers import get_topup_bonus_rate, get_tier_rank, normalize_tier
+from app.services.tiers import get_topup_bonus_rate, get_tier_rank
+
+logger = logging.getLogger(__name__)
 
 CREDIT_COSTS: dict[str, int] = {
     "batch_llm": 8,               # per company

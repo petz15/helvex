@@ -22,7 +22,6 @@ from app.api.routes.billing._shared import (
     BillingTierRead,
     _cancel_provider_transaction,
     _resolve_worldline_payment_alias,
-    logger,
 )
 
 router = APIRouter()

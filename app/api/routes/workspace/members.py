@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from app import crud
-from app.api.deps import get_current_org, require_org_role
+from app.api.deps import require_org_role
 from app.database import get_db
 from app.models.org_member import OrgMember
 from app.models.organization import Organization

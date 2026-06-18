@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session
 from app import crud
 from app.clients.zefix_client import SWISS_CANTONS
 from app.auth import get_current_user, require_superadmin
-from app.services.rate_limit import check_job_rate_limit, check_rate_limit
+from app.services.rate_limit import check_job_rate_limit
 from app.database import get_db
 from app.models.organization import Organization
 from app.models.user import User
@@ -786,7 +786,6 @@ def trigger_claude_preview(
     # ── Run classification synchronously (no job queue) ────────────────────────
     from app.config import settings as _cfg
     from app.services.collection import claude_classify_batch
-    import anthropic as _anthropic
 
     api_key = (_cfg.anthropic_api_key or "").strip()
     if not api_key:

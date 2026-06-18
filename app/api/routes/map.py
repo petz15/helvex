@@ -6,7 +6,6 @@ from fastapi.responses import JSONResponse
 from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
-from app import crud
 from app.clients.geocoding_client import geocode_address
 from app.crud.company import _apply_filters as _apply_company_filters
 from app.database import get_db

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import datetime, timezone
 from typing import Any
 
 import httpx
@@ -1202,7 +1201,6 @@ def reextract_zefix_raw_fields(
         if null_checks:
             q = q.filter(or_(*null_checks))
 
-    from sqlalchemy import update as _sa_update
 
     target_set = set(target_fields)
     q = q.order_by(CompanyModel.id)

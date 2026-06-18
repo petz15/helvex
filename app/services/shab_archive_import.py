@@ -408,9 +408,7 @@ def _paginate_window(
 ) -> None:
     """Paginate one date window (or the default window if no dates given)."""
     from app.clients.shab_archive_client import (
-        fetch_archive_page, get_entries, get_total_elements,
-        is_last_page, extract_text_from_pdf, normalize_pdf_text,
-        extract_uid_from_text, parse_entry_fields, is_hr_heading,
+        fetch_archive_page, get_entries, is_last_page, extract_text_from_pdf, extract_uid_from_text,
     )
     from app.models.company import Company
 

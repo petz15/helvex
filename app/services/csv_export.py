@@ -16,7 +16,6 @@ no automatic S3 lifecycle rule is required for correctness).
 from __future__ import annotations
 
 import csv
-import io
 import logging
 import os
 import tempfile
@@ -25,7 +24,6 @@ from typing import Any, Callable
 
 from sqlalchemy.orm import Session
 
-from app import crud
 from app.crud.company import list_companies, _apply_filters
 from app.models.company import Company
 from app.models.org_company_state import OrgCompanyState

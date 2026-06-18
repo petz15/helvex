@@ -1,4 +1,3 @@
-import json
 import logging
 import threading
 import time
@@ -6,13 +5,13 @@ from collections import Counter
 from datetime import date
 from typing import Any
 
-logger = logging.getLogger(__name__)
-
-from sqlalchemy import case, func, nullslast, or_, and_, text as _text
+from sqlalchemy import case, func, nullslast, or_, text as _text
 from sqlalchemy.orm import Session
 
 from app.models.company import Company
 from app.schemas.company import CompanyCreate, CompanyUpdate
+
+logger = logging.getLogger(__name__)
 
 try:
     from app.models.company_tfidf_cluster import CompanyTfidfCluster
@@ -223,7 +222,6 @@ def _apply_filters(query, *, name_filter, uid_filter=None, canton, review_status
         if HAS_JUNCTION_TABLES:
             query = query.join(CompanyPurposeKeyword).filter(CompanyPurposeKeyword.keyword.in_(terms))
         else:
-            from sqlalchemy import text as _sqlt
             query = query.filter(or_(
                 Company.purpose_keywords_arr.overlap(terms),   # uses GIN index
                 *[
@@ -1158,7 +1156,6 @@ def _compute_category_stats(
     )
 
     org_join = ""
-    org_where = ""
     if org_id:
         org_join = "INNER JOIN org_company_state ocs ON ocs.company_id = c.id AND ocs.org_id = :org_id"
         bind_org: dict = {"value": value, "org_id": org_id}

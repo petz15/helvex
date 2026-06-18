@@ -102,7 +102,7 @@ def login_for_token(
 # Cookie-based login / logout (used by the Next.js login page)
 # ---------------------------------------------------------------------------
 
-from pydantic import BaseModel as _BaseModel
+from pydantic import BaseModel as _BaseModel  # noqa: E402
 
 
 class _LoginRequest(_BaseModel):
@@ -504,11 +504,11 @@ def delete_my_billing_address(
 # Google OAuth2
 # ---------------------------------------------------------------------------
 
-import secrets as _secrets
-from urllib.parse import urlencode as _urlencode
+import secrets as _secrets  # noqa: E402
+from urllib.parse import urlencode as _urlencode  # noqa: E402
 
-import httpx as _httpx
-from fastapi.responses import RedirectResponse as _Redirect
+import httpx as _httpx  # noqa: E402
+from fastapi.responses import RedirectResponse as _Redirect  # noqa: E402
 
 _OAUTH_STATE_COOKIE = "oauth_state"
 _OAUTH_NEXT_COOKIE = "oauth_next"

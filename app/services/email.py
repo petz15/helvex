@@ -209,8 +209,8 @@ def send_capture_failure_alert(*, to: str, failed_tx_ids: list[int]) -> None:
         f'<h1 style="margin:0 0 4px;font-size:20px;font-weight:700;color:#b91c1c;letter-spacing:-0.3px;">⚠ {count} capture(s) failed</h1>'
         + _p(f"The nightly billing renewal could not capture <strong>{count}</strong> Worldline/Saferpay transaction(s) at {now_str}.")
         + _p("These payments are <strong>authorized</strong> (funds reserved) but <strong>not yet settled</strong>. Without a capture, Saferpay will release the authorization after ~7 days.")
-        + f'<table role="presentation" style="border-collapse:collapse;margin:12px 0 20px;">'
-        + f'<tr><th style="text-align:left;padding:4px 16px 4px 0;font-size:13px;color:#6b7280;border-bottom:1px solid #e5e7eb;">Transaction IDs</th></tr>'
+        + '<table role="presentation" style="border-collapse:collapse;margin:12px 0 20px;">'
+        + '<tr><th style="text-align:left;padding:4px 16px 4px 0;font-size:13px;color:#6b7280;border-bottom:1px solid #e5e7eb;">Transaction IDs</th></tr>'
         + rows
         + "</table>"
         + _p("<strong>What to do:</strong>")
@@ -265,7 +265,7 @@ def send_low_credit_alert(
     body = (
         _h1("Your credit balance is low")
         + _p(f"The organisation <strong>{org_name}</strong> is running low on credits.")
-        + f'<table role="presentation" style="background:#f9fafb;border-radius:8px;padding:16px 20px;margin:8px 0 20px;width:100%;box-sizing:border-box;">'
+        + '<table role="presentation" style="background:#f9fafb;border-radius:8px;padding:16px 20px;margin:8px 0 20px;width:100%;box-sizing:border-box;">'
         + f'<tr><td style="font-size:28px;font-weight:700;color:#111827;letter-spacing:-0.5px;">{balance:,}<span style="font-size:16px;font-weight:500;color:#6b7280;"> credits</span></td></tr>'
         + f'<tr><td style="font-size:14px;color:#6b7280;margin-top:4px;">≈ CHF {balance_chf}</td></tr>'
         + "</table>"
@@ -331,7 +331,7 @@ def send_job_failed(
     body = (
         _h1("A background job failed")
         + _p("One of your background jobs encountered an error and could not complete.")
-        + f'<table role="presentation" style="border-collapse:collapse;margin:8px 0 20px;width:100%;">'
+        + '<table role="presentation" style="border-collapse:collapse;margin:8px 0 20px;width:100%;">'
         + f'<tr><td style="padding:6px 0;font-size:13px;color:#6b7280;width:80px;">Job</td><td style="padding:6px 0;font-size:14px;font-weight:600;color:#111827;">{label}</td></tr>'
         + f'<tr><td style="padding:6px 0;font-size:13px;color:#6b7280;">Type</td><td style="padding:6px 0;font-size:14px;color:#374151;">{job_type}</td></tr>'
         + f'<tr><td style="padding:6px 0;font-size:13px;color:#6b7280;vertical-align:top;">Error</td><td style="padding:6px 0;font-size:14px;color:#b91c1c;">{summary}</td></tr>'
@@ -368,8 +368,8 @@ def send_saved_view_alert(
     body = (
         _h1(f"{new_count} new {noun} found")
         + _p(f"<strong>{new_count} new {noun}</strong> now {verb} your saved search <strong>&#8220;{view_name}&#8221;</strong>.")
-        + f'<table role="presentation" style="background:#f9fafb;border-radius:8px;padding:14px 20px;margin:8px 0 20px;width:100%;box-sizing:border-box;">'
-        + f'<tr><td style="font-size:13px;color:#6b7280;">Total matching</td></tr>'
+        + '<table role="presentation" style="background:#f9fafb;border-radius:8px;padding:14px 20px;margin:8px 0 20px;width:100%;box-sizing:border-box;">'
+        + '<tr><td style="font-size:13px;color:#6b7280;">Total matching</td></tr>'
         + f'<tr><td style="font-size:24px;font-weight:700;color:#111827;letter-spacing:-0.5px;">{previous_count + new_count:,} <span style="font-size:14px;font-weight:400;color:#6b7280;">(was {previous_count:,})</span></td></tr>'
         + "</table>"
         + _btn(view_url, "View results")
