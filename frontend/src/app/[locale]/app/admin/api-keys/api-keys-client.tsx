@@ -96,7 +96,7 @@ function PlatformTab({
           <div>
             <h2 className="text-sm font-semibold text-slate-800">Platform API Key (Claude)</h2>
             <p className="text-xs text-slate-400 mt-0.5">
-              Used by all orgs that don't have a custom key
+              Used by all orgs that don&apos;t have a custom key
             </p>
           </div>
           {data && <StatusBadge status={data.status} />}

@@ -18,8 +18,8 @@ from app.models.user import User
 from app.services import payment_transactions, payments
 from app.services.tiers import get_billing_tiers
 
+from app.schemas.billing import BillingTierRead
 from app.api.routes.billing._shared import (
-    BillingTierRead,
     _cancel_provider_transaction,
     _resolve_worldline_payment_alias,
 )

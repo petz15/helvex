@@ -1,4 +1,5 @@
 "use client";
+import Link from "next/link";
 import { useState, useEffect, useRef } from "react";
 import useSWR from "swr"; // still used for CSV export status
 import { CheckCircle2, XCircle, Clock, Loader2, PauseCircle, Play, Square, ChevronDown, ChevronUp, RefreshCw, Download, FileText } from "lucide-react";
@@ -277,9 +278,9 @@ export function JobsClient() {
               <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
                 Export capped at {exportStatus.tier_limit?.toLocaleString()} rows
                 {exportStatus.total_matching != null && ` — ${exportStatus.total_matching.toLocaleString()} matched your filters`}.{" "}
-                <a href="/app/billing" className="underline font-medium capitalize">
+                <Link href="/app/billing" className="underline font-medium capitalize">
                   Upgrade to {exportStatus.upgrade_to}
-                </a>{" "}for more.
+                </Link>{" "}for more.
               </div>
             )}
 

@@ -1,5 +1,6 @@
 "use client";
 import { useState, useCallback, useTransition, Suspense, useEffect, useRef } from "react";
+import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import useSWR from "swr";
 import {
@@ -58,7 +59,7 @@ function SetupGateBanner({ hasApiKey, hasTargetDescription }: { hasApiKey: boole
           <span className="inline-flex items-center gap-1 text-[10px] uppercase tracking-wide text-amber-700 bg-amber-100 border border-amber-300 rounded px-1.5 py-0.5 font-semibold">Pro</span>
         </div>
         <p className="text-xs text-amber-700 mt-0.5">
-          AI lead scoring is a paid feature that uses credits per company. Set your {missing.join(" and ")} in <a href="/app/settings" className="underline">Settings → Scoring</a> to enable it. Free-tier filtering by NOGA, canton, and score is unaffected.
+          AI lead scoring is a paid feature that uses credits per company. Set your {missing.join(" and ")} in <Link href="/app/settings" className="underline">Settings → Scoring</Link> to enable it. Free-tier filtering by NOGA, canton, and score is unaffected.
         </p>
       </div>
     </div>
@@ -208,6 +209,7 @@ function AutocompleteInput({
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     if (!query) { setResults([]); return; }
     if (timer.current) clearTimeout(timer.current);
     timer.current = setTimeout(async () => {

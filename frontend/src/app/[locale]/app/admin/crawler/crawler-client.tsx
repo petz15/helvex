@@ -354,9 +354,9 @@ export function CrawlerAdminClient() {
               </button>
             </div>
             <p className="text-xs text-slate-400 mt-3">
-              "Reset HTTP failures" moves bot_blocked / http_error / timeout / no_content rows (HTTP tier) back to pending so they are re-crawled.
-              "Reset Playwright failures" does the same for the Playwright tier.
-              "Backfill URL candidates" enqueues a job that reads stored Google results and populates company_url_candidates for companies that were enriched before auto-populate was added.
+              {'"'}Reset HTTP failures{'"'} moves bot_blocked / http_error / timeout / no_content rows (HTTP tier) back to pending so they are re-crawled.
+              {'"'}Reset Playwright failures{'"'} does the same for the Playwright tier.
+              {'"'}Backfill URL candidates{'"'} enqueues a job that reads stored Google results and populates company_url_candidates for companies that were enriched before auto-populate was added.
               To trigger extraction or re-extract all HTML, use the Collection page.
             </p>
           </Section>
@@ -371,7 +371,7 @@ export function CrawlerAdminClient() {
               <Flag size={14} className="text-amber-500" /> Extracts flagged for review
             </h2>
             <p className="text-xs text-slate-400">
-              UID found on crawled page belongs to a different company. Review and promote/discard from the company's Website tab.
+              UID found on crawled page belongs to a different company. Review and promote/discard from the company&apos;s Website tab.
             </p>
           </div>
           <div className="overflow-x-auto">

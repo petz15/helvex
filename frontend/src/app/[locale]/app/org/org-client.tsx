@@ -1,4 +1,5 @@
 "use client";
+import Link from "next/link";
 import { useState } from "react";
 import useSWR from "swr";
 import {
@@ -889,12 +890,12 @@ export function OrgClient({ embedded = false }: { embedded?: boolean }) {
         <p className="text-sm text-blue-700">
           LLM configuration, FLEX scoring parameters, and AI classification settings have moved to the Settings page.
         </p>
-        <a
+        <Link
           href="/app/settings?tab=llm"
           className="ml-4 shrink-0 flex items-center gap-1.5 bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded-lg text-sm font-medium transition-colors"
         >
           <Sparkles size={13} /> Open Settings
-        </a>
+        </Link>
       </div>
 
       {/* Danger Zone */}

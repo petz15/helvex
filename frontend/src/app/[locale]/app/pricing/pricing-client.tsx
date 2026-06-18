@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import useSWR from "swr";
 import {
@@ -41,6 +42,7 @@ export function PricingClient() {
     const alreadyProcessed = params.get("already_processed") === "true";
     if (!checkout && !alreadyProcessed && !reason) return;
     if (alreadyProcessed) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setCheckoutMessage({ kind: "success", message: "This checkout was already processed." });
     } else if (checkout === "cancel") {
       setCheckoutMessage({
@@ -368,12 +370,12 @@ export function PricingClient() {
           </div>
           <div className="flex flex-wrap items-center justify-between gap-3">
             {process.env.NODE_ENV !== "production" && (
-              <a
+              <Link
                 href="/app/dev/billing"
                 className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-600 transition-colors hover:bg-slate-50"
               >
                 Open dev billing test page
-              </a>
+              </Link>
             )}
           </div>
         </div>

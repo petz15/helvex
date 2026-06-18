@@ -142,13 +142,13 @@ function DetailDrawer({ tx: initialTx, onClose, onMutate }: { tx: AdminPaymentTr
   const rows: [string, React.ReactNode][] = [
     ["ID",              tx.id],
     ["Org ID",          tx.org_id],
-    ["Provider",        <span className="font-mono">{tx.provider}</span>],
-    ["External ID",     <span className="font-mono text-xs break-all">{tx.external_id}</span>],
-    ["Order ref",       <span className="font-mono text-xs break-all">{tx.order_reference}</span>],
+    ["Provider",        <span key="provider" className="font-mono">{tx.provider}</span>],
+    ["External ID",     <span key="external-id" className="font-mono text-xs break-all">{tx.external_id}</span>],
+    ["Order ref",       <span key="order-ref" className="font-mono text-xs break-all">{tx.order_reference}</span>],
     ["Provider tx ID",  tx.provider_transaction_id ?? "—"],
     ["Amount",          fmtChf(tx.amount_chf)],
-    ["Kind",            <KindBadge kind={tx.kind} />],
-    ["Status",          <StatusBadge status={tx.status} />],
+    ["Kind",            <KindBadge key="kind" kind={tx.kind} />],
+    ["Status",          <StatusBadge key="status" status={tx.status} />],
     ["Payment method",  tx.payment_method ?? "—"],
     ["Cardholder name", tx.cardholder_name ?? "—"],
     [

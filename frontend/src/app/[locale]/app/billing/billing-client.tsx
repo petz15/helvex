@@ -1028,6 +1028,7 @@ export function BillingClient() {
     if (!checkout && !alreadyProcessed && !reason && !saved && !downgradeScheduled) return;
 
     if (downgradeScheduled) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setReturnBanner({ kind: "success", message: "Downgrade scheduled. Your plan will switch at the end of the current billing period." });
       void mutateSummary();
       window.history.replaceState({}, "", window.location.pathname);

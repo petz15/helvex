@@ -234,6 +234,7 @@ export function MapClient() {
       resizeObserver?.observe(mapRef.current!);
 
       // Track open popup so it can be restored after layer reloads
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       map.on("popupopen", (e: any) => {
         const ll = e.popup.getLatLng();
         if (ll) {

@@ -291,11 +291,11 @@ function MetaSummary({ meta, action }: { meta: Record<string, unknown>; action: 
   if (action === "company_deleted" && meta.name) return <>Deleted: {String(meta.name)}</>;
   if (action === "company_updated" && Array.isArray(meta.fields)) return <>Fields: {(meta.fields as string[]).join(", ")}</>;
   if (action === "company_bulk_updated") return <>{String(meta.count ?? "?")} rows · {String(meta.field)}={String(meta.value ?? "null")}</>;
-  if (action === "company_bulk_tagged") return <>{String(meta.action)} tag "{String(meta.tag)}" on {String(meta.count ?? "?")} rows</>;
+  if (action === "company_bulk_tagged") return <>{String(meta.action)} tag {'"'}{String(meta.tag)}{'"'} on {String(meta.count ?? "?")} rows</>;
   if (action === "company_exported") return <>Job #{String(meta.job_id ?? "?")}</>;
   if (action === "company_website_set") return <>{String(meta.url ?? "")}</>;
-  if (action === "view_created" || action === "view_deleted") return <>"{String(meta.name ?? "")}"</>;
-  if (action === "view_alert_toggled") return <>{meta.enabled ? "enabled" : "disabled"} on "{String(meta.view_name ?? "")}"</>;
+  if (action === "view_created" || action === "view_deleted") return <>{'"'}{String(meta.name ?? "")}{'"'}</>;
+  if (action === "view_alert_toggled") return <>{meta.enabled ? "enabled" : "disabled"} on {'"'}{String(meta.view_name ?? "")}{'"'}</>;
   if (action === "page_viewed" && meta.path) return <>{String(meta.path)}</>;
   if (action === "web_search_run" && meta.company_id) return <>Company #{String(meta.company_id)}</>;
   if (action === "user_login") return <>via {String(meta.method ?? "")}</>;

@@ -123,6 +123,7 @@ function TenureTimeline({ mandates, locale }: { mandates: MandateItem[]; locale:
   );
 
   // Build legend from actual SOGC publication titles (signature_type ?? role), coloured by role_category
+  // eslint-disable-next-line react-hooks/preserve-manual-memoization
   const roleLegend = useMemo(() => {
     const map = new Map<string, string>(); // title → fill colour
     for (const m of mandates) {
@@ -552,6 +553,7 @@ export function PersonDetailClient({
   const initials = name.split(" ").map(s => s[0] ?? "").join("").slice(0, 2).toUpperCase();
   const conf = CONFIDENCE_CHIP[entity.confidence_level] ?? CONFIDENCE_CHIP.medium;
 
+  // eslint-disable-next-line react-hooks/preserve-manual-memoization
   const roleBreakdown = useMemo(() => {
     if (!network?.mandates) return {} as Record<string, number>;
     const counts: Record<string, number> = {};
@@ -562,6 +564,7 @@ export function PersonDetailClient({
     return counts;
   }, [network?.mandates]);
 
+  // eslint-disable-next-line react-hooks/preserve-manual-memoization
   const firstSeen = useMemo(() => {
     if (!network?.mandates) return null;
     const dates = network.mandates.map(m => m.date_from).filter(Boolean) as string[];

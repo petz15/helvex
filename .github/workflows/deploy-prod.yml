@@ -406,18 +406,32 @@ jobs:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
         with:
           fetch-depth: 0
-          token: ${{ secrets.GH_WORKFLOW_PAT }}
+          token: ${{ secrets.GH_WORKFLOW_PAT || github.token }}
 
       - name: Setup tools
         run: |
           set -euo pipefail
           # Skip installs if tools are already present on the self-hosted runner.
+          INSTALL_DIR=/usr/local/bin
+          LOCAL_BIN="$HOME/.local/bin"
+          mkdir -p "$LOCAL_BIN"
+          _install() {
+            # Try sudo to system path, fall back to ~/.local/bin (no sudo needed)
+            if sudo mv "$1" "$INSTALL_DIR/$1" 2>/dev/null; then
+              sudo chmod +x "$INSTALL_DIR/$1"
+            else
+              mv "$1" "$LOCAL_BIN/$1"
+              chmod +x "$LOCAL_BIN/$1"
+              echo "$LOCAL_BIN" >> "$GITHUB_PATH"
+            fi
+          }
           if ! command -v kubectl &>/dev/null; then
             KUBECTL_VERSION=$(curl -Ls https://dl.k8s.io/release/stable.txt)
             curl -sfLO "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/amd64/kubectl"
             curl -sfLO "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/amd64/kubectl.sha256"
             echo "$(cat kubectl.sha256)  kubectl" | sha256sum -c -
-            chmod +x kubectl && sudo mv kubectl /usr/local/bin/kubectl
+            chmod +x kubectl
+            _install kubectl
           fi
           if ! command -v helm &>/dev/null; then
             HELM_VERSION=3.21.1
@@ -425,8 +439,9 @@ jobs:
             curl -sfLO "https://get.helm.sh/helm-v${HELM_VERSION}-linux-amd64.tar.gz.sha256sum"
             sha256sum -c "helm-v${HELM_VERSION}-linux-amd64.tar.gz.sha256sum"
             tar -xzf "helm-v${HELM_VERSION}-linux-amd64.tar.gz"
-            sudo mv linux-amd64/helm /usr/local/bin/helm
-            chmod +x /usr/local/bin/helm
+            chmod +x linux-amd64/helm
+            mv linux-amd64/helm helm
+            _install helm
           fi
           if ! command -v helmfile &>/dev/null; then
             HELMFILE_VERSION=0.171.0
@@ -434,8 +449,10 @@ jobs:
               curl -sfLO "https://github.com/helmfile/helmfile/releases/download/v${HELMFILE_VERSION}/helmfile_${HELMFILE_VERSION}_checksums.txt" && \
               curl -sfLO "https://github.com/helmfile/helmfile/releases/download/v${HELMFILE_VERSION}/helmfile_${HELMFILE_VERSION}_linux_amd64.tar.gz" && \
               grep "helmfile_${HELMFILE_VERSION}_linux_amd64.tar.gz" "helmfile_${HELMFILE_VERSION}_checksums.txt" | sha256sum -c - && \
-              tar -xzf "helmfile_${HELMFILE_VERSION}_linux_amd64.tar.gz" )
-            sudo mv /tmp/helmfile /usr/local/bin/helmfile
+              tar -xzf "helmfile_${HELMFILE_VERSION}_linux_amd64.tar.gz" && \
+              chmod +x helmfile )
+            mv /tmp/helmfile helmfile
+            _install helmfile
           fi
           if ! helm plugin list | grep -q diff; then
             helm plugin install https://github.com/databus23/helm-diff
@@ -894,16 +911,17 @@ jobs:
       - name: Dump diagnostics on failure
         if: failure()
         run: |
+          command -v kubectl >/dev/null 2>&1 || { echo "kubectl not available (setup-tools may have failed)"; exit 0; }
           echo "=== Pods ==="
-          kubectl get pods -n helvex-prod -o wide
+          kubectl get pods -n helvex-prod -o wide || true
           echo "=== Helvex pod describe ==="
-          kubectl describe pods -n helvex-prod -l app.kubernetes.io/name=helvex
+          kubectl describe pods -n helvex-prod -l app.kubernetes.io/name=helvex || true
           echo "=== Helvex logs (current) ==="
           kubectl logs -n helvex-prod -l app.kubernetes.io/name=helvex --tail=80 || true
           echo "=== Helvex logs (previous, if crash-looped) ==="
           kubectl logs -n helvex-prod -l app.kubernetes.io/name=helvex --previous --tail=80 || true
           echo "=== Events ==="
-          kubectl get events -n helvex-prod --sort-by='.lastTimestamp' | tail -30
+          kubectl get events -n helvex-prod --sort-by='.lastTimestamp' | tail -30 || true
 
       - name: Bump patch version
         if: |
