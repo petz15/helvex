@@ -25,7 +25,7 @@ export function AdBanner() {
               <span className="font-semibold text-slate-900 text-sm">Balogh Consulting</span>
               <span className="rounded-full bg-blue-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-blue-700">Sponsor</span>
             </div>
-            <p className="text-xs text-slate-600 mt-0.5">Value first — you decide what it's worth.</p>
+            <p className="text-xs text-slate-600 mt-0.5">Value first — you decide what it&apos;s worth.</p>
           </div>
         </div>
         <Link

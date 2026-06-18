@@ -12,7 +12,7 @@ from app.services.tiers import calculate_custom_tier_price
 
 # EU VAT standard rates keyed by ISO 3166-1 alpha-2 country code.
 _EU_VAT_RATES: dict[str, dict] = json.loads(
-    (Path(__file__).parent.parent.parent / "data" / "eu_vat_rates.json").read_text()
+    (Path(__file__).parent.parent.parent / "data" / "eu_vat_rates.json").read_text(encoding="utf-8")
 )["rates"]
 
 

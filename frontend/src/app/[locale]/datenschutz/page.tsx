@@ -52,7 +52,7 @@ export default function DatenschutzPage() {
           <li>Werbung: Auslieferung und Messung von Anzeigen über Google AdSense.</li>
         </ul>
         <p>
-          Ihre Auswahl kann jederzeit über den Link "Cookie-Einstellungen" im Footer geändert werden.
+          Ihre Auswahl kann jederzeit über den Link &quot;Cookie-Einstellungen&quot; im Footer geändert werden.
         </p>
       </section>
 
@@ -65,7 +65,7 @@ export default function DatenschutzPage() {
         </p>
         <p>
           Rechtsgrundlage ist Ihre Einwilligung. Sie können diese jederzeit mit Wirkung für die Zukunft über
-          "Cookie-Einstellungen" widerrufen.
+          &quot;Cookie-Einstellungen&quot; widerrufen.
         </p>
       </section>
 

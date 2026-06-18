@@ -53,6 +53,8 @@ from app.services.payments.transactions import (  # noqa: F401
 # billing.py accesses payments.settings.X — keep this re-export
 from app.config import settings  # noqa: F401
 
+import httpx  # noqa: F401 — re-exported so tests can patch payments.httpx.Client
+
 
 # ── Provider factory ───────────────────────────────────────────────────────────
 

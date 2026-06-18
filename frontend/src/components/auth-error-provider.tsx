@@ -11,6 +11,7 @@ export function AuthErrorProvider({ children }: { children: React.ReactNode }) {
   const { notify } = useNotifications();
 
   const onError = useCallback(
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (error: any) => {
       if (!(error instanceof ApiError)) return;
 

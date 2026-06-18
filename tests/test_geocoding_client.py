@@ -3,7 +3,7 @@ import pytest
 
 def test_geocode_uses_postal_code_segment_not_postfach(monkeypatch):
     """Regression: a 4-digit Postfach number must not be treated as the PLZ."""
-    from app.api import geocoding_client as gc
+    from app.clients import geocoding_client as gc
 
     # Stub the PLZ table so the test is deterministic and offline.
     monkeypatch.setattr(
@@ -23,7 +23,7 @@ def test_geocode_uses_postal_code_segment_not_postfach(monkeypatch):
 
 
 def test_geocode_falls_back_to_plz_centroid_when_too_far(monkeypatch):
-    from app.api import geocoding_client as gc
+    from app.clients import geocoding_client as gc
 
     monkeypatch.setattr(gc, "_load_plz_table", lambda: {"8000": (47.0, 8.0)})
 

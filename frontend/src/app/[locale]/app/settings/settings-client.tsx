@@ -87,6 +87,7 @@ function CollapsibleSection({
   );
 }
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 const getTabs = (dict: any) => [
   { id: "llm", label: dict.app.settings.tabs.llm, icon: Brain },
   { id: "flex", label: dict.app.settings.tabs.flex, icon: Settings2 },

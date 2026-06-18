@@ -11,7 +11,7 @@ def _http_500_error() -> httpx.HTTPStatusError:
 
 
 def test_iter_prefix_with_fallback_pauses_and_rechecks_on_500(monkeypatch):
-    from app.services import collection
+    from app.services import zefix_import, collection
 
     # Avoid real sleeping in tests
     monkeypatch.setattr(collection.time, "sleep", lambda *_args, **_kwargs: None)
@@ -28,13 +28,13 @@ def test_iter_prefix_with_fallback_pauses_and_rechecks_on_500(monkeypatch):
         calls["probe"] += 1
         return []
 
-    monkeypatch.setattr(collection, "fetch_companies_by_prefix", fake_fetch)
-    monkeypatch.setattr(collection, "search_companies", fake_probe)
+    monkeypatch.setattr(zefix_import, "fetch_companies_by_prefix", fake_fetch)
+    monkeypatch.setattr(zefix_import, "search_companies", fake_probe)
 
     status: list[str] = []
 
     items = list(
-        collection._iter_prefix_with_fallback(
+        zefix_import._iter_prefix_with_fallback(
             None,
             "AB",
             active_only=True,
@@ -52,7 +52,7 @@ def test_iter_prefix_with_fallback_pauses_and_rechecks_on_500(monkeypatch):
 
 
 def test_import_company_from_zefix_uid_retries_on_500_when_enabled(monkeypatch):
-    from app.services import collection
+    from app.services import zefix_import, collection
 
     # Avoid real sleeping in tests
     monkeypatch.setattr(collection.time, "sleep", lambda *_args, **_kwargs: None)
@@ -69,27 +69,27 @@ def test_import_company_from_zefix_uid_retries_on_500_when_enabled(monkeypatch):
         calls["probe"] += 1
         return []
 
-    monkeypatch.setattr(collection, "zefix_get_company", fake_get)
-    monkeypatch.setattr(collection, "search_companies", fake_probe)
+    monkeypatch.setattr(zefix_import, "zefix_get_company", fake_get)
+    monkeypatch.setattr(zefix_import, "search_companies", fake_probe)
 
     # Bypass DB/scoring internals; focus on retry control flow.
-    monkeypatch.setattr(collection, "_load_scoring_config", lambda _db: {})
+    monkeypatch.setattr(zefix_import, "_load_scoring_config", lambda _db: {})
     monkeypatch.setattr(
-        collection,
+        zefix_import,
         "_extract_company_fields",
-        lambda _raw, _uid, *, scoring_config: collection.CompanyCreate(uid="CHE-123.456.789", name="Test AG"),
+        lambda _raw, _uid, *, scoring_config: zefix_import.CompanyCreate(uid="CHE-123.456.789", name="Test AG"),
     )
 
     class DummyCompany:
         def __init__(self, uid: str):
             self.uid = uid
 
-    monkeypatch.setattr(collection.crud, "get_company_by_uid", lambda _db, _uid: None)
-    monkeypatch.setattr(collection.crud, "create_company", lambda _db, company_data: DummyCompany(company_data.uid))
+    monkeypatch.setattr(zefix_import.crud, "get_company_by_uid", lambda _db, _uid: None)
+    monkeypatch.setattr(zefix_import.crud, "create_company", lambda _db, company_data: DummyCompany(company_data.uid))
 
     status: list[str] = []
 
-    company, created = collection.import_company_from_zefix_uid(
+    company, created = zefix_import.import_company_from_zefix_uid(
         db=object(),
         uid="CHE-123.456.789",
         pause_on_zefix_500=True,
@@ -105,10 +105,10 @@ def test_import_company_from_zefix_uid_retries_on_500_when_enabled(monkeypatch):
 
 @pytest.mark.parametrize("pause_on_zefix_500", [False])
 def test_import_company_from_zefix_uid_does_not_retry_by_default(monkeypatch, pause_on_zefix_500):
-    from app.services import collection
+    from app.services import zefix_import, collection
 
     monkeypatch.setattr(collection.time, "sleep", lambda *_args, **_kwargs: None)
-    monkeypatch.setattr(collection, "zefix_get_company", lambda _uid: (_ for _ in ()).throw(_http_500_error()))
+    monkeypatch.setattr(zefix_import, "zefix_get_company", lambda _uid: (_ for _ in ()).throw(_http_500_error()))
 
     with pytest.raises(httpx.HTTPStatusError):
-        collection.import_company_from_zefix_uid(db=object(), uid="CHE-123.456.789", pause_on_zefix_500=pause_on_zefix_500)
+        zefix_import.import_company_from_zefix_uid(db=object(), uid="CHE-123.456.789", pause_on_zefix_500=pause_on_zefix_500)

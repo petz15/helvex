@@ -85,7 +85,7 @@ def test_worldline_topup_checkout_calls_api(monkeypatch):
     assert captured["json"]["RequestHeader"]["CustomerId"] == "customer_test"
     assert captured["json"]["TerminalId"] == "12345678"
     assert captured["json"]["Payment"]["OrderId"].startswith("wl_topup_7_25000_")
-    assert captured["json"]["PaymentMeans"]["Card"]["Alias"]["Id"] == "alias_saved_1"
+    assert captured["json"]["PaymentMeans"]["Alias"]["Id"] == "alias_saved_1"
     assert captured["json"]["RedirectNotifyUrls"]["Success"].endswith("source=notify")
     assert captured["auth"] == ("wl_key", "wl_pwd")
 
@@ -115,7 +115,8 @@ def test_worldline_topup_checkout_registers_alias_when_requested(monkeypatch):
 
     assert out.external_id == "tok_2"
     assert captured["url"].endswith("/Payment/v1/Transaction/Initialize")
-    assert captured["json"]["RegisterAlias"]["IdGenerator"] == "RANDOM"
+    # save_payment_method is encoded in the callback ctx URL, not in the Initialize payload
+    assert "RegisterAlias" not in captured["json"]
 
 
 def test_worldline_card_alias_registration_calls_api(monkeypatch):

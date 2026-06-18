@@ -17,7 +17,9 @@ function ConfirmEmailChangeContent() {
 
   useEffect(() => {
     if (!token) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setErrorMsg(t.noToken);
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setStatus("error");
       return;
     }

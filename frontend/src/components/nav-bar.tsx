@@ -256,6 +256,7 @@ export function NavBar() {
                       <CreditCard size={16} />
                       {t.billing}
                     </Link>
+                    {/* eslint-disable-next-line @next/next/no-html-link-for-pages */}
                     <a
                       href="/logout"
                       onClick={() => setAccountMenuOpen(false)}
@@ -399,6 +400,7 @@ export function NavBar() {
                 <CreditCard size={18} />
                 {t.billing}
               </Link>
+              {/* eslint-disable-next-line @next/next/no-html-link-for-pages */}
               <a
                 href="/logout"
                 className="flex items-center gap-3 px-5 py-3.5 text-sm text-slate-500 hover:bg-slate-50 transition-colors"

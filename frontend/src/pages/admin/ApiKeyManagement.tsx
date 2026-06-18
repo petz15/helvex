@@ -399,12 +399,12 @@ const ApiKeyManagement: React.FC = () => {
               </div>
               <div className="akm-card-body">
                 <p className="akm-help-text" style={{ marginBottom: '1.5rem' }}>
-                  Rules are evaluated top-to-bottom. First match wins. Leave empty to use organization's default.
+                  Rules are evaluated top-to-bottom. First match wins. Leave empty to use organization&apos;s default.
                 </p>
                 <div className="akm-rules-list">
                   <div className="akm-rule-item">
                     <span className="akm-rule-num">1</span>
-                    <span className="akm-rule-text">If function = <code>claude_classify</code> AND org = <code>Acme Corp</code> → use Acme's custom key</span>
+                    <span className="akm-rule-text">If function = <code>claude_classify</code> AND org = <code>Acme Corp</code> → use Acme&apos;s custom key</span>
                     <button className="akm-icon-btn"><Trash2 size={14} /></button>
                   </div>
                 </div>

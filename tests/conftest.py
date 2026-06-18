@@ -59,12 +59,16 @@ def db():
         session.close()
 
 
-# Startup functions that hit the real PostgreSQL — patch them to no-ops in tests.
+# Startup functions that hit the real PostgreSQL or start background schedulers —
+# patch them all to no-ops so _startup() completes cleanly without a real DB.
 _STARTUP_PATCHES = [
     patch("app.main._run_migrations"),
     patch("app.main._seed_settings"),
     patch("app.main._recover_jobs_and_start_worker"),
     patch("app.main._maybe_enqueue_geocode_upgrade"),
+    patch("app.main._start_nightly_shab_scheduler"),
+    patch("app.main._start_nightly_billing_scheduler"),
+    patch("app.main._warm_taxonomy_cache"),
 ]
 
 

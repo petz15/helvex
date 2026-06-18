@@ -25,6 +25,7 @@ export function MapTurnstileGate() {
 
   // Re-read sessionStorage after hydration (handles SSR mismatch).
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     if (sessionStorage.getItem(SESSION_KEY) === "1") setPassed(true);
   }, []);
 

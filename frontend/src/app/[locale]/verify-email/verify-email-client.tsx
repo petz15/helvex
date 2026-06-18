@@ -17,7 +17,9 @@ export function VerifyEmailClient() {
 
   useEffect(() => {
     if (!token) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setState("error");
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setMessage(t.noToken);
       return;
     }

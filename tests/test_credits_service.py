@@ -11,31 +11,32 @@ def _make_org(db, *, tier: str, credits: int) -> Organization:
     return org
 
 
-def test_simple_tier_first_flex_rescore_is_free(db):
+def test_simple_tier_flex_rescore_deducts_cost(db):
     org = _make_org(db, tier="simple", credits=100)
 
     ok = check_and_deduct(db, org.id, action="flex_rescore", count=50, reference_id="t1")
     assert ok is True
 
     db.refresh(org)
-    assert org.credits_balance == 100
-    assert org.monthly_rescore_used is True
+    assert org.credits_balance == 50  # 100 - 50×1 credit/company
 
     txs = db.query(OrgCreditTransaction).filter(OrgCreditTransaction.org_id == org.id).all()
     assert len(txs) == 1
-    assert txs[0].amount == 0
+    assert txs[0].amount == -50
     assert txs[0].action_type == "flex_rescore"
 
 
-def test_simple_tier_second_flex_rescore_is_discounted(db):
-    org = _make_org(db, tier="simple", credits=100)
+def test_explorer_tier_flex_rescore_is_free(db):
+    org = _make_org(db, tier="explorer", credits=100)
 
-    assert check_and_deduct(db, org.id, action="flex_rescore", count=50, reference_id="t1") is True
-    assert check_and_deduct(db, org.id, action="flex_rescore", count=50, reference_id="t2") is True
+    ok = check_and_deduct(db, org.id, action="flex_rescore", count=50, reference_id="t1")
+    assert ok is True
 
     db.refresh(org)
-    # base 50 credits with 10% simple-tier discount => 45 deducted
-    assert org.credits_balance == 55
+    assert org.credits_balance == 100  # explorer+ flex rescore is free
+
+    txs = db.query(OrgCreditTransaction).filter(OrgCreditTransaction.org_id == org.id).all()
+    assert len(txs) == 0  # no ledger entry for free entitlement
 
 
 def test_insufficient_balance_returns_false(db):

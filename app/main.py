@@ -526,6 +526,41 @@ _MAX_BODY_SIZE = 10 * 1024 * 1024  # 10 MB
 app.mount("/static", StaticFiles(directory="app/static"), name="static")
 
 from prometheus_fastapi_instrumentator import Instrumentator  # noqa: E402
+import prometheus_fastapi_instrumentator.routing as _pfi_routing  # noqa: E402
+
+
+def _safe_get_route_name(scope, routes, route_name=None):
+    """Drop-in replacement for pfi's _get_route_name that handles _IncludedRouter objects.
+
+    Starlette creates _IncludedRouter wrappers when include_router is called inside
+    a sub-router (e.g. the companies package). These lack .path, causing an AttributeError
+    in the original function. We recurse into their sub-routes instead.
+    """
+    from starlette.routing import Match, Mount
+    for route in routes:
+        if not hasattr(route, 'matches'):
+            continue
+        try:
+            match, child_scope = route.matches(scope)
+        except Exception:
+            continue
+        merged = {**scope, **child_scope}
+        if match == Match.FULL:
+            if not hasattr(route, 'path'):
+                if hasattr(route, 'routes'):
+                    return _safe_get_route_name(merged, route.routes, route_name)
+                return route_name
+            route_name = route.path
+            if isinstance(route, Mount) and route.routes:
+                child_name = _safe_get_route_name(merged, route.routes, route_name)
+                route_name = (route_name + child_name) if child_name is not None else None
+            return route_name
+        elif match == Match.PARTIAL and route_name is None:
+            route_name = getattr(route, 'path', None)
+    return None
+
+
+_pfi_routing._get_route_name = _safe_get_route_name
 Instrumentator().instrument(app).expose(app, endpoint="/metrics", include_in_schema=False)
 
 app.include_router(admin_router, prefix="/api/v1")

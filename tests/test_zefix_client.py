@@ -1,5 +1,6 @@
 """Tests for the Zefix API client helper functions (no network calls)."""
 
+import json
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -67,9 +68,9 @@ class TestParseCompany:
 class TestSearchCompanies:
     def test_returns_list_of_results(self):
         mock_response = MagicMock()
-        mock_response.json.return_value = [
+        mock_response.content = json.dumps([
             {"uid": "123456789", "name": "Test AG", "status": "ACTIVE"},
-        ]
+        ]).encode("utf-8")
         mock_response.raise_for_status = MagicMock()
 
         with patch("app.api.zefix_client.httpx.Client") as mock_client_cls:
@@ -86,7 +87,7 @@ class TestSearchCompanies:
 
     def test_handles_nested_list_response(self):
         mock_response = MagicMock()
-        mock_response.json.return_value = {"list": [{"uid": "987654321", "name": "Another GmbH"}]}
+        mock_response.content = json.dumps({"list": [{"uid": "987654321", "name": "Another GmbH"}]}).encode("utf-8")
         mock_response.raise_for_status = MagicMock()
 
         with patch("app.api.zefix_client.httpx.Client") as mock_client_cls:
@@ -105,7 +106,7 @@ class TestSearchCompanies:
 class TestGetCompany:
     def test_accepts_list_uid(self):
         mock_response = MagicMock()
-        mock_response.json.return_value = {"uid": "CHE-123.456.789", "name": "Test AG"}
+        mock_response.content = json.dumps({"uid": "CHE-123.456.789", "name": "Test AG"}).encode("utf-8")
         mock_response.raise_for_status = MagicMock()
 
         with patch("app.api.zefix_client.httpx.Client") as mock_client_cls:

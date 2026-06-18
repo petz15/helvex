@@ -38,6 +38,7 @@ async function _handleErrorResponse(res: Response): Promise<never> {
   throw new ApiError(detail ?? res.statusText, res.status, detail, retryAfter);
 }
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 export function createFetcher(url: string): Promise<any> {
   return fetch(url, { credentials: "include" }).then((res) => {
     if (!res.ok) return _handleErrorResponse(res);

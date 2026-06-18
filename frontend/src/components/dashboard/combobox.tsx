@@ -26,6 +26,7 @@ export function Combobox({ options, value, onChange, placeholder = "Type to sear
     (value ? `${value} (${options.find(([v]) => v === value)?.[1] ?? "?"})` : "");
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     if (!open) setQuery("");
   }, [open]);
 

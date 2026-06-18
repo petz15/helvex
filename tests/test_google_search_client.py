@@ -32,7 +32,7 @@ class TestSearchWebsite:
             mock_ctx.post.return_value = mock_response
             mock_client_cls.return_value = mock_ctx
 
-            results = search_website("Test AG")
+            results, _ = search_website("Test AG")
 
         assert len(results) == 2
         assert results[0].link == "https://test-ag.ch"
@@ -53,6 +53,6 @@ class TestSearchWebsite:
             mock_ctx.post.return_value = mock_response
             mock_client_cls.return_value = mock_ctx
 
-            results = search_website("Unknown Corp")
+            results, _ = search_website("Unknown Corp")
 
         assert results == []

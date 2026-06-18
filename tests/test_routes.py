@@ -50,7 +50,7 @@ def test_create_duplicate_uid_returns_409(client):
 def test_list_companies(client):
     client.post("/api/v1/companies", json={"uid": "CHE-001.001.001", "name": "Alpha AG"})
     client.post("/api/v1/companies", json={"uid": "CHE-002.002.002", "name": "Beta GmbH"})
-    resp = client.get("/api/v1/companies")
+    resp = client.get("/api/v1/companies?active_only=false")
     assert resp.status_code == 200
     names = [c["name"] for c in resp.json()["items"]]
     assert "Alpha AG" in names
@@ -60,7 +60,7 @@ def test_list_companies(client):
 def test_list_companies_name_filter(client):
     client.post("/api/v1/companies", json={"uid": "CHE-001.001.001", "name": "Alpha AG"})
     client.post("/api/v1/companies", json={"uid": "CHE-002.002.002", "name": "Beta GmbH"})
-    resp = client.get("/api/v1/companies?q=alpha")
+    resp = client.get("/api/v1/companies?q=alpha&active_only=false")
     assert resp.status_code == 200
     data = resp.json()["items"]
     assert len(data) == 1
@@ -155,7 +155,7 @@ def test_notes_deleted_with_company(client):
 
 def test_zefix_search_route(client):
     mock_results = [ZefixSearchResult(uid="CHE-123.456.789", name="Mocked AG")]
-    with patch("app.api.routes.companies.zefix_client.search_companies", return_value=mock_results):
+    with patch("app.api.routes.companies.zefix.zefix_client.search_companies", return_value=mock_results):
         resp = client.get("/api/v1/companies/zefix/search?name=Mocked")
     assert resp.status_code == 200
     data = resp.json()
@@ -165,7 +165,7 @@ def test_zefix_search_route(client):
 
 def test_zefix_search_propagates_error(client):
     with patch(
-        "app.api.routes.companies.zefix_client.search_companies",
+        "app.api.routes.companies.zefix.zefix_client.search_companies",
         side_effect=Exception("network error"),
     ):
         resp = client.get("/api/v1/companies/zefix/search?name=Fail")
@@ -179,8 +179,14 @@ def test_zefix_search_propagates_error(client):
 
 def test_google_search_route(client):
     company_id = _create_company(client)
-    mock_results = [GoogleSearchResult(title="Test AG", link="https://test-ag.ch")]
-    with patch("app.services.collection.search_website", return_value=mock_results):
+
+    def _mock_enrich(db, company, *, num=10):
+        company.google_search_results_raw = json.dumps([{"title": "Test AG", "link": "https://test-ag.ch"}])
+        company.website_url = "https://test-ag.ch"
+        db.add(company)
+        db.commit()
+
+    with patch("app.api.routes.companies.detail.enrich_company_website", side_effect=_mock_enrich):
         resp = client.get(f"/api/v1/companies/{company_id}/google-search")
     assert resp.status_code == 200
     data = resp.json()
@@ -194,7 +200,7 @@ def test_google_search_route(client):
 def test_google_search_not_configured(client):
     company_id = _create_company(client)
     with patch(
-        "app.services.collection.search_website",
+        "app.api.routes.companies.detail.enrich_company_website",
         side_effect=ValueError("GOOGLE_API_KEY and GOOGLE_CSE_ID must be set"),
     ):
         resp = client.get(f"/api/v1/companies/{company_id}/google-search")

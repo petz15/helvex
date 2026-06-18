@@ -12,6 +12,7 @@ function OAuthButtons({ orSignUpWith }: { orSignUpWith: string }) {
         <span>{orSignUpWith}</span>
         <div className="flex-1 border-t border-slate-200" />
       </div>
+      {/* eslint-disable-next-line @next/next/no-html-link-for-pages */}
       <a
         href="/api/v1/auth/google/authorize"
         className="flex items-center justify-center gap-2 rounded border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 transition-colors"
@@ -24,6 +25,7 @@ function OAuthButtons({ orSignUpWith }: { orSignUpWith: string }) {
         </svg>
         Google
       </a>
+      {/* eslint-disable-next-line @next/next/no-html-link-for-pages */}
       <a
         href="/api/v1/auth/linkedin/authorize"
         className="flex items-center justify-center gap-2 rounded border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 transition-colors"

@@ -99,7 +99,7 @@ def test_subscription_checkout_returns_provider_and_amount(client, db, monkeypat
     assert resp.status_code == 200
     data = resp.json()
     assert data["provider"] == "stripe"
-    assert data["amount_chf"] == 6.0
+    assert data["amount_chf"] == 6.486  # 6.0 CHF + 8.1% Swiss VAT
     assert data["checkout_url"]
 
 
@@ -210,8 +210,9 @@ def test_stripe_webhook_updates_org_subscription(client, db, monkeypatch):
 
 def test_worldline_return_authorizes_and_redirects(client, db, monkeypatch):
     org = _seed_org(db, org_id=15)
+    monkeypatch.setattr("app.services.payments.settings.app_base_url", "https://example.com")
 
-    def _fake_authorize(self, *, token):
+    def _fake_authorize(self, *, token, save_payment_method=False):
         assert token == "tok_15"
         return {
             "Transaction": {
@@ -234,16 +235,17 @@ def test_worldline_return_authorizes_and_redirects(client, db, monkeypatch):
         follow_redirects=False,
     )
 
-    assert resp.status_code == 303
-    assert resp.headers["location"] == "https://example.com/success"
+    assert resp.status_code == 200
+    assert "example.com/success" in resp.text
     db.refresh(org)
     assert org.credits_balance == 25000
 
 
 def test_worldline_return_persists_alias_from_checkout_authorize(client, db, monkeypatch):
     org = _seed_org(db, org_id=19)
+    monkeypatch.setattr("app.services.payments.settings.app_base_url", "https://example.com")
 
-    def _fake_authorize(self, *, token):
+    def _fake_authorize(self, *, token, save_payment_method=False):
         assert token == "tok_19"
         return {
             "Transaction": {
@@ -271,7 +273,7 @@ def test_worldline_return_persists_alias_from_checkout_authorize(client, db, mon
         follow_redirects=False,
     )
 
-    assert resp.status_code == 303
+    assert resp.status_code == 200
     saved_user = db.get(User, 1)
     assert saved_user is not None
     assert saved_user.payment_customer_id == "alias_from_checkout_1"
@@ -279,8 +281,9 @@ def test_worldline_return_persists_alias_from_checkout_authorize(client, db, mon
 
 def test_worldline_return_persists_alias_from_registration_result(client, db, monkeypatch):
     org = _seed_org(db, org_id=119)
+    monkeypatch.setattr("app.services.payments.settings.app_base_url", "https://example.com")
 
-    def _fake_authorize(self, *, token):
+    def _fake_authorize(self, *, token, save_payment_method=False):
         assert token == "tok_119"
         return {
             "Transaction": {
@@ -306,7 +309,7 @@ def test_worldline_return_persists_alias_from_registration_result(client, db, mo
         follow_redirects=False,
     )
 
-    assert resp.status_code == 303
+    assert resp.status_code == 200
     saved_user = db.get(User, 1)
     assert saved_user is not None
     assert saved_user.payment_customer_id == "alias_from_registration_result_1"
@@ -319,8 +322,8 @@ def test_worldline_card_registration_saves_alias(client, db, monkeypatch):
     def _fake_register(self, *, org_id, user_id, success_url, cancel_url, billing_address):
         assert org_id == org.id
         assert user_id == 1
-        assert success_url == "https://example.com/success"
-        assert cancel_url == "https://example.com/cancel"
+        assert success_url == "https://example.com/success?card_scope=personal"
+        assert cancel_url == "https://example.com/cancel?card_scope=personal"
         return CheckoutSession(provider="worldline", checkout_url="https://payment.preprod.worldline/alias_tok_1", external_id="alias_tok_1", order_reference="wl_alias_16_1_test")
 
     def _fake_assert(self, *, token):
@@ -351,15 +354,16 @@ def test_worldline_card_registration_saves_alias(client, db, monkeypatch):
 
 def test_worldline_card_return_saves_alias(client, db, monkeypatch):
     org = _seed_org(db, org_id=17)
+    monkeypatch.setattr("app.services.payments.settings.app_base_url", "https://example.com")
 
-    def _fake_assert(self, *, token):
+    def _fake_wait(self, *, token, max_attempts=15, poll_interval_seconds=60):
         assert token == "alias_tok_1"
         return {
             "Alias": {"Id": "alias_123"},
             "PaymentMeans": {"Card": {"HolderName": "Max Mustermann"}, "DisplayText": "**** 1234"},
         }
 
-    monkeypatch.setattr("app.services.payments.WorldlineProvider.assert_alias_insert", _fake_assert)
+    monkeypatch.setattr("app.services.payments.WorldlineProvider.wait_for_alias_registration", _fake_wait)
 
     from app.services import payments as payments_module
 
@@ -381,8 +385,8 @@ def test_worldline_card_return_saves_alias(client, db, monkeypatch):
         follow_redirects=False,
     )
 
-    assert resp.status_code == 303
-    assert resp.headers["location"].startswith("https://example.com/success")
+    assert resp.status_code == 200
+    assert "example.com/success" in resp.text
     saved_user = db.get(User, 1)
     assert saved_user is not None
     assert saved_user.payment_customer_id == "alias_123"
@@ -473,6 +477,7 @@ def test_topup_checkout_prefers_current_users_saved_alias_over_org_default(clien
             "credits": 10000,
             "success_url": "https://example.com/success",
             "cancel_url": "https://example.com/cancel",
+            "save_payment_method": False,
         },
     )
 

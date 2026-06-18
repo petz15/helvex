@@ -30,8 +30,8 @@ def test_register_creates_user(client):
 
 def test_register_rate_limit_is_per_forwarded_ip(client):
     with patch("app.api.routes.auth.send_verification_email", return_value=None):
-        # Hit limit for IP A
-        for i in range(10):
+        # Hit limit for IP A (limit is 5 per hour)
+        for i in range(5):
             resp = client.post(
                 "/api/v1/auth/register",
                 json={
@@ -45,7 +45,7 @@ def test_register_rate_limit_is_per_forwarded_ip(client):
 
         resp_blocked = client.post(
             "/api/v1/auth/register",
-            json={"username": "usera10", "email": "usera10@example.com", "password": "long-enough"},
+            json={"username": "usera5", "email": "usera5@example.com", "password": "long-enough"},
             headers={"X-Forwarded-For": "203.0.113.1"},
         )
         assert resp_blocked.status_code == 429

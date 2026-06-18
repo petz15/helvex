@@ -12,6 +12,7 @@ The implementation has been split into focused modules:
 from __future__ import annotations
 
 import re
+import time  # noqa: F401 — re-exported so tests can patch collection.time.sleep
 
 # ── Shared data / utilities kept here ────────────────────────────────────────
 # _TFIDF_STOPWORDS is imported by app.crud.google_scoring_filter — keep in this module.
