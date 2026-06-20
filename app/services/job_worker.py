@@ -358,8 +358,8 @@ def _run_job(app, job_id: int) -> None:  # noqa: C901
                 try:
                     with SessionLocal() as _hb_db:
                         crud.update_heartbeat(_hb_db, job_id)
-                except Exception:  # noqa: BLE001
-                    pass
+                except Exception as _hb_exc:  # noqa: BLE001
+                    logger.warning("Heartbeat update failed for job %d: %s", job_id, _hb_exc)
 
         _hb_thread = threading.Thread(target=_hb_daemon, daemon=True, name=f"hb-job-{job_id}")
         _hb_thread.start()
@@ -386,6 +386,12 @@ def _run_job(app, job_id: int) -> None:  # noqa: C901
                 raise JobPausedError("Pause requested")
             if _shutdown_requested:
                 raise JobPausedError("Worker shutdown — job paused for restart")
+            # If recovery on a sibling pod re-queued this job (due to a
+            # heartbeat gap), our status is no longer 'running'.  Pause so
+            # the re-queued instance can start cleanly instead of two threads
+            # executing the same job in parallel.
+            if job.status != "running":
+                raise JobPausedError(f"Job evicted by recovery (status='{job.status}') — yielding to re-queued instance")
 
         try:
             if job.job_type == "re_geocode":

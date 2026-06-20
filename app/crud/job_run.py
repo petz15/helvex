@@ -184,13 +184,19 @@ def requeue_interrupted_jobs(
     db: Session,
     *,
     message: str = "Recovered after application restart",
-    stale_after_seconds: int = 120,
+    stale_after_seconds: int = 300,
 ) -> int:
     """Move interrupted running jobs back to queued so they can resume.
 
     Only re-queues jobs whose heartbeat is stale (older than *stale_after_seconds*)
     or missing entirely.  Jobs with a recent heartbeat are still alive on a worker
     pod and must not be double-executed.
+
+    Threshold is 300 s (5 min): heartbeat daemon fires every 30 s, so a live job
+    is never more than ~30 s stale.  The old 120 s threshold was too tight — a
+    transient DB connection hiccup during a heavy batch job could silently fail
+    several consecutive heartbeats, crossing the threshold and re-queuing a still-
+    running job onto a second pod.
 
     Jobs that have been restarted more than MAX_RESTART_COUNT times are killed
     instead of re-queued to prevent infinite crash loops.

@@ -550,10 +550,11 @@ def handle_web_extract(ctx: JobContext) -> tuple[dict, str]:
                             if other is not None and other.id != company_id:
                                 data["review_flag"] = "uid_mismatch_cross_ref"
                                 other_best = crawler_crud.get_best_web_extract(ctx.db, other.id)
-                                if (
-                                    other_best is None
-                                    or (other_best.confidence or 0) < (data.get("confidence") or 0)
-                                ):
+                                # Cross-attribute if the target company has no extract yet or
+                                # only a weak one. Use a fixed threshold (0.60) rather than
+                                # comparing against the current extract's (uid-mismatch-capped)
+                                # confidence, which was always ≤0.35 and caused over-skipping.
+                                if (other_best is None or (other_best.confidence or 0) < 0.60):
                                     page_url = site_url or (cand_pages[0].url if cand_pages else None)
                                     if page_url:
                                         try:
@@ -807,12 +808,13 @@ def handle_web_crawl_single(ctx: JobContext) -> tuple[dict, str]:
     now = datetime.now(timezone.utc)
 
     if result.failure_status:
-        crawler_crud.mark_crawl_failed(
-            ctx.db, state,
-            status=result.failure_status,
-            detail=result.failure_detail,
-            bot_protection_type=result.bot_protection_type,
-        )
+        if not is_fallback:
+            crawler_crud.mark_crawl_failed(
+                ctx.db, state,
+                status=result.failure_status,
+                detail=result.failure_detail,
+                bot_protection_type=result.bot_protection_type,
+            )
         selected.last_crawled_at = now
         ctx.db.commit()
         stats = {

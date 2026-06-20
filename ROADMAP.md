@@ -10,6 +10,15 @@
     - Data from eSHAB: has much mor than just changes in companies
 
 
+- **Architecture — Go API + non-ML workers (v2.0, long-term)** (high effort, high payoff at scale):
+    Keep the Python ML worker pod unchanged (sentence-transformers, spaCy, trafilatura, Playwright, clustering). Rewrite everything else in Go:
+    - HTTP API server (all routes, auth, billing) → Gin or Fiber
+    - Non-ML job handlers: `bulk_import`, `detail_fetch`, `batch_enrich`, `web_url_populate`, `web_crawl_http`, `web_crawl_single`, `claude_classify`, SIMAP/SHAB imports, geocoding → Go workers polling `job_runs` table (same `JOB_TYPE_WHITELIST` boundary already in place)
+    - External API clients (Zefix, Serper, Stripe, Worldline, S3) → Go
+    - Schema ownership: keep Alembic in Python for migrations (already runs on pod startup); use `sqlc` to generate typed Go query functions from the same SQL — no Go ORM needed
+    - Python ML worker keeps SQLAlchemy models as-is; two schema representations need discipline to keep in sync
+    Effort: ~6–10 weeks solo to reach feature parity. Hard parts: Stripe webhook state machine, job pause/resume/heartbeat logic (`job_worker.py`). Payoff when: selling API access with latency SLAs, or concurrent-user load makes the Python GIL visible on the API server.
+
 - **Architecture — Company table normalization** (medium effort, high long-term value):
     Currently `companies` is a ~60-column fat-row table that tightly couples Zefix raw data, scoring, NOGA, TF-IDF, and geocoding. This works while every company comes from Zefix, but is a growing liability as we add non-Zefix sources (SHAB stubs, future people-only entities, etc.).
     Recommended split:
@@ -32,6 +41,7 @@
     - Data from SIMAP (augeschrieben + won) -> integrating government bodies might be somewhat difficult -> started need be checked, government bodies are not done yet (potentially this could be simply be added as other companies or extented bodies?) 
     - SIMAP suche anbieten bzw verbesserte suchmaske
     - epublikationen für weitere dinge wie betreibungen
+    - medizinische leistungserbringer (?) helsana liste https://www.helsana.ch/de/private/services/leistungserbringer-suche.html?
 
 ### MVP before public PROD
 - Tiers are enforced - partially done (not fully checked and web searches are not gated yet + always uses api instead of checking if data already exists)
@@ -125,6 +135,8 @@
 - [ ] **Web extract — LLM description/summary layer** — deterministic description is meta/OG or first paragraph; often weak. Add the deferred Claude Haiku layer to summarise cleaned main text into a description + service summary + category hint (tier/credit-gated, run on cleaned text only). Re-extract loop (`/admin/jobs/crawler/reextract`) means this can be layered on stored HTML without re-crawling.
 - [ ] **Web extract — persons → People graph** — `persons` (impressum management names) are now extracted. Resolve them against SOGC person records / signers and feed the People-finder/graph feature.
 - [ ] **Web extract — extractor quality tuning** — using the coverage dashboard, raise low-fill fields. Likely next: address parser recall (many SME impressums use non-standard formats), bigram keyword quality (reuse `discover_stopwords`/`analyze_boilerplate` outputs), phone fax-vs-tel disambiguation.
+- [ ] **Web extract — URL confidence: trained logistic regression** — replace the hand-tuned additive weights in `crawler_extract.resolve_company_extract` with a logistic regression trained on labeled company→site pairs. Features already computed: `uid_score`, `addr_score`, `zone_name_conf`, `base` (signal coverage). Bootstrap labels by exporting companies with confidence 0.25–0.65 (the uncertain middle band) and classifying them manually; ~500 pairs sufficient for sklearn. Weights learned from real failure modes will outperform hand-tuning and handle feature correlations (e.g. matching address + wrong UID = subsidiary page). Serialize trained model to `app/services/url_confidence_model.joblib`; fall back to current formula if model file absent.
+- [ ] **Web extract — URL confidence: embedding similarity feature** — add cosine similarity between the Zefix `purpose` embedding and the crawled site's `description`/`service_keywords` as a fourth feature for the logistic regression above. Reuse `paraphrase-multilingual-mpnet-base-v2` already running on the ML worker. Catches semantic matches that token overlap misses (e.g. "Versicherungsberatung" vs "insurance consulting"). Zero extra API cost; run during the `web_extract` job pass since embeddings are already available.
 - [ ] **Google results & scoring** — Improve the selection and scoring of google results
 - [ ] **NOGA Data** — add NOGA data (or similar) which is something other sites have such as business-monitor.ch or moneyhouse.ch -> first implementation done via AI classification; needs improvement preferably without AI or optional with AI; displaying is not looking too good yet; only shows the level it is confident in but not the full hierarchy -> NOGA classification should be done via AI
 - [ ] **Free tier**- show some limited or teaser data for free tier

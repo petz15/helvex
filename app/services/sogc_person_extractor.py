@@ -925,14 +925,18 @@ def run_extract_sogc_persons_batch(
     )
 
     if mode == "missing":
-        already_person = db.query(SogcPersonAppearance.sogc_change_id).distinct().subquery()
-        already_auditor = db.query(SogcAuditor.sogc_change_id).distinct().subquery()
+        # Correlated NOT EXISTS: Postgres can use the sogc_change_id index for
+        # an index seek per row. The previous pattern materialised a DISTINCT
+        # subquery of the entire table first, preventing index use and timing out.
         q = q.filter(
-            ~exists().where(already_person.c.sogc_change_id == SogcChange.id),
-            ~exists().where(already_auditor.c.sogc_change_id == SogcChange.id),
+            ~exists().where(SogcPersonAppearance.sogc_change_id == SogcChange.id),
+            ~exists().where(SogcAuditor.sogc_change_id == SogcChange.id),
         )
 
-    total = q.order_by(None).with_entities(func.count(SogcChange.id)).scalar() or 0
+    try:
+        total = q.order_by(None).with_entities(func.count(SogcChange.id)).scalar() or 0
+    except Exception:
+        total = 0  # progress count is non-critical; don't abort the job over it
     stats["selected"] = total
 
     if status_cb:

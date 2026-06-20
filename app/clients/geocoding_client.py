@@ -28,8 +28,10 @@ logger = logging.getLogger(__name__)
 
 # ── Data paths ────────────────────────────────────────────────────────────────
 _DATA_DIR = Path(__file__).resolve().parents[2] / "data"
-_PLZ_CACHE = _DATA_DIR / "plz_ch.tsv"
 _BUILDING_DB = _DATA_DIR / "geocoding.db"
+# PLZ cache is downloaded at runtime. /app/data is read-only in K8s
+# (readOnlyRootFilesystem: true), so write to /tmp which is always writable.
+_PLZ_CACHE = Path("/tmp/plz_ch.tsv") if not (_DATA_DIR / "plz_ch.tsv").exists() else _DATA_DIR / "plz_ch.tsv"
 
 # ── Download URLs ─────────────────────────────────────────────────────────────
 _GEONAMES_URL = "https://download.geonames.org/export/zip/CH.zip"

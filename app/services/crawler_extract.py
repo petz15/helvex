@@ -85,6 +85,18 @@ _LEGAL_FORMS = frozenset([
     "kg", "ohg", "gbr", "holding", "group", "gruppe", "company", "the",
 ])
 
+# Tokens so ubiquitous on Swiss/European business sites that their presence in
+# page body text is essentially no evidence of identity. Used to separate
+# "distinctive" tokens from noise when computing unverified name confidence.
+_GENERIC_NAME_TOKENS = frozenset([
+    "swiss", "suisse", "svizzera", "schweiz", "schweizer", "helvetia", "suiza",
+    "solutions", "solution", "services", "service", "consulting", "management",
+    "international", "global", "systems", "system", "tech", "technology",
+    "digital", "media", "design", "concept", "gruppe", "partner", "partners",
+    "home", "center", "centre", "studio", "office", "industries", "enterprise",
+    "enterprises", "innovations", "innovation", "network", "networks",
+])
+
 # Social platforms → canonical key, matched by host substring.
 _SOCIAL_HOSTS: list[tuple[str, str]] = [
     ("linkedin.", "linkedin"),
@@ -611,6 +623,70 @@ def _name_match_ratio(company_name: str | None, haystack: str) -> float:
     return hits / len(toks)
 
 
+def _zone_weighted_name_ratio(
+    company_name: str | None,
+    site_url: str | None,
+    page_titles: list[str],
+    all_text_parts: list[str],
+) -> float:
+    """Return 0.0–1.0 identity confidence from name signals alone.
+
+    Zones: domain SLD (near-proof) >> page titles (strong) >> body text (weak).
+    Generic tokens like 'swiss', 'solutions' are excluded from the match pool
+    because they appear on almost every Swiss business page and contribute
+    no evidence of identity.
+    """
+    if not company_name:
+        return 0.0
+
+    all_toks = _name_tokens(company_name)
+    if not all_toks:
+        return 0.0
+
+    distinctive = all_toks - _GENERIC_NAME_TOKENS
+    # If all tokens are generic, fall back to all tokens with a heavy penalty applied later.
+    toks = distinctive if distinctive else all_toks
+    generic_only = not distinctive
+
+    def _hit_ratio(tok_set: set, haystack: str) -> float:
+        h = haystack.lower()
+        return sum(1 for t in tok_set if t in h) / len(tok_set)
+
+    # Zone 1: second-level domain (highest signal — company registered domain)
+    domain_ratio = 0.0
+    if site_url:
+        try:
+            sld = urlparse(site_url).netloc.lower().lstrip("www.").split(".")[0]
+            domain_ratio = _hit_ratio(toks, sld)
+        except Exception:
+            pass
+
+    # Zone 2: page title(s) — weaker than domain but still prominent placement
+    title_ratio = _hit_ratio(toks, " ".join(page_titles)) if page_titles else 0.0
+
+    # Zone 3: body text — very weak; body text on any page can match incidentally.
+    # Only count distinctive tokens here; generic-only names get zero body credit.
+    body_ratio = 0.0
+    if not generic_only:
+        body_ratio = _hit_ratio(toks, " ".join(all_text_parts)[:5000])
+
+    if domain_ratio > 0:
+        composite = 0.65 * domain_ratio + 0.25 * title_ratio + 0.10 * body_ratio
+    elif title_ratio > 0:
+        # Title match without domain: medium confidence
+        composite = 0.55 * title_ratio + 0.45 * body_ratio * 0.25
+    else:
+        # Body-only: very low — most generic words appear anywhere
+        composite = body_ratio * 0.12
+
+    # Generic-only names (e.g. "Swiss Solutions GmbH") get an additional 60% penalty
+    # because even distinctive-only scoring above may overcount.
+    if generic_only:
+        composite *= 0.4
+
+    return round(min(1.0, composite), 3)
+
+
 def _norm_uid(raw: str | None) -> str | None:
     if not raw:
         return None
@@ -707,18 +783,31 @@ def resolve_company_extract(
         uid_matches = site_uid_n == zefix_uid_n
 
     # Name match against title + site URL + leading body text.
+    # Used only for the name_address_verified threshold check (needs full haystack).
     haystack = " ".join([
         " ".join(titles),
         site_url or "",
         " ".join(all_text_parts)[:5000],
     ])
     name_ratio = _name_match_ratio(company_name, haystack)
-    # Fallback verification path when no UID was found: exact name + address match.
-    name_address_verified = (
-        uid_matches is None
-        and name_ratio >= 0.999
-        and _address_matches_company(address, company_zip, company_city)
+
+    # Zone-weighted name confidence (domain >> title >> body, generic tokens discounted).
+    zone_name_conf = _zone_weighted_name_ratio(company_name, site_url, titles, all_text_parts)
+
+    # Graded address verification: full (zip+city) > partial (one of the two) > none.
+    addr_full_match = _address_matches_company(address, company_zip, company_city)
+    addr_partial_match = (
+        not addr_full_match
+        and bool(address)
+        and (
+            (company_zip and company_zip.strip() in address)
+            or (company_city and company_city.strip().lower() in address.lower())
+        )
     )
+    addr_score = 1.0 if addr_full_match else (0.35 if addr_partial_match else 0.0)
+
+    # Strongest fallback path: all name tokens + exact address verified, no UID needed.
+    name_address_verified = uid_matches is None and name_ratio >= 0.999 and addr_full_match
 
     site_domain = urlparse(site_url).netloc.lower().lstrip("www.") if site_url else None
     ranked_emails = _rank_emails(emails, site_domain)
@@ -730,24 +819,66 @@ def resolve_company_extract(
     if signals_present == 0 and uid_matches is None:
         return {}
 
-    # ── Confidence model ─────────────────────────────────────────────────────
-    # Coverage is the base; verification dominates. A confirmed UID is near-proof;
-    # a contradicted UID means we almost certainly crawled the wrong site.
+    # ── Confidence model (layered, additive) ─────────────────────────────────
+    #
+    # Three identity layers contribute in decreasing priority; signal coverage
+    # (base) adds a small residual bonus. Each layer's contribution shrinks once
+    # stronger layers have already established identity, so a confirmed UID makes
+    # address and name merely corroborating rather than decisive.
+    #
+    #   Layer 1 — UID verification  (0.80 base, dominates)
+    #   Layer 2 — address match     (0–0.10 on top of UID; 0–0.55 without UID)
+    #   Layer 3 — zone name match   (0–0.06 on top of UID; 0–0.35 without UID)
+    #   Layer 4 — signal coverage   (≤0.10 residual, diminishes as identity firms up)
+    #
     base = min(1.0, signals_present / 7.0)
+
     if uid_matches is True:
-        confidence = round(min(1.0, 0.85 + 0.15 * base), 2)
+        # UID is near-proof — address and name add small incremental certainty.
+        confidence = round(
+            min(1.0, 0.80 + 0.10 * addr_score + 0.06 * zone_name_conf + 0.04 * base), 2
+        )
         method = "deterministic+uid_verified"
+        if addr_full_match:
+            method += "+address"
+        elif addr_partial_match:
+            method += "+address_partial"
+
     elif uid_matches is False:
-        confidence = round(min(0.4, 0.15 + 0.2 * base), 2)
+        # UID contradicts the company — heavy penalty. Address and name can
+        # partially recover (e.g. a subsidiary page showing the parent's UID)
+        # but confidence stays well below 0.35.
+        confidence = round(
+            min(0.35, 0.03 + 0.18 * addr_score + 0.09 * zone_name_conf + 0.05 * base), 2
+        )
         method = "deterministic+uid_mismatch"
+
     elif name_address_verified:
-        # No UID, but exact name + address match — solid fallback verification.
-        confidence = round(min(0.95, 0.7 + 0.25 * base), 2)
+        # All name tokens + full address verified — solid without UID.
+        confidence = round(min(0.90, 0.70 + 0.20 * base), 2)
         method = "deterministic+name_address_verified"
+
     else:
-        # No UID to verify — lean on name match to discount stranger sites.
-        confidence = round(min(0.9, base * (0.45 + 0.55 * name_ratio)), 2)
+        # General unverified case.
+        # Address carries the most weight (55%) because it's hard to fake incidentally.
+        # Zone-weighted name (35%) rewards domain/title matches and penalises
+        # body-text-only generic matches. Coverage is the residual 10%.
+        #
+        # Example scores (base ≈ 0.71):
+        #   Domain match + full address → 0.55 + 0.35 + 0.07 → capped 0.75
+        #   Full address only           → 0.55 + 0 + 0.07   → 0.62
+        #   Domain name only            → 0 + 0.35 + 0.07   → 0.42
+        #   Body-only generic match     → 0 + 0.04 + 0.07   → 0.11
+        confidence = round(
+            min(0.75, 0.55 * addr_score + 0.35 * zone_name_conf + 0.10 * base), 2
+        )
         method = "deterministic"
+        if addr_full_match:
+            method += "+address_verified"
+        elif addr_partial_match:
+            method += "+address_partial"
+        elif zone_name_conf >= 0.40:
+            method += "+name_match"
 
     return {
         "emails": ranked_emails[:20] or None,
