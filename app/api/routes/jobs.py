@@ -126,7 +126,7 @@ def list_jobs(limit: int = 100, db: Session = Depends(get_db), current_user: Use
 
     merged = sorted(
         by_id.values(),
-        key=lambda j: j.queued_at or j.started_at,
+        key=lambda j: j.completed_at or j.queued_at or j.started_at,
         reverse=True,
     )
     return [JobOut.from_orm_obj(j) for j in merged]
@@ -233,7 +233,7 @@ async def stream_active_jobs(db: Session = Depends(get_db), current_user: User =
             by_id[j.id] = j
         merged = sorted(
             by_id.values(),
-            key=lambda j: j.queued_at or j.started_at,
+            key=lambda j: j.completed_at or j.queued_at or j.started_at,
             reverse=True,
         )
         return [JobOut.from_orm_obj(j).model_dump() for j in merged]

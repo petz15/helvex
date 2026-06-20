@@ -317,6 +317,9 @@ def mark_crawl_done(
     db.flush()
 
 
+_TERMINAL_CRAWL_STATUSES = frozenset({"bot_blocked", "http_error", "timeout", "no_content"})
+
+
 def mark_crawl_failed(
     db: Session,
     state: CompanyCrawlState,
@@ -339,6 +342,19 @@ def mark_crawl_failed(
     if status == "js_required":
         state.tier = "playwright"
     db.flush()
+
+    if status in _TERMINAL_CRAWL_STATUSES:
+        try:
+            from app.crud.company_error import log_error as _log_err
+            _log_err(
+                db,
+                company_id=state.company_id,
+                source="crawler",
+                error_type=status,
+                message=detail,
+            )
+        except Exception:  # noqa: BLE001
+            pass
 
 
 def schedule_crawl_retry(

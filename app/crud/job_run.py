@@ -86,7 +86,8 @@ def get_job(db: Session, job_id: int) -> JobRun | None:
 
 
 def list_jobs(db: Session, limit: int = 50) -> list[JobRun]:
-    return db.query(JobRun).order_by(JobRun.queued_at.desc()).limit(limit).all()
+    # NULLS FIRST puts active jobs (no completed_at) above finished ones; finished jobs sort by end time
+    return db.query(JobRun).order_by(JobRun.completed_at.desc().nullsfirst(), JobRun.queued_at.desc()).limit(limit).all()
 
 
 def list_jobs_for_user(db: Session, *, user_id: int, org_id: int | None, limit: int = 100) -> list[JobRun]:
@@ -95,7 +96,7 @@ def list_jobs_for_user(db: Session, *, user_id: int, org_id: int | None, limit: 
         q = q.filter(or_(JobRun.user_id == user_id, JobRun.org_id == org_id))
     else:
         q = q.filter(JobRun.user_id == user_id)
-    return q.order_by(JobRun.queued_at.desc()).limit(limit).all()
+    return q.order_by(JobRun.completed_at.desc().nullsfirst(), JobRun.queued_at.desc()).limit(limit).all()
 
 
 def list_org_jobs(db: Session, org_id: int, limit: int = 100) -> list[JobRun]:
@@ -103,7 +104,7 @@ def list_org_jobs(db: Session, org_id: int, limit: int = 100) -> list[JobRun]:
     return (
         db.query(JobRun)
         .filter(JobRun.org_id == org_id)
-        .order_by(JobRun.queued_at.desc())
+        .order_by(JobRun.completed_at.desc().nullsfirst(), JobRun.queued_at.desc())
         .limit(limit)
         .all()
     )

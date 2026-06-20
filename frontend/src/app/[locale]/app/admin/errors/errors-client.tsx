@@ -14,6 +14,7 @@ import {
   resolveAdminError,
   ignoreAdminError,
   correctCompanyData,
+  backfillCrawlerErrors,
   type DataQualitySummary,
   type PipelineError,
   type JobFailure,
@@ -78,6 +79,7 @@ const SOURCE_COLOUR: Record<string, string> = {
   zefix_import: "bg-purple-100 text-purple-800",
   geocoding: "bg-teal-100 text-teal-800",
   noga: "bg-orange-100 text-orange-800",
+  crawler: "bg-red-100 text-red-800",
 };
 
 function SourceBadge({ source }: { source: string }) {
@@ -216,6 +218,7 @@ function PipelineErrorsTab() {
   const [showResolved, setShowResolved] = useState(false);
   const [expandedId, setExpandedId] = useState<number | null>(null);
   const [acting, setActing] = useState<number | null>(null);
+  const [backfilling, setBackfilling] = useState(false);
   const [banner, setBanner] = useState<{ kind: "success" | "error"; msg: string } | null>(null);
 
   const flash = useCallback((kind: "success" | "error", msg: string) => {
@@ -267,6 +270,7 @@ function PipelineErrorsTab() {
           className="text-sm border border-slate-300 rounded-lg px-3 py-1.5 bg-white focus:outline-none focus:ring-2 focus:ring-purple-400"
         >
           <option value="">All sources</option>
+          <option value="crawler">Crawler</option>
           <option value="web_enrichment">Web enrichment</option>
           <option value="zefix_import">Zefix import</option>
           <option value="geocoding">Geocoding</option>
@@ -281,7 +285,27 @@ function PipelineErrorsTab() {
           />
           Show resolved
         </label>
-        <button onClick={() => mutate()} className="ml-auto text-slate-500 hover:text-slate-700">
+        <button
+          disabled={backfilling}
+          onClick={async () => {
+            setBackfilling(true);
+            try {
+              const r = await backfillCrawlerErrors();
+              await mutate();
+              flash("success", `Backfilled ${r.backfilled} crawler errors`);
+            } catch {
+              flash("error", "Backfill failed");
+            } finally {
+              setBackfilling(false);
+            }
+          }}
+          className="ml-auto flex items-center gap-1.5 px-2 py-1 text-xs rounded bg-slate-100 text-slate-600 hover:bg-slate-200 disabled:opacity-50 transition-colors"
+          title="Import existing terminal crawler failures into pipeline errors"
+        >
+          {backfilling ? <Loader2 size={12} className="animate-spin" /> : <Database size={12} />}
+          Backfill crawler
+        </button>
+        <button onClick={() => mutate()} className="text-slate-500 hover:text-slate-700">
           <RefreshCw size={14} />
         </button>
       </div>

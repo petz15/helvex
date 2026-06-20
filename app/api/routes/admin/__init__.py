@@ -1183,6 +1183,40 @@ def list_job_failures(
     return {"items": items, "total": total, "page": page, "page_size": page_size}
 
 
+@router.post("/errors/backfill-crawler", summary="Backfill company_errors from existing terminal crawl failures (superadmin)")
+def backfill_crawler_errors(
+    db: Session = Depends(get_db),
+    actor: User = Depends(_require_superadmin),
+) -> dict:
+    """One-time backfill: reads all terminal company_crawl_state rows and inserts
+    company_errors entries for any that don't already have one (dedup via log_error).
+    Run this once after deploying the crawler error-logging wiring.
+    """
+    from sqlalchemy import text as _text
+    from app.crud.company_error import log_error as _log_err
+
+    terminal_statuses = ("bot_blocked", "http_error", "timeout", "no_content")
+    placeholders = ", ".join(f"'{s}'" for s in terminal_statuses)
+
+    rows = db.execute(_text(
+        f"SELECT company_id, crawl_status, crawl_error_detail "  # noqa: S608
+        f"FROM company_crawl_state "
+        f"WHERE crawl_status IN ({placeholders}) AND company_id IS NOT NULL"
+    )).fetchall()
+
+    inserted = 0
+    for company_id, status, detail in rows:
+        try:
+            _log_err(db, company_id=company_id, source="crawler", error_type=status, message=detail)
+            inserted += 1
+        except Exception:  # noqa: BLE001
+            pass
+
+    db.commit()
+    logger.info("admin.backfill_crawler_errors actor=%s inserted=%d", actor.id, inserted)
+    return {"backfilled": inserted}
+
+
 @router.patch("/companies/{company_id}/correct", summary="Inline data correction for a company (superadmin)")
 def correct_company_data(
     company_id: int,

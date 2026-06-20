@@ -2441,6 +2441,15 @@ export async function fetchJobFailures(params?: {
   return res.json();
 }
 
+export async function backfillCrawlerErrors(): Promise<{ backfilled: number }> {
+  const res = await fetch("/api/v1/admin/errors/backfill-crawler", {
+    method: "POST",
+    credentials: "include",
+  });
+  if (!res.ok) throw new Error("Backfill failed");
+  return res.json();
+}
+
 export async function resolveAdminError(errorId: number): Promise<void> {
   const res = await fetch(`/api/v1/admin/errors/${errorId}/resolve`, {
     method: "POST",
