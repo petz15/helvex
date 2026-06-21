@@ -656,6 +656,311 @@ def import_shab_archive(
     return stats
 
 
+def import_shab_old_pdfs(
+    db: Session,
+    *,
+    date_start: str,
+    date_end: str,
+    request_delay: float = 1.0,
+    resume_from: int = 0,
+    job_run_id: int | None = None,
+    progress_cb=None,
+    status_cb=None,
+    abort_cb=None,
+) -> dict[str, Any]:
+    """Import pre-2012 SHAB HR publications from the daily bulk PDF endpoint.
+
+    Downloads one PDF per business day via
+    ``GET /api/v1/archive/issue-of-today?date=YYYY-MM-DD``.
+    Each PDF covers all cantons + non-HR publication types; this function
+    extracts only the Handelsregister entries.
+
+    ``sogc_id`` format: ``"shab_old_{YYYYMMDD}_{pub_number}"``
+    Company UIDs are NOT available in these PDFs (old CH-xxx format only);
+    ``company_uid`` and ``company_id`` are left NULL.
+
+    ``resume_from``: number of days already completed (maps to ``progress_done``).
+    """
+    from app.clients.shab_archive_client import (
+        fetch_daily_pdf_bytes,
+        extract_text_from_pdf,
+        parse_bulk_hr_entries,
+        check_bulk_pdf_structure,
+    )
+    from app.models.sogc_publication import SogcPublication
+    from app.models.sogc_change import SogcChange
+    from app.services.sogc_preprocessor import _detect_changes
+
+    def _log_structural_error(
+        _db: Session,
+        _date: str,
+        _error_type: str,
+        _message: str,
+        _detail: dict,
+        _job_run_id: int | None,
+    ) -> None:
+        """Log a structural PDF error to the Error Center; never raises."""
+        try:
+            from app.crud.company_error import log_error as _log_err
+            _log_err(
+                _db,
+                company_id=None,
+                source="shab_old_pdf",
+                error_type=_error_type,
+                message=_message,
+                detail={**_detail, "date": _date},
+                job_run_id=_job_run_id,
+            )
+            _db.flush()
+        except Exception as _exc:
+            logger.warning("Error Center log failed for %s/%s: %s", _date, _error_type, _exc)
+
+    stats: dict[str, Any] = {
+        "mode": "old_pdf",
+        "days_attempted": 0,
+        "days_skipped": 0,
+        "pdfs_downloaded": 0,
+        "entries_parsed": 0,
+        "created": 0,
+        "updated": 0,
+        "errors": [],
+    }
+
+    d_start = date.fromisoformat(date_start)
+    d_end = date.fromisoformat(date_end)
+    all_days: list[date] = []
+    cur = d_start
+    while cur <= d_end:
+        if cur.weekday() < 5:  # Mon–Fri only
+            all_days.append(cur)
+        cur += timedelta(days=1)
+
+    total_days = len(all_days)
+    stats["total_days"] = total_days
+
+    if status_cb:
+        status_cb(
+            f"SHAB old-PDF: {total_days} weekdays "
+            f"({date_start} → {date_end}) — "
+            f"starting from day {resume_from + 1}/{total_days}…"
+        )
+
+    for day_idx, day in enumerate(all_days):
+        if day_idx < resume_from:
+            continue
+
+        if abort_cb:
+            abort_cb()
+
+        day_str = day.isoformat()
+        stats["days_attempted"] += 1
+
+        if status_cb and day_idx % 10 == 0:
+            status_cb(
+                f"Day {day_idx + 1}/{total_days}: {day_str} "
+                f"({stats['created']} created, {stats['updated']} updated)…"
+            )
+
+        try:
+            pdf_bytes = fetch_daily_pdf_bytes(day_str)
+        except Exception as exc:
+            stats["errors"].append(f"[{day_str}] PDF download failed: {exc}")
+            logger.warning("SHAB old-PDF download failed for %s: %s", day_str, exc)
+            continue
+
+        if pdf_bytes is None:
+            stats["days_skipped"] += 1
+            logger.debug("No issue for %s (weekend/holiday)", day_str)
+            if day_idx > resume_from:
+                time.sleep(request_delay * 0.25)
+            continue
+
+        stats["pdfs_downloaded"] += 1
+        pdf_size = len(pdf_bytes)
+
+        pdf_text_raw = extract_text_from_pdf(pdf_bytes)
+        if not pdf_text_raw:
+            msg = f"PDF text extraction returned empty string (bytes={pdf_size})"
+            stats["errors"].append(f"[{day_str}] {msg}")
+            logger.warning("SHAB old-PDF: %s for %s", msg, day_str)
+            _log_structural_error(
+                db, day_str, "pdf_text_empty", msg,
+                {"pdf_size": pdf_size}, job_run_id,
+            )
+            continue
+
+        # ── Structural validation ─────────────────────────────────────────────
+        try:
+            struct = check_bulk_pdf_structure(pdf_text_raw, day_str)
+        except Exception as exc:
+            logger.warning("SHAB old-PDF structure check error for %s: %s", day_str, exc)
+            struct = {"hr_end_found": True, "tagebuch_count": -1, "warnings": [], "critical": False}
+
+        if struct["warnings"]:
+            for w in struct["warnings"]:
+                stats["errors"].append(w)
+                logger.warning("SHAB old-PDF structure: %s", w)
+            _log_structural_error(
+                db, day_str,
+                "pdf_structure_changed",
+                struct["warnings"][0],
+                {"pdf_size": pdf_size, **struct},
+                job_run_id,
+            )
+
+        if struct["critical"]:
+            stats["days_skipped"] += 1
+            continue
+
+        # ── Parse HR entries ──────────────────────────────────────────────────
+        try:
+            entries = parse_bulk_hr_entries(pdf_text_raw, day_str)
+        except Exception as exc:
+            msg = f"PDF parse raised {type(exc).__name__}: {exc}"
+            stats["errors"].append(f"[{day_str}] {msg}")
+            logger.warning("SHAB old-PDF parse error for %s: %s", day_str, exc)
+            _log_structural_error(
+                db, day_str, "pdf_parse_failed", msg,
+                {"pdf_size": pdf_size}, job_run_id,
+            )
+            continue
+
+        stats["entries_parsed"] += len(entries)
+
+        # ── Post-parse quality checks ─────────────────────────────────────────
+        if entries:
+            none_canton = sum(1 for e in entries if e["canton"] is None)
+            none_subtype = sum(1 for e in entries if e["sub_rubric"] == "HR")
+            if none_canton == len(entries):
+                warn = (
+                    f"[{day_str}] Canton detection failed for all {len(entries)} entries "
+                    "(canton section header format may have changed)."
+                )
+                stats["errors"].append(warn)
+                logger.warning("SHAB old-PDF: %s", warn)
+                _log_structural_error(
+                    db, day_str, "canton_detection_failed", warn,
+                    {"pdf_size": pdf_size, "entries": len(entries)}, job_run_id,
+                )
+            if none_subtype == len(entries):
+                warn = (
+                    f"[{day_str}] Subtype classification failed for all {len(entries)} entries "
+                    "(Neueintragungen/Mutationen/Löschungen headers may have changed)."
+                )
+                stats["errors"].append(warn)
+                logger.warning("SHAB old-PDF: %s", warn)
+                _log_structural_error(
+                    db, day_str, "subtype_detection_failed", warn,
+                    {"pdf_size": pdf_size, "entries": len(entries)}, job_run_id,
+                )
+        elif pdf_size > 100_000:
+            warn = (
+                f"[{day_str}] PDF is {pdf_size // 1024}KB but 0 HR entries were parsed "
+                "(entry delimiter 'Tagebuch Nr.' may have changed format)."
+            )
+            stats["errors"].append(warn)
+            logger.warning("SHAB old-PDF: %s", warn)
+            _log_structural_error(
+                db, day_str, "zero_entries_large_pdf", warn,
+                {"pdf_size": pdf_size, "tagebuch_count": struct.get("tagebuch_count", 0)},
+                job_run_id,
+            )
+
+        for entry in entries:
+            if abort_cb:
+                abort_cb()
+
+            pub_number = entry["pub_number"]
+            date_compact = day_str.replace("-", "")
+            sogc_id = f"shab_old_{date_compact}_{pub_number}"
+
+            lang = _detect_lang(entry["text"], entry.get("canton"))
+            texts: dict[str, str | None] = {"de": None, "fr": None, "it": None, "en": None}
+            if entry["text"]:
+                texts[lang] = entry["text"]
+
+            change_dicts = _detect_changes(texts)
+
+            raw_meta = {
+                "pub_number": pub_number,
+                "ch_number": entry["ch_number"],
+                "pub_date": day_str,
+                "canton": entry.get("canton"),
+                "title": entry.get("title", ""),
+                "city": entry.get("city"),
+                "sub_rubric": entry["sub_rubric"],
+                "source": "shab_old_pdf",
+            }
+
+            try:
+                existing = db.query(SogcPublication).filter_by(sogc_id=sogc_id).first()
+                if existing:
+                    pub = existing
+                    pub.pub_date = day_str
+                    pub.sub_rubric = entry["sub_rubric"]
+                    pub.pub_number = pub_number
+                    pub.detected_language = lang
+                    if entry["text"]:
+                        setattr(pub, f"text_{lang}", entry["text"])
+                    pub.raw_json = json.dumps(raw_meta)
+                    pub.preprocessed_at = datetime.now(tz=timezone.utc)
+                    db.query(SogcChange).filter_by(sogc_publication_id=pub.id).delete()
+                    db.flush()
+                    for ch in change_dicts:
+                        db.add(SogcChange(
+                            sogc_publication_id=pub.id,
+                            change_type=ch["change_type"],
+                            keywords_matched=ch.get("keywords_matched"),
+                            raw_excerpt=(ch.get("raw_excerpt") or "")[:500],
+                        ))
+                    stats["updated"] += 1
+                else:
+                    pub = SogcPublication(
+                        sogc_id=sogc_id,
+                        company_uid=None,
+                        company_id=None,
+                        pub_date=day_str,
+                        sub_rubric=entry["sub_rubric"],
+                        pub_number=pub_number,
+                        text_de=texts.get("de"),
+                        text_fr=texts.get("fr"),
+                        text_it=texts.get("it"),
+                        text_en=texts.get("en"),
+                        detected_language=lang,
+                        encoding_fixed=False,
+                        raw_json=json.dumps(raw_meta),
+                        preprocessed_at=datetime.now(tz=timezone.utc),
+                    )
+                    db.add(pub)
+                    db.flush()
+                    for ch in change_dicts:
+                        db.add(SogcChange(
+                            sogc_publication_id=pub.id,
+                            change_type=ch["change_type"],
+                            keywords_matched=ch.get("keywords_matched"),
+                            raw_excerpt=(ch.get("raw_excerpt") or "")[:500],
+                        ))
+                    stats["created"] += 1
+
+                db.commit()
+
+            except Exception as exc:
+                try:
+                    db.rollback()
+                except Exception:
+                    pass
+                stats["errors"].append(f"[{sogc_id}] DB: {type(exc).__name__}: {exc}")
+                logger.warning("SHAB old-PDF DB write failed %s: %s", sogc_id, exc)
+
+        if progress_cb:
+            progress_cb(day_idx + 1, total_days, stats)
+
+        if day_idx < len(all_days) - 1:
+            time.sleep(request_delay)
+
+    return stats
+
+
 def run_link_sogc_stubs(
     db: Session,
     *,

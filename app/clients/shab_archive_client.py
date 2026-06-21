@@ -4,9 +4,11 @@ Provides paginated access to historical SHAB publications and PDF download /
 text extraction.  This is a separate data source from the Zefix SOGC feed used
 by shab_client.py.
 
-sogc_id convention used by the archive importer:
-    "shab_{archive_id}"  (e.g. "shab_4447021")
-Zefix SOGC IDs are stored as plain numeric strings and will never collide.
+sogc_id conventions:
+    Modern (post-2012):  "shab_{archive_id}"      (e.g. "shab_4447021")
+    Old bulk PDF:        "shab_old_{YYYYMMDD}_{pub_number}"
+                         (e.g. "shab_old_20020103_000018")
+Zefix SOGC IDs are plain numeric strings and never collide with either prefix.
 """
 
 from __future__ import annotations
@@ -280,6 +282,247 @@ def is_hr_heading(heading: str | None, rubric: str | None) -> bool:
 def is_hr_rubric(rubric: str | None) -> bool:
     """Return True if *rubric* is a Handelsregister entry type."""
     return (rubric or "").upper() in HR_SUBRUBRICS
+
+
+# ── Old bulk-PDF download (pre-2012) ─────────────────────────────────────────
+
+_DAILY_PDF_URL = "https://www.shab.ch/api/v1/archive/issue-of-today"
+_BROWSER_UA = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+    "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+)
+
+
+def fetch_daily_pdf_bytes(
+    date_str: str,
+    *,
+    language: str = "de",
+    tenant: str = SHAB_TENANT,
+    timeout: float = 120.0,
+) -> bytes | None:
+    """Download the daily bulk SHAB PDF for dates before the per-publication API era.
+
+    Returns raw PDF bytes on success, or None if the server returns 404 (no
+    issue published that day — weekend or holiday).
+
+    The endpoint requires a browser-like User-Agent header; without it the
+    server returns 404 even for valid dates.
+
+    URL: GET /api/v1/archive/issue-of-today?date=YYYY-MM-DD&language=de&tenant=shab
+    """
+    params = {"date": date_str, "language": language, "tenant": tenant}
+    headers = {"User-Agent": _BROWSER_UA, "Accept": "application/pdf,*/*"}
+
+    last_exc: Exception | None = None
+    for attempt in range(_MAX_RETRIES + 1):
+        if attempt > 0:
+            wait = _backoff(attempt - 1)
+            logger.warning(
+                "SHAB daily-PDF retry %d/%d for %s in %.1fs",
+                attempt, _MAX_RETRIES, date_str, wait,
+            )
+            time.sleep(wait)
+
+        try:
+            with httpx.Client(timeout=timeout, headers=headers, follow_redirects=True) as client:
+                resp = client.get(_DAILY_PDF_URL, params=params)
+
+            if resp.status_code == 404:
+                return None  # no issue that day (weekend / holiday)
+
+            if resp.status_code == 429:
+                retry_after = float(resp.headers.get("Retry-After") or _backoff(attempt))
+                time.sleep(retry_after)
+                last_exc = RuntimeError(f"HTTP 429 — waited {retry_after:.0f}s")
+                continue
+
+            if resp.status_code in _RETRYABLE_STATUS:
+                last_exc = RuntimeError(f"HTTP {resp.status_code}")
+                continue
+
+            resp.raise_for_status()
+
+            content_type = resp.headers.get("content-type", "")
+            if "pdf" not in content_type and len(resp.content) < 1000:
+                last_exc = RuntimeError(f"Unexpected content-type: {content_type}")
+                continue
+
+            return resp.content
+
+        except (httpx.TimeoutException, httpx.ConnectError, httpx.RemoteProtocolError) as exc:
+            last_exc = exc
+
+    raise RuntimeError(
+        f"SHAB daily PDF failed after {_MAX_RETRIES} retries "
+        f"(date={date_str}): {last_exc}"
+    )
+
+
+# ── Bulk PDF parsing ──────────────────────────────────────────────────────────
+
+# End of the HR section: all three languages on ONE line (section content header).
+# Safe against the TOC, which has a page-number digit interrupting the whitespace
+# ("Schulden-\ndenrufe\n 32\nAppel…" → hyphen + digit breaks both patterns).
+_HR_END_RE = re.compile(r"Schuldenrufe\s+Appel aux cr")
+
+# Entry terminator: "Tagebuch Nr. 9488 vom 21.12.2001\n(000018 / CH-400.3.002.852-4)"
+_TAGEBUCH_RE = re.compile(
+    r"Tagebuch Nr\.\s+\d+\s+vom\s+\d{2}\.\d{2}\.\d{4}\s*\n"
+    r"\((\d+)\s*/\s*(CH-[\d.]+-\d)\)",
+    re.MULTILINE,
+)
+
+# Canton section header: two-letter code on its own line (optionally repeated)
+_CANTON_HEADER_RE = re.compile(
+    r"(?:^|\n)(AG|AI|AR|BE|BL|BS|FR|GE|GL|GR|JU|LU|NE|NW|OW|SG|SH|SO|SZ|TG|TI|UR|VD|VS|ZG|ZH)\n",
+    re.MULTILINE,
+)
+
+# Subsection type (German keyword suffices — French/Italian also present but not needed)
+_SUBTYPE_RE = re.compile(
+    r"\b(Neueintragungen|Mutationen|L.schungen|Aufl.sungen|Konkurse|Zweigniederlassungen)\b",
+    re.IGNORECASE,
+)
+
+# First line of an entry body (Roman-numeral "I" as section marker)
+_ENTRY_START_RE = re.compile(r"(?:^|\n)I\s+(.+?)(?:\n|$)")
+
+# City from first line: ", [bisher ]in City,"
+_CITY_RE = re.compile(r",\s+(?:bisher\s+)?in\s+([^,\n]+)")
+
+
+def check_bulk_pdf_structure(pdf_text: str, date_str: str) -> dict[str, Any]:
+    """Validate the structural markers of a daily SHAB bulk PDF.
+
+    Returns a dict with:
+        hr_end_found        bool   — False means HR section boundary not found;
+                                     importing would risk including non-HR entries.
+        tagebuch_count      int    — number of 'Tagebuch Nr.' delimiters found.
+        warnings            list   — human-readable descriptions of any issues.
+        critical            bool   — True when data integrity is at risk
+                                     (currently: hr_end_found is False).
+
+    Call this BEFORE parse_bulk_hr_entries.  If ``critical`` is True, skip
+    importing and surface the issue via the Error Center.
+    """
+    m_end = _HR_END_RE.search(pdf_text)
+    tagebuch_count = len(_TAGEBUCH_RE.findall(pdf_text))
+    warnings: list[str] = []
+    critical = False
+
+    if not m_end:
+        warnings.append(
+            f"[{date_str}] HR section end marker ('Schuldenrufe Appel aux…') not found. "
+            "The PDF may have changed structure — importing without this boundary risks "
+            "including non-HR entries (Schuldenrufe, Beschaffungswesen, …) as HR records. "
+            "Entries for this day have been skipped."
+        )
+        critical = True
+
+    if tagebuch_count == 0:
+        warnings.append(
+            f"[{date_str}] No 'Tagebuch Nr.' entry delimiters found. "
+            "The per-entry delimiter format may have changed — no entries will be parsed."
+        )
+        critical = True
+
+    return {
+        "hr_end_found": m_end is not None,
+        "tagebuch_count": tagebuch_count,
+        "warnings": warnings,
+        "critical": critical,
+    }
+
+
+def parse_bulk_hr_entries(pdf_text: str, pub_date: str) -> list[dict[str, Any]]:
+    """Split a daily bulk SHAB PDF (pre-2012 format) into individual HR entry dicts.
+
+    Returns one dict per HR entry found.  Each dict has keys:
+        pub_number  — 6-digit sequential entry number within the issue
+        ch_number   — old Swiss cantonal register number (CH-XXX.X.XXX.XXX-X)
+        pub_date    — ISO date string of the SHAB issue
+        canton      — two-letter canton code (None if not detectable)
+        sub_rubric  — "HR01"/"HR02"/"HR03"/"HR04" or "HR" if unknown
+        title       — company name (first line of entry, may be truncated at line-break)
+        city        — city of the registered seat, or None
+        text        — normalized full entry text (German; mixed-language content preserved)
+
+    Entry structure in the PDF:
+        ...entry body text...
+        Tagebuch Nr. NNNN vom DD.MM.YYYY
+        (NNNNNN / CH-XXX.X.XXX.XXX-X)    ← delimiter marking the END of this entry
+                                            ← next entry starts after this block
+
+    Canton and subsection-type headers appear between entries in the inter-entry
+    whitespace and are tracked as state.
+    """
+    # Truncate at the first non-HR section (Schuldenrufe / creditor calls)
+    m_end = _HR_END_RE.search(pdf_text)
+    hr_text = pdf_text[: m_end.start()] if m_end else pdf_text
+
+    delimiters = list(_TAGEBUCH_RE.finditer(hr_text))
+    if not delimiters:
+        return []
+
+    entries: list[dict[str, Any]] = []
+    current_canton: str | None = None
+    current_subtype: str = "HR"
+
+    for i, delim in enumerate(delimiters):
+        pub_number = delim.group(1)
+        ch_number = delim.group(2)
+
+        # Text that ends at this delimiter = body of the entry identified by pub_number
+        if i == 0:
+            segment = hr_text[: delim.start()]
+        else:
+            segment = hr_text[delimiters[i - 1].end() : delim.start()]
+
+        # ── Canton tracking ───────────────────────────────────────────────────
+        canton_m = _CANTON_HEADER_RE.search(segment)
+        if canton_m:
+            current_canton = canton_m.group(1)
+
+        # ── Subsection type ───────────────────────────────────────────────────
+        subtype_m = _SUBTYPE_RE.search(segment)
+        if subtype_m:
+            word = subtype_m.group(1).lower()
+            if "neueintrag" in word:
+                current_subtype = "HR01"
+            elif "mutation" in word:
+                current_subtype = "HR02"
+            elif "löschung" in word or "auflös" in word or "lschung" in word:
+                current_subtype = "HR03"
+            elif "konkurs" in word:
+                current_subtype = "HR04"
+            # Zweigniederlassungen → keep current
+
+        # ── Title / city ──────────────────────────────────────────────────────
+        # Use the LAST match — the first segment includes TOC/cover text before
+        # the actual entry, so earlier matches are page-header noise.
+        title = ""
+        city: str | None = None
+        title_matches = _ENTRY_START_RE.findall(segment)
+        if title_matches:
+            title = title_matches[-1].strip()
+            city_m = _CITY_RE.search(title)
+            if city_m:
+                city = city_m.group(1).strip().rstrip(".")
+
+        entry_text = normalize_pdf_text(segment)
+
+        entries.append({
+            "pub_number": pub_number,
+            "ch_number": ch_number,
+            "pub_date": pub_date,
+            "canton": current_canton,
+            "sub_rubric": current_subtype,
+            "title": title[:512],
+            "city": city,
+            "text": entry_text,
+        })
+
+    return entries
 
 
 def parse_entry_fields(entry: dict[str, Any]) -> dict[str, Any]:
