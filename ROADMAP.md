@@ -80,12 +80,7 @@
 
 ### UI fixes:
 - Email notifications remove from billing -> should be fixed but untested
-- Show settings in explore page (currently only shown when there is no data but there is always data)
-- Company profile page improve the AD banner, too small! -> still an issue
-- Move recaculate scores, jobs etc from settings to jobs? or elsewhere but not here. also these should only be available to certain orgs
 - updated at in company overview should represent when the last sogc update was. potentially generally overhaul company search/overview for a cleaner search for one company. in company search, remove the small preview of a company profile. not really necessary in my opinion or atleast remove the scores as those are meant for explorer
-- larger symbols and text in header
-- When map moves and a map marker is opend while more map markers load in, the currently opened map marker always closes QOL issue
 
 # Questions
 
@@ -104,7 +99,6 @@
 
 ## Company Explore page
 
-
 - [ ] **Create a mutation Timeline page** - A place where users can scroll through the daily company mutations with filters. Basically the company data but sorted by date instead of grouped by company and displayed on individual pages. This will probably require some preprocessing and then daily processing. 
 - [ ] **scoring wizard general overhaul** - currently pretty useless as it only shows AI categories not all. the flow should be different. probably move away from singular score, or use that in the end. It should have filters etc and then scoring. or weighted scores based on different other scores. for location distance scoring, implement the option of multiple locations and if descending or ascending is better (some might have different locations/branches they are interested in).
 - [ ] **NOGA numbers** - NOGA is not showing up any numbers
@@ -116,8 +110,6 @@
 
 ## Company Data
 
-- [ ] **Historic SHAB import** - from the official SHAB website, get all the pre 2018 SHAB publications -> and then use them for my sogc stuff. need merge logic from the current zefix imports to avoid duplications and keep manageable. needs pdf parsing
-
 - [ ] **SIMAP archive backfill** — import historical procurement award data from `archiv.simap.ch` (covers pre-July-2024 data; the current `simap_backfill` job only covers July 2024+ via `simap.ch/api`).
   - **API:** `POST https://archiv.simap.ch/api/search` with `type_cd_ob: "OB02,OB08"` (Zuschläge); integer-paged (`pageNo`/`recordsPerPage`); detail via `GET /api/detail?meldungsnummer={id}` (returns JSON). Vendor data is in `OB02.SPEC.OB02.AWARD.PRIM.CONTRACTOR.LIST.PRIM.CONTRACTOR` — name + address, **no CHE UID**.
   - **Company matching — name index approach:** Since the archive has no CHE UIDs, matching requires a name-based lookup. Build a `{normalized_name → company_id}` index at job start from: (1) `companies.name` (current), (2) `sogc_changes.raw_excerpt` where `change_type='name'` (historical renamed-to names), (3) bisher-pattern extraction from those same excerpts (renamed-from names). Normalize: lowercase, strip legal suffixes (AG/GmbH/SA/Sàrl), collapse whitespace. Use vendor `ZIPCODE` (4-digit PLZ) as a tiebreaker only when the normalized name maps to multiple companies — never as a required constraint. If ambiguous after ZIP tiebreak → `company_id = NULL`. Past addresses from SOGC (`change_type='address'`) are free-form text and too noisy to use reliably; skip.
@@ -128,10 +120,6 @@
 - [ ] **Web extract — LLM enrichment layer** — on top of the deterministic `web_extract` job (emails/phones/UID/socials/keywords), add an optional Claude Haiku layer that summarizes the cleaned main text into a company description + service summary + category hint. Must be tier/credit-gated (reuse `claude_classify` gating + batch-API pattern); run only on cleaned text to bound tokens; never ungated. Deferred from the phase-1 crawler ingestion build.
 - [ ] **Web crawler — external paid scrape fallback tier** — a 3rd `tier=external` last resort for hard Cloudflare/CAPTCHA sites that defeat both httpx (curl_cffi impersonation) and Playwright. Reuse the existing ScrapingDog integration pattern (`scrapingdog_search_client.py`); gate by org/credits so cost is bounded to the few sites that need it. Deferred from the phase-2 bot-protection build.
 - [ ] **Web extract — company-profile UI** — surface extracted contacts (emails/phones/socials), address, UID, languages, and description on the company detail page, sourced from `company_web_extract`. Decide placement/QOL (per CLAUDE.md frontend-wiring rule). Deferred from the phase-1 crawler ingestion build.
-- [x] **Web extract — multi-candidate comparison & discard UI** — Done: `WebsitePanel` shows "All URL candidates" card with confidence badge, UID match icon, candidate status, review flag, and promote/discard actions per row. Backend: `GET /{id}/web-extracts`, `POST .../promote`, `DELETE .../discard`. Crawler admin shows review flags table and high-frequency domain stats.
-- [x] **Web extract — wire into web_score** — Done: `scoring.adjust_web_score_for_extraction()` adjusts the raw Serper `web_score` using `uid_matches_zefix` (+40 match / −50 mismatch, capped/floored) and the new `name_address_verified` fallback signal (+20, when no UID found but name+address match Zefix exactly). Wired into `handle_web_extract`, recomputed idempotently from the raw score each run so re-extraction doesn't compound it. See architecture.md §16.
-- [x] **Web extract — wire web_score into combined_score** — Done: `compute_relevance_score` now uses a 4-component formula when `web_score` is present (`ai×0.50 + web×0.20 + noga×0.20 + kw×0.10`); falls back to 3-component when absent. All call sites updated. Absent components renormalise proportionally.
-- [x] **Web extract — UID-mismatch candidate quarantine** — Done: when best extract has `uid_matches_zefix=False`, `handle_web_extract` calls `reject_url_candidate()` and unconditionally triggers fallback crawl of the next candidate. `quarantined` counter in job stats tracks this per run.
 - [ ] **Web extract — LLM description/summary layer** — deterministic description is meta/OG or first paragraph; often weak. Add the deferred Claude Haiku layer to summarise cleaned main text into a description + service summary + category hint (tier/credit-gated, run on cleaned text only). Re-extract loop (`/admin/jobs/crawler/reextract`) means this can be layered on stored HTML without re-crawling.
 - [ ] **Web extract — persons → People graph** — `persons` (impressum management names) are now extracted. Resolve them against SOGC person records / signers and feed the People-finder/graph feature.
 - [ ] **Web extract — extractor quality tuning** — using the coverage dashboard, raise low-fill fields. Likely next: address parser recall (many SME impressums use non-standard formats), bigram keyword quality (reuse `discover_stopwords`/`analyze_boilerplate` outputs), phone fax-vs-tel disambiguation.
@@ -219,13 +207,10 @@ before the next `[deploy-prod]` push.
 - [ ] **Confirm Renovate is actually active on this repo** — `renovate.json` is committed but needs the Renovate GitHub App (or equivalent) installed/enabled before it opens any PRs.
 - [ ] **Re-confirm `admin_cidrs` covers how you actually connect** — scoped sudo + PAM now reject SSH/sudo from any IP outside `admin_cidrs` (`infra/terraform/envs/prod/variables.tf`). If your admin IP changes without updating this first, you lock yourself out of the control-plane.
 
-### Migration lock fix (Jun 2026) — verify on next deploy
 
-Prod logs (2026-06-07, 06-14, 06-16) showed migration `0098 → 0099` (plain `ADD COLUMN` on `company_web_extract`) repeatedly failing with `QueryCanceled: canceling statement due to statement timeout` — every deploy attempt was hitting this, meaning migrations 0099–0102 had likely never actually landed in prod despite being committed. Root cause: all 5 deployments (app, frontend, api-worker, ml-worker, crawler-http ×2) run `alembic upgrade head` independently (both `entrypoint.sh` and the `app/main.py` lifespan), so a normal deploy alone produces several concurrent sessions racing for the same `ACCESS EXCLUSIVE` table lock, getting killed by the 30s `statement_timeout` before any finish. Fixed via a Postgres advisory lock in [alembic/env.py](alembic/env.py) (see [architecture.md](architecture.md#entry-point-appmainpy)) so pods serialize instead of racing.
-
-- [ ] **Confirm the next `[deploy-prod]` actually applies migrations 0099–0102 cleanly** — this is the first deploy since the advisory-lock fix; watch the migration logs for the lock-wait behavior instead of timeout errors.
 
 ## Architecture & Refactoring
+
 - [ ] **API key management** — token creation/revocation UI for org admins to manage their API credentials; currently only available via admin panel
 - [ ] **uvicorn async** - Each open SSE connection holds one synchronous uvicorn worker thread (blocking I/O). At current scale (<50 concurrent users) this is fine; at higher scale the endpoint should be rewritten as `async def` with `anyio.sleep` and an async Redis client.
 - [ ] **Github Action Secrets Mess** - Currently many github action secrets are thrown in there which are my ENV variables, this should be managed and documented much better. Especially when I implement a DEV/INT env I should seperate a lot of these variables
@@ -354,3 +339,8 @@ as a join key outside the person resolution pipeline (audit all callers first).
 - [X] **Pre-processing company timeline** - process all shab timeline with a seperate table which then can be used for more features such as cleaner overview of changes, connections of people over multiple companies etc. past changes also with cancelled companies etc!
 - [X] **Graph overview of relationships** — based on past SHAB changes and name changes, take overs etc -> create nicer visuals for timeline. evaluate js on the fly calculations vs backend/DB
 - [X] **Cross-company person graph** — normalize sogcPub organ changes into `persons` / `company_persons` tables via a pipeline job; build a graph UI showing where signers appear across multiple companies, what roles they held, and when — enabling network analysis of directors, beneficial owners, and corporate groups -> could use a graph DB for that
+- [x] **Historic SHAB import** - from the official SHAB website, get all the pre 2018 SHAB publications -> and then use them for my sogc stuff. need merge logic from the current zefix imports to avoid duplications and keep manageable. needs pdf parsing
+- [x] **Web extract — multi-candidate comparison & discard UI** — Done: `WebsitePanel` shows "All URL candidates" card with confidence badge, UID match icon, candidate status, review flag, and promote/discard actions per row. Backend: `GET /{id}/web-extracts`, `POST .../promote`, `DELETE .../discard`. Crawler admin shows review flags table and high-frequency domain stats.
+- [x] **Web extract — wire into web_score** — Done: `scoring.adjust_web_score_for_extraction()` adjusts the raw Serper `web_score` using `uid_matches_zefix` (+40 match / −50 mismatch, capped/floored) and the new `name_address_verified` fallback signal (+20, when no UID found but name+address match Zefix exactly). Wired into `handle_web_extract`, recomputed idempotently from the raw score each run so re-extraction doesn't compound it. See architecture.md §16.
+- [x] **Web extract — wire web_score into combined_score** — Done: `compute_relevance_score` now uses a 4-component formula when `web_score` is present (`ai×0.50 + web×0.20 + noga×0.20 + kw×0.10`); falls back to 3-component when absent. All call sites updated. Absent components renormalise proportionally.
+- [x] **Web extract — UID-mismatch candidate quarantine** — Done: when best extract has `uid_matches_zefix=False`, `handle_web_extract` calls `reject_url_candidate()` and unconditionally triggers fallback crawl of the next candidate. `quarantined` counter in job stats tracks this per run.
