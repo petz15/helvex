@@ -929,7 +929,28 @@ The `message` field contains the full HR publication narrative (single language;
 
 ### SHAB Archive Import — `app/services/shab_archive_import.py`
 
-Imports historical SHAB publications directly from the `shab.ch` public archive API (`https://www.shab.ch/api/v1/archive/public`). PDF-based; links publications to the `companies` table and creates stub entries for cancelled companies absent from Zefix.
+Imports historical SHAB publications from `shab.ch`. Operates in two modes depending on the date range, dispatched automatically by `handle_shab_archive` in `app/services/job_handlers/shab_archive.py` (cutoff: `2012-12-01`):
+
+#### Mode A — Pre-2012 bulk PDF (`import_shab_old_pdfs`)
+
+Pre-December 2012, SHAB published one PDF per day covering all cantons + all publication types. Endpoint: `GET /api/v1/archive/issue-of-today?date=YYYY-MM-DD&language=de&tenant=shab` (requires browser User-Agent; 404 on weekends/holidays).
+
+**PDF format eras** — three distinct delimiter structures; auto-detected by `_find_entry_delimiters`:
+| Era | Delimiter format | Pub-number digits | Entry bullet |
+|---|---|---|---|
+| 2002–mid-2008 | `Tagebuch Nr. NNNN vom DD.MM.YYYY\n(NNNNNN / CH-…)` | 6 | `I ` (Roman I) |
+| mid-2008 | `Tagesregister-Nr. NNNN vom DD.MM.YYYY\n(NNNNNNNN / CH-…)` | 8 | `■` |
+| 2009–2012 | `Tagesregister-Nr. NNNN vom DD.MM.YYYY / CH-… / NNNNNNNN` (single line) | 8 | `■` |
+
+The `■` glyph is encoded differently by PyMuPDF depending on PDF year: `\x84` (U+0084, 2008–2011) or a Unicode PUA codepoint like U+F06E (2012+).
+
+**Workflow:** iterates weekdays Mon–Fri; skips 404s; calls `check_bulk_pdf_structure` → `parse_bulk_hr_entries`; upserts `SogcPublication` rows with `sogc_id = "shab_old_{YYYYMMDD}_{pub_number}"` and `company_uid = company_id = None` (old CH-xxx numbers don't map to CHE UIDs).
+
+**Structural validation:** `check_bulk_pdf_structure` logs critical format changes to the Error Center (`company_errors` table, `source="shab_old_pdf"`) rather than silently skipping. Days with critical issues (HR end marker missing, zero delimiters) are counted in `days_skipped`.
+
+#### Mode B — Post-2012 per-publication API (`import_shab_archive`)
+
+Paginates the `shab.ch` public archive API (`https://www.shab.ch/api/v1/archive/public`). PDF-based; links publications to the `companies` table and creates stub entries for cancelled companies absent from Zefix.
 
 **Workflow:**
 1. `fetch_archive_page(page, size)` — paginates the archive list (`includeContent=false`).
@@ -944,15 +965,17 @@ Imports historical SHAB publications directly from the `shab.ch` public archive 
 
 **Company source field:** `companies.source` distinguishes import origin: `"zefix"` (bulk/detail import), `"shab_stub"` (stub created by SHAB archive). Legacy rows have `NULL`. If a stub later appears in a Zefix import, `source` is updated to `"zefix"` automatically (included in `REEXTRACTABLE_FIELDS`). Stubs have `status="CANCELLED"` so they are excluded from the lead dashboard by the existing `_DELETED_STATUSES` filter.
 
-**sogc_id convention:** `"shab_{archive_id}"` (e.g. `"shab_4447021"`) — never collides with Zefix SOGC IDs (plain numeric strings).
+**sogc_id conventions:**
+- Post-2012 API: `"shab_{archive_id}"` (e.g. `"shab_4447021"`)
+- Pre-2012 PDF: `"shab_old_{YYYYMMDD}_{pub_number}"` (e.g. `"shab_old_20100315_05541344"`, max 27 chars, within String(32))
 
-**Job type:** `shab_archive` — registered in `JOB_HANDLERS`, ONE_PER_ORG.
+**Job type:** `shab_archive` — registered in `JOB_HANDLERS`, ONE_PER_ORG. Params: `date_start`, `date_end`, `mode` (`auto`|`old_pdf`|`api`). Auto-mode routes dates < 2012-12-01 to Mode A and dates >= 2012-12-01 to Mode B.
 
 **API endpoint:** `POST /api/v1/collection/shab-archive` (superadmin only).
 
 **Frontend:** Collection page → SHAB / SOGC group → "SHAB Archive Import (shab.ch)" section.
 
-**Dependency:** `pypdf>=4.0.0` added to `requirements.backend.txt`.
+**Dependencies:** `pypdf>=4.0.0`, `PyMuPDF (fitz)>=1.23.0` added to `requirements.backend.txt`.
 
 ### Link SOGC Stubs — `run_link_sogc_stubs` in `app/services/shab_archive_import.py`
 

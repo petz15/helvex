@@ -275,6 +275,7 @@ function PipelineErrorsTab() {
           <option value="zefix_import">Zefix import</option>
           <option value="geocoding">Geocoding</option>
           <option value="noga">NOGA</option>
+          <option value="shab_old_pdf">SHAB old PDF</option>
         </select>
         <label className="flex items-center gap-2 text-sm text-slate-600 cursor-pointer">
           <input
@@ -377,14 +378,34 @@ function PipelineErrorsTab() {
                       </div>
                     </td>
                   </tr>
-                  {expandedId === err.id && !err.resolved_at && (
+                  {expandedId === err.id && (
                     <tr key={`${err.id}-expand`}>
-                      <td colSpan={5} className="px-4 pb-3">
-                        <CorrectionPanel
-                          error={err}
-                          onSaved={handleSaved}
-                          onCancel={() => setExpandedId(null)}
-                        />
+                      <td colSpan={5} className="px-4 pb-4">
+                        <div className="mt-2 space-y-2">
+                          {/* Full error text */}
+                          {err.message && (
+                            <div className="p-3 bg-red-50 border border-red-200 rounded-lg">
+                              <p className="text-xs font-semibold text-red-700 mb-1 uppercase tracking-wider">Message</p>
+                              <p className="text-xs text-red-900 font-mono whitespace-pre-wrap break-all">{err.message}</p>
+                            </div>
+                          )}
+                          {err.detail_json && (
+                            <div className="rounded-lg overflow-hidden">
+                              <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider bg-slate-800 px-3 pt-2 pb-1">Detail</p>
+                              <pre className="bg-slate-900 text-slate-100 text-xs px-3 pb-3 overflow-auto max-h-48 whitespace-pre-wrap">
+                                {(() => { try { return JSON.stringify(JSON.parse(err.detail_json), null, 2); } catch { return err.detail_json; } })()}
+                              </pre>
+                            </div>
+                          )}
+                          {/* Correction form (only for unresolved errors) */}
+                          {!err.resolved_at && (
+                            <CorrectionPanel
+                              error={err}
+                              onSaved={handleSaved}
+                              onCancel={() => setExpandedId(null)}
+                            />
+                          )}
+                        </div>
                       </td>
                     </tr>
                   )}

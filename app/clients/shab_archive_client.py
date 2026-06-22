@@ -365,12 +365,29 @@ def fetch_daily_pdf_bytes(
 # ("Schulden-\ndenrufe\n 32\nAppel…" → hyphen + digit breaks both patterns).
 _HR_END_RE = re.compile(r"Schuldenrufe\s+Appel aux cr")
 
-# Entry terminator: "Tagebuch Nr. 9488 vom 21.12.2001\n(000018 / CH-400.3.002.852-4)"
-_TAGEBUCH_RE = re.compile(
-    r"Tagebuch Nr\.\s+\d+\s+vom\s+\d{2}\.\d{2}\.\d{4}\s*\n"
+# Entry terminator — three distinct eras of the SHAB PDF format:
+#
+# Format 1/2 (2002–mid-2008): keyword on its own line, then (pub / CH) on the next.
+#   "Tagebuch Nr. 9488 vom 21.12.2001\n(000018 / CH-400.3.002.852-4)"   — space before Nr
+#   "Tagesregister-Nr. 3555 vom 28.04.2008\n(04460582 / CH-400.1.030.375-6)" — hyphen, 8-digit
+# Note: "Tagebuch Nr." has a SPACE; "Tagesregister-Nr." has a HYPHEN — handled separately.
+# Groups: (1) pub_number, (2) ch_number
+_FMT12_RE = re.compile(
+    r"(?:Tagebuch Nr\.|Tagesregister-Nr\.)\s+\d+\s+vom\s+\d{2}\.\d{2}\.\d{4}\s*\n"
     r"\((\d+)\s*/\s*(CH-[\d.]+-\d)\)",
     re.MULTILINE,
 )
+
+# Format 3 (2009–2012): all on one line with slash separators, CH first then pub.
+#   "Tagesregister-Nr. 2987 vom 09.03.2010 / CH-400.1.031.931-8 / 05541344"
+# Groups: (1) ch_number, (2) pub_number  ← swapped vs FMT12
+_FMT3_RE = re.compile(
+    r"Tagesregister-Nr\.\s+\d+\s+vom\s+\d{2}\.\d{2}\.\d{4}\s*/\s*(CH-[\d.]+-\d)\s*/\s*(\d+)",
+    re.MULTILINE,
+)
+
+# Keep legacy name so existing callers that might import it still compile.
+_TAGEBUCH_RE = _FMT12_RE
 
 # Canton section header: two-letter code on its own line (optionally repeated)
 _CANTON_HEADER_RE = re.compile(
@@ -384,8 +401,13 @@ _SUBTYPE_RE = re.compile(
     re.IGNORECASE,
 )
 
-# First line of an entry body (Roman-numeral "I" as section marker)
-_ENTRY_START_RE = re.compile(r"(?:^|\n)I\s+(.+?)(?:\n|$)")
+# First line of an entry body.
+# Pre-2008: "I CompanyName AG, ..."  (Roman numeral I as section marker)
+# 2008+:    bullet glyph + company name.  The glyph encoding varies by PDF era:
+#   2008-2011: PyMuPDF maps the bullet to \x84 (U+0084, C1 control)
+#   2012+:     PyMuPDF maps it to a PUA code point (e.g. U+F06E from Wingdings encoding)
+# Matching: I<space>, \x84, ■ (U+25A0 as-is), or any PUA character (U+E000–U+F8FF).
+_ENTRY_START_RE = re.compile(r"(?:^|\n)(?:I\s+|[\x84■-]\s*)(.+?)(?:\n|$)")
 
 # City from first line: ", [bisher ]in City,"
 _CITY_RE = re.compile(r",\s+(?:bisher\s+)?in\s+([^,\n]+)")
@@ -395,18 +417,19 @@ def check_bulk_pdf_structure(pdf_text: str, date_str: str) -> dict[str, Any]:
     """Validate the structural markers of a daily SHAB bulk PDF.
 
     Returns a dict with:
-        hr_end_found        bool   — False means HR section boundary not found;
-                                     importing would risk including non-HR entries.
-        tagebuch_count      int    — number of 'Tagebuch Nr.' delimiters found.
+        hr_end_found        bool   — False means HR section boundary not found.
+        tagebuch_count      int    — total entry delimiters found (all format eras).
         warnings            list   — human-readable descriptions of any issues.
-        critical            bool   — True when data integrity is at risk
-                                     (currently: hr_end_found is False).
+        critical            bool   — True when data integrity is at risk.
 
     Call this BEFORE parse_bulk_hr_entries.  If ``critical`` is True, skip
     importing and surface the issue via the Error Center.
     """
     m_end = _HR_END_RE.search(pdf_text)
-    tagebuch_count = len(_TAGEBUCH_RE.findall(pdf_text))
+    # Count delimiters across all three format eras
+    fmt12_count = len(_FMT12_RE.findall(pdf_text))
+    fmt3_count = len(_FMT3_RE.findall(pdf_text))
+    tagebuch_count = fmt12_count + fmt3_count
     warnings: list[str] = []
     critical = False
 
@@ -421,7 +444,7 @@ def check_bulk_pdf_structure(pdf_text: str, date_str: str) -> dict[str, Any]:
 
     if tagebuch_count == 0:
         warnings.append(
-            f"[{date_str}] No 'Tagebuch Nr.' entry delimiters found. "
+            f"[{date_str}] No entry delimiters found (tried Tagebuch/Tagesregister formats). "
             "The per-entry delimiter format may have changed — no entries will be parsed."
         )
         critical = True
@@ -434,11 +457,29 @@ def check_bulk_pdf_structure(pdf_text: str, date_str: str) -> dict[str, Any]:
     }
 
 
+def _find_entry_delimiters(
+    text: str,
+) -> list[tuple[str, str, re.Match]]:
+    """Return (pub_number, ch_number, match) for each HR entry delimiter in text.
+
+    Tries format 1/2 (newline + parenthesized block) first; falls back to
+    format 3 (single-line slash separators) if the earlier format yields nothing.
+    """
+    matches = list(_FMT12_RE.finditer(text))
+    if matches:
+        return [(m.group(1), m.group(2), m) for m in matches]
+    matches = list(_FMT3_RE.finditer(text))
+    if matches:
+        # Format 3: groups are (ch_number, pub_number) — swap to normalise
+        return [(m.group(2), m.group(1), m) for m in matches]
+    return []
+
+
 def parse_bulk_hr_entries(pdf_text: str, pub_date: str) -> list[dict[str, Any]]:
     """Split a daily bulk SHAB PDF (pre-2012 format) into individual HR entry dicts.
 
     Returns one dict per HR entry found.  Each dict has keys:
-        pub_number  — 6-digit sequential entry number within the issue
+        pub_number  — sequential entry number within the issue (6 or 8 digits)
         ch_number   — old Swiss cantonal register number (CH-XXX.X.XXX.XXX-X)
         pub_date    — ISO date string of the SHAB issue
         canton      — two-letter canton code (None if not detectable)
@@ -447,20 +488,16 @@ def parse_bulk_hr_entries(pdf_text: str, pub_date: str) -> list[dict[str, Any]]:
         city        — city of the registered seat, or None
         text        — normalized full entry text (German; mixed-language content preserved)
 
-    Entry structure in the PDF:
-        ...entry body text...
-        Tagebuch Nr. NNNN vom DD.MM.YYYY
-        (NNNNNN / CH-XXX.X.XXX.XXX-X)    ← delimiter marking the END of this entry
-                                            ← next entry starts after this block
-
-    Canton and subsection-type headers appear between entries in the inter-entry
-    whitespace and are tracked as state.
+    Three delimiter formats across the archive eras are handled automatically
+    (see _FMT12_RE / _FMT3_RE).  The delimiter marks the END of an entry.
+    Canton and subsection-type headers appear in inter-entry whitespace and are
+    tracked as running state.
     """
     # Truncate at the first non-HR section (Schuldenrufe / creditor calls)
     m_end = _HR_END_RE.search(pdf_text)
     hr_text = pdf_text[: m_end.start()] if m_end else pdf_text
 
-    delimiters = list(_TAGEBUCH_RE.finditer(hr_text))
+    delimiters = _find_entry_delimiters(hr_text)
     if not delimiters:
         return []
 
@@ -468,15 +505,12 @@ def parse_bulk_hr_entries(pdf_text: str, pub_date: str) -> list[dict[str, Any]]:
     current_canton: str | None = None
     current_subtype: str = "HR"
 
-    for i, delim in enumerate(delimiters):
-        pub_number = delim.group(1)
-        ch_number = delim.group(2)
-
+    for i, (pub_number, ch_number, delim) in enumerate(delimiters):
         # Text that ends at this delimiter = body of the entry identified by pub_number
         if i == 0:
             segment = hr_text[: delim.start()]
         else:
-            segment = hr_text[delimiters[i - 1].end() : delim.start()]
+            segment = hr_text[delimiters[i - 1][2].end() : delim.start()]
 
         # ── Canton tracking ───────────────────────────────────────────────────
         canton_m = _CANTON_HEADER_RE.search(segment)
