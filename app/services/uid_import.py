@@ -149,8 +149,9 @@ def import_uid_entities(
     from app.clients.uid_client import _SWEEP_CHARS, iter_entities_by_prefix
 
     # Generate all 2-char pairs upfront for clean resume_from indexing
+    # 49 chars (A-Z + 0-9 + ÄÖÜ + accented) → 49*49 = 2401 pairs
     pairs = [c1 + c2 for c1 in _SWEEP_CHARS for c2 in _SWEEP_CHARS]
-    total_pairs = len(pairs)  # 36*36 = 1296
+    total_pairs = len(pairs)
 
     stats: dict[str, Any] = {
         "inserted": 0,
@@ -249,7 +250,6 @@ def import_uid_entities(
 # ── Detail fetch (GetByUID) ───────────────────────────────────────────────────
 
 _DETAIL_BATCH_SIZE = 100
-_DETAIL_DELAY = 0.2  # seconds between GetByUID calls
 
 
 def fetch_uid_details(
@@ -329,7 +329,6 @@ def fetch_uid_details(
 
             last_id = row_id
             processed += 1
-            time.sleep(_DETAIL_DELAY)
 
         db.commit()
 

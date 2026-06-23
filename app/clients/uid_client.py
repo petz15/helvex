@@ -238,7 +238,7 @@ def detail_to_update(org_outer: dict) -> dict[str, Any]:
 
 # ── GetByUID detail call ──────────────────────────────────────────────────────
 
-def get_by_uid(uid_str: str) -> dict[str, Any] | None:
+def get_by_uid(uid_str: str, *, _retry: int = 0) -> dict[str, Any] | None:
     """Fetch the full detail record for a single entity via GetByUID.
 
     Returns the V5.0 organisation dict (same shape as entity_to_dict input) or
@@ -246,7 +246,10 @@ def get_by_uid(uid_str: str) -> dict[str, Any] | None:
 
     GetByUID provides address details that Search does not reliably return
     (it returns the full eCH-0108 record including legal address, contact, etc.).
+    Sleeps _INTER_CALL_DELAY after each call and retries on rate-limit errors
+    with the same exponential backoff as _search_page.
     """
+    import time
     from zeep.helpers import serialize_object
 
     s = uid_str.upper().replace("CHE-", "").replace(".", "")
@@ -264,9 +267,16 @@ def get_by_uid(uid_str: str) -> dict[str, Any] | None:
                 "uidOrganisationId": uid_id,
             }
         )
-    except Exception:
+    except Exception as exc:
+        if "Request_limit_exceeded" in str(exc) and _retry < 3:
+            delay = _RATE_LIMIT_BASE_DELAY * (2 ** _retry)
+            logger.warning("UID rate limited (GetByUID uid=%s), waiting %.0fs (retry %d)", uid_str, delay, _retry + 1)
+            time.sleep(delay)
+            return get_by_uid(uid_str, _retry=_retry + 1)
         logger.debug("GetByUID failed for %s", uid_str, exc_info=True)
         return None
+
+    time.sleep(_INTER_CALL_DELAY)
 
     serialized = serialize_object(raw, target_cls=dict)
     # GetByUID returns a list wrapping a single organisationType in V5.0
@@ -284,7 +294,8 @@ def get_by_uid(uid_str: str) -> dict[str, Any] | None:
 #
 # Normal mode search with a single character returns 0 results (API minimum ~2).
 # The import service iterates all 2-char pairs from this alphabet.
-_SWEEP_CHARS = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+# Includes German umlauts and French/Italian accented chars common in Swiss names.
+_SWEEP_CHARS = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZÄÖÜÉÈÀÂÊÎÔÛÇÑ"
 
 # Additional expansion characters for deeper sub-prefix sweeps
 _EXPANSION_CHARS = _SWEEP_CHARS + "-. &/()"
@@ -297,7 +308,7 @@ _EXPAND_THRESHOLD = _MAX_RECORDS_PER_CALL - 1
 # ── Low-level single Search call ──────────────────────────────────────────────
 
 _RATE_LIMIT_BASE_DELAY = 60.0   # seconds to wait after first rate-limit error (doubles each retry)
-_INTER_CALL_DELAY = 2.0          # minimum sleep between API calls (~30 calls/min, stays under throttle)
+_INTER_CALL_DELAY = 3.0          # minimum sleep between API calls (~20 calls/min, safely under throttle)
 
 
 def _search_page(
