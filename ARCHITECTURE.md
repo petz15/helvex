@@ -58,8 +58,9 @@ zefix_analyzer/
 │   ├── database.py             # SQLAlchemy engine + session factory
 │   ├── create_admin.py         # CLI: create superadmin user
 │   ├── run_collector.py        # CLI: run collection jobs outside HTTP
-│   ├── clients/                # External API wrappers (Zefix, Serper, Geocoding, SHAB)
+│   ├── clients/                # External API wrappers (Zefix, Serper, Geocoding, SHAB, UID)
 │   │   ├── zefix_client.py     # Zefix REST API client
+│   │   ├── uid_client.py       # UID register SOAP client (zeep); formats UIDs, parses registration_type
 │   │   ├── google_search_client.py      # Serper.dev wrapper
 │   │   ├── scrapingdog_search_client.py # ScrapingDog wrapper (google.ch, per-company location/language)
 │   │   ├── geocoding_client.py # Offline geocoder (swisstopo + GeoNames fallback)
@@ -98,6 +99,7 @@ zefix_analyzer/
 │       ├── scoring.py          # Score computation (flex, web, AI, combined)
 │       ├── shab_import.py      # SHAB daily + backfill import (Zefix SOGC bydate)
 │       ├── shab_archive_import.py  # SHAB archive import from shab.ch (PDF-based)
+│       ├── uid_import.py       # UID register import (two-phase: active + cancelled)
 │       ├── job_worker.py       # Job dispatch (now: handler registry pattern)
 │       ├── job_handlers/       # Handler modules for each job type (24 types)
 │       ├── rate_limit.py       # Centralized rate limiting (no Redis)
@@ -444,6 +446,20 @@ The core entity. Key columns:
 | `business_model` | String | b2b / b2c / b2g / mixed |
 | `zefix_raw` | Text/JSON | Raw Zefix API response |
 | `sogc_pub` | Text/JSON | Raw `sogcPub` array from Zefix detail (source for `sogc_publications`) |
+| `registration_type` | String(16) | `hr` \| `mwst` \| `both` \| `uid_only` \| NULL — populated by UID import job |
+| `uid_raw` | Text/JSON | Raw UID web service response for this entity (audit trail) |
+
+**`registration_type` values:**
+- `hr` — registered with Handelsregister only (classic Zefix companies not in MWST)
+- `mwst` — VAT-registered only (sole proprietors, freelancers below HR threshold)
+- `both` — registered in both HR and MWST registers
+- `uid_only` — in UID register via another authority (AHV employer, SUVA, statistical register, etc.)
+- `NULL` — legacy row, type not yet resolved by the UID import job
+
+**`source` values** (extended):
+- `zefix` — imported from Zefix commercial register
+- `shab_stub` — minimal stub created from a SHAB publication before full Zefix data arrived
+- `uid` — imported exclusively from the UID register (no Zefix entry exists)
 
 **Dual-write note (Google scoring fields):** `website_url`, `web_score`, `google_search_results_raw`, `website_checked_at`, and `social_media_only` exist on both `Company` (global Serper master) and `OrgCompanyState` (org-specific re-score). Always read from `OrgCompanyState` when `org_id` is available; fall back to `Company` only when no org context exists. See model file comments for details.
 
@@ -926,6 +942,49 @@ The `message` field contains the full HR publication narrative (single language;
 - `run_sogc_publications_backfill(db, ...)` — iterates existing `sogc_publications` rows, re-applies encoding fix to stored texts, regenerates `sogc_changes`. Used via `mode="publications"` job param to retroactively fix rows written before the encoding/text-extraction fixes.
 
 **SHAB integration (Zefix-backed):** After every HR01/HR02 company upsert in `shab_import.py`, `preprocess_company_sogc_pub` is called fire-and-forget (errors logged, not raised), ensuring new publications are indexed immediately.
+
+### UID Register Import — `app/services/uid_import.py`
+
+Imports all entities from the Swiss UID (Unternehmens-Identifikationsnummer) register via the V5.0 PublicServices SOAP API.
+
+**API endpoint:** `https://www.uid-wse.admin.ch/V5.0/PublicServices.svc` (correct as of BFS spec v5.0, Oktober 2018; **not** `uid.admin.ch/uid-wse/` which is a web portal, not the service endpoint).
+
+**WSDL:** `https://www.uid-wse.admin.ch/V5.0/PublicServices.svc?wsdl`
+
+**V5.0 PublicServices constraints:**
+- Operation: `Search` (not `SearchByCriteria` from old V3.0)
+- `searchMode=Normal` does a SQL **contains** search — not prefix/starts-with
+- Max **30 results per call** — no pagination token exists
+- Single-character `organisationName` returns 0 results (API minimum ~2 chars)
+- Rate limit: `Request_limit_exceeded` raised on excessive call frequency; client retries with exponential backoff
+
+**New data this adds:**
+- MWST/VAT-only companies (sole proprietors below CHF 100k HR threshold, freelancers)
+- AHV employer registrations without HR entry
+- Entities in statistical register (BFS), SUVA, etc.
+- Dissolved / historical UIDs not in current Zefix
+
+**2-char pair sweep strategy (guarantees completeness):**
+- Iterate all 1,296 two-character pairs from `_SWEEP_CHARS` ("AA", "AB", ..., "Z9", "ZZ")
+- "Contains" semantics ensure every company is found by at least one pair (all company names have a 2-char alphabetic/numeric substring in the sweep set)
+- When a pair returns exactly 30 (the cap), recursively expand to 3-char, 4-char sub-prefixes until each bucket returns < 30
+- `seen_uids` set deduplicates across overlapping prefix buckets
+- Resume via `resume_from` pair index (0–1295) stored in job progress
+
+**Upsert behaviour:**
+- Existing rows: only `registration_type` and `uid_raw` updated; purpose/scores/geocodes preserved.
+- New rows: `source=uid`; no purpose → skipped by NOGA, scoring, and Claude classification.
+
+**`registration_type` derivation:** from V5.0 response — `commercialRegisterStatus=2` → `hr`; `vatRegisterInformation.vatStatus=2` → `mwst`; both → `both`; neither → `uid_only`.
+
+**`legalForm`:** stored as eCH-0097 code (e.g. `"0106"` for GmbH, `"0109"` for AG) — text descriptions require eCH-0097 code table lookup.
+
+**Client:** `app/clients/uid_client.py` — lazy zeep WSDL init; `_search_page(prefix)`, `iter_entities_by_prefix(prefix)`, `get_by_uid(uid_str)`, `detail_to_update(entity)`.
+
+**Scoring note:** UID-only companies (no `purpose`) excluded at DB query level from NOGA, keyword extraction, Claude classification.
+
+**Job type:** `uid_import` | **Endpoint:** `POST /api/v1/jobs/collection/uid-import`
+**Detail job:** `uid_detail` | **Endpoint:** `POST /api/v1/jobs/collection/uid-detail`
 
 ### SHAB Archive Import — `app/services/shab_archive_import.py`
 

@@ -960,6 +960,15 @@ class SogcPreprocessBody(BaseModel):
     batch_size: int = 500
 
 
+class UidImportBody(BaseModel):
+    batch_size: int = 500
+    active_only: bool = False
+
+
+class UidDetailBody(BaseModel):
+    batch_size: int = 100
+
+
 class ShabArchiveBody(BaseModel):
     # Date-window mode (recommended for full historical import)
     date_start: str | None = None    # ISO date YYYY-MM-DD; enables date-window mode
@@ -972,6 +981,53 @@ class ShabArchiveBody(BaseModel):
     page_size: int = 100
     request_delay: float = 0.5
     pdf_delay: float = 0.3
+
+
+@router.post("/collection/uid-import", response_model=JobOut, status_code=status.HTTP_202_ACCEPTED)
+def trigger_uid_import(
+    body: UidImportBody,
+    request: Request,
+    db: Session = Depends(get_db),
+    _: User = Depends(require_superadmin),
+):
+    """Import all entities from the Swiss UID register (current + historical).
+
+    Two-phase: fetches ACTIVE companies first, then CANCELLED/historical.
+    Existing Zefix companies have their registration_type updated; new companies
+    are inserted with source='uid'. No scoring is run automatically — trigger
+    re_geocode and scoring jobs separately after the import completes.
+    """
+    label = "UID register import (active only)" if body.active_only else "UID register import (active + historical)"
+    job = _enqueue_or_http_error(
+        request,
+        job_type="uid_import",
+        label=label,
+        params={"batch_size": body.batch_size, "active_only": body.active_only},
+        db=db,
+    )
+    return JobOut.from_orm_obj(job)
+
+
+@router.post("/collection/uid-detail", response_model=JobOut, status_code=status.HTTP_202_ACCEPTED)
+def trigger_uid_detail(
+    body: UidDetailBody,
+    request: Request,
+    db: Session = Depends(get_db),
+    _: User = Depends(require_superadmin),
+):
+    """Fetch GetByUID detail for source='uid' companies that have no address yet.
+
+    Populates address, legal_form, municipality, canton, address_zip from the
+    UID detail endpoint. Run after uid_import; then trigger re_geocode.
+    """
+    job = _enqueue_or_http_error(
+        request,
+        job_type="uid_detail",
+        label="UID detail fetch (GetByUID — address + legal form)",
+        params={"batch_size": body.batch_size},
+        db=db,
+    )
+    return JobOut.from_orm_obj(job)
 
 
 _SHAB_BACKFILL_MIN_DATE = date(2016, 2, 3)

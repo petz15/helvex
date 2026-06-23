@@ -3,6 +3,7 @@
 Internal leads dashboard for Swiss registered companies. Bulk-imports the entire Zefix commercial register, runs Google Search to find each company's website, and provides a GUI to review, score, and track outreach.
 
 * **Zefix API** – bulk-import all ~700k companies from the official Swiss commercial register ([zefix.admin.ch](https://www.zefix.admin.ch/ZefixREST/swagger-ui.html)), canton by canton with resume support
+* **UID register** – import all entities from the Swiss UID web service (SOAP), including VAT-only companies, AHV employers, and historical/dissolved entities not in Zefix; cross-references Zefix rows to populate `registration_type` (hr / mwst / both / uid_only)
 * **Serper.dev** – automatically find and score each company's website (0–100 match score)
 * **Zefix priority score** – score every company from Zefix data alone (legal form, capital, purpose, industry, proximity) so high-value companies are Google-searched first
 * **Keyword scoring** – configurable target and excluded keywords matched against `purpose` + `industry` text; boosts or penalises the Zefix score; fully tunable from Settings
@@ -22,10 +23,9 @@ Internal leads dashboard for Swiss registered companies. Bulk-imports the entire
 * **CSV export** – export any filtered view to CSV
 * **HTTPS** – Nginx reverse proxy with self-signed certificate (or swap in a CA-signed cert); HTTP auto-redirects to HTTPS
 * **PostgreSQL** – all data persisted in Postgres; DB indexes on all filter columns
-* **Redis** – job queue backend (RQ) and rate-limit counters; app falls back gracefully when unavailable
-* **Rate limiting** – public auth endpoints (`/token`, `/register`, `/forgot-password`) rate-limited per IP via Redis `INCR + EXPIRE`; in-memory fallback when Redis is unavailable
+* **Rate limiting** – public auth endpoints rate-limited per IP; in-memory token bucket, no Redis required
 * **Monitoring** – Prometheus scrapes `/metrics` every 30 s; Grafana at `grafana.helvex.dicy.ch` with pre-built K8s + node dashboards
-* **FastAPI + Jinja2** – server-rendered UI, no JS framework required
+* **FastAPI + Next.js** – FastAPI backend with a Next.js frontend; background jobs are thread-based, no Redis required
 
 ---
 

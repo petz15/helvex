@@ -92,11 +92,15 @@ from app.services.job_handlers import (  # noqa: E402
     sogc_preprocess,
     sogc_repair,
     stopwords,
+    uid_jobs,
     web_crawl,
     zefix_jobs,
 )
 
 JOB_HANDLERS: dict[str, Callable[[JobContext], tuple[dict, str]]] = {
+    # UID register import
+    "uid_import":                uid_jobs.handle_uid_import,
+    "uid_detail":                uid_jobs.handle_uid_detail,
     # Zefix import
     "bulk":                      zefix_jobs.handle_bulk,
     "batch":                     zefix_jobs.handle_batch,

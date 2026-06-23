@@ -43,6 +43,11 @@ def reclassify_noga(
     }
 
     query = db.query(Company)
+    # Skip companies with no purpose text at the DB level when only_detailed_raw is
+    # set (the default). This prevents bulk UID-sourced companies (which have no
+    # purpose) from being loaded into memory only to be immediately skipped in the loop.
+    if only_detailed_raw:
+        query = query.filter(Company.purpose.isnot(None), Company.purpose != "")
     if only_missing_noga and not include_stale:
         query = query.filter(Company.noga_code.is_(None))
     elif only_missing_noga and include_stale:

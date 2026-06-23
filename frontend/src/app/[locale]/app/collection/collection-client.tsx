@@ -288,6 +288,61 @@ export function CollectionClient() {
         </div>
       )}
 
+      <GroupHeader label="UID Register Import" />
+
+      <Section title="UID register import (all entities, current + historical)">
+        <form onSubmit={async e => {
+          e.preventDefault();
+          const fd = new FormData(e.currentTarget);
+          await submit("collection/uid-import", {
+            batch_size: parseInt(fd.get("batch_size") as string) || 500,
+            active_only: fd.get("active_only") === "on",
+          });
+        }} className="space-y-4">
+          <p className="text-sm text-slate-600 leading-relaxed">
+            Imports <strong>all entities</strong> from the Swiss UID register — including companies
+            registered only for MWST/VAT, AHV, SUVA, or statistical purposes that are not in Zefix.
+            Runs in two phases: active companies first, then cancelled/historical.
+          </p>
+          <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+            One-time job. ~1–2M API calls at 250 ms each = several hours. Monitor in{" "}
+            <a href="/app/jobs" className="underline">Jobs</a>.
+            Existing Zefix companies have their <code>registration_type</code> updated; new entries
+            get <code>source=uid</code> and no scores. Run Re-geocode separately afterwards.
+          </p>
+          <div className="flex gap-6">
+            <label className="flex items-center gap-2 text-sm text-slate-700">
+              <input type="checkbox" name="active_only" className={checkCls} />
+              Active companies only (uncheck to also import cancelled / historical)
+            </label>
+          </div>
+          <Field label="Batch size" hint="Rows per API call (max 500 — hard limit of the UID web service).">
+            <input name="batch_size" type="number" min={50} max={500} defaultValue={500} className={cn(inputCls, "w-28")} />
+          </Field>
+          <SubmitBtn loading={loading === "collection/uid-import"} />
+        </form>
+      </Section>
+
+      <Section title="UID detail fetch (address + legal form via GetByUID)">
+        <form onSubmit={async e => {
+          e.preventDefault();
+          const fd = new FormData(e.currentTarget);
+          await submit("collection/uid-detail", {
+            batch_size: parseInt(fd.get("uid_detail_batch") as string) || 100,
+          });
+        }} className="space-y-4">
+          <p className="text-sm text-slate-600 leading-relaxed">
+            Calls <code>GetByUID</code> for every <code>source=uid</code> company that has no address yet.
+            Populates address, legal form, municipality, canton, and postcode. Run after the UID register
+            import, then trigger <strong>Re-geocode</strong> to get coordinates.
+          </p>
+          <Field label="Batch size" hint="Companies fetched per DB batch (each triggers one GetByUID API call).">
+            <input name="uid_detail_batch" type="number" min={10} max={500} defaultValue={100} className={cn(inputCls, "w-28")} />
+          </Field>
+          <SubmitBtn loading={loading === "collection/uid-detail"} />
+        </form>
+      </Section>
+
       <GroupHeader label="Zefix Import" />
 
       <Section title="Bulk import from Zefix">
