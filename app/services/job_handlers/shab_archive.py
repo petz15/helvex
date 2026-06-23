@@ -148,10 +148,11 @@ def handle_link_sogc_stubs(ctx: JobContext) -> tuple[dict, str]:
 
     batch_size = int(ctx.params.get("batch_size", 500))
 
-    def _progress(done: int, total: int, _stats: dict) -> None:
+    def _progress(done: int, total: int | None, _stats: dict) -> None:
         ctx.assert_not_cancelled()
+        total_str = f"/{total:,}" if total is not None else ""
         msg = (
-            f"{done:,}/{total:,} UIDs — "
+            f"{done:,}{total_str} UIDs — "
             f"{_stats.get('stubs_created', 0)} stubs, "
             f"{_stats.get('publications_linked', 0)} pubs linked, "
             f"{_stats.get('appearances_linked', 0)} appearances linked"

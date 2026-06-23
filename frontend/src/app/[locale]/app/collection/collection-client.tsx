@@ -951,6 +951,43 @@ export function CollectionClient() {
         </form>
       </Section>
 
+      <Section title="SIMAP Archive Import (pre-2024)">
+        <form onSubmit={async e => {
+          e.preventDefault();
+          const fd = new FormData(e.currentTarget);
+          const fromDate = (fd.get("simap_arch_from") as string)?.trim() || undefined;
+          const toDate = (fd.get("simap_arch_to") as string)?.trim() || undefined;
+          await submit("collection/simap-archive", {
+            from_date: fromDate,
+            to_date: toDate,
+            request_delay: parseFloat(fd.get("simap_arch_delay") as string) || 0.10,
+          });
+        }} className="space-y-4">
+          <div>
+            <h2 className="text-sm font-semibold text-slate-800">SIMAP archive import (2007–2023)</h2>
+            <p className="mt-1 text-xs text-slate-500">
+              Imports ~117k OB02 award notices from{" "}
+              <span className="font-mono">archiv.simap.ch</span> (pre-2024).
+              Vendors are matched to companies by name similarity + zip code (no CHE UIDs in the archive).
+              Leave dates empty to import the full archive (2007–2023).
+              <strong className="block mt-1 text-amber-700">Full run: ~50k detail API calls, expect 90–120 min.</strong>
+            </p>
+          </div>
+          <div className="grid grid-cols-2 gap-4">
+            <Field label="From date (YYYY-MM-DD)" hint="Leave empty for 2007-01-01">
+              <input name="simap_arch_from" type="date" defaultValue="2007-01-01" className={inputCls} />
+            </Field>
+            <Field label="To date (YYYY-MM-DD)" hint="Leave empty for 2023-12-31">
+              <input name="simap_arch_to" type="date" defaultValue="2023-12-31" className={inputCls} />
+            </Field>
+          </div>
+          <Field label="Request delay (seconds)" hint="Between archive API calls">
+            <input name="simap_arch_delay" type="number" step="0.01" min="0.05" defaultValue="0.10" className={cn(inputCls, "w-32")} />
+          </Field>
+          <SubmitBtn loading={loading === "collection/simap-archive"} />
+        </form>
+      </Section>
+
       <Section title="SOGC Preprocess">
         <form onSubmit={async e => {
           e.preventDefault();

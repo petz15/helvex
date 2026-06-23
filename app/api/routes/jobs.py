@@ -1157,6 +1157,65 @@ def trigger_simap_backfill(
     return JobOut.from_orm_obj(job)
 
 
+class SimapArchiveBody(BaseModel):
+    from_date: str | None = None   # ISO date YYYY-MM-DD; defaults to 2007-01-01
+    to_date: str | None = None     # ISO date YYYY-MM-DD; defaults to 2023-12-31
+    request_delay: float = 0.10
+
+
+@router.post("/collection/simap-archive", response_model=JobOut, status_code=status.HTTP_202_ACCEPTED)
+def trigger_simap_archive(
+    body: SimapArchiveBody,
+    request: Request,
+    db: Session = Depends(get_db),
+    _: User = Depends(require_superadmin),
+):
+    """Import pre-2024 SIMAP award notices from archiv.simap.ch (2007–2023).
+
+    Fetches OB02 (Zuschlag) publications, de-duplicates by project, fuzzy-matches
+    the contractor to our companies table by name + zip, and upserts into
+    simap_awards / simap_award_vendors.  Archive IDs are prefixed with "arch-"
+    to avoid collision with post-2024 simap.ch UUIDs.
+    """
+    from datetime import date
+
+    _earliest = date(2007, 1, 1)
+    _latest = date(2023, 12, 31)
+
+    from_date: date | None = None
+    to_date: date | None = None
+
+    if body.from_date:
+        try:
+            from_date = date.fromisoformat(body.from_date)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=f"Invalid from_date: {exc}") from exc
+    if body.to_date:
+        try:
+            to_date = date.fromisoformat(body.to_date)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=f"Invalid to_date: {exc}") from exc
+
+    fd = from_date or _earliest
+    td = to_date or _latest
+    if fd > td:
+        raise HTTPException(status_code=400, detail="from_date must be on or before to_date")
+
+    label = f"SIMAP archive import — {fd} → {td}"
+    job = _enqueue_or_http_error(
+        request,
+        job_type="simap_archive",
+        label=label,
+        params={
+            "from_date": fd.isoformat(),
+            "to_date": td.isoformat(),
+            "request_delay": body.request_delay,
+        },
+        db=db,
+    )
+    return JobOut.from_orm_obj(job)
+
+
 @router.post("/collection/shab-archive", response_model=JobOut, status_code=status.HTTP_202_ACCEPTED)
 def trigger_shab_archive(
     body: ShabArchiveBody,

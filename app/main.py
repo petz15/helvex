@@ -51,7 +51,7 @@ from app.config import settings  # noqa: E402
 from app.database import Base, engine  # noqa: E402
 from app.services.job_worker import kick_job_worker  # noqa: E402
 from app.services.scoring import get_default_scoring_config  # noqa: E402
-from app.api.routes import admin_router, auth_router, billing_router, clusters_router, companies_router, invites_router, jobs_router, map_router, notes_router, orgs_router, persons_router, search_router, settings_router, views_router, workspace_router  # noqa: E402
+from app.api.routes import admin_router, auth_router, billing_router, clusters_router, companies_router, invites_router, jobs_router, map_router, notes_router, orgs_router, persons_router, search_router, settings_router, simap_router, views_router, workspace_router  # noqa: E402
 
 # Paths that do NOT require authentication
 _PUBLIC_PREFIXES = (
@@ -576,6 +576,7 @@ app.include_router(map_router, prefix="/api/v1")
 app.include_router(settings_router, prefix="/api/v1")
 app.include_router(orgs_router, prefix="/api/v1")
 app.include_router(invites_router, prefix="/api/v1")
+app.include_router(simap_router)
 app.include_router(views_router, prefix="/api/v1")
 app.include_router(workspace_router, prefix="/api/v1")
 

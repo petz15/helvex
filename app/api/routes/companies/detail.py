@@ -479,6 +479,7 @@ def get_company_simap_awards(
             "lot_title_it": a.lot_title_it,
             "project_number": a.project_number,
             "publication_number": a.publication_number,
+            "simap_project_id": a.simap_project_id,
             "simap_publication_id": a.simap_publication_id,
             # Vendor-specific fields for this company
             "price": float(v.price) if v.price is not None else None,

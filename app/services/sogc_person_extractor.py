@@ -966,7 +966,7 @@ def run_extract_sogc_persons_batch(
             if abort_cb:
                 abort_cb()
 
-            change_id = change.id  # capture before try — ORM access after IntegrityError raises PendingRollbackError
+            change_id = change.id
 
             if not change.raw_excerpt:
                 stats["skipped_no_excerpt"] += 1
@@ -974,6 +974,9 @@ def run_extract_sogc_persons_batch(
 
             pub = pubs.get(change.sogc_publication_id)
 
+            # Use a savepoint per change so a FK violation (e.g. sogc_change_id deleted by a
+            # concurrent archive re-import) only rolls back this one change, not the whole batch.
+            sp = db.begin_nested()
             try:
                 if mode == "all":
                     from app.models.sogc_person_appearance import SogcPersonAppearance as SPA
@@ -985,6 +988,7 @@ def run_extract_sogc_persons_batch(
 
                 if change.change_type in PERSON_TYPES:
                     if _AUDITOR_EXCERPT_RE.search(change.raw_excerpt):
+                        sp.commit()
                         continue
                     if _CHE_UID_RE.search(change.raw_excerpt):
                         from app.models.sogc_corporate_role import SogcCorporateRole
@@ -1005,11 +1009,14 @@ def run_extract_sogc_persons_batch(
                                 **corp,
                             ))
                             stats["corporate_roles_written"] += 1
+                        db.flush()
+                        sp.commit()
                         stats["processed"] += 1
                         continue
                     fields = _parse_person(change.raw_excerpt, change.change_type)
                     if fields is None:
                         stats["skipped_no_excerpt"] += 1
+                        sp.commit()
                         continue
                     pst = _person_change_subtype(fields, change.change_type, change.raw_excerpt)
                     change.change_subtype = pst
@@ -1039,12 +1046,14 @@ def run_extract_sogc_persons_batch(
                         title=fields["title"],
                         raw_excerpt=change.raw_excerpt,
                     ))
+                    db.flush()
                     stats["persons_written"] += 1
 
                 elif change.change_type == "auditor_change":
                     fields = _parse_auditor(change.raw_excerpt, change.change_type)
                     if fields is None:
                         stats["skipped_no_excerpt"] += 1
+                        sp.commit()
                         continue
                     from app.models.sogc_auditor import SogcAuditor
                     db.add(SogcAuditor(
@@ -1056,15 +1065,14 @@ def run_extract_sogc_persons_batch(
                         change_type=change.change_type,
                         **fields,
                     ))
+                    db.flush()
                     stats["auditors_written"] += 1
 
+                sp.commit()
                 stats["processed"] += 1
 
             except Exception as exc:
-                try:
-                    db.rollback()  # must come first — session is in PendingRollbackError state
-                except Exception:
-                    pass
+                sp.rollback()
                 stats["errors"].append(f"change_id={change_id}: {type(exc).__name__}: {exc}")
 
         # Update entity counts for this batch

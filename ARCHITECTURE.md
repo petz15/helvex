@@ -2881,6 +2881,7 @@ Migration: `alembic/versions/0096_add_simap_awards.py`
 |---|---|---|
 | `simap_daily` | `date` (optional, default=yesterday), `request_delay` | Import one day of awards; runs nightly at 04:00 Zurich |
 | `simap_backfill` | `from_date` (required), `to_date` (optional), `request_delay` | Import full date range; resume support via `last_cursor` |
+| `simap_archive` | `from_date` (optional, default=2007-01-01), `to_date` (optional, default=2023-12-31), `request_delay` | Import pre-2024 archive from archiv.simap.ch; see §below |
 
 **CRUD guard:** `has_simap_daily_run_today(db)` prevents double-import.
 
@@ -2896,9 +2897,11 @@ Migration: `alembic/versions/0096_add_simap_awards.py`
 | `app/models/simap_award.py` | `SimapAward` ORM model; `best_title()`, `best_proc_office()` methods |
 | `app/models/simap_award_vendor.py` | `SimapAwardVendor` ORM model |
 | `app/services/simap_import.py` | Core import function: paginates, fetches details + vendor profiles, upserts awards + vendors, matches CHE UIDs; returns stats |
-| `app/services/job_handlers/simap.py` | Job handler for both `simap_daily` and `simap_backfill`; resume via `last_cursor` in `stats_json` |
+| `app/services/job_handlers/simap.py` | Job handler for `simap_daily`, `simap_backfill`, and `simap_archive`; resume via `last_cursor` in `stats_json` |
 | `app/crud/job_run.py` | `has_simap_daily_run_today()` guard (mirrors `has_shab_daily_run_today`) |
 | `frontend/src/components/simap-panel.tsx` | Company detail panel: useSWR on `GET /api/v1/companies/{id}/simap-awards`; renders award cards with price, authority, CPV; null-returns if no awards; show-more collapse after 3 |
+| `app/clients/simap_archive_client.py` | HTTP client for archiv.simap.ch: `search_archive_awards()` (POST /api/search with `type_cd_ob`, date params) and `get_archive_detail()` (GET /api/detail?meldungsnummer={id}) |
+| `app/services/simap_archive_import.py` | Import service for pre-2024 archive: paginates 116k OB02 records, de-dupes by projectid (DE>FR>IT), fuzzy-matches contractor name+zip to companies via pg_trgm; IDs prefixed "arch-" |
 
 ## 22. Security Hardening Pass (Jun 2026)
 
@@ -2923,3 +2926,21 @@ Full operational procedures (K3s upgrades, OS patching, Renovate review cadence)
 | `GET` | `/api/v1/companies/{id}/simap-awards` | Awards where this company was a winning vendor (joined with vendor row for price) |
 | `POST` | `/api/v1/jobs/collection/simap-daily` | Trigger daily import (superadmin only) |
 | `POST` | `/api/v1/jobs/collection/simap-backfill` | Trigger backfill import with date range (superadmin only) |
+| `POST` | `/api/v1/jobs/collection/simap-archive` | Trigger pre-2024 archive import from archiv.simap.ch (superadmin only) |
+
+### Pre-2024 Archive (archiv.simap.ch)
+
+The pre-2024 SIMAP archive at `archiv.simap.ch` uses a different REST API (Vite SPA with `/api` backend) and has **no CHE UIDs** — only contractor name + address. Key differences from the current API:
+
+| Property | Post-2024 (simap.ch) | Pre-2024 (archiv.simap.ch) |
+|---|---|---|
+| Vendor ID | UUID (`simap_vendor_id`) | None — synthetic `"arch-{pub_id}"` |
+| Company matching | Exact CHE UID | Fuzzy: `pg_trgm similarity ≥ 0.50` + exact zip |
+| ID type | UUID strings | Integers — prefixed `"arch-{id}"` |
+| Volume | ~300–900/month | 116,971 OB02 total (2007–2023) |
+| Multi-language | Per-field (title_de/fr/it) | One language per publication — de-dup by projectid (DE>FR>IT) |
+
+**Archive search DTO fields** (discovered from JS bundle `getSearchDTO()`):
+- `type_cd_ob`: publication type (OB02 = award notice)
+- `stat_tm_1` / `stat_tm_2`: date range (YYYY-MM-DD)
+- Page params: `pageNo` (1-based), `recordsPerPage` (max 1000)

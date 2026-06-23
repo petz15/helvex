@@ -42,6 +42,7 @@
     - SIMAP suche anbieten bzw verbesserte suchmaske
     - epublikationen für weitere dinge wie betreibungen
     - medizinische leistungserbringer (?) helsana liste https://www.helsana.ch/de/private/services/leistungserbringer-suche.html?
+    - Language translation for companies other languages. plan is probably all to english and then translate search terms to english and return results? -> this as additional feature for paid tiers
 
 ### MVP before public PROD
 - Tiers are enforced - partially done (not fully checked and web searches are not gated yet + always uses api instead of checking if data already exists)

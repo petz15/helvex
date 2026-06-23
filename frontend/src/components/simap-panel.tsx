@@ -19,6 +19,7 @@ interface SimapAward {
   lot_number: number | null;
   project_number: string | null;
   publication_number: string | null;
+  simap_project_id: string | null;
   simap_publication_id: string | null;
   price: number | null;
   price_currency: string | null;
@@ -70,9 +71,9 @@ function AwardCard({ award }: { award: SimapAward }) {
           {pubDate && (
             <span className="text-xs text-slate-400 whitespace-nowrap">{pubDate}</span>
           )}
-          {award.simap_publication_id && (
+          {award.simap_project_id && (
             <a
-              href={`https://www.simap.ch/notices/${award.simap_publication_id}`}
+              href={`https://www.simap.ch/de/project-detail/${award.simap_project_id}`}
               target="_blank"
               rel="noopener noreferrer"
               className="text-slate-400 hover:text-blue-600 transition-colors"

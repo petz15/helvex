@@ -993,19 +993,7 @@ def run_link_sogc_stubs(
     }
 
     if status_cb:
-        status_cb("Counting unlinked UIDs…")
-
-    # Count for progress reporting (approximate; doesn't need to be exact)
-    count_row = db.execute(
-        text(
-            "SELECT COUNT(DISTINCT company_uid) FROM sogc_publications "
-            "WHERE company_uid IS NOT NULL AND company_id IS NULL"
-        )
-    ).fetchone()
-    total_uids = count_row[0] if count_row else 0
-
-    if status_cb:
-        status_cb(f"Found {total_uids:,} unlinked UIDs — starting back-fill…")
+        status_cb("Starting back-fill of unlinked UIDs…")
 
     cursor_uid = ""  # keyset: start before first UID alphabetically
     done = 0
@@ -1134,6 +1122,6 @@ def run_link_sogc_stubs(
         done += len(uids)
 
         if progress_cb:
-            progress_cb(done, total_uids, stats)
+            progress_cb(done, None, stats)
 
     return stats

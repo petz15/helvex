@@ -127,6 +127,7 @@ JOB_HANDLERS: dict[str, Callable[[JobContext], tuple[dict, str]]] = {
     # SIMAP
     "simap_daily":               simap.handle_simap,
     "simap_backfill":            simap.handle_simap,
+    "simap_archive":             simap.handle_simap_archive,
     # SHAB / SOGC
     "shab_daily":                shab.handle_shab,
     "shab_backfill":             shab.handle_shab,

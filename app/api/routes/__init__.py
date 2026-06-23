@@ -11,6 +11,7 @@ from app.api.routes.persons import router as persons_router
 from app.api.routes.search import router as search_router
 from app.api.routes.ops_settings import router as settings_router
 from app.api.routes.orgs import router as orgs_router
+from app.api.routes.simap import router as simap_router
 from app.api.routes.views import router as views_router
 from app.api.routes.workspace import router as workspace_router
 
@@ -28,6 +29,7 @@ __all__ = [
     "search_router",
     "settings_router",
     "orgs_router",
+    "simap_router",
     "views_router",
     "workspace_router",
 ]
