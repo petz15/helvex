@@ -1205,9 +1205,9 @@ def backfill_crawler_errors(
     )).fetchall()
 
     inserted = 0
-    for company_id, status, detail in rows:
+    for company_id, crawl_status, detail in rows:
         try:
-            _log_err(db, company_id=company_id, source="crawler", error_type=status, message=detail)
+            _log_err(db, company_id=company_id, source="crawler", error_type=crawl_status, message=detail)
             inserted += 1
         except Exception:  # noqa: BLE001
             pass

@@ -1,5 +1,6 @@
 "use client";
 import { useState, useEffect } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Play, ChevronDown, ChevronUp, BrainCircuit, Globe, ScanSearch, Zap } from "lucide-react";
 import useSWR from "swr";
@@ -306,7 +307,7 @@ export function CollectionClient() {
           </p>
           <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
             One-time job. ~1–2M API calls at 250 ms each = several hours. Monitor in{" "}
-            <a href="/app/jobs" className="underline">Jobs</a>.
+            <Link href="/app/jobs" className="underline">Jobs</Link>.
             Existing Zefix companies have their <code>registration_type</code> updated; new entries
             get <code>source=uid</code> and no scores. Run Re-geocode separately afterwards.
           </p>

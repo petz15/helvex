@@ -108,8 +108,8 @@ export function SimapSearchClient({ locale }: { locale: string }) {
       const data = await searchSimap(buildParams(pg));
       setResults(data);
       setPage(pg);
-    } catch (e: any) {
-      setError(e.message || "Search failed");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Search failed");
     } finally {
       setLoading(false);
     }
@@ -237,7 +237,7 @@ export function SimapSearchClient({ locale }: { locale: string }) {
           </div>
           <div>
             <label className="text-xs font-medium text-slate-500 block mb-1">Data source</label>
-            <select value={source} onChange={e => setSource(e.target.value as any)} className={inputCls}>
+            <select value={source} onChange={e => setSource(e.target.value as "" | "api" | "archive")} className={inputCls}>
               <option value="">All</option>
               <option value="api">Post-2024 (simap.ch)</option>
               <option value="archive">Pre-2024 archive</option>

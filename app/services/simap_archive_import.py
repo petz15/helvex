@@ -122,7 +122,6 @@ def _build_award_row(pub: dict, detail: dict) -> dict[str, Any]:
     spec = ob02.get("OB02.SPEC") or {}
     contract = spec.get("OB02.CONTRACT") or {}
     info = spec.get("OB02.INFORMATION") or {}
-    award_block = spec.get("OB02.AWARD") or {}
     auth = ob02.get("AUTHORITY") or {}
     auth_contact = auth.get("AUTH.CONTACT") or {}
 

@@ -18,7 +18,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
-from sqlalchemy import case, func, literal, or_, text
+from sqlalchemy import func
 from sqlalchemy.orm import Session, aliased
 
 from app.auth import get_current_user
