@@ -6,13 +6,14 @@ SOAP API.
 Why 2-char pairs:
   - V5.0 Search uses "contains" semantics (SQL LIKE '%term%'), not prefix/starts-with
   - Single-character search returns 0 results (API minimum length ~2)
-  - Every Swiss company name contains at least one 2-char consecutive substring from
-    our alphabet (A-Z, 0-9), so iterating all 50^2 = 1,296 pairs guarantees completeness
+  - Every Swiss company name contains at least one 2-char consecutive alpha substring,
+    so iterating all 39²=1521 letter pairs (A-Z + ÄÖÜ + accented) guarantees completeness.
+    Digits are excluded from the base pairs to avoid expansion bombs on "00"/"20" etc.
   - Max 30 results per call — no pagination. When a pair returns exactly 30, we
     recursively expand to 3-char, 4-char sub-prefixes until all buckets return < 30
 
 Sweep strategy:
-  - Iterate all 2-char pairs from _SWEEP_CHARS ("AA", "AB", ..., "ZZ", "9Z", etc.)
+  - Iterate all 2-char pairs from _PAIR_CHARS ("AA", "AB", ..., "ÑÑ")
   - For each pair, call Search with organisationName=pair
   - If result count == 30 (cap), expand to 3-char sub-prefixes via iter_entities_by_prefix
   - active_only=False (default): all statuses (active, cancelled, liquidated)
@@ -146,11 +147,13 @@ def import_uid_entities(
 
     Returns a stats dict compatible with the job handler convention.
     """
-    from app.clients.uid_client import _SWEEP_CHARS, iter_entities_by_prefix
+    from app.clients.uid_client import _PAIR_CHARS, iter_entities_by_prefix
 
-    # Generate all 2-char pairs upfront for clean resume_from indexing
-    # 49 chars (A-Z + 0-9 + ÄÖÜ + accented) → 49*49 = 2401 pairs
-    pairs = [c1 + c2 for c1 in _SWEEP_CHARS for c2 in _SWEEP_CHARS]
+    # Generate all 2-char pairs upfront for clean resume_from indexing.
+    # Letters only (39 chars → 39²=1521 pairs) — digits excluded to avoid
+    # recursive expansion bombs on pairs like "00"/"20" that match thousands
+    # of company names (years, codes) and cause 10k+ API calls per pair.
+    pairs = [c1 + c2 for c1 in _PAIR_CHARS for c2 in _PAIR_CHARS]
     total_pairs = len(pairs)
 
     stats: dict[str, Any] = {

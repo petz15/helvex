@@ -288,14 +288,17 @@ def get_by_uid(uid_str: str, *, _retry: int = 0) -> dict[str, Any] | None:
 
 # ── Prefix sweep characters ───────────────────────────────────────────────────
 
-# Every Swiss company name contains at least one 2-char consecutive substring
-# from this set. By sweeping all 2-char pairs we guarantee completeness with
-# the V5.0 "contains" search semantics.
-#
-# Normal mode search with a single character returns 0 results (API minimum ~2).
-# The import service iterates all 2-char pairs from this alphabet.
-# Includes German umlauts and French/Italian accented chars common in Swiss names.
-_SWEEP_CHARS = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZÄÖÜÉÈÀÂÊÎÔÛÇÑ"
+# Letters-only alphabet for the 2-char pair sweep (39 chars → 39²=1521 pairs).
+# Digits are intentionally excluded: numeric substrings like "00" or "20" appear
+# in too many company names (years, codes) and trigger recursive expansion that
+# can generate tens of thousands of API calls for a single pair. Every Swiss
+# company name contains at least one consecutive alpha pair, so completeness is
+# preserved. Digits are still included in _EXPANSION_CHARS so sub-prefix
+# expansion can narrow down alpha buckets that hit the 30-result cap.
+_PAIR_CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZÄÖÜÉÈÀÂÊÎÔÛÇÑ"
+
+# Kept for back-compat; not used for pair generation anymore.
+_SWEEP_CHARS = "0123456789" + _PAIR_CHARS
 
 # Additional expansion characters for deeper sub-prefix sweeps
 _EXPANSION_CHARS = _SWEEP_CHARS + "-. &/()"
