@@ -23,8 +23,8 @@ For each entity:
   - Existing row (any source): update registration_type + uid_raw only.
   - New row: insert with source='uid'. Address/legal_form will be filled by uid_detail job.
 
-Resume: resume_from maps to the flat pair index (0 = "AA", 1 = "AB", ...) so a
-crashed job restarts from the last completed pair, not from scratch.
+Resume: resume_from maps to the flat pair index into the _PAIR_CHARS² list
+(0 = "AA", 1 = "AB", …) so a crashed job restarts from the last completed pair.
 """
 from __future__ import annotations
 
@@ -141,9 +141,9 @@ def import_uid_entities(
     active_only=True:  only ACTIVE entities.
     active_only=False: all statuses (active + cancelled + historical).
 
-    resume_from: prefix index into _SWEEP_CHARS. The job worker stores
-      progress_done in the DB; we restart from that prefix index so a
-      crashed job resumes from the last completed prefix, not from scratch.
+    resume_from: index into the _PAIR_CHARS² pair list (0="AA", 1="AB", …).
+      The job worker stores progress_done in the DB so a crashed job resumes
+      from the last completed pair, not from scratch.
 
     Returns a stats dict compatible with the job handler convention.
     """
@@ -155,6 +155,18 @@ def import_uid_entities(
     # of company names (years, codes) and cause 10k+ API calls per pair.
     pairs = [c1 + c2 for c1 in _PAIR_CHARS for c2 in _PAIR_CHARS]
     total_pairs = len(pairs)
+
+    # Guard: if resume_from is out of range (e.g. from an older job that used
+    # a different alphabet producing 2401 pairs), restart from scratch to avoid
+    # silently processing 0 pairs or resuming at the wrong position.
+    if resume_from >= total_pairs:
+        logger.warning(
+            "uid_import: resume_from=%d is out of range for current pair list "
+            "(total=%d) — restarting from pair 0. "
+            "This happens when resuming a job started before the alphabet was changed.",
+            resume_from, total_pairs,
+        )
+        resume_from = 0
 
     stats: dict[str, Any] = {
         "inserted": 0,
