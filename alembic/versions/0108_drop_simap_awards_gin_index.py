@@ -13,7 +13,7 @@ from typing import Union
 from alembic import op
 
 revision: str = "0108"
-down_revision: Union[str, None] = "0107"
+down_revision: Union[str, None] = "05c41110fd1b"
 branch_labels = None
 depends_on = None
 
