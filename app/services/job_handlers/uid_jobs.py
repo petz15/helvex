@@ -50,12 +50,17 @@ def handle_uid_import(ctx: JobContext) -> tuple[dict, str]:
         )
         ctx.progress(done, total or 0, stats, msg)
 
+    def _ping() -> None:
+        ctx._heartbeat()
+        ctx.assert_not_cancelled()
+
     stats = import_uid_entities(
         ctx.db,
         resume_from=ctx.resume_from,
         batch_size=batch_size,
         active_only=active_only,
         progress_cb=_progress,
+        abort_cb=_ping,
     )
 
     done_msg = (

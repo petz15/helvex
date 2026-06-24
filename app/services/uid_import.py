@@ -135,6 +135,7 @@ def import_uid_entities(
     batch_size: int = _BATCH_SIZE,
     active_only: bool = False,
     progress_cb: Callable[[int, int, dict], None] | None = None,
+    abort_cb: Callable[[], None] | None = None,
 ) -> dict[str, Any]:
     """Run the UID import using a name-prefix sweep.
 
@@ -191,6 +192,7 @@ def import_uid_entities(
                 prefix,
                 active_only=active_only,
                 seen_uids=seen_uids,
+                abort_cb=abort_cb,
             )
         except Exception as exc:
             logger.error("UID prefix sweep failed: prefix=%r: %s", prefix, exc)

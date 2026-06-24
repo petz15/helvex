@@ -318,6 +318,7 @@ def _search_page(
     name_prefix: str,
     *,
     active_only: bool,
+    abort_cb: "Callable[[], None] | None" = None,
     _retry: int = 0,
 ) -> tuple[list[dict[str, Any]], int]:
     """One Search call returning (entities, effective_total).
@@ -327,6 +328,8 @@ def _search_page(
       - _MAX_RECORDS_PER_CALL + 1 when == MAX → there may be more; caller must expand
 
     Retries up to 3 times on Request_limit_exceeded with exponential backoff.
+    abort_cb is called after each sleep so the job worker can update its heartbeat
+    and check for cancellation without blocking the SOAP call itself.
     """
     import time
     from zeep.helpers import serialize_object
@@ -351,10 +354,12 @@ def _search_page(
             delay = _RATE_LIMIT_BASE_DELAY * (2 ** _retry)
             logger.warning("UID rate limited (prefix=%r), waiting %.0fs (retry %d)", name_prefix, delay, _retry + 1)
             time.sleep(delay)
-            return _search_page(name_prefix, active_only=active_only, _retry=_retry + 1)
+            return _search_page(name_prefix, active_only=active_only, abort_cb=abort_cb, _retry=_retry + 1)
         raise
 
     time.sleep(_INTER_CALL_DELAY)
+    if abort_cb:
+        abort_cb()
 
     result: dict = serialize_object(raw_result, target_cls=dict) or {}
     items = result.get("uidEntitySearchResultItem") or []
@@ -387,6 +392,7 @@ def iter_entities_by_prefix(
     *,
     active_only: bool,
     seen_uids: set[str],
+    abort_cb: "Callable[[], None] | None" = None,
     _depth: int = 0,
 ) -> list[dict[str, Any]]:
     """Return all entities whose name contains *prefix* as a substring.
@@ -397,11 +403,13 @@ def iter_entities_by_prefix(
 
     Deduplication is done via seen_uids so entities matched by multiple prefixes
     (contains semantics) are inserted only once.
+    abort_cb is forwarded to every _search_page call so the heartbeat stays alive
+    during deep recursive expansion (which can make hundreds of SOAP calls).
     """
     _MAX_DEPTH = 3
 
     try:
-        entities, effective_total = _search_page(prefix, active_only=active_only)
+        entities, effective_total = _search_page(prefix, active_only=active_only, abort_cb=abort_cb)
     except Exception:
         logger.warning("UID prefix search failed: prefix=%r", prefix, exc_info=True)
         return []
@@ -416,6 +424,7 @@ def iter_entities_by_prefix(
                 prefix + ch,
                 active_only=active_only,
                 seen_uids=seen_uids,
+                abort_cb=abort_cb,
                 _depth=_depth + 1,
             )
             results.extend(sub)
