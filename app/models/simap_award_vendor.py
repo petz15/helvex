@@ -35,7 +35,7 @@ class SimapAwardVendor(Base):
     vendor_uid: Mapped[str | None] = mapped_column(String(20), nullable=True)   # CHE-xxx.xxx.xxx
     vendor_country: Mapped[str | None] = mapped_column(String(2), nullable=True)
     vendor_city: Mapped[str | None] = mapped_column(String(100), nullable=True)
-    vendor_postal_code: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    vendor_postal_code: Mapped[str | None] = mapped_column(String(50), nullable=True)
 
     # Price (per-vendor; null when award uses a total price range)
     price: Mapped[float | None] = mapped_column(Numeric(15, 2), nullable=True)
