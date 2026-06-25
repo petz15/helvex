@@ -1,6 +1,7 @@
 """Job handlers for UID register import and detail fetch."""
 from __future__ import annotations
 
+from app import crud
 from app.services.job_handlers import JobContext
 
 
@@ -54,6 +55,12 @@ def handle_uid_import(ctx: JobContext) -> tuple[dict, str]:
         ctx._heartbeat()
         ctx.assert_not_cancelled()
 
+    def _status(prefix: str) -> None:
+        crud.update_progress(
+            ctx.db, ctx.job,
+            message=f"Sweeping prefix '{prefix}'…",
+        )
+
     stats = import_uid_entities(
         ctx.db,
         resume_from=ctx.resume_from,
@@ -61,6 +68,7 @@ def handle_uid_import(ctx: JobContext) -> tuple[dict, str]:
         active_only=active_only,
         progress_cb=_progress,
         abort_cb=_ping,
+        status_cb=_status,
     )
 
     done_msg = (

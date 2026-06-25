@@ -136,6 +136,7 @@ def import_uid_entities(
     active_only: bool = False,
     progress_cb: Callable[[int, int, dict], None] | None = None,
     abort_cb: Callable[[], None] | None = None,
+    status_cb: Callable[[str], None] | None = None,
 ) -> dict[str, Any]:
     """Run the UID import using a name-prefix sweep.
 
@@ -186,6 +187,8 @@ def import_uid_entities(
             continue
 
         stats["current_prefix"] = prefix
+        if status_cb:
+            status_cb(prefix)
 
         try:
             entities = iter_entities_by_prefix(

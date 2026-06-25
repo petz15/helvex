@@ -60,6 +60,7 @@ _city_table: dict[str, tuple[float, float]] | None = None
 
 # ── SQLite connection (building lookup) ───────────────────────────────────────
 _db_conn: sqlite3.Connection | None = None
+_db_build_failed: bool = False
 
 
 # ── LV95 → WGS84 conversion ───────────────────────────────────────────────────
@@ -284,15 +285,18 @@ def build_geocoding_db() -> None:
 
 
 def _get_db() -> sqlite3.Connection | None:
-    global _db_conn
+    global _db_conn, _db_build_failed
     with _db_lock:
         if _db_conn is not None:
             return _db_conn
+        if _db_build_failed:
+            return None
         if not _BUILDING_DB.exists():
             try:
                 build_geocoding_db()
             except Exception as exc:
                 logger.error("geocoding.db build failed — PLZ fallback only: %s", exc)
+                _db_build_failed = True
                 return None
         _db_conn = sqlite3.connect(
             f"file:{_BUILDING_DB}?mode=ro", uri=True, check_same_thread=False

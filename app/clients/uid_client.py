@@ -45,15 +45,34 @@ _MAX_RECORDS_PER_CALL = 30
 _client_cache: Any = None
 
 
+_WSDL_INIT_TIMEOUT = 120  # seconds; zeep fetches WSDL + all imported XSD schemas
+
+
 def _get_client() -> Any:
     global _client_cache
     if _client_cache is None:
+        import concurrent.futures
         from zeep import Client, Settings
         from zeep.transports import Transport
 
         transport = Transport(timeout=30, operation_timeout=90)
         settings = Settings(strict=False, xml_huge_tree=True)
-        _client_cache = Client(_WSDL, transport=transport, settings=settings)
+
+        # Transport(timeout=) doesn't always cover recursive XSD schema downloads —
+        # wrap in a thread so the whole init has a hard ceiling.
+        def _init() -> Any:
+            return Client(_WSDL, transport=transport, settings=settings)
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as _pool:
+            _future = _pool.submit(_init)
+            try:
+                _client_cache = _future.result(timeout=_WSDL_INIT_TIMEOUT)
+            except concurrent.futures.TimeoutError:
+                raise RuntimeError(
+                    f"UID SOAP client init timed out after {_WSDL_INIT_TIMEOUT}s "
+                    f"(WSDL or schema download hung)"
+                )
+
         logger.info("UID SOAP V5.0 PublicServices client initialised from WSDL")
     return _client_cache
 
