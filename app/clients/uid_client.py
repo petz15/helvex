@@ -359,6 +359,7 @@ def _search_page(
     if active_only:
         search_params["uidregInformation"] = {"uidregStatusEnterpriseDetail": "3"}
 
+    logger.info("uid_soap.search prefix=%r retry=%d", name_prefix, _retry)
     try:
         raw_result = client.service.Search(
             searchParameters={"uidEntitySearchParameters": search_params},
@@ -386,6 +387,7 @@ def _search_page(
         items = [items] if items else []
 
     effective_total = len(items) if len(items) < _MAX_RECORDS_PER_CALL else _MAX_RECORDS_PER_CALL + 1
+    logger.info("uid_soap.result prefix=%r n=%d capped=%s", name_prefix, len(items), effective_total > _EXPAND_THRESHOLD)
 
     parsed: list[dict] = []
     for item in items:

@@ -51,11 +51,20 @@ def handle_uid_import(ctx: JobContext) -> tuple[dict, str]:
         )
         ctx.progress(done, total or 0, stats, msg)
 
+    _live = {"prefix": "", "calls": 0}
+
     def _ping() -> None:
+        _live["calls"] += 1
         ctx._heartbeat()
         ctx.assert_not_cancelled()
+        crud.update_progress(
+            ctx.db, ctx.job,
+            message=f"Sweeping '{_live['prefix']}' — {_live['calls']} API calls",
+        )
 
     def _status(prefix: str) -> None:
+        _live["prefix"] = prefix
+        _live["calls"] = 0
         crud.update_progress(
             ctx.db, ctx.job,
             message=f"Sweeping prefix '{prefix}'…",
