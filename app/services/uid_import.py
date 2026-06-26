@@ -198,6 +198,8 @@ def import_uid_entities(
                 abort_cb=abort_cb,
             )
         except Exception as exc:
+            if type(exc).__name__ in ("JobCancelledError", "JobPausedError"):
+                raise
             logger.error("UID prefix sweep failed: prefix=%r: %s", prefix, exc)
             stats["api_errors"] += 1
             stats["errors"].append(f"[prefix={prefix}] {exc}")

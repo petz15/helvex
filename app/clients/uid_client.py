@@ -429,7 +429,11 @@ def iter_entities_by_prefix(
 
     try:
         entities, effective_total = _search_page(prefix, active_only=active_only, abort_cb=abort_cb)
-    except Exception:
+    except Exception as exc:
+        # Let job-control signals propagate so cancel/pause actually stops the sweep.
+        # Check by class name to avoid importing from job_worker (wrong dep direction).
+        if type(exc).__name__ in ("JobCancelledError", "JobPausedError"):
+            raise
         logger.warning("UID prefix search failed: prefix=%r", prefix, exc_info=True)
         return []
 
