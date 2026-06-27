@@ -43,6 +43,8 @@ def handle_analyze_boilerplate(ctx: JobContext) -> tuple[dict, str]:
         min_match_count=ctx.params.get("min_match_count") or 500,
         max_candidates=ctx.params.get("max_candidates") or 200,
         sample_limit=ctx.params.get("sample_limit") or 200_000,
+        language_filter=ctx.params.get("language_filter") or None,
+        truncate_mode=bool(ctx.params.get("truncate_mode", False)),
         progress_cb=_progress,
     )
     return stats, (

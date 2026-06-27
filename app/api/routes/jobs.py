@@ -891,6 +891,8 @@ class AnalyzeBoilerplateBody(BaseModel):
     min_match_count: int = 500
     max_candidates: int = 200
     sample_limit: int = 200_000
+    language_filter: str | None = None   # DE / FR / IT / EN — None = all languages
+    truncate_mode: bool = False           # when True, only scan last sentence of each purpose text
 
 
 @router.post("/scoring/analyze-boilerplate", response_model=JobOut, status_code=status.HTTP_202_ACCEPTED)
@@ -907,10 +909,15 @@ def trigger_analyze_boilerplate(
     """
     from app.services.boilerplate_analysis import seed_multilang_boilerplate
     seed_multilang_boilerplate(db)
+    parts = [f"sample={body.sample_limit:,}", f"min_count={body.min_match_count}"]
+    if body.language_filter:
+        parts.append(f"lang={body.language_filter.upper()}")
+    if body.truncate_mode:
+        parts.append("truncate-tail")
     job = _enqueue_or_http_error(
         request,
         job_type="analyze_boilerplate",
-        label="Boilerplate pattern analysis",
+        label=f"Boilerplate analysis — {', '.join(parts)}",
         params=body.model_dump(),
         db=db,
     )

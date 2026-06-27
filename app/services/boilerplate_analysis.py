@@ -299,17 +299,21 @@ def run_boilerplate_analysis(
     min_sentence_len: int = 10,
     max_sentence_len: int = 120,
     sample_limit: int = 200_000,
+    language_filter: str | None = None,
+    truncate_mode: bool = False,
     progress_cb: Callable[[int, int, dict], None] | None = None,
 ) -> dict:
     """Analyse purpose text corpus to surface new boilerplate candidates.
 
     Algorithm:
-      1. Load purpose texts (up to sample_limit rows).
-      2. Split into sentences on common punctuation.
+      1. Load purpose texts (up to sample_limit rows), optionally filtered by language.
+      2. Split into sentences. In truncate_mode, only the LAST sentence per text is used
+         so the analysis surfaces clause-openers that mark the start of the boilerplate tail.
       3. Normalize each sentence (lowercase, collapse whitespace, strip leading articles).
       4. Count sentence frequencies.
       5. Sentences appearing >= min_match_count times that are NOT already covered
-         by an existing pattern are written to the boilerplate_candidates table.
+         by an existing pattern are written to boilerplate_patterns as inactive candidates.
+         In truncate_mode the candidates are flagged truncate=True.
 
     Returns stats dict with candidate count, top candidates, etc.
     """
@@ -324,9 +328,18 @@ def run_boilerplate_analysis(
     ]
 
     # Stream purpose texts in batches
-    logger.info("boilerplate_analysis: loading purpose texts (limit=%d)", sample_limit)
+    lang_label = language_filter.upper() if language_filter else "all"
+    mode_label = "truncate-tail" if truncate_mode else "full"
+    logger.info(
+        "boilerplate_analysis: loading purpose texts (limit=%d, lang=%s, mode=%s)",
+        sample_limit, lang_label, mode_label,
+    )
     sentence_counter: Counter = Counter()
-    total = db.query(func.count(Company.id)).filter(Company.purpose.isnot(None)).scalar() or 0
+    base_filter = [Company.purpose.isnot(None)]
+    if language_filter:
+        base_filter.append(Company.purpose_language == language_filter.upper())
+    q = db.query(Company.purpose).filter(*base_filter)
+    total = db.query(func.count(Company.id)).filter(*base_filter).scalar() or 0
     total = min(total, sample_limit)
     batch_size = 5000
     offset = 0
@@ -334,9 +347,7 @@ def run_boilerplate_analysis(
 
     while loaded < total:
         batch = (
-            db.query(Company.purpose)
-            .filter(Company.purpose.isnot(None))
-            .order_by(Company.id)
+            q.order_by(Company.id)
             .offset(offset)
             .limit(batch_size)
             .all()
@@ -344,7 +355,10 @@ def run_boilerplate_analysis(
         if not batch:
             break
         for (purpose,) in batch:
-            for sent in _split_sentences(purpose):
+            sentences = _split_sentences(purpose)
+            # In truncate_mode only the last sentence is a useful signal
+            candidates_from = [sentences[-1]] if (truncate_mode and sentences) else sentences
+            for sent in candidates_from:
                 norm = _normalize(sent)
                 if min_sentence_len <= len(norm) <= max_sentence_len:
                     sentence_counter[norm] += 1
@@ -373,6 +387,7 @@ def run_boilerplate_analysis(
             break
 
     # Upsert candidates into boilerplate_patterns as inactive (for admin review)
+    tag = "[AUTO-TRUNC]" if truncate_mode else "[AUTO]"
     upserted = 0
     for c in candidates:
         existing = db.query(BoilerplatePattern).filter(
@@ -381,10 +396,11 @@ def run_boilerplate_analysis(
         if existing is None:
             db.add(BoilerplatePattern(
                 pattern=c["pattern"],
-                description=f"[AUTO] Appears {c['count']}x in corpus",
+                description=f"{tag} Appears {c['count']}x in corpus" + (f" lang={lang_label}" if language_filter else ""),
                 example=c["sentence"][:512],
                 match_count=c["count"],
                 active=False,  # admin must review before activating
+                truncate=truncate_mode,
             ))
             upserted += 1
         else:
@@ -394,14 +410,16 @@ def run_boilerplate_analysis(
         db.commit()
 
     logger.info(
-        "boilerplate_analysis: %d candidates found, %d new patterns saved (inactive, pending review)",
-        len(candidates), upserted,
+        "boilerplate_analysis: %d candidates found, %d new patterns saved (inactive, pending review, truncate=%s)",
+        len(candidates), upserted, truncate_mode,
     )
     return {
         "total_purposes_scanned": loaded,
         "unique_sentences": len(sentence_counter),
         "candidates_found": len(candidates),
         "new_patterns_saved": upserted,
+        "language_filter": lang_label,
+        "truncate_mode": truncate_mode,
         "top_candidates": candidates[:20],
     }
 

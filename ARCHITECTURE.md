@@ -110,7 +110,8 @@ zefix_analyzer/
 │       ├── email.py            # SMTP transactional email
 │       ├── s3_client.py        # boto3 S3 wrapper
 │       ├── payment_transactions.py  # Credit grant, subscription apply
-│       └── [other services]    # email, boilerplate_analysis, incremental_classify, etc.
+│       ├── boilerplate_analysis.py  # Corpus-frequency boilerplate candidate analysis (language/truncate filters)
+│       └── [other services]    # email, incremental_classify, etc.
 │
 ├── alembic/                    # Database migrations (Alembic)
 │   ├── env.py
@@ -2668,6 +2669,31 @@ NOGA is skipped inline because it depends on `tfidf_cluster` — use the batch `
 ```python
 backfill_unclassified(db, *, batch_size=500, run_noga, run_clusters, limit)
 ```
+
+### Boilerplate Pattern Analysis — `app/services/boilerplate_analysis.py`
+
+`run_boilerplate_analysis` is a corpus-frequency job triggered from the Collection page (`scoring/analyze-boilerplate`).
+
+**Parameters:**
+| Param | Default | Description |
+|---|---|---|
+| `sample_limit` | 200 000 | Max purpose rows to scan (set to 700 000 for full corpus) |
+| `min_match_count` | 500 | Min frequency for a sentence to become a candidate |
+| `max_candidates` | 200 | Cap on candidates saved per run |
+| `language_filter` | `None` | Filter companies by `purpose_language` (DE/FR/IT/EN); `None` = all |
+| `truncate_mode` | `False` | When True, only inspect the **last sentence** of each purpose text — surfaces clause-openers that mark the start of the boilerplate tail; saved with `truncate=True` |
+
+**Algorithm:**
+1. Stream purpose texts in batches of 5 000. In `truncate_mode`, only the final sentence per text is kept.
+2. Normalize (lowercase, collapse whitespace, strip leading articles).
+3. Count sentence frequencies.
+4. Sentences above `min_match_count` that are NOT matched by any existing active pattern are converted to a regex (`\s+`-relaxed escape) and saved as **inactive** `BoilerplatePattern` rows tagged `[AUTO]` or `[AUTO-TRUNC]` for admin review.
+
+**Seed function:** `seed_multilang_boilerplate(db)` inserts the standard DE/FR/IT hand-curated patterns (including truncation triggers) on first run; safe to call repeatedly.
+
+**Frontend:** Triggered from Collection → Boilerplate Analysis section with all params exposed. Reviewed and activated in Settings → Boilerplate Patterns (includes regex quick-reference panel).
+
+---
 
 ### Automated Stopword Discovery — `app/services/stopword_discovery.py`
 

@@ -330,7 +330,7 @@ _EXPAND_THRESHOLD = _MAX_RECORDS_PER_CALL - 1
 # ── Low-level single Search call ──────────────────────────────────────────────
 
 _RATE_LIMIT_BASE_DELAY = 60.0   # seconds to wait after first rate-limit error (doubles each retry)
-_INTER_CALL_DELAY = 3.0          # minimum sleep between API calls (~20 calls/min, safely under throttle)
+_INTER_CALL_DELAY = 2.0          # minimum sleep between API calls (~30 calls/min); safe when uid_detail is mutually excluded
 
 
 def _search_page(

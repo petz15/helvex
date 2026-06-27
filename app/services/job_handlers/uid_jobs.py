@@ -7,6 +7,21 @@ from app.services.job_handlers import JobContext
 
 def handle_uid_detail(ctx: JobContext) -> tuple[dict, str]:
     from app.services.uid_import import fetch_uid_details
+    from sqlalchemy import text as _text
+
+    # Refuse to run while uid_import is active — both hit the same rate-limited API.
+    active_import = ctx.db.execute(
+        _text(
+            "SELECT id FROM job_runs WHERE job_type = 'uid_import' "
+            "AND status IN ('queued', 'running') LIMIT 1"
+        )
+    ).fetchone()
+    if active_import:
+        raise RuntimeError(
+            "uid_import is currently running (job_runs id=%d). "
+            "uid_detail shares the same UID SOAP API rate limit — "
+            "wait for uid_import to finish before starting uid_detail." % active_import[0]
+        )
 
     batch_size = int(ctx.params.get("batch_size", 100))
 

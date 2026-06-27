@@ -918,9 +918,9 @@ jobs:
             elif [ "${DEPLOY_MODE}" = "ml" ]; then
               kubectl rollout status deployment/helvex-ml-worker -n helvex-prod --timeout=360s
             elif [ "${DEPLOY_MODE}" = "app" ]; then
-              kubectl rollout status deployment/helvex -n helvex-prod --timeout=360s
-              kubectl rollout status deployment/helvex-api-worker -n helvex-prod --timeout=360s
-              kubectl rollout status deployment/helvex-frontend -n helvex-prod --timeout=180s
+              kubectl rollout status deployment/helvex -n helvex-prod --timeout=600s
+              kubectl rollout status deployment/helvex-api-worker -n helvex-prod --timeout=600s
+              kubectl rollout status deployment/helvex-frontend -n helvex-prod --timeout=300s
             else
               kubectl rollout status deployment/helvex -n helvex-prod --timeout=360s
               kubectl rollout status deployment/helvex-ml-worker -n helvex-prod --timeout=360s
@@ -935,9 +935,9 @@ jobs:
           elif echo "$COMMIT_MSG" | grep -qF '[deploy-http]'; then
             kubectl rollout status deployment/helvex-crawler-http -n helvex-prod --timeout=360s
           elif echo "$COMMIT_MSG" | grep -qF '[deploy-app]'; then
-            kubectl rollout status deployment/helvex -n helvex-prod --timeout=360s
-            kubectl rollout status deployment/helvex-api-worker -n helvex-prod --timeout=360s
-            kubectl rollout status deployment/helvex-frontend -n helvex-prod --timeout=180s
+            kubectl rollout status deployment/helvex -n helvex-prod --timeout=600s
+            kubectl rollout status deployment/helvex-api-worker -n helvex-prod --timeout=600s
+            kubectl rollout status deployment/helvex-frontend -n helvex-prod --timeout=300s
           else
             kubectl rollout status deployment/helvex -n helvex-prod --timeout=360s
             kubectl rollout status deployment/helvex-ml-worker -n helvex-prod --timeout=360s
@@ -953,9 +953,9 @@ jobs:
           echo "=== Helvex pod describe ==="
           kubectl describe pods -n helvex-prod -l app.kubernetes.io/name=helvex || true
           echo "=== Helvex logs (current) ==="
-          kubectl logs -n helvex-prod -l app.kubernetes.io/name=helvex --tail=80 || true
+          kubectl logs -n helvex-prod -l app.kubernetes.io/name=helvex,app.kubernetes.io/component=app -c app --tail=80 || true
           echo "=== Helvex logs (previous, if crash-looped) ==="
-          kubectl logs -n helvex-prod -l app.kubernetes.io/name=helvex --previous --tail=80 || true
+          kubectl logs -n helvex-prod -l app.kubernetes.io/name=helvex,app.kubernetes.io/component=app -c app --previous --tail=80 || true
           echo "=== Events ==="
           kubectl get events -n helvex-prod --sort-by='.lastTimestamp' | tail -30 || true
 

@@ -1227,6 +1227,66 @@ export function CollectionClient() {
         </form>
       </Section>
 
+      <GroupHeader label="Boilerplate Analysis" />
+
+      <Section title="Analyse Boilerplate Patterns">
+        <form onSubmit={async e => {
+          e.preventDefault();
+          const fd = new FormData(e.currentTarget);
+          const lang = fd.get("bp_language") as string;
+          await submit("scoring/analyze-boilerplate", {
+            sample_limit: parseInt(fd.get("bp_sample_limit") as string) || 200_000,
+            min_match_count: parseInt(fd.get("bp_min_match_count") as string) || 500,
+            max_candidates: parseInt(fd.get("bp_max_candidates") as string) || 200,
+            language_filter: lang || null,
+            truncate_mode: fd.get("bp_truncate_mode") === "on",
+          });
+        }} className="space-y-4">
+          <p className="text-sm text-slate-600 leading-relaxed">
+            Scans the purpose text corpus to find high-frequency sentences that are good candidates for new boilerplate patterns.
+            Results are saved as <span className="font-medium text-slate-700">inactive</span> patterns for admin review in Settings → Boilerplate.
+          </p>
+
+          <div className="grid grid-cols-2 gap-4">
+            <Field label="Sample limit" hint="Max purpose texts to scan. 700k = full corpus.">
+              <input name="bp_sample_limit" type="number" min="1000" max="700000" step="1000" defaultValue="200000" className={inputCls} />
+            </Field>
+            <Field label="Min match count" hint="Minimum times a sentence must appear to become a candidate.">
+              <input name="bp_min_match_count" type="number" min="10" defaultValue="500" className={inputCls} />
+            </Field>
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <Field label="Max candidates" hint="Cap on how many candidate patterns are saved per run.">
+              <input name="bp_max_candidates" type="number" min="10" max="1000" defaultValue="200" className={inputCls} />
+            </Field>
+            <Field label="Language filter" hint="Restrict to one language or scan all.">
+              <select name="bp_language" className={inputCls}>
+                <option value="">All languages</option>
+                <option value="DE">DE — German</option>
+                <option value="FR">FR — French</option>
+                <option value="IT">IT — Italian</option>
+                <option value="EN">EN — English</option>
+              </select>
+            </Field>
+          </div>
+
+          <label className="flex items-start gap-3 text-sm text-slate-700 cursor-pointer">
+            <input type="checkbox" name="bp_truncate_mode" className={cn(checkCls, "mt-0.5")} />
+            <span>
+              <span className="font-medium">Truncation-trigger mode</span>
+              <span className="block text-xs text-slate-500 mt-0.5">
+                Only inspects the <em>last sentence</em> of each purpose text — these are the clause-openers that mark where the boilerplate tail begins (e.g. <em>"Die Gesellschaft kann Zweigniederlassungen…"</em>).
+                Candidates are saved with <span className="font-medium text-amber-700">truncate=true</span> so one regex strips the entire tail.
+                Most efficient: one active truncate pattern can clean hundreds of thousands of records.
+              </span>
+            </span>
+          </label>
+
+          <SubmitBtn loading={loading === "scoring/analyze-boilerplate"} />
+        </form>
+      </Section>
+
       <GroupHeader label="NOGA Classification" />
 
       <Section title="NOGA Classification">

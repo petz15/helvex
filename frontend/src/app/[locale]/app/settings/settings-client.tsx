@@ -802,6 +802,24 @@ export function SettingsClient() {
           </div>
 
           <CollapsibleSection title={dict.app.settings.admin.boilerplatePatterns} description={dict.app.settings.admin.boilerplateDescription} count={boilerplate.length}>
+            {/* Regex quick reference */}
+            <div className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-xs text-slate-600 space-y-1.5 mb-4">
+              <p className="font-semibold text-slate-700">Regex quick reference</p>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-1 font-mono">
+                <span><code className="text-blue-700">\s+</code> — one or more whitespace chars (space, tab, newline)</span>
+                <span><code className="text-blue-700">\b</code> — word boundary (edge of a word)</span>
+                <span><code className="text-blue-700">(?:…)</code> — non-capturing group</span>
+                <span><code className="text-blue-700">[àa]</code> — character class — matches <em>à</em> or <em>a</em></span>
+                <span><code className="text-blue-700">["']</code> — matches straight or curly apostrophe</span>
+                <span><code className="text-blue-700">{"{0,5}"}</code> — repeat 0 to 5 times</span>
+                <span><code className="text-blue-700">.*</code> — any characters, any length (greedy)</span>
+                <span><code className="text-blue-700">^</code> — start of string; <code className="text-blue-700">$</code> — end</span>
+              </div>
+              <p className="text-slate-500 pt-0.5">
+                Auto-generated patterns escape sentences literally and relax spaces to <code className="text-blue-700">\s+</code>.
+                <span className="inline-flex items-center gap-0.5 mx-1 text-amber-700 font-medium">truncate</span> patterns strip everything from the match to end-of-text — the most efficient type since one regex cleans entire boilerplate tails.
+              </p>
+            </div>
             <div className="space-y-4">
               <div className="space-y-2">
                 {boilerplate.map(bp => (

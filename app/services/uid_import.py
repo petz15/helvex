@@ -30,7 +30,6 @@ from __future__ import annotations
 
 import json
 import logging
-import time
 from typing import Any, Callable
 
 from sqlalchemy import text
@@ -43,7 +42,7 @@ from app.models.company import Company
 logger = logging.getLogger(__name__)
 
 _BATCH_SIZE = 500
-_INTER_PAGE_DELAY = 1.0  # seconds between pair batches (individual calls already sleep in uid_client)
+_INTER_PAGE_DELAY = 0.0  # last API call of each pair already sleeps _INTER_CALL_DELAY in uid_client
 
 
 def _serialize_raw(raw: dict | None) -> str | None:
@@ -263,8 +262,6 @@ def import_uid_entities(
 
         if progress_cb:
             progress_cb(pair_idx + 1, total_pairs, stats)
-
-        time.sleep(_INTER_PAGE_DELAY)
 
     return stats
 
