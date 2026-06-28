@@ -43,6 +43,7 @@
     - epublikationen für weitere dinge wie betreibungen
     - medizinische leistungserbringer (?) helsana liste https://www.helsana.ch/de/private/services/leistungserbringer-suche.html?
     - Language translation for companies other languages. plan is probably all to english and then translate search terms to english and return results? -> this as additional feature for paid tiers
+    - there is a uid search portal https://www.uid.admin.ch/Search.aspx partially implemented but the issue is no fuzzy search (or some weird limited fuzzy search) and cap of 30 companies per result. further exacerbated by a rate limiting on the api calls and potentially non useable filters in some combinations. effectively rendering it unusable. which is too bad as this could have been a HUGE source (all possible companies, sole entrepreneurs/traders, lawyers (?), governmental bodies etc). keep an eye on it
 
 ### MVP before public PROD
 - Tiers are enforced - partially done (not fully checked and web searches are not gated yet + always uses api instead of checking if data already exists)

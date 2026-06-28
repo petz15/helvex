@@ -301,17 +301,22 @@ def run_boilerplate_analysis(
     sample_limit: int = 200_000,
     language_filter: str | None = None,
     truncate_mode: bool = False,
+    pre_strip: bool = False,
     progress_cb: Callable[[int, int, dict], None] | None = None,
 ) -> dict:
     """Analyse purpose text corpus to surface new boilerplate candidates.
 
     Algorithm:
       1. Load purpose texts (up to sample_limit rows), optionally filtered by language.
-      2. Split into sentences. In truncate_mode, only the LAST sentence per text is used
+      2. If pre_strip=True, apply existing active boilerplate rules to each purpose
+         before analysis so the frequency counts reflect what remains AFTER known
+         patterns are removed. This surfaces patterns that are structurally similar
+         to existing ones but distinct enough not to be caught yet.
+      3. Split into sentences. In truncate_mode, only the LAST sentence per text is used
          so the analysis surfaces clause-openers that mark the start of the boilerplate tail.
-      3. Normalize each sentence (lowercase, collapse whitespace, strip leading articles).
-      4. Count sentence frequencies.
-      5. Sentences appearing >= min_match_count times that are NOT already covered
+      4. Normalize each sentence (lowercase, collapse whitespace, strip leading articles).
+      5. Count sentence frequencies.
+      6. Sentences appearing >= min_match_count times that are NOT already covered
          by an existing pattern are written to boilerplate_patterns as inactive candidates.
          In truncate_mode the candidates are flagged truncate=True.
 
@@ -319,17 +324,22 @@ def run_boilerplate_analysis(
     """
     from app.models.company import Company
     from app.models.boilerplate import BoilerplatePattern
+    from app.services.noga import _strip_purpose_boilerplate
 
-    # Load existing active patterns for dedup
-    existing_patterns = [
-        re.compile(r.pattern, re.IGNORECASE)
-        for r in db.query(BoilerplatePattern).filter(BoilerplatePattern.active.is_(True)).all()
+    # Load existing active patterns — used both for pre_strip and for dedup
+    active_rows = db.query(BoilerplatePattern).filter(BoilerplatePattern.active.is_(True)).all()
+    strip_patterns: list[tuple[re.Pattern, bool]] = [
+        (re.compile(r.pattern, re.IGNORECASE), bool(r.truncate))
+        for r in active_rows
         if _safe_compile(r.pattern)
     ]
+    existing_patterns = [pat for pat, _ in strip_patterns]
 
     # Stream purpose texts in batches
     lang_label = language_filter.upper() if language_filter else "all"
     mode_label = "truncate-tail" if truncate_mode else "full"
+    if pre_strip:
+        mode_label += "+pre-strip"
     logger.info(
         "boilerplate_analysis: loading purpose texts (limit=%d, lang=%s, mode=%s)",
         sample_limit, lang_label, mode_label,
@@ -355,7 +365,8 @@ def run_boilerplate_analysis(
         if not batch:
             break
         for (purpose,) in batch:
-            sentences = _split_sentences(purpose)
+            text = _strip_purpose_boilerplate(purpose, strip_patterns) if pre_strip else purpose
+            sentences = _split_sentences(text)
             # In truncate_mode only the last sentence is a useful signal
             candidates_from = [sentences[-1]] if (truncate_mode and sentences) else sentences
             for sent in candidates_from:
@@ -420,6 +431,7 @@ def run_boilerplate_analysis(
         "new_patterns_saved": upserted,
         "language_filter": lang_label,
         "truncate_mode": truncate_mode,
+        "pre_strip": pre_strip,
         "top_candidates": candidates[:20],
     }
 

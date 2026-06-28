@@ -1240,6 +1240,7 @@ export function CollectionClient() {
             max_candidates: parseInt(fd.get("bp_max_candidates") as string) || 200,
             language_filter: lang || null,
             truncate_mode: fd.get("bp_truncate_mode") === "on",
+            pre_strip: fd.get("bp_pre_strip") === "on",
           });
         }} className="space-y-4">
           <p className="text-sm text-slate-600 leading-relaxed">
@@ -1279,6 +1280,17 @@ export function CollectionClient() {
                 Only inspects the <em>last sentence</em> of each purpose text — these are the clause-openers that mark where the boilerplate tail begins (e.g. <em>"Die Gesellschaft kann Zweigniederlassungen…"</em>).
                 Candidates are saved with <span className="font-medium text-amber-700">truncate=true</span> so one regex strips the entire tail.
                 Most efficient: one active truncate pattern can clean hundreds of thousands of records.
+              </span>
+            </span>
+          </label>
+
+          <label className="flex items-start gap-3 text-sm text-slate-700 cursor-pointer">
+            <input type="checkbox" name="bp_pre_strip" className={cn(checkCls, "mt-0.5")} />
+            <span>
+              <span className="font-medium">Pre-strip existing rules</span>
+              <span className="block text-xs text-slate-500 mt-0.5">
+                Apply all active boilerplate patterns to each purpose text <em>before</em> counting sentence frequencies.
+                Surfaces patterns that only become visible once known boilerplate is removed — useful for finding the next layer of recurring legal clauses.
               </span>
             </span>
           </label>

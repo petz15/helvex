@@ -45,6 +45,7 @@ def handle_analyze_boilerplate(ctx: JobContext) -> tuple[dict, str]:
         sample_limit=ctx.params.get("sample_limit") or 200_000,
         language_filter=ctx.params.get("language_filter") or None,
         truncate_mode=bool(ctx.params.get("truncate_mode", False)),
+        pre_strip=bool(ctx.params.get("pre_strip", False)),
         progress_cb=_progress,
     )
     return stats, (

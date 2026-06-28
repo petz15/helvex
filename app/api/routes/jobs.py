@@ -893,6 +893,7 @@ class AnalyzeBoilerplateBody(BaseModel):
     sample_limit: int = 200_000
     language_filter: str | None = None   # DE / FR / IT / EN — None = all languages
     truncate_mode: bool = False           # when True, only scan last sentence of each purpose text
+    pre_strip: bool = False               # when True, apply existing active rules before counting
 
 
 @router.post("/scoring/analyze-boilerplate", response_model=JobOut, status_code=status.HTTP_202_ACCEPTED)
@@ -914,6 +915,8 @@ def trigger_analyze_boilerplate(
         parts.append(f"lang={body.language_filter.upper()}")
     if body.truncate_mode:
         parts.append("truncate-tail")
+    if body.pre_strip:
+        parts.append("pre-strip")
     job = _enqueue_or_http_error(
         request,
         job_type="analyze_boilerplate",
