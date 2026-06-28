@@ -131,6 +131,31 @@ function FlexScoreCell({ score, breakdownJson }: { score: number | null; breakdo
   );
 }
 
+/** Compact badge for the company-level website verdict. */
+const WEBSITE_STATUS_META: Record<string, { label: string; cls: string }> = {
+  verified:       { label: "Verified",   cls: "bg-green-50 text-green-700 border-green-200" },
+  confirmed:      { label: "Confirmed",  cls: "bg-emerald-50 text-emerald-700 border-emerald-200" },
+  likely:         { label: "Likely",     cls: "bg-amber-50 text-amber-700 border-amber-200" },
+  social_only:    { label: "Social only", cls: "bg-sky-50 text-sky-700 border-sky-200" },
+  directory_only: { label: "Directory",  cls: "bg-slate-100 text-slate-500 border-slate-200" },
+  none:           { label: "No website", cls: "bg-red-50 text-red-600 border-red-200" },
+};
+
+function WebsiteStatusBadge({ status, count }: { status: string | null; count: number | null }) {
+  if (!status) return <span className="text-slate-300 text-xs">—</span>;
+  const meta = WEBSITE_STATUS_META[status] ?? { label: status, cls: "bg-slate-100 text-slate-500 border-slate-200" };
+  return (
+    <span className="inline-flex items-center gap-1">
+      <span className={`text-[10px] px-1.5 py-0.5 rounded-full border ${meta.cls}`}>{meta.label}</span>
+      {(count ?? 0) >= 2 && (
+        <span title={`${count} websites detected`} className="text-[10px] px-1 py-0.5 rounded-full border bg-indigo-50 text-indigo-700 border-indigo-200">
+          ×{count}
+        </span>
+      )}
+    </span>
+  );
+}
+
 export function CompanyTable({ companies, selectedId, onSelect, filters, onSort, isLoading, selectedIds, onToggleSelect, onSelectAll, onUpdateReview }: CompanyTableProps) {
   const sort = filters.sort ?? "-updated";
 
@@ -218,6 +243,17 @@ export function CompanyTable({ companies, selectedId, onSelect, filters, onSort,
                 className="text-blue-600 hover:underline text-xs truncate max-w-[140px] block">{url.replace(/^https?:\/\//, "")}</a>
             : <span className="text-slate-300 text-xs">—</span>;
         },
+      }),
+      ch.accessor("website_status", {
+        id: "website_status",
+        header: "Site status",
+        enableSorting: false,
+        cell: (info) => (
+          <WebsiteStatusBadge
+            status={info.getValue() as string | null}
+            count={info.row.original.website_count}
+          />
+        ),
       }),
       ch.accessor("web_score", {
         header: "Web",

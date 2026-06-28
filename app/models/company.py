@@ -48,6 +48,13 @@ class Company(Base):
     web_score: Mapped[int | None] = mapped_column(Integer, nullable=True)
     # True if Google only returned social media results (no real website found)
     social_media_only: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    # Company-level website verdict, aggregated from search results + crawl
+    # verification (company_web_extract). One of:
+    #   verified | confirmed | likely | social_only | directory_only | none
+    # NULL = unknown (not yet searched/crawled). See app/services/website_status.py.
+    website_status: Mapped[str | None] = mapped_column(String(16), nullable=True, index=True)
+    # Number of distinct genuine websites detected for this company (>=2 ⇒ multiple).
+    website_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
     # Manual workflow statuses
     # None='pending' | 'interesting' | 'rejected'
     # | 'potential_proposal' | 'confirmed_proposal'

@@ -13,6 +13,8 @@ export interface Company {
   google_search_results_raw: string | null;
   web_score: number | null;
   social_media_only: boolean | null;
+  website_status: string | null;
+  website_count: number | null;
   flex_score: number | null;
   flex_score_breakdown: string | null;
   flex_scored_at: string | null;

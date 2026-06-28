@@ -225,7 +225,31 @@ function AllExtractsPanel({ companyId, bestCandidateId, onMutate }: {
   );
 }
 
-export function WebsitePanel({ companyId, isSuperadmin = false }: { companyId: number; isSuperadmin?: boolean }) {
+const WEBSITE_STATUS_META: Record<string, { label: string; cls: string; hint: string }> = {
+  verified:       { label: "Verified website",  cls: "bg-green-50 text-green-700 border-green-200",     hint: "Crawl matched the Swiss UID or name+address from Zefix" },
+  confirmed:      { label: "Confirmed website", cls: "bg-emerald-50 text-emerald-700 border-emerald-200", hint: "Own-domain found with high confidence (no UID proof)" },
+  likely:         { label: "Likely website",   cls: "bg-amber-50 text-amber-700 border-amber-200",      hint: "Own-domain candidate exists, mid confidence" },
+  social_only:    { label: "Social media only", cls: "bg-sky-50 text-sky-700 border-sky-200",            hint: "No own website found — only a social profile" },
+  directory_only: { label: "Directory only",   cls: "bg-slate-100 text-slate-500 border-slate-200",     hint: "Only directory/registry listings found" },
+  none:           { label: "No website",       cls: "bg-red-50 text-red-600 border-red-200",            hint: "Searched/crawled — nothing credible found" },
+};
+
+function WebsiteStatusBadge({ status, count }: { status: string | null | undefined; count: number | null | undefined }) {
+  if (!status) return null;
+  const meta = WEBSITE_STATUS_META[status] ?? { label: status, cls: "bg-slate-100 text-slate-500 border-slate-200", hint: "" };
+  return (
+    <div className="flex items-center gap-1.5">
+      <span title={meta.hint} className={`text-[11px] px-2 py-0.5 rounded-full border ${meta.cls}`}>{meta.label}</span>
+      {(count ?? 0) >= 2 && (
+        <span title={`${count} distinct websites detected`} className="text-[11px] px-2 py-0.5 rounded-full border bg-indigo-50 text-indigo-700 border-indigo-200">
+          {count} sites
+        </span>
+      )}
+    </div>
+  );
+}
+
+export function WebsitePanel({ companyId, isSuperadmin = false, websiteStatus = null, websiteCount = null }: { companyId: number; isSuperadmin?: boolean; websiteStatus?: string | null; websiteCount?: number | null }) {
   const { data, error, isLoading, mutate } = useSWR(
     `web-extract-${companyId}`,
     () => fetchWebExtract(companyId),
@@ -262,6 +286,9 @@ export function WebsitePanel({ companyId, isSuperadmin = false }: { companyId: n
     return (
       <div className="bg-white rounded-xl border border-[#e6e8ec] p-10 text-center">
         <Globe size={28} className="text-slate-300 mx-auto mb-3" />
+        {websiteStatus && (
+          <div className="flex justify-center mb-3"><WebsiteStatusBadge status={websiteStatus} count={websiteCount} /></div>
+        )}
         <p className="text-sm text-slate-500">This company has not been crawled yet.</p>
         <p className="text-xs text-slate-400 mt-1">
           Run the web crawler to fetch and extract website data.
@@ -292,6 +319,7 @@ export function WebsitePanel({ companyId, isSuperadmin = false }: { companyId: n
     <div className="space-y-4">
       {/* ── Source strip ── */}
       <div className="bg-white rounded-xl border border-[#e6e8ec] px-4 py-3 flex flex-wrap items-center gap-x-6 gap-y-2">
+        <WebsiteStatusBadge status={websiteStatus} count={websiteCount} />
         <div className="flex items-center gap-2 min-w-0">
           <Globe size={15} className="text-[#2563eb] shrink-0" />
           {extract?.url ? (

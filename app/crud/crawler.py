@@ -558,6 +558,26 @@ def get_best_web_extract(db: Session, company_id: int) -> "CompanyWebExtract | N
     )
 
 
+def get_web_extracts_with_urls(db: Session, company_id: int):
+    """Return all crawl extracts for a company joined to their candidate URL.
+
+    Each row exposes: url, confidence, uid_matches_zefix, name_address_verified.
+    Used by website_status.compute_verdict to aggregate per-candidate verification
+    into a company-level website verdict + distinct-domain count.
+    """
+    return db.execute(
+        text(
+            "SELECT c.url AS url, e.confidence AS confidence, "
+            "e.uid_matches_zefix AS uid_matches_zefix, "
+            "e.name_address_verified AS name_address_verified "
+            "FROM company_web_extract e "
+            "JOIN company_url_candidates c ON c.id = e.url_candidate_id "
+            "WHERE e.company_id = :cid"
+        ),
+        {"cid": company_id},
+    ).fetchall()
+
+
 def reset_extraction_flags(db: Session) -> int:
     """Flag every crawled page that has stored HTML for re-extraction.
 

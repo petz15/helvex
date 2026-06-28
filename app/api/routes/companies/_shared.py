@@ -53,7 +53,10 @@ def _bulk_org_states(db: Session, company_ids: list[int], org_id: int | None) ->
     return {r.company_id: r for r in rows}
 
 
-_WEB_RESULT_FIELDS = ("website_url", "web_score", "google_search_results_raw")
+_WEB_RESULT_FIELDS = (
+    "website_url", "web_score", "google_search_results_raw",
+    "website_status", "website_count",
+)
 
 
 def _apply_web_results_gate(company: CompanyRead, org: Organization | None, is_superadmin: bool) -> CompanyRead:

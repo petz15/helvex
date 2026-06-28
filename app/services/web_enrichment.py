@@ -22,7 +22,6 @@ from app.services.scoring import (
     distance_to_muri_km,
     fallback_result_score,
     is_irrelevant_result,
-    is_social_lead_domain,
     score_result,
 )
 
@@ -135,6 +134,31 @@ def _enrich_stored_results(stored: list[dict], full_raw_json: str | None) -> lis
         else:
             result.append(row)
     return result
+
+
+def _search_verdict_fields(db: Session, scored: list[dict]) -> dict:
+    """Compute gated website fields from scored search results (search-only verdict).
+
+    Returns a dict of {website_url, web_score, social_media_only, website_status,
+    website_count} suitable for a CompanyUpdate or direct attribute assignment.
+
+    Replaces the old "force scored[0] into website_url" behaviour: website_url is
+    only populated when the verdict is a genuine own-domain match (POSITIVE).
+    """
+    from app.services import website_status as ws
+
+    _, directory_domains = _google_scoring_overrides(db)
+    thr = ws.load_thresholds(db)
+    verdict = ws.classify_search_results(scored, directory_domains, thr)
+    best = scored[0] if scored else {}
+    web_score = verdict.web_score if verdict.status in ws.POSITIVE else best.get("score")
+    return {
+        "website_url": verdict.website_url,
+        "web_score": web_score,
+        "social_media_only": verdict.status == ws.SOCIAL_ONLY,
+        "website_status": verdict.status,
+        "website_count": verdict.website_count or None,
+    }
 
 
 def _score_google_results_for_company(db: Session, company: Company, raw_results: list[dict]) -> list[dict]:
@@ -275,27 +299,29 @@ def enrich_company_website(db: Session, company: Company, *, num: int = 10) -> t
     else:
         raw_results = [{"title": r.title, "link": r.link, "snippet": r.snippet or ""} for r in results]
     scored = _score_google_results_for_company(db, company, raw_results)
-    best = scored[0]
-    social_media_only = is_social_lead_domain(best["link"])
+    fields = _search_verdict_fields(db, scored)
 
     crud.update_company(
         db,
         company,
         CompanyUpdate(
-            website_url=best["link"],
-            web_score=best["score"],
-            social_media_only=social_media_only,
+            website_url=fields["website_url"],
+            web_score=fields["web_score"],
+            social_media_only=fields["social_media_only"],
+            website_status=fields["website_status"],
+            website_count=fields["website_count"],
             website_checked_at=now,
             google_search_results_raw=json.dumps(scored, ensure_ascii=False),
             google_search_full_raw=json.dumps(full_raw, ensure_ascii=False) if full_raw is not None else None,
             google_search_params=search_params,
             combined_score=Company.compute_combined_score(
                 company.ai_score, company.noga_confidence, company.purpose_keywords,
-                web_score=best["score"],
+                web_score=fields["web_score"],
             ),
         ),
     )
-    return True, best["link"]
+    # Returns the gated own-domain URL (None for social_only/directory_only/none).
+    return fields["website_url"] is not None, fields["website_url"]
 
 
 def rescore_from_stored_results(db: Session, company: Company) -> bool:
@@ -316,18 +342,20 @@ def rescore_from_stored_results(db: Session, company: Company) -> bool:
 
     stored = _enrich_stored_results(stored, getattr(company, "google_search_full_raw", None))
     rescored = _score_google_results_for_company(db, company, stored)
-    best = rescored[0]
+    fields = _search_verdict_fields(db, rescored)
     crud.update_company(
         db,
         company,
         CompanyUpdate(
-            website_url=best["link"],
-            web_score=best["score"],
-            social_media_only=is_social_lead_domain(best["link"]),
+            website_url=fields["website_url"],
+            web_score=fields["web_score"],
+            social_media_only=fields["social_media_only"],
+            website_status=fields["website_status"],
+            website_count=fields["website_count"],
             google_search_results_raw=json.dumps(rescored, ensure_ascii=False),
             combined_score=Company.compute_combined_score(
                 company.ai_score, company.noga_confidence, company.purpose_keywords,
-                web_score=best["score"],
+                web_score=fields["web_score"],
             ),
         ),
     )
@@ -384,10 +412,12 @@ def recalculate_google_scores(
                     stats["skipped"] += 1
                     continue
 
-                best = rescored[0]
-                company.website_url = best["link"]
-                company.web_score = best["score"]
-                company.social_media_only = is_social_lead_domain(best["link"])
+                fields = _search_verdict_fields(db, rescored)
+                company.website_url = fields["website_url"]
+                company.web_score = fields["web_score"]
+                company.social_media_only = fields["social_media_only"]
+                company.website_status = fields["website_status"]
+                company.website_count = fields["website_count"]
                 company.google_search_results_raw = json.dumps(rescored, ensure_ascii=False)
                 company.combined_score = Company.compute_combined_score(
                     company.ai_score, company.noga_confidence, company.purpose_keywords,
@@ -473,7 +503,11 @@ def run_batch_collect(
         ~Company.name.ilike("%filiale di%"),
     )
     if only_missing_website:
-        query = query.filter(or_(Company.website_url.is_(None), Company.website_url == ""))
+        # "Missing website" = never searched. Use website_checked_at (not website_url)
+        # because the verdict now gates website_url to NULL for companies that were
+        # checked but have no genuine site (social_only/directory_only/none) — keying
+        # off website_url would re-enrich those forever.
+        query = query.filter(Company.website_checked_at.is_(None))
     if canton:
         query = query.filter(Company.canton == canton.strip().upper())
     if min_flex_score is not None:

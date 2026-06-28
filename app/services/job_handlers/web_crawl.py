@@ -473,9 +473,13 @@ def handle_web_extract(ctx: JobContext) -> tuple[dict, str]:
     from app.services import crawler_extract
     from app.services import s3_client as _s3
     from app.services import scoring
+    from app.services import website_status as ws
 
     batch_size = int(ctx.params.get("batch_size", 200))
     stats: dict = {"extracted": 0, "empty": 0, "s3_errors": 0, "errors": [], "rescored": 0}
+    # Loaded once per run; drives the company-level website verdict below.
+    _thr = ws.load_thresholds(ctx.db)
+    _dir_domains = crud.get_active_google_directory_domains(ctx.db)
 
     total = crawler_crud.count_companies_pending_extraction(ctx.db)
     done = 0
@@ -605,6 +609,25 @@ def handle_web_extract(ctx: JobContext) -> tuple[dict, str]:
                             })
                             stats["rescored"] += 1
 
+                    # ── Company-level website verdict (authoritative) ──────────
+                    # Aggregate this company's crawl extracts (uid_matches_zefix /
+                    # name_address_verified / confidence) + search fallback into a
+                    # verdict + distinct-website count. Gates website_url so it only
+                    # holds a genuine own-domain match — no more forced guesses.
+                    try:
+                        scored_raw = json.loads(row[6]) if row and row[6] else []
+                    except Exception:  # noqa: BLE001
+                        scored_raw = []
+                    verdict = ws.compute_verdict(ctx.db, company_id, scored_raw, _dir_domains, _thr)
+                    ctx.db.query(Company).filter(Company.id == company_id).update({
+                        "website_status": verdict.status,
+                        "website_count": verdict.website_count or None,
+                        "website_url": verdict.website_url,
+                    })
+                    stats["verdict_" + verdict.status] = stats.get("verdict_" + verdict.status, 0) + 1
+                    if (verdict.website_count or 0) >= 2:
+                        stats["multi_site"] = stats.get("multi_site", 0) + 1
+
                     # UID-mismatch auto-quarantine: reject the wrong-site candidate
                     # so it's never re-selected. Always triggers a fallback crawl.
                     if any_extracted and best.uid_matches_zefix is False:
@@ -671,6 +694,80 @@ def handle_web_extract(ctx: JobContext) -> tuple[dict, str]:
         f"{len(stats['errors'])} errors"
     )
     return stats, done_msg
+
+
+# ── recompute_website_status ────────────────────────────────────────────────────
+
+def handle_recompute_website_status(ctx: JobContext) -> tuple[dict, str]:
+    """Recompute company-level website_status + website_count for all checked companies.
+
+    Authoritative verdict from crawl extracts (company_web_extract) with a search
+    fallback. No API/crawl cost. Use to backfill the new verdict columns or after
+    tuning thresholds. Chunked by id (keyset) for 700k-row safety.
+    """
+    import json
+
+    from app.models.company import Company
+    from app.services import website_status as ws
+
+    batch_size = int(ctx.params.get("batch_size", 1000))
+    thr = ws.load_thresholds(ctx.db)
+    dir_domains = crud.get_active_google_directory_domains(ctx.db)
+
+    total = int(ctx.db.execute(
+        text("SELECT COUNT(*) FROM companies WHERE website_checked_at IS NOT NULL")
+    ).scalar() or 0)
+
+    stats: dict = {"updated": 0, "multi_site": 0}
+    last_id = int(ctx.resume_from or 0)
+    done = 0
+
+    while True:
+        ctx.assert_not_cancelled()
+        _self_preempt_if_ml_queued(ctx)
+
+        rows = ctx.db.execute(
+            text(
+                "SELECT id, google_search_results_raw FROM companies "
+                "WHERE website_checked_at IS NOT NULL AND id > :last "
+                "ORDER BY id LIMIT :lim"
+            ),
+            {"last": last_id, "lim": batch_size},
+        ).fetchall()
+        if not rows:
+            break
+
+        for cid, raw_json in rows:
+            try:
+                scored = json.loads(raw_json) if raw_json else []
+            except Exception:  # noqa: BLE001
+                scored = []
+            verdict = ws.compute_verdict(ctx.db, cid, scored, dir_domains, thr)
+            ctx.db.query(Company).filter(Company.id == cid).update({
+                "website_status": verdict.status,
+                "website_count": verdict.website_count or None,
+                "website_url": verdict.website_url,
+            })
+            stats["updated"] += 1
+            stats[verdict.status] = stats.get(verdict.status, 0) + 1
+            if (verdict.website_count or 0) >= 2:
+                stats["multi_site"] += 1
+            last_id = cid
+
+        ctx.db.commit()
+        done += len(rows)
+        msg = (
+            f"Recomputed {done}/{total} — "
+            f"{stats.get('verified', 0)} verified, {stats.get('confirmed', 0)} confirmed, "
+            f"{stats.get('likely', 0)} likely, {stats['multi_site']} multi-site"
+        )
+        crud.update_progress(ctx.db, ctx.job, message=msg, done=done, total=total, stats=dict(stats))
+        crud.create_event(ctx.db, job_id=ctx.job.id, level="debug", message=msg)
+
+    return stats, (
+        f"Website status recomputed for {stats['updated']} companies "
+        f"({stats['multi_site']} with multiple websites)"
+    )
 
 
 # ── web_select_url ────────────────────────────────────────────────────────────

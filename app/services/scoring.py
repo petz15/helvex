@@ -579,6 +579,28 @@ def is_social_lead_domain(url: str) -> bool:
     return any(domain == d or domain.endswith("." + d) for d in _SOCIAL_LEAD_DOMAINS)
 
 
+def classify_domain(url: str, directory_domains: set[str] | None = None) -> str:
+    """Bucket a result URL by domain type for website-presence classification.
+
+    Returns one of: "own" | "social" | "directory" | "news" | "none".
+    "own" means a candidate company-owned website (not a directory/social/news
+    aggregator). Used by app.services.website_status to decide whether a company
+    actually has its own website versus only a social profile or directory listing.
+    """
+    domain = _root_domain(url)
+    if not domain:
+        return "none"
+    if is_social_lead_domain(url):
+        return "social"
+    if _is_news_domain(domain):
+        return "news"
+    if _is_directory_domain(domain, directory_domains):
+        return "directory"
+    if _LOCAL_DIRECTORY_PATH_RE.search(url) or _url_is_globally_excluded(url):
+        return "directory"
+    return "own"
+
+
 # ── Location helpers ────────────────────────────────────────────────────────
 # Default origin: Muri bei Bern (lat, lon) — used for distance_to_muri_km helper
 _ORIGIN = (46.9266, 7.4817)

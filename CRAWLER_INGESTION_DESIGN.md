@@ -1,3 +1,13 @@
+> **STATUS (superseded — kept for design history).** All three "gaps" below have
+> since been **built**: the `web_extract` stage (`crawler_extract.py` +
+> `company_web_extract`), sitemap/robots discovery (`crawler_sitemap.py`), and the
+> bot-protection improvements (curl_cffi impersonation, client-hints, retry/backoff,
+> bot→Playwright escalation). The company-level **website verdict** + multi-site
+> detection that consumes this pipeline is in `app/services/website_status.py`.
+> For the current, authoritative description see **architecture.md §16 — Web Crawler
+> Pipeline**. Remaining optional work (LLM enrichment layer, external paid scrape
+> tier, trained URL-confidence model) is tracked in ROADMAP.md.
+
 # Crawler & HTML Ingestion — Design / Improvement Plan
 
 Scope: improve the HTTP crawler, the Playwright crawler, site-overview discovery, bot-protection

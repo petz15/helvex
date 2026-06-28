@@ -26,6 +26,8 @@ class CompanyBase(BaseModel):
     purpose: str | None = None
     address: str | None = None
     website_url: str | None = None
+    website_status: str | None = None
+    website_count: int | None = None
     # Zefix administrative identifiers
     ehraid: str | None = None
     chid: str | None = None
@@ -99,6 +101,8 @@ class CompanyUpdate(BaseModel):
     google_search_params: dict | None = None
     web_score: int | None = None
     social_media_only: bool | None = None
+    website_status: str | None = None
+    website_count: int | None = None
     review_status: str | None = None
     contact_status: str | None = None
     contact_name: str | None = None

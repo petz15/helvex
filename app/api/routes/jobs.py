@@ -1852,6 +1852,28 @@ def trigger_web_reextract(
     return JobOut.from_orm_obj(job)
 
 
+@router.post("/crawler/recompute-website-status", response_model=JobOut, status_code=status.HTTP_202_ACCEPTED)
+def trigger_recompute_website_status(
+    request: Request,
+    db: Session = Depends(get_db),
+    _: User = Depends(require_superadmin),
+):
+    """Recompute the company-level website verdict (website_status + website_count).
+
+    Aggregates crawl-verification extracts + search results into verified / confirmed /
+    likely / social_only / directory_only / none, and counts distinct genuine websites.
+    Deterministic — no API or crawl cost. Use to backfill or after tuning thresholds.
+    """
+    job = _enqueue_or_http_error(
+        request,
+        job_type="recompute_website_status",
+        label="Recompute website status (verdict + multi-site count)",
+        params={},
+        db=db,
+    )
+    return JobOut.from_orm_obj(job)
+
+
 @router.post("/crawler/select-url", response_model=JobOut, status_code=status.HTTP_202_ACCEPTED)
 def trigger_web_select_url(
     body: WebSelectUrlBody,

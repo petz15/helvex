@@ -321,6 +321,7 @@ HTML routes (browser, in `main.py`):
 | POST | `/api/v1/admin/jobs/crawler/populate-urls` | Superadmin | Enqueue `web_url_populate` backfill job |
 | POST | `/api/v1/admin/jobs/crawler/extract` | Superadmin | Enqueue `web_extract` job (also triggered automatically after each crawl batch) |
 | POST | `/api/v1/admin/jobs/crawler/reextract` | Superadmin | Flag all crawled S3 HTML for re-extraction + run `web_extract` (no re-crawl) |
+| POST | `/api/v1/admin/jobs/crawler/recompute-website-status` | Superadmin | Enqueue `recompute_website_status` — recompute the company website verdict + multi-site count from extracts (no API/crawl cost) |
 | GET | `/api/v1/companies/{id}/web-extract` | Authenticated | Best web extract + per-page crawl coverage for the company detail "Website" tab |
 | … | (other existing admin routes) | | |
 
@@ -429,8 +430,10 @@ The core entity. Key columns:
 | `lat`, `lon` | Float | Geocoordinates (swisstopo / GeoNames) |
 | `flex_score` | Integer 0-100 | Zefix-data-only priority score (no external API) |
 | `flex_score_breakdown` | JSON | Per-component flex score detail |
-| `website_url` | String | Top Google result URL (global master; see dual-write note) |
+| `website_url` | String | Best **own-domain** match — gated by the website verdict (NULL for social_only/directory_only/none; no longer a forced top result) |
 | `web_score` | Integer 0-100 | Google name/location match quality |
+| `website_status` | String(16) | Company-level website verdict: `verified` / `confirmed` / `likely` / `social_only` / `directory_only` / `none` (NULL = unknown). See §16. |
+| `website_count` | Integer | Number of distinct genuine websites detected (≥2 ⇒ company has multiple sites) |
 | `google_search_results_raw` | Text | Scored organic results as JSON [{title, link, snippet, score}] |
 | `google_search_full_raw` | Text | Complete provider JSON (ScrapingDog only; null for Serper) |
 | `google_search_params` | JSON | Exact params sent to search API: provider, q, gl, hl, location, municipality, address_zip, purpose_language_raw — diagnose wrong-language/location results |
@@ -462,7 +465,7 @@ The core entity. Key columns:
 - `shab_stub` — minimal stub created from a SHAB publication before full Zefix data arrived
 - `uid` — imported exclusively from the UID register (no Zefix entry exists)
 
-**Dual-write note (Google scoring fields):** `website_url`, `web_score`, `google_search_results_raw`, `website_checked_at`, and `social_media_only` exist on both `Company` (global Serper master) and `OrgCompanyState` (org-specific re-score). Always read from `OrgCompanyState` when `org_id` is available; fall back to `Company` only when no org context exists. See model file comments for details.
+**Dual-write note (Google scoring fields):** `website_url`, `web_score`, `google_search_results_raw`, `website_checked_at`, `social_media_only`, `website_status`, and `website_count` exist on both `Company` (global Serper master) and `OrgCompanyState` (org-specific re-score). Always read from `OrgCompanyState` when `org_id` is available; fall back to `Company` only when no org context exists. See model file comments for details.
 
 **Note:** `review_status`, `contact_status`, `contact_name/email/phone`, and `tags` also exist as legacy columns on `Company`, but the authoritative per-org values live in `OrgCompanyState`. Do not write these fields directly on `Company` for new code.
 
@@ -1952,6 +1955,38 @@ web_extract            distinct companies WHERE company_web_pages.needs_extracti
 Both crawler tiers run robots.txt + sitemap.xml discovery (`crawler_sitemap.py`) before
 page selection: sitemap URLs fill subpage slots the homepage nav misses, and the robots
 `Crawl-delay` raises the per-domain rate limit.
+
+### Website verdict — does this company have a website, and how many?
+
+`app/services/website_status.py` aggregates the search + crawl evidence into one
+company-level verdict (`companies.website_status`) plus a distinct-website count
+(`companies.website_count`). No API cost. This replaces the old behaviour of forcing
+the top-scored search result into `website_url` regardless of quality.
+
+- **Domain buckets** (`scoring.classify_domain`): each result URL → `own` / `social` /
+  `directory` / `news` / `none`, reusing the existing directory/social/news domain sets.
+- **Provisional verdict** (search-only, in `enrich_company_website` / rescore paths):
+  `classify_search_results` → best own-domain by score vs DB thresholds
+  (`website_confirmed_search_score`, `website_likely_search_score`).
+- **Authoritative verdict** (post-crawl, in `handle_web_extract` and the
+  `recompute_website_status` job): `compute_verdict` reads every `company_web_extract`
+  row for the company (joined to its candidate URL) and tiers each by
+  `uid_matches_zefix` / `name_address_verified` / `confidence`
+  (`website_confirmed_confidence` default 0.65, `website_likely_confidence` 0.45):
+  - `uid_matches_zefix=True` or `name_address_verified` → **verified**
+  - `uid_matches_zefix=False` → discarded (site belongs to another company)
+  - else confidence ≥ confirmed / likely thresholds → **confirmed** / **likely**
+- **Verdict ladder:** `verified` › `confirmed` › `likely` › `social_only` ›
+  `directory_only` › `none` (NULL = unknown). `website_url` is set only for the
+  positive verdicts (verified/confirmed/likely); otherwise NULL.
+- **Multiple websites:** `website_count` = distinct root domains among verified+confirmed
+  extracts (≥2 ⇒ company has multiple genuine sites). Surfaced as a badge on the company
+  table (`Site status` column) and the detail page Website tab.
+- **Re-enrichment guard:** the batch `only_missing_website` filter now keys off
+  `website_checked_at IS NULL` (not `website_url`), so companies legitimately gated to
+  NULL aren't re-searched forever.
+- **Thresholds** are DB-configurable `AppSetting`s (`website_*`); `recompute_website_status`
+  re-derives all verdicts after tuning them or to backfill.
 
 ### Job params — web_crawl_http and web_crawl_playwright
 

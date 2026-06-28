@@ -41,6 +41,8 @@ class OrgCompanyState(Base):
     google_search_results_raw: Mapped[str | None] = mapped_column(Text, nullable=True)
     website_checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     social_media_only: Mapped[bool | None] = mapped_column(nullable=True)
+    website_status: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    website_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)

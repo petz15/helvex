@@ -643,7 +643,12 @@ export function CompanyDetailClient({ company: initial, readOnlyDemo = false, is
           {/* ── Website tab ── */}
           {activeTab === "Website" && (
             <div className="mt-[18px]">
-              <WebsitePanel companyId={company.id} isSuperadmin={isSuperadmin} />
+              <WebsitePanel
+                companyId={company.id}
+                isSuperadmin={isSuperadmin}
+                websiteStatus={company.website_status}
+                websiteCount={company.website_count}
+              />
             </div>
           )}
 

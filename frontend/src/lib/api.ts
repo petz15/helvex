@@ -2324,6 +2324,15 @@ export async function crawlerReextract(): Promise<{ flagged: number; job_id: num
   return res.json();
 }
 
+export async function crawlerRecomputeWebsiteStatus(): Promise<{ job_id: number; status: string }> {
+  const res = await fetch("/api/v1/admin/jobs/crawler/recompute-website-status", {
+    method: "POST",
+    credentials: "include",
+  });
+  if (!res.ok) throw new Error("Failed to enqueue recompute-website-status job");
+  return res.json();
+}
+
 export interface CandidateDomainStat {
   domain: string;
   company_count: number;
