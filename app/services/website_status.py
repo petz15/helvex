@@ -26,7 +26,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app import crud
