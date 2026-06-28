@@ -944,43 +944,43 @@ The `message` field contains the full HR publication narrative (single language;
 
 **SHAB integration (Zefix-backed):** After every HR01/HR02 company upsert in `shab_import.py`, `preprocess_company_sogc_pub` is called fire-and-forget (errors logged, not raised), ensuring new publications are indexed immediately.
 
-### UID Register Import — `app/services/uid_import.py`
+### UID Register Gap Import — `app/services/uid_import.py`
 
-Imports all entities from the Swiss UID (Unternehmens-Identifikationsnummer) register via the V5.0 PublicServices SOAP API.
+Discovers the companies **not in Zefix** (the "gap": sole traders, MWST/VAT-only, `uid_only`) from the Swiss UID register via the V5.0 PublicServices SOAP API, using a **name/keyword dictionary sweep with geo/status refinement**.
 
-**API endpoint:** `https://www.uid-wse.admin.ch/V5.0/PublicServices.svc` (correct as of BFS spec v5.0, Oktober 2018; **not** `uid.admin.ch/uid-wse/` which is a web portal, not the service endpoint).
-
+**API endpoint:** `https://www.uid-wse.admin.ch/V5.0/PublicServices.svc` (BFS spec v5.0; **not** `uid.admin.ch/uid-wse/` which is a web portal).
 **WSDL:** `https://www.uid-wse.admin.ch/V5.0/PublicServices.svc?wsdl`
 
-**V5.0 PublicServices constraints:**
-- Operation: `Search` (not `SearchByCriteria` from old V3.0)
-- `searchMode=Normal` does a SQL **contains** search — not prefix/starts-with
-- Max **30 results per call** — no pagination token exists
-- Single-character `organisationName` returns 0 results (API minimum ~2 chars)
-- Rate limit: `Request_limit_exceeded` raised on excessive call frequency; client retries with exponential backoff
+**V5.0 Search semantics (empirically established 2026-06; the old "contains" assumption was wrong):**
+- `organisationName` is **exact word-token AND** matching (tokenize by spaces, match each word exactly, case-insensitive, accent-folded — e.g. `MULLER` matches `Müller`). Multiple tokens are AND-ed. NOT a SQL `LIKE`/contains. Min token length ~2.
+- Max **30 results per call** — no pagination token.
+- Server-side filters (all confirmed working): `address.swissZipCode` (PLZ — pass as `{"_value_1": [{"swissZipCode": <int>}]}`), `commercialRegisterInformation.commercialRegisterStatus` (`"3"`=not in HR, `"2"`=in HR), `vatRegisterInformation.vatStatus` (`"2"`=MWST), `legalForm` (list of eCH-0097 codes). `personName` is silently ignored.
+- **No filter lifts the 30-cap** — the non-HR gap is dense (>30 per PLZ even in villages), and there is **no searchable date** covering non-HR entities (so no dictionary-free bisection).
+- Rate limit: `Request_limit_exceeded`; client retries with exponential backoff (`_RATE_LIMIT_BASE_DELAY=60s`, `_INTER_CALL_DELAY=2s`).
 
-**New data this adds:**
-- MWST/VAT-only companies (sole proprietors below CHF 100k HR threshold, freelancers)
-- AHV employer registrations without HR entry
-- Entities in statistical register (BFS), SUVA, etc.
-- Dissolved / historical UIDs not in current Zefix
+**Sweep strategy (`sweep_uid_gap`):**
+- **Discovery is name-driven** — a company is only found if we query a word in its name. So the OUTER LOOP is a dictionary of name tokens/keywords built from all `source<>'uid'` company names (`build_dictionary`, one chunked keyset-paginated pass; also returns a `canton→[postcodes]` map). Freq-sorted; built from non-UID rows so term order is **stable across resumes**.
+- For each term: `search_entities(name=term, not_in_hr=True[, mwst_only])` nationwide. When a bucket caps at 30, `_collect_token` refines to break the cap: **canton (26, coarse/cheap) → postcode (within a capped canton) → MWST subset → AND a 2nd top-token** (`max_depth`). Canton-first keeps a common surname from fanning out to all ~4,150 postcodes at once.
+- A single `seen` set (whole run) dedups the heavy cross-term overlap (multi-word names match several terms). Resume via `resume_from` = index into the freq-sorted dictionary; upsert is idempotent so re-runs after resume are safe.
+- **Completeness** bounded by the dictionary: a company whose name shares no token with any Zefix name is unreachable (most sole traders are "Firstname Surname …" and surnames recur, so coverage is high). Unmeasurable from the API (no count) — validate by external recall sampling. Tune `max_terms` / `min_token_freq`.
 
-**2-char pair sweep strategy (guarantees completeness):**
-- Iterate all 1,296 two-character pairs from `_SWEEP_CHARS` ("AA", "AB", ..., "Z9", "ZZ")
-- "Contains" semantics ensure every company is found by at least one pair (all company names have a 2-char alphabetic/numeric substring in the sweep set)
-- When a pair returns exactly 30 (the cap), recursively expand to 3-char, 4-char sub-prefixes until each bucket returns < 30
-- `seen_uids` set deduplicates across overlapping prefix buckets
-- Resume via `resume_from` pair index (0–1295) stored in job progress
+**Why not PLZ-outer:** an earlier iteration looped postcodes and refined by names drawn from companies *already in that postcode* — circular for discovery (it re-finds known names). Discovery must be driven by a comprehensive name dictionary; geography is only a cap-breaking refinement.
 
-**Upsert behaviour:**
-- Existing rows: only `registration_type` and `uid_raw` updated; purpose/scores/geocodes preserved.
-- New rows: `source=uid`; no purpose → skipped by NOGA, scoring, and Claude classification.
+**Job params:** `batch_size`, `not_in_hr` (default true), `mwst_only`, `refine_mwst` (default true), `max_depth` (default 1), `min_token_freq` (default 2), `max_terms` (default 50000), `second_token_count` (default 200). resume = dictionary index.
 
-**`registration_type` derivation:** from V5.0 response — `commercialRegisterStatus=2` → `hr`; `vatRegisterInformation.vatStatus=2` → `mwst`; both → `both`; neither → `uid_only`.
+**Upsert behaviour (`_upsert_batch`, `on_conflict` param — Zefix is NEVER overwritten in either mode):**
+- New rows: inserted `source=uid`; no purpose → skipped by NOGA, scoring, and Claude classification.
+- `on_conflict="update"` (default): refresh existing `source='uid'` rows only — `registration_type`/`uid_raw`/`status` always; other fields filled only when NULL via `COALESCE` (so a prior `uid_detail` enrichment is never clobbered by a sparse Search row). Gated by `WHERE companies.source = 'uid'`, so Zefix/other rows are skipped entirely.
+- `on_conflict="ignore"`: `ON CONFLICT DO NOTHING` — only brand-new UIDs inserted; no existing row touched.
+- Note: unlike the old full-import, this no longer annotates Zefix rows' `registration_type` (the gap sweep is `not_in_hr` so it never matches a Zefix/HR company anyway).
 
-**`legalForm`:** stored as eCH-0097 code (e.g. `"0106"` for GmbH, `"0109"` for AG) — text descriptions require eCH-0097 code table lookup.
+**`registration_type` derivation:** `commercialRegisterStatus=2` → `hr`; `vatStatus=2` → `mwst`; both → `both`; neither → `uid_only`.
 
-**Client:** `app/clients/uid_client.py` — lazy zeep WSDL init; `_search_page(prefix)`, `iter_entities_by_prefix(prefix)`, `get_by_uid(uid_str)`, `detail_to_update(entity)`.
+**`legalForm`:** stored as eCH-0097 code (e.g. `"0106"`=GmbH, `"0109"`=AG, `"0101"`=Einzelunternehmen).
+
+**Client:** `app/clients/uid_client.py` — lazy zeep WSDL init; `search_entities(name=, plz=, not_in_hr=, in_hr=, mwst_only=, legal_form=, active_only=)` / `build_search_params(...)` / `_run_search(params)`, `get_by_uid(uid_str)`, `detail_to_update(entity)`.
+
+**Experiment scripts:** `scripts/uid_phase0_experiment.py` (multi-token AND semantics), `scripts/uid_phase0_filters.py` (PLZ + HR filter probes + WSDL schema introspection).
 
 **Scoring note:** UID-only companies (no `purpose`) excluded at DB query level from NOGA, keyword extraction, Claude classification.
 

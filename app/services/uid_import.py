@@ -1,35 +1,52 @@
-"""UID register import pipeline.
+"""UID register gap import — name/keyword dictionary sweep, geo/status-refined.
 
-Uses a 2-char pair sweep to fetch all entities from the Swiss UID V5.0 PublicServices
-SOAP API.
+Goal: DISCOVER the companies that are NOT in Zefix — sole traders / MWST-only /
+uid_only entities (commercialRegisterStatus = "3", "not in HR"). MWST registration
+implies turnover > CHF 100k, so these are commercially relevant leads.
 
-Why 2-char pairs:
-  - V5.0 Search uses "contains" semantics (SQL LIKE '%term%'), not prefix/starts-with
-  - Single-character search returns 0 results (API minimum length ~2)
-  - Every Swiss company name contains at least one 2-char consecutive alpha substring,
-    so iterating all 39²=1521 letter pairs (A-Z + ÄÖÜ + accented) guarantees completeness.
-    Digits are excluded from the base pairs to avoid expansion bombs on "00"/"20" etc.
-  - Max 30 results per call — no pagination. When a pair returns exactly 30, we
-    recursively expand to 3-char, 4-char sub-prefixes until all buckets return < 30
+Why this design (see app/clients/uid_client.py header + the phase-0 experiments):
+  - `organisationName` is exact word-token AND matching (no CONTAINS). The old
+    2-char prefix sweep was structurally lossy and is removed.
+  - The Search API caps at 30 results with no pagination. PLZ / canton / HR / MWST
+    filters all work server-side but none lifts the cap alone.
+  - DISCOVERY must be driven by the NAME, not by geography: a company is only found
+    if we query a word in its name. So the OUTER LOOP is a dictionary of name
+    tokens + keywords built from the Zefix company names (every surname/word that
+    appears in any registered name). Geography/status are REFINEMENTS that break
+    the 30-cap, applied only when a token query overflows:
 
-Sweep strategy:
-  - Iterate all 2-char pairs from _PAIR_CHARS ("AA", "AB", ..., "ÑÑ")
-  - For each pair, call Search with organisationName=pair
-  - If result count == 30 (cap), expand to 3-char sub-prefixes via iter_entities_by_prefix
-  - active_only=False (default): all statuses (active, cancelled, liquidated)
-  - active_only=True: filters to ACTIVE status only
+      for each dictionary token t:
+          search(name=t, not_in_hr=True[, mwst_only])          # whole country
+          if capped (==30):
+              for canton in cantons:                            # 26 — cheap coarse split
+                  search(name=t, canton=canton, not_in_hr=True)
+                  if capped:
+                      for plz in that canton's postcodes:        # fine split
+                          search(name=t, plz=plz, not_in_hr=True)
+                          if capped:                             # rare
+                              [mwst subset] then AND a 2nd token
 
-For each entity:
-  - Existing row (any source): update registration_type + uid_raw only.
-  - New row: insert with source='uid'. Address/legal_form will be filled by uid_detail job.
+  - Completeness is bounded by the dictionary: a company whose name shares no token
+    with any Zefix name is unreachable. With ~all Zefix name tokens this covers the
+    vast majority (most sole traders are "Firstname Surname …" and surnames recur
+    across the register). Coverage is unmeasurable from the API (no count) —
+    validate by external recall sampling. Tune max_terms / min_token_freq to trade
+    completeness vs. API calls.
 
-Resume: resume_from maps to the flat pair index into the _PAIR_CHARS² list
-(0 = "AA", 1 = "AB", …) so a crashed job restarts from the last completed pair.
+Scale: the dictionary + canton→postcode map are built in ONE streaming pass over
+non-UID `companies` rows (chunked, never loaded whole). Built from source<>'uid'
+so the term list is STABLE across resumes (inserted uid rows don't shift indices).
+
+Resume: `resume_from` is the index into the freq-sorted dictionary, stored in job
+progress, so a crashed/paused job restarts from the last completed token.
 """
 from __future__ import annotations
 
 import json
 import logging
+import re
+import unicodedata
+from collections import Counter
 from typing import Any, Callable
 
 from sqlalchemy import text
@@ -42,7 +59,35 @@ from app.models.company import Company
 logger = logging.getLogger(__name__)
 
 _BATCH_SIZE = 500
-_INTER_PAGE_DELAY = 0.0  # last API call of each pair already sleeps _INTER_CALL_DELAY in uid_client
+_NAME_SCAN_CHUNK = 5000          # rows per chunk when building the PLZ vocab
+
+# Tokens never worth querying: legal-form noise + API zero-result stopwords.
+_TOKEN_STOPWORDS = {
+    "AG", "GMBH", "SA", "SARL", "SAGL", "SAS", "LTD", "INC", "CO", "AND", "UND",
+    "THE", "VON", "DER", "DIE", "DAS", "LA", "LE", "LES", "DI", "DE", "DU", "EN",
+    "IN", "ME", "ET", "UN", "UNE", "EG", "KG", "PLC",
+}
+
+
+# ── Text helpers ──────────────────────────────────────────────────────────────
+
+def _fold(s: str) -> str:
+    """Uppercase + strip accents — mirrors the API's accent-folding so a folded
+    token like 'MULLER' matches 'Müller' server-side."""
+    nfkd = unicodedata.normalize("NFKD", s)
+    return "".join(c for c in nfkd if not unicodedata.combining(c)).upper()
+
+
+_TOKEN_RE = re.compile(r"[A-Za-z0-9]+")
+
+
+def _name_tokens(name: str) -> list[str]:
+    """Folded alphanumeric word tokens of a name, length ≥ 2, minus stopwords."""
+    out = []
+    for raw in _TOKEN_RE.findall(_fold(name)):
+        if len(raw) >= 2 and raw not in _TOKEN_STOPWORDS:
+            out.append(raw)
+    return out
 
 
 def _serialize_raw(raw: dict | None) -> str | None:
@@ -54,67 +99,131 @@ def _serialize_raw(raw: dict | None) -> str | None:
         return None
 
 
-def _upsert_batch(db: Session, entities: list[dict[str, Any]]) -> tuple[int, int]:
-    """Bulk-upsert a list of entity dicts. Returns (inserted, updated)."""
-    if not entities:
-        return 0, 0
+# ── Dictionary + canton→postcode map (single streaming pass) ──────────────────
 
-    # Split into fields we always write (on conflict) vs fields only for new rows
+_ZIP_RE = re.compile(r"^[0-9]{4}$")
+
+
+def build_dictionary(
+    db: Session,
+    *,
+    min_token_freq: int,
+    max_terms: int,
+    chunk: int = _NAME_SCAN_CHUNK,
+    heartbeat_cb: Callable[[], None] | None = None,
+) -> tuple[list[str], dict[str, list[str]]]:
+    """Build the discovery dictionary + canton→postcodes map from Zefix names.
+
+    Returns (terms, canton_plz):
+      - terms: name/keyword tokens across all source<>'uid' company names,
+        frequency-descending, filtered to count >= min_token_freq, capped at
+        max_terms. This is the OUTER LOOP — every word that names a Swiss company.
+      - canton_plz: {canton: [postcodes]} — the geographic refinement search space
+        used to break the 30-cap on common tokens.
+
+    One keyset-paginated pass (chunked). Built from source<>'uid' so the term order
+    is stable across resumes. heartbeat_cb runs each chunk to keep the job alive.
+    """
+    counter: Counter = Counter()
+    canton_plz: dict[str, set] = {}
+    last_id = 0
+    scanned = 0
+    while True:
+        if heartbeat_cb:
+            heartbeat_cb()
+        rows = db.execute(
+            text(
+                "SELECT id, name, canton, address_zip FROM companies "
+                "WHERE id > :last AND source <> 'uid' "
+                "ORDER BY id ASC LIMIT :lim"
+            ),
+            {"last": last_id, "lim": chunk},
+        ).fetchall()
+        if not rows:
+            break
+        for rid, name, canton, zip_code in rows:
+            last_id = rid
+            scanned += 1
+            if name:
+                for tok in set(_name_tokens(name)):
+                    counter[tok] += 1
+            if canton and zip_code and _ZIP_RE.match(zip_code):
+                canton_plz.setdefault(canton.upper(), set()).add(zip_code)
+
+    terms = [t for t, c in counter.most_common() if c >= min_token_freq][:max_terms]
+    canton_map = {k: sorted(v) for k, v in canton_plz.items()}
+    logger.info(
+        "uid_sweep: dictionary=%d terms (of %d distinct), %d cantons, from %d names",
+        len(terms), len(counter), len(canton_map), scanned,
+    )
+    return terms, canton_map
+
+
+# ── Upsert ────────────────────────────────────────────────────────────────────
+
+def _upsert_batch(
+    db: Session,
+    entities: list[dict[str, Any]],
+    *,
+    on_conflict: str = "update",
+) -> int:
+    """Bulk-upsert entity dicts. New rows are inserted with source='uid'.
+
+    Zefix (and any non-uid) rows are NEVER overwritten in either mode:
+      - on_conflict="ignore": ON CONFLICT DO NOTHING — no existing row is touched.
+      - on_conflict="update": refresh existing source='uid' rows only (registration_type,
+        uid_raw, status always; other fields filled only when currently NULL via
+        COALESCE), gated by `WHERE companies.source = 'uid'` so Zefix rows are skipped.
+
+    Returns affected row count.
+    """
+    if not entities:
+        return 0
+
     rows = []
     for e in entities:
-        raw_json = _serialize_raw(e.get("_raw"))
         rows.append({
             "uid": e["uid"],
             "name": e.get("name") or e["uid"],
             "status": e.get("status"),
             "legal_form": e.get("legal_form"),
-            "legal_form_short_name": e.get("legal_form_short_name"),
             "municipality": e.get("municipality"),
             "canton": e.get("canton"),
             "address": e.get("address"),
             "address_city": e.get("address_city"),
             "address_zip": e.get("address_zip"),
             "registration_type": e.get("registration_type"),
-            "first_sogc_date": e.get("first_sogc_date"),
-            "deletion_date": e.get("deletion_date"),
             "source": "uid",
-            "uid_raw": raw_json,
+            "uid_raw": _serialize_raw(e.get("_raw")),
         })
 
-    # We use a raw SQL upsert to differentiate behaviour for new vs existing rows:
-    #   - New rows:      insert all fields
-    #   - Existing rows: only update registration_type + uid_raw (preserve enriched data)
-    # This ensures Zefix-sourced companies keep their purpose, scores, addresses etc.
-    stmt = (
-        pg_insert(Company.__table__)
-        .values(rows)
-        .on_conflict_do_update(
+    base = pg_insert(Company.__table__).values(rows)
+
+    if on_conflict == "ignore":
+        stmt = base.on_conflict_do_nothing(index_elements=["uid"])
+    else:  # "update" — refresh existing uid rows only; never touch Zefix
+        excl = base.excluded
+        stmt = base.on_conflict_do_update(
             index_elements=["uid"],
             set_={
-                "registration_type": pg_insert(Company.__table__).excluded.registration_type,
-                "uid_raw": pg_insert(Company.__table__).excluded.uid_raw,
-                # For uid-sourced rows, also refresh basic fields if we're the source:
-                "status": text(
-                    "CASE WHEN companies.source = 'uid' "
-                    "THEN excluded.status ELSE companies.status END"
-                ),
-                "canton": text(
-                    "CASE WHEN companies.canton IS NULL "
-                    "THEN excluded.canton ELSE companies.canton END"
-                ),
-                "municipality": text(
-                    "CASE WHEN companies.municipality IS NULL "
-                    "THEN excluded.municipality ELSE companies.municipality END"
-                ),
+                "registration_type": excl.registration_type,
+                "uid_raw": excl.uid_raw,
+                "status": excl.status,
+                # Enrichment fields: keep what's there, fill only if NULL (so a prior
+                # uid_detail GetByUID enrichment is never clobbered by a sparse Search row).
+                "legal_form": text("COALESCE(companies.legal_form, excluded.legal_form)"),
+                "canton": text("COALESCE(companies.canton, excluded.canton)"),
+                "municipality": text("COALESCE(companies.municipality, excluded.municipality)"),
+                "address": text("COALESCE(companies.address, excluded.address)"),
+                "address_city": text("COALESCE(companies.address_city, excluded.address_city)"),
+                "address_zip": text("COALESCE(companies.address_zip, excluded.address_zip)"),
             },
+            where=text("companies.source = 'uid'"),
         )
-    )
 
     result = db.execute(stmt)
-    # rowcount is the number of rows affected (inserted + updated in PostgreSQL)
-    affected = result.rowcount or 0
     db.commit()
-    return affected, 0
+    return result.rowcount or 0
 
 
 def _count_existing_by_uid(db: Session, uids: list[str]) -> set[str]:
@@ -127,146 +236,206 @@ def _count_existing_by_uid(db: Session, uids: list[str]) -> set[str]:
     return {r[0] for r in rows}
 
 
-def import_uid_entities(
+# ── Per-token collection with geo/status refinement ───────────────────────────
+
+def _collect_token(
+    token: str,
+    *,
+    cantons: list[str],
+    canton_plz: dict[str, list[str]],
+    second_vocab: list[str],
+    seen: set[str],
+    not_in_hr: bool,
+    mwst_only: bool,
+    refine_mwst: bool,
+    max_depth: int,
+    abort_cb: Callable[[], None] | None,
+    stats: dict[str, Any],
+) -> list[dict[str, Any]]:
+    """Discover gap companies for one dictionary token.
+
+    Base query is name=token over the whole country (HR=3 to target the gap).
+    When a bucket caps at 30, refine: canton → postcode → [MWST subset] → AND a
+    2nd token. Dedups against `seen` (shared across the whole sweep)."""
+    from app.clients.uid_client import search_entities
+
+    out: list[dict] = []
+
+    def run(name: str, *, plz=None, canton=None, mwst=None) -> bool:
+        """Search one bucket, collect new uids, return True if capped (>=30)."""
+        entities, capped = search_entities(
+            name=name, plz=plz, canton=canton,
+            not_in_hr=not_in_hr,
+            mwst_only=mwst_only if mwst is None else mwst,
+            abort_cb=abort_cb,
+        )
+        for e in entities:
+            u = e.get("uid")
+            if u and u not in seen:
+                seen.add(u)
+                out.append(e)
+        return capped
+
+    # 1) whole-country token query
+    if not run(token):
+        return out
+
+    # 2) capped → split by canton
+    stats["buckets_capped"] += 1
+    for canton in cantons:
+        if not run(token, canton=canton):
+            continue
+        # 3) canton still capped → split by postcode
+        for plz in canton_plz.get(canton, ()):
+            if not run(token, plz=plz):
+                continue
+            # 4) postcode still capped (rare) → MWST subset, then AND a 2nd token
+            if refine_mwst and not mwst_only:
+                run(token, plz=plz, mwst=True)
+            if max_depth >= 1:
+                for tok2 in second_vocab:
+                    if tok2 == token:
+                        continue
+                    run(f"{token} {tok2}", plz=plz)
+    return out
+
+
+# ── Main sweep ────────────────────────────────────────────────────────────────
+
+def sweep_uid_gap(
     db: Session,
     *,
     resume_from: int = 0,
     batch_size: int = _BATCH_SIZE,
-    active_only: bool = False,
+    not_in_hr: bool = True,
+    mwst_only: bool = False,
+    refine_mwst: bool = True,
+    max_depth: int = 1,
+    min_token_freq: int = 2,
+    max_terms: int = 50000,
+    second_token_count: int = 200,
+    on_conflict: str = "update",
     progress_cb: Callable[[int, int, dict], None] | None = None,
     abort_cb: Callable[[], None] | None = None,
     status_cb: Callable[[str], None] | None = None,
 ) -> dict[str, Any]:
-    """Run the UID import using a name-prefix sweep.
+    """Discover non-Zefix (gap) companies via a name/keyword dictionary sweep.
 
-    active_only=True:  only ACTIVE entities.
-    active_only=False: all statuses (active + cancelled + historical).
+    Outer loop = dictionary of name tokens from Zefix names (freq-sorted). Each
+    token is queried nationally, then refined by canton → postcode → MWST → 2nd
+    token to break the 30-cap. See module docstring.
 
-    resume_from: index into the _PAIR_CHARS² pair list (0="AA", 1="AB", …).
-      The job worker stores progress_done in the DB so a crashed job resumes
-      from the last completed pair, not from scratch.
+    not_in_hr=True (default): commercialRegisterStatus="3" — the non-Zefix gap.
+    mwst_only=True: restrict to MWST/VAT-registered (commercially active).
+    refine_mwst: also pull the MWST subset of a still-capped postcode bucket.
+    max_depth: 1 = allow one AND-ed 2nd token on capped postcodes; 0 = off.
+    min_token_freq / max_terms: dictionary size knobs (cost vs completeness).
+    second_token_count: how many top tokens to try as a 2nd AND term.
+    on_conflict: "update" (refresh existing uid rows, never Zefix) | "ignore"
+        (insert new UIDs only, leave every existing row untouched).
 
-    Returns a stats dict compatible with the job handler convention.
+    resume_from: index into the freq-sorted dictionary (job stores progress_done).
     """
-    from app.clients.uid_client import _PAIR_CHARS, iter_entities_by_prefix
-
-    # Generate all 2-char pairs upfront for clean resume_from indexing.
-    # Letters only (39 chars → 39²=1521 pairs) — digits excluded to avoid
-    # recursive expansion bombs on pairs like "00"/"20" that match thousands
-    # of company names (years, codes) and cause 10k+ API calls per pair.
-    pairs = [c1 + c2 for c1 in _PAIR_CHARS for c2 in _PAIR_CHARS]
-    total_pairs = len(pairs)
-
-    # Guard: if resume_from is out of range (e.g. from an older job that used
-    # a different alphabet producing 2401 pairs), restart from scratch to avoid
-    # silently processing 0 pairs or resuming at the wrong position.
-    if resume_from >= total_pairs:
-        logger.warning(
-            "uid_import: resume_from=%d is out of range for current pair list "
-            "(total=%d) — restarting from pair 0. "
-            "This happens when resuming a job started before the alphabet was changed.",
-            resume_from, total_pairs,
-        )
-        resume_from = 0
-
     stats: dict[str, Any] = {
         "inserted": 0,
         "updated_type": 0,
+        "skipped_existing": 0,
         "skipped_invalid": 0,
         "api_errors": 0,
-        "current_prefix": "",
+        "buckets_capped": 0,
+        "tokens_done": 0,
+        "tokens_total": 0,
+        "current_token": "",
         "errors": [],
     }
 
-    seen_uids: set[str] = set()
+    # Dictionary (outer loop) + canton→postcode refinement map, one DB pass.
+    if status_cb:
+        status_cb("(building dictionary)")
+    terms, canton_plz = build_dictionary(
+        db, min_token_freq=min_token_freq, max_terms=max_terms, heartbeat_cb=abort_cb,
+    )
+    cantons = sorted(canton_plz.keys())
+    second_vocab = terms[:second_token_count]
+    total = len(terms)
+    stats["tokens_total"] = total
 
-    for pair_idx, prefix in enumerate(pairs):
-        # Resume: skip already-completed pairs
-        if pair_idx < resume_from:
+    if resume_from >= total:
+        logger.warning("uid_sweep: resume_from=%d out of range (total=%d) — restarting at 0", resume_from, total)
+        resume_from = 0
+
+    seen: set[str] = set()
+
+    for idx, token in enumerate(terms):
+        if idx < resume_from:
             continue
 
-        stats["current_prefix"] = prefix
+        stats["current_token"] = token
         if status_cb:
-            status_cb(prefix)
+            status_cb(token)
 
         try:
-            entities = iter_entities_by_prefix(
-                prefix,
-                active_only=active_only,
-                seen_uids=seen_uids,
-                abort_cb=abort_cb,
+            entities = _collect_token(
+                token,
+                cantons=cantons, canton_plz=canton_plz, second_vocab=second_vocab,
+                seen=seen, not_in_hr=not_in_hr, mwst_only=mwst_only,
+                refine_mwst=refine_mwst, max_depth=max_depth,
+                abort_cb=abort_cb, stats=stats,
             )
         except Exception as exc:
             if type(exc).__name__ in ("JobCancelledError", "JobPausedError"):
                 raise
-            logger.error("UID prefix sweep failed: prefix=%r: %s", prefix, exc)
+            logger.error("UID token sweep failed: token=%r: %s", token, exc)
             stats["api_errors"] += 1
-            stats["errors"].append(f"[prefix={prefix}] {exc}")
+            stats["errors"].append(f"[token={token}] {exc}")
             try:
                 _log_error(
-                    db,
-                    company_id=None,
-                    source="uid_import",
-                    error_type="api_error_abort",
-                    message=f"UID import prefix sweep failed (prefix={prefix!r}): {exc}",
-                    detail={"prefix": prefix, "pair_idx": pair_idx, "last_error": str(exc)},
+                    db, company_id=None, source="uid_import", error_type="api_error",
+                    message=f"UID sweep failed (token={token!r}): {exc}",
+                    detail={"token": token, "token_idx": idx},
                 )
                 db.commit()
             except Exception:
-                pass
-            if stats["api_errors"] > 5:
-                logger.error("Too many prefix failures — aborting UID import")
+                db.rollback()
+            if stats["api_errors"] > 10:
+                logger.error("Too many token failures — aborting UID sweep")
                 return stats
             continue
 
-        if not entities:
-            if progress_cb:
-                progress_cb(pair_idx + 1, total_pairs, stats)
-            continue
-
-        # Write in sub-batches of batch_size to bound memory and commit regularly
+        # Upsert this token's discoveries in sub-batches
         for i in range(0, len(entities), batch_size):
-            sub = entities[i : i + batch_size]
+            sub = entities[i:i + batch_size]
             valid = [e for e in sub if e.get("uid")]
             stats["skipped_invalid"] += len(sub) - len(valid)
             if not valid:
                 continue
-
-            uids_in_batch = [e["uid"] for e in valid]
-            existing_uids = _count_existing_by_uid(db, uids_in_batch)
-            new_count = sum(1 for e in valid if e["uid"] not in existing_uids)
-            upd_count = len(valid) - new_count
-
+            existing = _count_existing_by_uid(db, [e["uid"] for e in valid])
+            new_count = sum(1 for e in valid if e["uid"] not in existing)
             try:
-                _upsert_batch(db, valid)
+                _upsert_batch(db, valid, on_conflict=on_conflict)
             except Exception as exc:
-                logger.error("UID batch upsert failed (prefix=%r): %s", prefix, exc)
-                stats["errors"].append(f"[prefix={prefix}] upsert: {exc}")
+                logger.error("UID upsert failed (token=%r): %s", token, exc)
+                stats["errors"].append(f"[token={token}] upsert: {exc}")
                 try:
-                    _log_error(
-                        db,
-                        company_id=None,
-                        source="uid_import",
-                        error_type="upsert_error",
-                        message=f"Batch upsert failed (prefix={prefix!r}): {exc}",
-                        detail={"prefix": prefix, "batch_size": len(valid)},
-                    )
                     db.rollback()
-                    db.commit()
                 except Exception:
                     pass
                 continue
-
             stats["inserted"] += new_count
-            stats["updated_type"] += upd_count
+            existing_count = len(valid) - new_count
+            if on_conflict == "ignore":
+                stats["skipped_existing"] += existing_count
+            else:
+                stats["updated_type"] += existing_count
 
+        stats["tokens_done"] = idx + 1
         if progress_cb:
-            progress_cb(pair_idx + 1, total_pairs, stats)
+            progress_cb(idx + 1, total, stats)
 
     return stats
 
 
-# ── Detail fetch (GetByUID) ───────────────────────────────────────────────────
+# ── Detail fetch (GetByUID) — unchanged ───────────────────────────────────────
 
 _DETAIL_BATCH_SIZE = 100
 
@@ -281,8 +450,8 @@ def fetch_uid_details(
     """Call GetByUID for every source='uid' company that has no address yet.
 
     Populates address, legal_form, municipality, canton, address_zip from the
-    UID detail endpoint. Run this after uid_import to get location data.
-    Geocoding can then be triggered separately via the re_geocode job.
+    UID detail endpoint. Run this after sweep_uid_gap to get location data;
+    geocoding is then triggered separately via the re_geocode job.
     """
     from app.clients.uid_client import get_by_uid, detail_to_update
 
@@ -293,7 +462,6 @@ def fetch_uid_details(
         "errors": [],
     }
 
-    # Count companies needing detail fetch
     total: int = db.execute(
         text(
             "SELECT COUNT(*) FROM companies "

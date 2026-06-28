@@ -972,7 +972,14 @@ class SogcPreprocessBody(BaseModel):
 
 class UidImportBody(BaseModel):
     batch_size: int = 500
-    active_only: bool = False
+    not_in_hr: bool = True            # only commercialRegisterStatus="3" (the non-Zefix gap)
+    mwst_only: bool = False           # restrict to MWST/VAT-registered
+    refine_mwst: bool = True          # pull MWST subset of a still-capped postcode bucket
+    max_depth: int = 1                # allow one AND-ed 2nd token on capped postcodes (0=off)
+    min_token_freq: int = 2           # skip dictionary tokens rarer than this
+    max_terms: int = 50000            # max dictionary terms (freq-sorted) — cost vs completeness
+    second_token_count: int = 200     # top tokens tried as a 2nd AND term
+    on_conflict: str = "update"       # "update" (refresh uid rows, never Zefix) | "ignore" (skip existing)
 
 
 class UidDetailBody(BaseModel):
@@ -1000,19 +1007,36 @@ def trigger_uid_import(
     db: Session = Depends(get_db),
     _: User = Depends(require_superadmin),
 ):
-    """Import all entities from the Swiss UID register (current + historical).
+    """Discover the non-Zefix gap from the UID register via a name-dictionary sweep.
 
-    Two-phase: fetches ACTIVE companies first, then CANCELLED/historical.
-    Existing Zefix companies have their registration_type updated; new companies
-    are inserted with source='uid'. No scoring is run automatically — trigger
-    re_geocode and scoring jobs separately after the import completes.
+    Outer loop is a dictionary of name tokens/keywords built from Zefix company
+    names; each is queried nationally with commercialRegisterStatus="3" (not in HR)
+    to find sole traders / MWST-only / uid_only entities absent from Zefix. Capped
+    token queries are refined by canton → postcode → MWST → 2nd token. Existing
+    Zefix rows get registration_type updated; new ones are inserted source='uid'.
+    Run uid_detail then re_geocode afterwards to fill addresses + coordinates.
     """
-    label = "UID register import (active only)" if body.active_only else "UID register import (active + historical)"
+    if body.mwst_only:
+        label = "UID gap sweep (name dictionary × non-HR, MWST-only)"
+    elif body.not_in_hr:
+        label = "UID gap sweep (name dictionary × non-HR companies)"
+    else:
+        label = "UID register sweep (name dictionary × all companies)"
     job = _enqueue_or_http_error(
         request,
         job_type="uid_import",
         label=label,
-        params={"batch_size": body.batch_size, "active_only": body.active_only},
+        params={
+            "batch_size": body.batch_size,
+            "not_in_hr": body.not_in_hr,
+            "mwst_only": body.mwst_only,
+            "refine_mwst": body.refine_mwst,
+            "max_depth": body.max_depth,
+            "min_token_freq": body.min_token_freq,
+            "max_terms": body.max_terms,
+            "second_token_count": body.second_token_count,
+            "on_conflict": body.on_conflict,
+        },
         db=db,
     )
     return JobOut.from_orm_obj(job)

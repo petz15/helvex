@@ -291,35 +291,75 @@ export function CollectionClient() {
 
       <GroupHeader label="UID Register Import" />
 
-      <Section title="UID register import (all entities, current + historical)">
+      <Section title="UID gap sweep (name dictionary × non-HR)">
         <form onSubmit={async e => {
           e.preventDefault();
           const fd = new FormData(e.currentTarget);
           await submit("collection/uid-import", {
             batch_size: parseInt(fd.get("batch_size") as string) || 500,
-            active_only: fd.get("active_only") === "on",
+            not_in_hr: fd.get("not_in_hr") === "on",
+            mwst_only: fd.get("mwst_only") === "on",
+            refine_mwst: fd.get("refine_mwst") === "on",
+            max_depth: parseInt(fd.get("max_depth") as string) || 0,
+            min_token_freq: parseInt(fd.get("min_token_freq") as string) || 2,
+            max_terms: parseInt(fd.get("max_terms") as string) || 50000,
+            second_token_count: parseInt(fd.get("second_token_count") as string) || 200,
+            on_conflict: (fd.get("on_conflict") as string) || "update",
           });
         }} className="space-y-4">
           <p className="text-sm text-slate-600 leading-relaxed">
-            Imports <strong>all entities</strong> from the Swiss UID register — including companies
-            registered only for MWST/VAT, AHV, SUVA, or statistical purposes that are not in Zefix.
-            Runs in two phases: active companies first, then cancelled/historical.
+            Discovers the <strong>non-Zefix gap</strong> — sole traders, MWST/VAT-only and
+            <code> uid_only</code> entities not in the commercial register. The outer loop is a
+            <strong> dictionary of name tokens &amp; keywords</strong> built from existing Zefix
+            company names (surnames, first names, trade words). Each term is searched nationwide as
+            <code> not in HR</code>; terms that hit the 30-result API cap are refined by
+            <strong> canton → postcode → MWST → second keyword</strong> until under the cap.
           </p>
           <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
-            One-time job. ~1–2M API calls at 250 ms each = several hours. Monitor in{" "}
-            <Link href="/app/jobs" className="underline">Jobs</Link>.
-            Existing Zefix companies have their <code>registration_type</code> updated; new entries
-            get <code>source=uid</code> and no scores. Run Re-geocode separately afterwards.
+            One-time backfill, <strong>resumable per term</strong>. Cost ≈ <em>dictionary size</em> base
+            calls + refinement on common terms, at ~2 s/call → multiple days. Lower <em>max terms</em>,
+            raise <em>min term frequency</em>, or enable <em>MWST-only</em> to trade completeness for
+            speed. Monitor in <Link href="/app/jobs" className="underline">Jobs</Link>. Existing Zefix
+            rows get <code>registration_type</code> updated; new ones get <code>source=uid</code>. Run{" "}
+            <strong>UID detail</strong> then <strong>Re-geocode</strong> afterwards.
           </p>
-          <div className="flex gap-6">
+          <div className="flex flex-col gap-2">
             <label className="flex items-center gap-2 text-sm text-slate-700">
-              <input type="checkbox" name="active_only" className={checkCls} />
-              Active companies only (uncheck to also import cancelled / historical)
+              <input type="checkbox" name="not_in_hr" defaultChecked className={checkCls} />
+              Only non-HR companies (the gap) — uncheck to search all entities per term
+            </label>
+            <label className="flex items-center gap-2 text-sm text-slate-700">
+              <input type="checkbox" name="mwst_only" className={checkCls} />
+              MWST/VAT-registered only (commercially active; turnover &gt; CHF 100k)
+            </label>
+            <label className="flex items-center gap-2 text-sm text-slate-700">
+              <input type="checkbox" name="refine_mwst" defaultChecked className={checkCls} />
+              On a still-capped postcode, also pull the MWST subset
             </label>
           </div>
-          <Field label="Batch size" hint="Rows per API call (max 500 — hard limit of the UID web service).">
-            <input name="batch_size" type="number" min={50} max={500} defaultValue={500} className={cn(inputCls, "w-28")} />
-          </Field>
+          <div className="flex flex-wrap gap-4">
+            <Field label="Max terms" hint="Dictionary size (most frequent first). Larger = more complete, more calls.">
+              <input name="max_terms" type="number" min={100} max={500000} defaultValue={50000} className={cn(inputCls, "w-32")} />
+            </Field>
+            <Field label="Min term frequency" hint="Skip name tokens that appear in fewer than this many Zefix names.">
+              <input name="min_token_freq" type="number" min={1} max={100} defaultValue={2} className={cn(inputCls, "w-24")} />
+            </Field>
+            <Field label="2nd-keyword depth" hint="1 = AND a second keyword on a still-capped postcode; 0 = off.">
+              <input name="max_depth" type="number" min={0} max={1} defaultValue={1} className={cn(inputCls, "w-20")} />
+            </Field>
+            <Field label="2nd-keyword pool" hint="How many top terms to try as the second AND keyword.">
+              <input name="second_token_count" type="number" min={0} max={2000} defaultValue={200} className={cn(inputCls, "w-24")} />
+            </Field>
+            <Field label="Batch size" hint="DB upsert batch size (rows per commit).">
+              <input name="batch_size" type="number" min={50} max={500} defaultValue={500} className={cn(inputCls, "w-24")} />
+            </Field>
+            <Field label="On existing UID" hint="Zefix companies are never overwritten in either mode.">
+              <select name="on_conflict" defaultValue="update" className={cn(inputCls, "w-56")}>
+                <option value="update">Update uid rows (never Zefix)</option>
+                <option value="ignore">Ignore — insert new only</option>
+              </select>
+            </Field>
+          </div>
           <SubmitBtn loading={loading === "collection/uid-import"} />
         </form>
       </Section>

@@ -3,19 +3,25 @@
 Endpoint (PublicServices): https://www.uid-wse.admin.ch/V5.0/PublicServices.svc
 WSDL:                       https://www.uid-wse.admin.ch/V5.0/PublicServices.svc?wsdl
 
-PublicServices key constraints (from BFS specification 5.0, Oktober 2018):
+PublicServices key constraints (BFS spec 5.0 + empirical testing 2026-06):
   - Operation: Search (not SearchByCriteria from old V3.0)
   - Max 30 results per query — NO PAGINATION TOKEN
-  - searchMode=Normal does a SQL CONTAINS search (not prefix/starts-with)
-  - Single-character organisationName returns 0 results (min length ~2)
-  - GetByUID returns full address and legal form data (absent from Search results)
-
-Sweep strategy (see uid_import.py for orchestration):
-  - Iterate all 2-char pairs from _SWEEP_CHARS as the base search term
-  - If a pair returns exactly 30 results (the cap), recursively add a 3rd char
-  - "Contains" semantics guarantee every company is reached by at least one 2-char pair
-    (every company name has at least one 2-char consecutive substring in our alphabet)
-  - Deduplication via seen_uids set handles overlap between prefix buckets
+  - `organisationName` matching is EXACT WORD-TOKEN (tokenize by spaces, match each
+    token exactly, case-insensitive, accent-folded) — NOT a SQL CONTAINS/LIKE.
+    Multiple tokens are AND-ed (every result contains all words). Single ≤1-char
+    tokens return 0 (min length ~2).
+  - Filters that work server-side (before truncation), all confirmed empirically:
+      * address.swissZipCode (PLZ)      → partition by domicile postcode
+      * commercialRegisterInformation.commercialRegisterStatus  "3"=not in HR,
+        "2"=in HR  → "3" isolates the non-Zefix gap (mwst/uid_only)
+      * vatRegisterInformation.vatStatus "2" = registered for MWST/VAT
+      * legalForm (list of eCH-0097 codes, e.g. "0101"=Einzelunternehmen)
+    `personName` is silently IGNORED by the service.
+  - None of these filters lift the 30-cap on their own (the gap is dense: >30
+    non-HR entities per PLZ even in villages). The sweep therefore STACKS filters:
+    PLZ × HR=3, then AND-refines a capped bucket with name tokens. See
+    `app/services/uid_import.py:sweep_uid_gap` for orchestration.
+  - GetByUID returns full address + legal form (Search omits zip/canton reliably).
 
 Register type codes (CH.* in OtherOrganisationId):
   CH.HR    — Handelsregister (commercial register)
@@ -33,18 +39,25 @@ uidregStatusEnterpriseDetail values:
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import Any, Callable
 
 logger = logging.getLogger(__name__)
 
 _WSDL = "https://www.uid-wse.admin.ch/V5.0/PublicServices.svc?wsdl"
 
-# PublicServices hard limit — if we receive exactly this many, there are more
+# PublicServices hard limit — if we receive this many, there are more (no pagination)
 _MAX_RECORDS_PER_CALL = 30
 
+# Rate limiting (applies to ALL operations: Search and GetByUID)
+_RATE_LIMIT_BASE_DELAY = 60.0   # seconds after first rate-limit error (doubles each retry)
+_INTER_CALL_DELAY = 2.0         # min sleep between API calls (~30/min); safe with mutual exclusion
+
+# Search filter constants (eCH register-status codes)
+_HR_REGISTERED = "2"            # commercialRegisterStatus: in Handelsregister
+_HR_NOT_REGISTERED = "3"        # commercialRegisterStatus: NOT in HR → the non-Zefix gap
+_VAT_REGISTERED = "2"           # vatStatus: registered for MWST/VAT
+
 _client_cache: Any = None
-
-
 _WSDL_INIT_TIMEOUT = 120  # seconds; zeep fetches WSDL + all imported XSD schemas
 
 
@@ -186,8 +199,8 @@ def entity_to_dict(org_outer: dict) -> dict[str, Any]:
     vat: dict | None = org_outer.get("vatRegisterInformation") or None
     vat_status = _str_or_none((vat or {}).get("vatStatus")) if vat else None
 
-    has_hr = comm_status == "2"    # 2 = im HR eingetragen
-    has_mwst = vat_status == "2"   # 2 = im MWST-Register eingetragen
+    has_hr = comm_status == _HR_REGISTERED
+    has_mwst = vat_status == _VAT_REGISTERED
 
     if has_hr and has_mwst:
         reg_type = "both"
@@ -261,12 +274,8 @@ def get_by_uid(uid_str: str, *, _retry: int = 0) -> dict[str, Any] | None:
     """Fetch the full detail record for a single entity via GetByUID.
 
     Returns the V5.0 organisation dict (same shape as entity_to_dict input) or
-    None if not found or request fails.
-
-    GetByUID provides address details that Search does not reliably return
-    (it returns the full eCH-0108 record including legal address, contact, etc.).
-    Sleeps _INTER_CALL_DELAY after each call and retries on rate-limit errors
-    with the same exponential backoff as _search_page.
+    None if not found or request fails. Sleeps _INTER_CALL_DELAY after each call
+    and retries on rate-limit errors with exponential backoff.
     """
     import time
     from zeep.helpers import serialize_object
@@ -305,61 +314,64 @@ def get_by_uid(uid_str: str, *, _retry: int = 0) -> dict[str, Any] | None:
     return entity if entity else None
 
 
-# ── Prefix sweep characters ───────────────────────────────────────────────────
+# ── Search (filtered) ─────────────────────────────────────────────────────────
 
-# Letters-only alphabet for the 2-char pair sweep (39 chars → 39²=1521 pairs).
-# Digits are intentionally excluded: numeric substrings like "00" or "20" appear
-# in too many company names (years, codes) and trigger recursive expansion that
-# can generate tens of thousands of API calls for a single pair. Every Swiss
-# company name contains at least one consecutive alpha pair, so completeness is
-# preserved. Digits are still included in _EXPANSION_CHARS so sub-prefix
-# expansion can narrow down alpha buckets that hit the 30-result cap.
-_PAIR_CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZÄÖÜÉÈÀÂÊÎÔÛÇÑ"
-
-# Kept for back-compat; not used for pair generation anymore.
-_SWEEP_CHARS = "0123456789" + _PAIR_CHARS
-
-# Additional expansion characters for deeper sub-prefix sweeps
-_EXPANSION_CHARS = _SWEEP_CHARS + "-. &/()"
-
-# If a 2-char prefix hits exactly MAX results, sub-prefix to get a complete set.
-# 29 means "if we got 30 back (the cap), definitely expand".
-_EXPAND_THRESHOLD = _MAX_RECORDS_PER_CALL - 1
-
-
-# ── Low-level single Search call ──────────────────────────────────────────────
-
-_RATE_LIMIT_BASE_DELAY = 60.0   # seconds to wait after first rate-limit error (doubles each retry)
-_INTER_CALL_DELAY = 2.0          # minimum sleep between API calls (~30 calls/min); safe when uid_detail is mutually excluded
-
-
-def _search_page(
-    name_prefix: str,
+def build_search_params(
     *,
-    active_only: bool,
-    abort_cb: "Callable[[], None] | None" = None,
+    name: str | None = None,
+    plz: int | str | None = None,
+    canton: str | None = None,
+    not_in_hr: bool = False,
+    in_hr: bool = False,
+    mwst_only: bool = False,
+    legal_form: str | list[str] | None = None,
+    active_only: bool = False,
+) -> dict[str, Any]:
+    """Build a `uidEntitySearchParameters` dict from high-level filters.
+
+    swissZipCode (xsd:unsignedInt) and cantonAbbreviation live inside a repeating
+    CHOICE group in addressSearchType → they go through zeep's `_value_1` list, not
+    a top-level kwarg. PLZ is finer than canton; if both are given, PLZ wins.
+    commercialRegisterStatus "3"=not in HR isolates the non-Zefix gap.
+    """
+    params: dict[str, Any] = {}
+    if name:
+        params["organisationName"] = name
+    if plz is not None and str(plz).strip():
+        params["address"] = {"_value_1": [{"swissZipCode": int(plz)}]}
+    elif canton and str(canton).strip():
+        params["address"] = {"_value_1": [{"cantonAbbreviation": str(canton).strip().upper()}]}
+    if not_in_hr:
+        params["commercialRegisterInformation"] = {"commercialRegisterStatus": _HR_NOT_REGISTERED}
+    elif in_hr:
+        params["commercialRegisterInformation"] = {"commercialRegisterStatus": _HR_REGISTERED}
+    if mwst_only:
+        params["vatRegisterInformation"] = {"vatStatus": _VAT_REGISTERED}
+    if legal_form:
+        params["legalForm"] = [legal_form] if isinstance(legal_form, str) else list(legal_form)
+    if active_only:
+        params["uidregInformation"] = {"uidregStatusEnterpriseDetail": "3"}
+    return params
+
+
+def _run_search(
+    search_params: dict[str, Any],
+    *,
+    abort_cb: Callable[[], None] | None = None,
     _retry: int = 0,
-) -> tuple[list[dict[str, Any]], int]:
-    """One Search call returning (entities, effective_total).
+) -> tuple[list[dict[str, Any]], bool]:
+    """One Search call. Returns (parsed_entities, capped).
 
-    effective_total:
-      - len(entities) when < _MAX_RECORDS_PER_CALL → we received all results
-      - _MAX_RECORDS_PER_CALL + 1 when == MAX → there may be more; caller must expand
-
-    Retries up to 3 times on Request_limit_exceeded with exponential backoff.
-    abort_cb is called after each sleep so the job worker can update its heartbeat
-    and check for cancellation without blocking the SOAP call itself.
+    capped is True when we received the 30-result cap (there may be more — the
+    caller must narrow with an additional filter/token). Retries up to 3 times on
+    Request_limit_exceeded with exponential backoff. abort_cb runs after each
+    successful call so the job worker can heartbeat / check cancellation.
     """
     import time
     from zeep.helpers import serialize_object
 
     client = _get_client()
-
-    search_params: dict[str, Any] = {"organisationName": name_prefix}
-    if active_only:
-        search_params["uidregInformation"] = {"uidregStatusEnterpriseDetail": "3"}
-
-    logger.info("uid_soap.search prefix=%r retry=%d", name_prefix, _retry)
+    logger.info("uid_soap.search params=%s retry=%d", search_params, _retry)
     try:
         raw_result = client.service.Search(
             searchParameters={"uidEntitySearchParameters": search_params},
@@ -372,9 +384,9 @@ def _search_page(
     except Exception as exc:
         if "Request_limit_exceeded" in str(exc) and _retry < 3:
             delay = _RATE_LIMIT_BASE_DELAY * (2 ** _retry)
-            logger.warning("UID rate limited (prefix=%r), waiting %.0fs (retry %d)", name_prefix, delay, _retry + 1)
+            logger.warning("UID rate limited (params=%s), waiting %.0fs (retry %d)", search_params, delay, _retry + 1)
             time.sleep(delay)
-            return _search_page(name_prefix, active_only=active_only, abort_cb=abort_cb, _retry=_retry + 1)
+            return _run_search(search_params, abort_cb=abort_cb, _retry=_retry + 1)
         raise
 
     time.sleep(_INTER_CALL_DELAY)
@@ -385,9 +397,6 @@ def _search_page(
     items = result.get("uidEntitySearchResultItem") or []
     if not isinstance(items, list):
         items = [items] if items else []
-
-    effective_total = len(items) if len(items) < _MAX_RECORDS_PER_CALL else _MAX_RECORDS_PER_CALL + 1
-    logger.info("uid_soap.result prefix=%r n=%d capped=%s", name_prefix, len(items), effective_total > _EXPAND_THRESHOLD)
 
     parsed: list[dict] = []
     for item in items:
@@ -401,65 +410,28 @@ def _search_page(
             d["_raw"] = org_outer
             parsed.append(d)
         except Exception:
-            logger.exception("Failed to parse V5.0 entity in _search_page")
+            logger.exception("Failed to parse V5.0 entity in _run_search")
 
-    return parsed, effective_total
+    capped = len(parsed) >= _MAX_RECORDS_PER_CALL
+    logger.info("uid_soap.result params=%s n=%d capped=%s", search_params, len(parsed), capped)
+    return parsed, capped
 
 
-# ── Recursive prefix sweep ────────────────────────────────────────────────────
-
-def iter_entities_by_prefix(
-    prefix: str,
+def search_entities(
     *,
-    active_only: bool,
-    seen_uids: set[str],
-    abort_cb: "Callable[[], None] | None" = None,
-    _depth: int = 0,
-) -> list[dict[str, Any]]:
-    """Return all entities whose name contains *prefix* as a substring.
-
-    V5.0 Search has no pagination — it returns at most 30 results. When the
-    cap is hit, expand by appending one more character from _EXPANSION_CHARS,
-    and recurse. Stop recursing at depth 3 (4-char prefixes) to bound API calls.
-
-    Deduplication is done via seen_uids so entities matched by multiple prefixes
-    (contains semantics) are inserted only once.
-    abort_cb is forwarded to every _search_page call so the heartbeat stays alive
-    during deep recursive expansion (which can make hundreds of SOAP calls).
-    """
-    _MAX_DEPTH = 3
-
-    try:
-        entities, effective_total = _search_page(prefix, active_only=active_only, abort_cb=abort_cb)
-    except Exception as exc:
-        # Let job-control signals propagate so cancel/pause actually stops the sweep.
-        # Check by class name to avoid importing from job_worker (wrong dep direction).
-        if type(exc).__name__ in ("JobCancelledError", "JobPausedError"):
-            raise
-        logger.warning("UID prefix search failed: prefix=%r", prefix, exc_info=True)
-        return []
-
-    if effective_total == 0:
-        return []
-
-    if effective_total > _EXPAND_THRESHOLD and _depth < _MAX_DEPTH:
-        results: list[dict] = []
-        for ch in _EXPANSION_CHARS:
-            sub = iter_entities_by_prefix(
-                prefix + ch,
-                active_only=active_only,
-                seen_uids=seen_uids,
-                abort_cb=abort_cb,
-                _depth=_depth + 1,
-            )
-            results.extend(sub)
-        return results
-
-    # Under cap or at max depth — deduplicate and return
-    result: list[dict] = []
-    for e in entities:
-        uid = e.get("uid")
-        if uid and uid not in seen_uids:
-            seen_uids.add(uid)
-            result.append(e)
-    return result
+    name: str | None = None,
+    plz: int | str | None = None,
+    canton: str | None = None,
+    not_in_hr: bool = False,
+    in_hr: bool = False,
+    mwst_only: bool = False,
+    legal_form: str | list[str] | None = None,
+    active_only: bool = False,
+    abort_cb: Callable[[], None] | None = None,
+) -> tuple[list[dict[str, Any]], bool]:
+    """High-level filtered Search. Returns (entities, capped). See build_search_params."""
+    params = build_search_params(
+        name=name, plz=plz, canton=canton, not_in_hr=not_in_hr, in_hr=in_hr,
+        mwst_only=mwst_only, legal_form=legal_form, active_only=active_only,
+    )
+    return _run_search(params, abort_cb=abort_cb)

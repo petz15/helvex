@@ -50,23 +50,35 @@ def handle_uid_detail(ctx: JobContext) -> tuple[dict, str]:
 
 
 def handle_uid_import(ctx: JobContext) -> tuple[dict, str]:
-    from app.services.uid_import import import_uid_entities
+    """Name/keyword dictionary sweep, geo/status-refined (replaces prefix sweep).
+
+    params: batch_size, not_in_hr (default True), mwst_only, refine_mwst, max_depth,
+    min_token_freq, max_terms, second_token_count. resume_from = dictionary index.
+    """
+    from app.services.uid_import import sweep_uid_gap
 
     batch_size = int(ctx.params.get("batch_size", 500))
-    active_only = bool(ctx.params.get("active_only", False))
+    not_in_hr = bool(ctx.params.get("not_in_hr", True))
+    mwst_only = bool(ctx.params.get("mwst_only", False))
+    refine_mwst = bool(ctx.params.get("refine_mwst", True))
+    max_depth = int(ctx.params.get("max_depth", 1))
+    min_token_freq = int(ctx.params.get("min_token_freq", 2))
+    max_terms = int(ctx.params.get("max_terms", 50000))
+    second_token_count = int(ctx.params.get("second_token_count", 200))
+    on_conflict = str(ctx.params.get("on_conflict", "update"))
 
     def _progress(done: int, total: int, stats: dict) -> None:
         ctx.assert_not_cancelled()
-        prefix = stats.get("current_prefix", "?")
         msg = (
-            f"Pair {done}/{total} ('{prefix}') — "
+            f"Term {done}/{total} ('{stats.get('current_token', '?')}') — "
             f"{stats.get('inserted', 0)} new, "
             f"{stats.get('updated_type', 0)} type-updated, "
+            f"{stats.get('buckets_capped', 0)} refined, "
             f"{stats.get('api_errors', 0)} API errors"
         )
         ctx.progress(done, total or 0, stats, msg)
 
-    _live = {"prefix": "", "calls": 0}
+    _live = {"token": "", "calls": 0}
 
     def _ping() -> None:
         _live["calls"] += 1
@@ -74,33 +86,38 @@ def handle_uid_import(ctx: JobContext) -> tuple[dict, str]:
         ctx.assert_not_cancelled()
         crud.update_progress(
             ctx.db, ctx.job,
-            message=f"Sweeping '{_live['prefix']}' — {_live['calls']} API calls",
+            message=f"Term '{_live['token']}' — {_live['calls']} API calls",
         )
 
-    def _status(prefix: str) -> None:
-        _live["prefix"] = prefix
+    def _status(token: str) -> None:
+        _live["token"] = token
         _live["calls"] = 0
-        crud.update_progress(
-            ctx.db, ctx.job,
-            message=f"Sweeping prefix '{prefix}'…",
-        )
+        crud.update_progress(ctx.db, ctx.job, message=f"Sweeping term '{token}'…")
 
-    stats = import_uid_entities(
+    stats = sweep_uid_gap(
         ctx.db,
         resume_from=ctx.resume_from,
         batch_size=batch_size,
-        active_only=active_only,
+        not_in_hr=not_in_hr,
+        mwst_only=mwst_only,
+        refine_mwst=refine_mwst,
+        max_depth=max_depth,
+        min_token_freq=min_token_freq,
+        max_terms=max_terms,
+        second_token_count=second_token_count,
+        on_conflict=on_conflict,
         progress_cb=_progress,
         abort_cb=_ping,
         status_cb=_status,
     )
 
     done_msg = (
-        f"UID import done — {stats['inserted']} new companies, "
-        f"{stats['updated_type']} registration_type updates, "
-        f"{stats['skipped_invalid']} skipped (no UID), "
+        f"UID gap sweep done — {stats['inserted']} new companies, "
+        f"{stats['updated_type']} uid-row updates, "
+        f"{stats.get('skipped_existing', 0)} existing skipped, "
+        f"{stats['buckets_capped']} capped buckets refined, "
         f"{stats['api_errors']} API errors"
     )
     if ctx.resume_from:
-        done_msg += f" (resumed from pair index {ctx.resume_from})"
+        done_msg += f" (resumed from term index {ctx.resume_from})"
     return stats, done_msg
