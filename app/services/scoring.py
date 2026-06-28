@@ -10,18 +10,34 @@ from app.config import settings
 logger = logging.getLogger(__name__)
 
 
+def web_score_from_extract(
+    confidence: float | None,
+    uid_matches_zefix: bool | None = None,
+) -> int | None:
+    """Derive web_score directly from crawl-extract confidence (0–1 → 0–100).
+
+    The extractor's confidence already integrates UID match, address, zone-weighted
+    name, and signal coverage — so this single number is more principled than the
+    old delta approach. A UID mismatch overrides to a low floor (the page belongs to
+    a different company; the crawl should be rejected, not just penalised).
+    """
+    if confidence is None:
+        return None
+    if uid_matches_zefix is False:
+        return min(20, round(confidence * 100))
+    return round(confidence * 100)
+
+
 def adjust_web_score_for_extraction(
     base_web_score: int | float | None,
     *,
     uid_matches_zefix: bool | None,
     name_address_verified: bool,
 ) -> int | None:
-    """Adjust the Serper-based web_score using crawl-verified extraction signals.
+    """Deprecated: use web_score_from_extract() for post-crawl scoring.
 
-    base_web_score must be the raw, un-adjusted score (google_search_results_raw[0]["score"])
-    so repeated calls (e.g. after a no-recrawl re-extract) stay idempotent instead of
-    compounding. +40/-50 dominate when a Swiss UID was found on-site; +20 is a weaker
-    fallback when no UID was present but name+address matched exactly.
+    Kept for backward-compatibility with rescore paths that only have the
+    search-snippet score and 2 extract bits (no full confidence value).
     """
     if base_web_score is None:
         return None

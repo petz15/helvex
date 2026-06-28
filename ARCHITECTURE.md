@@ -1970,12 +1970,14 @@ the top-scored search result into `website_url` regardless of quality.
   (`website_confirmed_search_score`, `website_likely_search_score`).
 - **Authoritative verdict** (post-crawl, in `handle_web_extract` and the
   `recompute_website_status` job): `compute_verdict` reads every `company_web_extract`
-  row for the company (joined to its candidate URL) and tiers each by
-  `uid_matches_zefix` / `name_address_verified` / `confidence`
-  (`website_confirmed_confidence` default 0.65, `website_likely_confidence` 0.45):
+  row (joined to candidate URL, including `purpose_sim`) and tiers each via `_extract_tier()`:
   - `uid_matches_zefix=True` or `name_address_verified` → **verified**
   - `uid_matches_zefix=False` → discarded (site belongs to another company)
-  - else confidence ≥ confirmed / likely thresholds → **confirmed** / **likely**
+  - else: purpose-semantic boost applied first (`purpose_sim > 0.30` → linear up to +0.15 on `confidence`), then confidence ≥ thresholds → **confirmed** / **likely** (`website_confirmed_confidence` default 0.65, `website_likely_confidence` 0.45)
+- **`web_score` from crawl confidence:** `compute_verdict` now returns `web_score = round(best_confidence × 100)` from the winning extract. Both `handle_web_extract` and `recompute_website_status` write this to `companies.web_score` and recompute `combined_score`. The old ±delta (`adjust_web_score_for_extraction`) is kept for backward-compat but no longer called on the main path.
+- **Negative verdict floors:** `classify_search_results` returns fixed `web_score` floors: `social_only`→10, `directory_only`→5, `none`→0. Prevents search snippet scores from inflating `web_score` when the company has no genuine website.
+- **Purpose-site semantic similarity (`purpose_sim`):** `company_web_extract.purpose_sim` (float 0–1) stores cosine similarity between the Zefix `purpose` embedding and the crawled site description/keywords embedding. Computed by ML-worker job `enrich_web_purpose_sim` (in `noga.py`). Migration `0110`. Trigger via `POST /api/v1/admin/jobs/crawler/enrich-purpose-sim` (UI: crawler admin page).
+- **Impressum/contact page bonus:** `resolve_company_extract` accepts `page_types: list[str] | None`. If `impressum` or `contact` is present in the fetched pages for a candidate, one extra signal is added to the base coverage count, raising base confidence.
 - **Verdict ladder:** `verified` › `confirmed` › `likely` › `social_only` ›
   `directory_only` › `none` (NULL = unknown). `website_url` is set only for the
   positive verdicts (verified/confirmed/likely); otherwise NULL.
@@ -2060,7 +2062,7 @@ Grafana query: `rate(crawl_result_total[5m])` grouped by `tier` and `status`. Pe
 | `company_url_candidates` | Serper/ScrapingDog URL candidates; one selected per company |
 | `company_crawl_state` | Per-company crawl status, tier, bot flags, re-crawl scheduling |
 | `company_web_pages` | Per-page crawl result; S3 key for raw HTML; `needs_extraction` flag |
-| `company_web_extract` | PK `(company_id, url_candidate_id)` — one row per company+URL crawled; `get_best_web_extract()` picks highest-confidence row for display/scoring. Includes `uid_matches_zefix` (verification flag), `name_address_verified` (migration `0100`, fallback verification when no UID found), and `persons` (impressum management names + spaCy NER names) |
+| `company_web_extract` | PK `(company_id, url_candidate_id)` — one row per company+URL crawled; `get_best_web_extract()` picks highest-confidence row for display/scoring. Includes `uid_matches_zefix` (verification flag), `name_address_verified` (migration `0100`, fallback verification when no UID found), `persons` (impressum management names + spaCy NER names), and `purpose_sim` (float, migration `0110`; cosine similarity between Zefix purpose embedding and site content, used as a confidence boost in `_extract_tier()`) |
 
 ### Key files
 

@@ -72,6 +72,9 @@ class CompanyWebExtract(Base):
     extraction_method: Mapped[str | None] = mapped_column(String(64), nullable=True)
     # 0.0–1.0 heuristic confidence in the resolved record
     confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
+    # Cosine similarity (0–1) between Zefix purpose embedding and site description/keywords.
+    # Set by the enrich_web_purpose_sim ML-worker job; NULL until that job runs.
+    purpose_sim: Mapped[float | None] = mapped_column(Float, nullable=True)
     # Number of crawled pages that fed this extraction
     page_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
     # Set when this extract row requires human review.

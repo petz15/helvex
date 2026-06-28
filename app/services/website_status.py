@@ -77,7 +77,7 @@ class Verdict:
     status: str
     website_url: str | None
     website_count: int  # distinct genuine websites (>=2 ⇒ multiple)
-    web_score: int | None  # score to persist for the chosen url (search verdicts only)
+    web_score: int | None  # crawl-confidence-based (0–100) or floored search score for negatives
 
 
 # ── Search-only (provisional) ────────────────────────────────────────────────
@@ -125,21 +125,36 @@ def classify_search_results(
         return Verdict(LIKELY, best["link"], count, best_score)
 
     if has_social:
-        return Verdict(SOCIAL_ONLY, None, 0, None)
+        return Verdict(SOCIAL_ONLY, None, 0, 10)   # searched; social profile only
     if has_directory:
-        return Verdict(DIRECTORY_ONLY, None, 0, None)
-    return Verdict(NONE, None, 0, None)
+        return Verdict(DIRECTORY_ONLY, None, 0, 5)  # only registry/directory entries
+    return Verdict(NONE, None, 0, 0)                # nothing credible found
 
 
 # ── Post-crawl (authoritative) ───────────────────────────────────────────────
 
-def _extract_tier(uid_matches_zefix, name_address_verified, confidence, thr: Thresholds) -> str | None:
-    """Classify one crawl extract into verified | confirmed | likely | None."""
+def _extract_tier(
+    uid_matches_zefix,
+    name_address_verified,
+    confidence,
+    thr: Thresholds,
+    purpose_sim: float | None = None,
+) -> str | None:
+    """Classify one crawl extract into verified | confirmed | likely | None.
+
+    purpose_sim (0–1) is the cosine similarity between the company's Zefix purpose
+    embedding and the site's description/service_keywords embedding, computed by the
+    ML-worker enrich_web_purpose_sim job. When present it provides a small confidence
+    boost (up to +0.15) that can lift a borderline extract from likely → confirmed.
+    """
     conf = confidence or 0.0
     if uid_matches_zefix is True or name_address_verified:
         return VERIFIED
     if uid_matches_zefix is False:
         return None  # site belongs to another company — never counts as this company's
+    # Purpose-semantic boost: linear 0 → +0.15 over sim range [0.30, 1.00].
+    if purpose_sim is not None and purpose_sim > 0.30:
+        conf = min(1.0, conf + 0.15 * (purpose_sim - 0.30) / 0.70)
     if conf >= thr.confirmed_conf:
         return CONFIRMED
     if conf >= thr.likely_conf:
@@ -171,7 +186,8 @@ def compute_verdict(
         dom = scoring._root_domain(url)
         if not dom:
             continue
-        tier = _extract_tier(row.uid_matches_zefix, row.name_address_verified, row.confidence, thr)
+        purpose_sim = getattr(row, "purpose_sim", None)
+        tier = _extract_tier(row.uid_matches_zefix, row.name_address_verified, row.confidence, thr, purpose_sim)
         if tier is None:
             continue
         conf = row.confidence or 0.0
@@ -190,18 +206,23 @@ def compute_verdict(
         if verified:
             status = VERIFIED
             url = best_url_by_tier[VERIFIED][1]
+            best_conf = best_url_by_tier[VERIFIED][0]
         elif confirmed:
             status = CONFIRMED
             url = best_url_by_tier[CONFIRMED][1]
+            best_conf = best_url_by_tier[CONFIRMED][0]
         else:
             status = LIKELY
             url = best_url_by_tier[LIKELY][1]
+            best_conf = best_url_by_tier[LIKELY][0]
         strong_domains = {d for d, _ in verified} | {d for d, _ in confirmed}
         if strong_domains:
             count = len(strong_domains)
         else:
             count = len({d for d, _ in likely}) or 1
-        return Verdict(status, url, count, None)
+        # web_score driven by crawl confidence — more principled than the old ±delta.
+        web_score = round(best_conf * 100)
+        return Verdict(status, url, count, web_score)
 
     # No usable crawl evidence — fall back to the search-only verdict.
     return classify_search_results(scored_results, directory_domains, thr)

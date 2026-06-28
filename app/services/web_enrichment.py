@@ -150,11 +150,11 @@ def _search_verdict_fields(db: Session, scored: list[dict]) -> dict:
     _, directory_domains = _google_scoring_overrides(db)
     thr = ws.load_thresholds(db)
     verdict = ws.classify_search_results(scored, directory_domains, thr)
-    best = scored[0] if scored else {}
-    web_score = verdict.web_score if verdict.status in ws.POSITIVE else best.get("score")
+    # verdict.web_score: best search score for positive verdicts; floored (10/5/0) for
+    # negative ones (social_only/directory_only/none) so combined_score reflects reality.
     return {
         "website_url": verdict.website_url,
-        "web_score": web_score,
+        "web_score": verdict.web_score,
         "social_media_only": verdict.status == ws.SOCIAL_ONLY,
         "website_status": verdict.status,
         "website_count": verdict.website_count or None,

@@ -118,6 +118,7 @@ JOB_HANDLERS: dict[str, Callable[[JobContext], tuple[dict, str]]] = {
     "detect_language_bulk":      noga.handle_detect_language_bulk,
     "reclassify_low_conf_noga":  noga.handle_reclassify_low_conf_noga,
     "noga_v2_explain":           noga.handle_noga_v2_explain,
+    "enrich_web_purpose_sim":    noga.handle_enrich_web_purpose_sim,
     # Clustering
     "tfidf_kmeans_cluster":      clustering.handle_tfidf_kmeans_cluster,
     "recompute_keywords":        clustering.handle_recompute_keywords,

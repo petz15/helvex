@@ -117,3 +117,116 @@ def handle_reclassify_low_conf_noga(ctx: JobContext) -> tuple[dict, str]:
         f"{stats.get('still_low', 0)} still low, "
         f"{len(stats.get('errors', []))} errors"
     )
+
+
+def handle_enrich_web_purpose_sim(ctx: JobContext) -> tuple[dict, str]:
+    """Compute purpose↔site semantic similarity for company_web_extract rows.
+
+    For each extract that has a description or service_keywords but no purpose_sim,
+    embeds both the company's Zefix purpose text and the site's description/keywords
+    using paraphrase-multilingual-mpnet-base-v2 (same model as NOGA), then stores
+    cosine similarity (dot product of L2-normalised vectors) as purpose_sim (0–1).
+
+    This is a 4th confidence layer consumed by website_status._extract_tier() to
+    lift borderline extracts when the site's content semantically matches the company.
+
+    Requires sentence-transformers — runs on the ML worker.
+    """
+    import numpy as np
+    from sqlalchemy import text
+
+    from app.services.embeddings import embed_texts
+
+    batch_size = int(ctx.params.get("batch_size", 500))
+    only_missing = bool(ctx.params.get("only_missing", True))
+    stats: dict = {"updated": 0, "skipped_no_content": 0, "skipped_no_purpose": 0, "errors": []}
+
+    missing_cond = "AND e.purpose_sim IS NULL" if only_missing else ""
+    total_q = ctx.db.execute(
+        text(
+            f"SELECT COUNT(*) FROM company_web_extract e "
+            f"WHERE (e.description IS NOT NULL OR e.service_keywords IS NOT NULL) {missing_cond}"
+        )
+    ).scalar() or 0
+    total = int(total_q)
+    done = 0
+
+    while True:
+        ctx.assert_not_cancelled()
+
+        rows = ctx.db.execute(
+            text(
+                f"SELECT e.company_id, e.url_candidate_id, e.description, e.service_keywords, "
+                f"c.purpose "
+                f"FROM company_web_extract e "
+                f"JOIN companies c ON c.id = e.company_id "
+                f"WHERE (e.description IS NOT NULL OR e.service_keywords IS NOT NULL) {missing_cond} "
+                f"ORDER BY e.company_id "
+                f"LIMIT :lim OFFSET :off"
+            ),
+            {"lim": batch_size, "off": done},
+        ).fetchall()
+        if not rows:
+            break
+
+        texts_purpose: list[str] = []
+        texts_site: list[str] = []
+        valid_rows: list = []
+        for row in rows:
+            purpose = (row[4] or "").strip()
+            desc = (row[2] or "").strip()
+            keywords = " ".join(row[3] or []) if row[3] else ""
+            site_text = f"{desc} {keywords}".strip()
+            if not purpose:
+                stats["skipped_no_purpose"] += 1
+                continue
+            if not site_text:
+                stats["skipped_no_content"] += 1
+                continue
+            texts_purpose.append(purpose)
+            texts_site.append(site_text)
+            valid_rows.append(row)
+
+        if texts_purpose:
+            try:
+                emb_purpose = embed_texts(texts_purpose, batch_size=256)
+                emb_site = embed_texts(texts_site, batch_size=256)
+                # L2-normalised → dot product = cosine similarity
+                sims = np.sum(emb_purpose * emb_site, axis=1)
+
+                for (row, sim) in zip(valid_rows, sims):
+                    sim_val = float(np.clip(sim, 0.0, 1.0))
+                    try:
+                        ctx.db.execute(
+                            text(
+                                "UPDATE company_web_extract SET purpose_sim = :sim "
+                                "WHERE company_id = :cid AND url_candidate_id = :ucid"
+                            ),
+                            {"sim": sim_val, "cid": row[0], "ucid": row[1]},
+                        )
+                        stats["updated"] += 1
+                    except Exception as exc:  # noqa: BLE001
+                        stats["errors"].append(f"company {row[0]}: {exc}")
+
+                ctx.db.commit()
+            except Exception as exc:  # noqa: BLE001
+                stats["errors"].append(f"batch at offset {done}: {exc}")
+                ctx.db.rollback()
+
+        done += len(rows)
+        msg = (
+            f"Processed {done}/{total} — {stats['updated']} updated, "
+            f"{stats['skipped_no_purpose']} no purpose, "
+            f"{stats['skipped_no_content']} no content, "
+            f"{len(stats['errors'])} errors"
+        )
+        from app import crud
+        crud.update_progress(ctx.db, ctx.job, message=msg, done=done, total=total, stats=dict(stats))
+        crud.create_event(ctx.db, job_id=ctx.job.id, level="debug", message=msg)
+
+    return stats, (
+        f"Purpose-sim done — {stats['updated']} extracts enriched, "
+        f"{stats['skipped_no_purpose']} skipped (no purpose), "
+        f"{stats['skipped_no_content']} skipped (no site content), "
+        f"{len(stats['errors'])} errors"
+    )

@@ -12,6 +12,7 @@ import {
   crawlerResetPlaywright,
   crawlerPopulateUrls,
   crawlerRecomputeWebsiteStatus,
+  crawlerEnrichPurposeSim,
   fetchCandidateDomainStats,
   blockDomain,
   fetchCrawlerReviewFlags,
@@ -360,6 +361,14 @@ export function CrawlerAdminClient() {
               >
                 {acting === "website-status" ? <Loader2 size={14} className="animate-spin" /> : <Globe size={14} />}
                 Recompute website status
+              </button>
+              <button
+                onClick={() => doAction("purpose-sim", crawlerEnrichPurposeSim)}
+                disabled={acting !== null}
+                className="flex items-center gap-2 px-3 py-2 text-sm rounded-lg border border-violet-200 bg-violet-50 hover:bg-violet-100 text-violet-800 disabled:opacity-50 transition-colors"
+              >
+                {acting === "purpose-sim" ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
+                Enrich purpose similarity (ML)
               </button>
             </div>
             <p className="text-xs text-slate-400 mt-3">

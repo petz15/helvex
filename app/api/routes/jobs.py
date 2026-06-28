@@ -1852,6 +1852,30 @@ def trigger_web_reextract(
     return JobOut.from_orm_obj(job)
 
 
+@router.post("/crawler/enrich-purpose-sim", response_model=JobOut, status_code=status.HTTP_202_ACCEPTED)
+def trigger_enrich_web_purpose_sim(
+    request: Request,
+    db: Session = Depends(get_db),
+    _: User = Depends(require_superadmin),
+):
+    """Compute purpose↔site semantic similarity for company_web_extract rows.
+
+    Embeds the company's Zefix purpose text and the crawled site's description/
+    service_keywords using paraphrase-multilingual-mpnet-base-v2 (same model as NOGA),
+    stores cosine similarity as purpose_sim (0–1) in company_web_extract. This feeds
+    into website_status._extract_tier() as a 4th confidence layer. Requires the ML
+    worker (sentence-transformers). No API cost.
+    """
+    job = _enqueue_or_http_error(
+        request,
+        job_type="enrich_web_purpose_sim",
+        label="Enrich web extract purpose similarity (ML worker)",
+        params={"only_missing": True},
+        db=db,
+    )
+    return JobOut.from_orm_obj(job)
+
+
 @router.post("/crawler/recompute-website-status", response_model=JobOut, status_code=status.HTTP_202_ACCEPTED)
 def trigger_recompute_website_status(
     request: Request,

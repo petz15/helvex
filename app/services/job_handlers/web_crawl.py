@@ -472,7 +472,6 @@ def handle_web_extract(ctx: JobContext) -> tuple[dict, str]:
     from app.models.company import Company
     from app.services import crawler_extract
     from app.services import s3_client as _s3
-    from app.services import scoring
     from app.services import website_status as ws
 
     batch_size = int(ctx.params.get("batch_size", 200))
@@ -543,6 +542,7 @@ def handle_web_extract(ctx: JobContext) -> tuple[dict, str]:
                         site_url=site_url,
                         company_zip=czip,
                         company_city=ccity,
+                        page_types=[p.page_type for p in cand_pages],
                     ) if page_blobs else {}
                     if data:
                         # Cross-UID attribution: if a UID was found on the page but
@@ -577,53 +577,38 @@ def handle_web_extract(ctx: JobContext) -> tuple[dict, str]:
                 if not pages_by_candidate:
                     stats["empty"] += 1
 
-                # Idempotent web_score adjustment using the BEST extract across all
-                # candidates. Done once per company after all candidate groups are processed.
+                # ── Company-level website verdict (authoritative) ──────────────────────
+                # Aggregates crawl-extract confidence + search-result fallback into one
+                # verdict. Verdict.web_score is now crawl-confidence-based (round(conf*100))
+                # which is more principled than the old ±40/−50 delta approach. Done once
+                # per company after all candidate groups finish, so it sees the best extract.
                 best = crawler_crud.get_best_web_extract(ctx.db, company_id)
                 if best is not None:
-                    raw_score_json = row[6] if row else None
-                    base_score = None
-                    if raw_score_json:
-                        try:
-                            parsed = json.loads(raw_score_json)
-                            base_score = parsed[0]["score"] if parsed else None
-                        except Exception:  # noqa: BLE001
-                            base_score = None
-                    if base_score is not None:
-                        new_web_score = scoring.adjust_web_score_for_extraction(
-                            base_score,
-                            uid_matches_zefix=best.uid_matches_zefix,
-                            name_address_verified=bool(best.name_address_verified),
-                        )
-                        prev_web_score = row[5] if row else None
-                        if new_web_score != prev_web_score:
-                            ai_score = row[7] if row else None
-                            noga_confidence = row[8] if row else None
-                            purpose_keywords = row[9] if row else None
-                            ctx.db.query(Company).filter(Company.id == company_id).update({
-                                "web_score": new_web_score,
-                                "combined_score": Company.compute_combined_score(
-                                    ai_score, noga_confidence, purpose_keywords,
-                                    web_score=new_web_score,
-                                ),
-                            })
-                            stats["rescored"] += 1
-
-                    # ── Company-level website verdict (authoritative) ──────────
-                    # Aggregate this company's crawl extracts (uid_matches_zefix /
-                    # name_address_verified / confidence) + search fallback into a
-                    # verdict + distinct-website count. Gates website_url so it only
-                    # holds a genuine own-domain match — no more forced guesses.
                     try:
                         scored_raw = json.loads(row[6]) if row and row[6] else []
                     except Exception:  # noqa: BLE001
                         scored_raw = []
                     verdict = ws.compute_verdict(ctx.db, company_id, scored_raw, _dir_domains, _thr)
-                    ctx.db.query(Company).filter(Company.id == company_id).update({
+
+                    update_fields: dict = {
                         "website_status": verdict.status,
                         "website_count": verdict.website_count or None,
                         "website_url": verdict.website_url,
-                    })
+                    }
+                    if verdict.web_score is not None:
+                        prev_web_score = row[5] if row else None
+                        if verdict.web_score != prev_web_score:
+                            ai_score = row[7] if row else None
+                            noga_confidence = row[8] if row else None
+                            purpose_keywords = row[9] if row else None
+                            update_fields["web_score"] = verdict.web_score
+                            update_fields["combined_score"] = Company.compute_combined_score(
+                                ai_score, noga_confidence, purpose_keywords,
+                                web_score=verdict.web_score,
+                            )
+                            stats["rescored"] += 1
+
+                    ctx.db.query(Company).filter(Company.id == company_id).update(update_fields)
                     stats["verdict_" + verdict.status] = stats.get("verdict_" + verdict.status, 0) + 1
                     if (verdict.website_count or 0) >= 2:
                         stats["multi_site"] = stats.get("multi_site", 0) + 1
@@ -728,7 +713,8 @@ def handle_recompute_website_status(ctx: JobContext) -> tuple[dict, str]:
 
         rows = ctx.db.execute(
             text(
-                "SELECT id, google_search_results_raw FROM companies "
+                "SELECT id, google_search_results_raw, web_score, "
+                "ai_score, noga_confidence, purpose_keywords FROM companies "
                 "WHERE website_checked_at IS NOT NULL AND id > :last "
                 "ORDER BY id LIMIT :lim"
             ),
@@ -737,17 +723,25 @@ def handle_recompute_website_status(ctx: JobContext) -> tuple[dict, str]:
         if not rows:
             break
 
-        for cid, raw_json in rows:
+        for row in rows:
+            cid = row[0]
             try:
-                scored = json.loads(raw_json) if raw_json else []
+                scored = json.loads(row[1]) if row[1] else []
             except Exception:  # noqa: BLE001
                 scored = []
             verdict = ws.compute_verdict(ctx.db, cid, scored, dir_domains, thr)
-            ctx.db.query(Company).filter(Company.id == cid).update({
+            update_fields: dict = {
                 "website_status": verdict.status,
                 "website_count": verdict.website_count or None,
                 "website_url": verdict.website_url,
-            })
+            }
+            if verdict.web_score is not None and verdict.web_score != row[2]:
+                update_fields["web_score"] = verdict.web_score
+                update_fields["combined_score"] = Company.compute_combined_score(
+                    row[3], row[4], row[5], web_score=verdict.web_score
+                )
+                stats["rescored"] = stats.get("rescored", 0) + 1
+            ctx.db.query(Company).filter(Company.id == cid).update(update_fields)
             stats["updated"] += 1
             stats[verdict.status] = stats.get(verdict.status, 0) + 1
             if (verdict.website_count or 0) >= 2:

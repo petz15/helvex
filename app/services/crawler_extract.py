@@ -701,13 +701,16 @@ def resolve_company_extract(
     site_url: str | None = None,
     company_zip: str | None = None,
     company_city: str | None = None,
+    page_types: list[str] | None = None,
 ) -> dict:
     """Aggregate per-page signals into one resolved, verification-aware record.
 
     pages: list of (page_type, html_bytes). Optional context (company_name,
     zefix_uid, site_url, company_zip, company_city) drives UID verification,
-    name/address matching, and email ranking. Returns a dict ready to persist
-    via crud.crawler.upsert_web_extract, or {} if nothing useful was found.
+    name/address matching, and email ranking. page_types: the full list of
+    page_types fetched for this candidate (may include 'impressum', 'contact'
+    etc. not present in pages when S3 download failed). Returns a dict ready to
+    persist via crud.crawler.upsert_web_extract, or {} if nothing useful was found.
     """
     emails: set[str] = set()
     phones: set[str] = set()
@@ -813,9 +816,14 @@ def resolve_company_extract(
     ranked_emails = _rank_emails(emails, site_domain)
     service_keywords = _mine_keywords(" ".join(kw_text_parts) or " ".join(all_text_parts))
 
+    # Site-quality bonus: impressum page (legal requirement for Swiss businesses) and
+    # contact page are high-confidence signals that this is a real, active business site.
+    # Add one extra "signal" for each, lifting the base coverage score by ~1/7 per page.
+    _crawled_types = set(page_types or [t for t, _ in pages])
+    has_impressum_page = "impressum" in _crawled_types or "contact" in _crawled_types
     signals_present = sum(bool(x) for x in (
         emails, phones, socials, uid, address, description, service_keywords, persons,
-    ))
+    )) + (1 if has_impressum_page else 0)
     if signals_present == 0 and uid_matches is None:
         return {}
 
