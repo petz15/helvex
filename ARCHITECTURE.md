@@ -323,6 +323,7 @@ HTML routes (browser, in `main.py`):
 | POST | `/api/v1/admin/jobs/crawler/reextract` | Superadmin | Flag all crawled S3 HTML for re-extraction + run `web_extract` (no re-crawl) |
 | POST | `/api/v1/admin/jobs/crawler/recompute-website-status` | Superadmin | Enqueue `recompute_website_status` — recompute the company website verdict + multi-site count from extracts (no API/crawl cost) |
 | GET | `/api/v1/companies/{id}/web-extract` | Authenticated | Best web extract + per-page crawl coverage for the company detail "Website" tab |
+| GET | `/api/v1/companies/{id}/serp-analysis` | Authenticated | SERP snapshot derived from stored Google data: organic rank, ads count, local pack, competitors above — no new API calls |
 | … | (other existing admin routes) | | |
 
 #### CSV Export status — `app/api/routes/jobs.py`

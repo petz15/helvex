@@ -385,21 +385,29 @@ def sweep_uid_gap(
         except Exception as exc:
             if type(exc).__name__ in ("JobCancelledError", "JobPausedError"):
                 raise
-            logger.error("UID token sweep failed: token=%r: %s", token, exc)
-            stats["api_errors"] += 1
-            stats["errors"].append(f"[token={token}] {exc}")
-            try:
-                _log_error(
-                    db, company_id=None, source="uid_import", error_type="api_error",
-                    message=f"UID sweep failed (token={token!r}): {exc}",
-                    detail={"token": token, "token_idx": idx},
-                )
-                db.commit()
-            except Exception:
-                db.rollback()
-            if stats["api_errors"] > 10:
-                logger.error("Too many token failures — aborting UID sweep")
-                return stats
+            is_rate_limit = type(exc).__name__ == "UIDRateLimitError" or "Request_limit_exceeded" in str(exc)
+            if is_rate_limit:
+                # Rate-limited after all retries — skip this token, don't count toward hard abort.
+                stats.setdefault("rate_limited_tokens", 0)
+                stats["rate_limited_tokens"] += 1
+                stats["errors"].append(f"[token={token}] {exc}")
+                logger.warning("UID token rate-limited, skipping: token=%r", token)
+            else:
+                logger.error("UID token sweep failed: token=%r: %s", token, exc)
+                stats["api_errors"] += 1
+                stats["errors"].append(f"[token={token}] {exc}")
+                try:
+                    _log_error(
+                        db, company_id=None, source="uid_import", error_type="api_error",
+                        message=f"UID sweep failed (token={token!r}): {exc}",
+                        detail={"token": token, "token_idx": idx},
+                    )
+                    db.commit()
+                except Exception:
+                    db.rollback()
+                if stats["api_errors"] > 50:
+                    logger.error("Too many non-rate-limit token failures — aborting UID sweep")
+                    return stats
             continue
 
         # Upsert this token's discoveries in sub-batches

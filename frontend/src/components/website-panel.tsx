@@ -5,11 +5,12 @@ import useSWR from "swr";
 import {
   Globe, Mail, MapPin, Link2, Languages, Tag, FileText,
   CheckCircle2, AlertTriangle, ExternalLink, Loader2, Hash, Users,
-  ChevronUp, Trash2, Flag, RefreshCw,
+  ChevronUp, Trash2, Flag, RefreshCw, Search,
 } from "lucide-react";
 import {
   fetchAllWebExtracts, promoteWebExtract, discardWebExtract, runCompanyWebSearch,
-  type WebExtractSummary,
+  fetchSerpAnalysis,
+  type WebExtractSummary, type SerpAnalysis, type SerpAboveItem,
 } from "@/lib/api";
 
 interface WebExtract {
@@ -225,6 +226,144 @@ function AllExtractsPanel({ companyId, bestCandidateId, onMutate }: {
   );
 }
 
+// ── SERP Presence ─────────────────────────────────────────────────────────────
+
+const TYPE_META: Record<SerpAboveItem["type"], { label: string; cls: string }> = {
+  directory: { label: "Dir",     cls: "bg-orange-50 text-orange-600 border-orange-200" },
+  social:    { label: "Social",  cls: "bg-sky-50 text-sky-600 border-sky-200" },
+  news:      { label: "News",    cls: "bg-purple-50 text-purple-600 border-purple-200" },
+  own:       { label: "Web",     cls: "bg-slate-100 text-slate-500 border-slate-200" },
+  none:      { label: "Other",   cls: "bg-slate-100 text-slate-400 border-slate-200" },
+};
+
+function PositionBadge({ pos }: { pos: number | null }) {
+  if (pos == null) return <span className="text-[12px] text-slate-400">Not found</span>;
+  const cls = pos <= 3 ? "bg-green-50 text-green-700 border-green-200"
+    : pos <= 7 ? "bg-amber-50 text-amber-700 border-amber-200"
+    : "bg-red-50 text-red-600 border-red-200";
+  return (
+    <span className={`text-[12px] font-semibold px-2 py-0.5 rounded-full border ${cls}`}>
+      #{pos} organic
+    </span>
+  );
+}
+
+function SerpPresenceCard({ companyId }: { companyId: number }) {
+  const { data, isLoading, error } = useSWR<SerpAnalysis>(
+    `serp-analysis-${companyId}`,
+    () => fetchSerpAnalysis(companyId),
+  );
+
+  if (isLoading) return (
+    <div className="bg-white rounded-xl border border-[#e6e8ec] p-4 flex items-center gap-2 text-slate-400 text-[13px]">
+      <Loader2 size={14} className="animate-spin" /> Loading search presence…
+    </div>
+  );
+
+  if (error || !data) return null;
+  if (!data.searched_at) return null;  // no search done yet
+
+  const pos = data.organic_position;
+  const hasUrl = Boolean(data.company_url);
+
+  return (
+    <Card title="Search Presence" icon={Search}>
+      {/* Summary row */}
+      <div className="flex flex-wrap items-center gap-3 mb-4">
+        {hasUrl ? (
+          <PositionBadge pos={pos} />
+        ) : (
+          <span className="text-[12px] text-slate-400">No website on file</span>
+        )}
+        {data.ads_count > 0 && (
+          <span className="text-[12px] px-2 py-0.5 rounded-full border bg-red-50 text-red-600 border-red-200">
+            {data.ads_count} ad{data.ads_count !== 1 ? "s" : ""} above organic
+          </span>
+        )}
+        {data.has_local_pack && (
+          <span className="text-[12px] px-2 py-0.5 rounded-full border bg-indigo-50 text-indigo-700 border-indigo-200">
+            Maps pack ({data.local_count})
+          </span>
+        )}
+        {data.has_knowledge_graph && (
+          <span className="text-[12px] px-2 py-0.5 rounded-full border bg-slate-100 text-slate-500 border-slate-200">
+            Knowledge graph
+          </span>
+        )}
+        {data.search_query && (
+          <span className="ml-auto text-[11px] text-slate-400 font-mono truncate max-w-[200px]" title={data.search_query}>
+            q: {data.search_query}
+          </span>
+        )}
+      </div>
+
+      {/* SERP timeline — only when there's something interesting to show */}
+      {(data.ads_count > 0 || data.has_local_pack || data.organic_above.length > 0 || pos != null) && (
+        <div className="space-y-1">
+          {/* Ads */}
+          {data.ads.map((ad, i) => (
+            <div key={i} className="flex items-center gap-2 py-1 text-[12px]">
+              <span className="shrink-0 text-[10px] px-1.5 py-0.5 rounded border bg-red-50 text-red-600 border-red-200 font-medium w-14 text-center">Ad</span>
+              <a href={ad.link} target="_blank" rel="noopener noreferrer"
+                 className="text-slate-500 hover:text-blue-600 truncate flex items-center gap-1">
+                {ad.title || ad.link} <ExternalLink size={10} className="shrink-0 opacity-60" />
+              </a>
+            </div>
+          ))}
+          {data.ads_count > data.ads.length && (
+            <div className="py-1 text-[11px] text-slate-400 pl-16">
+              +{data.ads_count - data.ads.length} more ad{data.ads_count - data.ads.length !== 1 ? "s" : ""}
+            </div>
+          )}
+
+          {/* Local pack */}
+          {data.has_local_pack && (
+            <div className="flex items-center gap-2 py-1 text-[12px]">
+              <span className="shrink-0 text-[10px] px-1.5 py-0.5 rounded border bg-indigo-50 text-indigo-700 border-indigo-200 font-medium w-14 text-center">Maps</span>
+              <span className="text-slate-500">{data.local_count} local result{data.local_count !== 1 ? "s" : ""}</span>
+            </div>
+          )}
+
+          {/* Organic results above company */}
+          {data.organic_above.map(r => {
+            const meta = TYPE_META[r.type] ?? TYPE_META.none;
+            return (
+              <div key={r.link} className="flex items-center gap-2 py-1 text-[12px]">
+                <span className={`shrink-0 text-[10px] px-1.5 py-0.5 rounded border font-medium w-14 text-center ${meta.cls}`}>
+                  #{r.position} {meta.label}
+                </span>
+                <a href={r.link} target="_blank" rel="noopener noreferrer"
+                   className="text-slate-500 hover:text-blue-600 truncate flex items-center gap-1">
+                  {r.title || r.link} <ExternalLink size={10} className="shrink-0 opacity-60" />
+                </a>
+              </div>
+            );
+          })}
+
+          {/* Company's own website row */}
+          {hasUrl && pos != null && (
+            <div className="flex items-center gap-2 py-1 text-[12px] bg-green-50/60 rounded-lg px-2 -mx-2">
+              <span className="shrink-0 text-[10px] px-1.5 py-0.5 rounded border bg-green-50 text-green-700 border-green-200 font-semibold w-14 text-center">
+                #{pos}
+              </span>
+              <a href={data.company_url!} target="_blank" rel="noopener noreferrer"
+                 className="text-green-700 font-medium hover:underline truncate flex items-center gap-1">
+                {data.company_url} <ExternalLink size={10} className="shrink-0" />
+              </a>
+              <span className="shrink-0 text-[10px] text-green-600 font-medium">✓ your site</span>
+            </div>
+          )}
+          {hasUrl && pos == null && (
+            <div className="py-2 text-[12px] text-slate-400">
+              Website URL on file but not found in the {data.total_organic} stored organic results — may appear on page 2+.
+            </div>
+          )}
+        </div>
+      )}
+    </Card>
+  );
+}
+
 const WEBSITE_STATUS_META: Record<string, { label: string; cls: string; hint: string }> = {
   verified:       { label: "Verified website",  cls: "bg-green-50 text-green-700 border-green-200",     hint: "Crawl matched the Swiss UID or name+address from Zefix" },
   confirmed:      { label: "Confirmed website", cls: "bg-emerald-50 text-emerald-700 border-emerald-200", hint: "Own-domain found with high confidence (no UID proof)" },
@@ -284,7 +423,9 @@ export function WebsitePanel({ companyId, isSuperadmin = false, websiteStatus = 
   // Nothing crawled at all
   if (!extract && pages.length === 0) {
     return (
-      <div className="bg-white rounded-xl border border-[#e6e8ec] p-10 text-center">
+      <div className="space-y-4">
+        <SerpPresenceCard companyId={companyId} />
+        <div className="bg-white rounded-xl border border-[#e6e8ec] p-10 text-center">
         <Globe size={28} className="text-slate-300 mx-auto mb-3" />
         {websiteStatus && (
           <div className="flex justify-center mb-3"><WebsiteStatusBadge status={websiteStatus} count={websiteCount} /></div>
@@ -303,6 +444,7 @@ export function WebsitePanel({ companyId, isSuperadmin = false, websiteStatus = 
             {rerunning ? "Searching…" : "Rerun web search"}
           </button>
         )}
+        </div>
       </div>
     );
   }
@@ -369,6 +511,8 @@ export function WebsitePanel({ companyId, isSuperadmin = false, websiteStatus = 
           Pages were crawled but no structured data could be extracted. See crawl coverage below.
         </div>
       )}
+
+      <SerpPresenceCard companyId={companyId} />
 
       <div className="grid md:grid-cols-2 gap-4">
         {/* ── Contact ── */}

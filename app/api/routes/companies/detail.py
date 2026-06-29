@@ -302,6 +302,113 @@ def google_search_for_company(
     return results
 
 
+@router.get("/{company_id}/serp-analysis", summary="SERP position analysis for the company's website")
+def get_serp_analysis(
+    company_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Return a structured SERP snapshot derived from stored Google search data.
+
+    Parses google_search_results_raw (organic position) and google_search_full_raw
+    (ads/local pack counts) without making any new API calls.
+    """
+    from urllib.parse import urlparse
+    from app.services.scoring import classify_domain
+
+    db_company = crud.get_company(db, company_id)
+    if not db_company:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Company not found")
+
+    def _domain(url: str | None) -> str:
+        if not url:
+            return ""
+        try:
+            return urlparse(url).netloc.lower().removeprefix("www.")
+        except Exception:
+            return ""
+
+    # Parse organic results (each has a `position` field = 0-based Google rank)
+    organic_results: list[dict] = []
+    if db_company.google_search_results_raw:
+        try:
+            parsed = json.loads(db_company.google_search_results_raw)
+            if isinstance(parsed, list):
+                organic_results = parsed
+        except (json.JSONDecodeError, TypeError):
+            pass
+
+    # Sort by original Google rank; results without `position` go to end
+    has_positions = any(r.get("position") is not None for r in organic_results)
+    organic_by_rank = sorted(organic_results, key=lambda r: r.get("position", 9999)) if has_positions else organic_results
+
+    # Parse full raw for ads and SERP features
+    ads_count = 0
+    ads_list: list[dict] = []
+    has_local_pack = False
+    local_count = 0
+    has_knowledge_graph = False
+
+    if db_company.google_search_full_raw:
+        try:
+            full = json.loads(db_company.google_search_full_raw)
+            ads = full.get("ads") or full.get("paid_results") or []
+            if isinstance(ads, list):
+                ads_count = len(ads)
+                ads_list = [{"title": a.get("title", ""), "link": a.get("link", "")} for a in ads[:5]]
+            local = full.get("places") or full.get("local_results") or []
+            if isinstance(local, list):
+                has_local_pack = bool(local)
+                local_count = len(local)
+            has_knowledge_graph = bool(full.get("knowledgeGraph") or full.get("knowledge_graph"))
+        except (json.JSONDecodeError, TypeError):
+            pass
+
+    # Find company URL's organic position
+    company_url = db_company.website_url
+    company_domain = _domain(company_url)
+    organic_position: int | None = None
+
+    if company_domain:
+        for r in organic_by_rank:
+            if _domain(r.get("link", "")) == company_domain and r.get("position") is not None:
+                organic_position = r["position"] + 1  # 1-based for display
+                break
+
+    # Organic results ranked above the company's own website
+    organic_above: list[dict] = []
+    if organic_position is not None:
+        for r in organic_by_rank:
+            pos = r.get("position")
+            if pos is None or pos + 1 >= organic_position:
+                break
+            link = r.get("link", "")
+            organic_above.append({
+                "title": r.get("title", ""),
+                "link": link,
+                "position": pos + 1,
+                "type": classify_domain(link),
+            })
+
+    search_query: str | None = None
+    if db_company.google_search_params and isinstance(db_company.google_search_params, dict):
+        search_query = db_company.google_search_params.get("q")
+
+    return {
+        "company_url": company_url,
+        "search_query": search_query,
+        "organic_position": organic_position,
+        "total_organic": len(organic_results),
+        "ads_count": ads_count,
+        "ads": ads_list,
+        "has_local_pack": has_local_pack,
+        "local_count": local_count,
+        "has_knowledge_graph": has_knowledge_graph,
+        "organic_above": organic_above,
+        "searched_at": db_company.website_checked_at.isoformat() if db_company.website_checked_at else None,
+    }
+
+
 @router.post(
     "/{company_id}/noga-v2-explain",
     summary="Enqueue NOGA explain job for a company (superadmin only)",

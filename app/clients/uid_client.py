@@ -52,6 +52,10 @@ _MAX_RECORDS_PER_CALL = 30
 _RATE_LIMIT_BASE_DELAY = 60.0   # seconds after first rate-limit error (doubles each retry)
 _INTER_CALL_DELAY = 2.0         # min sleep between API calls (~30/min); safe with mutual exclusion
 
+
+class UIDRateLimitError(Exception):
+    """Raised when the UID API returns Request_limit_exceeded after all retries."""
+
 # Search filter constants (eCH register-status codes)
 _HR_REGISTERED = "2"            # commercialRegisterStatus: in Handelsregister
 _HR_NOT_REGISTERED = "3"        # commercialRegisterStatus: NOT in HR → the non-Zefix gap
@@ -382,11 +386,13 @@ def _run_search(
             },
         )
     except Exception as exc:
-        if "Request_limit_exceeded" in str(exc) and _retry < 3:
-            delay = _RATE_LIMIT_BASE_DELAY * (2 ** _retry)
-            logger.warning("UID rate limited (params=%s), waiting %.0fs (retry %d)", search_params, delay, _retry + 1)
-            time.sleep(delay)
-            return _run_search(search_params, abort_cb=abort_cb, _retry=_retry + 1)
+        if "Request_limit_exceeded" in str(exc):
+            if _retry < 3:
+                delay = _RATE_LIMIT_BASE_DELAY * (2 ** _retry)
+                logger.warning("UID rate limited (params=%s), waiting %.0fs (retry %d)", search_params, delay, _retry + 1)
+                time.sleep(delay)
+                return _run_search(search_params, abort_cb=abort_cb, _retry=_retry + 1)
+            raise UIDRateLimitError(f"Request_limit_exceeded after {_retry} retries (params={search_params})") from exc
         raise
 
     time.sleep(_INTER_CALL_DELAY)

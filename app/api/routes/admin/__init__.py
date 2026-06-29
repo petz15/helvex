@@ -385,6 +385,50 @@ def crawler_reextract(
     return {"flagged": flagged, "job_id": job.id, "status": job.status}
 
 
+@router.post("/jobs/crawler/recompute-website-status", summary="Recompute website verdict + multi-site count (superadmin)")
+def crawler_recompute_website_status(
+    request: Request,
+    db: Session = Depends(get_db),
+    actor: User = Depends(_require_superadmin),
+) -> dict:
+    """Recompute company-level website_status + website_count from stored extracts and search results.
+
+    Deterministic — no API or crawl cost. Use to backfill or after tuning thresholds.
+    """
+    from app.services.job_worker import enqueue_job
+    job = enqueue_job(
+        request.app,
+        job_type="recompute_website_status",
+        label="Recompute website status (verdict + multi-site count)",
+        params={},
+        org_id=None,
+        user_id=actor.id,
+    )
+    return {"job_id": job.id, "status": job.status}
+
+
+@router.post("/jobs/crawler/enrich-purpose-sim", summary="Enrich web extract purpose similarity (superadmin)")
+def crawler_enrich_purpose_sim(
+    request: Request,
+    db: Session = Depends(get_db),
+    actor: User = Depends(_require_superadmin),
+) -> dict:
+    """Compute cosine similarity between company purpose and web extract description (ML worker job).
+
+    Stores the result as purpose_sim (0–1) in company_web_extract. Feeds the website scoring pipeline.
+    """
+    from app.services.job_worker import enqueue_job
+    job = enqueue_job(
+        request.app,
+        job_type="enrich_web_purpose_sim",
+        label="Enrich web extract purpose similarity (ML worker)",
+        params={},
+        org_id=None,
+        user_id=actor.id,
+    )
+    return {"job_id": job.id, "status": job.status}
+
+
 @router.get("/crawler/review-flags", summary="Extracts flagged for human review (superadmin)")
 def get_crawler_review_flags(
     page: int = Query(1, ge=1),

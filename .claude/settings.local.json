@@ -253,7 +253,9 @@
       "PowerShell(\\(Get-Content \"c:\\\\D\\\\coding_projects\\\\zefix_analyzer\\\\app\\\\services\\\\zefix_import.py\"\\).Count)",
       "PowerShell(cd \"c:\\\\D\\\\coding_projects\\\\zefix_analyzer\"; \\(Get-Content \"app\\\\services\\\\job_worker.py\"\\) | Where-Object { $_ -notmatch '_publish_job_update' } | Set-Content \"app\\\\services\\\\job_worker.py\" -Encoding utf8)",
       "Skill(update-config)",
-      "Skill(update-config:*)"
+      "Skill(update-config:*)",
+      "Bash(npx tsc *)",
+      "Bash(python -c \"import ast; ast.parse\\(open\\('app/api/routes/companies/detail.py'\\).read\\(\\)\\); print\\('OK'\\)\")"
     ]
   }
 }

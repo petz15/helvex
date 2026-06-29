@@ -2227,6 +2227,33 @@ export interface WebExtractSummary {
   extracted_at: string | null;
 }
 
+export interface SerpAboveItem {
+  title: string;
+  link: string;
+  position: number;
+  type: "own" | "social" | "directory" | "news" | "none";
+}
+
+export interface SerpAnalysis {
+  company_url: string | null;
+  search_query: string | null;
+  organic_position: number | null;
+  total_organic: number;
+  ads_count: number;
+  ads: { title: string; link: string }[];
+  has_local_pack: boolean;
+  local_count: number;
+  has_knowledge_graph: boolean;
+  organic_above: SerpAboveItem[];
+  searched_at: string | null;
+}
+
+export async function fetchSerpAnalysis(companyId: number): Promise<SerpAnalysis> {
+  const res = await fetch(`/api/v1/companies/${companyId}/serp-analysis`, { credentials: "include" });
+  if (!res.ok) throw new Error("Failed to load SERP analysis");
+  return res.json();
+}
+
 export async function fetchAllWebExtracts(companyId: number): Promise<WebExtractSummary[]> {
   const res = await fetch(`/api/v1/companies/${companyId}/web-extracts`, { credentials: "include" });
   if (!res.ok) throw new Error("Failed to load extracts");

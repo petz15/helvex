@@ -133,7 +133,7 @@
 - [ ] **Multiple scores** - allow for different set of scores in case users are looking for different types of companies. e.g. for a specific campaign or promotion etc
 - [ ] **Fix Multilang issue** - Need to decide if I have one language as base (such as english), convert everything to english for stuff like categorization etc then go and translate back i.e. use the original language again? other method would be to do it per language and then add a filter for languges with optional translations for other langugages. 
 - [ ] **Data from eSHAB** - has much mor than just changes in companies and pre 2018
-
+- [ ] **Serper Data as SEO indication** - use the results from serper which shows the SEO of the website?
 
 
 ## Company Profile
