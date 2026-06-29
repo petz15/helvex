@@ -87,6 +87,7 @@ _DIRECTORY_DOMAINS = {
     "treuhandsuisse.ch",
     "treuhandsuisse-zh.ch",
     "treuhandvergleich.ch",
+    "consultingvergleich.ch",
     "fiduciairesuisse-vd.ch",
     "business-monitor.ch",
     "graph.swiss",
@@ -196,6 +197,39 @@ _LOCAL_DIRECTORY_PATH_RE = re.compile(
     re.IGNORECASE,
 )
 
+# Phrases that ONLY appear on directory listing pages (never on a company's own site).
+# Matched against lowercased decoded HTML.
+_DIRECTORY_CLAIM_PHRASES: tuple[str, ...] = (
+    "sind sie inhaber",
+    "sind sie der inhaber",
+    "inhaber dieses eintrags",
+    "eintrag beanspruchen",
+    "als inhaber registrieren",
+    "als inhaber anmelden",
+    "unternehmen beanspruchen",
+    "claim this listing",
+    "claim your listing",
+    "is this your business",
+    "revendiquer cette fiche",
+    "êtes-vous le propriétaire",
+    "revendiquer cet établissement",
+)
+
+# "Similar companies" blocks appear in the sidebar of virtually every directory listing.
+_DIRECTORY_SIMILAR_PHRASES: tuple[str, ...] = (
+    "ähnliche unternehmen",
+    "ähnliche firmen",
+    "similar companies",
+    "entreprises similaires",
+    "aziende simili",
+)
+
+# Title-tag suffix patterns: "Company Name | Branchenbuch" or "Company | Vergleich"
+_DIRECTORY_TITLE_SUFFIX_RE = re.compile(
+    r"[|\-–]\s*(?:branchenbuch|verzeichnis|vergleich|eintrag|annuaire|repertoire|répertoire|registre|registro)",
+    re.IGNORECASE,
+)
+
 # Words to exclude when extracting keywords from the purpose field
 _STOPWORDS = {
     "die", "der", "das", "und", "oder", "mit", "von", "für", "des", "dem",
@@ -280,7 +314,8 @@ def _url_is_globally_excluded(url: str) -> bool:
 
 
 def _is_directory_domain(domain: str, directory_domains: set[str] | None = None) -> bool:
-    domains = directory_domains or _DIRECTORY_DOMAINS
+    # Always include the hardcoded baseline; DB overrides are additive, not a replacement.
+    domains = _DIRECTORY_DOMAINS | (directory_domains or set())
     return any(domain == d or domain.endswith("." + d) for d in domains)
 
 
@@ -321,7 +356,11 @@ def _domain_is_exact_name_match(domain: str, company_name: str) -> bool:
     if not name_words:
         return False
 
-    return domain_norm == "".join(name_words)
+    # Full match: all meaningful words concatenated equal the domain base ("bau-schmidt.ch" → "bauers")
+    if domain_norm == "".join(name_words):
+        return True
+    # Partial match: domain base equals the first meaningful word alone ("symbiont.ch" for "Symbiont Consulting GmbH")
+    return len(name_words) > 1 and domain_norm == name_words[0]
 
 
 def _domain_name_overlap(domain: str, company_name: str) -> float:
@@ -615,6 +654,36 @@ def classify_domain(url: str, directory_domains: set[str] | None = None) -> str:
     if _LOCAL_DIRECTORY_PATH_RE.search(url) or _url_is_globally_excluded(url):
         return "directory"
     return "own"
+
+
+def is_directory_page(html: bytes, url: str) -> bool:
+    """Return True when fetched HTML is a business directory listing, not the company's own site.
+
+    Checks URL path patterns and three tiers of HTML signals without full DOM parsing.
+    Called at crawl-extraction time so bad URL candidates can be rejected before storage.
+    """
+    if _LOCAL_DIRECTORY_PATH_RE.search(url):
+        return True
+
+    try:
+        text_lower = html.decode("utf-8", errors="replace").lower()
+    except Exception:  # noqa: BLE001
+        return False
+
+    # Tier 1 — claim-listing phrases: near-zero false-positive rate
+    if any(phrase in text_lower for phrase in _DIRECTORY_CLAIM_PHRASES):
+        return True
+
+    # Tier 2 — title tag contains directory keyword after a separator
+    m = re.search(r"<title[^>]*>([^<]{5,300})</title>", text_lower)
+    if m and _DIRECTORY_TITLE_SUFFIX_RE.search(m.group(1)):
+        return True
+
+    # Tier 3 — "similar companies" sidebar present (ubiquitous on directory listing pages)
+    if any(phrase in text_lower for phrase in _DIRECTORY_SIMILAR_PHRASES):
+        return True
+
+    return False
 
 
 # ── Location helpers ────────────────────────────────────────────────────────

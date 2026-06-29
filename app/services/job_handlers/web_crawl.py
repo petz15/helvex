@@ -535,6 +535,24 @@ def handle_web_extract(ctx: JobContext) -> tuple[dict, str]:
                             stats["s3_errors"] += 1
                             logger.debug("S3 download failed for %s: %s", p.s3_key_html, exc)
 
+                    # Reject candidates whose homepage HTML is a business directory
+                    # listing (e.g. treuhandvergleich.ch, moneyhouse.ch profile pages).
+                    # Triggers the fallback-crawl mechanism to try the next candidate.
+                    if page_blobs:
+                        from app.services.scoring import is_directory_page
+                        homepage_html = next(
+                            (h for pt, h in page_blobs if pt == "homepage"), None
+                        ) or page_blobs[0][1]
+                        if is_directory_page(homepage_html, site_url or ""):
+                            crawler_crud.reject_url_candidate(ctx.db, url_candidate_id)
+                            stats["directory_blocked"] = stats.get("directory_blocked", 0) + 1
+                            logger.info(
+                                "Directory page detected — rejecting candidate %d (%s)",
+                                url_candidate_id, site_url,
+                            )
+                            stats["empty"] += 1
+                            continue
+
                     data = crawler_extract.resolve_company_extract(
                         page_blobs,
                         company_name=cname,
