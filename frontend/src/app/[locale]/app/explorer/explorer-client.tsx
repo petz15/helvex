@@ -958,6 +958,7 @@ function ExplorerPage({ initialCantons, initialStats, locale }: ExplorerPageProp
                   first_sogc_date: null, deletion_date: null,
                   ehraid: null, chid: null, lat: null, lon: null,
                   business_model: null, purpose_language: h.lang ?? null,
+                  source: null,
                   created_at: "", updated_at: "", notes: [],
                 } as import("@/lib/types").Company))}
                 isLoading={purposeLoading}
