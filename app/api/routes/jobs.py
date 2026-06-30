@@ -66,6 +66,7 @@ class JobOut(BaseModel):
     progress_done: int | None
     progress_total: int | None
     error: str | None
+    restart_count: int
     created_at: str
     started_at: str | None
     finished_at: str | None
@@ -83,6 +84,7 @@ class JobOut(BaseModel):
             progress_done=j.progress_done,
             progress_total=j.progress_total,
             error=j.error,
+            restart_count=j.restart_count or 0,
             created_at=j.queued_at.isoformat() if j.queued_at else "",
             started_at=j.started_at.isoformat() if j.started_at else None,
             finished_at=j.completed_at.isoformat() if j.completed_at else None,
@@ -193,6 +195,55 @@ def resume_job(job_id: int, request: Request, db: Session = Depends(get_db), cur
     from app.services.job_worker import kick_job_worker
     kick_job_worker(request.app)
     return JobOut.from_orm_obj(job)
+
+
+class RerunBody(BaseModel):
+    mode: str  # "new" | "continue"
+
+
+@router.post("/jobs/{job_id}/rerun", response_model=JobOut, status_code=status.HTTP_202_ACCEPTED)
+def rerun_job(
+    job_id: int,
+    body: RerunBody,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Re-enqueue a failed/cancelled job.
+
+    mode="new"      — fresh run from the beginning (same params, progress_done=0).
+    mode="continue" — resume from where it stopped (adds resume_from=progress_done).
+    """
+    import json as _json
+
+    job = crud.get_job(db, job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    _assert_job_visible_to_user(job, current_user)
+    if job.status not in ("failed", "cancelled"):
+        raise HTTPException(status_code=400, detail="Only failed or cancelled jobs can be rerun")
+
+    params: dict = {}
+    if job.params_json:
+        try:
+            params = _json.loads(job.params_json)
+        except Exception:
+            params = {}
+
+    if body.mode == "continue" and job.progress_done:
+        params = {**params, "resume_from": job.progress_done}
+
+    label_prefix = "↺ " if body.mode == "new" else "⏩ "
+    new_job = _enqueue_or_http_error(
+        request,
+        job_type=job.job_type,
+        label=label_prefix + job.label,
+        params=params,
+        db=db,
+        org_id=job.org_id,
+        user_id=current_user.id,
+    )
+    return new_job
 
 
 @router.get("/jobs/stream/active")

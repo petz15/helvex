@@ -145,6 +145,9 @@ class Company(Base):
     registration_type: Mapped[str | None] = mapped_column(String(16), nullable=True, index=True)
     # Raw JSON response from the UID web service for this entity (audit trail).
     uid_raw: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Timestamp when GetByUID detail call was last attempted (success or not).
+    # NULL = detail not yet fetched. Used to avoid re-fetching on every run.
+    uid_detail_fetched_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     # Exact search params sent to the Google Search API for this company's last search.
     # Keys: q, provider, gl/country, hl/language, location.
     # Stored so bad results (wrong language, wrong location) can be diagnosed after the fact.

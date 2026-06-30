@@ -2,9 +2,9 @@
 import Link from "next/link";
 import { useState, useEffect, useRef } from "react";
 import useSWR from "swr"; // still used for CSV export status
-import { CheckCircle2, XCircle, Clock, Loader2, PauseCircle, Play, Square, ChevronDown, ChevronUp, RefreshCw, Download, FileText } from "lucide-react";
+import { CheckCircle2, XCircle, Clock, Loader2, PauseCircle, Play, Square, ChevronDown, ChevronUp, RefreshCw, Download, FileText, RotateCcw, FastForward } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { cancelJob, fetchCSVExportStatus, fetchJobEvents, fetchJobs, pauseJob, resumeJob } from "@/lib/api";
+import { cancelJob, fetchCSVExportStatus, fetchJobEvents, fetchJobs, pauseJob, resumeJob, rerunJob } from "@/lib/api";
 import type { Job, JobEvent } from "@/lib/types";
 import { useI18n } from "@/i18n/context";
 
@@ -111,6 +111,7 @@ function JobEvents({ jobId }: { jobId: number }) {
 function JobRow({ job, onAction }: { job: Job; onAction: (updated?: Job[]) => void }) {
   const [expanded, setExpanded] = useState(false);
   const active = job.status === "running" || job.status === "queued" || job.status === "paused" || job.status === "waiting_external";
+  const failed = job.status === "failed" || job.status === "cancelled";
 
   async function doCancel() {
     await cancelJob(job.id);
@@ -123,6 +124,14 @@ function JobRow({ job, onAction }: { job: Job; onAction: (updated?: Job[]) => vo
   }
   async function doResume() {
     await resumeJob(job.id);
+    onAction(await fetchJobs());
+  }
+  async function doRerunNew() {
+    await rerunJob(job.id, "new");
+    onAction(await fetchJobs());
+  }
+  async function doRerunContinue() {
+    await rerunJob(job.id, "continue");
     onAction(await fetchJobs());
   }
 
@@ -141,6 +150,11 @@ function JobRow({ job, onAction }: { job: Job; onAction: (updated?: Job[]) => vo
             {statusBadge(job.status)}
             <span className="text-xs text-slate-400 font-mono">#{job.id}</span>
             <span className="text-xs text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded">{job.job_type}</span>
+            {job.restart_count > 0 && (
+              <span className="text-xs text-orange-600 bg-orange-50 px-1.5 py-0.5 rounded" title="Number of crash-restarts">
+                {job.restart_count}× restarted
+              </span>
+            )}
           </div>
           <p className="mt-1 font-medium text-slate-800 text-sm">{job.label}</p>
           {job.message && (
@@ -166,6 +180,26 @@ function JobRow({ job, onAction }: { job: Job; onAction: (updated?: Job[]) => vo
             <button onClick={doCancel} className="p-1.5 rounded-lg hover:bg-red-50 text-red-400 hover:text-red-500 transition-colors" title="Cancel">
               <Square size={16} />
             </button>
+          )}
+          {failed && (
+            <>
+              <button
+                onClick={doRerunNew}
+                className="p-1.5 rounded-lg hover:bg-slate-100 text-slate-500 hover:text-slate-700 transition-colors"
+                title="Rerun from the beginning (same settings)"
+              >
+                <RotateCcw size={16} />
+              </button>
+              {job.progress_done != null && job.progress_done > 0 && (
+                <button
+                  onClick={doRerunContinue}
+                  className="p-1.5 rounded-lg hover:bg-blue-50 text-blue-500 hover:text-blue-600 transition-colors"
+                  title={`Continue from where it stopped (${job.progress_done} done)`}
+                >
+                  <FastForward size={16} />
+                </button>
+              )}
+            </>
           )}
           <button onClick={() => setExpanded(v => !v)} className="p-1.5 rounded-lg hover:bg-slate-100 text-slate-400 transition-colors">
             {expanded ? <ChevronUp size={16} /> : <ChevronDown size={16} />}

@@ -372,23 +372,25 @@ def recalculate_google_scores(
     resume_from: int = 0,
     progress_cb: Any = None,
 ) -> dict[str, Any]:
-    """Recompute web_score from stored Google results for all companies."""
+    """Recompute web_score from stored Google results — only for companies that have them.
+
+    Filters at the DB level so the 700k rows without search results are never loaded.
+    Ordered by id (stable) so OFFSET-based resume is consistent between restarts.
+    """
     stats: dict[str, Any] = {"updated": 0, "skipped": 0, "errors": []}
 
-    total = db.query(func.count(Company.id)).scalar() or 0
+    total: int = (
+        db.query(func.count(Company.id))
+        .filter(Company.google_search_results_raw.isnot(None))
+        .scalar() or 0
+    )
     offset = max(0, min(resume_from, total))
 
     while True:
         batch = (
             db.query(Company)
-            .order_by(
-                (
-                    func.coalesce(Company.ai_score * 0.70, 0)
-                    + func.coalesce(Company.web_score * 0.20, 0)
-                    + func.coalesce(Company.flex_score * 0.10, 0)
-                ).desc(),
-                Company.id.asc(),
-            )
+            .filter(Company.google_search_results_raw.isnot(None))
+            .order_by(Company.id.asc())
             .offset(offset)
             .limit(batch_size)
             .all()
@@ -398,10 +400,6 @@ def recalculate_google_scores(
 
         for company in batch:
             try:
-                if not company.google_search_results_raw:
-                    stats["skipped"] += 1
-                    continue
-
                 raw_results = json.loads(company.google_search_results_raw)
                 if not isinstance(raw_results, list) or not raw_results:
                     stats["skipped"] += 1
@@ -448,7 +446,7 @@ def recalculate_google_scores(
         offset += len(batch)
 
         if progress_cb:
-            progress_cb(min(offset, total), total, stats)
+            progress_cb(offset, total, stats)
 
     return stats
 

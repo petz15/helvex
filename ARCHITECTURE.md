@@ -247,6 +247,7 @@ HTML routes (browser, in `main.py`):
 | POST | `/api/v1/jobs/{id}/cancel` | Cancel job |
 | POST | `/api/v1/jobs/{id}/pause` | Pause job |
 | POST | `/api/v1/jobs/{id}/resume` | Resume job |
+| POST | `/api/v1/jobs/{id}/rerun` | Re-enqueue failed/cancelled job (body: `{mode: "new"\|"continue"}`) |
 | GET  | `/api/v1/jobs/stream/active` | SSE stream of active job status |
 | POST | `/api/v1/jobs/enqueue/bulk` | Enqueue bulk import |
 | POST | `/api/v1/jobs/enqueue/initial` | Enqueue detail fetch + geocode |
@@ -992,7 +993,7 @@ Discovers the companies **not in Zefix** (the "gap": sole traders, MWST/VAT-only
 **Scoring note:** UID-only companies (no `purpose`) excluded at DB query level from NOGA, keyword extraction, Claude classification.
 
 **Job type:** `uid_import` | **Endpoint:** `POST /api/v1/jobs/collection/uid-import`
-**Detail job:** `uid_detail` | **Endpoint:** `POST /api/v1/jobs/collection/uid-detail`
+**Detail job:** `uid_detail` | **Endpoint:** `POST /api/v1/jobs/collection/uid-detail` — calls `fetch_uid_details()`, which filters `source='uid' AND uid_detail_fetched_at IS NULL` so each company is fetched exactly once. `uid_detail_fetched_at` is set after every GetByUID attempt (success or not), preventing re-processing on subsequent runs even for entities with no address.
 
 ### SHAB Archive Import — `app/services/shab_archive_import.py`
 

@@ -443,7 +443,7 @@ def sweep_uid_gap(
     return stats
 
 
-# ── Detail fetch (GetByUID) — unchanged ───────────────────────────────────────
+# ── Detail fetch (GetByUID) ───────────────────────────────────────────────────
 
 _DETAIL_BATCH_SIZE = 100
 
@@ -455,11 +455,12 @@ def fetch_uid_details(
     batch_size: int = _DETAIL_BATCH_SIZE,
     progress_cb: Callable[[int, int, dict], None] | None = None,
 ) -> dict[str, Any]:
-    """Call GetByUID for every source='uid' company that has no address yet.
+    """Call GetByUID for every source='uid' company that has not yet been fetched.
 
-    Populates address, legal_form, municipality, canton, address_zip from the
-    UID detail endpoint. Run this after sweep_uid_gap to get location data;
-    geocoding is then triggered separately via the re_geocode job.
+    Filters on uid_detail_fetched_at IS NULL — set after each attempt (success
+    or not) so companies are never re-processed on subsequent runs even when the
+    detail endpoint returns nothing. Populates address, legal_form, municipality,
+    canton, address_zip from the UID detail endpoint.
     """
     from app.clients.uid_client import get_by_uid, detail_to_update
 
@@ -473,7 +474,7 @@ def fetch_uid_details(
     total: int = db.execute(
         text(
             "SELECT COUNT(*) FROM companies "
-            "WHERE source = 'uid' AND address IS NULL AND id > :resume"
+            "WHERE source = 'uid' AND uid_detail_fetched_at IS NULL AND id > :resume"
         ),
         {"resume": resume_from},
     ).scalar() or 0
@@ -485,7 +486,7 @@ def fetch_uid_details(
         rows = db.execute(
             text(
                 "SELECT id, uid FROM companies "
-                "WHERE source = 'uid' AND address IS NULL AND id > :last_id "
+                "WHERE source = 'uid' AND uid_detail_fetched_at IS NULL AND id > :last_id "
                 "ORDER BY id ASC LIMIT :limit"
             ),
             {"last_id": last_id, "limit": batch_size},
@@ -500,28 +501,37 @@ def fetch_uid_details(
             except Exception as exc:
                 stats["api_errors"] += 1
                 stats["errors"].append(f"[{uid_str}] GetByUID: {exc}")
-                last_id = row_id
-                processed += 1
-                continue
-
-            if not entity:
-                stats["skipped_no_detail"] += 1
-                last_id = row_id
-                processed += 1
-                continue
-
-            update = detail_to_update(entity)
-            if update:
+                # Mark as fetched so we don't keep hammering a broken entry.
                 db.execute(
-                    text(
-                        "UPDATE companies SET "
-                        + ", ".join(f"{k} = :{k}" for k in update)
-                        + " WHERE id = :id"
-                    ),
-                    {**update, "id": row_id},
+                    text("UPDATE companies SET uid_detail_fetched_at = now() WHERE id = :id"),
+                    {"id": row_id},
                 )
-                stats["updated"] += 1
+                last_id = row_id
+                processed += 1
+                continue
 
+            if entity:
+                update = detail_to_update(entity)
+                if update:
+                    db.execute(
+                        text(
+                            "UPDATE companies SET "
+                            + ", ".join(f"{k} = :{k}" for k in update)
+                            + ", uid_detail_fetched_at = now() WHERE id = :id"
+                        ),
+                        {**update, "id": row_id},
+                    )
+                    stats["updated"] += 1
+                    last_id = row_id
+                    processed += 1
+                    continue
+
+            # No entity or no fields to update — still mark as fetched.
+            stats["skipped_no_detail"] += 1
+            db.execute(
+                text("UPDATE companies SET uid_detail_fetched_at = now() WHERE id = :id"),
+                {"id": row_id},
+            )
             last_id = row_id
             processed += 1
 

@@ -877,7 +877,7 @@ export function CompanyDetailClient({ company: initial, readOnlyDemo = false, is
               <div className="bg-white rounded-2xl border border-[#e6e8ec] p-5">
                 <h2 className="font-bold mb-3" style={{ fontSize: 15, color: "#1f2733" }}>Source coverage</h2>
                 <div className="grid grid-cols-2 gap-x-4 gap-y-2">
-                  <CoverageItem label="Zefix" present={true} />
+                  <CoverageItem label={company.source === 'uid' ? 'UID Register' : 'Zefix'} present={true} />
                   <CoverageItem label="Purpose" present={!!company.purpose} />
                   <CoverageItem label="NOGA" present={!!company.noga_code} />
                   <CoverageItem label="AI class." present={!!company.ai_category} />

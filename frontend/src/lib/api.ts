@@ -827,6 +827,17 @@ export async function resumeJob(id: number): Promise<void> {
   await fetch(`/api/v1/jobs/${id}/resume`, { method: "POST", credentials: "include" });
 }
 
+export async function rerunJob(id: number, mode: "new" | "continue"): Promise<Job> {
+  const res = await fetch(`/api/v1/jobs/${id}/rerun`, {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ mode }),
+  });
+  if (!res.ok) return _handleErrorResponse(res);
+  return res.json();
+}
+
 export async function triggerJob(endpoint: string, body?: object): Promise<Job> {
   const res = await fetch(`/api/v1/${endpoint}`, {
     method: "POST",

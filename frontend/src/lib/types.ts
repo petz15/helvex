@@ -4,6 +4,7 @@ export interface Company {
   name: string;
   legal_form: string | null;
   status: string | null;
+  source: string | null;
   municipality: string | null;
   canton: string | null;
   purpose: string | null;
@@ -174,6 +175,7 @@ export interface Job {
   progress_done: number | null;
   progress_total: number | null;
   error: string | null;
+  restart_count: number;
   created_at: string;
   started_at: string | null;
   finished_at: string | null;
