@@ -313,8 +313,9 @@ def get_serp_analysis(
     Parses google_search_results_raw (organic position) and google_search_full_raw
     (ads/local pack counts) without making any new API calls.
     """
+    from datetime import datetime, timezone
     from urllib.parse import urlparse
-    from app.services.scoring import classify_domain
+    from app.services.scoring import classify_domain, compute_seo_visibility_score, find_organic_position
 
     db_company = crud.get_company(db, company_id)
     if not db_company:
@@ -366,14 +367,7 @@ def get_serp_analysis(
 
     # Find company URL's organic position
     company_url = db_company.website_url
-    company_domain = _domain(company_url)
-    organic_position: int | None = None
-
-    if company_domain:
-        for r in organic_by_rank:
-            if _domain(r.get("link", "")) == company_domain and r.get("position") is not None:
-                organic_position = r["position"] + 1  # 1-based for display
-                break
+    organic_position = find_organic_position(organic_results, company_url)
 
     # Organic results ranked above the company's own website
     organic_above: list[dict] = []
@@ -394,6 +388,17 @@ def get_serp_analysis(
     if db_company.google_search_params and isinstance(db_company.google_search_params, dict):
         search_query = db_company.google_search_params.get("q")
 
+    seo_score = compute_seo_visibility_score(
+        organic_position,
+        ads_count=ads_count,
+        has_local_pack=has_local_pack,
+        has_knowledge_graph=has_knowledge_graph,
+    )
+    if seo_score != db_company.seo_visibility_score:
+        db_company.seo_visibility_score = seo_score
+        db_company.seo_visibility_computed_at = datetime.now(timezone.utc)
+        db.commit()
+
     return {
         "company_url": company_url,
         "search_query": search_query,
@@ -405,6 +410,7 @@ def get_serp_analysis(
         "local_count": local_count,
         "has_knowledge_graph": has_knowledge_graph,
         "organic_above": organic_above,
+        "seo_visibility_score": seo_score,
         "searched_at": db_company.website_checked_at.isoformat() if db_company.website_checked_at else None,
     }
 

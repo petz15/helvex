@@ -486,6 +486,70 @@ def get_crawler_review_flags(
     return {"items": items, "total": total, "page": page, "page_size": page_size}
 
 
+@router.get("/crawler/directory-crawl-domains", summary="List directory crawl domains (superadmin)")
+def list_directory_crawl_domains_route(
+    status: str | None = Query(None, description="Filter by status: pending_review | approved | rejected"),
+    db: Session = Depends(get_db),
+    _: User = Depends(_require_superadmin),
+) -> list[dict]:
+    """Return all directory crawl domains, optionally filtered by status."""
+    from app import crud
+    rows = crud.list_directory_crawl_domains(db, status=status)
+    return [
+        {
+            "id": r.id,
+            "value": r.value,
+            "status": r.status,
+            "source": r.source,
+            "company_count": r.company_count,
+            "notes": r.notes,
+            "discovered_at": r.discovered_at.isoformat() if r.discovered_at else None,
+            "reviewed_at": r.reviewed_at.isoformat() if r.reviewed_at else None,
+        }
+        for r in rows
+    ]
+
+
+@router.patch("/crawler/directory-crawl-domains/{domain_id}/approve", summary="Approve a directory crawl domain (superadmin)")
+def approve_directory_crawl_domain_route(
+    domain_id: int,
+    db: Session = Depends(get_db),
+    _: User = Depends(_require_superadmin),
+) -> dict:
+    from app import crud
+    row = crud.approve_directory_crawl_domain(db, domain_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="Domain not found")
+    db.commit()
+    return {"id": row.id, "value": row.value, "status": row.status}
+
+
+@router.patch("/crawler/directory-crawl-domains/{domain_id}/reject", summary="Reject a directory crawl domain (superadmin)")
+def reject_directory_crawl_domain_route(
+    domain_id: int,
+    db: Session = Depends(get_db),
+    _: User = Depends(_require_superadmin),
+) -> dict:
+    from app import crud
+    row = crud.reject_directory_crawl_domain(db, domain_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="Domain not found")
+    db.commit()
+    return {"id": row.id, "value": row.value, "status": row.status}
+
+
+@router.delete("/crawler/directory-crawl-domains/{domain_id}", status_code=204, summary="Delete a directory crawl domain entry (superadmin)")
+def delete_directory_crawl_domain_route(
+    domain_id: int,
+    db: Session = Depends(get_db),
+    _: User = Depends(_require_superadmin),
+) -> None:
+    from app import crud
+    if not crud.delete_directory_crawl_domain(db, domain_id):
+        raise HTTPException(status_code=404, detail="Domain not found")
+    db.commit()
+
+
 @router.get("/crawler/candidate-domain-stats", summary="Frequent URL candidate domains for blocklist review (superadmin)")
 def get_candidate_domain_stats(
     min_companies: int = Query(50, ge=1, le=10000),

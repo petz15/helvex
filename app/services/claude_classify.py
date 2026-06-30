@@ -191,6 +191,29 @@ def claude_classify_batch(
 
     _boilerplate_patterns = crud.get_active_boilerplate_patterns(db)
 
+    # Pre-fetch directory profile data for all companies in this batch (one query).
+    _selected_ids = [c.id for c in selected]
+    _dir_data_by_company: dict[int, list[dict]] = {}
+    if _selected_ids:
+        from sqlalchemy import text as _text
+        dir_rows = db.execute(
+            _text(
+                "SELECT company_id, domain, description, raw_text, rating, review_count "
+                "FROM company_directory_data "
+                "WHERE company_id = ANY(:ids) AND crawl_status = 'crawled' "
+                "ORDER BY company_id, crawled_at DESC"
+            ),
+            {"ids": _selected_ids},
+        ).fetchall()
+        for row in dir_rows:
+            _dir_data_by_company.setdefault(row[0], []).append({
+                "domain": row[1],
+                "description": row[2],
+                "raw_text": row[3],
+                "rating": row[4],
+                "review_count": row[5],
+            })
+
     def _build_user_text(company: Company) -> str:
         purpose = _strip_purpose_boilerplate(company.purpose or "", _boilerplate_patterns)
         if max_purpose_chars > 0 and len(purpose) > max_purpose_chars:
@@ -206,6 +229,19 @@ def claude_classify_batch(
             parts.append(f"Google score: {company.web_score} (0–100 confidence that the website belongs to this company)")
         if company.social_media_only:
             parts.append("Note: only social media presence found — no company website")
+        dir_entries = _dir_data_by_company.get(company.id, [])
+        if dir_entries:
+            dir_lines = []
+            for entry in dir_entries[:4]:
+                snippet = (entry.get("description") or (entry.get("raw_text") or "")[:400]).strip()
+                if not snippet:
+                    continue
+                domain = entry.get("domain") or "directory"
+                rating_str = f" · {entry['rating']}/5" if entry.get("rating") else ""
+                rc_str = f" ({entry['review_count']} reviews)" if entry.get("review_count") else ""
+                dir_lines.append(f"- [{domain}{rating_str}{rc_str}] {snippet}")
+            if dir_lines:
+                parts.append("External profiles:\n" + "\n".join(dir_lines))
         return "\n".join(parts)
 
     def _refresh_combined(company: Company) -> None:

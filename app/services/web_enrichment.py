@@ -19,8 +19,11 @@ from app.models.company import Company
 from app.schemas.company import CompanyUpdate
 from app.services._pipeline_utils import _is_control_signal_exception
 from app.services.scoring import (
+    compute_seo_visibility_score,
     distance_to_muri_km,
+    extract_serp_features,
     fallback_result_score,
+    find_organic_position,
     is_irrelevant_result,
     score_result,
 )
@@ -423,6 +426,19 @@ def recalculate_google_scores(
                     company.ai_score, company.noga_confidence, company.purpose_keywords,
                     web_score=company.web_score,
                 )
+
+                organic_position = find_organic_position(rescored, company.website_url)
+                ads_count, has_local_pack, has_knowledge_graph = extract_serp_features(
+                    getattr(company, "google_search_full_raw", None)
+                )
+                company.seo_visibility_score = compute_seo_visibility_score(
+                    organic_position,
+                    ads_count=ads_count,
+                    has_local_pack=has_local_pack,
+                    has_knowledge_graph=has_knowledge_graph,
+                )
+                company.seo_visibility_computed_at = datetime.now(timezone.utc)
+
                 stats["updated"] += 1
             except Exception as exc:  # noqa: BLE001
                 logger.warning("Google rescore failed for %s: %s", company.uid, exc)

@@ -62,6 +62,17 @@ from app.crud.company import (
     search_keywords,
     update_company,
 )
+from app.crud.directory_crawl_domain import (
+    approve_directory_crawl_domain,
+    count_pending_directory_crawl_domains,
+    delete_directory_crawl_domain,
+    get_approved_directory_crawl_domains,
+    get_directory_crawl_domain,
+    get_directory_crawl_domain_by_value,
+    list_directory_crawl_domains,
+    reject_directory_crawl_domain,
+    upsert_directory_crawl_domain,
+)
 from app.crud.note import create_note, delete_note, get_note, list_notes_for_company, update_note
 from app.crud.org_company_state import (
     get_or_create_org_company_state,

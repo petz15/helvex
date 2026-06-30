@@ -1876,6 +1876,67 @@ def trigger_enrich_web_purpose_sim(
     return JobOut.from_orm_obj(job)
 
 
+class DiscoverDirectoryDomainsBody(BaseModel):
+    min_companies: int = 30
+    limit: int = 200
+
+
+@router.post("/crawler/discover-directory-domains", response_model=JobOut, status_code=status.HTTP_202_ACCEPTED)
+def trigger_discover_directory_domains(
+    body: DiscoverDirectoryDomainsBody,
+    request: Request,
+    db: Session = Depends(get_db),
+    _: User = Depends(require_superadmin),
+):
+    """Scan company_url_candidates for high-frequency domains not yet in the managed list.
+
+    Domains appearing for >= min_companies companies that are not already blocked or known
+    are inserted into directory_crawl_domains as pending_review for admin evaluation.
+    Run after large Google enrichment batches to surface new directories.
+    """
+    job = _enqueue_or_http_error(
+        request,
+        job_type="discover_directory_domains",
+        label=f"Discover directory domains (≥{body.min_companies} companies)",
+        params=body.model_dump(),
+        db=db,
+    )
+    return JobOut.from_orm_obj(job)
+
+
+class DirectoryCrawlBody(BaseModel):
+    batch_size: int = 100
+    limit: int | None = None
+    timeout: float = 15.0
+    rate_limit_delay: float = 0.3
+    rerun: bool = False
+
+
+@router.post("/crawler/directory-crawl", response_model=JobOut, status_code=status.HTTP_202_ACCEPTED)
+def trigger_directory_crawl(
+    body: DirectoryCrawlBody,
+    request: Request,
+    db: Session = Depends(get_db),
+    _: User = Depends(require_superadmin),
+):
+    """Crawl business directory profile pages for company context enrichment.
+
+    Fetches HTML from directory sites (moneyhouse.ch, local.ch, northdata.com, etc.)
+    that appear in company_url_candidates, extracts text + ratings + categories, and
+    stores results in company_directory_data. This data feeds into Claude AI scoring
+    as additional context about what the company does and how it is rated externally.
+    No S3 — text stored directly in the DB (capped at 5000 chars per page).
+    """
+    job = _enqueue_or_http_error(
+        request,
+        job_type="directory_crawl",
+        label="Directory crawl — profile pages (moneyhouse, local.ch, northdata…)",
+        params=body.model_dump(),
+        db=db,
+    )
+    return JobOut.from_orm_obj(job)
+
+
 @router.post("/crawler/recompute-website-status", response_model=JobOut, status_code=status.HTTP_202_ACCEPTED)
 def trigger_recompute_website_status(
     request: Request,

@@ -13,12 +13,18 @@ import {
   crawlerPopulateUrls,
   crawlerRecomputeWebsiteStatus,
   crawlerEnrichPurposeSim,
+  crawlerDirectoryCrawl,
+  crawlerDiscoverDirectoryDomains,
+  fetchDirectoryCrawlDomains,
+  approveDirectoryCrawlDomain,
+  rejectDirectoryCrawlDomain,
   fetchCandidateDomainStats,
   blockDomain,
   fetchCrawlerReviewFlags,
   type AdminCrawlerStats,
   type AdminCrawlerFailure,
   type CandidateDomainStat,
+  type DirectoryCrawlDomain,
   type ReviewFlagItem,
 } from "@/lib/api";
 
@@ -119,6 +125,21 @@ export function CrawlerAdminClient() {
     `admin-review-flags-${reviewPage}`,
     () => fetchCrawlerReviewFlags({ page: reviewPage, page_size: 50 }),
   );
+
+  const { data: pendingDomains, isLoading: pendingDomainsLoading, mutate: mutatePendingDomains } =
+    useSWR<DirectoryCrawlDomain[]>("admin-pending-dir-domains", () =>
+      fetchDirectoryCrawlDomains("pending_review"),
+    );
+
+  async function handleDomainReview(id: number, action: "approve" | "reject") {
+    try {
+      if (action === "approve") await approveDirectoryCrawlDomain(id);
+      else await rejectDirectoryCrawlDomain(id);
+      void mutatePendingDomains();
+    } catch (e) {
+      flash("error", e instanceof Error ? e.message : "Action failed");
+    }
+  }
 
   const mutateAll = useCallback(() => {
     void mutateStats();
@@ -370,15 +391,93 @@ export function CrawlerAdminClient() {
                 {acting === "purpose-sim" ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
                 Enrich purpose similarity (ML)
               </button>
+              <button
+                onClick={() => doAction("directory-crawl", crawlerDirectoryCrawl)}
+                disabled={acting !== null}
+                className="flex items-center gap-2 px-3 py-2 text-sm rounded-lg border border-teal-200 bg-teal-50 hover:bg-teal-100 text-teal-800 disabled:opacity-50 transition-colors"
+              >
+                {acting === "directory-crawl" ? <Loader2 size={14} className="animate-spin" /> : <Globe size={14} />}
+                Crawl directory profiles
+              </button>
+              <button
+                onClick={() => doAction("discover-dirs", () => crawlerDiscoverDirectoryDomains({ min_companies: 30 }).then(r => ({ job_id: r.job_id })))}
+                disabled={acting !== null}
+                className="flex items-center gap-2 px-3 py-2 text-sm rounded-lg border border-cyan-200 bg-cyan-50 hover:bg-cyan-100 text-cyan-800 disabled:opacity-50 transition-colors"
+              >
+                {acting === "discover-dirs" ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
+                Discover new directories
+              </button>
             </div>
             <p className="text-xs text-slate-400 mt-3">
               {'"'}Reset HTTP failures{'"'} moves bot_blocked / http_error / timeout / no_content rows (HTTP tier) back to pending so they are re-crawled.
               {'"'}Reset Playwright failures{'"'} does the same for the Playwright tier.
               {'"'}Backfill URL candidates{'"'} enqueues a job that reads stored Google results and populates company_url_candidates for companies that were enriched before auto-populate was added.
+              {'"'}Crawl directory profiles{'"'} fetches profile pages from moneyhouse.ch, local.ch, northdata.com and similar directories — extracted text feeds into Claude AI scoring as additional context.
               To trigger extraction or re-extract all HTML, use the Collection page.
             </p>
           </Section>
         </>
+      )}
+
+      {/* Directory domain review queue */}
+      {((pendingDomains?.length ?? 0) > 0 || pendingDomainsLoading) && (
+        <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
+          <div className="px-4 py-3 border-b border-slate-100 flex items-center justify-between gap-3">
+            <h2 className="text-sm font-semibold text-slate-700 flex items-center gap-1.5">
+              <Globe size={14} className="text-cyan-500" /> Directory domains pending review
+              {(pendingDomains?.length ?? 0) > 0 && (
+                <span className="ml-1 px-1.5 py-0.5 rounded-full bg-cyan-100 text-cyan-700 text-xs font-semibold">
+                  {pendingDomains!.length}
+                </span>
+              )}
+            </h2>
+            <p className="text-xs text-slate-400">
+              Auto-discovered via frequency analysis. Approve to include in directory crawl; reject to ignore.
+            </p>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="bg-slate-50 border-b border-slate-200">
+                <tr>
+                  <th className="text-left px-4 py-2.5 text-xs font-semibold text-slate-500 uppercase tracking-wide">Domain</th>
+                  <th className="text-right px-4 py-2.5 text-xs font-semibold text-slate-500 uppercase tracking-wide">Companies</th>
+                  <th className="text-left px-4 py-2.5 text-xs font-semibold text-slate-500 uppercase tracking-wide">Source</th>
+                  <th className="text-right px-4 py-2.5 text-xs font-semibold text-slate-500 uppercase tracking-wide">Actions</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {pendingDomainsLoading && (
+                  <tr><td colSpan={4} className="px-4 py-6 text-center text-slate-400"><Loader2 size={16} className="animate-spin inline" /></td></tr>
+                )}
+                {(pendingDomains ?? []).map((d) => (
+                  <tr key={d.id} className="hover:bg-slate-50">
+                    <td className="px-4 py-2.5 font-mono text-slate-800 text-xs">{d.value}</td>
+                    <td className="px-4 py-2.5 text-right tabular-nums text-slate-600 text-xs">
+                      {d.company_count != null ? d.company_count.toLocaleString() : "—"}
+                    </td>
+                    <td className="px-4 py-2.5 text-slate-400 text-xs">{d.source === "auto_discovered" ? "Auto" : "Manual"}</td>
+                    <td className="px-4 py-2.5 text-right">
+                      <div className="flex items-center justify-end gap-2">
+                        <button
+                          onClick={() => handleDomainReview(d.id, "approve")}
+                          className="px-2 py-1 text-xs rounded border border-green-200 bg-green-50 hover:bg-green-100 text-green-700 transition-colors"
+                        >
+                          Approve
+                        </button>
+                        <button
+                          onClick={() => handleDomainReview(d.id, "reject")}
+                          className="px-2 py-1 text-xs rounded border border-red-200 bg-red-50 hover:bg-red-100 text-red-700 transition-colors"
+                        >
+                          Reject
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
       )}
 
       {/* Review flags table */}

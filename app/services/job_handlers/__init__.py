@@ -156,4 +156,6 @@ JOB_HANDLERS: dict[str, Callable[[JobContext], tuple[dict, str]]] = {
     "web_crawl_single":          web_crawl.handle_web_crawl_single,
     "web_select_url":            web_crawl.handle_web_select_url,
     "recompute_website_status":  web_crawl.handle_recompute_website_status,
+    "directory_crawl":           web_crawl.handle_directory_crawl,
+    "discover_directory_domains": web_crawl.handle_discover_directory_domains,
 }

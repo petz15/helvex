@@ -255,7 +255,8 @@
       "Skill(update-config)",
       "Skill(update-config:*)",
       "Bash(npx tsc *)",
-      "Bash(python -c \"import ast; ast.parse\\(open\\('app/api/routes/companies/detail.py'\\).read\\(\\)\\); print\\('OK'\\)\")"
+      "Bash(python -c \"import ast; ast.parse\\(open\\('app/api/routes/companies/detail.py'\\).read\\(\\)\\); print\\('OK'\\)\")",
+      "Bash(python -m pytest tests/ -x -q --tb=short)"
     ]
   }
 }

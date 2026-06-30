@@ -46,6 +46,11 @@ class Company(Base):
     google_search_full_raw: Mapped[str | None] = mapped_column(Text, nullable=True)
     # 0-100 auto match score for the current website_url; None = not yet scored
     web_score: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # 0-100 Google search VISIBILITY (distinct from web_score, which is URL-selection
+    # confidence). Derived from organic rank of the company's own site, discounted by
+    # ads/local-pack/knowledge-graph above it. See scoring.compute_seo_visibility_score().
+    seo_visibility_score: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+    seo_visibility_computed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     # True if Google only returned social media results (no real website found)
     social_media_only: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     # Company-level website verdict, aggregated from search results + crawl

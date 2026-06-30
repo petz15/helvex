@@ -2245,6 +2245,7 @@ export interface SerpAnalysis {
   local_count: number;
   has_knowledge_graph: boolean;
   organic_above: SerpAboveItem[];
+  seo_visibility_score: number | null;
   searched_at: string | null;
 }
 
@@ -2367,6 +2368,68 @@ export async function crawlerEnrichPurposeSim(): Promise<{ job_id: number; statu
   });
   if (!res.ok) throw new Error("Failed to enqueue enrich-purpose-sim job");
   return res.json();
+}
+
+export async function crawlerDirectoryCrawl(params?: {
+  batch_size?: number;
+  limit?: number | null;
+  rerun?: boolean;
+}): Promise<{ job_id: number; status: string }> {
+  const res = await fetch("/api/v1/admin/jobs/crawler/directory-crawl", {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(params ?? {}),
+  });
+  if (!res.ok) throw new Error("Failed to enqueue directory-crawl job");
+  return res.json();
+}
+
+export async function crawlerDiscoverDirectoryDomains(params?: {
+  min_companies?: number;
+}): Promise<{ job_id: number; status: string }> {
+  const res = await fetch("/api/v1/admin/jobs/crawler/discover-directory-domains", {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(params ?? {}),
+  });
+  if (!res.ok) throw new Error("Failed to enqueue discover-directory-domains job");
+  return res.json();
+}
+
+export interface DirectoryCrawlDomain {
+  id: number;
+  value: string;
+  status: "pending_review" | "approved" | "rejected";
+  source: "manual" | "auto_discovered";
+  company_count: number | null;
+  notes: string | null;
+  discovered_at: string;
+  reviewed_at: string | null;
+}
+
+export async function fetchDirectoryCrawlDomains(status?: string): Promise<DirectoryCrawlDomain[]> {
+  const url = status
+    ? `/api/v1/admin/crawler/directory-crawl-domains?status=${encodeURIComponent(status)}`
+    : "/api/v1/admin/crawler/directory-crawl-domains";
+  const res = await fetch(url, { credentials: "include" });
+  if (!res.ok) return [];
+  return res.json();
+}
+
+export async function approveDirectoryCrawlDomain(id: number): Promise<void> {
+  await fetch(`/api/v1/admin/crawler/directory-crawl-domains/${id}/approve`, {
+    method: "PATCH",
+    credentials: "include",
+  });
+}
+
+export async function rejectDirectoryCrawlDomain(id: number): Promise<void> {
+  await fetch(`/api/v1/admin/crawler/directory-crawl-domains/${id}/reject`, {
+    method: "PATCH",
+    credentials: "include",
+  });
 }
 
 export interface CandidateDomainStat {

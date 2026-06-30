@@ -248,6 +248,21 @@ function PositionBadge({ pos }: { pos: number | null }) {
   );
 }
 
+function SeoScoreBadge({ score }: { score: number | null }) {
+  if (score == null) return null;
+  const cls = score >= 70 ? "bg-green-50 text-green-700 border-green-200"
+    : score >= 40 ? "bg-amber-50 text-amber-700 border-amber-200"
+    : "bg-red-50 text-red-600 border-red-200";
+  return (
+    <span
+      className={`text-[12px] font-semibold px-2 py-0.5 rounded-full border ${cls}`}
+      title="Organic rank discounted by ads and SERP features above it — distinct from web_score (URL-match confidence)"
+    >
+      SEO visibility {score}
+    </span>
+  );
+}
+
 function SerpPresenceCard({ companyId }: { companyId: number }) {
   const { data, isLoading, error } = useSWR<SerpAnalysis>(
     `serp-analysis-${companyId}`,
@@ -275,6 +290,7 @@ function SerpPresenceCard({ companyId }: { companyId: number }) {
         ) : (
           <span className="text-[12px] text-slate-400">No website on file</span>
         )}
+        <SeoScoreBadge score={data.seo_visibility_score} />
         {data.ads_count > 0 && (
           <span className="text-[12px] px-2 py-0.5 rounded-full border bg-red-50 text-red-600 border-red-200">
             {data.ads_count} ad{data.ads_count !== 1 ? "s" : ""} above organic

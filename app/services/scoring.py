@@ -1,5 +1,6 @@
 """Scoring logic for matching Google Search results to a company profile."""
 
+import json
 import logging
 import math
 import re
@@ -654,6 +655,78 @@ def classify_domain(url: str, directory_domains: set[str] | None = None) -> str:
     if _LOCAL_DIRECTORY_PATH_RE.search(url) or _url_is_globally_excluded(url):
         return "directory"
     return "own"
+
+
+# Points lost per organic rank below #1, per ad shown above the result, and per
+# competing SERP feature (local pack / knowledge graph) pushing it further down.
+_SEO_RANK_PENALTY = 8
+_SEO_AD_PENALTY = 12
+_SEO_FEATURE_PENALTY = 5
+
+
+def find_organic_position(results: list[dict], url: str | None) -> int | None:
+    """1-based organic rank of `url`'s domain within stored Google results.
+
+    `results` is the google_search_results_raw list (each row has a 0-based `position`).
+    Returns None when the domain isn't present or has no recorded position.
+    """
+    if not url:
+        return None
+    domain = _root_domain(url)
+    if not domain:
+        return None
+    has_positions = any(r.get("position") is not None for r in results)
+    ordered = sorted(results, key=lambda r: r.get("position", 9999)) if has_positions else results
+    for r in ordered:
+        pos = r.get("position")
+        if pos is not None and _root_domain(r.get("link", "")) == domain:
+            return pos + 1
+    return None
+
+
+def extract_serp_features(google_search_full_raw: str | None) -> tuple[int, bool, bool]:
+    """Return (ads_count, has_local_pack, has_knowledge_graph) from stored provider JSON.
+
+    Handles both Serper (ads/places/knowledgeGraph) and ScrapingDog
+    (paid_results/local_results/knowledge_graph) field naming.
+    """
+    if not google_search_full_raw:
+        return 0, False, False
+    try:
+        full = json.loads(google_search_full_raw)
+    except (json.JSONDecodeError, TypeError):
+        return 0, False, False
+    ads = full.get("ads") or full.get("paid_results") or []
+    ads_count = len(ads) if isinstance(ads, list) else 0
+    local = full.get("places") or full.get("local_results") or []
+    has_local_pack = bool(local) if isinstance(local, list) else False
+    has_knowledge_graph = bool(full.get("knowledgeGraph") or full.get("knowledge_graph"))
+    return ads_count, has_local_pack, has_knowledge_graph
+
+
+def compute_seo_visibility_score(
+    organic_position: int | None,
+    *,
+    ads_count: int = 0,
+    has_local_pack: bool = False,
+    has_knowledge_graph: bool = False,
+) -> int | None:
+    """SEO visibility (0-100): how findable the company's own site actually is in Google.
+
+    Distinct from web_score (URL-selection confidence). This measures the real-world
+    search result page: a #1 organic rank buried under 3 ads is not great visibility.
+
+    organic_position is 1-based (1 = top organic result). Returns None when the
+    company's own site was not found in the organic results at all.
+    """
+    if organic_position is None or organic_position < 1:
+        return None
+    score = 100 - (organic_position - 1) * _SEO_RANK_PENALTY - ads_count * _SEO_AD_PENALTY
+    if has_local_pack:
+        score -= _SEO_FEATURE_PENALTY
+    if has_knowledge_graph:
+        score -= _SEO_FEATURE_PENALTY
+    return max(0, min(100, score))
 
 
 def is_directory_page(html: bytes, url: str) -> bool:

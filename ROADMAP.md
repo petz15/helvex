@@ -133,7 +133,8 @@
 - [ ] **Multiple scores** - allow for different set of scores in case users are looking for different types of companies. e.g. for a specific campaign or promotion etc
 - [ ] **Fix Multilang issue** - Need to decide if I have one language as base (such as english), convert everything to english for stuff like categorization etc then go and translate back i.e. use the original language again? other method would be to do it per language and then add a filter for languges with optional translations for other langugages. 
 - [ ] **Data from eSHAB** - has much mor than just changes in companies and pre 2018
-- [ ] **Serper Data as SEO indication** - use the results from serper which shows the SEO of the website?
+- [x] **SEO Visibility Score** — stored `seo_visibility_score` (0–100) derived from organic rank of the company's own site, discounted by ads above it (-12 each) and SERP features (local pack / knowledge graph, -5 each). Distinct from `web_score` (URL-selection confidence). Backfilled in bulk via `recalculate_google_scores` job; persisted on demand when `/serp-analysis` endpoint is called. Shown in Search Presence card on company profile.
+- [ ] **Keyword SEO Checker** — ad-hoc Serper.dev search for an arbitrary user-supplied keyword (not the company name). Returns raw SERP results with position, ads, local pack, and organic entries. Configurable by location (e.g. "Bern, Switzerland") and language (de/fr/it/en), reusing the existing `gl`/`hl`/`location` params already supported by `google_search_client.py`. Useful for checking whether a target keyword is dominated by directories, competitors, or ads before recommending it to a prospect. No company-matching or scoring — just raw keyword intelligence.
 
 
 ## Company Profile

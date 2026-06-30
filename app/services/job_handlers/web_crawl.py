@@ -5,6 +5,7 @@ Three job types:
   web_crawl_http     — httpx crawler (crawler-http pods + ML worker idle-fill)
   web_crawl_playwright — Playwright crawler (ML worker idle-fill)
   web_select_url     — switches selected URL candidate for a company
+  directory_crawl    — crawls directory profile pages (moneyhouse, local.ch, etc.)
 """
 from __future__ import annotations
 
@@ -969,3 +970,333 @@ def handle_web_crawl_single(ctx: JobContext) -> tuple[dict, str]:
         "used_playwright": result.needs_playwright,
     }
     return stats, f"Crawled {len(pages_crawled)} page(s) for company {company_id}: {', '.join(pages_crawled)}"
+
+
+# ── directory_crawl ────────────────────────────────────────────────────────────
+
+# Domains we actively crawl for directory profile data.
+# Subset of _DIRECTORY_DOMAINS: profile/review/business-info sites only.
+# Excludes government registries (already in Zefix), job boards, real estate,
+# automotive classifieds, and paywalled / irrelevant sites.
+DIRECTORY_CRAWL_DOMAINS: frozenset[str] = frozenset({
+    # Local / general Swiss directories — free, per-company profile pages
+    "local.ch",
+    "search.ch",
+    "yellowpages.ch",
+    "yellowpages.swiss",
+    "help.ch",
+    "startups.ch",
+    "pappers.ch",
+    # Sector-specific Swiss directories
+    "treuhandvergleich.ch",
+    "consultingvergleich.ch",
+    "treuhandsuisse.ch",
+    "treuhandsuisse-zh.ch",
+    "fiduciairesuisse-vd.ch",
+    "kanzleiwelten.com",
+    "spheriq.ch",
+    "swiss-arc.ch",
+    "swissbiotech.org",
+    "ofri.ch",
+    "auditorstats.ch",
+    "ccis.ch",
+    # Review platforms
+    "provenexpert.com",
+    "kununu.com",
+    "yelp.com",
+    # Industry databases — free tiers have useful text
+    "kompass.ch",
+    "kompass.com",
+    # Excluded (paywall / JS-heavy / low value for Swiss SMEs):
+    #   moneyhouse.ch      — useful data behind login; ToS restrictions
+    #   business-monitor.ch — aggregated metrics, not descriptive text
+    #   northdata.*        — free tier is sparse; login required for financials
+    #   bloomberg.com      — only large companies; paywalled
+    #   crunchbase.com     — mostly US/tech; limited Swiss SME coverage
+})
+
+_DIR_DOMAIN_EXTRACT_SQL = """
+    regexp_replace(
+        split_part(
+            regexp_replace(lower(url), '^https?://', ''),
+            '/', 1
+        ),
+        '^www\\.', ''
+    )
+"""
+
+
+def handle_directory_crawl(ctx: JobContext) -> tuple[dict, str]:
+    """Crawl business directory profile pages for company context enrichment.
+
+    Queries company_url_candidates for URLs on known directory sites, fetches
+    HTML via httpx, extracts text + structured fields, and upserts into
+    company_directory_data. No S3 — raw text stored directly in DB (capped).
+    Feeds into Claude classification via _build_user_text() in claude_classify.py.
+    """
+    import asyncio
+
+    import httpx
+
+    from app.services.directory_extract import extract_directory_page
+
+    batch_size = int(ctx.params.get("batch_size", 100))
+    rerun = bool(ctx.params.get("rerun", False))
+    limit_raw = ctx.params.get("limit")
+    limit: int | None = int(limit_raw) if limit_raw else None
+    request_timeout = float(ctx.params.get("timeout", 15.0))
+    rate_delay = float(ctx.params.get("rate_limit_delay", 0.3))
+
+    # Prefer DB-managed approved list; fall back to hardcoded set if table is empty
+    # (e.g. before the migration has run on a dev environment).
+    db_domains = crud.get_approved_directory_crawl_domains(ctx.db)
+    domain_list = list(db_domains) if db_domains else list(DIRECTORY_CRAWL_DOMAINS)
+
+    already_done_clause = (
+        ""
+        if rerun
+        else f"AND NOT EXISTS (SELECT 1 FROM company_directory_data d WHERE d.company_id = u.company_id AND d.url = u.url)"
+    )
+
+    count_sql = text(
+        f"SELECT COUNT(*) FROM company_url_candidates u "  # noqa: S608
+        f"WHERE ({_DIR_DOMAIN_EXTRACT_SQL}) = ANY(:domains) "
+        f"{already_done_clause}"
+    )
+    total = int(ctx.db.execute(count_sql, {"domains": domain_list}).scalar() or 0)
+    if limit is not None:
+        total = min(total, limit)
+
+    stats: dict = {"crawled": 0, "failed": 0, "skipped": 0, "errors": []}
+    offset = 0
+    done = 0
+
+    _headers = {
+        "User-Agent": (
+            "Mozilla/5.0 (compatible; HelvexBot/1.0; +https://helvex.ch)"
+        ),
+        "Accept-Language": "de-CH,de;q=0.9,fr-CH;q=0.8,en;q=0.7",
+    }
+
+    async def _fetch(url: str) -> bytes | None:
+        try:
+            async with httpx.AsyncClient(
+                headers=_headers,
+                follow_redirects=True,
+                timeout=request_timeout,
+                verify=True,
+            ) as client:
+                r = await client.get(url)
+                if r.status_code < 400:
+                    return r.content
+        except Exception:
+            pass
+        return None
+
+    while True:
+        ctx.assert_not_cancelled()
+
+        fetch_limit = batch_size if limit is None else min(batch_size, limit - done)
+        if fetch_limit <= 0:
+            break
+
+        rows = ctx.db.execute(
+            text(
+                f"SELECT u.company_id, u.url, ({_DIR_DOMAIN_EXTRACT_SQL}) AS domain "  # noqa: S608
+                f"FROM company_url_candidates u "
+                f"WHERE ({_DIR_DOMAIN_EXTRACT_SQL}) = ANY(:domains) "
+                f"{already_done_clause} "
+                f"ORDER BY u.company_id, u.score DESC NULLS LAST "
+                f"LIMIT :lim OFFSET :off"
+            ),
+            {"domains": domain_list, "lim": fetch_limit, "off": offset},
+        ).fetchall()
+
+        if not rows:
+            break
+
+        for company_id, url, domain in rows:
+            ctx.assert_not_cancelled()
+            try:
+                import time as _time
+                html = asyncio.run(_fetch(url))
+                if rate_delay > 0:
+                    _time.sleep(rate_delay)
+
+                if html is None:
+                    ctx.db.execute(
+                        text(
+                            "INSERT INTO company_directory_data "
+                            "(company_id, url, domain, crawl_status, crawl_error, crawled_at) "
+                            "VALUES (:cid, :url, :dom, 'failed', 'fetch_failed', now()) "
+                            "ON CONFLICT (company_id, url) DO UPDATE SET "
+                            "crawl_status='failed', crawl_error='fetch_failed', crawled_at=now()"
+                        ),
+                        {"cid": company_id, "url": url, "dom": domain},
+                    )
+                    stats["failed"] += 1
+                    continue
+
+                extracted = extract_directory_page(html, url)
+                raw_text = extracted.get("raw_text")
+                if not raw_text:
+                    ctx.db.execute(
+                        text(
+                            "INSERT INTO company_directory_data "
+                            "(company_id, url, domain, crawl_status, crawl_error, crawled_at) "
+                            "VALUES (:cid, :url, :dom, 'failed', 'no_text', now()) "
+                            "ON CONFLICT (company_id, url) DO UPDATE SET "
+                            "crawl_status='failed', crawl_error='no_text', crawled_at=now()"
+                        ),
+                        {"cid": company_id, "url": url, "dom": domain},
+                    )
+                    stats["skipped"] += 1
+                    continue
+
+                ctx.db.execute(
+                    text(
+                        "INSERT INTO company_directory_data "
+                        "(company_id, url, domain, crawl_status, raw_text, description, "
+                        " rating, review_count, categories, crawled_at) "
+                        "VALUES (:cid, :url, :dom, 'crawled', :raw, :desc, "
+                        "        :rating, :rc, :cats, now()) "
+                        "ON CONFLICT (company_id, url) DO UPDATE SET "
+                        "domain=EXCLUDED.domain, crawl_status='crawled', crawl_error=NULL, "
+                        "raw_text=EXCLUDED.raw_text, description=EXCLUDED.description, "
+                        "rating=EXCLUDED.rating, review_count=EXCLUDED.review_count, "
+                        "categories=EXCLUDED.categories, crawled_at=now()"
+                    ),
+                    {
+                        "cid": company_id,
+                        "url": url,
+                        "dom": domain,
+                        "raw": raw_text,
+                        "desc": extracted.get("description"),
+                        "rating": extracted.get("rating"),
+                        "rc": extracted.get("review_count"),
+                        "cats": extracted.get("categories"),
+                    },
+                )
+                stats["crawled"] += 1
+
+            except Exception as exc:  # noqa: BLE001
+                stats["failed"] += 1
+                stats["errors"].append(f"company {company_id} {url}: {exc}")
+                logger.warning("directory_crawl error for company %d %s: %s", company_id, url, exc)
+                try:
+                    ctx.db.rollback()
+                except Exception:
+                    pass
+
+        ctx.db.commit()
+        done += len(rows)
+        offset += len(rows)
+
+        msg = (
+            f"Directory crawl {done}/{total} — "
+            f"{stats['crawled']} crawled, {stats['failed']} failed, "
+            f"{stats['skipped']} empty, {len(stats['errors'])} errors"
+        )
+        crud.update_progress(ctx.db, ctx.job, message=msg, done=done, total=total, stats=dict(stats))
+        crud.create_event(ctx.db, job_id=ctx.job.id, level="debug", message=msg)
+
+    return stats, (
+        f"Directory crawl done — {stats['crawled']} pages crawled, "
+        f"{stats['failed']} failed, {stats['skipped']} empty, "
+        f"{len(stats['errors'])} errors"
+    )
+
+
+# ── discover_directory_domains ─────────────────────────────────────────────────
+
+# Domains never worth surfacing for directory crawl review, regardless of frequency.
+# Government registries (data already in Zefix), job boards, real estate, automotive.
+_DISCOVERY_SKIP_DOMAINS: frozenset[str] = frozenset({
+    "zefix.admin.ch", "uid.admin.ch", "handelsregister.ch", "hr-register.ch",
+    "shab.ch", "admin.ch", "companyhouse.ch",
+    "jobs.ch", "jobup.ch", "jobscout24.ch", "emplois-fribourg.ch",
+    "homegate.ch", "immoscout24.ch", "immowelt.ch", "flatfox.ch", "newhome.ch",
+    "scout24.ch", "autolina.ch", "autoscout24.ch", "promove.ch",
+    "rocketreach.co", "rocketreach.com",
+    "yandex.ru",
+    "wikipedia.org",
+    "comparis.ch",
+    "konsumentenschutz.ch", "konsumentenbewertung.ch",
+    "maptons.com",
+    "die-bestatter.ch", "bestatter1.ch",
+    "psychologie.ch",
+    "sogenda.ch",
+    "bloomberg.com",
+    "crunchbase.com",
+    "moneyhouse.ch",
+    "business-monitor.ch",
+    "northdata.com", "northdata.ch", "northdata.de", "northdata.eu",
+    "linkedin.com", "xing.com", "facebook.com", "instagram.com",
+    "twitter.com", "x.com", "youtube.com", "tiktok.com", "pinterest.com",
+    "news.google.com",
+})
+
+
+def handle_discover_directory_domains(ctx: JobContext) -> tuple[dict, str]:
+    """Scan company_url_candidates for high-frequency domains not yet in the managed list.
+
+    Domains appearing for >= min_companies companies that are not already blocked
+    (CRAWL_BLOCKED_DOMAINS), not already in directory_crawl_domains, and not on
+    the permanent skip list are inserted as pending_review for admin evaluation.
+
+    Run this periodically (e.g. after large Google enrichment batches) to surface
+    new directories appearing in search results.
+    """
+    from app.crud.crawler import get_high_frequency_candidate_domains
+
+    min_companies = int(ctx.params.get("min_companies", 30))
+    limit = int(ctx.params.get("limit", 200))
+
+    ctx.status(f"Scanning URL candidates for domains appearing in ≥{min_companies} companies…")
+
+    candidates = get_high_frequency_candidate_domains(ctx.db, min_companies=min_companies, limit=limit)
+
+    from app.services.scoring import CRAWL_BLOCKED_DOMAINS
+    existing = {
+        r[0]
+        for r in ctx.db.execute(
+            text("SELECT value FROM directory_crawl_domains")
+        ).fetchall()
+    }
+
+    stats = {"found": 0, "inserted": 0, "already_known": 0, "skipped_blocked": 0}
+    for row in candidates:
+        domain = row["domain"]
+        count = row["company_count"]
+        stats["found"] += 1
+
+        if domain in _DISCOVERY_SKIP_DOMAINS:
+            continue
+        if domain in CRAWL_BLOCKED_DOMAINS and domain not in existing:
+            stats["skipped_blocked"] += 1
+            continue
+        if domain in existing:
+            # Update company_count so the review UI shows current numbers
+            crud.upsert_directory_crawl_domain(
+                ctx.db, domain, company_count=count,
+            )
+            stats["already_known"] += 1
+            continue
+
+        crud.upsert_directory_crawl_domain(
+            ctx.db, domain,
+            source="auto_discovered",
+            company_count=count,
+        )
+        stats["inserted"] += 1
+
+    ctx.db.commit()
+
+    msg = (
+        f"Discovery done — {stats['inserted']} new pending_review, "
+        f"{stats['already_known']} already known (counts updated), "
+        f"{stats['skipped_blocked']} skipped (blocked), "
+        f"{stats['found']} total candidates scanned"
+    )
+    ctx.event("info", msg)
+    return stats, msg

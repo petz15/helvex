@@ -322,8 +322,9 @@ HTML routes (browser, in `main.py`):
 | POST | `/api/v1/admin/jobs/crawler/extract` | Superadmin | Enqueue `web_extract` job (also triggered automatically after each crawl batch) |
 | POST | `/api/v1/admin/jobs/crawler/reextract` | Superadmin | Flag all crawled S3 HTML for re-extraction + run `web_extract` (no re-crawl) |
 | POST | `/api/v1/admin/jobs/crawler/recompute-website-status` | Superadmin | Enqueue `recompute_website_status` — recompute the company website verdict + multi-site count from extracts (no API/crawl cost) |
+| POST | `/api/v1/admin/jobs/crawler/directory-crawl` | Superadmin | Enqueue `directory_crawl` — fetch profile pages from business directories (moneyhouse.ch, local.ch, northdata.com, etc.) and store in `company_directory_data` |
 | GET | `/api/v1/companies/{id}/web-extract` | Authenticated | Best web extract + per-page crawl coverage for the company detail "Website" tab |
-| GET | `/api/v1/companies/{id}/serp-analysis` | Authenticated | SERP snapshot derived from stored Google data: organic rank, ads count, local pack, competitors above — no new API calls |
+| GET | `/api/v1/companies/{id}/serp-analysis` | Authenticated | SERP snapshot from stored data: organic rank, ads, local pack, competitors above, `seo_visibility_score`. Write-through: persists `seo_visibility_score` + `seo_visibility_computed_at` if value changed — no new API calls |
 | … | (other existing admin routes) | | |
 
 #### CSV Export status — `app/api/routes/jobs.py`
@@ -432,7 +433,9 @@ The core entity. Key columns:
 | `flex_score` | Integer 0-100 | Zefix-data-only priority score (no external API) |
 | `flex_score_breakdown` | JSON | Per-component flex score detail |
 | `website_url` | String | Best **own-domain** match — gated by the website verdict (NULL for social_only/directory_only/none; no longer a forced top result) |
-| `web_score` | Integer 0-100 | Google name/location match quality |
+| `web_score` | Integer 0-100 | Google name/location match quality (URL-selection confidence, not visibility) |
+| `seo_visibility_score` | Integer 0-100 | Organic search visibility: rank discounted by ads (-12 each) + SERP features (-5 each). NULL until computed. |
+| `seo_visibility_computed_at` | DateTime | Timestamp of last `seo_visibility_score` computation |
 | `website_status` | String(16) | Company-level website verdict: `verified` / `confirmed` / `likely` / `social_only` / `directory_only` / `none` (NULL = unknown). See §16. |
 | `website_count` | Integer | Number of distinct genuine websites detected (≥2 ⇒ company has multiple sites) |
 | `google_search_results_raw` | Text | Scored organic results as JSON [{title, link, snippet, score}] |
@@ -1951,6 +1954,12 @@ web_extract            distinct companies WHERE company_web_pages.needs_extracti
                        deterministic only; LLM enrichment deferred (see ROADMAP)
                        Runs concurrently with crawling: auto-triggered by _run_crawl_batch
                        when crawled > 0; dedup prevents stacking (one active instance only)
+       ↓ (separate job, manual trigger)
+directory_crawl        Queries company_url_candidates for URLs in DIRECTORY_CRAWL_DOMAINS
+                       (moneyhouse.ch, local.ch, northdata.com, treuhandvergleich.ch, etc.)
+                       httpx fetch → trafilatura text + rating/review/category heuristics
+                       → company_directory_data PK (company_id, url); no S3 (text in DB)
+                       Output feeds into claude_classify _build_user_text() as "External profiles"
 ```
 
 Both crawler tiers run robots.txt + sitemap.xml discovery (`crawler_sitemap.py`) before
@@ -1966,6 +1975,13 @@ the top-scored search result into `website_url` regardless of quality.
 
 - **Domain buckets** (`scoring.classify_domain`): each result URL → `own` / `social` /
   `directory` / `news` / `none`, reusing the existing directory/social/news domain sets.
+- **Directory-domain blocking** (`scoring._is_directory_domain`): `_DIRECTORY_DOMAINS` (hardcoded frozenset) is always unioned with DB overrides from `crud.get_active_google_directory_domains` — never replaced. Ensures both sets are active simultaneously.
+- **Content-based directory detection** (`scoring.is_directory_page(html, url)`): runs at crawl-extraction time in `handle_web_extract`. Checks URL path patterns, "claim this listing" phrases, title suffix patterns (Branchenbuch/Verzeichnis/Vergleich), and "similar companies" phrasing — three tiers, any match rejects the candidate via `crawler_crud.reject_url_candidate`.
+- **SEO Visibility Score** (`scoring.compute_seo_visibility_score(organic_position, *, ads_count, has_local_pack, has_knowledge_graph) → int | None`): measures actual Google search findability, distinct from `web_score` (URL-selection confidence). Formula: `100 − (rank−1)×8 − ads×12 − 5×(local_pack) − 5×(knowledge_graph)`, clamped [0,100]; `None` when company site not in organic results.
+  - Shared helpers: `find_organic_position(results, url) → int | None` (1-based rank of `url` domain in stored results); `extract_serp_features(google_search_full_raw) → (ads_count, has_local_pack, has_knowledge_graph)` (handles Serper `ads`/`places`/`knowledgeGraph` and ScrapingDog `paid_results`/`local_results`/`knowledge_graph` naming).
+  - Stored as `companies.seo_visibility_score` + `seo_visibility_computed_at` (migration `0113`).
+  - Persisted on demand by `GET /api/v1/companies/{id}/serp-analysis`; backfilled in bulk by `recalculate_google_scores` (no new API calls).
+  - Displayed in the Search Presence card on the company profile (green ≥70, amber 40–69, red <40).
 - **Provisional verdict** (search-only, in `enrich_company_website` / rescore paths):
   `classify_search_results` → best own-domain by score vs DB thresholds
   (`website_confirmed_search_score`, `website_likely_search_score`).
