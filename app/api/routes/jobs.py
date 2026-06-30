@@ -281,16 +281,42 @@ class BatchCollectBody(BaseModel):
     only_missing_website: bool = True
     refresh_zefix: bool = False
     run_google: bool = True
-    canton: str | None = None
-    min_zefix_score: int | None = None   # passed as-is to job params; worker maps to min_flex_score
-    min_claude_score: int | None = None  # passed as-is to job params; worker maps to min_ai_score
+    # ── Geography ─────────────────────────────────────────────────────────────
+    canton: str | None = None            # single-canton shorthand (backward compat)
+    cantons: list[str] | None = None     # include any of these cantons
+    exclude_cantons: list[str] | None = None
+    # ── Status / registration ─────────────────────────────────────────────────
+    active_only: bool = True             # exclude CANCELLED/BEING_CANCELLED/Gelöscht
+    skip_uid_only: bool = False          # exclude registration_type='uid_only'
+    skip_mwst_only: bool = False         # exclude registration_type='mwst'
+    # ── Language ──────────────────────────────────────────────────────────────
+    purpose_language: str | None = None
+    # ── Scores ────────────────────────────────────────────────────────────────
+    min_zefix_score: int | None = None   # maps to min_flex_score in worker
+    max_zefix_score: int | None = None   # maps to max_flex_score in worker
+    min_claude_score: int | None = None  # maps to min_ai_score in worker
+    min_combined_score: float | None = None
+    # ── Keywords / clusters ───────────────────────────────────────────────────
     purpose_keywords: str | None = None
+    exclude_purpose_keywords: str | None = None
     tfidf_cluster: str | None = None
     review_status: str | None = None
-    # Ordering: flex_score_desc | combined_score_desc | last_enriched_asc | created_asc
+    # ── Industry (NOGA) ───────────────────────────────────────────────────────
+    noga_code: str | None = None         # prefix include — e.g. "47" for retail
+    exclude_noga_code: str | None = None # prefix exclude — e.g. "64" for financials
+    # ── Company type ──────────────────────────────────────────────────────────
+    legal_form: str | None = None
+    business_model: str | None = None
+    # ── Date ranges ───────────────────────────────────────────────────────────
+    registered_after: str | None = None  # first_sogc_date >=  (YYYY-MM-DD)
+    registered_before: str | None = None # first_sogc_date <=
+    sogc_after: str | None = None        # sogc_date >= (last Zefix publication)
+    sogc_before: str | None = None       # sogc_date <=
+    # ── Ordering ──────────────────────────────────────────────────────────────
+    # flex_score_desc | combined_score_desc | ai_score_desc | web_score_desc |
+    # last_enriched_asc | created_asc | sogc_date_desc |
+    # first_sogc_date_asc | first_sogc_date_desc | name_asc
     order_by: str = "flex_score_desc"
-    # NOGA prefix filter — e.g. "47" matches all retail sub-codes
-    noga_code: str | None = None
 
 
 class InitialCollectBody(BaseModel):

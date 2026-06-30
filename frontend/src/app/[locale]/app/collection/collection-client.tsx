@@ -498,16 +498,53 @@ export function CollectionClient() {
         <form onSubmit={async e => {
           e.preventDefault();
           const fd = new FormData(e.currentTarget);
+          const splitCsvUpper = (key: string): string[] | null => {
+            const v = (fd.get(key) as string)?.trim();
+            if (!v) return null;
+            const parts = v.split(",").map(s => s.trim().toUpperCase()).filter(Boolean);
+            return parts.length ? parts : null;
+          };
+          const str = (key: string): string | null =>
+            (fd.get(key) as string)?.trim() || null;
+          const num = (key: string): number | null => {
+            const v = parseFloat(fd.get(key) as string);
+            return isNaN(v) ? null : v;
+          };
           await submit("collection/batch", {
             limit: parseInt(fd.get("limit") as string) || 100,
             only_missing_website: fd.get("all_companies") !== "on",
             refresh_zefix: fd.get("refresh_zefix") === "on",
             run_google: true,
-            order_by: fd.get("order_by") as string || "flex_score_desc",
-            canton: (fd.get("canton") as string)?.trim().toUpperCase() || null,
-            noga_code: (fd.get("noga_code") as string)?.trim() || null,
-            min_zefix_score: parseInt(fd.get("min_flex_score") as string) || null,
-            purpose_keywords: (fd.get("purpose_keywords") as string)?.trim() || null,
+            order_by: str("order_by") || "flex_score_desc",
+            // Status & registration
+            active_only: fd.get("active_only") === "on",
+            skip_uid_only: fd.get("skip_uid_only") === "on",
+            skip_mwst_only: fd.get("skip_mwst_only") === "on",
+            // Geography
+            cantons: splitCsvUpper("cantons"),
+            exclude_cantons: splitCsvUpper("exclude_cantons"),
+            // Language
+            purpose_language: str("purpose_language"),
+            // Scores
+            min_zefix_score: num("min_flex_score"),
+            max_zefix_score: num("max_flex_score"),
+            min_claude_score: num("min_claude_score"),
+            min_combined_score: num("min_combined_score"),
+            // NOGA
+            noga_code: str("noga_code"),
+            exclude_noga_code: str("exclude_noga_code"),
+            // Keywords
+            purpose_keywords: str("purpose_keywords"),
+            exclude_purpose_keywords: str("exclude_purpose_keywords"),
+            tfidf_cluster: str("tfidf_cluster"),
+            // Company type
+            legal_form: str("legal_form"),
+            business_model: str("business_model") || null,
+            // Date ranges
+            registered_after: str("registered_after"),
+            registered_before: str("registered_before"),
+            sogc_after: str("sogc_after"),
+            sogc_before: str("sogc_before"),
           });
         }} className="space-y-4">
           <p className="text-xs text-slate-500">
@@ -525,8 +562,14 @@ export function CollectionClient() {
               <select name="order_by" className={inputCls}>
                 <option value="flex_score_desc">Flex score ↓ (highest first)</option>
                 <option value="combined_score_desc">Combined score ↓ (AI + Web + Flex)</option>
+                <option value="ai_score_desc">AI score ↓ (highest first)</option>
+                <option value="web_score_desc">Web score ↓ (highest web confidence first)</option>
                 <option value="last_enriched_asc">Last enriched ↑ (stalest first)</option>
-                <option value="created_asc">Created ↑ (oldest registration first)</option>
+                <option value="sogc_date_desc">SOGC date ↓ (most recently active in Zefix)</option>
+                <option value="first_sogc_date_asc">First SOGC ↑ (longest-established first)</option>
+                <option value="first_sogc_date_desc">First SOGC ↓ (newest registrations first)</option>
+                <option value="created_asc">Created ↑ (oldest DB row first)</option>
+                <option value="name_asc">Name A–Z</option>
               </select>
             </Field>
           </div>
@@ -542,22 +585,133 @@ export function CollectionClient() {
             </label>
           </div>
 
-          {/* Filters sub-section */}
-          <SubSection title="Filters &amp; Scope">
+          {/* Status & Registration */}
+          <SubSection title="Status &amp; Registration">
+            <div className="flex flex-wrap gap-x-6 gap-y-2">
+              <label className="flex items-center gap-2 text-sm text-slate-700">
+                <input type="checkbox" name="active_only" defaultChecked className={checkCls} />
+                Active companies only (exclude CANCELLED / BEING_CANCELLED)
+              </label>
+              <label className="flex items-center gap-2 text-sm text-slate-700">
+                <input type="checkbox" name="skip_uid_only" className={checkCls} />
+                Skip UID-only (no HR or VAT registration — unlikely to have a website)
+              </label>
+              <label className="flex items-center gap-2 text-sm text-slate-700">
+                <input type="checkbox" name="skip_mwst_only" className={checkCls} />
+                Skip VAT-only (MWST registered, not in Handelsregister — sole traders)
+              </label>
+            </div>
+          </SubSection>
+
+          {/* Geography */}
+          <SubSection title="Geography">
             <div className="grid grid-cols-2 gap-4">
-              <Field label="Canton" hint="Leave blank for all cantons">
-                <input name="canton" className={inputCls} placeholder="e.g. ZH" />
+              <Field label="Include cantons" hint="Comma-separated — e.g. ZH,BE,GE (blank = all)">
+                <input name="cantons" className={inputCls} placeholder="all cantons" />
               </Field>
-              <Field label="NOGA code" hint="Prefix filter — e.g. 47 for retail, 62 for IT">
-                <input name="noga_code" className={inputCls} placeholder="e.g. 47" />
+              <Field label="Exclude cantons" hint="Comma-separated — e.g. AG,SZ">
+                <input name="exclude_cantons" className={inputCls} placeholder="none excluded" />
               </Field>
             </div>
-            <div className="grid grid-cols-2 gap-4 mt-3">
-              <Field label="Min flex score" hint="0–100, skip low-quality leads">
+          </SubSection>
+
+          {/* Language */}
+          <SubSection title="Language">
+            <Field label="Purpose language" hint="Filter by detected language of company purpose text">
+              <select name="purpose_language" className={inputCls}>
+                <option value="">All languages</option>
+                <option value="de">German (de)</option>
+                <option value="fr">French (fr)</option>
+                <option value="it">Italian (it)</option>
+                <option value="en">English (en)</option>
+                <option value="rm">Romansh (rm)</option>
+              </select>
+            </Field>
+          </SubSection>
+
+          {/* Score Filters */}
+          <SubSection title="Score Filters">
+            <div className="grid grid-cols-2 gap-4">
+              <Field label="Min flex score" hint="0–100 — skip low-quality leads">
                 <input name="min_flex_score" type="number" min="0" max="100" className={inputCls} placeholder="—" />
               </Field>
-              <Field label="Purpose keywords" hint="Comma-separated — e.g. software,saas">
-                <input name="purpose_keywords" className={inputCls} placeholder="—" />
+              <Field label="Max flex score" hint="0–100 — cap at a ceiling (e.g. skip already-known brands)">
+                <input name="max_flex_score" type="number" min="0" max="100" className={inputCls} placeholder="—" />
+              </Field>
+              <Field label="Min AI score" hint="0–100 — only Claude-rated companies">
+                <input name="min_claude_score" type="number" min="0" max="100" className={inputCls} placeholder="—" />
+              </Field>
+              <Field label="Min combined score" hint="0–100 — requires scored companies">
+                <input name="min_combined_score" type="number" min="0" max="100" step="0.1" className={inputCls} placeholder="—" />
+              </Field>
+            </div>
+          </SubSection>
+
+          {/* Industry (NOGA) */}
+          <SubSection title="Industry (NOGA)">
+            <div className="grid grid-cols-2 gap-4">
+              <Field label="Include NOGA prefix" hint="e.g. 47 = retail, 62 = IT, 41 = construction">
+                <input name="noga_code" className={inputCls} placeholder="—" />
+              </Field>
+              <Field label="Exclude NOGA prefix" hint="e.g. 64 = financial intermediaries, 84 = public admin">
+                <input name="exclude_noga_code" className={inputCls} placeholder="—" />
+              </Field>
+            </div>
+          </SubSection>
+
+          {/* Keywords & Clusters */}
+          <SubSection title="Keywords &amp; Clusters">
+            <div className="grid grid-cols-2 gap-4">
+              <Field label="Include keywords" hint="Comma-separated — match any (OR logic)">
+                <input name="purpose_keywords" className={inputCls} placeholder="e.g. software,saas,cloud" />
+              </Field>
+              <Field label="Exclude keywords" hint="Comma-separated — skip if any match">
+                <input name="exclude_purpose_keywords" className={inputCls} placeholder="e.g. holding,verwaltung" />
+              </Field>
+            </div>
+            <div className="mt-3">
+              <Field label="TF-IDF cluster" hint="Partial match on cluster label">
+                <input name="tfidf_cluster" className={inputCls} placeholder="—" />
+              </Field>
+            </div>
+          </SubSection>
+
+          {/* Company Type */}
+          <SubSection title="Company Type">
+            <div className="grid grid-cols-2 gap-4">
+              <Field label="Legal form" hint="Exact match — e.g. Aktiengesellschaft, GmbH">
+                <input name="legal_form" className={inputCls} placeholder="— any —" />
+              </Field>
+              <Field label="Business model" hint="Rule-based classification">
+                <select name="business_model" className={inputCls}>
+                  <option value="">All</option>
+                  <option value="b2b">B2B</option>
+                  <option value="b2c">B2C</option>
+                  <option value="b2g">B2G (government)</option>
+                  <option value="mixed">Mixed</option>
+                  <option value="_none">Not yet classified</option>
+                </select>
+              </Field>
+            </div>
+          </SubSection>
+
+          {/* Date Ranges */}
+          <SubSection title="Date Ranges">
+            <p className="text-xs text-slate-500 -mt-1 mb-2">
+              <strong>Registered</strong> filters on first SOGC appearance; <strong>SOGC updated</strong> filters on most recent Zefix publication.
+            </p>
+            <div className="grid grid-cols-2 gap-4">
+              <Field label="Registered after" hint="first_sogc_date ≥">
+                <input name="registered_after" type="date" className={inputCls} />
+              </Field>
+              <Field label="Registered before" hint="first_sogc_date ≤">
+                <input name="registered_before" type="date" className={inputCls} />
+              </Field>
+              <Field label="SOGC updated after" hint="sogc_date ≥ (recently active in Zefix)">
+                <input name="sogc_after" type="date" className={inputCls} />
+              </Field>
+              <Field label="SOGC updated before" hint="sogc_date ≤">
+                <input name="sogc_before" type="date" className={inputCls} />
               </Field>
             </div>
           </SubSection>

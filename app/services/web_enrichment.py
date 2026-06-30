@@ -453,6 +453,9 @@ def recalculate_google_scores(
     return stats
 
 
+_DELETED_STATUSES = ("Gelöscht", "CANCELLED", "BEING_CANCELLED")
+
+
 def run_batch_collect(
     db: Session,
     *,
@@ -462,14 +465,40 @@ def run_batch_collect(
     run_google: bool = True,
     resume_from: int = 0,
     progress_cb: Any = None,
-    canton: str | None = None,
+    # ── Geography ─────────────────────────────────────────────────────────────
+    canton: str | None = None,              # single-canton shorthand (backward compat)
+    cantons: list[str] | None = None,       # include any of these cantons
+    exclude_cantons: list[str] | None = None,
+    # ── Status / registration ─────────────────────────────────────────────────
+    active_only: bool = True,               # exclude CANCELLED/BEING_CANCELLED/Gelöscht
+    skip_uid_only: bool = False,            # exclude registration_type='uid_only'
+    skip_mwst_only: bool = False,           # exclude registration_type='mwst'
+    # ── Language ──────────────────────────────────────────────────────────────
+    purpose_language: str | None = None,
+    # ── Scores ────────────────────────────────────────────────────────────────
     min_flex_score: int | None = None,
+    max_flex_score: int | None = None,
     min_ai_score: int | None = None,
+    min_combined_score: float | None = None,
+    # ── Keywords / clusters ───────────────────────────────────────────────────
     purpose_keywords: str | None = None,
+    exclude_purpose_keywords: str | None = None,
     tfidf_cluster: str | None = None,
     review_status: str | None = None,
-    order_by: str = "flex_score_desc",
+    # ── Industry (NOGA) ───────────────────────────────────────────────────────
     noga_code: str | None = None,
+    exclude_noga_code: str | None = None,
+    # ── Company type ──────────────────────────────────────────────────────────
+    legal_form: str | None = None,
+    business_model: str | None = None,
+    # ── Date ranges ───────────────────────────────────────────────────────────
+    registered_after: str | None = None,   # first_sogc_date >=
+    registered_before: str | None = None,  # first_sogc_date <=
+    sogc_after: str | None = None,         # sogc_date >= (last Zefix publication)
+    sogc_before: str | None = None,        # sogc_date <=
+    # ── Ordering ──────────────────────────────────────────────────────────────
+    order_by: str = "flex_score_desc",
+    # ── Callbacks ─────────────────────────────────────────────────────────────
     status_cb: Any = None,
     abort_cb: Any = None,
 ) -> dict[str, Any]:
@@ -518,24 +547,65 @@ def run_batch_collect(
         ~Company.name.ilike("%succursale%"),
         ~Company.name.ilike("%filiale di%"),
     )
+
     if only_missing_website:
         # "Missing website" = never searched. Use website_checked_at (not website_url)
         # because the verdict now gates website_url to NULL for companies that were
         # checked but have no genuine site (social_only/directory_only/none) — keying
         # off website_url would re-enrich those forever.
         query = query.filter(Company.website_checked_at.is_(None))
+
+    # ── Status / registration ────────────────────────────────────────────────
+    if active_only:
+        query = query.filter(Company.status.notin_(list(_DELETED_STATUSES)))
+    _excl_reg: list[str] = []
+    if skip_uid_only:
+        _excl_reg.append("uid_only")
+    if skip_mwst_only:
+        _excl_reg.append("mwst")
+    if _excl_reg:
+        query = query.filter(
+            or_(Company.registration_type.is_(None), Company.registration_type.notin_(_excl_reg))
+        )
+
+    # ── Geography ─────────────────────────────────────────────────────────────
+    _canton_inc: list[str] = []
     if canton:
-        query = query.filter(Company.canton == canton.strip().upper())
+        _canton_inc.append(canton.strip().upper())
+    if cantons:
+        _canton_inc.extend(c.strip().upper() for c in cantons if c.strip())
+    if _canton_inc:
+        query = query.filter(Company.canton.in_(_canton_inc))
+    if exclude_cantons:
+        _excl_c = [c.strip().upper() for c in exclude_cantons if c.strip()]
+        if _excl_c:
+            query = query.filter(or_(Company.canton.is_(None), Company.canton.notin_(_excl_c)))
+
+    # ── Language ──────────────────────────────────────────────────────────────
+    if purpose_language:
+        query = query.filter(Company.purpose_language == purpose_language)
+
+    # ── Scores ────────────────────────────────────────────────────────────────
     if min_flex_score is not None:
         query = query.filter(Company.flex_score >= min_flex_score)
+    if max_flex_score is not None:
+        query = query.filter(or_(Company.flex_score.is_(None), Company.flex_score <= max_flex_score))
     if min_ai_score is not None:
         query = query.filter(Company.ai_score >= min_ai_score)
+    if min_combined_score is not None:
+        query = query.filter(Company.combined_score >= min_combined_score)
+
+    # ── Keywords / clusters ───────────────────────────────────────────────────
     if purpose_keywords:
         kw_terms = [t.strip() for t in purpose_keywords.split(",") if t.strip()]
         if kw_terms:
             query = query.filter(
                 or_(*[Company.purpose_keywords.ilike(f"%{kw}%") for kw in kw_terms])
             )
+    if exclude_purpose_keywords:
+        excl_kw = [t.strip() for t in exclude_purpose_keywords.split(",") if t.strip()]
+        for kw in excl_kw:
+            query = query.filter(~Company.purpose_keywords.ilike(f"%{kw}%"))
     if tfidf_cluster:
         query = query.filter(Company.tfidf_cluster.ilike(f"%{tfidf_cluster}%"))
     if review_status:
@@ -543,8 +613,35 @@ def run_batch_collect(
             query = query.filter(Company.review_status.is_(None))
         else:
             query = query.filter(Company.review_status == review_status)
+
+    # ── Industry (NOGA) ───────────────────────────────────────────────────────
     if noga_code:
         query = query.filter(Company.noga_code.like(f"{noga_code.strip()}%"))
+    if exclude_noga_code:
+        _excl_noga = exclude_noga_code.strip()
+        query = query.filter(
+            or_(Company.noga_code.is_(None), ~Company.noga_code.like(f"{_excl_noga}%"))
+        )
+
+    # ── Company type ──────────────────────────────────────────────────────────
+    if legal_form:
+        query = query.filter(Company.legal_form == legal_form)
+    if business_model:
+        if business_model == "_none":
+            query = query.filter(Company.business_model.is_(None))
+        else:
+            _bm_terms = [t.strip() for t in business_model.split(",") if t.strip()]
+            query = query.filter(Company.business_model.in_(_bm_terms))
+
+    # ── Date ranges ───────────────────────────────────────────────────────────
+    if registered_after:
+        query = query.filter(Company.first_sogc_date >= registered_after)
+    if registered_before:
+        query = query.filter(Company.first_sogc_date <= registered_before)
+    if sogc_after:
+        query = query.filter(Company.sogc_date >= sogc_after)
+    if sogc_before:
+        query = query.filter(Company.sogc_date <= sogc_before)
 
     keep_n = max(0, int(limit)) + max(0, int(resume_from))
     if keep_n <= 0:
@@ -568,6 +665,20 @@ def run_batch_collect(
             .order_by(Company.flex_score.desc().nulls_last(), Company.id.desc())
             .limit(keep_n).all()
         ]
+    elif order_by == "ai_score_desc":
+        planned_ids = [
+            row[0] for row in
+            query.with_entities(Company.id)
+            .order_by(Company.ai_score.desc().nulls_last(), Company.id.desc())
+            .limit(keep_n).all()
+        ]
+    elif order_by == "web_score_desc":
+        planned_ids = [
+            row[0] for row in
+            query.with_entities(Company.id)
+            .order_by(Company.web_score.desc().nulls_last(), Company.id.desc())
+            .limit(keep_n).all()
+        ]
     elif order_by == "last_enriched_asc":
         planned_ids = [
             row[0] for row in
@@ -580,6 +691,34 @@ def run_batch_collect(
             row[0] for row in
             query.with_entities(Company.id)
             .order_by(Company.id.asc())
+            .limit(keep_n).all()
+        ]
+    elif order_by == "sogc_date_desc":
+        planned_ids = [
+            row[0] for row in
+            query.with_entities(Company.id)
+            .order_by(Company.sogc_date.desc().nulls_last(), Company.id.desc())
+            .limit(keep_n).all()
+        ]
+    elif order_by == "first_sogc_date_asc":
+        planned_ids = [
+            row[0] for row in
+            query.with_entities(Company.id)
+            .order_by(Company.first_sogc_date.asc().nulls_last(), Company.id.asc())
+            .limit(keep_n).all()
+        ]
+    elif order_by == "first_sogc_date_desc":
+        planned_ids = [
+            row[0] for row in
+            query.with_entities(Company.id)
+            .order_by(Company.first_sogc_date.desc().nulls_last(), Company.id.desc())
+            .limit(keep_n).all()
+        ]
+    elif order_by == "name_asc":
+        planned_ids = [
+            row[0] for row in
+            query.with_entities(Company.id)
+            .order_by(Company.name.asc())
             .limit(keep_n).all()
         ]
     else:

@@ -136,12 +136,39 @@ def handle_batch(ctx: JobContext) -> tuple[dict, str]:
         run_google=bool(ctx.params.get("run_google", True)),
         resume_from=ctx.resume_from,
         progress_cb=_progress,
+        # Geography
         canton=ctx.params.get("canton"),
+        cantons=ctx.params.get("cantons"),
+        exclude_cantons=ctx.params.get("exclude_cantons"),
+        # Status / registration
+        active_only=bool(ctx.params.get("active_only", True)),
+        skip_uid_only=bool(ctx.params.get("skip_uid_only", False)),
+        skip_mwst_only=bool(ctx.params.get("skip_mwst_only", False)),
+        # Language
+        purpose_language=ctx.params.get("purpose_language"),
+        # Scores
         min_flex_score=ctx.params.get("min_zefix_score"),
+        max_flex_score=ctx.params.get("max_zefix_score"),
         min_ai_score=ctx.params.get("min_claude_score"),
+        min_combined_score=ctx.params.get("min_combined_score"),
+        # Keywords / clusters
         purpose_keywords=ctx.params.get("purpose_keywords"),
+        exclude_purpose_keywords=ctx.params.get("exclude_purpose_keywords"),
         tfidf_cluster=ctx.params.get("tfidf_cluster"),
         review_status=ctx.params.get("review_status"),
+        # NOGA
+        noga_code=ctx.params.get("noga_code"),
+        exclude_noga_code=ctx.params.get("exclude_noga_code"),
+        # Company type
+        legal_form=ctx.params.get("legal_form"),
+        business_model=ctx.params.get("business_model"),
+        # Date ranges
+        registered_after=ctx.params.get("registered_after"),
+        registered_before=ctx.params.get("registered_before"),
+        sogc_after=ctx.params.get("sogc_after"),
+        sogc_before=ctx.params.get("sogc_before"),
+        # Ordering
+        order_by=ctx.params.get("order_by", "flex_score_desc"),
         status_cb=lambda m: ctx.status_with_stats(m),
         abort_cb=ctx.assert_not_cancelled,
     )
