@@ -28,7 +28,8 @@ from app.database import get_db
 from app.models.user import User
 
 COOKIE_NAME = "session"
-_SESSION_MAX_AGE = 8 * 3600  # 8 hours
+_SESSION_MAX_AGE = 14 * 24 * 3600  # 14 days (sliding — re-issued on activity)
+_SESSION_RENEW_AFTER = _SESSION_MAX_AGE // 2  # re-issue once half the window has elapsed
 _SALT = "session-v1"
 _EMAIL_VERIFY_SALT = "email-verify-v1"
 _EMAIL_VERIFY_MAX_AGE = 1 * 3600  # 1 hour
@@ -65,6 +66,35 @@ def decode_session_cookie(token: str) -> int | None:
         return int(user_id)
     except (SignatureExpired, BadSignature, ValueError, TypeError):
         return None
+
+
+def set_session_cookie(response, user_id: int, *, is_https: bool, samesite: str = "strict") -> None:
+    """Write the signed session cookie onto a response (login and sliding renewal)."""
+    response.set_cookie(
+        key=COOKIE_NAME,
+        value=create_session_cookie(user_id),
+        httponly=True,
+        samesite=samesite,
+        secure=is_https,
+        max_age=_SESSION_MAX_AGE,
+    )
+
+
+def session_user_needing_refresh(request: Request) -> int | None:
+    """Return the user_id if the request carries a valid session *cookie* that is
+    past the sliding-renewal threshold, so the caller can re-issue it. Requests
+    authenticated only by a Bearer/JWT token return None — API tokens are not slid."""
+    token = request.cookies.get(COOKIE_NAME)
+    if not token:
+        return None
+    try:
+        user_id, ts = _serializer().loads(
+            token, max_age=_SESSION_MAX_AGE, return_timestamp=True
+        )
+    except (SignatureExpired, BadSignature, ValueError, TypeError):
+        return None
+    age = (datetime.now(tz=timezone.utc) - ts).total_seconds()
+    return int(user_id) if age >= _SESSION_RENEW_AFTER else None
 
 
 # ---------------------------------------------------------------------------
@@ -298,7 +328,7 @@ def require_verified_email(user: User = Depends(get_current_user)) -> User:
 _RATE_WINDOW = 900   # 15 minutes
 _RATE_MAX = 10       # failed login attempts per window per IP
 
-# In-memory fallback (used when Redis is unavailable)
+# In-memory, per-pod (no Redis/shared backend — see ARCHITECTURE.md §5 Rate limiting)
 _login_attempts: dict[str, list[float]] = defaultdict(list)
 _email_attempts: dict[str, list[float]] = defaultdict(list)
 _request_counts: dict[str, list[float]] = defaultdict(list)

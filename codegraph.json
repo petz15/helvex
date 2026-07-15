@@ -1,0 +1,20 @@
+{
+  "exclude": [
+    ".terraform/",
+    "**/.terraform/**",
+    "node_modules/",
+    ".next/",
+    ".claude/",
+    ".venv/",
+    ".code-review-graph/",
+    ".vscode/",
+    ".codegraph/",
+    ".gemini/",
+    ".github/",
+    ".pytest_cache/",
+    ".qoder/",
+    ".ruff-cache/",
+    ".tmp_wheels/",
+    ".tmp_wheels_linux/"
+  ]
+}

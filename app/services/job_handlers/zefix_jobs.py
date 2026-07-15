@@ -134,6 +134,7 @@ def handle_batch(ctx: JobContext) -> tuple[dict, str]:
         only_missing_website=bool(ctx.params.get("only_missing_website", True)),
         refresh_zefix=bool(ctx.params.get("refresh_zefix", False)),
         run_google=bool(ctx.params.get("run_google", True)),
+        concurrency=int(ctx.params.get("concurrency", 1)),
         resume_from=ctx.resume_from,
         progress_cb=_progress,
         # Geography

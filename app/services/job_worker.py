@@ -321,7 +321,7 @@ def _maybe_sync(app, **kwargs) -> None:
 # ── Job runner ─────────────────────────────────────────────────────────────────
 
 def _run_job(app, job_id: int) -> None:  # noqa: C901
-    """Execute one job. `app` may be None when called from an RQ worker."""
+    """Execute one job."""
     from app.metrics import record_job_duration
     from app.services.job_handlers import JOB_HANDLERS as _JOB_HANDLERS
     
@@ -763,6 +763,7 @@ def _run_job(app, job_id: int) -> None:  # noqa: C901
                     only_missing_website=bool(params.get("only_missing_website", True)),
                     refresh_zefix=bool(params.get("refresh_zefix", False)),
                     run_google=bool(params.get("run_google", True)),
+                    concurrency=int(params.get("concurrency", 1)),
                     resume_from=resume_from,
                     progress_cb=_progress,
                     canton=params.get("canton"),
@@ -1607,12 +1608,32 @@ def _enqueue_job_in_session(
     if dedup_key is not None:
         existing = crud.find_active_by_dedup_key(db, dedup_key)
         if existing is not None:
-            logger.info(
-                "Dedup hit: returning existing job %s (type=%s key=%s status=%s)",
-                existing.id, job_type, dedup_key, existing.status,
-            )
-            db.expunge(existing)
-            return existing
+            # Self-heal: a job that has already blown through the restart cap
+            # should have been killed by requeue_interrupted_jobs(), but if that
+            # somehow didn't stick (e.g. missed sweep, race), don't let it block
+            # this job type forever. Fail it now and fall through to enqueue.
+            if (existing.restart_count or 0) > crud.MAX_RESTART_COUNT:
+                logger.warning(
+                    "Dedup-blocking job %s (type=%s key=%s) exceeds restart cap "
+                    "(%d/%d) — force-failing so a new job can be queued",
+                    existing.id, job_type, dedup_key, existing.restart_count, crud.MAX_RESTART_COUNT,
+                )
+                crud.mark_failed(
+                    db, existing,
+                    error=f"Force-failed — exceeded restart cap ({existing.restart_count}/{crud.MAX_RESTART_COUNT})",
+                    message="Force-failed (runaway restarts)",
+                )
+                crud.create_event(
+                    db, job_id=existing.id, level="warn",
+                    message="Force-failed by dedup self-heal — restart cap exceeded",
+                )
+            else:
+                logger.info(
+                    "Dedup hit: returning existing job %s (type=%s key=%s status=%s)",
+                    existing.id, job_type, dedup_key, existing.status,
+                )
+                db.expunge(existing)
+                return existing
     # ── Normal enqueue path ──────────────────────────────────────────────────
     preflight_params, warnings = _preflight_job(db, job_type=job_type, params=params)
     deduction = _apply_credit_deduction_if_needed(

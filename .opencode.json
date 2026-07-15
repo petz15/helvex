@@ -1,0 +1,15 @@
+{
+  "mcpServers": {
+    "code-review-graph": {
+      "command": "C:\\Users\\peter\\.code-review-graph-venv\\Scripts\\python.exe",
+      "args": [
+        "-m",
+        "code_review_graph",
+        "serve"
+      ],
+      "cwd": "C:\\D\\coding_projects\\zefix_analyzer",
+      "type": "stdio",
+      "env": []
+    }
+  }
+}

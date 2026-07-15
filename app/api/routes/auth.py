@@ -16,7 +16,6 @@ from app.auth import (
     create_access_token,
     create_email_change_token,
     create_password_reset_token,
-    create_session_cookie,
     create_verification_token,
     decode_email_change_token,
     decode_password_reset_token,
@@ -27,6 +26,7 @@ from app.auth import (
     is_login_allowed,
     record_email_login_failure,
     record_login_failure,
+    set_session_cookie,
 )
 from app.database import get_db
 from app.models.user import User
@@ -134,14 +134,7 @@ def login_cookie(
     forwarded_proto = request.headers.get("x-forwarded-proto", "")
     is_https = request.url.scheme == "https" or forwarded_proto.split(",")[0].strip().lower() == "https"
     response = JSONResponse({"ok": True})
-    response.set_cookie(
-        key=COOKIE_NAME,
-        value=create_session_cookie(user.id),
-        httponly=True,
-        samesite="strict",
-        secure=is_https,
-        max_age=8 * 3600,
-    )
+    set_session_cookie(response, user.id, is_https=is_https, samesite="strict")
     return response
 
 
@@ -543,14 +536,7 @@ def _set_session(response: _Redirect, user_id: int, *, is_https: bool) -> None:
     # lax (not strict) is required here: after the OAuth redirect from Google
     # the browser treats the chain as cross-site-initiated, so strict cookies
     # are not sent on the following same-site redirect and auth breaks.
-    response.set_cookie(
-        key=COOKIE_NAME,
-        value=create_session_cookie(user_id),
-        httponly=True,
-        samesite="lax",
-        secure=is_https,
-        max_age=8 * 3600,
-    )
+    set_session_cookie(response, user_id, is_https=is_https, samesite="lax")
 
 
 @router.get("/google/authorize", include_in_schema=False)

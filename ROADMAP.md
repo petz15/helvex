@@ -44,6 +44,10 @@
     - medizinische leistungserbringer (?) helsana liste https://www.helsana.ch/de/private/services/leistungserbringer-suche.html?
     - Language translation for companies other languages. plan is probably all to english and then translate search terms to english and return results? -> this as additional feature for paid tiers
     - there is a uid search portal https://www.uid.admin.ch/Search.aspx partially implemented but the issue is no fuzzy search (or some weird limited fuzzy search) and cap of 30 companies per result. further exacerbated by a rate limiting on the api calls and potentially non useable filters in some combinations. effectively rendering it unusable. which is too bad as this could have been a HUGE source (all possible companies, sole entrepreneurs/traders, lawyers (?), governmental bodies etc). keep an eye on it
+    - Serper search especially via scrapingdog use advanced search (cost 10 credits i.e. twice of light search) in order to find google business profile? maybe for later
+    - Find email of people by testing name@domain configurations -> check: https://www.fedlex.admin.ch/eli/cc/1988/223_223_223/de#art_3 https://www.edoeb.admin.ch/de/werbung-marketing -> seems to be legal grey area or even completely illegal especially selling the personal data. Must be careful before implementing such a feature or consider completely skipping such a feature
+    - Extend export features like nobody else (past signatories etc), past shab (with filter) on company detail etc etc
+    - google ads library (https://adstransparency.google.com/?region=CH) and meta (https://www.facebook.com/ads/library/?active_status=active&ad_type=political_and_issue_ads&country=CH&is_targeted_country=false&media_type=all&sort_data[mode]=total_impressions&sort_data[direction]=desc) and linkedin (https://www.linkedin.com/ad-library/home) and bing (https://adlibrary.ads.microsoft.com/) and tiktok (https://library.tiktok.com/ads)
 
 ### MVP before public PROD
 - Tiers are enforced - partially done (not fully checked and web searches are not gated yet + always uses api instead of checking if data already exists)
@@ -216,6 +220,22 @@ before the next `[deploy-prod]` push.
 - [ ] **API key management** — token creation/revocation UI for org admins to manage their API credentials; currently only available via admin panel
 - [ ] **uvicorn async** - Each open SSE connection holds one synchronous uvicorn worker thread (blocking I/O). At current scale (<50 concurrent users) this is fine; at higher scale the endpoint should be rewritten as `async def` with `anyio.sleep` and an async Redis client.
 - [ ] **Github Action Secrets Mess** - Currently many github action secrets are thrown in there which are my ENV variables, this should be managed and documented much better. Especially when I implement a DEV/INT env I should seperate a lot of these variables
+
+### API & MCP authentication (mid-term — third-party consumers)
+
+Decision (2026-07): API and MCP access will be exposed to **third-party developers/customers**, not just first-party apps. This rules out simply lengthening the current HS256 session JWT — long-lived, unrevocable, unscoped bearer tokens are the wrong primitive for external clients. Target three independent auth lanes that all resolve at the same choke point (`_auth_info_from_request` in `app/auth.py`), so `auth_gate`/`origin_gate` middleware and every route stay unchanged:
+
+1. **Browser humans → sliding session cookie.** ✅ Done (2026-07): 14-day cookie, auto-renewed past half-life in `auth_gate`; `set_session_cookie` / `session_user_needing_refresh` in `app/auth.py`. Solves "don't log in every day", independent of the API work.
+2. **Direct API developers → API keys.** New `api_keys` table (`org_id, user_id, name, key_hash, scopes, expires_at, revoked_at, last_used_at`), `hvx_live_…` prefix, hash-at-rest. Issued from a Settings UI (org admins — see existing "API key management" item). Resolved as a third branch in `_auth_info_from_request`. Gives per-key revocation, scoping, and org attribution for billing. **Build this lane first** — simpler, immediately useful, and it establishes the scope vocabulary.
+3. **MCP clients → OAuth 2.1 (spec-mandated).** Remote MCP servers must be OAuth 2.1 resource servers: authorization-code + **PKCE**, short-lived access token + **refresh token** (rotation), **Dynamic Client Registration** (RFC 7591), and discovery metadata (`/.well-known/oauth-authorization-server` + `/.well-known/oauth-protected-resource`, RFC 8414/9728). Scopes reuse the API-key vocabulary. The user authorizes once; the client silently refreshes.
+
+Cross-cutting decisions:
+- **Design the scope vocabulary early** (e.g. `companies:read`, `companies:write`, `export`, `billing:read`) — both API keys and OAuth tokens reference it and it is painful to retrofit onto issued credentials.
+- **Migrate the internal frontend off the static 8h JWT** onto the OAuth token service (short access + refresh) once lane 3 exists.
+- Consider **RS256/asymmetric signing** so MCP resource servers / third parties can verify tokens without holding `SECRET_KEY`.
+- New tables all org-scoped, ties into multi-tenant billing; unaffected by `org_company_state` dual-write.
+
+**Build vs. buy (open decision):** evaluate a hosted identity provider before hand-rolling the OAuth 2.1 lane — DCR + PKCE + refresh rotation + discovery metadata is a lot of security-critical surface. Candidates: Auth0/Okta, Clerk, Stytch, WorkOS (paid, fast); Keycloak, Ory Hydra, Authentik, ZITADEL (self-hostable, Hetzner-friendly, no per-MAU fees, keeps data on-cluster). API keys (lane 2) are cheap to own; OAuth (lane 3) is the piece worth buying/adopting. Ties into the existing "Cloudflare evaluation" and self-hosting posture.
 
 ### SOGC Entity Resolution — Event Sourcing (medium term)
 

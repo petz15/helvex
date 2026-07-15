@@ -256,7 +256,34 @@
       "Skill(update-config:*)",
       "Bash(npx tsc *)",
       "Bash(python -c \"import ast; ast.parse\\(open\\('app/api/routes/companies/detail.py'\\).read\\(\\)\\); print\\('OK'\\)\")",
-      "Bash(python -m pytest tests/ -x -q --tb=short)"
+      "Bash(python -m pytest tests/ -x -q --tb=short)",
+      "Bash(tail -n 100 \"C:\\\\Users\\\\peter\\\\.codegraphcontext\\\\logs\\\\cgc.log\" 2>&1 | head -200)",
+      "Read(//c/Users/peter/.codegraphcontext/logs/**)",
+      "Read(//c/Users/peter/.codegraphcontext/**)",
+      "Read(//c/Users/peter/.codegraphcontext/global/db/**)",
+      "Bash(\"C:\\\\D\\\\coding_projects\\\\zefix_analyzer\\\\.venv\\\\Scripts\\\\pip.exe\" show *)",
+      "Bash(\"C:\\\\D\\\\coding_projects\\\\zefix_analyzer\\\\.venv\\\\Scripts\\\\pip.exe\" list *)",
+      "Bash(ls -la \"C:\\\\Users\\\\peter\\\\.codegraphcontext\\\\logs\\\\\" 2>&1; echo \"---debug log---\"; ls -la \"C:\\\\Users\\\\peter\\\\mcp_debug.log\" 2>&1)",
+      "Bash(ls -la 'C:\\\\Users\\\\peter\\\\.codegraphcontext\\\\logs\\\\'; echo done)",
+      "Bash(ls -la 'C:\\\\Users\\\\peter\\\\mcp_debug.log'; echo done)",
+      "Read(//c/Users/peter/**)",
+      "Bash(\"C:\\\\D\\\\coding_projects\\\\zefix_analyzer\\\\.venv\\\\Scripts\\\\python.exe\" --version)",
+      "Bash(\"C:\\\\D\\\\coding_projects\\\\zefix_analyzer\\\\.venv\\\\Scripts\\\\pip.exe\" index *)",
+      "Bash(\"C:\\\\D\\\\coding_projects\\\\zefix_analyzer\\\\.venv\\\\Scripts\\\\pip.exe\" install *)",
+      "Bash(\"C:\\\\D\\\\coding_projects\\\\zefix_analyzer\\\\.venv\\\\Scripts\\\\python.exe\" -c \"from tree_sitter import Language, Parser; from tree_sitter_language_pack import get_language; lang = get_language\\('python'\\); p = Parser\\(lang\\); tree = p.parse\\(b'def foo\\(\\):\\\\n    pass\\\\n'\\); print\\('OK', tree.root_node.sexp\\(\\)[:80]\\)\")",
+      "Bash('C:\\\\D\\\\coding_projects\\\\zefix_analyzer\\\\.venv\\\\Scripts\\\\python.exe' -c ' *)",
+      "PowerShell(Get-Process -Name cgc -ErrorAction SilentlyContinue)",
+      "PowerShell(Get-Process | Where-Object { $_.ProcessName -match 'cgc|python|codegraph' } | Select-Object Id, ProcessName, CPU, WorkingSet, StartTime | Format-Table -AutoSize)",
+      "PowerShell($p1 = Get-Process -Id 63388 -ErrorAction SilentlyContinue; if \\($p1\\) { Write-Output \"CPU1: $\\($p1.CPU\\)\" }; Start-Sleep -Seconds 5; $p2 = Get-Process -Id 63388 -ErrorAction SilentlyContinue; if \\($p2\\) { Write-Output \"CPU2: $\\($p2.CPU\\)\" })",
+      "PowerShell($p1 = Get-Process -Id 63388 -ErrorAction SilentlyContinue; if \\($p1\\) { Write-Output \"CPU1: $\\($p1.CPU\\)\" } else { Write-Output \"PROCESS NOT FOUND\" }; Start-Sleep -Seconds 5; $p2 = Get-Process -Id 63388 -ErrorAction SilentlyContinue; if \\($p2\\) { Write-Output \"CPU2: $\\($p2.CPU\\)\" } else { Write-Output \"PROCESS NOT FOUND\" })",
+      "Bash(gh repo *)",
+      "PowerShell(Get-Process | Where-Object { $_.ProcessName -match 'cgc|codegraphcontext' } | Select-Object Id, ProcessName, Path, StartTime | Format-Table -AutoSize)",
+      "PowerShell(Stop-Process -Id 10268 -Force -Confirm:$false; Start-Sleep -Seconds 2; $p = Get-Process | Where-Object { $_.Id -eq 10268 }; if \\($p\\) { Write-Output \"STILL ALIVE\" } else { Write-Output \"CONFIRMED DEAD\" })",
+      "mcp__codegraph__codegraph_explore"
     ]
-  }
+  },
+  "enabledMcpjsonServers": [
+    "codegraph",
+    "code-review-graph"
+  ]
 }

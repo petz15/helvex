@@ -173,8 +173,9 @@ export function CompanyPreview({ company: incoming, onClose, onUpdated, classNam
           <div>
             <span className="text-xs font-medium text-slate-600 block mb-0.5">Website</span>
             <a href={company.website_url} target="_blank" rel="noopener noreferrer"
-              className="text-blue-600 hover:underline flex items-center gap-1 text-xs truncate">
-              {company.website_url} <ExternalLink size={11} />
+              className="text-blue-600 hover:underline flex items-center gap-1 text-xs min-w-0">
+              <span className="truncate min-w-0">{company.website_url}</span>
+              <ExternalLink size={11} className="shrink-0" />
             </a>
           </div>
         )}

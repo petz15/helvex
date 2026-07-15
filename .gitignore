@@ -27,3 +27,15 @@ terraform.tfvars
 /infra/environments/dev.yaml
 
 /*.tfstate
+# Added by code-review-graph
+.code-review-graph/
+
+# codegraph index (local SQLite graph, regenerated via `codegraph init`)
+.codegraph/
+
+.gemini/
+.qoder/
+.tmp_wheels/
+.tmp_wheels_linux/
+
+evaluate/

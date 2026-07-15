@@ -236,6 +236,45 @@ def _count_existing_by_uid(db: Session, uids: list[str]) -> set[str]:
     return {r[0] for r in rows}
 
 
+# ── Upsert helper ─────────────────────────────────────────────────────────────
+
+def _upsert_entities(
+    db: Session,
+    entities: list[dict[str, Any]],
+    *,
+    batch_size: int,
+    on_conflict: str,
+    stats: dict[str, Any],
+    label: str = "",
+) -> None:
+    """Upsert entity dicts in sub-batches, updating stats in place."""
+    for i in range(0, len(entities), batch_size):
+        sub = entities[i : i + batch_size]
+        valid = [e for e in sub if e.get("uid")]
+        stats["skipped_invalid"] += len(sub) - len(valid)
+        if not valid:
+            continue
+        existing = _count_existing_by_uid(db, [e["uid"] for e in valid])
+        new_count = sum(1 for e in valid if e["uid"] not in existing)
+        try:
+            _upsert_batch(db, valid, on_conflict=on_conflict)
+        except Exception as exc:
+            tag = f"[{label}] " if label else ""
+            logger.error("UID upsert failed %s: %s", label or "", exc)
+            stats["errors"].append(f"{tag}upsert: {exc}")
+            try:
+                db.rollback()
+            except Exception:
+                pass
+            continue
+        stats["inserted"] += new_count
+        existing_count = len(valid) - new_count
+        if on_conflict == "ignore":
+            stats["skipped_existing"] += existing_count
+        else:
+            stats["updated_type"] += existing_count
+
+
 # ── Per-token collection with geo/status refinement ───────────────────────────
 
 def _collect_token(
@@ -251,24 +290,35 @@ def _collect_token(
     max_depth: int,
     abort_cb: Callable[[], None] | None,
     stats: dict[str, Any],
-) -> list[dict[str, Any]]:
+) -> tuple[list[dict[str, Any]], bool]:
     """Discover gap companies for one dictionary token.
+
+    Returns (entities, was_rate_limited). Catches UIDRateLimitError internally so
+    partial results from earlier sub-queries are preserved and returned to the
+    caller even when a later refinement query is rate-limited. Callers should
+    upsert the partial entities and queue the token for retry.
 
     Base query is name=token over the whole country (HR=3 to target the gap).
     When a bucket caps at 30, refine: canton → postcode → [MWST subset] → AND a
     2nd token. Dedups against `seen` (shared across the whole sweep)."""
-    from app.clients.uid_client import search_entities
+    from app.clients.uid_client import UIDRateLimitError, search_entities
 
     out: list[dict] = []
+    was_rate_limited = False
 
-    def run(name: str, *, plz=None, canton=None, mwst=None) -> bool:
-        """Search one bucket, collect new uids, return True if capped (>=30)."""
-        entities, capped = search_entities(
-            name=name, plz=plz, canton=canton,
-            not_in_hr=not_in_hr,
-            mwst_only=mwst_only if mwst is None else mwst,
-            abort_cb=abort_cb,
-        )
+    def run(name: str, *, plz=None, canton=None, mwst=None) -> bool | None:
+        """Search one bucket. Returns True=capped, False=not capped, None=rate-limited."""
+        nonlocal was_rate_limited
+        try:
+            entities, capped = search_entities(
+                name=name, plz=plz, canton=canton,
+                not_in_hr=not_in_hr,
+                mwst_only=mwst_only if mwst is None else mwst,
+                abort_cb=abort_cb,
+            )
+        except UIDRateLimitError:
+            was_rate_limited = True
+            return None
         for e in entities:
             u = e.get("uid")
             if u and u not in seen:
@@ -276,9 +326,9 @@ def _collect_token(
                 out.append(e)
         return capped
 
-    # 1) whole-country token query
+    # 1) whole-country token query — None (rate-limited) or False (not capped) both bail out
     if not run(token):
-        return out
+        return out, was_rate_limited
 
     # 2) capped → split by canton
     stats["buckets_capped"] += 1
@@ -297,7 +347,7 @@ def _collect_token(
                     if tok2 == token:
                         continue
                     run(f"{token} {tok2}", plz=plz)
-    return out
+    return out, was_rate_limited
 
 
 # ── Main sweep ────────────────────────────────────────────────────────────────
@@ -345,6 +395,7 @@ def sweep_uid_gap(
         "buckets_capped": 0,
         "tokens_done": 0,
         "tokens_total": 0,
+        "rate_limited_tokens": 0,
         "current_token": "",
         "errors": [],
     }
@@ -365,6 +416,7 @@ def sweep_uid_gap(
         resume_from = 0
 
     seen: set[str] = set()
+    retry_queue: list[tuple[int, str]] = []  # (original_idx, token) for rate-limited tokens
 
     for idx, token in enumerate(terms):
         if idx < resume_from:
@@ -375,7 +427,7 @@ def sweep_uid_gap(
             status_cb(token)
 
         try:
-            entities = _collect_token(
+            entities, was_rate_limited = _collect_token(
                 token,
                 cantons=cantons, canton_plz=canton_plz, second_vocab=second_vocab,
                 seen=seen, not_in_hr=not_in_hr, mwst_only=mwst_only,
@@ -385,60 +437,90 @@ def sweep_uid_gap(
         except Exception as exc:
             if type(exc).__name__ in ("JobCancelledError", "JobPausedError"):
                 raise
-            is_rate_limit = type(exc).__name__ == "UIDRateLimitError" or "Request_limit_exceeded" in str(exc)
-            if is_rate_limit:
-                # Rate-limited after all retries — skip this token, don't count toward hard abort.
-                stats.setdefault("rate_limited_tokens", 0)
-                stats["rate_limited_tokens"] += 1
-                stats["errors"].append(f"[token={token}] {exc}")
-                logger.warning("UID token rate-limited, skipping: token=%r", token)
-            else:
-                logger.error("UID token sweep failed: token=%r: %s", token, exc)
-                stats["api_errors"] += 1
-                stats["errors"].append(f"[token={token}] {exc}")
-                try:
-                    _log_error(
-                        db, company_id=None, source="uid_import", error_type="api_error",
-                        message=f"UID sweep failed (token={token!r}): {exc}",
-                        detail={"token": token, "token_idx": idx},
-                    )
-                    db.commit()
-                except Exception:
-                    db.rollback()
-                if stats["api_errors"] > 50:
-                    logger.error("Too many non-rate-limit token failures — aborting UID sweep")
-                    return stats
+            logger.error("UID token sweep failed: token=%r: %s", token, exc)
+            stats["api_errors"] += 1
+            stats["errors"].append(f"[token={token}] {exc}")
+            try:
+                _log_error(
+                    db, company_id=None, source="uid_import", error_type="api_error",
+                    message=f"UID sweep failed (token={token!r}): {exc}",
+                    detail={"token": token, "token_idx": idx},
+                )
+                db.commit()
+            except Exception:
+                db.rollback()
+            if stats["api_errors"] > 50:
+                logger.error("Too many non-rate-limit token failures — aborting UID sweep")
+                return stats
             continue
 
-        # Upsert this token's discoveries in sub-batches
-        for i in range(0, len(entities), batch_size):
-            sub = entities[i:i + batch_size]
-            valid = [e for e in sub if e.get("uid")]
-            stats["skipped_invalid"] += len(sub) - len(valid)
-            if not valid:
-                continue
-            existing = _count_existing_by_uid(db, [e["uid"] for e in valid])
-            new_count = sum(1 for e in valid if e["uid"] not in existing)
-            try:
-                _upsert_batch(db, valid, on_conflict=on_conflict)
-            except Exception as exc:
-                logger.error("UID upsert failed (token=%r): %s", token, exc)
-                stats["errors"].append(f"[token={token}] upsert: {exc}")
-                try:
-                    db.rollback()
-                except Exception:
-                    pass
-                continue
-            stats["inserted"] += new_count
-            existing_count = len(valid) - new_count
-            if on_conflict == "ignore":
-                stats["skipped_existing"] += existing_count
-            else:
-                stats["updated_type"] += existing_count
+        # Upsert whatever was collected — even partial results from a rate-limited token.
+        _upsert_entities(
+            db, entities,
+            batch_size=batch_size, on_conflict=on_conflict, stats=stats,
+            label=f"token={token}",
+        )
+
+        if was_rate_limited:
+            # Queue for a retry after the main sweep completes with a cooldown.
+            # Don't advance tokens_done so a resume from crash also picks it up.
+            stats["rate_limited_tokens"] += 1
+            stats["errors"].append(f"[token={token}] rate-limited (partial results saved, queued for retry)")
+            logger.warning("UID token rate-limited, queued for retry: token=%r", token)
+            retry_queue.append((idx, token))
+            continue
 
         stats["tokens_done"] = idx + 1
         if progress_cb:
             progress_cb(idx + 1, total, stats)
+
+    # ── Retry phase — process rate-limited tokens after a cooldown ────────────
+    if retry_queue:
+        logger.info("uid_sweep: %d rate-limited tokens to retry; cooling down 180s", len(retry_queue))
+        if status_cb:
+            status_cb("(cooldown before retry)")
+        # Chunked sleep so cancellation is detected during the wait.
+        import time
+        _cooldown, _chunk = 180.0, 5.0
+        _slept = 0.0
+        while _slept < _cooldown:
+            time.sleep(min(_chunk, _cooldown - _slept))
+            _slept += _chunk
+            if abort_cb:
+                abort_cb()
+
+        for retry_idx, retry_token in retry_queue:
+            stats["current_token"] = retry_token
+            if status_cb:
+                status_cb(f"(retry) {retry_token}")
+            try:
+                entities, still_rate_limited = _collect_token(
+                    retry_token,
+                    cantons=cantons, canton_plz=canton_plz, second_vocab=second_vocab,
+                    seen=seen, not_in_hr=not_in_hr, mwst_only=mwst_only,
+                    refine_mwst=refine_mwst, max_depth=max_depth,
+                    abort_cb=abort_cb, stats=stats,
+                )
+            except Exception as exc:
+                if type(exc).__name__ in ("JobCancelledError", "JobPausedError"):
+                    raise
+                logger.error("UID retry sweep failed: token=%r: %s", retry_token, exc)
+                stats["api_errors"] += 1
+                stats["errors"].append(f"[retry][token={retry_token}] {exc}")
+                continue
+
+            _upsert_entities(
+                db, entities,
+                batch_size=batch_size, on_conflict=on_conflict, stats=stats,
+                label=f"retry token={retry_token}",
+            )
+
+            if still_rate_limited:
+                logger.warning("UID token still rate-limited after retry — giving up: token=%r", retry_token)
+                stats["errors"].append(f"[retry][token={retry_token}] still rate-limited")
+            else:
+                stats["rate_limited_tokens"] -= 1  # recovered
+                logger.info("uid_sweep: retry succeeded for token=%r", retry_token)
 
     return stats
 

@@ -568,7 +568,7 @@ export function CompanyDetailClient({ company: initial, readOnlyDemo = false, is
               {/* NOGA chip */}
               {(company.noga_code || company.noga_label) && (
                 <div className="mt-3">
-                  <Link href={`/app/search?noga_code=${encodeURIComponent(company.noga_code ?? "")}`}>
+                  <Link href={`/app/explorer?noga_code=${encodeURIComponent(company.noga_code ?? "")}`}>
                     <span className="inline-flex items-center gap-1.5 bg-[#eff4fe] border border-[#cdddfb] rounded-full px-3 py-1 text-[12px] cursor-pointer hover:bg-[#dbeafe] transition-colors">
                       {company.noga_code && <span className="font-mono font-semibold text-[#2563eb]">{company.noga_code}</span>}
                       {company.noga_label && <span style={{ color: "#1d4ed8" }}>{company.noga_label}</span>}

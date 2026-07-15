@@ -39,7 +39,7 @@
 Helvex is a B2B company intelligence platform. It bulk-imports the entire Swiss commercial register (~700 k companies via the [Zefix](https://www.zefix.admin.ch) public REST API), enriches them with Google Search results, offline geocoding, TF-IDF clustering, and Claude AI scoring, and exposes them through a filterable dashboard.
 
 **Key workflows:**
-1. **Bulk import** — Zefix canton-by-canton, resumable; now imports both ACTIVE and CANCELLED/BEING_CANCELLED companies by default (`active_only=False`)
+1. **Bulk import** — Zefix canton-by-canton, resumable. Imports both ACTIVE and CANCELLED/BEING_CANCELLED companies by default (`active_only=False`) — the frontend form and the `POST /collection/bulk` route (`BulkImportBody.active_only: bool = False`) always pass this explicitly, so it's correct end-to-end today. Note: `_run_job`'s dispatcher internally has two disagreeing, currently-unreachable fallback defaults for this field — see §6 job-handler-registry note and `docs/code-review/job-system-deep-dive.md` before relying on either fallback in new code
 2. **Detail fetch + geocode** — swisstopo building-level precision
 3. **Website enrichment** — Serper.dev Google Search, daily quota-aware
 4. **AI scoring** — Claude Haiku via Anthropic API
@@ -308,6 +308,20 @@ HTML routes (browser, in `main.py`):
 | GET | `/api/v1/billing/summary` | Member | Credit balance, tier, low-credit alert threshold |
 | GET | `/api/v1/billing/credits/usage` | Member | Credit spend/refund by action over N days |
 | … | (top-up, history routes) | | |
+
+**Payment providers:** Stripe and Worldline (Saferpay), selected per-checkout
+via `body.provider`. Stripe webhooks (`stripe_webhook` in
+`app/api/routes/billing/webhooks.py`) are thin and delegate to
+`payments.apply_subscription_update()` / `apply_credit_topup()`. Worldline's
+two return-URL webhooks (`worldline_return`, `worldline_card_return`, same
+file) are much larger — ~300 lines each of inline business logic (token
+resolution, duplicate-payment guard, VAT computation, manual transaction
+upsert, auto-capture) directly in the route handler, and neither has test
+coverage. For the Saferpay API request/response contract, see
+[`docs/payment-flows.md`](docs/payment-flows.md); for the code-structure risk
+picture (including a concrete lead on the "subscription upgrade doesn't
+work" bug in the Bug Fixes list below), see
+[`docs/code-review/billing-worldline-deep-dive.md`](docs/code-review/billing-worldline-deep-dive.md).
 
 #### Admin — `app/api/routes/admin.py`
 
@@ -623,10 +637,12 @@ alembic upgrade head
 
 | Mechanism | How it works | Used by |
 |---|---|---|
-| **Session cookie** | `itsdangerous` URLSafeTimedSerializer, httpOnly, samesite=lax, secure on HTTPS, 8 h | Browser / HTML UI |
+| **Session cookie** | `itsdangerous` URLSafeTimedSerializer, httpOnly, secure on HTTPS, **14 d sliding** | Browser / HTML UI |
 | **JWT Bearer token** | PyJWT HS256, same `SECRET_KEY`, 8 h expiry | API clients, frontend SPA |
 
-Both are checked by `_user_id_from_request()` in `app/auth.py:88`.
+Both are checked by `_user_id_from_request()` in `app/auth.py`.
+
+**Sliding session:** the cookie has a 14-day absolute lifetime (`_SESSION_MAX_AGE`) and is re-issued whenever a request arrives past half that window (`_SESSION_RENEW_AFTER`). Renewal happens in the `auth_gate` middleware via `session_user_needing_refresh()` + `set_session_cookie()` (samesite=lax so it also covers OAuth-initiated sessions; origin_gate enforces same-origin on API). Active users therefore never re-enter credentials; only ~14 d of true inactivity forces a re-login. Bearer/JWT requests are never slid. Login sites (`/login`, OAuth `_set_session`) share the same `set_session_cookie` helper so cookie max-age lives in one place.
 
 ### Token helpers — `app/auth.py`
 
@@ -779,10 +795,13 @@ Strict-Transport-Security: max-age=31536000 (HTTPS only)
 - No external dependencies; uses in-memory progress tracking
 - Set `DISABLE_JOB_WORKER=true` to suppress the thread (e.g., API-only pod)
 
-**Job handler registry pattern** — Replaced the previous 735-line `elif` chain
-- Each job type has a dedicated handler in `app/services/job_handlers/{type}.py`
-- `_run_job()` dispatches via `JOB_HANDLERS[job_type](ctx)`, passing context (DB, params, progress callback, abort signal)
+**Job handler registry pattern — ⚠️ ~27 entries are dead code (registered, unreachable)**
+- New job types are added as a dedicated handler in `app/services/job_handlers/{type}.py`, registered in `JOB_HANDLERS`
+- `_run_job()` falls through to `JOB_HANDLERS[job_type](ctx)` (passing a `JobContext`: DB, params, progress callback, abort signal) once the job type doesn't match any inline branch
 - Handlers return `(stats_dict, done_message)` or raise typed exceptions (`JobPausedError`, `JobCancelledError`, `JobWaitingExternalSignal`)
+- **This has not replaced the legacy dispatch — and most of the registry is unreachable.** `_run_job` (`app/services/job_worker.py:323`, 1059 lines) still contains ~27 inline `elif job.job_type == "...":` branches (`bulk`, `batch`, `initial`, `detail`, `recalculate_scores`, `tfidf_kmeans_cluster`, `claude_classify`, `shab_daily`/`shab_backfill`, `csv_export`, `sogc_preprocess`, `extract_sogc_persons`, etc.) *ahead of* the `JOB_HANDLERS` fallback in the same `if/elif` chain. Since Python takes the first matching branch, `JOB_HANDLERS` entries that share a job-type string with an inline branch are **registered but never called** — confirmed no callers exist for e.g. `zefix_jobs.handle_bulk`, `claude.handle_claude_classify` outside the dict itself. Only job types with *no* matching inline branch (`uid_import`, `uid_detail`, `enrich_web_purpose_sim`, `simap_*`, `shab_archive`, `link_sogc_stubs`, `resolve_bisher_links`, `repair_is_current`, the `web_*`/`directory_crawl` crawler types) are genuinely live via the registry.
+- **One disagreeing default found, traced end-to-end, not currently live:** `job_handlers/zefix_jobs.py::handle_bulk` (dead) defaults `active_only=False`; the *live* inline `"bulk"` branch in `_run_job` defaults `active_only=True`. These only matter if a `"bulk"` job is ever enqueued without the key — traced every real caller (the frontend form, the only HTTP route `POST /collection/bulk` → `BulkImportBody.active_only: bool = False`, `rerun_job`'s stored-params reload) and all of them always set `active_only` explicitly, so today's behavior is correct (matches the "imports both ACTIVE and CANCELLED by default" claim above) regardless of either fallback. Still worth fixing — it's a landmine for the next caller that omits the param. Other Pattern A/B pairs checked (`claude_classify`) were faithful 1:1 ports with no behavioral diff.
+- Full breakdown, the reachable/dead job-type list, and the `_TAXONOMY_INVALIDATING` gotcha (a hardcoded set of job types that bust the taxonomy cache — easy to forget when adding a scoring/category job type) in `docs/code-review/job-system-deep-dive.md`.
 
 **Atomic job claiming (multi-pod safety)**
 - `crud.atomic_claim_job(db, job_id)` issues a single `UPDATE job_runs SET status='running' WHERE id=? AND status IN ('queued','paused')` and checks `rowcount == 1`
@@ -2623,6 +2642,10 @@ New job types are automatically deduplicated without any code change. Add to `NO
 **Trade-offs:**
 - **Advantage:** Eliminates double-execution after web-pod restarts; safe for rolling updates.
 - **Disadvantage:** Adds one extra DB thread per running job. The thread is a daemon, writes are single-row UPDATEs every 30 s — negligible load. A crashed worker leaves a stale heartbeat; the 2-minute stale window means the job will not be recovered until the next startup after that window expires.
+
+**Restart cap + dedup self-heal (`app/crud/job_run.py` `MAX_RESTART_COUNT = 5`):** Every time `requeue_interrupted_jobs()` / `requeue_recent_abandoned_jobs()` re-queues a crashed job, `restart_count` increments. Once it exceeds `MAX_RESTART_COUNT`, the job is force-marked `failed` instead of re-queued (crash-loop protection).
+
+Observed incident: a `web_crawl_playwright` job (dedup key = one active per org) reached `restart_count` in the hundreds while still showing `status="running"`, permanently blocking every new job of that type via the dedup check — the restart-cap kill path should have caught it far earlier but apparently didn't stick (exact cause not confirmed — suspect a lost-update race between pods' independent periodic sweeps, since `requeue_interrupted_jobs()`'s query has no row lock, unlike `atomic_claim_job()`). As a defense-in-depth fix (not a root-cause fix), `_enqueue_job_in_session()` (`app/services/job_worker.py`) now checks the restart count of any dedup-blocking job before returning it: if `restart_count > MAX_RESTART_COUNT`, it force-fails that job on the spot (via `crud.mark_failed`) and falls through to the normal enqueue path, so a runaway job can never wedge a job type shut indefinitely.
 
 ---
 

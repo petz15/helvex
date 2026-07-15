@@ -247,7 +247,7 @@ export function SettingsClient() {
       if (!remove) kept.push(s);
     }
 
-    const stripped = kept.join(". ").trim() || workingSentences.join(". ").trim();
+    const stripped = kept.join(" ").trim() || workingSentences.join(" ").trim();
     const words = new Set(testText.toLowerCase().split(/\W+/).filter(Boolean));
     const tfidfMatches = tfidfStopwords
       .filter(sw => sw.active && words.has(sw.value.toLowerCase()))
@@ -262,6 +262,12 @@ export function SettingsClient() {
       await createBoilerplate(newPattern);
       setNewPattern({ pattern: "", description: "", example: "", truncate: false });
       reloadBoilerplate();
+    } catch (error) {
+      if (!handleApiError(error)) {
+        const msg = error instanceof Error ? error.message : String(error);
+        setBanner({ kind: "error", message: msg });
+        setTimeout(() => setBanner(null), 4000);
+      }
     } finally {
       setAddingPattern(false);
     }
@@ -837,6 +843,11 @@ export function SettingsClient() {
                         )}
                       </div>
                       {bp.description && <p className="text-xs text-slate-400">{bp.description}</p>}
+                      {bp.example && (
+                        <button type="button" onClick={() => { setTestText(bp.example!); setTestResults(null); }} className="text-xs text-blue-500 hover:text-blue-700 truncate max-w-xs text-left transition-colors" title="Load example into tester">
+                          ↪ {bp.example}
+                        </button>
+                      )}
                     </div>
                     <button
                       type="button"
@@ -855,6 +866,7 @@ export function SettingsClient() {
               <form onSubmit={handleAddPattern} className="flex gap-2 flex-wrap">
                 <input value={newPattern.pattern} onChange={e => setNewPattern(p => ({ ...p, pattern: e.target.value }))} placeholder={dict.app.settings.admin.regexPatternPlaceholder} className={cn(inputCls, "flex-1 min-w-48")} required />
                 <input value={newPattern.description} onChange={e => setNewPattern(p => ({ ...p, description: e.target.value }))} placeholder={dict.app.settings.admin.descriptionPlaceholder} className={cn(inputCls, "w-48")} />
+                <input value={newPattern.example} onChange={e => setNewPattern(p => ({ ...p, example: e.target.value }))} placeholder="Example sentence (optional)" className={cn(inputCls, "w-64")} />
                 <label className="flex items-center gap-1.5 text-sm text-slate-600 cursor-pointer select-none shrink-0">
                   <input type="checkbox" checked={newPattern.truncate} onChange={e => setNewPattern(p => ({ ...p, truncate: e.target.checked }))} className="rounded" />
                   <Scissors size={13} className={newPattern.truncate ? "text-amber-500" : "text-slate-400"} />

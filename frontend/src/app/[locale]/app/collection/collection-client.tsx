@@ -515,6 +515,7 @@ export function CollectionClient() {
             only_missing_website: fd.get("all_companies") !== "on",
             refresh_zefix: fd.get("refresh_zefix") === "on",
             run_google: true,
+            concurrency: parseInt(fd.get("concurrency") as string) || 1,
             order_by: str("order_by") || "flex_score_desc",
             // Status & registration
             active_only: fd.get("active_only") === "on",
@@ -555,9 +556,14 @@ export function CollectionClient() {
 
           {/* Core fields */}
           <div className="grid grid-cols-2 gap-4">
-            <Field label="Limit" hint="Max companies to enrich in this run">
-              <input name="limit" type="number" min="1" defaultValue="100" className={inputCls} />
-            </Field>
+            <div className="grid grid-cols-2 gap-4">
+              <Field label="Limit" hint="Max companies to enrich in this run">
+                <input name="limit" type="number" min="1" defaultValue="100" className={inputCls} />
+              </Field>
+              <Field label="Concurrency" hint="Parallel Serper requests (2–5 recommended)">
+                <input name="concurrency" type="number" min="1" max="10" defaultValue="1" className={inputCls} />
+              </Field>
+            </div>
             <Field label="Order by" hint="Which companies are picked first">
               <select name="order_by" className={inputCls}>
                 <option value="flex_score_desc">Flex score ↓ (highest first)</option>

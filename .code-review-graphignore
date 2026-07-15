@@ -1,0 +1,6 @@
+tests/**
+infra/**
+alembic/**
+.vscode/**
+docs/**
+data/**

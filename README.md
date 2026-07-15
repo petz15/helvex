@@ -529,6 +529,18 @@ AlertManager is disabled — add it back in `monitoring/values.yaml` (`alertmana
 
 ---
 
+## Developer Tooling
+
+### codegraph (MCP code graph)
+
+This repo is indexed into a local SQLite knowledge graph via the [codegraph](https://github.com/colbymchenry/codegraph) MCP server, giving AI assistants a single `codegraph_explore` tool that returns verbatim source plus call graph and blast-radius context in one call — instead of a grep/Read loop.
+
+- Config: `.mcp.json` (repo root — note the leading dot; this is the standard Claude Code project MCP config file). Per-repo exclude patterns live in `codegraph.json` (root).
+- Index data lives in `.codegraph/` (git-ignored). Unlike the previous tool (CodeGraphContext/KuzuDB), this one uses SQLite in **WAL mode** via a shared background daemon, so multiple clients (two IDE windows, a CLI, etc.) can query/update it concurrently without lock errors.
+- See [runbook.md §26](runbook.md#26-dev-tooling-codegraph-mcp--keeping-the-code-graph-in-sync) for setup, re-indexing, and file-watching details.
+
+---
+
 ## Roadmap
 
 ### Near-term

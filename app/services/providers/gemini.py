@@ -144,7 +144,8 @@ def gemini_batch_create(
     """Create a batch of Gemini requests and return a batch_id for polling.
 
     NOTE: Gemini doesn't have a native batch API like OpenAI.
-    We store requests in Redis/DB and return a pseudo-batch ID for polling.
+    We store requests in the AppSetting table (Postgres) and return a
+    pseudo-batch ID for polling.
     """
     import uuid
     from app.database import SessionLocal

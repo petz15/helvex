@@ -50,11 +50,23 @@ _MAX_RECORDS_PER_CALL = 30
 
 # Rate limiting (applies to ALL operations: Search and GetByUID)
 _RATE_LIMIT_BASE_DELAY = 60.0   # seconds after first rate-limit error (doubles each retry)
-_INTER_CALL_DELAY = 2.0         # min sleep between API calls (~30/min); safe with mutual exclusion
+_INTER_CALL_DELAY = 3.5         # min sleep between API calls; ~17/min leaves headroom below the API cap
 
 
 class UIDRateLimitError(Exception):
     """Raised when the UID API returns Request_limit_exceeded after all retries."""
+
+
+def _chunked_sleep(seconds: float, abort_cb=None, chunk: float = 5.0) -> None:
+    """Sleep for `seconds` total, calling abort_cb every `chunk` seconds so
+    job cancellation is detected promptly even during long rate-limit waits."""
+    import time
+    remaining = seconds
+    while remaining > 0:
+        time.sleep(min(chunk, remaining))
+        remaining -= chunk
+        if abort_cb:
+            abort_cb()
 
 # Search filter constants (eCH register-status codes)
 _HR_REGISTERED = "2"            # commercialRegisterStatus: in Handelsregister
@@ -390,7 +402,7 @@ def _run_search(
             if _retry < 3:
                 delay = _RATE_LIMIT_BASE_DELAY * (2 ** _retry)
                 logger.warning("UID rate limited (params=%s), waiting %.0fs (retry %d)", search_params, delay, _retry + 1)
-                time.sleep(delay)
+                _chunked_sleep(delay, abort_cb=abort_cb)
                 return _run_search(search_params, abort_cb=abort_cb, _retry=_retry + 1)
             raise UIDRateLimitError(f"Request_limit_exceeded after {_retry} retries (params={search_params})") from exc
         raise

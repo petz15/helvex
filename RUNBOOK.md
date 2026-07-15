@@ -34,6 +34,8 @@ General fixes, recovery procedures, and operational checklists.
 23. [New Company Classification (Incremental)](#23-new-company-classification-incremental)
 24. [Semantic Search Tuning](#24-semantic-search-tuning)
 25. [Keeping K3s and the Servers Up to Date](#25-keeping-k3s-and-the-servers-up-to-date)
+26. [Dev Tooling: CodeGraphContext MCP — Keeping the Code Graph in Sync](#26-dev-tooling-codegraphcontext-mcp--keeping-the-code-graph-in-sync)
+27. [Dev Tooling: code-review-graph MCP — PR/Diff Review Assistant](#27-dev-tooling-code-review-graph-mcp--prdiff-review-assistant)
 
 ---
 
@@ -1994,4 +1996,133 @@ Both SSH paths are further restricted at the PAM layer (`/etc/security/access.co
 - **Minor/major updates** open a PR but never auto-merge — review the changelog, especially for `cloudnative-pg`/CNPG operator and `cert-manager` (both manage stateful/TLS-critical infra), before merging and running `helmfile -e prod apply`.
 - **K3s, the CNPG Postgres image, Helm, and Helmfile** never auto-merge even on patch — merging the PR only updates the *pinned version string*; you still need to run the manual upgrade procedure above (K3s) or `helmfile apply` (Helm chart versions). Merging alone changes nothing running.
 - Renovate runs before 6am on weekdays (Europe/Zurich). Check PRs weekly; an accumulating backlog of major-version PRs is a signal to schedule a maintenance window, not something to ignore.
+
+---
+
+## 26. Dev Tooling: codegraph MCP — Keeping the Code Graph in Sync
+
+[codegraph](https://github.com/colbymchenry/codegraph) indexes this repo's source into a local SQLite knowledge graph (`.codegraph/`, git-ignored), exposing a single `codegraph_explore` MCP tool that returns verbatim source + call graph + blast-radius impact in one call. It replaced **CodeGraphContext/KuzuDB** (used previously) specifically because KuzuDB took an exclusive OS-level lock that made a second consumer (another IDE window, a standalone visualizer) impossible — see the git history of this section if you need the old tool's gotchas for reference.
+
+**Config:**
+- `.mcp.json` (repo root — **note the leading dot**; this is the standard Claude Code project MCP config file. A prior mistake put the config in a non-dotted `mcp.json`, which is silently never read — if codegraph tools ever stop showing up after an edit, check you edited the right file).
+- `codegraph.json` (repo root, optional) — custom file-extension mappings and **exclude patterns**. Currently excludes `.terraform/` explicitly (vendored Terraform provider binaries under `infra/terraform/envs/prod/.terraform/` aren't covered by any `.gitignore`). `.next/` and `node_modules/` are already covered by `frontend/.gitignore`, which codegraph respects, but are also listed explicitly for safety.
+- Global CLI config/telemetry preference: `C:\Users\<you>\.codegraph\telemetry.json`.
+
+### Concurrency — this is the actual reason we switched tools
+
+`codegraph status` reports `Backend: node:sqlite - built-in (full WAL)`. **SQLite in WAL mode allows concurrent readers without blocking on a writer**, and codegraph runs a shared background daemon (local sockets) that multiple clients — two Claude Code windows, a terminal, the MCP server — can all connect to at once. This is a real architectural fix, not a workaround: unlike the old KuzuDB setup, you do **not** need to choose between "watch mode" and "query through the assistant" — both can run simultaneously without lock errors.
+
+### Keeping the graph current
+
+The background daemon watches files and incrementally syncs changes automatically (debounced — default ~2s, tune via `CODEGRAPH_WATCH_DEBOUNCE_MS`, clamped 100ms–60s). In normal use you don't need to do anything manually. If you want to force a sync (e.g. after a large external change, a branch switch, or before an important query):
+
+```powershell
+cd C:\D\coding_projects\zefix_analyzer
+codegraph sync        # incremental — only files changed since last index
+codegraph index        # full rebuild from scratch (same as a fresh `codegraph init`)
+codegraph status        # check current stats + confirm "Index is up to date"
+```
+
+### Managing the daemon
+
+```powershell
+codegraph daemon        # interactive — lists running daemons, pick one + Enter to stop it
+codegraph unlock .      # remove a stale lock file if indexing reports one blocking it
+codegraph uninit .      # remove codegraph entirely from this project (deletes .codegraph/)
+```
+
+The daemon is spawned on demand by whichever command/MCP connection needs it first — there is no separate "start the daemon" step, and (unlike the old tool's in-memory watch state) it is not tied to a single IDE window's lifecycle. We have not separately verified it survives a full computer restart; if `codegraph status` ever reports a stale index after a reboot, run `codegraph sync` to catch it up.
+
+### Manual review from a terminal (no MCP/assistant needed)
+
+```powershell
+codegraph explore "score_result web_enrichment"   # same output as the codegraph_explore MCP tool
+codegraph callers score_result                    # who calls this symbol
+codegraph callees score_result                    # what this symbol calls
+codegraph impact score_result                     # blast-radius: what's affected by changing it
+codegraph query score_result                      # plain symbol search
+codegraph node score_result                       # one symbol's source + caller/callee trail
+codegraph files                                   # project file structure from the index
+```
+
+### Known gotchas
+
+1. **Config file must be `.mcp.json` (dotfile), not `mcp.json`.** We hit this directly during setup — a `codegraph` entry in the non-dotted file silently never connects, with no error surfaced anywhere.
+2. **`.terraform/` needs an explicit exclude** in `codegraph.json` — it's the one directory in this repo not already covered by a `.gitignore` that codegraph would otherwise respect.
+3. **Telemetry is on by default.** Disabled globally via `codegraph telemetry off` (confirm with `codegraph telemetry status`) and via `DO_NOT_TRACK=1` in the MCP server's env in `.mcp.json`. Per the project's own docs, no code/paths/names are collected even when enabled — see `TELEMETRY.md` in the repo if you want to verify that claim yourself.
+4. **Two similarly-named tools can coexist and cause confusion.** This repo also has a separate `code-review-graph` MCP server (also in `.mcp.json`) for PR/diff-focused review workflows (risk scoring, blast-radius on git diffs, community detection) — a different tool for a different job, not a duplicate/alternative to `codegraph`. If a query returns unexpected results, check which server's tools you actually called (`mcp__codegraph__*` vs `mcp__code-review-graph__*`).
+
+### Quick health check
+
+```
+1. `codegraph status` — files/nodes/edges should be non-zero and roughly match the real source file count; look for "[OK] Index is up to date"
+2. Ask the assistant to call `codegraph_explore` (or run `codegraph explore` yourself) with a function you know is called somewhere (grep for it first) — it should return that real caller in its "Relationships" / blast-radius section, plus verbatim source.
+```
+
+---
+
+## 27. Dev Tooling: code-review-graph MCP — PR/Diff Review Assistant
+
+[code-review-graph](https://github.com/tirth8205/code-review-graph) is a **separate** tool from `codegraph` (section 26) — different job, not a duplicate. It also parses this repo with Tree-sitter into its own SQLite graph, but it's built for **PR/diff-focused review**: risk scoring, blast-radius on git diffs, community/flow detection, wiki generation. Reach for `codegraph_explore` to understand how code works; reach for `code-review-graph`'s tools when reviewing what a change affects.
+
+**Install location — deliberately isolated:** `pip install code-review-graph` into the project's `.venv` pulled in newer `pydantic`/`uvicorn`/`watchdog` than `requirements.backend.txt` pins, which would have silently broken the running app's dependency versions (shared venv). It is instead installed in its own standalone venv at `C:\Users\<you>\.code-review-graph-venv`, never touching the app's `.venv`. If this is ever reinstalled or upgraded, **do not** `pip install` it into the project `.venv` — use the isolated venv (or `pipx`) again.
+
+**PATH requirement:** `C:\Users\<you>\.code-review-graph-venv\Scripts` was added to the **user** PATH so the bare `code-review-graph` command resolves for the git hook and Claude Code hooks below. This only takes effect for *new* processes started after the change — an already-running terminal/IDE/Claude Code session won't see it until restarted. If the hooks below silently no-op (e.g. the SessionStart hook prints "Not a git repo, skipping" even inside the repo), that's the symptom: PATH hasn't refreshed for that process yet, not an actual git-detection failure.
+
+**Config (project-scoped only — see "Known gotchas" for why):**
+- `.mcp.json`, `.vscode/mcp.json`, `.qoder/mcp.json`, `.opencode.json` — MCP server registration, one per platform, all pointing at the isolated venv's Python.
+- `.claude/settings.json` (repo root, checked in) — hooks, see below.
+- `.gitignore` — `.code-review-graph/` (the graph DB) is excluded.
+
+### Keeping the graph current — automatic, two mechanisms
+
+Unlike `codegraph`'s background daemon, `code-review-graph` has **no persistent watcher by default**; it's kept in sync by hooks that fire on specific events:
+
+1. **Claude Code hooks** (`.claude/settings.json`):
+   - `PostToolUse` (matcher `Edit|Write|Bash`) → runs `code-review-graph update --skip-flows --repo <path>` after every edit/command, best-effort (`|| true`).
+   - `SessionStart` → runs `code-review-graph status --repo <path>` so a fresh session reports current graph stats.
+2. **Git pre-commit hook** (`.git/hooks/pre-commit`, local only — not versioned, so a fresh clone won't have it until `code-review-graph install` is re-run there) → runs `code-review-graph update` then `code-review-graph detect-changes --brief` before each commit, both best-effort/non-blocking (`|| true`) so it can never fail a commit.
+
+In normal use you don't need to run anything manually — editing files in a Claude Code session or committing keeps the graph current. A manual full rebuild is only needed after a large external change (e.g. `git pull` of a big branch) or if the graph looks stale:
+
+```powershell
+cd C:\D\coding_projects\zefix_analyzer
+code-review-graph update          # incremental — only files changed since last build
+code-review-graph build           # full re-parse of all files
+code-review-graph status          # graph stats
+```
+
+### Manual commands from a terminal (no MCP/assistant needed)
+
+```powershell
+code-review-graph status                     # graph stats
+code-review-graph detect-changes --brief      # read-only impact analysis of current uncommitted diff
+code-review-graph visualize                   # interactive HTML graph
+code-review-graph wiki                        # markdown wiki from community structure
+code-review-graph embed                       # compute vector embeddings for semantic search
+code-review-graph postprocess                  # rebuild flows/communities/FTS without re-parsing
+code-review-graph daemon                       # multi-repo watch daemon control (start/stop/status)
+```
+
+Full command list: `code-review-graph --help`.
+
+### Excluding directories
+
+`.code-review-graphignore` (repo root) adds extra exclude patterns on top of the built-in defaults (`.git/`, `node_modules/`, `.venv/`, `__pycache__/`, etc.). **Patterns are `fnmatch` globs, not gitignore syntax** — a bare `tests/` matches nothing; it must be `tests/**`. After editing the file, a **full rebuild** is required (`code-review-graph build` / `build_or_update_graph_tool` with `full_rebuild=true`) — incremental `update` doesn't re-evaluate exclusions for already-indexed files. Current excludes: `tests/**`, `infra/**`, `frontend/**`, `alembic/**`, `.vscode/**`, `docs/**`, `data/**` (backend app code only — verify with `list_graph_stats_tool`: no `Test` node kind and no `javascript`/`typescript`/`tsx` in the languages list).
+
+### Known gotchas
+
+1. **Never `pip install` this into the project `.venv`.** It has its own dependency tree (`fastmcp`, `pydantic` ≥2.11.7, etc.) that conflicts with `requirements.backend.txt` pins. Use the isolated venv described above.
+2. **`code-review-graph install` reaches far beyond this repo if you let it.** Running it interactively offered to write global config for Codex (`~/.codex/hooks.json`), GitHub Copilot CLI (`~/.copilot/mcp-config.json` — which hardcoded this repo's path even though the file is global), and OpenCode (`~/.config/opencode/plugins/`). Those would have made **every** repo you touch with those tools try to run `code-review-graph` commands. We deliberately removed all three and kept the tool scoped to this repo's own config files only. If re-running `install`, decline (or immediately delete) anything it writes outside this project directory.
+3. **PATH must be refreshed** after adding the venv's `Scripts` dir — see above. New terminal/session required.
+4. **Config file must be `.mcp.json` (dotfile)** — same gotcha as `codegraph` (section 26.4); a non-dotted `mcp.json` is silently never read by Claude Code.
+5. **Two similarly-named tools.** If a query returns unexpected results, check which server's tools you actually called (`mcp__codegraph__*` vs `mcp__code-review-graph__*`).
+
+### Quick health check
+
+```
+1. `code-review-graph status` — files/nodes/edges non-zero, roughly matching real source file count.
+2. `code-review-graph detect-changes --brief` after editing a file — should list that file and its blast-radius, not error out.
+3. Make a commit — the pre-commit hook should run silently (check `.git/hooks/pre-commit` ran via `--tb`/verbose git output if you suspect it isn't firing); it never blocks the commit either way.
+```
 

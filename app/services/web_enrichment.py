@@ -454,6 +454,39 @@ def recalculate_google_scores(
 _DELETED_STATUSES = ("Gelöscht", "CANCELLED", "BEING_CANCELLED")
 
 
+def _enrich_one_concurrent(company_id: int) -> tuple[int, bool, str | None, Exception | None]:
+    """Enrich one company using its own DB session (safe for ThreadPoolExecutor)."""
+    from app.database import SessionLocal
+
+    thread_db = SessionLocal()
+    try:
+        company = thread_db.get(Company, company_id)
+        if company is None:
+            return company_id, False, None, None
+        enriched, url = enrich_company_website(thread_db, company)
+        if enriched:
+            try:
+                thread_db.refresh(company)
+                raw = company.google_search_results_raw
+                candidates = crawler_crud.parse_google_results_raw(raw) if raw else []
+                if candidates:
+                    crawler_crud.upsert_url_candidates(thread_db, company_id, candidates)
+                    if not crawler_crud.get_selected_candidate(thread_db, company_id):
+                        best = crawler_crud.select_best_candidate(thread_db, company_id)
+                        crawler_crud.get_or_create_crawl_state(
+                            thread_db, company_id,
+                            selected_url_id=best.id if best else None,
+                        )
+                    thread_db.commit()
+            except Exception as exc_inner:
+                logger.warning("URL candidate sync failed for company_id=%d: %s", company_id, exc_inner)
+        return company_id, enriched, url, None
+    except Exception as exc:
+        return company_id, False, None, exc
+    finally:
+        thread_db.close()
+
+
 def run_batch_collect(
     db: Session,
     *,
@@ -461,6 +494,7 @@ def run_batch_collect(
     only_missing_website: bool = True,
     refresh_zefix: bool = False,
     run_google: bool = True,
+    concurrency: int = 1,
     resume_from: int = 0,
     progress_cb: Any = None,
     # ── Geography ─────────────────────────────────────────────────────────────
@@ -760,65 +794,88 @@ def run_batch_collect(
     companies = [db.get(Company, cid) for cid in company_ids]
     companies = [c for c in companies if c is not None]
 
-    for i, company in enumerate(companies, start=start_idx + 1):
-        current = company
-        if refresh_zefix:
-            try:
-                from app.services.zefix_import import import_company_from_zefix_uid
-                refreshed, _ = import_company_from_zefix_uid(
-                    db,
-                    company.uid,
-                    pause_on_zefix_500=True,
-                    status_cb=status_cb,
-                    abort_cb=abort_cb,
-                )
-                current = refreshed
-                stats["zefix_refreshed"] += 1
-            except Exception as exc:  # noqa: BLE001
-                if _is_control_signal_exception(exc):
-                    raise
-                logger.warning("Zefix refresh failed for %s: %s", company.uid, exc)
-                stats["errors"].append(f"Zefix refresh {company.uid} [{type(exc).__name__}]: {exc}")
+    use_concurrent = run_google and concurrency > 1 and not refresh_zefix
 
-        if run_google:
-            try:
-                enriched, _ = enrich_company_website(db, current)
-                if enriched:
-                    stats["google_enriched"] += 1
-                    # Auto-populate url_candidates so the crawler can pick up new
-                    # URLs immediately without a separate web_url_populate job.
-                    # upsert is safe on existing rows (only updates score/title/snippet).
-                    # select_best_candidate only fires when no candidate is selected yet —
-                    # preserves any manually-chosen or already-crawled selection.
+    if use_concurrent:
+        from concurrent.futures import ThreadPoolExecutor, as_completed as _as_completed
+        done = 0
+        with ThreadPoolExecutor(max_workers=concurrency, thread_name_prefix="serper") as pool:
+            futures = {pool.submit(_enrich_one_concurrent, c.id): c for c in companies}
+            for future in _as_completed(futures):
+                done += 1
+                company_id_done, enriched, _url, exc = future.result()
+                if exc:
+                    company_obj = futures[future]
+                    logger.warning("Google search failed for %s: %s", company_obj.uid, exc)
+                    stats["errors"].append(f"Google search {company_obj.uid} [{type(exc).__name__}]: {exc}")
                     try:
-                        raw = current.google_search_results_raw
-                        candidates = crawler_crud.parse_google_results_raw(raw) if raw else []
-                        if candidates:
-                            crawler_crud.upsert_url_candidates(db, current.id, candidates)
-                            if not crawler_crud.get_selected_candidate(db, current.id):
-                                best = crawler_crud.select_best_candidate(db, current.id)
-                                crawler_crud.get_or_create_crawl_state(
-                                    db, current.id,
-                                    selected_url_id=best.id if best else None,
-                                )
-                    except Exception as exc_inner:  # noqa: BLE001
-                        logger.warning(
-                            "URL candidate sync failed for %s: %s", current.uid, exc_inner
-                        )
+                        from app.crud.company_error import log_error as _log_err
+                        _log_err(db, company_id=company_id_done, source="web_enrichment",
+                                 error_type="enrich_failed", message=str(exc))
+                        db.flush()
+                    except Exception:  # noqa: BLE001
+                        pass
+                elif enriched:
+                    stats["google_enriched"] += 1
                 else:
                     stats["google_no_result"] += 1
-            except Exception as exc:  # noqa: BLE001
-                logger.warning("Google search failed for %s: %s", current.uid, exc)
-                stats["errors"].append(f"Google search {current.uid} [{type(exc).__name__}]: {exc}")
+                if progress_cb:
+                    progress_cb(start_idx + done, stats["selected"], stats)
+    else:
+        for i, company in enumerate(companies, start=start_idx + 1):
+            current = company
+            if refresh_zefix:
                 try:
-                    from app.crud.company_error import log_error as _log_err
-                    _log_err(db, company_id=current.id, source="web_enrichment",
-                             error_type="enrich_failed", message=str(exc))
-                    db.flush()
-                except Exception:  # noqa: BLE001
-                    pass
+                    from app.services.zefix_import import import_company_from_zefix_uid
+                    refreshed, _ = import_company_from_zefix_uid(
+                        db,
+                        company.uid,
+                        pause_on_zefix_500=True,
+                        status_cb=status_cb,
+                        abort_cb=abort_cb,
+                    )
+                    current = refreshed
+                    stats["zefix_refreshed"] += 1
+                except Exception as exc:  # noqa: BLE001
+                    if _is_control_signal_exception(exc):
+                        raise
+                    logger.warning("Zefix refresh failed for %s: %s", company.uid, exc)
+                    stats["errors"].append(f"Zefix refresh {company.uid} [{type(exc).__name__}]: {exc}")
 
-        if progress_cb:
-            progress_cb(i, stats["selected"], stats)
+            if run_google:
+                try:
+                    enriched, _ = enrich_company_website(db, current)
+                    if enriched:
+                        stats["google_enriched"] += 1
+                        try:
+                            raw = current.google_search_results_raw
+                            candidates = crawler_crud.parse_google_results_raw(raw) if raw else []
+                            if candidates:
+                                crawler_crud.upsert_url_candidates(db, current.id, candidates)
+                                if not crawler_crud.get_selected_candidate(db, current.id):
+                                    best = crawler_crud.select_best_candidate(db, current.id)
+                                    crawler_crud.get_or_create_crawl_state(
+                                        db, current.id,
+                                        selected_url_id=best.id if best else None,
+                                    )
+                        except Exception as exc_inner:  # noqa: BLE001
+                            logger.warning(
+                                "URL candidate sync failed for %s: %s", current.uid, exc_inner
+                            )
+                    else:
+                        stats["google_no_result"] += 1
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning("Google search failed for %s: %s", current.uid, exc)
+                    stats["errors"].append(f"Google search {current.uid} [{type(exc).__name__}]: {exc}")
+                    try:
+                        from app.crud.company_error import log_error as _log_err
+                        _log_err(db, company_id=current.id, source="web_enrichment",
+                                 error_type="enrich_failed", message=str(exc))
+                        db.flush()
+                    except Exception:  # noqa: BLE001
+                        pass
+
+            if progress_cb:
+                progress_cb(i, stats["selected"], stats)
 
     return stats

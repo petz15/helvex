@@ -46,6 +46,8 @@ from app.auth import (  # noqa: E402
     create_session_cookie,
     decode_session_cookie,
     get_current_user,
+    session_user_needing_refresh,
+    set_session_cookie,
 )
 from app.config import settings  # noqa: E402
 from app.database import Base, engine  # noqa: E402
@@ -725,7 +727,17 @@ async def auth_gate(request: Request, call_next):
         return await call_next(request)
 
     if _user_id_from_request(request) is not None:
-        return await call_next(request)
+        response = await call_next(request)
+        # Sliding session: re-issue the cookie once it is past half its lifetime so
+        # active users stay logged in without ever re-entering credentials. lax (not
+        # strict) so renewal also covers OAuth-initiated sessions; origin_gate already
+        # enforces same-origin on API requests.
+        refresh_uid = session_user_needing_refresh(request)
+        if refresh_uid is not None:
+            forwarded_proto = request.headers.get("x-forwarded-proto", "")
+            is_https = request.url.scheme == "https" or forwarded_proto.split(",")[0].strip().lower() == "https"
+            set_session_cookie(response, refresh_uid, is_https=is_https, samesite="lax")
+        return response
 
     if path.startswith("/api/"):
         from fastapi.responses import JSONResponse

@@ -103,6 +103,7 @@ from app.crud.job_run import (
     list_jobs_for_user,
     list_org_jobs,
     list_queued_jobs,
+    MAX_RESTART_COUNT,
     has_noga_nightly_run_today,  # noqa: F401
     has_shab_daily_run_today,  # noqa: F401
     has_simap_daily_run_today,  # noqa: F401
@@ -194,6 +195,7 @@ __all__ = [
     "list_jobs_for_user",
     "list_org_jobs",
     "list_queued_jobs",
+    "MAX_RESTART_COUNT",
     "list_events",
     "mark_running",
     "delete_old_finished_jobs",
