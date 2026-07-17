@@ -29,7 +29,7 @@ from dataclasses import dataclass
 from sqlalchemy.orm import Session
 
 from app import crud
-from app.services.scoring.scoring import scoring
+from app.services.scoring import scoring
 
 VERIFIED = "verified"
 CONFIRMED = "confirmed"

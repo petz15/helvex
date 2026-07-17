@@ -7,7 +7,20 @@ the top, not at file #1 in your editor's tree view.
 
 See also: [job-system-deep-dive.md](job-system-deep-dive.md),
 [billing-worldline-deep-dive.md](billing-worldline-deep-dive.md),
-[company-filtering-deep-dive.md](company-filtering-deep-dive.md).
+[company-filtering-deep-dive.md](company-filtering-deep-dive.md),
+[scoring-multitenancy-rework.md](scoring-multitenancy-rework.md).
+
+## Priority 1b — multi-tenant data-integrity leak (design approved, fix pending)
+
+`flex/web/ai/combined` scores are stored on the global `companies` table, but the
+`org_company_state` overlay meant to hold per-org scores is **dead** —
+`update_org_google_results()` has no callers and `_overlay()` reads scores off
+`Company`. Org-scoped enrichment/crawl jobs (`web_enrichment.py`, `web_crawl.py`)
+therefore write scores onto the shared global row, so **one org's re-score/crawl
+changes what every other org sees**. Not a security hole (authz is enforced), but a
+correctness/isolation defect. Also see the still-open **"Cross-tenant pollution in
+bulk company mutations"** item in `ROADMAP.md` (same class: per-org fields written to
+`Company`). Full fix design: [scoring-multitenancy-rework.md](scoring-multitenancy-rework.md).
 
 ## Why these and not others
 

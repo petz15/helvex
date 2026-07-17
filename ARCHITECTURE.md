@@ -529,9 +529,34 @@ The core entity. Key columns:
 - `shab_stub` — minimal stub created from a SHAB publication before full Zefix data arrived
 - `uid` — imported exclusively from the UID register (no Zefix entry exists)
 
-**Dual-write note (Google scoring fields):** `website_url`, `web_score`, `google_search_results_raw`, `website_checked_at`, `social_media_only`, `website_status`, and `website_count` exist on both `Company` (global Serper master) and `OrgCompanyState` (org-specific re-score). Always read from `OrgCompanyState` when `org_id` is available; fall back to `Company` only when no org context exists. See model file comments for details.
+**Dual-write note (Google scoring fields):** `website_url`, `web_score`, `google_search_results_raw`, `website_checked_at`, `social_media_only`, `website_status`, and `website_count` exist on both `Company` (global Serper master) and `OrgCompanyState` (org-specific re-score). The `OrgCompanyState` docstring says to "always read from the overlay when `org_id` is available" — but ⚠️ **this is aspirational, not the current reality**: `_overlay()` reads these scores straight off `Company`, and the intended per-org sink `update_org_google_results()` has **no callers** (the `OrgCompanyState` web-score columns are dead shadow columns). Org-scoped enrichment/crawl jobs therefore write scores onto the *global* `Company` row, which every other org then reads — a data-integrity leak. This whole layering is being reworked so that scores become strictly per-scope; see the approved design in [`docs/code-review/scoring-multitenancy-rework.md`](docs/code-review/scoring-multitenancy-rework.md). Until that lands, treat these fields as effectively global.
 
 **Note:** `review_status`, `contact_status`, `contact_name/email/phone`, and `tags` also exist as legacy columns on `Company`, but the authoritative per-org values live in `OrgCompanyState`. Do not write these fields directly on `Company` for new code.
+
+#### Tenancy-overlay pattern (house standard)
+
+When an org or user needs their own version of shared/base data, follow this shape
+everywhere (workflow state, scores, AI, per-scope settings) — the `OrgCompanyState`
+drift above is what happens when it's *not* followed consistently.
+
+- **Layer by write authority, not by content.** Base/global row is written by one
+  system pipeline (ingest/crawl) and read by everyone. Each scope gets a **separate
+  overlay table keyed `(scope_id, base_id)`** — never tenant columns on the base table.
+- **The invariant:** *a scoped write must never touch the base row.* Most multi-tenant
+  data bugs here are violations of this (e.g. an org-scoped crawl writing `Company.web_score`).
+- **Facts vs. derived:** extract expensive facts once, globally (shared); make derived
+  values (scores, formatting) a pure function of `facts × scope-config`, computed/materialized
+  per scope. This is why re-crawling per org is unnecessary.
+- **Sparse vs. dense overlay:** sparse (row only when the scope touched the entity) for
+  annotations/overrides; **dense** (a row per base entity per scope, materialized by a job)
+  only when you must `ORDER BY`/`WHERE` on the scoped value across the full population.
+- **Precedence:** stack as `COALESCE(user, org, global)`, but resolve the scope to a single
+  key at request time so reads stay one indexed join with one predicate (no per-row COALESCE).
+- **Evolving attributes:** JSONB for the churning long tail + promoted real columns only for
+  the few fields you index/sort on. Avoid EAV.
+
+Full worked example + the in-flight migration of scores/AI to this model:
+[`docs/code-review/scoring-multitenancy-rework.md`](docs/code-review/scoring-multitenancy-rework.md).
 
 #### `User` — `app/models/user.py`
 
