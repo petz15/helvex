@@ -25,6 +25,7 @@ from app.api.routes.billing._shared import (
     _emit,
     _extract_card_info_from_worldline,
     _iframe_redirect,
+    _normalize_worldline_token,
     _safe_redirect_target,
     _save_alias,
     logger,
@@ -32,16 +33,10 @@ from app.api.routes.billing._shared import (
 
 router = APIRouter()
 
-# Token placeholders that Worldline may return before the customer fills the form.
-_WORLDLINE_PLACEHOLDER_TOKENS = {
-    "{TOKEN}", "%7BTOKEN%7D", "{token}", "%7Btoken%7D",
-    "{Token}", "%7BToken%7D", "{{{PAYMENTPAGETOKEN}}}", "%7B%7B%7BPAYMENTPAGETOKEN%7D%7D%7D",
-}
-
 
 @router.get("/webhooks/worldline/return", response_model=None)
 @router.get("/webhooks/worldline/return/{token}", response_model=None)
-async def worldline_return(
+def worldline_return(
     request: Request,
     db: Session = Depends(get_db),
     token: str | None = None,
@@ -49,9 +44,7 @@ async def worldline_return(
     params = request.query_params
     callback_ctx = payments.decode_worldline_callback_context(str(params.get("ctx") or "").strip())
 
-    token = str(token or params.get("TOKEN") or params.get("token") or params.get("Token") or "").strip()
-    if token in _WORLDLINE_PLACEHOLDER_TOKENS:
-        token = ""
+    token = _normalize_worldline_token(token, params)
 
     success_url = str(callback_ctx.get("success_url") or params.get("success_url") or "").strip()
     cancel_url = str(callback_ctx.get("cancel_url") or params.get("cancel_url") or "").strip()
@@ -421,16 +414,14 @@ async def worldline_return(
 
 @router.get("/webhooks/worldline/card/return", response_model=None)
 @router.get("/webhooks/worldline/card/return/{token}", response_model=None)
-async def worldline_card_return(
+def worldline_card_return(
     request: Request,
     db: Session = Depends(get_db),
     token: str | None = None,
 ) -> HTMLResponse | RedirectResponse:
     params = request.query_params
     callback_ctx = payments.decode_worldline_callback_context(str(params.get("ctx") or "").strip())
-    token = str(token or params.get("TOKEN") or params.get("token") or params.get("Token") or "").strip()
-    if token in _WORLDLINE_PLACEHOLDER_TOKENS:
-        token = ""
+    token = _normalize_worldline_token(token, params)
 
     success_url = str(callback_ctx.get("success_url") or params.get("success_url") or "").strip()
     cancel_url = str(callback_ctx.get("cancel_url") or params.get("cancel_url") or "").strip()
@@ -519,5 +510,7 @@ async def worldline_card_return(
             "billing.worldline_card_alias_failed source=%s org_id=%s user_id=%s order_ref=%s error=%s",
             source, org_id, user_id, order_reference[:50] if order_reference else "NONE", str(exc),
         )
+        if order_reference:
+            payments.clear_pending_card_alias_token(order_reference=order_reference)
         target = _append_query_params(cancel_url, {"reason": "alias_registration_failed"})
         return _iframe_redirect(_safe_redirect_target(target))

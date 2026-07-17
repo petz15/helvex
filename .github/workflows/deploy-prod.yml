@@ -524,6 +524,7 @@ jobs:
             --from-literal=WORLDLINE_API_USERNAME="${{ secrets.WORLDLINE_API_USERNAME }}" \
             --from-literal=WORLDLINE_API_PASSWORD="${{ secrets.WORLDLINE_API_PASSWORD }}" \
             --from-literal=WORLDLINE_RAW_API_LOGGING_ENABLED="${{ secrets.WORLDLINE_RAW_API_LOGGING_ENABLED }}" \
+            --from-literal=WORLDLINE_PAYMENT_PAGE_ENABLED="${{ secrets.WORLDLINE_PAYMENT_PAGE_ENABLED || 'false' }}" \
             --from-literal=SECRET_KEY="${{ secrets.SECRET_KEY }}" \
             --from-literal=S3_ACCESS_KEY="${{ secrets.S3_ACCESS_KEY }}" \
             --from-literal=S3_SECRET_KEY="${{ secrets.S3_SECRET_KEY }}" \

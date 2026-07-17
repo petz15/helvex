@@ -19,6 +19,7 @@ from app.api.routes.billing._shared import (
     PaymentMethodRegistrationResponse,
     SubscriptionCheckoutRequest,
     TopupCheckoutRequest,
+    compute_upgrade_proration_credits,
     _resolve_billing_address,
     _resolve_tier_amount_chf,
     _resolve_worldline_payment_alias,
@@ -61,6 +62,15 @@ def create_subscription_checkout(
     sub_billing_country = billing_address.get("country", "") or ""
     sub_vat_rate, sub_vat_amount_chf, sub_total_chf = apply_vat(amount_chf, sub_billing_country, getattr(org, "vat_id", None))
     logger.debug("billing.subscription_checkout vat country=%s vat_rate=%s total=%s", sub_billing_country, sub_vat_rate, sub_total_chf)
+
+    # SECURITY: the proration credit grant is computed here from the org's real
+    # current plan — never taken from the request. A client cannot inflate it.
+    proration_credits, _prorate_days, _prorate_cost = compute_upgrade_proration_credits(db, org, target_tier=body.tier)
+    if proration_credits:
+        logger.info(
+            "billing.subscription_checkout proration org_id=%s target_tier=%s credits=%s remaining_days=%s",
+            org.id, body.tier, proration_credits, _prorate_days,
+        )
 
     try:
         logger.info(
@@ -107,7 +117,7 @@ def create_subscription_checkout(
                     status="pending",
                     subscription_tier=body.tier,
                     subscription_billing_cycle=body.billing_cycle,
-                    upgrade_proration_credits=body.upgrade_proration_credits,
+                    upgrade_proration_credits=proration_credits or None,
                     billing_address=json.dumps(billing_address),
                     vat_rate=sub_vat_rate,
                     vat_amount_chf=sub_vat_amount_chf,

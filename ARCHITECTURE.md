@@ -93,7 +93,7 @@ zefix_analyzer/
 │       ├── enrichment/         # crawler_* (http/playwright/common/sitemap/extract), directory_extract, website_status, web_enrichment, geocoding_pipeline
 │       ├── ml/                 # noga, noga_pipeline, noga_lookup, language_detection, embeddings, company_embedding_pipeline, cluster_pipeline, stopword_discovery, boilerplate_analysis, _pipeline_utils
 │       ├── scoring/            # scoring, claude, claude_classify
-│       ├── billing/            # credits, tiers, billing_addresses, billing_renewal, payment_transactions, payments/ (stripe/worldline providers)
+│       ├── billing/            # credits, tiers, billing_addresses, billing_renewal, payment_transactions, payments/ (worldline provider — transaction + payment-page interfaces)
 │       ├── notifications/      # email, saved_view_alerts, activity
 │       ├── platform/           # s3_client, csv_export, llm, providers/ (openai/gemini/deepseek/groq)
 │       └── jobs/               # job_worker (JOB_HANDLERS dispatch), rate_limit, job_handlers/ (one module per job type)
@@ -299,6 +299,16 @@ Worldline's two return-URL webhooks (`worldline_return`, `worldline_card_return`
 in `app/api/routes/billing/webhooks.py`) are large — ~300 lines of inline
 business logic (token resolution, duplicate-payment guard, VAT computation,
 manual transaction upsert, auto-capture) directly in the route handler.
+Both are declared as plain `def` (not `async def`) — they do fully synchronous
+work (sync `httpx.Client` calls, and `wait_for_alias_registration`'s
+`time.sleep`-based retry loop, up to ~10s). An `async def` with no `await`
+runs directly on the event loop and blocks *all* concurrent requests
+(including `/health`) for its duration; this previously caused a real
+incident where a cancelled card-registration return got hit twice back-to-back,
+froze the event loop for 45s+, and tripped the liveness/readiness probes into
+restarting the pod. `worldline_card_return` also clears the pending alias
+token on failure (not just success) so a duplicate/retried return call fails
+fast instead of re-running the whole retry storm.
 
 **Entitlement trust model (SECURITY):** the return endpoint is public (payment
 redirect), and `decode_worldline_callback_context()` returns `{}` on a bad/absent

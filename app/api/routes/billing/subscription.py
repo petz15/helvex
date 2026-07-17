@@ -20,8 +20,8 @@ from app.api.routes.billing._shared import (
     ScheduleDowngradeRequest,
     UpgradeProrationResponse,
     WebhookResponse,
+    compute_upgrade_proration_credits,
     _cancel_provider_transaction,
-    _resolve_tier_amount_chf,
     logger,
 )
 
@@ -124,17 +124,8 @@ def calculate_upgrade_proration(
     if period_end is None or period_end <= now:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No active subscription period found")
 
-    remaining_days = max(0, (period_end - now).days)
-    billing_cycle = getattr(org, "subscription_billing_cycle", "monthly") or "monthly"
-    plan_cost_chf = _resolve_tier_amount_chf(
-        db,
-        tier=current_tier,
-        billing_cycle=billing_cycle,
-        custom_features=getattr(org, "custom_features", None),
-        verified_business=bool(getattr(org, "verified_business", False)),
-    )
-
-    credits_granted = int((plan_cost_chf / 50) * remaining_days * 10_000)
+    # Same trusted computation the checkout route uses to grant the credits.
+    credits_granted, remaining_days, plan_cost_chf = compute_upgrade_proration_credits(db, org)
     logger.info(
         "billing.upgrade_proration_calculated org_id=%s tier=%s remaining_days=%s credits=%s",
         org.id, current_tier, remaining_days, credits_granted,

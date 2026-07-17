@@ -5,7 +5,8 @@ from __future__ import annotations
 import json
 import logging
 import threading
-from typing import Literal
+from datetime import datetime, timezone
+from typing import Literal, Mapping
 from urllib.parse import urlencode, urlparse
 
 from fastapi import HTTPException, status
@@ -21,10 +22,19 @@ from app.schemas.billing import BillingAddress
 from app.services.billing.billing_addresses import get_default_billing_address
 from app.services.billing import payments
 from app.services.billing.tiers import (
+    TIER_RANK,
     get_tier_price_chf,
+    normalize_tier,
 )
 
 logger = logging.getLogger(__name__)
+
+# Token placeholders Worldline may echo back before the customer completes the
+# form. Shared by both return handlers via _normalize_worldline_token().
+_WORLDLINE_PLACEHOLDER_TOKENS = {
+    "{TOKEN}", "%7BTOKEN%7D", "{token}", "%7Btoken%7D",
+    "{Token}", "%7BToken%7D", "{{{PAYMENTPAGETOKEN}}}", "%7B%7B%7BPAYMENTPAGETOKEN%7D%7D%7D",
+}
 
 
 # ── Request / Response schemas ─────────────────────────────────────────────────
@@ -37,7 +47,9 @@ class SubscriptionCheckoutRequest(BaseModel):
     billing_address: BillingAddress | None = None
     save_payment_method: bool = False
     provider: Literal["worldline"] | None = None
-    upgrade_proration_credits: int | None = None
+    # upgrade_proration_credits is intentionally NOT accepted from the client — the
+    # grant is recomputed server-side in create_subscription_checkout via
+    # compute_upgrade_proration_credits(). Any value the client sends is ignored.
     selected_alias_id: str | None = None
 
 
@@ -97,6 +109,48 @@ class UpgradeProrationResponse(BaseModel):
 def _emit(level: str, message: str, *args: object) -> None:
     log_fn = getattr(logger, level, logger.info)
     log_fn(message, *args)
+
+
+def _normalize_worldline_token(raw_token: str | None, params: Mapping[str, str]) -> str:
+    """Resolve the Worldline return token from the path param or query aliases
+    (TOKEN/token/Token), treating unfilled placeholders as absent. Shared by both
+    return handlers so the placeholder handling can't drift between them."""
+    tok = str(raw_token or params.get("TOKEN") or params.get("token") or params.get("Token") or "").strip()
+    return "" if tok in _WORLDLINE_PLACEHOLDER_TOKENS else tok
+
+
+def compute_upgrade_proration_credits(
+    db: Session, org: Organization, *, target_tier: str | None = None
+) -> tuple[int, int, float]:
+    """Server-side proration for upgrading `org` off its current paid plan.
+
+    Returns (credits_granted, remaining_days, plan_cost_chf). Returns zeros when
+    proration does not apply: free tier, a scheduled cancellation, no active
+    billing period, or (when target_tier is given) a target that is not a strict
+    upgrade. This is the ONLY trusted source for the grant — never a client value.
+    """
+    current_tier = normalize_tier(getattr(org, "tier", "free"))
+    if current_tier == "free":
+        return 0, 0, 0.0
+    if getattr(org, "subscription_cancel_at_period_end", False):
+        return 0, 0, 0.0
+    now = datetime.now(tz=timezone.utc)
+    period_end = getattr(org, "subscription_period_end", None)
+    if period_end is None or period_end <= now:
+        return 0, 0, 0.0
+    if target_tier is not None and TIER_RANK.get(normalize_tier(target_tier), 0) <= TIER_RANK.get(current_tier, 0):
+        return 0, 0, 0.0
+    remaining_days = max(0, (period_end - now).days)
+    billing_cycle = getattr(org, "subscription_billing_cycle", "monthly") or "monthly"
+    plan_cost_chf = _resolve_tier_amount_chf(
+        db,
+        tier=current_tier,
+        billing_cycle=billing_cycle,
+        custom_features=getattr(org, "custom_features", None),
+        verified_business=bool(getattr(org, "verified_business", False)),
+    )
+    credits_granted = int((plan_cost_chf / 50) * remaining_days * 10_000)
+    return credits_granted, remaining_days, plan_cost_chf
 
 
 def _extract_card_info_from_worldline(result: dict) -> dict:
