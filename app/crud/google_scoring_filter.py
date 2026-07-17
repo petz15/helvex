@@ -10,7 +10,7 @@ def seed_default_google_stopwords(db: Session) -> int:
 
     Returns number of rows actually inserted.
     """
-    from app.services.scoring import _STOPWORDS  # import here to avoid circular
+    from app.services.scoring.scoring import _STOPWORDS  # import here to avoid circular
     inserted = 0
     for value in _STOPWORDS:
         v = value.strip().lower()
@@ -30,7 +30,7 @@ def seed_default_directory_domains(db: Session) -> int:
 
     Returns number of rows actually inserted.
     """
-    from app.services.scoring import _DIRECTORY_DOMAINS  # import here to avoid circular
+    from app.services.scoring.scoring import _DIRECTORY_DOMAINS  # import here to avoid circular
     inserted = 0
     for value in _DIRECTORY_DOMAINS:
         v = value.strip().lower()
@@ -50,7 +50,7 @@ def seed_default_tfidf_stopwords(db: Session) -> int:
 
     Returns number of rows actually inserted.
     """
-    from app.services.collection import _TFIDF_STOPWORDS  # import here to avoid circular
+    from app.services.ingestion.collection import _TFIDF_STOPWORDS  # import here to avoid circular
     inserted = 0
     for value in _TFIDF_STOPWORDS:
         v = value.strip().lower()

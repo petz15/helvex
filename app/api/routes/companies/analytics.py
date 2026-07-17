@@ -37,11 +37,13 @@ def list_cantons(db: Session = Depends(get_db), _: User = Depends(get_current_us
 
 @router.get("/taxonomy", response_model=dict, summary="Taxonomy stats (clusters, keywords, tags, categories)")
 def get_taxonomy(
-    org_id: int | None = Query(None, description="Scope stats to companies with an org state for this org"),
+    org_id: int | None = Query(None, description="Superadmin only: scope stats to a specific org"),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    effective_org_id = org_id or current_user.org_id
+    # A client-supplied org_id is honoured only for superadmins; regular users are
+    # always scoped to their own org so they cannot read another tenant's stats.
+    effective_org_id = org_id if current_user.is_superadmin else current_user.org_id
     return crud.get_taxonomy_stats(db, org_id=effective_org_id)
 
 
@@ -49,11 +51,12 @@ def get_taxonomy(
 def get_category_stats(
     type: str = Query(..., description="Category type: ai_category | tfidf_cluster | keyword | noga_code"),
     value: str = Query(..., description="Category value to look up"),
-    org_id: int | None = Query(None),
+    org_id: int | None = Query(None, description="Superadmin only: scope stats to a specific org"),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    effective_org_id = org_id or current_user.org_id
+    # Non-superadmins are always scoped to their own org (no cross-tenant reads).
+    effective_org_id = org_id if current_user.is_superadmin else current_user.org_id
     return crud.get_category_stats(db, category_type=type, value=value, org_id=effective_org_id)
 
 
@@ -82,7 +85,7 @@ def get_noga_description(
     db: Session = Depends(get_db),
     _: User = Depends(get_current_user),
 ):
-    from app.services.noga_lookup import load_noga_hierarchy
+    from app.services.ml.noga_lookup import load_noga_hierarchy
     cache = load_noga_hierarchy()
     noga_data = cache.get("noga_data", {})
     node = noga_data.get(code) if noga_data else None
@@ -119,7 +122,7 @@ def _build_market_segments(db: Session) -> list[dict]:
     from datetime import date
     from sqlalchemy import text as sa_text
 
-    from app.services.noga import _repo_root
+    from app.services.ml.noga import _repo_root
     lookup_path = _repo_root() / "noga_lookup.json"
     section_labels: dict[str, dict[str, str]] = {}
     if lookup_path.exists():

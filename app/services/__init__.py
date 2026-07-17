@@ -1,4 +1,4 @@
-from app.services.collection import (
+from app.services.ingestion.collection import (
     enrich_company_website,
     import_company_from_zefix_uid,
     initial_collect,

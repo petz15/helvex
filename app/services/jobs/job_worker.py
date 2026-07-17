@@ -267,23 +267,55 @@ def _refund_job_credits_if_needed(
 
     from app.services.billing.credits import grant_credits
     from app.models.organization import Organization
+    from app.models.org_credit_transaction import OrgCreditTransaction
 
     org = db.get(Organization, job.org_id)
     if org is None or org.credits_unlimited:
+        return
+
+    # Idempotency: never refund the same job twice (e.g. cancel then a recovery sweep).
+    already_refunded = (
+        db.query(OrgCreditTransaction.id)
+        .filter(
+            OrgCreditTransaction.reference_id == f"refund:job:{job.id}",
+            OrgCreditTransaction.type == "refund",
+        )
+        .first()
+    )
+    if already_refunded is not None:
+        return
+
+    # Prorate: refund only the portion of the charged work that was NOT performed.
+    # Otherwise a user could enqueue a large metered job, let it process almost all
+    # companies (results persist via per-batch commits), cancel just before completion,
+    # and get a full refund while keeping the work. Jobs that never started (done=0) or
+    # that don't track progress get a full refund.
+    done = int(job.progress_done or 0)
+    total = int(job.progress_total or 0)
+    if total > 0 and done > 0:
+        undone = max(0, total - done)
+        refund_amount = int(round(cost * undone / total))
+    else:
+        refund_amount = cost
+    if refund_amount <= 0:
+        logger.info(
+            "credit_refund_skipped job_id=%d org_id=%d action=%s done=%d/%d reason=%s (work fully consumed)",
+            job.id, job.org_id, action, done, total, reason,
+        )
         return
 
     try:
         grant_credits(
             db,
             org_id=job.org_id,
-            amount=cost,
+            amount=refund_amount,
             tx_type="refund",
             action_type=action,
             reference_id=f"refund:job:{job.id}",
         )
         logger.info(
-            "credit_refund job_id=%d org_id=%d action=%s cost=%d reason=%s",
-            job.id, job.org_id, action, cost, reason,
+            "credit_refund job_id=%d org_id=%d action=%s charged=%d refunded=%d done=%d/%d reason=%s",
+            job.id, job.org_id, action, cost, refund_amount, done, total, reason,
         )
     except Exception as _e:  # noqa: BLE001
         logger.warning("credit_refund_failed job_id=%d error=%s", job.id, _e)

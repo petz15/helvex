@@ -7,7 +7,7 @@ from app.auth import get_current_user
 from app.database import get_db
 from app.models.user import User
 from app.models.user_view import UserView
-from app.services.activity import log_activity
+from app.services.notifications.activity import log_activity
 
 router = APIRouter(prefix="/views", tags=["views"])
 

@@ -1,7 +1,4 @@
-import hashlib
-import hmac
 import json
-import time
 
 from app.auth import get_current_user
 from app.main import app
@@ -10,7 +7,7 @@ from app.models.organization import Organization
 from app.models.job_run import JobRun
 from app.models.payment_transaction import PaymentTransaction
 from app.models.user import User
-from app.services.payments import CheckoutSession
+from app.services.billing.payments import CheckoutSession
 from datetime import datetime, timedelta, timezone
 
 
@@ -73,34 +70,23 @@ def _override_user(org_id: int):
     )
 
 
-def test_subscription_checkout_returns_provider_and_amount(client, db, monkeypatch):
-    org = _seed_org(db, org_id=11)
-    _override_user(org.id)
-    monkeypatch.setattr("app.services.payments.settings.payment_provider_mode", "stripe")
-    monkeypatch.setattr("app.services.payments.settings.stripe_secret_key", "sk_test_123")
-    monkeypatch.setattr(
-        "app.services.payments.StripeProvider._post_checkout_session",
-        lambda self, form_data: CheckoutSession(provider="stripe", checkout_url="https://checkout.stripe.test/s/abc", external_id="cs_test_123"),
+def _seed_pending_tx(db, *, org_id, token, order_reference, kind, credits=None, tier=None, billing_cycle=None):
+    """Seed the pending PaymentTransaction that checkout creates, so the Worldline
+    return handler has a server-trusted entitlement source (mirrors production)."""
+    from app.services.billing import payment_transactions
+    payment_transactions.log_payment_transaction(
+        db,
+        org_id=org_id,
+        provider="worldline",
+        external_id=token,
+        order_reference=order_reference,
+        amount_chf=1.0,  # placeholder; the return handler recomputes from the trusted reference
+        kind=kind,
+        status="pending",
+        credits_purchased=credits,
+        subscription_tier=tier,
+        subscription_billing_cycle=billing_cycle,
     )
-
-    try:
-        resp = client.post(
-            "/api/v1/billing/checkout/subscription",
-            json={
-                "tier": "simple",
-                "billing_cycle": "monthly",
-                "success_url": "https://example.com/success",
-                "cancel_url": "https://example.com/cancel",
-            },
-        )
-    finally:
-        app.dependency_overrides.pop(get_current_user, None)
-
-    assert resp.status_code == 200
-    data = resp.json()
-    assert data["provider"] == "stripe"
-    assert data["amount_chf"] == 6.486  # 6.0 CHF + 8.1% Swiss VAT
-    assert data["checkout_url"]
 
 
 def test_subscription_checkout_returns_service_unavailable_when_worldline_missing_config(client, db):
@@ -124,12 +110,12 @@ def test_subscription_checkout_returns_service_unavailable_when_worldline_missin
 def test_subscription_checkout_returns_service_unavailable_when_worldline_base_url_invalid(client, db, monkeypatch):
     org = _seed_org(db, org_id=112)
     _override_user(org.id)
-    monkeypatch.setattr("app.services.payments.settings.payment_provider_mode", "worldline")
-    monkeypatch.setattr("app.services.payments.settings.worldline_customer_id", "cust-1")
-    monkeypatch.setattr("app.services.payments.settings.worldline_terminal_id", "term-1")
-    monkeypatch.setattr("app.services.payments.settings.worldline_api_username", "api-user")
-    monkeypatch.setattr("app.services.payments.settings.worldline_api_password", "api-pass")
-    monkeypatch.setattr("app.services.payments.settings.worldline_api_base_url", "payment.preprod.direct.worldline-solutions.com")
+    monkeypatch.setattr("app.services.billing.payments.settings.payment_provider_mode", "worldline")
+    monkeypatch.setattr("app.services.billing.payments.settings.worldline_customer_id", "cust-1")
+    monkeypatch.setattr("app.services.billing.payments.settings.worldline_terminal_id", "term-1")
+    monkeypatch.setattr("app.services.billing.payments.settings.worldline_api_username", "api-user")
+    monkeypatch.setattr("app.services.billing.payments.settings.worldline_api_password", "api-pass")
+    monkeypatch.setattr("app.services.billing.payments.settings.worldline_api_base_url", "payment.preprod.direct.worldline-solutions.com")
 
     resp = client.post(
         "/api/v1/billing/checkout/subscription",
@@ -172,45 +158,9 @@ def test_subscription_checkout_requires_org_admin_role(client, db):
     assert resp.status_code == 403
 
 
-def test_stripe_webhook_updates_org_subscription(client, db, monkeypatch):
-    org = _seed_org(db, org_id=12)
-    secret = "whsec_test"
-    monkeypatch.setattr("app.services.payments.settings.stripe_webhook_secret", secret)
-
-    payload_obj = {
-        "type": "customer.subscription.updated",
-        "data": {
-            "object": {
-                "customer": "cus_123",
-                "current_period_end": int(time.time()) + 3600,
-                "metadata": {
-                    "org_id": str(org.id),
-                    "tier": "researcher",
-                    "billing_cycle": "yearly",
-                },
-            }
-        },
-    }
-    payload = json.dumps(payload_obj).encode("utf-8")
-    ts = str(int(time.time()))
-    digest = hmac.new(secret.encode("utf-8"), f"{ts}.".encode("utf-8") + payload, hashlib.sha256).hexdigest()
-
-    resp = client.post(
-        "/api/v1/billing/webhooks/stripe",
-        data=payload,
-        headers={"Stripe-Signature": f"t={ts},v1={digest}", "Content-Type": "application/json"},
-    )
-
-    assert resp.status_code == 200
-    db.refresh(org)
-    assert org.tier == "researcher"
-    assert org.subscription_billing_cycle == "yearly"
-    assert org.payment_customer_id == "cus_123"
-
-
 def test_worldline_return_authorizes_and_redirects(client, db, monkeypatch):
     org = _seed_org(db, org_id=15)
-    monkeypatch.setattr("app.services.payments.settings.app_base_url", "https://example.com")
+    monkeypatch.setattr("app.services.billing.payments.settings.app_base_url", "https://example.com")
 
     def _fake_authorize(self, *, token, save_payment_method=False):
         assert token == "tok_15"
@@ -221,7 +171,9 @@ def test_worldline_return_authorizes_and_redirects(client, db, monkeypatch):
             }
         }
 
-    monkeypatch.setattr("app.services.payments.WorldlineProvider.authorize_transaction", _fake_authorize)
+    monkeypatch.setattr("app.services.billing.payments.WorldlineProvider.authorize_transaction", _fake_authorize)
+    _seed_pending_tx(db, org_id=org.id, token="tok_15",
+                     order_reference=f"wl_topup_{org.id}_25000_deadbeef", kind="topup", credits=25000)
 
     resp = client.get(
         "/api/v1/billing/webhooks/worldline/return/tok_15",
@@ -241,9 +193,104 @@ def test_worldline_return_authorizes_and_redirects(client, db, monkeypatch):
     assert org.credits_balance == 25000
 
 
+def test_worldline_return_ignores_forged_order_reference(client, db, monkeypatch):
+    """SECURITY: a caller who holds a valid token for a small real purchase cannot
+    grant themselves more by forging the (unsigned) order_reference query param.
+    The grant must come from the pending transaction created at checkout."""
+    org = _seed_org(db, org_id=1500)
+    monkeypatch.setattr("app.services.billing.payments.settings.app_base_url", "https://example.com")
+
+    def _fake_authorize(self, *, token, save_payment_method=False):
+        return {"Transaction": {"Status": "AUTHORIZED", "Id": "tx_atk"}}
+
+    monkeypatch.setattr("app.services.billing.payments.WorldlineProvider.authorize_transaction", _fake_authorize)
+    # Real checkout: the user actually purchased 100 credits.
+    _seed_pending_tx(db, org_id=org.id, token="tok_atk",
+                     order_reference=f"wl_topup_{org.id}_1_100_realnonce", kind="topup", credits=100)
+
+    # Attack: hit the return URL with a FORGED order_reference (25000 credits), no ctx.
+    resp = client.get(
+        "/api/v1/billing/webhooks/worldline/return/tok_atk",
+        params={
+            "kind": "topup",
+            "order_reference": f"wl_topup_{org.id}_1_25000_forged",
+            "success_url": "https://example.com/success",
+            "cancel_url": "https://example.com/cancel",
+            "source": "notify",
+        },
+        follow_redirects=False,
+    )
+
+    assert resp.status_code == 200
+    db.refresh(org)
+    assert org.credits_balance == 100  # the real purchase, NOT the forged 25000
+
+
+def test_worldline_return_rejects_amount_mismatch(client, db, monkeypatch):
+    """DOUBLE-VERIFICATION: if Worldline authorized less than the entitlement's price,
+    the grant is refused (and the authorization voided) even though a valid pending tx exists."""
+    org = _seed_org(db, org_id=1700)
+    monkeypatch.setattr("app.services.billing.payments.settings.app_base_url", "https://example.com")
+
+    def _fake_authorize(self, *, token, save_payment_method=False):
+        # Provider only authorized 1 cent — far below the price of 25000 credits.
+        return {"Transaction": {"Status": "AUTHORIZED", "Id": "tx_mm", "Amount": {"Value": "1", "CurrencyCode": "CHF"}}}
+
+    monkeypatch.setattr("app.services.billing.payments.WorldlineProvider.authorize_transaction", _fake_authorize)
+    monkeypatch.setattr("app.services.billing.payments.WorldlineProvider.cancel_transaction",
+                        lambda self, *, transaction_id: {})
+    _seed_pending_tx(db, org_id=org.id, token="tok_mm",
+                     order_reference=f"wl_topup_{org.id}_1_25000_nonce", kind="topup", credits=25000)
+
+    resp = client.get(
+        "/api/v1/billing/webhooks/worldline/return/tok_mm",
+        params={
+            "kind": "topup",
+            "order_reference": f"wl_topup_{org.id}_1_25000_nonce",
+            "success_url": "https://example.com/success",
+            "cancel_url": "https://example.com/cancel",
+            "source": "notify",
+        },
+        follow_redirects=False,
+    )
+
+    assert resp.status_code == 200
+    assert "amount_mismatch" in resp.text
+    db.refresh(org)
+    assert org.credits_balance == 0  # grant refused
+
+
+def test_worldline_return_blocks_grant_without_trusted_context(client, db, monkeypatch):
+    """SECURITY: a token with no pending transaction and no signed ctx cannot grant
+    entitlement from unsigned query params."""
+    org = _seed_org(db, org_id=1600)
+    monkeypatch.setattr("app.services.billing.payments.settings.app_base_url", "https://example.com")
+
+    def _fake_authorize(self, *, token, save_payment_method=False):
+        return {"Transaction": {"Status": "AUTHORIZED", "Id": "tx_notrust"}}
+
+    monkeypatch.setattr("app.services.billing.payments.WorldlineProvider.authorize_transaction", _fake_authorize)
+
+    resp = client.get(
+        "/api/v1/billing/webhooks/worldline/return/tok_notrust",
+        params={
+            "kind": "topup",
+            "order_reference": f"wl_topup_{org.id}_1_25000_forged",
+            "success_url": "https://example.com/success",
+            "cancel_url": "https://example.com/cancel",
+            "source": "notify",
+        },
+        follow_redirects=False,
+    )
+
+    assert resp.status_code == 200
+    db.refresh(org)
+    assert org.credits_balance == 0  # no pending tx + no signed ctx → no grant
+
+
 def test_worldline_return_persists_alias_from_checkout_authorize(client, db, monkeypatch):
     org = _seed_org(db, org_id=19)
-    monkeypatch.setattr("app.services.payments.settings.app_base_url", "https://example.com")
+    monkeypatch.setattr("app.services.billing.payments.settings.app_base_url", "https://example.com")
 
     def _fake_authorize(self, *, token, save_payment_method=False):
         assert token == "tok_19"
@@ -259,7 +306,9 @@ def test_worldline_return_persists_alias_from_checkout_authorize(client, db, mon
             },
         }
 
-    monkeypatch.setattr("app.services.payments.WorldlineProvider.authorize_transaction", _fake_authorize)
+    monkeypatch.setattr("app.services.billing.payments.WorldlineProvider.authorize_transaction", _fake_authorize)
+    _seed_pending_tx(db, org_id=org.id, token="tok_19",
+                     order_reference=f"wl_topup_{org.id}_1_25000_deadbeef", kind="topup", credits=25000)
 
     resp = client.get(
         "/api/v1/billing/webhooks/worldline/return/tok_19",
@@ -281,7 +330,7 @@ def test_worldline_return_persists_alias_from_checkout_authorize(client, db, mon
 
 def test_worldline_return_persists_alias_from_registration_result(client, db, monkeypatch):
     org = _seed_org(db, org_id=119)
-    monkeypatch.setattr("app.services.payments.settings.app_base_url", "https://example.com")
+    monkeypatch.setattr("app.services.billing.payments.settings.app_base_url", "https://example.com")
 
     def _fake_authorize(self, *, token, save_payment_method=False):
         assert token == "tok_119"
@@ -295,7 +344,9 @@ def test_worldline_return_persists_alias_from_registration_result(client, db, mo
             },
         }
 
-    monkeypatch.setattr("app.services.payments.WorldlineProvider.authorize_transaction", _fake_authorize)
+    monkeypatch.setattr("app.services.billing.payments.WorldlineProvider.authorize_transaction", _fake_authorize)
+    _seed_pending_tx(db, org_id=org.id, token="tok_119",
+                     order_reference=f"wl_topup_{org.id}_1_25000_deadbeef", kind="topup", credits=25000)
 
     resp = client.get(
         "/api/v1/billing/webhooks/worldline/return/tok_119",
@@ -333,8 +384,8 @@ def test_worldline_card_registration_saves_alias(client, db, monkeypatch):
             "PaymentMeans": {"Card": {"HolderName": "Max Mustermann"}, "DisplayText": "**** 1234"},
         }
 
-    monkeypatch.setattr("app.services.payments.WorldlineProvider.create_card_alias_registration", _fake_register)
-    monkeypatch.setattr("app.services.payments.WorldlineProvider.assert_alias_insert", _fake_assert)
+    monkeypatch.setattr("app.services.billing.payments.WorldlineProvider.create_card_alias_registration", _fake_register)
+    monkeypatch.setattr("app.services.billing.payments.WorldlineProvider.assert_alias_insert", _fake_assert)
 
     resp = client.post(
         "/api/v1/billing/payment-methods/worldline/register",
@@ -354,7 +405,7 @@ def test_worldline_card_registration_saves_alias(client, db, monkeypatch):
 
 def test_worldline_card_return_saves_alias(client, db, monkeypatch):
     org = _seed_org(db, org_id=17)
-    monkeypatch.setattr("app.services.payments.settings.app_base_url", "https://example.com")
+    monkeypatch.setattr("app.services.billing.payments.settings.app_base_url", "https://example.com")
 
     def _fake_wait(self, *, token, max_attempts=15, poll_interval_seconds=60):
         assert token == "alias_tok_1"
@@ -363,9 +414,9 @@ def test_worldline_card_return_saves_alias(client, db, monkeypatch):
             "PaymentMeans": {"Card": {"HolderName": "Max Mustermann"}, "DisplayText": "**** 1234"},
         }
 
-    monkeypatch.setattr("app.services.payments.WorldlineProvider.wait_for_alias_registration", _fake_wait)
+    monkeypatch.setattr("app.services.billing.payments.WorldlineProvider.wait_for_alias_registration", _fake_wait)
 
-    from app.services import payments as payments_module
+    from app.services.billing import payments as payments_module
 
     ctx = payments_module.create_worldline_callback_context(
         org_id=org.id,
@@ -469,7 +520,7 @@ def test_topup_checkout_prefers_current_users_saved_alias_over_org_default(clien
         captured["save_payment_method"] = save_payment_method
         return CheckoutSession(provider="worldline", checkout_url="https://payment.preprod.worldline/tok_19", external_id="tok_19", order_reference="wl_topup_19_1_10000_deadbeef")
 
-    monkeypatch.setattr("app.services.payments.create_topup_checkout", _fake_create_topup_checkout)
+    monkeypatch.setattr("app.services.billing.payments.create_topup_checkout", _fake_create_topup_checkout)
 
     resp = client.post(
         "/api/v1/billing/checkout/topup",
@@ -583,7 +634,7 @@ def test_cancel_pending_payment_triggers_worldline_cancel_when_provider_tx_id_pr
             "Date": "2026-04-02T12:00:00.000+01:00",
         }
 
-    monkeypatch.setattr("app.services.payments.WorldlineProvider.cancel_transaction", _fake_cancel)
+    monkeypatch.setattr("app.services.billing.payments.WorldlineProvider.cancel_transaction", _fake_cancel)
 
     tx = PaymentTransaction(
         org_id=org.id,
@@ -648,7 +699,7 @@ def test_payment_history_expiration_triggers_worldline_cancel_when_provider_tx_i
             "Date": "2026-04-02T12:00:00.000+01:00",
         }
 
-    monkeypatch.setattr("app.services.payments.WorldlineProvider.cancel_transaction", _fake_cancel)
+    monkeypatch.setattr("app.services.billing.payments.WorldlineProvider.cancel_transaction", _fake_cancel)
 
     stale = PaymentTransaction(
         org_id=org.id,

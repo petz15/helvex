@@ -68,7 +68,6 @@ _STARTUP_PATCHES = [
     patch("app.main._maybe_enqueue_geocode_upgrade"),
     patch("app.main._start_nightly_shab_scheduler"),
     patch("app.main._start_nightly_billing_scheduler"),
-    patch("app.main._warm_taxonomy_cache"),
 ]
 
 
@@ -96,6 +95,10 @@ def client(db):
             app.state.startup_message = "Ready"
             # Prevent the in-process worker thread from starting.
             app.state.disable_job_worker = True
+            # Disable the coarse per-user request rate limit so the shared test
+            # user (id=1) isn't throttled across the many requests in the suite.
+            from app.config import settings as _settings
+            _settings.api_rate_limit_enabled = False
             # Provide a signed session cookie so the auth gate lets requests through.
             c.cookies.set(COOKIE_NAME, create_session_cookie(1))
             yield c

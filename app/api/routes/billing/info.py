@@ -15,8 +15,8 @@ from app.database import get_db
 from app.models.org_credit_transaction import OrgCreditTransaction
 from app.models.payment_transaction import PaymentTransaction
 from app.models.user import User
-from app.services import payment_transactions, payments
-from app.services.tiers import get_billing_tiers
+from app.services.billing import payment_transactions, payments
+from app.services.billing.tiers import get_billing_tiers
 
 from app.schemas.billing import BillingTierRead
 from app.api.routes.billing._shared import (

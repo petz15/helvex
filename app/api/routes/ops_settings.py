@@ -12,7 +12,7 @@ from app import crud
 from app.auth import get_current_user, require_superadmin
 from app.database import get_db
 from app.models.user import User
-from app.services.scoring import get_default_scoring_config
+from app.services.scoring.scoring import get_default_scoring_config
 
 router = APIRouter(tags=["settings"])
 

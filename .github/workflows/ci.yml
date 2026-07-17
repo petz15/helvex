@@ -38,9 +38,9 @@ jobs:
             frontend:
               - 'frontend/**'
             ml:
-              - 'app/services/cluster_pipeline.py'
-              - 'app/services/noga.py'
-              - 'app/services/job_worker.py'
+              - 'app/services/ml/cluster_pipeline.py'
+              - 'app/services/ml/noga.py'
+              - 'app/services/jobs/job_worker.py'
               - 'scripts/build_noga_embeddings.py'
               - 'noga_lookup.json'
               - 'noga_tree.json'
@@ -90,8 +90,8 @@ jobs:
 
       - name: Verify ML imports
         run: |
-          python -c "import app.services.cluster_pipeline as cp; print('cluster_pipeline ok')"
-          python -c "import app.services.noga as noga; print('noga ok')"
+          python -c "import app.services.ml.cluster_pipeline as cp; print('cluster_pipeline ok')"
+          python -c "import app.services.ml.noga as noga; print('noga ok')"
 
   test-frontend:
     needs: changes

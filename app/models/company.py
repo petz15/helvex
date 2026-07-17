@@ -177,7 +177,7 @@ class Company(Base):
         See scoring.compute_relevance_score for the full formula.
         web_score is optional; when provided it becomes a 20% weight component.
         """
-        from app.services.scoring import compute_relevance_score as _compute
+        from app.services.scoring.scoring import compute_relevance_score as _compute
 
         class _FakeCompany:
             pass

@@ -31,12 +31,12 @@ class Organization(Base):
 
     @property
     def tier(self) -> str:
-        from app.services.tiers import TIER_NAME_BY_ID
+        from app.services.billing.tiers import TIER_NAME_BY_ID
         return TIER_NAME_BY_ID.get(self.tier_id, "free")
 
     @tier.setter
     def tier(self, value: "str | int") -> None:
-        from app.services.tiers import TIER_ID_BY_NAME
+        from app.services.billing.tiers import TIER_ID_BY_NAME
         if isinstance(value, int):
             self.tier_id = value
         else:

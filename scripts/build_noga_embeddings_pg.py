@@ -162,7 +162,7 @@ def run(
     import numpy as np
     from tqdm import tqdm
 
-    from app.services.embeddings import DEFAULT_MODEL, embed_texts
+    from app.services.ml.embeddings import DEFAULT_MODEL, embed_texts
 
     # Extract just the texts in the same order as tuples
     texts = [t[-1] for t in tuples]

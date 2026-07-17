@@ -124,7 +124,7 @@ async def list_org_api_keys(db: Session = Depends(get_db)) -> list[OrgApiKeyConf
         has_custom = bool(
             crud.get_effective_setting(db, "anthropic_api_key", org_id=org.id, default="")
         )
-        from app.services.tiers import has_feature
+        from app.services.billing.tiers import has_feature
         has_byo = has_feature(org, "byo_llm_keys")
         result.append(
             OrgApiKeyConfig(
@@ -155,7 +155,7 @@ async def set_org_api_key(
     if not org:
         raise HTTPException(status_code=404, detail="Organization not found")
 
-    from app.services.tiers import has_feature
+    from app.services.billing.tiers import has_feature
     if not has_feature(org, "byo_llm_keys"):
         raise HTTPException(
             status_code=403,
@@ -239,7 +239,7 @@ async def list_standard_keys(db: Session = Depends(get_db)) -> dict:
     - Org doesn't have a BYO key, AND
     - Platform key from .env isn't set
     """
-    from app.services.llm import PROVIDER_INFO
+    from app.services.platform.llm import PROVIDER_INFO
 
     standard_keys = {}
     for provider in PROVIDER_INFO.keys():
@@ -270,7 +270,7 @@ async def set_standard_key(
 
     Provides a middle ground between platform-wide and per-org keys.
     """
-    from app.services.llm import PROVIDER_INFO
+    from app.services.platform.llm import PROVIDER_INFO
 
     if provider not in PROVIDER_INFO:
         raise HTTPException(
@@ -301,7 +301,7 @@ async def reset_standard_key(
 
     After reset, orgs will fall through to platform key from .env.
     """
-    from app.services.llm import PROVIDER_INFO
+    from app.services.platform.llm import PROVIDER_INFO
 
     if provider not in PROVIDER_INFO:
         raise HTTPException(status_code=400, detail=f"Unknown provider: {provider}")

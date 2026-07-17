@@ -49,20 +49,12 @@ _BASE_MONTHLY_CHF: dict[str, float] = {
 
 
 def _normalize_mode(raw: str) -> str:
-    mode = (raw or "").strip().lower()
-    return mode if mode in {"worldline", "stripe", "dual"} else "worldline"
+    # Worldline is the only supported provider.
+    return "worldline"
 
 
 def get_enabled_provider_order() -> list[ProviderName]:
-    """Return provider priority order based on PAYMENT_PROVIDER_MODE.
-
-    dual mode keeps worldline first for backward-compatibility.
-    """
-    mode = _normalize_mode(settings.payment_provider_mode)
-    if mode == "stripe":
-        return ["stripe"]
-    if mode == "dual":
-        return ["worldline", "stripe"]
+    """Return provider priority order. Worldline is the only supported provider."""
     return ["worldline"]
 
 

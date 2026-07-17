@@ -1,1 +1,1 @@
-"""Billing and payments: credits, tiers, subscription renewal, Stripe/Worldline providers (payments/)."""
+"""Billing and payments: credits, tiers, subscription renewal, Worldline provider (payments/)."""

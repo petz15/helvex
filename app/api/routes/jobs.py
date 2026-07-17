@@ -13,13 +13,13 @@ from sqlalchemy.orm import Session
 from app import crud
 from app.clients.zefix_client import SWISS_CANTONS
 from app.auth import get_current_user, require_superadmin
-from app.services.rate_limit import check_job_rate_limit
+from app.services.jobs.rate_limit import check_job_rate_limit
 from app.database import get_db
 from app.models.organization import Organization
 from app.models.user import User
-from app.services import credits as credits_service
-from app.services.job_worker import enqueue_job
-from app.services.tiers import get_export_limit, has_feature, normalize_tier
+from app.services.billing import credits as credits_service
+from app.services.jobs.job_worker import enqueue_job
+from app.services.billing.tiers import get_export_limit, has_feature, normalize_tier
 
 
 router = APIRouter(tags=["jobs"])
@@ -192,7 +192,7 @@ def resume_job(job_id: int, request: Request, db: Session = Depends(get_db), cur
         raise HTTPException(status_code=400, detail="Only paused jobs can be resumed")
     crud.resume_paused_job(db, job)
     crud.create_event(db, job_id=job.id, level="info", message=f"Resumed from {job.progress_done or 0}")
-    from app.services.job_worker import kick_job_worker
+    from app.services.jobs.job_worker import kick_job_worker
     kick_job_worker(request.app)
     return JobOut.from_orm_obj(job)
 
@@ -862,7 +862,7 @@ def trigger_claude_preview(
 
     # ── Run classification synchronously (no job queue) ────────────────────────
     from app.config import settings as _cfg
-    from app.services.collection import claude_classify_batch
+    from app.services.ingestion.collection import claude_classify_batch
 
     api_key = (_cfg.anthropic_api_key or "").strip()
     if not api_key:
@@ -985,7 +985,7 @@ def trigger_analyze_boilerplate(
     Results are written as inactive BoilerplatePattern rows for admin review.
     Also seeds the standard FR/IT patterns before running the corpus scan.
     """
-    from app.services.boilerplate_analysis import seed_multilang_boilerplate
+    from app.services.ml.boilerplate_analysis import seed_multilang_boilerplate
     seed_multilang_boilerplate(db)
     parts = [f"sample={body.sample_limit:,}", f"min_count={body.min_match_count}"]
     if body.language_filter:
@@ -1628,7 +1628,7 @@ def enqueue_csv_export(
     Max 1 active export per user — any queued/running export is cancelled first.
     The finished file is stored in S3 for 7 days.
     """
-    from app.services.s3_client import is_configured
+    from app.services.platform.s3_client import is_configured
     if not is_configured():
         raise HTTPException(status_code=503, detail="S3 export storage is not configured on this server")
 
@@ -1723,7 +1723,7 @@ def get_csv_export_status(
                 # Only generate URL if not expired
                 exp_dt = datetime.fromisoformat(exp)
                 if exp_dt > datetime.now(tz=_tz.utc):
-                    from app.services.s3_client import generate_presigned_url
+                    from app.services.platform.s3_client import generate_presigned_url
                     remaining = int((exp_dt - datetime.now(tz=_tz.utc)).total_seconds())
                     download_url = generate_presigned_url(s3_key, expires_in=min(remaining, 3600))
                     expires_at = exp

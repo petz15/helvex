@@ -18,8 +18,8 @@ This document explains how to use the unified LLM provider system to call any la
    - All sensitive operations are superadmin-gated
 
 3. **Provider-Specific Implementation**
-   - Each provider has its own module: `app/services/providers/{provider}.py`
-   - Unified interface via `app/services/llm.py` dispatcher
+   - Each provider has its own module: `app/services/platform/providers/{provider}.py`
+   - Unified interface via `app/services/platform/llm.py` dispatcher
    - Batch API support varies by provider (Claude, OpenAI, Gemini support; DeepSeek, Groq don't)
 
 ---
@@ -55,7 +55,7 @@ POST /api/v1/admin/api-keys/functions/claude_classify/override
 
 **Simple synchronous call:**
 ```python
-from app.services.llm import llm_call, resolve_provider_api_key
+from app.services.platform.llm import llm_call, resolve_provider_api_key
 from sqlalchemy.orm import Session
 
 def my_function(db: Session, org_id: int):
@@ -81,7 +81,7 @@ def my_function(db: Session, org_id: int):
 
 **Batch processing (Claude, OpenAI, Gemini):**
 ```python
-from app.services.llm import llm_batch_create, llm_batch_iter_results
+from app.services.platform.llm import llm_batch_create, llm_batch_iter_results
 
 def batch_classify(db: Session, org_id: int, companies: list):
     api_key = resolve_provider_api_key(db, "claude", org_id=org_id)
@@ -129,7 +129,7 @@ def batch_classify(db: Session, org_id: int, companies: list):
 **Cost (per 1M tokens):** ~$3 input / $15 output (USD)
 
 ```python
-from app.services.providers.claude import claude_call
+from app.services.platform.providers.claude import claude_call
 response, tokens = claude_call(
     system="...",
     user="...",
@@ -149,7 +149,7 @@ response, tokens = claude_call(
 **Cost (per 1M tokens):** ~$5 input / $15 output (USD)
 
 ```python
-from app.services.providers.openai import openai_call
+from app.services.platform.providers.openai import openai_call
 response, tokens = openai_call(
     system="...",
     user="...",
@@ -169,7 +169,7 @@ response, tokens = openai_call(
 **Cost (per 1M tokens):** ~$0.075 input / $0.30 output (USD)
 
 ```python
-from app.services.providers.gemini import gemini_call
+from app.services.platform.providers.gemini import gemini_call
 response, tokens = gemini_call(
     system="...",
     user="...",
@@ -189,7 +189,7 @@ response, tokens = gemini_call(
 **Cost (per 1M tokens):** ~$0.14 input / $0.28 output (USD)
 
 ```python
-from app.services.providers.deepseek import deepseek_call
+from app.services.platform.providers.deepseek import deepseek_call
 response, tokens = deepseek_call(
     system="...",
     user="...",
@@ -209,7 +209,7 @@ response, tokens = deepseek_call(
 **Notable:** Ultra-fast inference (ms latency)
 
 ```python
-from app.services.providers.groq import groq_call
+from app.services.platform.providers.groq import groq_call
 response, tokens = groq_call(
     system="...",
     user="...",
@@ -225,7 +225,7 @@ response, tokens = groq_call(
 
 ### Before (Claude-specific):
 ```python
-from app.services.claude import claude_call
+from app.services.scoring.claude import claude_call
 
 response, tokens = claude_call(
     system="...",
@@ -237,7 +237,7 @@ response, tokens = claude_call(
 
 ### After (Provider-agnostic):
 ```python
-from app.services.llm import llm_call, resolve_provider_api_key
+from app.services.platform.llm import llm_call, resolve_provider_api_key
 
 api_key = resolve_provider_api_key(db, "openai", org_id=org_id)
 response, tokens = llm_call(

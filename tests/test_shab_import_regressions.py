@@ -129,7 +129,7 @@ def test_fetch_hr_publications_supports_content_page_request_wrapper(monkeypatch
 
 
 def test_import_company_from_zefix_uid_accepts_nested_list_uid(monkeypatch):
-    from app.services import zefix_import
+    from app.services.ingestion import zefix_import
 
     captured = {"uid": None}
 

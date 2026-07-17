@@ -9,6 +9,7 @@ is for routes that need to *act as* the user (audit logging, quota, etc.).
 """
 
 import ipaddress
+import logging
 import time
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
@@ -27,9 +28,17 @@ from app.config import settings
 from app.database import get_db
 from app.models.user import User
 
+logger = logging.getLogger(__name__)
+
 COOKIE_NAME = "session"
-_SESSION_MAX_AGE = 14 * 24 * 3600  # 14 days (sliding — re-issued on activity)
-_SESSION_RENEW_AFTER = _SESSION_MAX_AGE // 2  # re-issue once half the window has elapsed
+# Sliding idle session: a user is forced to log in only after ~7 days of
+# inactivity. The cookie carries a 7-day absolute lifetime and is re-issued on
+# activity once it is older than the renew threshold, so any user active within
+# a 7-day window keeps a fresh cookie. Renewing after 1 day (rather than at half)
+# keeps the effective idle-timeout close to the full 7 days for daily-active
+# users while re-issuing the cookie at most ~once/day per session.
+_SESSION_MAX_AGE = 7 * 24 * 3600  # 7 days (sliding — re-issued on activity)
+_SESSION_RENEW_AFTER = 1 * 24 * 3600  # re-issue once the cookie is >1 day old
 _SALT = "session-v1"
 _EMAIL_VERIFY_SALT = "email-verify-v1"
 _EMAIL_VERIFY_MAX_AGE = 1 * 3600  # 1 hour
@@ -433,6 +442,187 @@ def check_public_rate_limit(ip: str, action: str, *, window: float = 900, max_re
     calls.append(now)
     _request_counts[bucket] = calls
     return True
+
+
+# ---------------------------------------------------------------------------
+# Authenticated per-user / per-org request rate limiting (anti-scraping)
+#
+# A coarse ceiling on total authenticated /api requests, keyed by user AND org,
+# well above what the UI needs but low enough to blunt scripted bulk pulls.
+# Fine-grained per-action limits stay at the route level (jobs/rate_limit.py).
+#
+# NOTE: in-process sliding window (per pod) — same limitation as the login/public
+# limiters (see ARCHITECTURE.md §5). With N pods a user's effective ceiling is up
+# to N× looser. Acceptable as a first line; a shared (Postgres/Redis) counter is
+# the follow-up if precise cross-pod enforcement is needed.
+# ---------------------------------------------------------------------------
+
+_REQ_RATE_WINDOW = 60          # seconds
+_REQ_RATE_MAX_USER = 240       # per user per minute (UI page loads fire ~10–20)
+_REQ_RATE_ORG_PER_USER = 150   # org ceiling scales with membership: cap = members × this
+_THROTTLED_MAX_USER = 30       # tighter per-minute cap while auto-throttled (flagged)
+
+# Metadata cache: (is_superadmin, org_id, throttle_until_epoch|None, org_cap|None, cached_at).
+# Keeps the hot path DB-free after warmup; carries the active auto-throttle deadline
+# (so a flagged user is throttled cross-pod within ~one TTL) and a membership-scaled
+# org request cap (so a large org with many legit users is not throttled by a flat cap).
+_rl_meta_cache: dict[int, tuple[bool, int | None, float | None, int | None, float]] = {}
+_rl_meta_lock = Lock()
+_RL_META_TTL = 60.0
+
+
+def _rate_limit_meta(user_id: int) -> tuple[bool, int | None, float | None, int | None]:
+    """Return (is_superadmin, org_id, throttle_until_epoch, org_cap) for a user, cached ~60s.
+
+    org_cap scales with the org's member count so the per-org ceiling grows with the
+    team rather than throttling large legit orgs; None when the user has no org.
+    """
+    now = time.monotonic()
+    with _rl_meta_lock:
+        entry = _rl_meta_cache.get(user_id)
+        if entry and now - entry[4] < _RL_META_TTL:
+            return entry[0], entry[1], entry[2], entry[3]
+    is_superadmin, org_id, throttle_epoch, org_cap = False, None, None, None
+    try:
+        from sqlalchemy import func
+        from app.database import SessionLocal
+        from app.models.org_member import OrgMember
+        with SessionLocal() as db:
+            user = crud.get_user(db, user_id)
+            if user:
+                is_superadmin, org_id = bool(user.is_superadmin), user.org_id
+            if not is_superadmin:
+                tu = crud.get_active_throttle_until(db, user_id)
+                if tu is not None:
+                    throttle_epoch = tu.timestamp()
+                if org_id is not None:
+                    members = db.query(func.count(OrgMember.id)).filter(
+                        OrgMember.org_id == org_id
+                    ).scalar() or 1
+                    # Floor at the per-user cap so a 1-user org isn't capped below a lone user.
+                    org_cap = max(_REQ_RATE_MAX_USER, members * _REQ_RATE_ORG_PER_USER)
+    except Exception:  # noqa: BLE001 — never let metadata lookup break request flow
+        pass
+    with _rl_meta_lock:
+        _rl_meta_cache[user_id] = (is_superadmin, org_id, throttle_epoch, org_cap, now)
+    return is_superadmin, org_id, throttle_epoch, org_cap
+
+
+def invalidate_rate_limit_meta(user_id: int) -> None:
+    with _rl_meta_lock:
+        _rl_meta_cache.pop(user_id, None)
+
+
+def check_request_rate(user_id: int) -> tuple[bool, int]:
+    """Coarse per-user + per-org authenticated request cap.
+
+    Returns (allowed, retry_after_seconds). Superadmins are never limited. A user
+    with an active anomaly auto-throttle gets a much lower per-user cap. The org cap
+    scales with membership (see _rate_limit_meta).
+    """
+    if not settings.api_rate_limit_enabled:
+        return True, 0
+    is_superadmin, org_id, throttle_epoch, org_cap = _rate_limit_meta(user_id)
+    if is_superadmin:
+        return True, 0
+    user_max = _REQ_RATE_MAX_USER
+    if throttle_epoch is not None and time.time() < throttle_epoch:
+        user_max = _THROTTLED_MAX_USER
+    if not check_public_rate_limit(
+        f"user:{user_id}", "apireq", window=_REQ_RATE_WINDOW, max_requests=user_max
+    ):
+        return False, _REQ_RATE_WINDOW
+    if org_id is not None and org_cap is not None and not check_public_rate_limit(
+        f"org:{org_id}", "apireq", window=_REQ_RATE_WINDOW, max_requests=org_cap
+    ):
+        return False, _REQ_RATE_WINDOW
+    return True, _REQ_RATE_WINDOW
+
+
+# ---------------------------------------------------------------------------
+# Anomaly detection — flag script-like / high-volume authenticated access and
+# auto-throttle the offender. Behavioural counters are in-memory (per pod, cheap);
+# a flag writes a durable security_events row (throttle_until) that check_request_rate
+# then honours cross-pod via the metadata cache. Response policy: record + alert +
+# auto-throttle (never auto-suspend — a false positive must not lock out a user).
+# ---------------------------------------------------------------------------
+
+_SCRIPT_WINDOW = 300           # 5 min
+_SCRIPT_THRESHOLD = 100        # script-like /api requests (no Sec-Fetch-Site) → flag
+_VOLUME_WINDOW = 600           # 10 min
+_VOLUME_THRESHOLD = 1500       # total authenticated /api requests → flag (well above UI)
+_THROTTLE_COOLDOWN = 3600      # auto-throttle duration after a flag
+_REFLAG_COOLDOWN = 600         # do not re-flag / re-write the same user within 10 min
+
+_anom_lock = Lock()
+_anom_script: dict[int, list[float]] = defaultdict(list)
+_anom_volume: dict[int, list[float]] = defaultdict(list)
+_anom_last_flag: dict[int, float] = {}
+
+
+def note_api_access(request: Request, user_id: int) -> None:
+    """Record one authenticated /api access for anomaly detection.
+
+    Cheap on the hot path (in-memory counters); only writes to the DB when a
+    threshold is crossed and the user was not already flagged in the last window.
+    """
+    if not settings.api_rate_limit_enabled:
+        return
+    now = time.monotonic()
+    sfs = request.headers.get("sec-fetch-site", "")
+    # Browsers set Sec-Fetch-Site on fetches; scripts/curl usually omit it.
+    script_like = sfs == "" or sfs not in ("same-origin", "same-site", "none")
+
+    reason: str | None = None
+    count = 0
+    with _anom_lock:
+        vol = [t for t in _anom_volume[user_id] if now - t < _VOLUME_WINDOW]
+        vol.append(now)
+        _anom_volume[user_id] = vol
+        script_n = 0
+        if script_like:
+            sc = [t for t in _anom_script[user_id] if now - t < _SCRIPT_WINDOW]
+            sc.append(now)
+            _anom_script[user_id] = sc
+            script_n = len(sc)
+        if now - _anom_last_flag.get(user_id, 0.0) < _REFLAG_COOLDOWN:
+            return
+        if script_n >= _SCRIPT_THRESHOLD:
+            reason, count = "script_access", script_n
+        elif len(vol) >= _VOLUME_THRESHOLD:
+            reason, count = "rate_burst", len(vol)
+        if reason is None:
+            return
+        _anom_last_flag[user_id] = now
+    _flag_anomaly(user_id, reason, count, get_client_ip(request))
+
+
+def _flag_anomaly(user_id: int, reason: str, count: int, ip: str) -> None:
+    """Persist a security_events row with an auto-throttle window + alert. Never suspends."""
+    is_superadmin, org_id, _, _ = _rate_limit_meta(user_id)
+    if is_superadmin:
+        return
+    throttle_until = datetime.now(tz=timezone.utc) + timedelta(seconds=_THROTTLE_COOLDOWN)
+    window_s = _SCRIPT_WINDOW if reason == "script_access" else _VOLUME_WINDOW
+    try:
+        from app.database import SessionLocal
+        with SessionLocal() as db:
+            crud.record_security_event(
+                db,
+                event_type=reason,
+                user_id=user_id,
+                org_id=org_id,
+                ip=ip,
+                throttle_until=throttle_until,
+                detail={"count": count, "window_s": window_s},
+            )
+    except Exception:  # noqa: BLE001
+        logger.exception("anomaly: failed to record security event for user %s", user_id)
+    invalidate_rate_limit_meta(user_id)  # apply the throttle immediately on this pod
+    logger.warning(
+        "anomaly.flagged user_id=%s reason=%s count=%s window_s=%s ip=%s throttle_until=%s",
+        user_id, reason, count, window_s, ip, throttle_until.isoformat(),
+    )
 
 
 # ---------------------------------------------------------------------------

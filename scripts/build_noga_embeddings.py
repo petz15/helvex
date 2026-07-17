@@ -1,13 +1,13 @@
 """Build and upload NOGA embeddings to S3.
 
 Embeds each NOGA entry's German label using the shared multilingual embedding
-service (DEFAULT_MODEL in app.services.embeddings — currently
+service (DEFAULT_MODEL in app.services.ml.embeddings — currently
 paraphrase-multilingual-mpnet-base-v2, 768-dim), then uploads two files to S3:
   - models/noga_embeddings.npy         — float32 array, shape (N, D)
   - models/noga_embedding_ids.json     — list of N NOGA codes matching row order
 
-The model MUST match app.services.embeddings.DEFAULT_MODEL because
-app.services.noga.classify_company_noga() embeds queries via that same service
+The model MUST match app.services.ml.embeddings.DEFAULT_MODEL because
+app.services.ml.noga.classify_company_noga() embeds queries via that same service
 and computes cosine similarity against this matrix.
 
 Run once; re-run only if noga_lookup.json changes or DEFAULT_MODEL changes.
@@ -33,8 +33,8 @@ sys.path.insert(0, str(repo_root))
 
 import numpy as np
 
-from app.services import s3_client
-from app.services.embeddings import DEFAULT_MODEL, embed_texts
+from app.services.platform import s3_client
+from app.services.ml.embeddings import DEFAULT_MODEL, embed_texts
 
 LOOKUP_PATH = Path(__file__).resolve().parents[1] / "noga_lookup.json"
 S3_EMBEDDINGS_KEY = "models/noga_embeddings.npy"

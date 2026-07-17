@@ -5,7 +5,10 @@ rendering, sets CrawlResult.needs_playwright=True and returns without pages.
 """
 from __future__ import annotations
 
+import asyncio
+import ipaddress
 import logging
+import socket
 
 import httpx
 
@@ -57,15 +60,54 @@ def _make_headers(company_id: int) -> dict[str, str]:
     }
 
 
+def _ip_blocked(ip_str: str) -> bool:
+    """True if an address must not be crawled (internal / metadata / non-routable)."""
+    try:
+        ip = ipaddress.ip_address(ip_str)
+    except ValueError:
+        return True  # unparseable → block
+    return bool(
+        ip.is_private or ip.is_loopback or ip.is_link_local  # 169.254.169.254 cloud metadata is link-local
+        or ip.is_reserved or ip.is_multicast or ip.is_unspecified
+    )
+
+
+async def _ssrf_request_guard(request: httpx.Request) -> None:
+    """SSRF guard — blocks crawler requests (and redirect hops, since httpx runs
+    request hooks per hop) to non-public addresses. The crawler fetches URLs from
+    external search results and follows redirects, so without this a crawled or
+    redirected URL pointing at localhost / an internal service / the cloud
+    metadata endpoint (169.254.169.254) would be fetched server-side.
+    """
+    url = request.url
+    if url.scheme not in ("http", "https"):
+        raise httpx.RequestError(f"SSRF guard: blocked scheme {url.scheme!r}", request=request)
+    host = url.host
+    if not host:
+        raise httpx.RequestError("SSRF guard: request has no host", request=request)
+    try:
+        loop = asyncio.get_running_loop()
+        infos = await loop.run_in_executor(None, socket.getaddrinfo, host, None)
+    except OSError as exc:
+        raise httpx.RequestError(f"SSRF guard: cannot resolve {host}", request=request) from exc
+    for info in infos:
+        ip_str = info[4][0]
+        if _ip_blocked(ip_str):
+            logger.warning("crawler.ssrf_blocked host=%s ip=%s url=%s", host, ip_str, str(url)[:120])
+            raise httpx.RequestError(f"SSRF guard: {host} resolves to non-public {ip_str}", request=request)
+
+
 def _client(headers: dict[str, str], verify_ssl: bool = True) -> httpx.AsyncClient:
     # http2=True so the TLS/ALPN profile looks like a browser (HTTP/1.1-only
     # clients are a bot signal). Falls back to HTTP/1.1 transparently if the
-    # server doesn't negotiate h2.
+    # server doesn't negotiate h2. The request event hook enforces the SSRF guard
+    # on every request including redirect hops.
+    hooks = {"request": [_ssrf_request_guard]}
     try:
-        return httpx.AsyncClient(headers=headers, max_redirects=5, verify=verify_ssl, http2=True)
+        return httpx.AsyncClient(headers=headers, max_redirects=5, verify=verify_ssl, http2=True, event_hooks=hooks)
     except ImportError:
         # h2 package not available in this image — degrade gracefully.
-        return httpx.AsyncClient(headers=headers, max_redirects=5, verify=verify_ssl)
+        return httpx.AsyncClient(headers=headers, max_redirects=5, verify=verify_ssl, event_hooks=hooks)
 
 
 async def _fetch_curl_impersonate(

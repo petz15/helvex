@@ -1,8 +1,8 @@
 from types import SimpleNamespace
 
 from app.config import settings
-from app.services.web_enrichment import _score_google_results_for_company
-from app.services.scoring import is_irrelevant_result, is_social_lead_domain
+from app.services.enrichment.web_enrichment import _score_google_results_for_company
+from app.services.scoring.scoring import is_irrelevant_result, is_social_lead_domain
 
 
 def _company_stub() -> SimpleNamespace:

@@ -1,6 +1,6 @@
 from app.models.org_credit_transaction import OrgCreditTransaction
 from app.models.organization import Organization
-from app.services.credits import check_and_deduct
+from app.services.billing.credits import check_and_deduct
 
 
 def _make_org(db, *, tier: str, credits: int) -> Organization:

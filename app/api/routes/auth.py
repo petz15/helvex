@@ -40,9 +40,9 @@ from app.schemas.user import (
     UserRead,
 )
 from app.schemas.billing import BillingAddress, BillingAddressBookRead, BillingAddressCreate, BillingAddressItem
-from app.services.activity import log_activity
-from app.services.billing_addresses import parse_billing_address_book, serialize_billing_address_book
-from app.services.email import (
+from app.services.notifications.activity import log_activity
+from app.services.billing.billing_addresses import parse_billing_address_book, serialize_billing_address_book
+from app.services.notifications.email import (
     send_email_change_verification,
     send_password_reset_email,
     send_verification_email,
@@ -75,6 +75,10 @@ def login_for_token(
     password: str = Form(...),
     db: Session = Depends(get_db),
 ) -> TokenResponse:
+    from app.config import settings as _s
+    if not getattr(_s, "enable_password_token_endpoint", False):
+        # Disabled by default — see Settings.enable_password_token_endpoint.
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
     ip = get_client_ip(request)
     if not is_login_allowed(ip) or not is_email_login_allowed(email):
         raise HTTPException(
@@ -738,7 +742,7 @@ def record_page_view(
     current_user: User = Depends(get_current_user),
 ) -> None:
     """Record a frontend page navigation event for the current user."""
-    from app.services.activity import log_activity as _log_activity
+    from app.services.notifications.activity import log_activity as _log_activity
     _log_activity(
         db,
         action="page_viewed",

@@ -183,9 +183,9 @@ Offline only — no Google Maps API. Primary: swisstopo Gebäudeadressverzeichni
 ## Important files
 
 - [app/main.py](app/main.py) — app factory, middleware stack, lifespan
-- [app/services/scoring.py](app/services/scoring.py) — flex/web/ai/combined score logic
-- [app/services/collection.py](app/services/collection.py) — Zefix import, Google enrichment pipeline
-- [app/services/job_worker.py](app/services/job_worker.py) — job dispatch and thread/RQ orchestration
-- [app/services/cluster_pipeline.py](app/services/cluster_pipeline.py) — TF-IDF K-Means, HDBSCAN, semantic clustering
+- [app/services/scoring/scoring.py](app/services/scoring/scoring.py) — flex/web/ai/combined score logic
+- [app/services/ingestion/collection.py](app/services/ingestion/collection.py) — Zefix import, Google enrichment pipeline
+- [app/services/jobs/job_worker.py](app/services/jobs/job_worker.py) — job dispatch and thread/RQ orchestration
+- [app/services/ml/cluster_pipeline.py](app/services/ml/cluster_pipeline.py) — TF-IDF K-Means, HDBSCAN, semantic clustering
 - [infra/helmfile.yaml](infra/helmfile.yaml) — orchestrates all K8s releases
 - [.github/workflows/](.github/workflows/) — CI/CD pipelines

@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 from app.api.deps import get_current_org, require_org_role
 from app.database import get_db
 from app.models.user import User
-from app.services import payment_transactions, payments
+from app.services.billing import payment_transactions, payments
 
 from app.api.routes.billing._shared import (
     CardRegistrationRequest,
@@ -25,7 +25,7 @@ from app.api.routes.billing._shared import (
     _start_worldline_alias_polling,
     logger,
 )
-from app.services.payments.pricing import apply_vat
+from app.services.billing.payments.pricing import apply_vat
 
 router = APIRouter()
 

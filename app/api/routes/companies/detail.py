@@ -12,8 +12,8 @@ from sqlalchemy.orm import Session, joinedload
 
 from app import crud
 from app.crud import crawler as crawler_crud
-from app.auth import get_current_user
-from app.services.rate_limit import check_rate_limit
+from app.auth import get_current_user, require_superadmin
+from app.services.jobs.rate_limit import check_rate_limit
 from app.database import get_db
 from app.models.organization import Organization
 from app.models.company_url_candidate import CompanyUrlCandidate
@@ -23,11 +23,11 @@ from app.models.simap_award_vendor import SimapAwardVendor
 from app.models.user import User
 from app.schemas.company import CompanyCreate, CompanyRead, CompanyUpdate, GoogleSearchResult
 from app.schemas.note import NoteRead
-from app.services import credits as credits_service
-from app.services.activity import log_activity
-from app.services.collection import enrich_company_website
-from app.services.scoring import is_social_lead_domain
-from app.services.tiers import has_feature
+from app.services.billing import credits as credits_service
+from app.services.notifications.activity import log_activity
+from app.services.ingestion.collection import enrich_company_website
+from app.services.scoring.scoring import is_social_lead_domain
+from app.services.billing.tiers import has_feature
 
 from app.api.routes.companies._shared import (
     _ORG_FIELDS,
@@ -35,13 +35,17 @@ from app.api.routes.companies._shared import (
     _clear_noga_cache,
     _overlay,
 )
-from app.services.job_worker import enqueue_job
+from app.services.jobs.job_worker import enqueue_job
 
 router = APIRouter()
 
 
 @router.post("/", response_model=CompanyRead, status_code=status.HTTP_201_CREATED, summary="Create company")
-def create_company(company_in: CompanyCreate, db: Session = Depends(get_db)):
+def create_company(
+    company_in: CompanyCreate,
+    db: Session = Depends(get_db),
+    _: User = Depends(require_superadmin),  # master data — platform-managed, not per-tenant
+):
     existing = crud.get_company_by_uid(db, company_in.uid)
     if existing:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Company with this UID already exists")
@@ -180,6 +184,14 @@ def update_company(
     workflow = {k: v for k, v in payload.items() if k in _ORG_FIELDS}
     catalog = {k: v for k, v in payload.items() if k not in _ORG_FIELDS}
 
+    # Catalog (master-data) fields are shared across all tenants — only superadmins
+    # may edit them. Per-org workflow fields (_ORG_FIELDS) route to org_company_state.
+    if catalog and not current_user.is_superadmin:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only administrators can edit company master-data fields",
+        )
+
     old_values = {f: getattr(db_company, f) for f in ("website_url", *_ORG_FIELDS)}
 
     if workflow and current_user.org_id:
@@ -214,7 +226,7 @@ def update_company(
 def delete_company(
     company_id: int,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_superadmin),  # deletes shared master data
 ):
     db_company = crud.get_company(db, company_id)
     if not db_company:
@@ -315,7 +327,7 @@ def get_serp_analysis(
     """
     from datetime import datetime, timezone
     from urllib.parse import urlparse
-    from app.services.scoring import classify_domain, compute_seo_visibility_score, find_organic_position
+    from app.services.scoring.scoring import classify_domain, compute_seo_visibility_score, find_organic_position
 
     db_company = crud.get_company(db, company_id)
     if not db_company:

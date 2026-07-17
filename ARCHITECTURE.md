@@ -87,31 +87,16 @@ zefix_analyzer/
 │   │   ├── user.py, organization.py, company.py, job_run.py, note.py, etc.
 │   ├── schemas/                # Pydantic request/response DTOs
 │   ├── crud/                   # DB access functions (no business logic)
-│   └── services/               # Business logic (split into 20+ focused modules)
-│       ├── collection.py       # Facade re-exporting from split modules
-│       ├── zefix_import.py     # Zefix API fetch, bulk import, detail collect
-│       ├── web_enrichment.py   # Google search enrichment, batch collect
-│       ├── geocoding_pipeline.py    # Geocoding, flex-score recalc
-│       ├── noga_pipeline.py    # NOGA industry classification, embeddings
-│       ├── claude_classify.py  # Claude Haiku batch classification + resume
-│       ├── language_detection.py    # Purpose language detection (multilingual)
-│       ├── cluster_pipeline.py # TF-IDF K-Means, HDBSCAN, semantic clustering
-│       ├── scoring.py          # Score computation (flex, web, AI, combined)
-│       ├── shab_import.py      # SHAB daily + backfill import (Zefix SOGC bydate)
-│       ├── shab_archive_import.py  # SHAB archive import from shab.ch (PDF-based)
-│       ├── uid_import.py       # UID register import (two-phase: active + cancelled)
-│       ├── job_worker.py       # Job dispatch (now: handler registry pattern)
-│       ├── job_handlers/       # Handler modules for each job type (24 types)
-│       ├── rate_limit.py       # Centralized rate limiting (no Redis)
-│       ├── noga_lookup.py      # NOGA hierarchy file loader (zero deps)
-│       ├── credits.py          # Credit deduction, low-balance alerts
-│       ├── activity.py         # Activity logging (user actions)
-│       ├── tiers.py            # Org tier feature gates + pricing
-│       ├── email.py            # SMTP transactional email
-│       ├── s3_client.py        # boto3 S3 wrapper
-│       ├── payment_transactions.py  # Credit grant, subscription apply
-│       ├── boilerplate_analysis.py  # Corpus-frequency boilerplate candidate analysis (language/truncate filters)
-│       └── [other services]    # email, incremental_classify, etc.
+│   └── services/               # Business logic, grouped by domain subpackage
+│       ├── ingestion/          # collection, zefix_import, uid_import, incremental_classify
+│       ├── registry/           # shab_import, shab_archive_import, simap_*, sogc_* (preprocessor/persons/entity_resolver)
+│       ├── enrichment/         # crawler_* (http/playwright/common/sitemap/extract), directory_extract, website_status, web_enrichment, geocoding_pipeline
+│       ├── ml/                 # noga, noga_pipeline, noga_lookup, language_detection, embeddings, company_embedding_pipeline, cluster_pipeline, stopword_discovery, boilerplate_analysis, _pipeline_utils
+│       ├── scoring/            # scoring, claude, claude_classify
+│       ├── billing/            # credits, tiers, billing_addresses, billing_renewal, payment_transactions, payments/ (stripe/worldline providers)
+│       ├── notifications/      # email, saved_view_alerts, activity
+│       ├── platform/           # s3_client, csv_export, llm, providers/ (openai/gemini/deepseek/groq)
+│       └── jobs/               # job_worker (JOB_HANDLERS dispatch), rate_limit, job_handlers/ (one module per job type)
 │
 ├── alembic/                    # Database migrations (Alembic)
 │   ├── env.py
@@ -309,15 +294,28 @@ HTML routes (browser, in `main.py`):
 | GET | `/api/v1/billing/credits/usage` | Member | Credit spend/refund by action over N days |
 | … | (top-up, history routes) | | |
 
-**Payment providers:** Stripe and Worldline (Saferpay), selected per-checkout
-via `body.provider`. Stripe webhooks (`stripe_webhook` in
-`app/api/routes/billing/webhooks.py`) are thin and delegate to
-`payments.apply_subscription_update()` / `apply_credit_topup()`. Worldline's
-two return-URL webhooks (`worldline_return`, `worldline_card_return`, same
-file) are much larger — ~300 lines each of inline business logic (token
-resolution, duplicate-payment guard, VAT computation, manual transaction
-upsert, auto-capture) directly in the route handler, and neither has test
-coverage. For the Saferpay API request/response contract, see
+**Payment provider:** Worldline (Saferpay) only — Stripe was removed 2026-07.
+Worldline's two return-URL webhooks (`worldline_return`, `worldline_card_return`
+in `app/api/routes/billing/webhooks.py`) are large — ~300 lines of inline
+business logic (token resolution, duplicate-payment guard, VAT computation,
+manual transaction upsert, auto-capture) directly in the route handler.
+
+**Entitlement trust model (SECURITY):** the return endpoint is public (payment
+redirect), and `decode_worldline_callback_context()` returns `{}` on a bad/absent
+signature. Therefore the granted entitlement (tier / credits / kind) is derived
+**only** from the pending `PaymentTransaction` created at checkout (server-computed
+values, looked up by the Worldline token) or a validly-signed `ctx` — **never** from
+the unsigned `order_reference`/`kind` query params. A return with neither a pending
+transaction nor a signed `ctx` is refused (no grant). This closes a forge-the-reference
+exploit (hold any valid token → forge a higher tier / large credit grant). Regression
+tests: `test_worldline_return_ignores_forged_order_reference`,
+`test_worldline_return_blocks_grant_without_trusted_context`. **Amount double-check
+(defense in depth):** the handler also verifies the Worldline-authorized
+`Transaction.Amount` (minor units, CHF) covers the expected price — a material shortfall
+or currency mismatch refuses the grant and voids the authorization
+(`test_worldline_return_rejects_amount_mismatch`). Payment *status* is verified
+server-to-server via the `authorize_transaction` call before any grant. For the Saferpay
+API request/response contract, see
 [`docs/payment-flows.md`](docs/payment-flows.md); for the code-structure risk
 picture (including a concrete lead on the "subscription upgrade doesn't
 work" bug in the Bug Fixes list below), see
@@ -551,7 +549,7 @@ Per-company pipeline failure log. Written by services during batch jobs; reviewe
 | `resolved_at` / `resolved_by` | Cleared when admin applies a data correction |
 | `ignored` | True if admin dismissed without formal fix |
 
-Instrumented in: `app/services/web_enrichment.py` (per-company Google search failures), `app/services/zefix_import.py` (per-UID import failures).
+Instrumented in: `app/services/enrichment/web_enrichment.py` (per-company Google search failures), `app/services/ingestion/zefix_import.py` (per-UID import failures).
 
 CRUD: `app/crud/company_error.py` — `log_error()` deduplicates active errors per (company, source).
 Admin endpoints: `GET /admin/errors`, `POST /admin/errors/{id}/resolve`, `POST /admin/errors/{id}/ignore`, `PATCH /admin/companies/{id}/correct`.
@@ -637,12 +635,12 @@ alembic upgrade head
 
 | Mechanism | How it works | Used by |
 |---|---|---|
-| **Session cookie** | `itsdangerous` URLSafeTimedSerializer, httpOnly, secure on HTTPS, **14 d sliding** | Browser / HTML UI |
-| **JWT Bearer token** | PyJWT HS256, same `SECRET_KEY`, 8 h expiry | API clients, frontend SPA |
+| **Session cookie** | `itsdangerous` URLSafeTimedSerializer, httpOnly, samesite=strict, secure on HTTPS, **7 d idle sliding** | Browser / HTML UI (the Next.js SPA uses this exclusively) |
+| **JWT Bearer token** | PyJWT HS256, same `SECRET_KEY`, 8 h expiry | Self-service `POST /auth/token` — **disabled by default** (`enable_password_token_endpoint`, 404 when off); the frontend never used it. Bearer verification in `_auth_info_from_request` stays dormant for the future API-key/OAuth lanes |
 
 Both are checked by `_user_id_from_request()` in `app/auth.py`.
 
-**Sliding session:** the cookie has a 14-day absolute lifetime (`_SESSION_MAX_AGE`) and is re-issued whenever a request arrives past half that window (`_SESSION_RENEW_AFTER`). Renewal happens in the `auth_gate` middleware via `session_user_needing_refresh()` + `set_session_cookie()` (samesite=lax so it also covers OAuth-initiated sessions; origin_gate enforces same-origin on API). Active users therefore never re-enter credentials; only ~14 d of true inactivity forces a re-login. Bearer/JWT requests are never slid. Login sites (`/login`, OAuth `_set_session`) share the same `set_session_cookie` helper so cookie max-age lives in one place.
+**Sliding session:** the cookie has a 7-day absolute lifetime (`_SESSION_MAX_AGE`) and is re-issued whenever a request arrives while it is older than `_SESSION_RENEW_AFTER` (1 day). Renewal happens in the `auth_gate` middleware via `session_user_needing_refresh()` + `set_session_cookie()` (samesite=lax on renewal so it also covers OAuth-initiated sessions; origin_gate enforces same-origin on API). Active users therefore never re-enter credentials; only ~7 d of true inactivity forces a re-login. Bearer/JWT requests are never slid. Login sites (`/login`, OAuth `_set_session`) share the same `set_session_cookie` helper so cookie max-age lives in one place.
 
 ### Token helpers — `app/auth.py`
 
@@ -679,7 +677,7 @@ Admin-created users (`POST /orgs/{id}/members`) and invite-accepted users
 (`GET /invites/accept`) are set `email_verified = True` by the backend, so they are
 never blocked.
 
-### Rate limiting — `app/auth.py` + `app/services/rate_limit.py`
+### Rate limiting — `app/auth.py` + `app/services/jobs/rate_limit.py`
 
 **Implementation (Thread mode, default):** In-memory sliding window using `defaultdict` of timestamps per IP/key. No external dependencies.
 
@@ -702,7 +700,11 @@ never blocked.
 | `POST /scoring/claude-preview` | 3 calls | 24 h (calendar day per org) |
 
 Superadmins bypass all authenticated rate limits. The `check_rate_limit()` helper
-in `app/services/rate_limit.py` is the centralized function; routes call it directly.
+in `app/services/jobs/rate_limit.py` is the centralized function; routes call it directly.
+
+**Coarse per-user/org request ceiling (anti-scraping):** beyond the per-action limits above, `auth_gate` applies a blanket cap on authenticated `/api/*` requests via `check_request_rate()` in `app/auth.py` — 240 req/min per user; the per-org cap **scales with membership** (`members × 150/min`, floored at the per-user cap) so a large team is not throttled by a flat number. Superadmin-exempt; toggle `api_rate_limit_enabled` (disabled in tests). The user's `(is_superadmin, org_id, active-throttle, org_cap)` is resolved through a ~60s metadata cache to keep the hot path DB-free.
+
+**Anomaly detection + auto-throttle:** `note_api_access()` tracks per-user script-like access (missing `Sec-Fetch-Site`) and sustained volume in-memory; on a breach it writes a durable `security_events` row (migration 0115) with a 1 h `throttle_until` and logs an alert. `check_request_rate` then honours the throttle cross-pod (via the metadata cache), dropping the flagged user's per-user cap to 30/min. Policy is **record + alert + auto-throttle — never auto-suspend** (a false positive must not lock out a user). CRUD: `record_security_event` / `get_active_throttle_until` / `list_recent_security_events`.
 
 **Note:** Rate limiting is per-pod; in multi-pod deployments, each pod maintains its own sliding window. This is acceptable for a 2-3 pod cluster; large deployments should transition to Redis or a shared state backend.
 
@@ -790,18 +792,17 @@ Strict-Transport-Security: max-age=31536000 (HTTPS only)
 ### Implementation
 
 **Thread mode (only mode — Redis/RQ removed)**
-- Daemon thread pool (`app/services/job_worker.py`), polls `job_runs` table for `status=queued`
+- Daemon thread pool (`app/services/jobs/job_worker.py`), polls `job_runs` table for `status=queued`
 - Executes jobs concurrently via `ThreadPoolExecutor` (configurable `max_workers`)
 - No external dependencies; uses in-memory progress tracking
 - Set `DISABLE_JOB_WORKER=true` to suppress the thread (e.g., API-only pod)
 
-**Job handler registry pattern — ⚠️ ~27 entries are dead code (registered, unreachable)**
-- New job types are added as a dedicated handler in `app/services/job_handlers/{type}.py`, registered in `JOB_HANDLERS`
-- `_run_job()` falls through to `JOB_HANDLERS[job_type](ctx)` (passing a `JobContext`: DB, params, progress callback, abort signal) once the job type doesn't match any inline branch
+**Job handler registry pattern — single dispatch, no inline branches**
+- Every job type is a dedicated handler in `app/services/jobs/job_handlers/{type}.py`, registered in `JOB_HANDLERS` (`app/services/jobs/job_handlers/__init__.py`)
+- `_run_job()` (`app/services/jobs/job_worker.py`) dispatches solely via `JOB_HANDLERS[job_type](ctx)`, passing a `JobContext` (DB, `job`, `params`, `resume_from`, `app`, and helper methods `assert_not_cancelled`, `progress`/`progress_no_event`, `event`, `status`/`status_with_stats`, `sync`, `enqueue_job`). Unknown job types raise `RuntimeError`.
 - Handlers return `(stats_dict, done_message)` or raise typed exceptions (`JobPausedError`, `JobCancelledError`, `JobWaitingExternalSignal`)
-- **This has not replaced the legacy dispatch — and most of the registry is unreachable.** `_run_job` (`app/services/job_worker.py:323`, 1059 lines) still contains ~27 inline `elif job.job_type == "...":` branches (`bulk`, `batch`, `initial`, `detail`, `recalculate_scores`, `tfidf_kmeans_cluster`, `claude_classify`, `shab_daily`/`shab_backfill`, `csv_export`, `sogc_preprocess`, `extract_sogc_persons`, etc.) *ahead of* the `JOB_HANDLERS` fallback in the same `if/elif` chain. Since Python takes the first matching branch, `JOB_HANDLERS` entries that share a job-type string with an inline branch are **registered but never called** — confirmed no callers exist for e.g. `zefix_jobs.handle_bulk`, `claude.handle_claude_classify` outside the dict itself. Only job types with *no* matching inline branch (`uid_import`, `uid_detail`, `enrich_web_purpose_sim`, `simap_*`, `shab_archive`, `link_sogc_stubs`, `resolve_bisher_links`, `repair_is_current`, the `web_*`/`directory_crawl` crawler types) are genuinely live via the registry.
-- **One disagreeing default found, traced end-to-end, not currently live:** `job_handlers/zefix_jobs.py::handle_bulk` (dead) defaults `active_only=False`; the *live* inline `"bulk"` branch in `_run_job` defaults `active_only=True`. These only matter if a `"bulk"` job is ever enqueued without the key — traced every real caller (the frontend form, the only HTTP route `POST /collection/bulk` → `BulkImportBody.active_only: bool = False`, `rerun_job`'s stored-params reload) and all of them always set `active_only` explicitly, so today's behavior is correct (matches the "imports both ACTIVE and CANCELLED by default" claim above) regardless of either fallback. Still worth fixing — it's a landmine for the next caller that omits the param. Other Pattern A/B pairs checked (`claude_classify`) were faithful 1:1 ports with no behavioral diff.
-- Full breakdown, the reachable/dead job-type list, and the `_TAXONOMY_INVALIDATING` gotcha (a hardcoded set of job types that bust the taxonomy cache — easy to forget when adding a scoring/category job type) in `docs/code-review/job-system-deep-dive.md`.
+- The legacy inline `elif job.job_type == "...":` chain (~29 branches, ~900 lines) was **removed** — its logic already lived, near-verbatim, in the registry handlers. Two gaps closed during removal: (1) the `shab_daily` auto-chain that enqueues `sogc_preprocess`+`extract_sogc_persons` after a productive import was ported into `job_handlers/shab.py::handle_shab` (uses `ctx.enqueue_job`, which routes through the same `_enqueue_job_in_session` so the dedup key still guards against duplicate chained jobs); (2) `embed_purpose_full`/`embed_purpose_clean` gained handlers in `job_handlers/noga.py` and registry entries.
+- Shared post-completion logic stays in `_run_job` and is dispatch-agnostic: `mark_completed`, warning/error event fan-out, and `_maybe_send_job_notification`. (There is no longer any taxonomy/category cache to invalidate — those stats are computed live per request; see `get_taxonomy_stats`/`get_category_stats` in `app/crud/company.py`.)
 
 **Atomic job claiming (multi-pod safety)**
 - `crud.atomic_claim_job(db, job_id)` issues a single `UPDATE job_runs SET status='running' WHERE id=? AND status IN ('queued','paused')` and checks `rowcount == 1`
@@ -858,7 +859,7 @@ After `mark_completed` / `mark_failed`, the worker calls `_maybe_send_job_notifi
 
 No notification is sent for intermediate states, cancellations, or job types other than export (failures apply to all types).
 
-#### Saved view alert sweep — `app/services/saved_view_alerts.py`
+#### Saved view alert sweep — `app/services/notifications/saved_view_alerts.py`
 
 Runs as `saved_view_alerts` job type (nightly via cron, or triggered manually via `POST /admin/jobs/saved-view-alerts`).
 
@@ -915,18 +916,18 @@ Both are downloaded and compiled into SQLite databases **at Docker build time**.
 - **Resolution order:** building lookup → PLZ fallback → **city fallback** (new) → return None
 - **GeoNames index:** Now built at app startup with both PLZ and city names cached for O(1) lookup
 
-### Claude (Anthropic) — `app/services/collection.py` + `app/crud/app_setting.py`
+### Claude (Anthropic) — `app/services/ingestion/collection.py` + `app/crud/app_setting.py`
 
 - **API key**: Resolved per-org via `get_effective_setting(db, "anthropic_api_key", org_id=...)`
   - Falls back to global `ANTHROPIC_API_KEY` env var if no org override
   - Never exposed in APIs (replaced with `anthropic_api_key_set: bool` in frontend)
-- **Model**: Configurable via `claude_model` key in `app_settings` (default: `claude-haiku-4-5-20251001`). Read at runtime by `get_claude_default_model()` in `app/services/claude.py`. Changeable in Settings → LLM tab without a restart. Valid values: `claude-haiku-4-5-20251001`, `claude-sonnet-4-6`, `claude-opus-4-6`.
+- **Model**: Configurable via `claude_model` key in `app_settings` (default: `claude-haiku-4-5-20251001`). Read at runtime by `get_claude_default_model()` in `app/services/scoring/claude.py`. Changeable in Settings → LLM tab without a restart. Valid values: `claude-haiku-4-5-20251001`, `claude-sonnet-4-6`, `claude-opus-4-6`.
 - **Used for**: `claude_classify` batch job, and `claude-preview` dry-run endpoint
 - **System prompt**: User-configurable via Settings API; resolved per-org
 - **Preflight check** (`_preflight_job`): Validates org has API key before queueing `claude_classify`
 - **Dry-run / preview**: `claude_classify_batch(dry_run=True)` scores up to 5 companies without writing to DB. Called by `POST /api/v1/scoring/claude-preview`. Rate-limited to 3 calls/min per org (in-memory sliding window).
 
-### Hetzner Object Storage (S3-compatible) — `app/services/s3_client.py`
+### Hetzner Object Storage (S3-compatible) — `app/services/platform/s3_client.py`
 
 Two separate buckets in region **nbg1** (`https://nbg1.your-objectstorage.com`):
 
@@ -944,7 +945,7 @@ Both buckets share the same `S3_ACCESS_KEY` / `S3_SECRET_KEY` credentials.
 
 **Bucket provisioning:** Hetzner Object Storage buckets are not managed by Terraform (the `hcloud` provider has no bucket resource). Create `helvex-exports` manually in the Hetzner Console under Object Storage → `nbg1`, using the same project and the same S3 credentials as `helvex-backups`.
 
-### SOGC Publication Preprocessing — `app/services/sogc_preprocessor.py`
+### SOGC Publication Preprocessing — `app/services/registry/sogc_preprocessor.py`
 
 Explodes the flat `companies.sogc_pub` JSON blob (a list of SOGC publication entries from the Zefix company detail endpoint) into two normalized tables.
 
@@ -966,12 +967,12 @@ The `message` field contains the full HR publication narrative (single language;
 
 **Key functions:**
 - `preprocess_company_sogc_pub(db, company)` — idempotent upsert for one company; upserts `sogc_publications` by `sogc_id`, deletes + reinserts `sogc_changes`. Called inline after each SHAB import.
-- `run_sogc_preprocess_batch(db, mode, uids, ...)` — batch over companies table with cursor pagination; `mode="missing"` skips already-processed companies, `mode="all"` reprocesses everything.
+- `run_sogc_preprocess_batch(db, mode, uids, ...)` — batch over companies table with cursor pagination; `mode="missing"` skips already-processed companies, `mode="all"` reprocesses everything. The `mode="missing"` progress-count (informational only, not used by the pagination loop) bumps `statement_timeout` to 120s for its NOT EXISTS anti-join and falls back to a `pg_class.reltuples` estimate on timeout, so a slow count never fails the whole job.
 - `run_sogc_publications_backfill(db, ...)` — iterates existing `sogc_publications` rows, re-applies encoding fix to stored texts, regenerates `sogc_changes`. Used via `mode="publications"` job param to retroactively fix rows written before the encoding/text-extraction fixes.
 
 **SHAB integration (Zefix-backed):** After every HR01/HR02 company upsert in `shab_import.py`, `preprocess_company_sogc_pub` is called fire-and-forget (errors logged, not raised), ensuring new publications are indexed immediately.
 
-### UID Register Gap Import — `app/services/uid_import.py`
+### UID Register Gap Import — `app/services/ingestion/uid_import.py`
 
 Discovers the companies **not in Zefix** (the "gap": sole traders, MWST/VAT-only, `uid_only`) from the Swiss UID register via the V5.0 PublicServices SOAP API, using a **name/keyword dictionary sweep with geo/status refinement**.
 
@@ -1014,9 +1015,9 @@ Discovers the companies **not in Zefix** (the "gap": sole traders, MWST/VAT-only
 **Job type:** `uid_import` | **Endpoint:** `POST /api/v1/jobs/collection/uid-import`
 **Detail job:** `uid_detail` | **Endpoint:** `POST /api/v1/jobs/collection/uid-detail` — calls `fetch_uid_details()`, which filters `source='uid' AND uid_detail_fetched_at IS NULL` so each company is fetched exactly once. `uid_detail_fetched_at` is set after every GetByUID attempt (success or not), preventing re-processing on subsequent runs even for entities with no address.
 
-### SHAB Archive Import — `app/services/shab_archive_import.py`
+### SHAB Archive Import — `app/services/registry/shab_archive_import.py`
 
-Imports historical SHAB publications from `shab.ch`. Operates in two modes depending on the date range, dispatched automatically by `handle_shab_archive` in `app/services/job_handlers/shab_archive.py` (cutoff: `2012-12-01`):
+Imports historical SHAB publications from `shab.ch`. Operates in two modes depending on the date range, dispatched automatically by `handle_shab_archive` in `app/services/jobs/job_handlers/shab_archive.py` (cutoff: `2012-12-01`):
 
 #### Mode A — Pre-2012 bulk PDF (`import_shab_old_pdfs`)
 
@@ -1064,7 +1065,7 @@ Paginates the `shab.ch` public archive API (`https://www.shab.ch/api/v1/archive/
 
 **Dependencies:** `pypdf>=4.0.0`, `PyMuPDF (fitz)>=1.23.0` added to `requirements.backend.txt`.
 
-### Link SOGC Stubs — `run_link_sogc_stubs` in `app/services/shab_archive_import.py`
+### Link SOGC Stubs — `run_link_sogc_stubs` in `app/services/registry/shab_archive_import.py`
 
 Back-fills `company_id` on `sogc_publications` and `sogc_person_appearances` rows that already have a `company_uid` but no `company_id`. Works entirely from already-imported DB data — no API calls or PDF downloads.
 
@@ -1080,7 +1081,7 @@ Back-fills `company_id` on `sogc_publications` and `sogc_person_appearances` row
 
 **Frontend:** Collection page → "Link SOGC Stubs" section (after SHAB Archive Import).
 
-### SMTP — `app/services/email.py`
+### SMTP — `app/services/notifications/email.py`
 
 - Config: `SMTP_HOST`, `SMTP_PORT` (587), `SMTP_USER`, `SMTP_PASSWORD`, `SMTP_FROM`
 - Protocol: STARTTLS
@@ -1099,7 +1100,7 @@ Back-fills `company_id` on `sogc_publications` and `sogc_person_appearances` row
 
 ## 8. Scoring Logic
 
-**File:** `app/services/scoring.py`
+**File:** `app/services/scoring/scoring.py`
 
 ### Zefix Score (0–100)
 Computed from Zefix data alone (no external calls).
@@ -1130,7 +1131,7 @@ The keyword taxonomy (target clusters, target keywords, flex score weights) is s
 
 ### Classification Pipelines (Clustering, Keywords, NOGA)
 
-**Files:** `app/services/cluster_pipeline.py`, `app/services/noga.py`, `app/services/collection.py`
+**Files:** `app/services/ml/cluster_pipeline.py`, `app/services/ml/noga.py`, `app/services/ingestion/collection.py`
 
 ---
 
@@ -1191,7 +1192,7 @@ Stores 768-dim L2-normalized embeddings per company in `company_embeddings` for 
 
 **Key files:**
 - `app/models/company_embedding.py` — SQLAlchemy model
-- `app/services/company_embedding_pipeline.py` — batch jobs, upsert helpers, semantic search
+- `app/services/ml/company_embedding_pipeline.py` — batch jobs, upsert helpers, semantic search
 - `alembic/versions/0083_add_company_embeddings.py` — migration
 
 **Debug / explain endpoint (superadmin only):**
@@ -1200,7 +1201,7 @@ Stores 768-dim L2-normalized embeddings per company in `company_embeddings` for 
 - Per-level (L1–L5): top-10 candidates with embedding similarity, normalized token score, excludes cosine penalty, final hybrid score, and the winner
 - Flags for lookahead tie-breaking and fallback usage at each level
 
-Implemented in `classify_company_noga_explain()` in `app/services/noga.py`. Exposed in the company detail UI as a "NOGA explain" button (violet, header area) visible only to superadmins; opens a modal with the full trace.
+Implemented in `classify_company_noga_explain()` in `app/services/ml/noga.py`. Exposed in the company detail UI as a "NOGA explain" button (violet, header area) visible only to superadmins; opens a modal with the full trace.
 
 ---
 
@@ -1319,7 +1320,7 @@ Quality depends on:
 4. **Hierarchy path** — walk `noga_lookup.json` via `parentCode` links to build full ancestry (section → division → group → class → type).
 5. **Multilingual labels:** Section labels for the `market-segments` API are derived directly from `noga_lookup.json` using `_collect_multilang_text()` — all four language variants (DE/FR/IT/EN) are available without hardcoding.
 
-**Progress-count performance (`include_stale`):** [app/services/noga_pipeline.py](app/services/noga_pipeline.py) `reclassify_noga`'s `include_stale` mode ORs `noga_code IS NULL` with a cross-column comparison (`noga_classified_at < updated_at - interval`), which can't be served by a btree index and forces a full table scan — this timed out in production (job 692, 2026-06-16) even after bumping `statement_timeout` to 120s. The exact `COUNT(*)` for this path was replaced with a cheap planner estimate (`pg_class.reltuples`) since it's only used for progress display, not iteration logic. The plain `only_missing_noga` (non-stale) path keeps an exact, index-backed count via the `ix_companies_no_noga_code` partial index added in migration 0102.
+**Progress-count performance (`include_stale`):** [app/services/ml/noga_pipeline.py](app/services/ml/noga_pipeline.py) `reclassify_noga`'s `include_stale` mode ORs `noga_code IS NULL` with a cross-column comparison (`noga_classified_at < updated_at - interval`), which can't be served by a btree index and forces a full table scan — this timed out in production (job 692, 2026-06-16) even after bumping `statement_timeout` to 120s. The exact `COUNT(*)` for this path was replaced with a cheap planner estimate (`pg_class.reltuples`) since it's only used for progress display, not iteration logic. The plain `only_missing_noga` (non-stale) path keeps an exact, index-backed count via the `ix_companies_no_noga_code` partial index added in migration 0102.
 
 **Outputs to DB per company:**
 - `noga_code` — best-matching code (e.g. `"263001"`)
@@ -1400,7 +1401,7 @@ The `cluster_registry` table gives each cluster a stable identity across pipelin
 
 Credits are the unit of account for AI-powered actions (Claude scoring, web search, etc.). Each org has a balance stored in `OrgSetting(key="credit_balance")`. Credits are pre-purchased and deducted at action time.
 
-### Core function — `app/services/credits.py`
+### Core function — `app/services/billing/credits.py`
 
 ```
 check_and_deduct(db, org_id, action, count=1) → (ok: bool, balance: int)
@@ -1408,8 +1409,12 @@ check_and_deduct(db, org_id, action, count=1) → (ok: bool, balance: int)
 
 - Reads the org's current balance.
 - Checks the deduction amount for `action` from the `CreditCostConfig` table (or hardcoded defaults).
-- Atomically deducts or returns `(False, current_balance)` if insufficient.
+- Atomically deducts (`SELECT … FOR UPDATE` row lock — no double-spend race) or returns `False` if insufficient (`after < 0` guard — balance never goes negative).
 - Calls `_maybe_low_credit_alert(db, org_id, balance)` after every deduction.
+
+**Deduction is at enqueue.** `_apply_credit_deduction_if_needed` (job_worker) charges when a metered job is queued; the charged `count` is either server-computed (`csv_export`, `recalculate_scores` via `count_companies`) or a user `limit` that also *bounds* the work — so you can't get more work than you pay for. The only `crud.create_job` call is inside the enqueue path, so no route bypasses deduction.
+
+**Refunds are prorated + idempotent (SECURITY).** `_refund_job_credits_if_needed` (called on cancel/fail) refunds only the *undone* fraction: `cost × (total − done) / total`. This closes an abuse where a user runs a large metered job to near-completion (results persist via per-batch commits), cancels, and keeps the work while getting a full refund. Jobs that never started (`done=0`) get a full refund. A ledger check on `reference_id="refund:job:{id}"` makes the refund idempotent (no double-refund on a cancel-then-recovery race). Tests: `tests/test_credit_refund.py`.
 
 ### Low-credit alert
 
@@ -1988,7 +1993,7 @@ page selection: sitemap URLs fill subpage slots the homepage nav misses, and the
 
 ### Website verdict — does this company have a website, and how many?
 
-`app/services/website_status.py` aggregates the search + crawl evidence into one
+`app/services/enrichment/website_status.py` aggregates the search + crawl evidence into one
 company-level verdict (`companies.website_status`) plus a distinct-website count
 (`companies.website_count`). No API cost. This replaces the old behaviour of forcing
 the top-scored search result into `website_url` regardless of quality.
@@ -2105,12 +2110,12 @@ Grafana query: `rate(crawl_result_total[5m])` grouped by `tier` and `status`. Pe
 
 | File | Purpose |
 |---|---|
-| `app/services/crawler_common.py` | Shared utilities: browser profiles + client hints, bot/JS detection, nav + sitemap subpage discovery, media counting |
-| `app/services/crawler_sitemap.py` | robots.txt + sitemap.xml discovery (URLs + crawl-delay); best-effort |
-| `app/services/crawler_http.py` | httpx crawler (HTTP/2, client hints, curl_cffi impersonation fallback) |
-| `app/services/crawler_playwright.py` | Playwright crawler (lazy import; resource-blocking, optional Chrome channel) |
-| `app/services/crawler_extract.py` | Deterministic structured-data extractor (trafilatura + regex/schema.org/phonenumbers) |
-| `app/services/job_handlers/web_crawl.py` | Job handlers: `_run_crawl_batch` shared loop, `handle_web_extract`, per-type handlers |
+| `app/services/enrichment/crawler_common.py` | Shared utilities: browser profiles + client hints, bot/JS detection, nav + sitemap subpage discovery, media counting |
+| `app/services/enrichment/crawler_sitemap.py` | robots.txt + sitemap.xml discovery (URLs + crawl-delay); best-effort |
+| `app/services/enrichment/crawler_http.py` | httpx crawler (HTTP/2, client hints, curl_cffi impersonation fallback) |
+| `app/services/enrichment/crawler_playwright.py` | Playwright crawler (lazy import; resource-blocking, optional Chrome channel) |
+| `app/services/enrichment/crawler_extract.py` | Deterministic structured-data extractor (trafilatura + regex/schema.org/phonenumbers) |
+| `app/services/jobs/job_handlers/web_crawl.py` | Job handlers: `_run_crawl_batch` shared loop, `handle_web_extract`, per-type handlers |
 | `app/crud/crawler.py` | CRUD: upsert candidates, SKIP LOCKED claiming, save pages, retry backoff, extraction claim/upsert, `get_best_web_extract` |
 | `infra/charts/helvex/templates/crawler-http-deployment.yaml` | K8s deployment for HTTP crawler pods |
 | `frontend/src/components/website-panel.tsx` | Company-detail "Website" tab: extracted contacts/socials/content + per-page crawl-coverage debug table (POC) |
@@ -2185,7 +2190,7 @@ job routing was moved to ml-worker only (see Pod topology above).
 ### web_score adjustment from extraction signals
 
 `scoring.adjust_web_score_for_extraction(base_web_score, *, uid_matches_zefix, name_address_verified)`
-(in `app/services/scoring.py`) nudges the Serper-based `web_score` using on-site verification
+(in `app/services/scoring/scoring.py`) nudges the Serper-based `web_score` using on-site verification
 found during extraction:
 - UID found and matches Zefix → **+40** (capped at 100)
 - UID found but does not match Zefix → **−50** (floored at 0)
@@ -2196,7 +2201,7 @@ found during extraction:
 this keeps repeated re-extraction (e.g. via the `reextract` admin action, which re-runs
 extraction without re-crawling) idempotent instead of compounding the adjustment each run.
 
-Wired into `handle_web_extract` (`app/services/job_handlers/web_crawl.py`): after each
+Wired into `handle_web_extract` (`app/services/jobs/job_handlers/web_crawl.py`): after each
 successful per-company upsert, `get_best_web_extract()` re-selects the best extract across
 all of that company's URL candidates (not necessarily the one just processed), recomputes
 `web_score` from the raw Serper score + the best extract's verification signals, and — only
@@ -2233,7 +2238,7 @@ the extractor missing at scale" view.
 
 ### combined_score formula (web_score wired in)
 
-`compute_relevance_score(company)` in `app/services/scoring.py` now reads `company.web_score` when
+`compute_relevance_score(company)` in `app/services/scoring/scoring.py` now reads `company.web_score` when
 available and uses a 4-component formula: `ai×0.50 + web_score×0.20 + noga_confidence×100×0.20 +
 keyword_density×100×0.10`. When `web_score` is absent (no Serper result yet) the original
 3-component formula `ai×0.60 + noga×100×0.25 + kw×100×0.15` is used. Absent components always
@@ -2272,7 +2277,7 @@ The currently-best row is highlighted in blue.
 
 ### NOGA fix for Zweigniederlassungen
 
-`reclassify_noga` in `app/services/noga_pipeline.py` now bypasses the `only_missing_noga` guard
+`reclassify_noga` in `app/services/ml/noga_pipeline.py` now bypasses the `only_missing_noga` guard
 for detected branch offices (`is_branch_office(company) == True`). Previously, a branch with a
 stale/wrong NOGA code was skipped when `only_missing_noga=True` because it already had a code.
 Now branches always re-run `apply_noga_classification`, which inherits the parent's NOGA if
@@ -2365,7 +2370,7 @@ Indexes: `user_id`, `org_id`, `action`, `created_at`.
 
 ### Service
 
-`app/services/activity.py` — `log_activity(db, *, action, user_id, org_id, ...)`.
+`app/services/notifications/activity.py` — `log_activity(db, *, action, user_id, org_id, ...)`.
 
 The helper is **best-effort**: exceptions are caught and logged but never re-raised. A failed write never breaks the user-facing request. It calls `db.flush()` (not `db.commit()`), so the entry participates in the caller's transaction.
 
@@ -2490,7 +2495,7 @@ Added `app.guidedSearch` key to `messages/{en,de,fr,it}.json`. Component uses ha
 ## 19. Common Bug-Fixing Cheatsheet
 
 ### NOGA nightly job runs multiple times / fails then retries
-`reclassify_noga`'s upfront `COUNT(*)` (used for progress %) ORs an `IS NULL` check with a cross-column comparison (`noga_classified_at < updated_at - interval`), which can't use a btree index and forces a sequential scan. Under load this exceeds the engine-wide 30s `statement_timeout` (`app/database.py`), the job fails, and `_maybe_enqueue_noga_nightly` (`app/main.py`) re-enqueues it within the same 03:00–03:59 window since `has_noga_nightly_run_today` (`app/crud/job_run.py`) deliberately excludes failed/cancelled runs (so a crash doesn't block retry). Fix: `db.execute(text("SET LOCAL statement_timeout = '120000'"))` scoped to just that one COUNT statement in `reclassify_noga()` and `reclassify_low_confidence_noga()` (`app/services/noga_pipeline.py`) — resets to 30s on next commit, doesn't affect interactive API requests.
+`reclassify_noga`'s upfront `COUNT(*)` (used for progress %) ORs an `IS NULL` check with a cross-column comparison (`noga_classified_at < updated_at - interval`), which can't use a btree index and forces a sequential scan. Under load this exceeds the engine-wide 30s `statement_timeout` (`app/database.py`), the job fails, and `_maybe_enqueue_noga_nightly` (`app/main.py`) re-enqueues it within the same 03:00–03:59 window since `has_noga_nightly_run_today` (`app/crud/job_run.py`) deliberately excludes failed/cancelled runs (so a crash doesn't block retry). Fix: `db.execute(text("SET LOCAL statement_timeout = '120000'"))` scoped to just that one COUNT statement in `reclassify_noga()` and `reclassify_low_confidence_noga()` (`app/services/ml/noga_pipeline.py`) — resets to 30s on next commit, doesn't affect interactive API requests.
 
 ### Company filter bar: multi-canton / multi-noga-label silently match nothing
 `_apply_filters()` in `app/crud/company.py` is the single shared filter builder for `list_companies`/`count_companies`. The guided wizard already comma-joins multi-select values (e.g. `canton="ZH,BE"`), but the canton filter did an exact-equality check against the whole string and noga_label did a single literal `ILIKE`, so any multi-value selection matched zero rows. Fixed by splitting on `,` and using `.in_()` (canton) / `or_(*[...ilike...])` (noga_label). `has_website` was already fully wired end-to-end (route → crud → `lib/api.ts`) — only the filter-bar UI control was missing.
@@ -2645,7 +2650,7 @@ New job types are automatically deduplicated without any code change. Add to `NO
 
 **Restart cap + dedup self-heal (`app/crud/job_run.py` `MAX_RESTART_COUNT = 5`):** Every time `requeue_interrupted_jobs()` / `requeue_recent_abandoned_jobs()` re-queues a crashed job, `restart_count` increments. Once it exceeds `MAX_RESTART_COUNT`, the job is force-marked `failed` instead of re-queued (crash-loop protection).
 
-Observed incident: a `web_crawl_playwright` job (dedup key = one active per org) reached `restart_count` in the hundreds while still showing `status="running"`, permanently blocking every new job of that type via the dedup check — the restart-cap kill path should have caught it far earlier but apparently didn't stick (exact cause not confirmed — suspect a lost-update race between pods' independent periodic sweeps, since `requeue_interrupted_jobs()`'s query has no row lock, unlike `atomic_claim_job()`). As a defense-in-depth fix (not a root-cause fix), `_enqueue_job_in_session()` (`app/services/job_worker.py`) now checks the restart count of any dedup-blocking job before returning it: if `restart_count > MAX_RESTART_COUNT`, it force-fails that job on the spot (via `crud.mark_failed`) and falls through to the normal enqueue path, so a runaway job can never wedge a job type shut indefinitely.
+Observed incident: a `web_crawl_playwright` job (dedup key = one active per org) reached `restart_count` in the hundreds while still showing `status="running"`, permanently blocking every new job of that type via the dedup check — the restart-cap kill path should have caught it far earlier but apparently didn't stick (exact cause not confirmed — suspect a lost-update race between pods' independent periodic sweeps, since `requeue_interrupted_jobs()`'s query has no row lock, unlike `atomic_claim_job()`). As a defense-in-depth fix (not a root-cause fix), `_enqueue_job_in_session()` (`app/services/jobs/job_worker.py`) now checks the restart count of any dedup-blocking job before returning it: if `restart_count > MAX_RESTART_COUNT`, it force-fails that job on the spot (via `crud.mark_failed`) and falls through to the normal enqueue path, so a runaway job can never wedge a job type shut indefinitely.
 
 ---
 
@@ -2701,11 +2706,11 @@ This section documents new ML services and the Explorer/scoring redesign shipped
 
 | File | Purpose |
 |---|---|
-| `app/services/embeddings.py` | Shared multilingual embedding backbone (singleton SentenceTransformer) |
-| `app/services/incremental_classify.py` | Classify newly imported companies inline (NOGA + clusters + language detection) |
-| `app/services/stopword_discovery.py` | 4-phase automated boilerplate/stopword discovery pipeline |
+| `app/services/ml/embeddings.py` | Shared multilingual embedding backbone (singleton SentenceTransformer) |
+| `app/services/ingestion/incremental_classify.py` | Classify newly imported companies inline (NOGA + clusters + language detection) |
+| `app/services/ml/stopword_discovery.py` | 4-phase automated boilerplate/stopword discovery pipeline |
 
-### Shared Embedding Backbone — `app/services/embeddings.py`
+### Shared Embedding Backbone — `app/services/ml/embeddings.py`
 
 All ML code that needs sentence embeddings shares a single lazy-loaded model instance:
 
@@ -2720,7 +2725,7 @@ nearest_neighbours(query_vec, index_matrix, top_k) → list[(idx, cosine)]
 
 `_get_model()` is `lru_cache(maxsize=1)` — the model loads once and stays in memory.
 
-### Incremental Classification — `app/services/incremental_classify.py`
+### Incremental Classification — `app/services/ingestion/incremental_classify.py`
 
 When new companies arrive via Zefix import they need inline classification. This service runs synchronously during `enrich_company()`.
 
@@ -2748,7 +2753,7 @@ NOGA is skipped inline because it depends on `tfidf_cluster` — use the batch `
 backfill_unclassified(db, *, batch_size=500, run_noga, run_clusters, limit)
 ```
 
-### Boilerplate Pattern Analysis — `app/services/boilerplate_analysis.py`
+### Boilerplate Pattern Analysis — `app/services/ml/boilerplate_analysis.py`
 
 `run_boilerplate_analysis` is a corpus-frequency job triggered from the Collection page (`scoring/analyze-boilerplate`).
 
@@ -2773,7 +2778,7 @@ backfill_unclassified(db, *, batch_size=500, run_noga, run_clusters, limit)
 
 ---
 
-### Automated Stopword Discovery — `app/services/stopword_discovery.py`
+### Automated Stopword Discovery — `app/services/ml/stopword_discovery.py`
 
 `discover_stopwords` job auto-triggers after every `tfidf_kmeans_cluster` run. Four phases:
 
@@ -2992,11 +2997,11 @@ Controls: "Past mandates" checkbox (rekeys SWR), segmented Timeline | Network to
 
 | File | Purpose |
 |---|---|
-| `app/services/sogc_person_extractor.py` | Regex-based DE/FR/IT parser, bisher field parsing, entity upsert, confidence recomputation, batch job; `_AUDITOR_EXCERPT_RE` auditor skip guard; `_recompute_is_current_for_entities`; `run_repair_is_current` |
-| `app/services/sogc_entity_resolver.py` | Bisher-first entity resolution: union-find, bisher match lookup, entity merge; calls `_recompute_is_current_for_entities` after merges |
-| `app/services/job_handlers/sogc_persons.py` | Job handler for extract_sogc_persons |
-| `app/services/job_handlers/sogc_entity_resolution.py` | Job handler for resolve_bisher_links |
-| `app/services/job_handlers/sogc_repair.py` | Job handler for repair_is_current |
+| `app/services/registry/sogc_person_extractor.py` | Regex-based DE/FR/IT parser, bisher field parsing, entity upsert, confidence recomputation, batch job; `_AUDITOR_EXCERPT_RE` auditor skip guard; `_recompute_is_current_for_entities`; `run_repair_is_current` |
+| `app/services/registry/sogc_entity_resolver.py` | Bisher-first entity resolution: union-find, bisher match lookup, entity merge; calls `_recompute_is_current_for_entities` after merges |
+| `app/services/jobs/job_handlers/sogc_persons.py` | Job handler for extract_sogc_persons |
+| `app/services/jobs/job_handlers/sogc_entity_resolution.py` | Job handler for resolve_bisher_links |
+| `app/services/jobs/job_handlers/sogc_repair.py` | Job handler for repair_is_current |
 | `app/api/routes/persons.py` | Person/auditor search, company-scoped endpoints, flag reporting; `GET /sogc/persons/{id}/network` ego-graph endpoint |
 | `frontend/src/lib/types.ts` | `CoDirector`, `MandateItem`, `PersonNetworkData` types |
 | `frontend/src/lib/api.ts` | `fetchPersonNetwork(entityId, params?)` |
@@ -3059,12 +3064,12 @@ Migration: `alembic/versions/0096_add_simap_awards.py`
 | `app/clients/simap_client.py` | HTTP client for all three SIMAP endpoints; `best_title()` helper (DE→FR→IT→EN fallback) |
 | `app/models/simap_award.py` | `SimapAward` ORM model; `best_title()`, `best_proc_office()` methods |
 | `app/models/simap_award_vendor.py` | `SimapAwardVendor` ORM model |
-| `app/services/simap_import.py` | Core import function: paginates, fetches details + vendor profiles, upserts awards + vendors, matches CHE UIDs; returns stats |
-| `app/services/job_handlers/simap.py` | Job handler for `simap_daily`, `simap_backfill`, and `simap_archive`; resume via `last_cursor` in `stats_json` |
+| `app/services/registry/simap_import.py` | Core import function: paginates, fetches details + vendor profiles, upserts awards + vendors, matches CHE UIDs; returns stats |
+| `app/services/jobs/job_handlers/simap.py` | Job handler for `simap_daily`, `simap_backfill`, and `simap_archive`; resume via `last_cursor` in `stats_json` |
 | `app/crud/job_run.py` | `has_simap_daily_run_today()` guard (mirrors `has_shab_daily_run_today`) |
 | `frontend/src/components/simap-panel.tsx` | Company detail panel: useSWR on `GET /api/v1/companies/{id}/simap-awards`; renders award cards with price, authority, CPV; null-returns if no awards; show-more collapse after 3 |
 | `app/clients/simap_archive_client.py` | HTTP client for archiv.simap.ch: `search_archive_awards()` (POST /api/search with `type_cd_ob`, date params) and `get_archive_detail()` (GET /api/detail?meldungsnummer={id}) |
-| `app/services/simap_archive_import.py` | Import service for pre-2024 archive: paginates 116k OB02 records, de-dupes by projectid (DE>FR>IT), fuzzy-matches contractor name+zip to companies via pg_trgm; IDs prefixed "arch-" |
+| `app/services/registry/simap_archive_import.py` | Import service for pre-2024 archive: paginates 116k OB02 records, de-dupes by projectid (DE>FR>IT), fuzzy-matches contractor name+zip to companies via pg_trgm; IDs prefixed "arch-" |
 
 ## 22. Security Hardening Pass (Jun 2026)
 

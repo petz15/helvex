@@ -107,7 +107,7 @@ Terms:
 
 def _classify_batch(terms: list[str], *, api_key: str, model: str, retries: int = 3) -> dict[str, str]:
     """Call Claude to classify a batch of terms. Returns term → label mapping."""
-    from app.services.claude import claude_call
+    from app.services.scoring.claude import claude_call
 
     user_msg = _USER_TEMPLATE.format(n=len(terms), terms_json=json.dumps(terms, ensure_ascii=False, indent=2))
 

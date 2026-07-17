@@ -1,4 +1,4 @@
-"""Webhook and provider callback handlers: Stripe, Worldline return, Worldline card return."""
+"""Webhook and provider callback handlers: Worldline return, Worldline card return."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ import json
 from datetime import datetime, timedelta, timezone
 from urllib.parse import parse_qs, urlparse
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy.orm import Session
 
@@ -14,10 +14,10 @@ from app.database import get_db
 from app.models.organization import Organization
 from app.models.payment_transaction import PaymentTransaction
 from app.models.user import User
-from app.services import payment_transactions, payments
-from app.services.billing_addresses import get_default_billing_address
-from app.services.payments.pricing import apply_vat
-from app.services.tiers import get_tier_price_chf
+from app.services.billing import payment_transactions, payments
+from app.services.billing.billing_addresses import get_default_billing_address
+from app.services.billing.payments.pricing import apply_vat
+from app.services.billing.tiers import get_tier_price_chf
 
 from app.api.routes.billing._shared import (
     WebhookResponse,
@@ -37,55 +37,6 @@ _WORLDLINE_PLACEHOLDER_TOKENS = {
     "{TOKEN}", "%7BTOKEN%7D", "{token}", "%7Btoken%7D",
     "{Token}", "%7BToken%7D", "{{{PAYMENTPAGETOKEN}}}", "%7B%7B%7BPAYMENTPAGETOKEN%7D%7D%7D",
 }
-
-
-@router.post("/webhooks/stripe", response_model=WebhookResponse)
-async def stripe_webhook(
-    request: Request,
-    db: Session = Depends(get_db),
-    stripe_signature: str | None = Header(default=None, alias="Stripe-Signature"),
-) -> WebhookResponse:
-    payload = await request.body()
-    if not payments.verify_stripe_signature(
-        payload=payload,
-        signature_header=stripe_signature,
-        secret=payments.settings.stripe_webhook_secret,
-    ):
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid Stripe signature")
-
-    event = payments.parse_json_payload(payload)
-    event_type = str(event.get("type") or "")
-    obj = ((event.get("data") or {}).get("object") or {}) if isinstance(event.get("data"), dict) else {}
-    metadata = obj.get("metadata") if isinstance(obj, dict) else None
-    metadata = metadata if isinstance(metadata, dict) else {}
-
-    if event_type in {"customer.subscription.created", "customer.subscription.updated"}:
-        org_id = int(metadata.get("org_id") or 0)
-        if org_id <= 0:
-            return WebhookResponse(ok=True, ignored=True)
-        payments.apply_subscription_update(
-            db,
-            org_id=org_id,
-            tier=metadata.get("tier"),
-            billing_cycle=(metadata.get("billing_cycle") or None),
-            customer_id=(obj.get("customer") if isinstance(obj, dict) else None),
-            period_end_ts=(int(obj.get("current_period_end")) if isinstance(obj, dict) and obj.get("current_period_end") else None),
-        )
-        return WebhookResponse(ok=True)
-
-    if event_type == "checkout.session.completed":
-        org_id = int(metadata.get("org_id") or 0)
-        topup_credits = int(metadata.get("topup_credits") or 0)
-        if org_id > 0 and topup_credits > 0:
-            payments.apply_credit_topup(
-                db,
-                org_id=org_id,
-                credits_amount=topup_credits,
-                reference_id=(obj.get("id") if isinstance(obj, dict) else None),
-            )
-            return WebhookResponse(ok=True)
-
-    return WebhookResponse(ok=True, ignored=True)
 
 
 @router.get("/webhooks/worldline/return", response_model=None)
@@ -169,7 +120,10 @@ async def worldline_return(
     # SECURITY: Check for existing payment to prevent double-processing.
     existing_payment = payment_transactions.get_payment_transaction_by_external_id(db, token)
     if existing_payment:
-        if existing_payment.status == "pending" and existing_payment.created_at <= datetime.now(tz=timezone.utc) - timedelta(minutes=15):
+        _created = existing_payment.created_at
+        if _created is not None and _created.tzinfo is None:
+            _created = _created.replace(tzinfo=timezone.utc)  # tolerate drivers that return naive datetimes
+        if existing_payment.status == "pending" and _created is not None and _created <= datetime.now(tz=timezone.utc) - timedelta(minutes=15):
             existing_payment.status = "declined"
             existing_payment.error_code = "PENDING_TIMEOUT"
             existing_payment.error_message = "Payment expired after 15 minutes"
@@ -189,6 +143,33 @@ async def worldline_return(
                 _safe_redirect_target(_append_query_params(cancel_url, {"reason": "payment_declined"}))
             )
         pending_payment = existing_payment
+
+    # SECURITY: the granted entitlement (tier / credits / kind) MUST come from a
+    # server-trusted source — the pending transaction created at checkout with the
+    # real, server-computed values — not the unsigned return query params.
+    # decode_worldline_callback_context() returns {} on a bad/absent signature, so
+    # `order_reference` and `kind` otherwise fall back to fully attacker-controlled
+    # query params, letting a caller who holds any valid token forge a higher tier
+    # or a large credit grant. When a pending tx exists, re-derive everything from
+    # ITS stored order_reference. If there is neither a pending tx nor a validly
+    # signed ctx, refuse to grant any entitlement.
+    if pending_payment is not None:
+        order_reference = (pending_payment.order_reference or order_reference).strip()
+        kind = (pending_payment.kind or kind).strip().lower()
+        parsed_ref = payments.parse_worldline_merchant_reference(order_reference)
+    elif not callback_ctx and (
+        kind in {"subscription", "topup"}
+        or parsed_ref.get("tier")
+        or parsed_ref.get("topup_credits")
+    ):
+        _emit(
+            "warning",
+            "billing.worldline_untrusted_grant_blocked token=%s kind=%s order_ref=%s",
+            token[:20], kind, order_reference[:50] if order_reference else "NONE",
+        )
+        return _iframe_redirect(
+            _safe_redirect_target(_append_query_params(cancel_url, {"reason": "invalid_callback_context"}))
+        )
 
     try:
         result = payments.WorldlineProvider().authorize_transaction(
@@ -315,6 +296,49 @@ async def worldline_return(
             "billing.worldline_tx_logged token=%s tx_id=%s org_id=%s status=%s kind=%s amount_chf=%s",
             token[:20], payment_tx.id, payment_tx.org_id, payment_tx.status, payment_tx.kind, payment_tx.amount_chf,
         )
+
+        # DOUBLE-VERIFICATION: confirm the amount Worldline actually authorized covers the
+        # entitlement being granted. The entitlement is already bound to the server-trusted
+        # pending transaction above; this is defense in depth against any amount/entitlement
+        # drift. Worldline returns the authorized amount in minor units (cents), CHF. When
+        # the field is absent we do not block — the entitlement binding is the primary control.
+        if normalized_status in {"authorized", "captured"}:
+            tx_amount = transaction.get("Amount") if isinstance(transaction, dict) else {}
+            tx_amount = tx_amount if isinstance(tx_amount, dict) else {}
+            try:
+                authorized_cents = int(str(tx_amount.get("Value") or "0"))
+            except (ValueError, TypeError):
+                authorized_cents = 0
+            authorized_currency = str(tx_amount.get("CurrencyCode") or "").upper()
+            expected_cents = int(round(amount_chf_total * 100))
+            # Reject only on a clear discrepancy: wrong currency, or paid materially less
+            # than expected (>1% short, min 1 cent). Overpayment / rounding is tolerated.
+            mismatch = authorized_cents > 0 and expected_cents > 0 and (
+                (bool(authorized_currency) and authorized_currency != "CHF")
+                or authorized_cents < expected_cents - max(1, int(expected_cents * 0.01))
+            )
+            if mismatch:
+                _emit(
+                    "error",
+                    "billing.worldline_amount_mismatch token=%s tx_id=%s authorized=%s%s expected_cents=%s kind=%s",
+                    token[:20], payment_tx.id, authorized_cents, authorized_currency or "?", expected_cents, kind,
+                )
+                payment_tx.status = "error"
+                payment_tx.error_code = "AMOUNT_MISMATCH"
+                payment_tx.error_message = (
+                    f"Authorized {authorized_cents} {authorized_currency or '?'} does not cover "
+                    f"expected {expected_cents} CHF cents"
+                )
+                db.commit()
+                # Best-effort void so the customer isn't charged for a grant we refuse.
+                if transaction_id:
+                    try:
+                        payments.WorldlineProvider().cancel_transaction(transaction_id=transaction_id)
+                    except (payments.PaymentConfigurationError, RuntimeError) as _cx:
+                        _emit("warning", "billing.worldline_amount_mismatch_cancel_failed token=%s error=%s", token[:20], _cx)
+                return _iframe_redirect(
+                    _safe_redirect_target(_append_query_params(cancel_url, {"reason": "amount_mismatch"}))
+                )
 
         if normalized_status == "authorized" and transaction_id:
             try:

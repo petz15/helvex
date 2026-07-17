@@ -22,7 +22,7 @@ from app.services.billing import credits
 logger = logging.getLogger(__name__)
 
 
-ProviderName = Literal["worldline", "stripe"]
+ProviderName = Literal["worldline"]
 PaymentKind = Literal["subscription", "topup"]
 PaymentStatus = Literal["pending", "authorized", "captured", "declined", "error"]
 

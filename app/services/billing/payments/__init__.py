@@ -4,7 +4,6 @@ Implementation is split into focused modules:
   _types.py              — Shared types: ProviderName, CheckoutSession, PaymentConfigurationError
   pricing.py             — Price calculations, provider mode selection
   worldline_provider.py  — WorldlineProvider class and Worldline-specific helpers
-  stripe_provider.py     — StripeProvider class and Stripe webhook verification
   transactions.py        — Subscription lifecycle and credit grant application
 """
 
@@ -39,11 +38,6 @@ from app.services.billing.payments.worldline_provider import (  # noqa: F401
     register_pending_card_alias_token,
 )
 
-from app.services.billing.payments.stripe_provider import (  # noqa: F401
-    StripeProvider,
-    verify_stripe_signature,
-)
-
 from app.services.billing.payments.transactions import (  # noqa: F401
     apply_credit_topup,
     apply_subscription_update,
@@ -59,8 +53,6 @@ import httpx  # noqa: F401 — re-exported so tests can patch payments.httpx.Cli
 # ── Provider factory ───────────────────────────────────────────────────────────
 
 def _provider_instance(name: ProviderName) -> PaymentProvider:
-    if name == "stripe":
-        return StripeProvider()
     return WorldlineProvider()
 
 

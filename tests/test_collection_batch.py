@@ -2,7 +2,7 @@ from datetime import datetime, timezone
 
 from app.config import settings
 from app.models.company import Company
-from app.services.collection import run_batch_collect
+from app.services.ingestion.collection import run_batch_collect
 
 
 def _create_company(db, *, uid: str, name: str, purpose_keywords: str | None = None, website_url: str | None = None):

@@ -930,13 +930,13 @@ if config.config_file_name is not None:
     fileConfig(config.config_file_name, disable_existing_loggers=False)
 ```
 
-**Why:** This prevents `fileConfig` from disabling loggers it doesn't know about (i.e. `app`, `app.services.payments`, etc.), even though those loggers aren't defined in `alembic.ini`. With this flag, the `app` logger can attach its own handler and emit normally.
+**Why:** This prevents `fileConfig` from disabling loggers it doesn't know about (i.e. `app`, `app.services.billing.payments`, etc.), even though those loggers aren't defined in `alembic.ini`. With this flag, the `app` logger can attach its own handler and emit normally.
 
 **Verification:**
 ```bash
 # After redeploy, check that app-level logs appear:
 kubectl logs -n helvex-prod -l app.kubernetes.io/component=app | grep -E "^202[0-9]-.*INFO.*app\."
-# Should see entries like: "2026-04-02 14:30:15,123 INFO app.services.payments - ..."
+# Should see entries like: "2026-04-02 14:30:15,123 INFO app.services.billing.payments - ..."
 ```
 
 ---
@@ -1715,7 +1715,7 @@ kubectl logs -n helvex-prod -l app.kubernetes.io/component=worker --tail=200 | g
 
 Expected log entries:
 ```
-INFO:app.services.saved_view_alerts:saved_view_alerts: checked=12 alerted=2 errors=0
+INFO:app.services.notifications.saved_view_alerts:saved_view_alerts: checked=12 alerted=2 errors=0
 ```
 
 ### Debug: why didn't a specific view alert?
@@ -1897,7 +1897,7 @@ Use this after upgrading the classification pipeline or after any batch import t
 
 ```python
 from app.database import SessionLocal
-from app.services.incremental_classify import backfill_unclassified
+from app.services.ingestion.incremental_classify import backfill_unclassified
 
 db = SessionLocal()
 stats = backfill_unclassified(
@@ -1937,13 +1937,7 @@ The semantic search endpoint (`GET /api/v1/companies/semantic-search`) uses the 
 
 1. **Check model is loaded:** `kubectl logs -n helvex-prod deploy/helvex | grep "Loaded SentenceTransformer"` — model loads on first search request.
 2. **Query language mismatch:** The model handles DE/FR/IT/EN natively. Very short queries (<3 chars) may produce low similarity scores — this is expected.
-3. **Taxonomy stale:** The endpoint scores the in-memory taxonomy snapshot. If new clusters were added in the last 2 hours, they may not appear in search results until the 2-hour cache refreshes.
-
-### Force taxonomy cache refresh
-
-```bash
-kubectl rollout restart -n helvex-prod deployment/helvex
-```
+3. **Taxonomy freshness:** The fuzzy-fallback path scores a live taxonomy snapshot (`get_taxonomy_stats`, computed per request), so newly added clusters/keywords appear immediately — there is no cache to wait on. (The former process-wide taxonomy/category caches were removed; these analytics aggregates now run live on each request.)
 
 ---
 

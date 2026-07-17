@@ -19,9 +19,9 @@ them leads to the wrong fix (e.g. "translate everything on the fly").
 
 | Operation class | Cross-lingual today? | Mechanism | Verdict |
 |---|---|---|---|
-| **Semantic** — vector search, NOGA classification | ✅ Works | `paraphrase-multilingual-mpnet-base-v2` shared embedding space ([app/services/embeddings.py](../app/services/embeddings.py)); per-language NOGA embeddings with DE fallback ([app/services/noga.py](../app/services/noga.py)) | Keep. Don't translate for this. |
-| **LLM scoring** — Claude Haiku ([app/services/claude_classify.py](../app/services/claude_classify.py)) | ⚠️ Mostly works | Claude reads DE/FR/IT natively; English system prompt is fine; `ai_category` already English (canonical) | Works, but benefits from a canonical input for consistency. |
-| **Lexical / structured** — `ILIKE` keyword search ([app/crud/company.py](../app/crud/company.py)), TF-IDF + clustering ([app/services/cluster_pipeline.py](../app/services/cluster_pipeline.py)), keyword/cluster labels | ❌ Broken | Substring match ("Bäckerei" ≠ "boulangerie"); spaCy **`de_core_news_md` German-only lemmatizer**; German-biased labels | **This is the real fragmentation.** |
+| **Semantic** — vector search, NOGA classification | ✅ Works | `paraphrase-multilingual-mpnet-base-v2` shared embedding space ([app/services/ml/embeddings.py](../app/services/ml/embeddings.py)); per-language NOGA embeddings with DE fallback ([app/services/ml/noga.py](../app/services/ml/noga.py)) | Keep. Don't translate for this. |
+| **LLM scoring** — Claude Haiku ([app/services/scoring/scoring/claude_classify.py](../app/services/scoring/scoring/claude_classify.py)) | ⚠️ Mostly works | Claude reads DE/FR/IT natively; English system prompt is fine; `ai_category` already English (canonical) | Works, but benefits from a canonical input for consistency. |
+| **Lexical / structured** — `ILIKE` keyword search ([app/crud/company.py](../app/crud/company.py)), TF-IDF + clustering ([app/services/ml/cluster_pipeline.py](../app/services/ml/cluster_pipeline.py)), keyword/cluster labels | ❌ Broken | Substring match ("Bäckerei" ≠ "boulangerie"); spaCy **`de_core_news_md` German-only lemmatizer**; German-biased labels | **This is the real fragmentation.** |
 
 The observation "a German speaker can only analyze German companies" is concretely the
 **lexical/structured layer**: exact-match search, filters, and the TF-IDF/cluster labels
@@ -69,7 +69,7 @@ query directly (multilingual model already crosses languages — no translation 
 
 ### 4. Translation engine → local NMT on the ML worker
 A local offline model (MarianMT/Opus-MT dedicated `de/fr/it→en`, or NLLB-200-distilled as
-a single model), lazy-loaded with the **same pattern as [app/services/embeddings.py](../app/services/embeddings.py)**.
+a single model), lazy-loaded with the **same pattern as [app/services/ml/embeddings.py](../app/services/ml/embeddings.py)**.
 Consistent with the project's offline-first stance (offline geocoding, local embeddings),
 no per-row API cost, no quota. Runs in the existing batch-job framework with the standard
 chunked pattern. Source language is already known from `Company.purpose_language`

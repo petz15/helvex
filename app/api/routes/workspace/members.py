@@ -11,7 +11,7 @@ from app.database import get_db
 from app.models.org_member import OrgMember
 from app.models.organization import Organization
 from app.models.user import User
-from app.services.tiers import has_feature
+from app.services.billing.tiers import has_feature
 
 from app.api.routes.workspace._shared import (
     AddMemberRequest,
@@ -174,6 +174,6 @@ def send_invite(
     if body.role not in _VALID_ROLES:
         raise HTTPException(status_code=400, detail=f"Invalid role. Must be one of: {sorted(_VALID_ROLES)}")
     from app.auth import create_invite_token
-    from app.services.email import send_invite_email
+    from app.services.notifications.email import send_invite_email
     token = create_invite_token(org.id, body.email, role=body.role)
     send_invite_email(to=body.email, org_name=org.name, invited_by_email=actor.email, token=token)

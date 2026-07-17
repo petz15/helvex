@@ -1,4 +1,4 @@
-# Deep Dive — Background Job Dispatcher (`app/services/job_worker.py`)
+# Deep Dive — Background Job Dispatcher (`app/services/jobs/job_worker.py`)
 
 Read this before reviewing any PR that touches job execution. Companion to
 [risk-map.md](risk-map.md) — this function is the #1 hub node in the
@@ -50,7 +50,7 @@ Execution order:
    `noga_v2_explain`, and ~15 more.
 
    **Pattern B (registry, line 1296 — `elif job.job_type in _JOB_HANDLERS`):**
-   looks up the type in `JOB_HANDLERS` (`app/services/job_handlers/__init__.py`),
+   looks up the type in `JOB_HANDLERS` (`app/services/jobs/job_handlers/__init__.py`),
    builds a `JobContext`, and calls the handler.
 
    **The problem:** `JOB_HANDLERS` registers 46 job types — including
@@ -72,7 +72,7 @@ Execution order:
 
    **This isn't just dead-code hygiene — it hides disagreeing defaults, though
    tracing the actual trigger path shows it isn't user-facing today.**
-   Compare `app/services/job_handlers/zefix_jobs.py::handle_bulk` (dead)
+   Compare `app/services/jobs/job_handlers/zefix_jobs.py::handle_bulk` (dead)
    against the inline `elif job.job_type == "bulk":` block (live) in
    `_run_job`:
    ```python
@@ -134,16 +134,11 @@ Execution order:
 
 6. **Success path** — `mark_completed`, emit info/warn events (capped at 10
    warnings / 50 errors so a bad job can't flood `job_run_events`), sync
-   in-process state, publish an update (SSE), maybe send a completion email,
-   then **conditionally bust the taxonomy/category-stats cache** — but only
-   for job types listed in the hardcoded `_TAXONOMY_INVALIDATING` set
-   (`claude_classify`, `reclassify_noga`, `recalculate_scores`,
-   `recalculate_google_scores`, `reextract_purpose`). This set has to be
-   manually kept in sync with reality: **if you add a new job type that
-   changes `ai_category`/`noga_code`/scores and forget to add it here, the
-   cached taxonomy/category counts silently go stale.** Worth a specific
-   check during review whenever a PR adds a job type that writes score or
-   category fields.
+   in-process state, publish an update (SSE), maybe send a completion email.
+   (Historical note: this path used to bust a process-wide taxonomy/category
+   cache via a hardcoded `_TAXONOMY_INVALIDATING` job-type set. That cache was
+   removed — `get_taxonomy_stats`/`get_category_stats` now compute live per
+   request — so there is no longer a set to keep in sync.)
 7. **Exception handling** — four cases: `_JobWaitingExternalSignal` (job
    already transitioned state, no-op), `JobPausedError` (pause or
    preemption-requeue), `JobCancelledError` (refund + mark cancelled),
@@ -164,8 +159,6 @@ check both ends — the closure's shape in `_run_job` and every call site.
 ## What to actually check in a review touching this file
 
 - **New job type added as Pattern A instead of Pattern B** (see above).
-- **New job type that writes scores/categories but isn't in
-  `_TAXONOMY_INVALIDATING`.**
 - **Anything that bypasses `_assert_not_cancelled()` checkpoints** inside a
   loop — the whole pause/cancel/multi-pod-eviction model depends on it being
   called at every "between companies" boundary (per `ARCHITECTURE.md` §6),

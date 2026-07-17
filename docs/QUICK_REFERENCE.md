@@ -12,7 +12,7 @@
 ## Basic Usage
 
 ```python
-from app.services.llm import llm_call, resolve_provider_api_key
+from app.services.platform.llm import llm_call, resolve_provider_api_key
 
 # Get the right key
 api_key = resolve_provider_api_key(db, "openai", org_id=org_id)
@@ -45,7 +45,7 @@ response, tokens = llm_call(
 ## Batch Calls (Claude, OpenAI, Gemini)
 
 ```python
-from app.services.llm import llm_batch_create, llm_batch_iter_results
+from app.services.platform.llm import llm_batch_create, llm_batch_iter_results
 
 # Submit
 batch_id = llm_batch_create(

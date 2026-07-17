@@ -54,7 +54,7 @@ Trace:
    recomputation or bound-checking** against the org's actual current tier,
    prior payments, or any proration formula.
 3. Later, when the webhook confirms the payment,
-   `apply_successful_payment` (`app/services/payment_transactions.py:376`)
+   `apply_successful_payment` (`app/services/billing/payment_transactions.py:376`)
    reads that same field back off the row and **grants it as real credits**:
    ```python
    proration = payment_tx.upgrade_proration_credits

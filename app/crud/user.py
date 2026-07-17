@@ -60,7 +60,7 @@ def ensure_personal_org(db: Session, user: User) -> None:
     # Grant welcome credits (skip for unlimited orgs — they don't need a balance)
     if not user.is_superadmin:
         try:
-            from app.services.credits import grant_credits
+            from app.services.billing.credits import grant_credits
             grant_credits(
                 db,
                 org_id=org.id,

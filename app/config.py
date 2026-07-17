@@ -11,6 +11,12 @@ class Settings(BaseSettings):
     app_env: str = "dev"
     log_level: str = "INFO"
     api_request_logging_enabled: bool = True
+    # Coarse per-user/org authenticated request rate limiting (anti-scraping).
+    api_rate_limit_enabled: bool = True
+    # Self-service password→JWT endpoint (POST /auth/token). Disabled by default:
+    # it mints a portable bearer token any user could script the API with. The
+    # frontend uses cookies only; re-enable when the sanctioned API-key lane exists.
+    enable_password_token_endpoint: bool = False
 
     # PostgreSQL — set individual fields OR override with a full DATABASE_URL
     postgres_host: str = "localhost"
@@ -70,8 +76,8 @@ class Settings(BaseSettings):
     linkedin_client_id: str = ""
     linkedin_client_secret: str = ""
 
-    # Payments (Phase 6)
-    # worldline | stripe | dual
+    # Payments
+    # worldline
     payment_provider_mode: str = "worldline"
 
     # Worldline
@@ -86,10 +92,6 @@ class Settings(BaseSettings):
     # Optional URL to a CSS file loaded inside the Saferpay iframe for custom styling.
     worldline_css_url: str = ""
 
-    # Stripe
-    stripe_api_base_url: str = "https://api.stripe.com"
-    stripe_secret_key: str = ""
-    stripe_webhook_secret: str = ""
 
     # Security — dev gets an ephemeral random key if unset; production must set a strong key.
     secret_key: str = Field(default_factory=lambda: secrets.token_hex(32))

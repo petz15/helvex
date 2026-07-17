@@ -87,7 +87,7 @@ The API request specifies which provider and model to use. The wrapper resolves 
 **Implementation:**
 ```python
 from fastapi import APIRouter, Depends
-from app.services.llm import llm_call
+from app.services.platform.llm import llm_call
 from app.database import get_db
 from sqlalchemy.orm import Session
 
@@ -420,7 +420,7 @@ from unittest.mock import patch, MagicMock
 
 @pytest.fixture
 def mock_llm():
-    with patch("app.services.llm.llm_call") as mock:
+    with patch("app.services.platform.llm.llm_call") as mock:
         mock.return_value = ("Mock response", {"input_tokens": 10, "output_tokens": 5})
         yield mock
 

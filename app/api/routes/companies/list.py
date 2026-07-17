@@ -9,14 +9,14 @@ from sqlalchemy.orm import Session
 
 from app import crud
 from app.auth import get_current_user
-from app.services.rate_limit import check_rate_limit
+from app.services.jobs.rate_limit import check_rate_limit
 from app.database import get_db
 from app.models.organization import Organization
 from app.models.user import User
 from app.schemas.company import CompanyPage
-from app.services import credits as credits_service
-from app.services.activity import log_activity
-from app.services.tiers import get_export_limit
+from app.services.billing import credits as credits_service
+from app.services.notifications.activity import log_activity
+from app.services.billing.tiers import get_export_limit
 
 from app.api.routes.companies._shared import _apply_web_results_gate, _bulk_org_states, _overlay
 
@@ -181,7 +181,7 @@ def export_companies_csv(
 ):
     """Enqueue a CSV export job with the given filters."""
     from app.api.routes.jobs import _enqueue_or_http_error
-    from app.services.s3_client import is_configured
+    from app.services.platform.s3_client import is_configured
 
     if not is_configured():
         raise HTTPException(status_code=503, detail="S3 export storage is not configured on this server")

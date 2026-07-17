@@ -41,6 +41,7 @@ from app.models.sogc_publication import SogcPublication
 from app.models.tfidf_stopword import TfidfStopword
 from app.models.user import User
 from app.models.user_company_state import UserCompanyState
+from app.models.security_event import SecurityEvent
 from app.models.user_org_setting import UserOrgSetting
 from app.models.user_view import UserView
 
@@ -54,6 +55,7 @@ __all__ = [
     "JobRun", "JobRunEvent", "Note", "OAuthAccount", "OrgCompanyState",
     "OrgCreditTransaction", "OrgMember", "OrgPaymentMethod", "OrgSetting",
     "Organization", "PaymentTransaction",
+    "SecurityEvent",
     "SimapAward", "SimapAwardVendor",
     "SogcAuditor", "SogcChange", "SogcCorporateRole", "SogcPersonAppearance", "SogcPersonEntity",
     "SogcPersonFlag", "SogcPublication",

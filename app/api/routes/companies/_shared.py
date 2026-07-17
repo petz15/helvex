@@ -10,7 +10,7 @@ from app.models.company import Company
 from app.models.org_company_state import OrgCompanyState
 from app.models.organization import Organization
 from app.schemas.company import CompanyRead
-from app.services.tiers import get_web_results_privacy_months, normalize_tier, TIER_RANK
+from app.services.billing.tiers import get_web_results_privacy_months, normalize_tier, TIER_RANK
 
 # Fields whose values are org-specific and live in OrgCompanyState, not Company.
 _ORG_FIELDS = frozenset({

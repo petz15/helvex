@@ -32,9 +32,9 @@ jobs:
             frontend:
               - 'frontend/**'
             ml:
-              - 'app/services/cluster_pipeline.py'
-              - 'app/services/noga.py'
-              - 'app/services/job_worker.py'
+              - 'app/services/ml/cluster_pipeline.py'
+              - 'app/services/ml/noga.py'
+              - 'app/services/jobs/job_worker.py'
               - 'scripts/build_noga_embeddings.py'
               - 'noga_lookup.json'
               - 'noga_tree.json'

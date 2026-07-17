@@ -11,7 +11,7 @@ def _http_500_error() -> httpx.HTTPStatusError:
 
 
 def test_iter_prefix_with_fallback_pauses_and_rechecks_on_500(monkeypatch):
-    from app.services import zefix_import, collection
+    from app.services.ingestion import zefix_import, collection
 
     # Avoid real sleeping in tests
     monkeypatch.setattr(collection.time, "sleep", lambda *_args, **_kwargs: None)
@@ -52,7 +52,7 @@ def test_iter_prefix_with_fallback_pauses_and_rechecks_on_500(monkeypatch):
 
 
 def test_import_company_from_zefix_uid_retries_on_500_when_enabled(monkeypatch):
-    from app.services import zefix_import, collection
+    from app.services.ingestion import zefix_import, collection
 
     # Avoid real sleeping in tests
     monkeypatch.setattr(collection.time, "sleep", lambda *_args, **_kwargs: None)
@@ -105,7 +105,7 @@ def test_import_company_from_zefix_uid_retries_on_500_when_enabled(monkeypatch):
 
 @pytest.mark.parametrize("pause_on_zefix_500", [False])
 def test_import_company_from_zefix_uid_does_not_retry_by_default(monkeypatch, pause_on_zefix_500):
-    from app.services import zefix_import, collection
+    from app.services.ingestion import zefix_import, collection
 
     monkeypatch.setattr(collection.time, "sleep", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(zefix_import, "zefix_get_company", lambda _uid: (_ for _ in ()).throw(_http_500_error()))

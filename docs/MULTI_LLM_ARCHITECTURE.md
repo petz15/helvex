@@ -287,13 +287,13 @@ RATE_LIMITS = {
 
 **Old code (claude-specific):**
 ```python
-from app.services.claude import claude_call
+from app.services.scoring.claude import claude_call
 response, tokens = claude_call(system="...", user="...", api_key=api_key)
 ```
 
 **New code (provider-agnostic):**
 ```python
-from app.services.llm import llm_call, resolve_provider_api_key
+from app.services.platform.llm import llm_call, resolve_provider_api_key
 
 # Resolve which provider/key to use
 api_key = resolve_provider_api_key(db, "openai", org_id=org_id)
@@ -308,8 +308,8 @@ response, tokens = llm_call(
 ```
 
 **Gradual migration:**
-1. Keep `app.services.claude` module intact for backward compatibility
-2. New features use `app.services.llm` dispatcher
+1. Keep `app.services.scoring.claude` module intact for backward compatibility
+2. New features use `app.services.platform.llm` dispatcher
 3. Gradually refactor old functions as they're touched
 
 ---
@@ -318,7 +318,7 @@ response, tokens = llm_call(
 
 To add a new provider (e.g., Anthropic's new model or Mistral):
 
-1. **Create `app/services/providers/{provider}.py`:**
+1. **Create `app/services/platform/providers/{provider}.py`:**
    ```python
    def resolve_{provider}_api_key(db, org_id) -> str | None: ...
    def get_{provider}_default_model(db, api_key) -> str: ...
@@ -326,10 +326,10 @@ To add a new provider (e.g., Anthropic's new model or Mistral):
    def {provider}_batch_create(requests, *, api_key) -> str: ...  # if supported
    ```
 
-2. **Update `app/services/llm.py` dispatcher:**
+2. **Update `app/services/platform/llm.py` dispatcher:**
    ```python
    elif provider == "mistral":
-       from app.services.providers.mistral import mistral_call
+       from app.services.platform.providers.mistral import mistral_call
        return mistral_call(...)
    
    # Add to PROVIDER_INFO registry
@@ -399,7 +399,7 @@ def mock_api_calls(monkeypatch):
     def mock_call(*args, **kwargs):
         return "Mock response", {"input_tokens": 10, "output_tokens": 5}
     
-    monkeypatch.setattr("app.services.llm.llm_call", mock_call)
+    monkeypatch.setattr("app.services.platform.llm.llm_call", mock_call)
 ```
 
 ---

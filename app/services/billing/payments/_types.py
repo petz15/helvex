@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from typing import Literal, Protocol
 
 
-ProviderName = Literal["worldline", "stripe"]
+ProviderName = Literal["worldline"]
 
 
 class PaymentConfigurationError(RuntimeError):

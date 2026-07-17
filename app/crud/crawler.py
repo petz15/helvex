@@ -82,7 +82,7 @@ def select_best_candidate(db: Session, company_id: int) -> CompanyUrlCandidate |
     crawler never tries to scrape moneyhouse.ch, LinkedIn, etc. as company websites.
     Returns the newly selected candidate, or None if no crawlable candidates exist.
     """
-    from app.services.scoring import CRAWL_BLOCKED_DOMAINS
+    from app.services.scoring.scoring import CRAWL_BLOCKED_DOMAINS
 
     # Demote current selection
     db.query(CompanyUrlCandidate).filter_by(company_id=company_id, status="selected").update(
@@ -673,7 +673,7 @@ def is_crawl_blocked(url: str, blocked: frozenset[str] | set[str] | None = None)
     social media). Pass a custom set to override (e.g. with DB-managed entries merged in).
     """
     if blocked is None:
-        from app.services.scoring import CRAWL_BLOCKED_DOMAINS
+        from app.services.scoring.scoring import CRAWL_BLOCKED_DOMAINS
         blocked = CRAWL_BLOCKED_DOMAINS
     domain = _extract_apex_domain(url)
     return bool(domain and domain in blocked)
@@ -692,7 +692,7 @@ def get_next_crawlable_candidate(
     the crawl blocklist. Returns the highest-score remaining candidate, or None.
     """
     if blocked is None:
-        from app.services.scoring import CRAWL_BLOCKED_DOMAINS
+        from app.services.scoring.scoring import CRAWL_BLOCKED_DOMAINS
         blocked = CRAWL_BLOCKED_DOMAINS
 
     # Candidates that already have at least one page saved (attempted before)

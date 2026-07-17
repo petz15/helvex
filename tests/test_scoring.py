@@ -1,4 +1,4 @@
-from app.services.scoring import (
+from app.services.scoring.scoring import (
     compute_zefix_score,
     compute_zefix_score_breakdown,
     fallback_result_score,

@@ -19,9 +19,9 @@ from app.models.payment_transaction import PaymentTransaction
 from app.models.user import User
 from app.schemas.billing import BillingTierRead
 from app.schemas.company_error import CompanyCorrection
-from app.services import credits as credits_service
-from app.services import payments as payments_service
-from app.services.tiers import TIER_ID_BY_NAME, get_billing_tier_names, get_billing_tiers
+from app.services.billing import credits as credits_service
+from app.services.billing import payments as payments_service
+from app.services.billing.tiers import TIER_ID_BY_NAME, get_billing_tier_names, get_billing_tiers
 from .api_keys import router as api_keys_router
 
 logger = logging.getLogger(__name__)
@@ -75,7 +75,7 @@ def get_analytics(
     from app.models.job_run import JobRun
     from app.models.company import Company
     from app.models.org_credit_transaction import OrgCreditTransaction as OrgCreditTx
-    from app.services.tiers import TIER_NAME_BY_ID
+    from app.services.billing.tiers import TIER_NAME_BY_ID
 
     cutoff = datetime.now(tz=_tz.utc) - timedelta(days=30)
 
@@ -329,7 +329,7 @@ def crawler_populate_urls(
     db: Session = Depends(get_db),
     actor: User = Depends(_require_superadmin),
 ) -> dict:
-    from app.services.job_worker import enqueue_job
+    from app.services.jobs.job_worker import enqueue_job
     job = enqueue_job(
         request.app,
         job_type="web_url_populate",
@@ -347,7 +347,7 @@ def crawler_run_extract(
     db: Session = Depends(get_db),
     actor: User = Depends(_require_superadmin),
 ) -> dict:
-    from app.services.job_worker import enqueue_job
+    from app.services.jobs.job_worker import enqueue_job
     job = enqueue_job(
         request.app,
         job_type="web_extract",
@@ -370,7 +370,7 @@ def crawler_reextract(
     Use after improving the extractor: reprocesses all stored HTML at no crawl cost.
     """
     from app.crud.crawler import reset_extraction_flags
-    from app.services.job_worker import enqueue_job
+    from app.services.jobs.job_worker import enqueue_job
     flagged = reset_extraction_flags(db)
     db.commit()
     job = enqueue_job(
@@ -395,7 +395,7 @@ def crawler_recompute_website_status(
 
     Deterministic — no API or crawl cost. Use to backfill or after tuning thresholds.
     """
-    from app.services.job_worker import enqueue_job
+    from app.services.jobs.job_worker import enqueue_job
     job = enqueue_job(
         request.app,
         job_type="recompute_website_status",
@@ -417,7 +417,7 @@ def crawler_enrich_purpose_sim(
 
     Stores the result as purpose_sim (0–1) in company_web_extract. Feeds the website scoring pipeline.
     """
-    from app.services.job_worker import enqueue_job
+    from app.services.jobs.job_worker import enqueue_job
     job = enqueue_job(
         request.app,
         job_type="enrich_web_purpose_sim",
@@ -579,7 +579,7 @@ def trigger_saved_view_alerts(
     actor: User = Depends(_require_superadmin),
 ) -> dict:
     """Enqueue a one-off saved_view_alerts job. The nightly cron calls this automatically."""
-    from app.services.job_worker import enqueue_job
+    from app.services.jobs.job_worker import enqueue_job
     job = enqueue_job(
         request.app,
         job_type="saved_view_alerts",
@@ -1335,7 +1335,7 @@ def correct_company_data(
     """Apply admin data corrections to a company and resolve all its active pipeline errors."""
     from app.models.company import Company
     from app.crud.company_error import resolve_company_errors
-    from app.services.scoring import compute_relevance_score
+    from app.services.scoring.scoring import compute_relevance_score
 
     company = db.get(Company, company_id)
     if not company:

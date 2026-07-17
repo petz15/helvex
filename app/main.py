@@ -43,6 +43,8 @@ from app.auth import (  # noqa: E402
     COOKIE_NAME,
     _SESSION_MAX_AGE,
     _user_id_from_request,
+    check_request_rate,
+    note_api_access,
     create_session_cookie,
     decode_session_cookie,
     get_current_user,
@@ -51,8 +53,8 @@ from app.auth import (  # noqa: E402
 )
 from app.config import settings  # noqa: E402
 from app.database import Base, engine  # noqa: E402
-from app.services.job_worker import kick_job_worker  # noqa: E402
-from app.services.scoring import get_default_scoring_config  # noqa: E402
+from app.services.jobs.job_worker import kick_job_worker  # noqa: E402
+from app.services.scoring.scoring import get_default_scoring_config  # noqa: E402
 from app.api.routes import admin_router, auth_router, billing_router, clusters_router, companies_router, invites_router, jobs_router, map_router, notes_router, orgs_router, persons_router, search_router, settings_router, simap_router, views_router, workspace_router  # noqa: E402
 
 # Paths that do NOT require authentication
@@ -141,6 +143,7 @@ def _seed_settings(app_state) -> None:
     from app.crud import seed_defaults
     from app.database import SessionLocal
 
+    #TODO: remove the google_search params from defaults. should be managed elsewhere? atleast not here
     defaults = {
         "google_search_enabled": "true" if settings.google_search_enabled else "false",
         "google_daily_quota": str(settings.google_daily_quota),
@@ -154,7 +157,7 @@ def _seed_settings(app_state) -> None:
 
     app_state.startup_message = "Seeding multilingual boilerplate patterns…"
     try:
-        from app.services.boilerplate_analysis import seed_multilang_boilerplate
+        from app.services.ml.boilerplate_analysis import seed_multilang_boilerplate
         with SessionLocal() as db:
             result = seed_multilang_boilerplate(db)
         _app_logger.info("boilerplate seed: inserted=%d skipped=%d", result["inserted"], result["skipped"])
@@ -163,7 +166,7 @@ def _seed_settings(app_state) -> None:
 
     app_state.startup_message = "Loading NOGA hierarchy cache…"
     try:
-        from app.services.noga_lookup import load_noga_hierarchy
+        from app.services.ml.noga_lookup import load_noga_hierarchy
         load_noga_hierarchy()
     except Exception as exc:
         _app_logger.warning("NOGA hierarchy cache failed (non-fatal): %s", exc)
@@ -237,7 +240,7 @@ def _maybe_enqueue_billing_renewal(app) -> None:
 
     from app.crud import create_event, list_jobs
     from app.database import SessionLocal
-    from app.services.job_worker import _enqueue_job_in_session, kick_job_worker
+    from app.services.jobs.job_worker import _enqueue_job_in_session, kick_job_worker
 
     with SessionLocal() as db:
         # Primary guard: fast exit if billing_renewal already ran today.
@@ -312,7 +315,7 @@ def _maybe_enqueue_shab_daily(app) -> None:
 
     from app.crud import create_event, has_shab_daily_run_today
     from app.database import SessionLocal
-    from app.services.job_worker import _enqueue_job_in_session, kick_job_worker
+    from app.services.jobs.job_worker import _enqueue_job_in_session, kick_job_worker
 
     yesterday = (datetime.now(tz=timezone.utc) - timedelta(days=1)).date()
 
@@ -354,7 +357,7 @@ def _maybe_enqueue_simap_daily(app) -> None:
 
     from app.crud import create_event, has_simap_daily_run_today
     from app.database import SessionLocal
-    from app.services.job_worker import _enqueue_job_in_session, kick_job_worker
+    from app.services.jobs.job_worker import _enqueue_job_in_session, kick_job_worker
 
     yesterday = (datetime.now(tz=timezone.utc) - timedelta(days=1)).date()
 
@@ -396,7 +399,7 @@ def _maybe_enqueue_noga_nightly(app) -> None:
     from app.crud import create_event
     from app.crud.job_run import has_noga_nightly_run_today
     from app.database import SessionLocal
-    from app.services.job_worker import _enqueue_job_in_session, kick_job_worker
+    from app.services.jobs.job_worker import _enqueue_job_in_session, kick_job_worker
 
     with SessionLocal() as db:
         if has_noga_nightly_run_today(db):
@@ -416,23 +419,6 @@ def _maybe_enqueue_noga_nightly(app) -> None:
 
     kick_job_worker(app)
     logger.info("shab_nightly_scheduler: enqueued noga_nightly reclassify_noga")
-
-
-def _warm_taxonomy_cache(app_state) -> None:
-    from app.crud.company import _compute_global_taxonomy, _tax_cache_lock
-    import time as _time
-    import app.crud.company as _cc
-    from app.database import SessionLocal
-    app_state.startup_message = "Warming taxonomy cache…"
-    try:
-        with SessionLocal() as db:
-            data = _compute_global_taxonomy(db)
-        with _tax_cache_lock:
-            _cc._tax_cache_data = data
-            _cc._tax_cache_ts = _time.monotonic()
-        app_state.startup_message = "Taxonomy cache warm"
-    except Exception as exc:
-        logger.warning("taxonomy cache warm failed (non-fatal): %s", exc)
 
 
 def _recover_jobs_and_start_worker(app, app_state) -> None:
@@ -492,7 +478,6 @@ async def lifespan(app: FastAPI):
             await loop.run_in_executor(None, _maybe_enqueue_geocode_upgrade, app, app.state)
             _start_nightly_shab_scheduler(app)
             _start_nightly_billing_scheduler(app)
-            await loop.run_in_executor(None, _warm_taxonomy_cache, app.state)
             app.state.ready = True
             app.state.startup_message = "Ready"
         except Exception as exc:  # noqa: BLE001
@@ -504,7 +489,7 @@ async def lifespan(app: FastAPI):
 
     # Graceful shutdown: ask any in-process jobs to pause at their next
     # progress checkpoint so they are not left stuck as "running".
-    from app.services.job_worker import request_shutdown
+    from app.services.jobs.job_worker import request_shutdown
     request_shutdown()
 
 
@@ -595,7 +580,7 @@ async def unhandled_exception_handler(request: Request, exc: Exception):
 async def refresh_session(request: Request, call_next):
     """Sliding session TTL — reissue the session cookie on every successful response.
 
-    This resets the browser cookie's expiry to now+8h so active users are never
+    This resets the browser cookie's expiry to now+14d so active users are never
     logged out mid-session. The itsdangerous token is reissued with a fresh
     timestamp so it also passes the server-side max_age check.
     Only runs on authenticated requests that return 2xx — never on errors.
@@ -726,9 +711,25 @@ async def auth_gate(request: Request, call_next):
     if path in _PUBLIC_EXACT or any(path.startswith(p) for p in _PUBLIC_PREFIXES):
         return await call_next(request)
 
-    if _user_id_from_request(request) is not None:
+    uid = _user_id_from_request(request)
+    if uid is not None:
+        # Coarse per-user/org request-rate ceiling on authenticated API calls
+        # (anti-scraping). UI traffic is well under the cap; scripted bulk pulls hit it.
+        if path.startswith("/api/"):
+            allowed, retry_after = check_request_rate(uid)
+            if not allowed:
+                from fastapi.responses import JSONResponse
+                logger.warning("api.rate_limited user_id=%s path=%s client=%s",
+                               uid, path, request.client.host if request.client else "?")
+                return JSONResponse(
+                    {"detail": "Rate limit exceeded. Please slow down."},
+                    status_code=429,
+                    headers={"Retry-After": str(retry_after)},
+                )
+            # Anomaly detection (cheap in-memory counters; DB write only on a flag).
+            note_api_access(request, uid)
         response = await call_next(request)
-        # Sliding session: re-issue the cookie once it is past half its lifetime so
+        # Sliding session: re-issue the cookie once it is past the renew threshold so
         # active users stay logged in without ever re-entering credentials. lax (not
         # strict) so renewal also covers OAuth-initiated sessions; origin_gate already
         # enforces same-origin on API requests.

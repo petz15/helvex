@@ -13,7 +13,7 @@ from app.database import get_db
 from app.models.org_member import OrgMember
 from app.models.organization import Organization
 from app.models.user import User
-from app.services.tiers import has_feature, normalize_tier
+from app.services.billing.tiers import has_feature, normalize_tier
 
 from app.api.routes.workspace._shared import (
     BillingAddress,

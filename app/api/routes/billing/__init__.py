@@ -3,7 +3,7 @@
 Implementation is split into focused modules:
   _shared.py      — Shared schemas, imports, and helper functions
   checkout.py     — Subscription + top-up checkout, card registration
-  webhooks.py     — Stripe webhook, Worldline return/notify, Worldline card return
+  webhooks.py     — Worldline return/notify, Worldline card return
   info.py         — Tiers, summary, credits, payment history, payment methods CRUD
   subscription.py — Subscription lifecycle (cancel, reactivate, downgrade, upgrade, invoice)
 """

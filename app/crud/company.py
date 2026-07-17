@@ -1,6 +1,4 @@
 import logging
-import threading
-import time
 from collections import Counter
 from datetime import date
 from typing import Any
@@ -20,7 +18,7 @@ try:
 except ImportError:
     HAS_JUNCTION_TABLES = False
 
-from app.services.noga_lookup import load_noga_hierarchy as _load_noga_hierarchy  # noqa: E402
+from app.services.ml.noga_lookup import load_noga_hierarchy as _load_noga_hierarchy  # noqa: E402
 
 # Valid sort keys → (column_attr, ascending)
 _SORT_MAP = {
@@ -826,42 +824,11 @@ def get_noga_hierarchy(db: Session, org_id: int | None = None) -> list[dict]:
 
 
 # ---------------------------------------------------------------------------
-# Taxonomy stats cache — stale-while-revalidate
-# Global data (clusters, keywords, categories, NOGA, cantons, legal forms)
-# is cached process-wide. When the TTL expires, stale data is returned
-# immediately and a background thread silently refreshes the cache so the
-# page never goes blank. Tags are per-org/cheap and always queried live.
+# Taxonomy stats — global aggregates (clusters, keywords, categories, NOGA,
+# cantons, legal forms) computed live per request. Tags are per-org and also
+# queried live. Consumers: GET /companies/analytics/taxonomy and the
+# semantic-search fuzzy fallback.
 # ---------------------------------------------------------------------------
-_TAX_CACHE_TTL = 7200  # seconds (2 hours — also busted explicitly on ML job completion)
-_tax_cache_lock = threading.Lock()
-_tax_cache_data: dict[str, Any] | None = None
-_tax_cache_ts: float = 0.0
-_tax_cache_refreshing: bool = False  # true while a background refresh is in flight
-
-
-def invalidate_taxonomy_cache() -> None:
-    """Force next get_taxonomy_stats() call to trigger a background refresh."""
-    global _tax_cache_ts
-    with _tax_cache_lock:
-        _tax_cache_ts = 0.0
-
-
-def _refresh_taxonomy_cache_bg() -> None:
-    """Background thread: recompute and store taxonomy cache without blocking callers."""
-    global _tax_cache_data, _tax_cache_ts, _tax_cache_refreshing
-    try:
-        from app.database import SessionLocal
-        with SessionLocal() as db:
-            data = _compute_global_taxonomy(db)
-        with _tax_cache_lock:
-            _tax_cache_data = data
-            _tax_cache_ts = time.monotonic()
-    except Exception:
-        logger.exception("taxonomy cache background refresh failed")
-    finally:
-        with _tax_cache_lock:
-            _tax_cache_refreshing = False
-
 
 def _compute_global_taxonomy(db: Session) -> dict[str, Any]:
     """Run all expensive global taxonomy queries. Result is cached."""
@@ -976,37 +943,9 @@ def _compute_global_taxonomy(db: Session) -> dict[str, Any]:
 def get_taxonomy_stats(db: Session, org_id: int | None = None) -> dict:
     """Return taxonomy counts for the explorer Layer 1 grid.
 
-    Global fields are served from a process-wide cache using stale-while-revalidate:
-    - Cache cold (startup or first call): blocks once, then warms.
-    - Cache stale (TTL expired): returns old data immediately, kicks a background
-      thread to refresh so the page never goes blank mid-session.
-    - Cache warm: instant return, no DB hit.
-    Tags are per-org and always queried live (fast indexed GROUP BY).
+    Global fields and per-org tags are computed live on each call.
     """
-    global _tax_cache_data, _tax_cache_ts, _tax_cache_refreshing
-
-    now = time.monotonic()
-    with _tax_cache_lock:
-        stale = _tax_cache_data is None or (now - _tax_cache_ts) >= _TAX_CACHE_TTL
-        cold = _tax_cache_data is None
-        already_refreshing = _tax_cache_refreshing
-
-    if cold:
-        # First ever call — block until we have data (startup warmer prevents this in prod).
-        data = _compute_global_taxonomy(db)
-        with _tax_cache_lock:
-            _tax_cache_data = data
-            _tax_cache_ts = time.monotonic()
-            _tax_cache_refreshing = False
-    elif stale and not already_refreshing:
-        # Stale but not cold — return existing data now, refresh in background.
-        with _tax_cache_lock:
-            _tax_cache_refreshing = True
-        t = threading.Thread(target=_refresh_taxonomy_cache_bg, daemon=True)
-        t.start()
-
-    with _tax_cache_lock:
-        global_data = _tax_cache_data
+    global_data = _compute_global_taxonomy(db)
 
     # Tags are per-org workflow data stored in OrgCompanyState — always live.
     from app.models.org_company_state import OrgCompanyState
@@ -1031,43 +970,9 @@ def get_taxonomy_stats(db: Session, org_id: int | None = None) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# Category stats cache — stale-while-revalidate (same pattern as taxonomy)
-# Keyed by (category_type, value, org_id). TTL 2h; busted on ML job completion.
+# Category stats — score-landscape aggregates for a single category value,
+# computed live per request. Consumer: GET /companies/analytics/category-stats.
 # ---------------------------------------------------------------------------
-_CAT_CACHE_TTL = 7200
-_cat_cache_lock = threading.Lock()
-_cat_cache: dict[tuple, dict[str, Any]] = {}  # key → {"data": ..., "ts": float, "refreshing": bool}
-_cat_refresh_sem = threading.Semaphore(5)  # max 5 concurrent background refreshes
-
-
-def invalidate_category_stats_cache() -> None:
-    """Bust all cached category stats (called after ML/classify jobs)."""
-    with _cat_cache_lock:
-        _cat_cache.clear()
-
-
-def _refresh_cat_cache_bg(category_type: str, value: str, org_id: int | None) -> None:
-    global _cat_cache
-    key = (category_type, value, org_id)
-    if not _cat_refresh_sem.acquire(blocking=False):
-        with _cat_cache_lock:
-            if key in _cat_cache:
-                _cat_cache[key]["refreshing"] = False
-        return
-    try:
-        from app.database import SessionLocal
-        with SessionLocal() as db:
-            data = _compute_category_stats(db, category_type, value, org_id)
-        with _cat_cache_lock:
-            _cat_cache[key] = {"data": data, "ts": time.monotonic(), "refreshing": False}
-    except Exception:
-        logger.exception("category stats cache background refresh failed for %s=%s", category_type, value)
-        with _cat_cache_lock:
-            if key in _cat_cache:
-                _cat_cache[key]["refreshing"] = False
-    finally:
-        _cat_refresh_sem.release()
-
 
 def get_category_stats(
     db: Session,
@@ -1075,27 +980,8 @@ def get_category_stats(
     value: str,
     org_id: int | None = None,
 ) -> dict:
-    """Stale-while-revalidate wrapper around _compute_category_stats."""
-    key = (category_type, value, org_id)
-    now = time.monotonic()
-    with _cat_cache_lock:
-        entry = _cat_cache.get(key)
-        cold = entry is None
-        stale = cold or (now - entry["ts"]) >= _CAT_CACHE_TTL
-        already_refreshing = (not cold) and entry.get("refreshing", False)
-
-    if cold:
-        data = _compute_category_stats(db, category_type, value, org_id)
-        with _cat_cache_lock:
-            _cat_cache[key] = {"data": data, "ts": time.monotonic(), "refreshing": False}
-        return data
-    if stale and not already_refreshing:
-        with _cat_cache_lock:
-            _cat_cache[key]["refreshing"] = True
-        t = threading.Thread(target=_refresh_cat_cache_bg, args=(category_type, value, org_id), daemon=True)
-        t.start()
-    with _cat_cache_lock:
-        return _cat_cache[key]["data"]
+    """Return score landscape stats for a category value (computed live)."""
+    return _compute_category_stats(db, category_type, value, org_id)
 
 
 def _compute_category_stats(

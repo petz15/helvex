@@ -2,7 +2,7 @@ from datetime import datetime, timedelta, timezone
 
 from app.models.organization import Organization
 from app.models.payment_transaction import PaymentTransaction
-from app.services.billing_renewal import run_billing_renewal
+from app.services.billing.billing_renewal import run_billing_renewal
 
 
 def _seed_due_paid_org(db, *, org_id: int, recurring_transaction_id: str) -> Organization:
@@ -35,11 +35,11 @@ def test_billing_renewal_keeps_initial_recurring_reference(db, monkeypatch):
         return {"CaptureId": "cap_301"}
 
     monkeypatch.setattr(
-        "app.services.payments.WorldlineProvider.authorize_referenced_transaction",
+        "app.services.billing.payments.WorldlineProvider.authorize_referenced_transaction",
         _fake_authorize_referenced_transaction,
     )
     monkeypatch.setattr(
-        "app.services.payments.WorldlineProvider.capture_transaction",
+        "app.services.billing.payments.WorldlineProvider.capture_transaction",
         _fake_capture_transaction,
     )
 
@@ -86,11 +86,11 @@ def test_billing_renewal_recovers_from_non_initial_reference_error(db, monkeypat
         return {"CaptureId": "cap_302"}
 
     monkeypatch.setattr(
-        "app.services.payments.WorldlineProvider.authorize_referenced_transaction",
+        "app.services.billing.payments.WorldlineProvider.authorize_referenced_transaction",
         _fake_authorize_referenced_transaction,
     )
     monkeypatch.setattr(
-        "app.services.payments.WorldlineProvider.capture_transaction",
+        "app.services.billing.payments.WorldlineProvider.capture_transaction",
         _fake_capture_transaction,
     )
 

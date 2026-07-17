@@ -13,8 +13,8 @@ from app.api.deps import get_current_org, require_org_role
 from app.database import get_db
 from app.models.payment_transaction import PaymentTransaction
 from app.models.user import User
-from app.services import payment_transactions
-from app.services.tiers import TIER_RANK, normalize_tier
+from app.services.billing import payment_transactions
+from app.services.billing.tiers import TIER_RANK, normalize_tier
 
 from app.api.routes.billing._shared import (
     ScheduleDowngradeRequest,

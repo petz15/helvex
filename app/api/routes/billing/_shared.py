@@ -18,9 +18,9 @@ from app.models.organization import Organization
 from app.models.payment_transaction import PaymentTransaction
 from app.models.user import User
 from app.schemas.billing import BillingAddress
-from app.services.billing_addresses import get_default_billing_address
-from app.services import payments
-from app.services.tiers import (
+from app.services.billing.billing_addresses import get_default_billing_address
+from app.services.billing import payments
+from app.services.billing.tiers import (
     get_tier_price_chf,
 )
 
@@ -36,7 +36,7 @@ class SubscriptionCheckoutRequest(BaseModel):
     cancel_url: str
     billing_address: BillingAddress | None = None
     save_payment_method: bool = False
-    provider: Literal["worldline", "stripe"] | None = None
+    provider: Literal["worldline"] | None = None
     upgrade_proration_credits: int | None = None
     selected_alias_id: str | None = None
 
@@ -48,7 +48,7 @@ class TopupCheckoutRequest(BaseModel):
     billing_address: BillingAddress | None = None
     save_payment_method: bool = True
     use_new_card: bool = False
-    provider: Literal["worldline", "stripe"] | None = None
+    provider: Literal["worldline"] | None = None
     selected_alias_id: str | None = None
 
 

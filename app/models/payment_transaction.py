@@ -17,7 +17,7 @@ from app.database import Base
 
 
 class PaymentTransaction(Base):
-    """Full audit trail of payment transactions from Worldline Saferpay or Stripe.
+    """Full audit trail of payment transactions from Worldline Saferpay.
 
     Tracks every payment attempt, success, decline, or error for compliance and support.
     External IDs are unique to prevent duplicate processing.
@@ -32,9 +32,9 @@ class PaymentTransaction(Base):
     org_id: Mapped[int] = mapped_column(ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False)
 
     # Provider and external IDs
-    provider: Mapped[str] = mapped_column(String(20), nullable=False)  # "worldline" or "stripe"
-    external_id: Mapped[str] = mapped_column(String(255), nullable=False, unique=True)  # Saferpay token or Stripe session ID
-    order_reference: Mapped[str] = mapped_column(String(255), nullable=False)  # wl_sub_* or wl_topup_* or st_*
+    provider: Mapped[str] = mapped_column(String(20), nullable=False)  # "worldline"
+    external_id: Mapped[str] = mapped_column(String(255), nullable=False, unique=True)  # Saferpay token
+    order_reference: Mapped[str] = mapped_column(String(255), nullable=False)  # wl_sub_* or wl_topup_*
 
     # Transaction amount (always in CHF for consistency)
     amount_chf: Mapped[float] = mapped_column(Float, nullable=False)

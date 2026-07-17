@@ -68,7 +68,7 @@ def semantic_search(
     if embedding_type not in ("purpose_clean", "purpose_full"):
         embedding_type = "purpose_clean"
 
-    from app.services.company_embedding_pipeline import search_companies_semantic
+    from app.services.ml.company_embedding_pipeline import search_companies_semantic
     hits = search_companies_semantic(db, q, embedding_type=embedding_type, limit=limit)
     results = [
         SemanticSearchResult(
