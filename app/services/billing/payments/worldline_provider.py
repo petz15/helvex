@@ -57,6 +57,27 @@ def _worldline_raw_api_logging_enabled() -> bool:
     return bool(getattr(settings, "worldline_raw_api_logging_enabled", False))
 
 
+def _worldline_payment_page_enabled() -> bool:
+    return bool(getattr(settings, "worldline_payment_page_enabled", False))
+
+
+def _worldline_payment_methods() -> list[str]:
+    raw = (getattr(settings, "worldline_payment_methods", "") or "").strip()
+    return [m.strip().upper() for m in raw.split(",") if m.strip()]
+
+
+# All wallet types Saferpay's Payment Page supports. Sent by default so Apple Pay /
+# Google Pay / Click to Pay always appear when enabled — no env config required.
+_ALL_WORLDLINE_WALLETS = ["APPLEPAY", "GOOGLEPAY", "CLICKTOPAY"]
+
+
+def _worldline_wallets() -> list[str]:
+    raw = (getattr(settings, "worldline_wallets", "") or "").strip()
+    if not raw:
+        return list(_ALL_WORLDLINE_WALLETS)
+    return [w.strip().upper() for w in raw.split(",") if w.strip()]
+
+
 def _worldline_callback_serializer() -> URLSafeSerializer:
     return URLSafeSerializer(settings.secret_key, salt="worldline-callback-v1")
 
@@ -160,6 +181,7 @@ def create_worldline_callback_context(
     success_url: str,
     cancel_url: str,
     save_payment_method: bool = False,
+    interface: str = "transaction",
 ) -> str:
     payload = {
         "org_id": str(org_id) if org_id is not None else "",
@@ -169,6 +191,8 @@ def create_worldline_callback_context(
         "success_url": success_url,
         "cancel_url": cancel_url,
         "save_payment_method": "1" if save_payment_method else "0",
+        # "transaction" (Transaction/Authorize) or "paymentpage" (PaymentPage/Assert)
+        "interface": interface if interface in {"transaction", "paymentpage"} else "transaction",
     }
     return str(_worldline_callback_serializer().dumps(payload))
 
@@ -190,6 +214,9 @@ def decode_worldline_callback_context(ctx: str | None) -> dict[str, str]:
     cancel_url = str(data.get("cancel_url") or "").strip()
     save_payment_method = str(data.get("save_payment_method") or "").strip().lower()
     save_payment_method = "1" if save_payment_method in {"1", "true", "yes", "on"} else "0"
+    interface = str(data.get("interface") or "transaction").strip().lower()
+    if interface not in {"transaction", "paymentpage"}:
+        interface = "transaction"
     if kind not in {"subscription", "topup", "alias", "card_alias"}:
         return {}
     if not order_reference or not success_url or not cancel_url:
@@ -202,6 +229,7 @@ def decode_worldline_callback_context(ctx: str | None) -> dict[str, str]:
         "success_url": success_url,
         "cancel_url": cancel_url,
         "save_payment_method": save_payment_method,
+        "interface": interface,
     }
 
 
@@ -215,6 +243,7 @@ def _worldline_callback_url(
     cancel_url: str,
     source: str,
     save_payment_method: bool = False,
+    interface: str = "transaction",
 ) -> str:
     # Alias/card-registration callbacks go to the card-specific endpoint.
     if kind in {"alias", "card_alias"}:
@@ -229,6 +258,7 @@ def _worldline_callback_url(
         success_url=success_url,
         cancel_url=cancel_url,
         save_payment_method=save_payment_method,
+        interface=interface,
     )
     fixed = urlencode({"ctx": ctx, "source": source})
     return f"{_base_url()}{base_path}?{fixed}"
@@ -403,6 +433,122 @@ class WorldlineProvider:
             if billing_address.get("company_name"):
                 payload["Payer"]["CompanyName"] = billing_address["company_name"]
         return self._create_transaction_initialize(payload)
+
+    # ── Payment Page interface (alternative payment methods) ────────────────────
+
+    def _create_paymentpage_initialize(self, payload: dict[str, Any]) -> CheckoutSession:
+        """POST PaymentPage/Initialize and parse the Token + RedirectUrl.
+
+        Mirrors _create_transaction_initialize; the response shape is identical
+        (Token + RedirectUrl / Redirect.RedirectUrl).
+        """
+        data = self._post_worldline_json(
+            endpoint_path="/Payment/v1/PaymentPage/Initialize",
+            payload=payload,
+            operation="Worldline PaymentPage creation",
+            timeout=100.0,
+        )
+        token = str(data.get("Token") or data.get("token") or "")
+        redirect = data.get("RedirectUrl")
+        if not redirect:
+            redirect = ((data.get("Redirect") or {}).get("RedirectUrl") if isinstance(data.get("Redirect"), dict) else None)
+        if not redirect:
+            logger.error("worldline.pp_initialize_no_redirect response=%s", json.dumps(data)[:200])
+            raise RuntimeError("Worldline PaymentPage response did not include a redirect URL")
+        if not token:
+            logger.error("worldline.pp_initialize_no_token response=%s", json.dumps(data)[:200])
+            raise RuntimeError("Worldline PaymentPage response did not include a token")
+        logger.info(
+            "worldline.pp_initialize_success token=%s redirect_prefix=%s",
+            token[:20], redirect[:50] if redirect else "N/A",
+        )
+        order_reference = str(payload.get("Payment", {}).get("OrderId") or "")
+        return CheckoutSession(
+            provider=self.name,
+            checkout_url=str(redirect),
+            external_id=token,
+            order_reference=order_reference or None,
+        )
+
+    def _paymentpage_initialize_request(
+        self,
+        *,
+        org_id: int,
+        save_payment_method: bool,
+        amount_chf: float,
+        order_reference: str,
+        description: str,
+        return_url: str,
+        notify_url: str,
+        is_initial_recurring: bool = False,
+    ) -> CheckoutSession:
+        """Build and send a PaymentPage/Initialize request.
+
+        Unlike the Transaction interface, the Payment Page uses a single ReturnUrl,
+        a Notification block, and offers every method activated on the terminal
+        (optionally narrowed by PaymentMethods / Wallets). Recurring subscriptions
+        set Payment.Recurring.Initial=true so the resulting Transaction.Id can be
+        charged later via AuthorizeReferenced — identical to the Transaction path.
+        Billing address is intentionally omitted from the PP payload (captured
+        server-side for VAT/invoicing) to avoid Payer schema mismatches.
+        """
+        payment_block: dict[str, Any] = {
+            "Amount": {
+                "Value": str(int(round(amount_chf * 100))),
+                "CurrencyCode": "CHF",
+            },
+            "OrderId": order_reference,
+            "Description": description,
+        }
+        if is_initial_recurring:
+            payment_block["Recurring"] = {"Initial": True}
+        payload: dict[str, Any] = {
+            "RequestHeader": {
+                "SpecVersion": _worldline_spec_version(),
+                "CustomerId": _worldline_customer_id(),
+                "RequestId": f"wlpp_{org_id}_{secrets.token_hex(8)}",
+                "RetryIndicator": 0,
+            },
+            "TerminalId": _worldline_terminal_id(),
+            "Payment": payment_block,
+            "Payer": {"LanguageCode": "en"},
+            "ReturnUrl": {"Url": return_url},
+            "Notification": {"SuccessNotifyUrl": notify_url, "FailNotifyUrl": notify_url},
+        }
+        methods = _worldline_payment_methods()
+        if methods:
+            payload["PaymentMethods"] = methods
+        wallets = _worldline_wallets()
+        if wallets:
+            payload["Wallets"] = wallets
+        css_url = (getattr(settings, "worldline_css_url", "") or "").strip()
+        if css_url:
+            payload["Styling"] = {"CssUrl": css_url}
+        if save_payment_method:
+            payload["RegisterAlias"] = {"IdGenerator": "RANDOM"}
+        return self._create_paymentpage_initialize(payload)
+
+    def assert_payment_page(self, *, token: str) -> dict[str, Any]:
+        """Assert a Payment Page result. Returns the same shape as
+        authorize_transaction (Transaction / PaymentMeans / RegistrationResult),
+        so the shared return handler consumes it unchanged. No separate Authorize
+        step is required — Assert yields an already authorized (or captured) tx.
+        """
+        payload = {
+            "RequestHeader": {
+                "SpecVersion": _worldline_spec_version(),
+                "CustomerId": _worldline_customer_id(),
+                "RequestId": f"wlpp_assert_{secrets.token_hex(8)}",
+                "RetryIndicator": 0,
+            },
+            "Token": token,
+        }
+        return self._post_worldline_json(
+            endpoint_path="/Payment/v1/PaymentPage/Assert",
+            payload=payload,
+            operation="Worldline PaymentPage assert",
+            timeout=100.0,
+        )
 
     def authorize_transaction(self, *, token: str, save_payment_method: bool = False) -> dict[str, Any]:
         customer_id = _worldline_customer_id()
@@ -692,6 +838,7 @@ class WorldlineProvider:
         cancel_url: str,
         billing_address: dict[str, str] | None = None,
         amount_chf: float | None = None,
+        use_payment_page: bool = False,
     ) -> CheckoutSession:
         from app.services.billing.payments.pricing import compute_subscription_price_chf
         self._assert_configured()
@@ -700,16 +847,25 @@ class WorldlineProvider:
             order_reference = f"wl_sub_{org_id}_{user_id}_{tier}_{billing_cycle}_{secrets.token_hex(6)}"
         else:
             order_reference = f"wl_sub_{org_id}_{tier}_{billing_cycle}_{secrets.token_hex(6)}"
+        interface = "paymentpage" if use_payment_page else "transaction"
         return_url = _worldline_callback_url(
             org_id=org_id, user_id=user_id, kind="subscription",
             order_reference=order_reference, success_url=success_url, cancel_url=cancel_url,
-            source="return", save_payment_method=save_payment_method,
+            source="return", save_payment_method=save_payment_method, interface=interface,
         )
         notify_url = _worldline_callback_url(
             org_id=org_id, user_id=user_id, kind="subscription",
             order_reference=order_reference, success_url=success_url, cancel_url=cancel_url,
-            source="notify", save_payment_method=save_payment_method,
+            source="notify", save_payment_method=save_payment_method, interface=interface,
         )
+        if use_payment_page:
+            return self._paymentpage_initialize_request(
+                org_id=org_id, save_payment_method=save_payment_method,
+                amount_chf=price, order_reference=order_reference,
+                description=f"Helvex {tier.title()} ({billing_cycle})",
+                return_url=return_url, notify_url=notify_url,
+                is_initial_recurring=True,
+            )
         return self._initialize_request(
             org_id=org_id, payment_alias_id=payment_alias_id, save_payment_method=save_payment_method,
             amount_chf=price, order_reference=order_reference,
@@ -731,6 +887,7 @@ class WorldlineProvider:
         cancel_url: str,
         billing_address: dict[str, str] | None = None,
         amount_chf: float | None = None,
+        use_payment_page: bool = False,
     ) -> CheckoutSession:
         from app.services.billing.payments.pricing import credits_to_chf
         self._assert_configured()
@@ -739,16 +896,25 @@ class WorldlineProvider:
             order_reference = f"wl_topup_{org_id}_{user_id}_{credits}_{secrets.token_hex(6)}"
         else:
             order_reference = f"wl_topup_{org_id}_{credits}_{secrets.token_hex(6)}"
+        interface = "paymentpage" if use_payment_page else "transaction"
         return_url = _worldline_callback_url(
             org_id=org_id, user_id=user_id, kind="topup",
             order_reference=order_reference, success_url=success_url, cancel_url=cancel_url,
-            source="return", save_payment_method=save_payment_method,
+            source="return", save_payment_method=save_payment_method, interface=interface,
         )
         notify_url = _worldline_callback_url(
             org_id=org_id, user_id=user_id, kind="topup",
             order_reference=order_reference, success_url=success_url, cancel_url=cancel_url,
-            source="notify", save_payment_method=save_payment_method,
+            source="notify", save_payment_method=save_payment_method, interface=interface,
         )
+        if use_payment_page:
+            return self._paymentpage_initialize_request(
+                org_id=org_id, save_payment_method=save_payment_method,
+                amount_chf=amount_chf, order_reference=order_reference,
+                description=f"Helvex top-up {credits} credits",
+                return_url=return_url, notify_url=notify_url,
+                is_initial_recurring=False,
+            )
         return self._initialize_request(
             org_id=org_id, payment_alias_id=payment_alias_id, save_payment_method=save_payment_method,
             amount_chf=amount_chf, order_reference=order_reference,

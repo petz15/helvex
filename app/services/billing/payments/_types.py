@@ -34,6 +34,7 @@ class PaymentProvider(Protocol):
         cancel_url: str,
         billing_address: dict[str, str] | None = None,
         save_payment_method: bool = False,
+        use_payment_page: bool = False,
     ) -> CheckoutSession:
         ...
 
@@ -46,5 +47,6 @@ class PaymentProvider(Protocol):
         cancel_url: str,
         billing_address: dict[str, str] | None = None,
         save_payment_method: bool = False,
+        use_payment_page: bool = False,
     ) -> CheckoutSession:
         ...

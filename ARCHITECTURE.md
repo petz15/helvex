@@ -314,7 +314,25 @@ tests: `test_worldline_return_ignores_forged_order_reference`,
 `Transaction.Amount` (minor units, CHF) covers the expected price — a material shortfall
 or currency mismatch refuses the grant and voids the authorization
 (`test_worldline_return_rejects_amount_mismatch`). Payment *status* is verified
-server-to-server via the `authorize_transaction` call before any grant. For the Saferpay
+server-to-server via the `authorize_transaction` call before any grant.
+
+**Payment methods — two Saferpay interfaces:** the default **Transaction interface**
+(`Transaction/Initialize` → `Transaction/Authorize`) only supports cards + direct debit.
+Alternative methods (TWINT, PayPal, Apple/Google Pay) require the **Payment Page interface**
+(`PaymentPage/Initialize` → `PaymentPage/Assert`), added in `worldline_provider.py`
+(`_paymentpage_initialize_request`, `assert_payment_page`). Gated by
+`WORLDLINE_PAYMENT_PAGE_ENABLED` (default off) — the only env needed. By default all
+terminal-activated methods and all wallets (Apple/Google/Click-to-Pay) are offered; optional
+`WORLDLINE_PAYMENT_METHODS` / `WORLDLINE_WALLETS` allowlists can narrow this. When enabled,
+`checkout.py` routes **fresh** subscription/top-up payments (no saved alias to charge) through
+the Payment Page; saved-alias one-click charges stay on the Transaction interface. The chosen
+interface is carried in the signed callback `ctx` (`interface` field); `worldline_return` calls
+`assert_payment_page()` vs `authorize_transaction()` accordingly — everything downstream
+(alias save, capture, amount check, entitlement grant) is shared because Assert returns the
+same result shape. Subscriptions set `Payment.Recurring.Initial=true` in the PP payload so the
+resulting `Transaction.Id` feeds the existing `authorize_referenced_transaction` recurring path
+(method-agnostic). Note: amount-less card save (`Alias/Insert`) has no Payment Page equivalent
+and stays card-only. For the Saferpay
 API request/response contract, see
 [`docs/payment-flows.md`](docs/payment-flows.md); for the code-structure risk
 picture (including a concrete lead on the "subscription upgrade doesn't

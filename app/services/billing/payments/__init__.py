@@ -82,6 +82,7 @@ def create_subscription_checkout(
     billing_address: dict[str, str] | None = None,
     amount_chf: float | None = None,
     preferred_provider: ProviderName | None = None,
+    use_payment_page: bool = False,
 ) -> CheckoutSession:
     provider = _pick_provider(preferred_provider)
     return provider.create_subscription_checkout(
@@ -95,6 +96,7 @@ def create_subscription_checkout(
         cancel_url=cancel_url,
         billing_address=billing_address,
         amount_chf=amount_chf,
+        use_payment_page=use_payment_page,
     )
 
 
@@ -110,6 +112,7 @@ def create_topup_checkout(
     billing_address: dict[str, str] | None = None,
     amount_chf: float | None = None,
     preferred_provider: ProviderName | None = None,
+    use_payment_page: bool = False,
 ) -> CheckoutSession:
     provider = _pick_provider(preferred_provider)
     return provider.create_topup_checkout(
@@ -122,4 +125,5 @@ def create_topup_checkout(
         cancel_url=cancel_url,
         billing_address=billing_address,
         amount_chf=amount_chf,
+        use_payment_page=use_payment_page,
     )

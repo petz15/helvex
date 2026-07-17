@@ -68,6 +68,14 @@ def create_subscription_checkout(
             body.provider or "default", org.id,
         )
         _sub_alias = _resolve_worldline_payment_alias(db, org, _user, body.selected_alias_id) if body.provider in {None, "worldline"} else None
+        # Fresh payments (no saved alias to charge) route through the Payment Page so
+        # TWINT/PayPal/Apple Pay are offered; saved-alias charges stay on the Transaction
+        # interface (one-click, no method picker).
+        _sub_use_pp = (
+            bool(payments.settings.worldline_payment_page_enabled)
+            and _sub_alias is None
+            and body.provider in {None, "worldline"}
+        )
         session = payments.create_subscription_checkout(
             org_id=org.id,
             user_id=_user.id,
@@ -80,6 +88,7 @@ def create_subscription_checkout(
             billing_address=billing_address,
             preferred_provider=body.provider,
             amount_chf=sub_total_chf,
+            use_payment_page=_sub_use_pp,
         )
         logger.info(
             "billing.subscription_checkout_ok org_id=%s provider=%s checkout_url_prefix=%s",
@@ -171,6 +180,12 @@ def create_topup_checkout(
         _topup_alias = None
         if body.provider in {None, "worldline"} and not body.use_new_card:
             _topup_alias = _resolve_worldline_payment_alias(db, org, _user, body.selected_alias_id)
+        # Fresh payment (new card / no saved alias) → Payment Page for alt methods.
+        _topup_use_pp = (
+            bool(payments.settings.worldline_payment_page_enabled)
+            and _topup_alias is None
+            and body.provider in {None, "worldline"}
+        )
         session = payments.create_topup_checkout(
             org_id=org.id,
             user_id=_user.id,
@@ -182,6 +197,7 @@ def create_topup_checkout(
             billing_address=billing_address,
             preferred_provider=body.provider,
             amount_chf=total_chf,
+            use_payment_page=_topup_use_pp,
         )
         logger.info(
             "billing.topup_checkout_ok org_id=%s provider=%s checkout_url_prefix=%s",

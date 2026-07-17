@@ -513,7 +513,7 @@ def test_topup_checkout_prefers_current_users_saved_alias_over_org_default(clien
 
     captured = {}
 
-    def _fake_create_topup_checkout(*, org_id, user_id, payment_alias_id, save_payment_method, credits, success_url, cancel_url, billing_address, preferred_provider=None, amount_chf=None):
+    def _fake_create_topup_checkout(*, org_id, user_id, payment_alias_id, save_payment_method, credits, success_url, cancel_url, billing_address, preferred_provider=None, amount_chf=None, use_payment_page=False):
         captured["org_id"] = org_id
         captured["user_id"] = user_id
         captured["payment_alias_id"] = payment_alias_id

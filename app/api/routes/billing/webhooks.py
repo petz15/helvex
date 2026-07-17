@@ -59,6 +59,7 @@ async def worldline_return(
     order_reference = str(callback_ctx.get("order_reference") or params.get("order_reference") or "").strip()
     kind = str(callback_ctx.get("kind") or params.get("kind") or "").strip().lower()
     save_payment_method = str(callback_ctx.get("save_payment_method") or "").strip().lower() in {"1", "true", "yes", "on"}
+    interface = str(callback_ctx.get("interface") or "transaction").strip().lower()
     query_string = request.url.query or ""
 
     _emit(
@@ -172,9 +173,16 @@ async def worldline_return(
         )
 
     try:
-        result = payments.WorldlineProvider().authorize_transaction(
-            token=token, save_payment_method=save_payment_method,
-        )
+        # Payment Page transactions are settled with PaymentPage/Assert (no separate
+        # Authorize); the Transaction interface uses Transaction/Authorize. Both return
+        # the same result shape (Transaction / PaymentMeans / RegistrationResult), so
+        # everything downstream is identical.
+        if interface == "paymentpage":
+            result = payments.WorldlineProvider().assert_payment_page(token=token)
+        else:
+            result = payments.WorldlineProvider().authorize_transaction(
+                token=token, save_payment_method=save_payment_method,
+            )
         transaction = result.get("Transaction") if isinstance(result, dict) else {}
         transaction_status = str(transaction.get("Status") or "").upper() if isinstance(transaction, dict) else ""
         transaction_id = str(transaction.get("Id") or "") if isinstance(transaction, dict) else ""

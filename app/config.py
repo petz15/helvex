@@ -91,6 +91,19 @@ class Settings(BaseSettings):
     worldline_raw_api_logging_enabled: bool = False
     # Optional URL to a CSS file loaded inside the Saferpay iframe for custom styling.
     worldline_css_url: str = ""
+    # Payment Page interface: hosted page that offers alternative payment methods
+    # (TWINT, PayPal, Apple/Google Pay, ...) which the Transaction interface cannot show.
+    # When enabled, fresh payments (no saved alias being charged) route through the
+    # Payment Page; saved-alias one-click charges stay on the Transaction interface.
+    worldline_payment_page_enabled: bool = False
+    # Optional override: comma-separated allowlist restricting which methods appear on the
+    # Payment Page (e.g. "VISA,MASTERCARD,TWINT,PAYPAL"). Default (unset) = show ALL methods
+    # activated on the terminal. Valid values per Saferpay: VISA, MASTERCARD, AMEX, TWINT,
+    # PAYPAL, KLARNA, POSTFINANCEPAY, DIRECTDEBIT, ...
+    worldline_payment_methods: str = ""
+    # Optional override: comma-separated wallet allowlist. Default (unset) = ALL wallets
+    # (APPLEPAY, GOOGLEPAY, CLICKTOPAY) are offered.
+    worldline_wallets: str = ""
 
 
     # Security — dev gets an ephemeral random key if unset; production must set a strong key.
