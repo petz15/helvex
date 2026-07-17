@@ -23,6 +23,7 @@ import { useSearchParams, useRouter } from "next/navigation";
 import useSWR from "swr";
 import Link from "next/link";
 import { CreditCard, Zap, ArrowRight, CheckCircle2, Loader2, Info, ShieldCheck } from "lucide-react";
+import { paymentMethodIcon, paymentMethodLabel } from "@/lib/payment-method-display";
 import {
   fetchCurrentUser,
   fetchBillingSummary,
@@ -249,8 +250,8 @@ export function PaymentGatewayClient() {
           cancel_url: cancelUrl.toString(),
           billing_address: billingAddress,
           save_payment_method: usingNewCard ? saveCard : false,
+          use_new_card: usingNewCard,
           selected_alias_id: usingNewCard ? null : selectedCard,
-          upgrade_proration_credits: proration?.credits_granted ?? null,
         });
         setIframeUrl(session.checkout_url);
       } else if (kind === "topup") {
@@ -477,13 +478,12 @@ export function PaymentGatewayClient() {
       <div className="rounded-2xl border border-slate-200 bg-white p-5 space-y-3">
         <h2 className="text-sm font-semibold text-slate-700">Payment method</h2>
 
-        {/* Saved card selector */}
+        {/* Saved payment method selector */}
         <div className="space-y-2">
           {savedMethods.map(m => {
-            const last4 = m.masked_number ? m.masked_number.slice(-4) : null;
-            const brand = m.brand ? m.brand.charAt(0).toUpperCase() + m.brand.slice(1).toLowerCase() : null;
             const scopeLabel = m.scope === "org" ? (m.is_default ? "Org · Default" : "Org") : "Personal";
-            const label = [brand, last4 ? `•••• ${last4}` : null, scopeLabel].filter(Boolean).join(" · ");
+            const label = [paymentMethodLabel(m, "Saved payment method"), scopeLabel].filter(Boolean).join(" · ");
+            const Icon = paymentMethodIcon(m.method_type);
             const active = selectedCard === m.alias_id;
             return (
               <button
@@ -493,7 +493,7 @@ export function PaymentGatewayClient() {
                   active ? "border-blue-400 bg-blue-50" : "border-slate-200 hover:border-slate-300"
                 }`}
               >
-                <CreditCard size={14} className={active ? "text-blue-500" : "text-slate-400"} />
+                <Icon size={14} className={active ? "text-blue-500" : "text-slate-400"} />
                 <span className={`text-sm ${active ? "font-medium text-blue-800" : "text-slate-700"}`}>{label}</span>
               </button>
             );
@@ -506,12 +506,12 @@ export function PaymentGatewayClient() {
           >
             <CreditCard size={14} className={usingNewCard ? "text-blue-500" : "text-slate-400"} />
             <span className={`text-sm ${usingNewCard ? "font-medium text-blue-800" : "text-slate-500"}`}>
-              Enter new card
+              New payment method
             </span>
           </button>
         </div>
 
-        {/* Save checkbox — only when entering a new card */}
+        {/* Save checkbox — only when entering a new payment method */}
         {usingNewCard && (
           <label className="flex items-center gap-2 text-xs text-slate-600 cursor-pointer select-none">
             <input
@@ -520,7 +520,7 @@ export function PaymentGatewayClient() {
               onChange={e => setSaveCard(e.target.checked)}
               className="h-3.5 w-3.5 rounded border-slate-300 text-blue-600 accent-blue-600"
             />
-            Save this card for future transactions (optional)
+            Save this payment method for future payments (optional)
           </label>
         )}
 
@@ -540,7 +540,7 @@ export function PaymentGatewayClient() {
       {/* Security note */}
       <div className="flex items-center gap-2 text-xs text-slate-400">
         <ShieldCheck size={13} className="shrink-0" />
-        Payments are processed securely by Worldline Saferpay. Your card details never reaches our servers.
+        Payments are processed securely by Worldline Saferpay. Your payment details never reach our servers.
       </div>
 
       {/* AGB acceptance */}

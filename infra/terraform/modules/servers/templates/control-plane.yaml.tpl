@@ -100,6 +100,18 @@ runcmd:
         ports:
           web:
             hostPort: 80
+            proxyProtocol:
+              trustedIPs:
+                - "${cluster_private_cidr}"
+            forwardedHeaders:
+              trustedIPs:
+                - "${cluster_private_cidr}"
           websecure:
             hostPort: 443
+            proxyProtocol:
+              trustedIPs:
+                - "${cluster_private_cidr}"
+            forwardedHeaders:
+              trustedIPs:
+                - "${cluster_private_cidr}"
     MANIFEST

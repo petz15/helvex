@@ -335,14 +335,33 @@ Alternative methods (TWINT, PayPal, Apple/Google Pay) require the **Payment Page
 terminal-activated methods and all wallets (Apple/Google/Click-to-Pay) are offered; optional
 `WORLDLINE_PAYMENT_METHODS` / `WORLDLINE_WALLETS` allowlists can narrow this. When enabled,
 `checkout.py` routes **fresh** subscription/top-up payments (no saved alias to charge) through
-the Payment Page; saved-alias one-click charges stay on the Transaction interface. The chosen
+the Payment Page; saved-alias one-click charges stay on the Transaction interface. Both the
+subscription and top-up routes honour an explicit `use_new_card` flag from the client that skips
+saved-alias resolution — so choosing "new payment method" in the UI reaches the Payment Page even
+when the org already has a card on file (without it, a saved alias would always force the
+Transaction interface). The chosen
 interface is carried in the signed callback `ctx` (`interface` field); `worldline_return` calls
 `assert_payment_page()` vs `authorize_transaction()` accordingly — everything downstream
 (alias save, capture, amount check, entitlement grant) is shared because Assert returns the
 same result shape. Subscriptions set `Payment.Recurring.Initial=true` in the PP payload so the
 resulting `Transaction.Id` feeds the existing `authorize_referenced_transaction` recurring path
 (method-agnostic). Note: amount-less card save (`Alias/Insert`) has no Payment Page equivalent
-and stays card-only. For the Saferpay
+and stays card-only.
+
+**Saved payment methods can be non-card.** Because the Payment Page can register an alias for
+TWINT/PayPal/etc. (not just cards), the saved-method record is method-aware:
+`_extract_card_info_from_worldline` (`_shared.py`) captures `method_type` (via
+`_extract_payment_method_worldline`, with a key-presence fallback for empty marker objects) and
+Worldline's `DisplayText` alongside the best-effort card fields (`masked_number`/`brand`/`exp*`,
+empty for non-card). These persist in the `card_info_json` blob (no migration) and are surfaced by
+`GET /billing/payment-methods`. The frontend renders them via a shared helper
+`frontend/src/lib/payment-method-display.tsx` (`paymentMethodIcon`, `paymentMethodLabel`) on both
+the billing page (`CardChip`) and the checkout selector — cards show `brand •••• last4`, non-card
+methods show `DisplayText` with a generic wallet icon. Legacy rows without `method_type` default to
+`"card"` when a masked number is present. Billing copy/i18n is method-neutral ("payment method",
+key `paymentMethods.savedMethod` across en/de/fr/it).
+
+For the Saferpay
 API request/response contract, see
 [`docs/payment-flows.md`](docs/payment-flows.md); for the code-structure risk
 picture (including a concrete lead on the "subscription upgrade doesn't
@@ -1651,6 +1670,51 @@ kubectl create secret generic helvex-env \
 
 The `Deployment` mounts it as `envFrom: - secretRef: name: helvex-env`.
 
+### ⚠️ How a new env var actually reaches a pod (two-step allow-list — easy to get wrong)
+
+Adding a secret in GitHub → Settings → Secrets → Actions is **not sufficient** on
+its own. `helvex-env` is built from an **explicit `--from-literal` allow-list** in
+the deploy workflow, so a GitHub secret that isn't referenced by a `--from-literal`
+line is silently ignored. Both steps are required for every new var:
+
+1. **Create the GitHub Actions secret** (`Settings → Secrets and variables →
+   Actions`).
+2. **Add a matching `--from-literal` line** to the `kubectl create secret generic
+   helvex-env` block in **both** `.github/workflows/deploy-prod.yml` **and**
+   `deploy-dev.yml`. Without this line the value never lands in the cluster secret
+   and the app falls back to the field's default in `app/config.py`.
+
+Then two propagation facts:
+
+- **`envFrom` injects env only at container start.** Editing/re-applying the
+  secret does **not** update running pods — a rollout is required. A normal
+  `[deploy-prod]` rolls a new image (so pods restart and pick up the new env);
+  a secret-only change needs `kubectl rollout restart deployment/helvex -n
+  helvex-prod`. There is **no `checksum/config` annotation** forcing restart on
+  secret change.
+- **Never `kubectl patch` the secret as a durable fix.** The next deploy rebuilds
+  `helvex-env` from the workflow allow-list and overwrites any manual edit —
+  silently reverting it. The allow-list line is the source of truth.
+
+**Bool/typed vars — guard against empty:** reference optional bool/typed secrets
+with a fallback, e.g. `"${{ secrets.WORLDLINE_PAYMENT_PAGE_ENABLED || 'false' }}"`.
+An unset secret renders as `""`, and an empty string fails Pydantic `bool` parsing,
+which crashes startup under prod's strict config validation.
+
+**Verify a var is live in the running pod:**
+```bash
+kubectl exec deploy/helvex -n helvex-prod -- \
+  python -c "from app.config import settings; print(settings.<field_name>)"
+# or, raw:
+kubectl exec deploy/helvex -n helvex-prod -- printenv <ENV_VAR_NAME>
+```
+`printenv` exiting non-zero means the var isn't in the pod at all → the allow-list
+line (step 2) is missing.
+
+*(This exact gap kept the Worldline Payment Page disabled: the GitHub secret existed
+but `WORLDLINE_PAYMENT_PAGE_ENABLED` had no `--from-literal` line, so the flag stayed
+at its `False` default in the pod. Fixed 2026-07 in both deploy workflows.)*
+
 GitHub Actions secrets to keep up to date (stored in the repo's Settings → Secrets):
 
 | Secret name | Used for |
@@ -1898,7 +1962,31 @@ network:
 | `network` | Hetzner VPC `10.0.0.0/16`, subnet `10.0.1.0/24` (eu-central zone) — avoids K3s internal ranges `10.42/43.x.x` |
 | `firewall` | Inbound: SSH (22), HTTP (80), HTTPS (443) from configured admin CIDRs; outbound: all except ICMP (restricted) |
 | `servers` | Control plane `cx23` (static IPv4, K3s init via cloud-init); worker/DB node `cx33` (taint: `helvex.io/role=database:NoSchedule`) |
-| `loadbalancer` | Hetzner LB (`lb11`); targets all non-DB nodes; health check on `GET /health` |
+| `loadbalancer` | Hetzner LB (`lb11`); targets all non-DB nodes; health check on `GET /health`; `proxyprotocol = true` on the HTTP/HTTPS TCP services so Traefik can see the real client IP (see below) |
+
+### Real client IP propagation (PROXY protocol)
+
+The Hetzner LB does **TCP passthrough** (not HTTP), so without PROXY protocol Traefik would only ever see the LB's private IP (`10.0.1.x`) as the connecting peer — collapsing every visitor into one IP for `app/auth.py`'s `get_client_ip()`, which breaks IP-keyed rate limiting (login, register, forgot-password, etc. in `app/api/routes/auth.py`) and makes `activity_log.ip` useless for audit purposes.
+
+Fix (both sides required, or the LB's PROXY-protocol header is sent but never decoded):
+- `loadbalancer` module: `proxyprotocol = true` on both `hcloud_load_balancer_service` blocks.
+- `servers` module: the control-plane cloud-init's Traefik `HelmChartConfig` sets `ports.{web,websecure}.proxyProtocol.trustedIPs` and `forwardedHeaders.trustedIPs` to the cluster's private subnet (`var.cluster_private_cidr`, threaded through from `envs/prod/variables.tf`'s `subnet_cidr`) — this tells Traefik to trust and decode the PROXY protocol header only from the LB's own network, then set `X-Forwarded-For` to the real client IP for the app.
+
+Since node cloud-init only runs once at provisioning, this change only takes effect on **new** nodes; existing nodes need `kubectl apply` of the updated `HelmChartConfig` manually (same manifest as in `control-plane.yaml.tpl`) plus a `kubectl rollout restart deployment/traefik -n kube-system`, and the LB service change needs `terraform apply` from `infra/terraform/envs/prod`.
+
+### Node replacement is not zero-downtime today (no HA on control-plane or DB)
+
+`hcloud_server.user_data` forces a destroy+recreate on any change (there's no in-place update for cloud-init), so any edit to `control-plane.yaml.tpl`/`worker.yaml.tpl` — or plain state/config drift — can put a node up for replacement. Whether that's an outage depends on the tier:
+
+| Node | Redundancy today | Impact of replacement |
+|---|---|---|
+| `app1` (control-plane) | None — single k3s server | Full API/ingress outage until the new node is up and Traefik is healthy |
+| `db1` (Postgres, CloudNativePG) | None — `postgres.instances: 1` | Real outage: CNPG must bootstrap fresh from the S3 backup + WAL replay (no data loss given WAL archiving, but not instant) |
+| `ml1`, apiWorker, frontend, etc. | Yes — `replicaCount: 2` (apiWorker) or stateless | Drain reschedules pods elsewhere; `ml1` briefly pauses ML jobs (background, not user-facing) |
+
+**To make control-plane/DB replacement zero-downtime**, both need real redundancy first (tracked in [roadmap.md](roadmap.md)): a 2nd/3rd k3s server node for embedded-etcd HA, and CNPG `instances: 2` for a standby replica enabling a planned switchover.
+
+**General safe node-swap procedure** (works today for any tier, avoids Terraform's `-/+ replace` entirely): add the replacement node under a **new** key in the `servers` map (new private IP) so `apply` creates it alongside the old one instead of recreating the same resource address; join it to the cluster and migrate/drain workloads over; verify healthy; only then remove the old key and `apply` again as a clean destroy of the old node. This is the only way to swap a load-bearing node without an outage window using this Terraform layout.
 
 ### Server access hardening (`control-plane.yaml.tpl` cloud-init)
 

@@ -39,6 +39,7 @@ locals {
           public_ip             = hcloud_primary_ip.cp[k].ip_address
           node_name             = "${var.name_prefix}-${k}"
           admin_cidrs           = var.admin_cidrs
+          cluster_private_cidr  = var.cluster_private_cidr
         })
       : templatefile("${path.module}/templates/worker.yaml.tpl", {
           token                 = var.k3s_token

@@ -34,6 +34,7 @@ module "servers" {
   k3s_token             = var.k3s_token
   k3s_version           = var.k3s_version
   admin_cidrs           = var.admin_cidrs
+  cluster_private_cidr  = var.subnet_cidr
 }
 
 # Load balancer — targets only k3s nodes (not the DB node)

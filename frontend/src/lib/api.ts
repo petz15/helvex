@@ -155,6 +155,10 @@ export interface PaymentMethod {
   scope: "org" | "personal";
   provider: string;
   alias_id: string;
+  /** "card" | "twint" | "paypal" | "klarna" | "bank_transfer" | "direct_debit" | "alipay" | null */
+  method_type: string | null;
+  /** Worldline-provided human label, e.g. "TWINT", "PayPal (user@ex.com)", or a masked card. */
+  display_text: string | null;
   masked_number: string | null;
   brand: string | null;
   holder_name: string | null;
@@ -404,8 +408,8 @@ export async function createSubscriptionCheckout(data: {
   cancel_url: string;
   billing_address?: BillingAddressPayload | null;
   save_payment_method?: boolean;
+  use_new_card?: boolean;
   provider?: "worldline" | "stripe" | null;
-  upgrade_proration_credits?: number | null;
   selected_alias_id?: string | null;
 }): Promise<BillingCheckoutResponse> {
   const res = await fetch("/api/v1/billing/checkout/subscription", {

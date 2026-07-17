@@ -47,6 +47,10 @@ class SubscriptionCheckoutRequest(BaseModel):
     billing_address: BillingAddress | None = None
     save_payment_method: bool = False
     provider: Literal["worldline"] | None = None
+    # When true, ignore any saved alias and force a fresh payment — this is what
+    # routes the checkout to the Payment Page (TWINT/PayPal/etc.) even for an org
+    # that already has a card on file. Mirrors TopupCheckoutRequest.use_new_card.
+    use_new_card: bool = False
     # upgrade_proration_credits is intentionally NOT accepted from the client — the
     # grant is recomputed server-side in create_subscription_checkout via
     # compute_upgrade_proration_credits(). Any value the client sends is ignored.
@@ -154,14 +158,43 @@ def compute_upgrade_proration_credits(
 
 
 def _extract_card_info_from_worldline(result: dict) -> dict:
-    """Pull masked card details from a Worldline Authorize or AliasInsert response."""
-    pm = result.get("PaymentMeans") if isinstance(result, dict) else {}
-    card = pm.get("Card") if isinstance(pm, dict) else {}
+    """Pull saved-payment-method details from a Worldline Authorize / AliasInsert /
+    PaymentPage Assert response.
+
+    Works for cards *and* non-card aliases (TWINT, PayPal, Klarna, …). The card-
+    specific fields are best-effort and empty for non-card methods; `method_type`
+    and `display_text` always describe what was actually saved so the UI can render
+    a correct label/icon instead of assuming a card.
+    """
+    from app.services.billing.payment_transactions import _extract_payment_method_worldline
+
+    # Effective PaymentMeans: top-level first, else nested under Transaction.
+    pm = result.get("PaymentMeans") if isinstance(result, dict) else None
+    if not isinstance(pm, dict):
+        tx = result.get("Transaction") if isinstance(result, dict) else None
+        pm = tx.get("PaymentMeans") if isinstance(tx, dict) else {}
+    if not isinstance(pm, dict):
+        pm = {}
+    card = pm.get("Card")
     if not isinstance(card, dict):
         card = {}
+
+    method_type = _extract_payment_method_worldline(result)
+    if method_type is None:
+        # Fallback: some responses carry an empty marker object (falsy), so the
+        # truthiness-based detector misses it — match on key presence instead.
+        _markers = {
+            "Card": "card", "Twint": "twint", "PayPal": "paypal", "Klarna": "klarna",
+            "BankAccount": "bank_transfer", "DirectDebit": "direct_debit", "Alipay": "alipay",
+        }
+        method_type = next((v for k, v in _markers.items() if k in pm), None)
+    if method_type is None and card:
+        method_type = "card"
     return {
+        "method_type": method_type,
+        "display_text": str(pm.get("DisplayText") or ""),
         "masked_number": str(card.get("MaskedNumber") or ""),
-        "brand": str(card.get("Brand") or pm.get("Brand") if isinstance(pm, dict) else ""),
+        "brand": str(card.get("Brand") or pm.get("Brand") or ""),
         "holder_name": str(card.get("HolderName") or ""),
         "exp_year": card.get("ExpYear"),
         "exp_month": card.get("ExpMonth"),

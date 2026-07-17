@@ -4,6 +4,7 @@ import useSWR from "swr";
 import { useI18n } from "@/i18n/context";
 import { ChevronLeft, ChevronRight, CreditCard, Zap, TrendingUp, ArrowUpRight, Loader2, AlertTriangle, BarChart2, ChevronDown } from "lucide-react";
 import Link from "next/link";
+import { paymentMethodIcon, paymentMethodLabel } from "@/lib/payment-method-display";
 import {
   fetchCurrentUser,
   fetchBillingSummary,
@@ -551,22 +552,23 @@ function VatIdSection({ orgId, initialVatId }: { orgId: number; initialVatId: st
 }
 
 function CardChip({ method }: { method: PaymentMethod }) {
+  const { dict } = useI18n();
   const brand = method.brand
     ? method.brand.charAt(0).toUpperCase() + method.brand.slice(1).toLowerCase()
     : null;
-  const last4 = method.masked_number ? method.masked_number.slice(-4) : null;
   const expiry = method.exp_month && method.exp_year
     ? `${String(method.exp_month).padStart(2, "0")}/${String(method.exp_year).slice(-2)}`
     : null;
+  // Card-only meta (brand / holder / expiry). Empty for non-card methods.
   const meta = [brand, method.holder_name, expiry ? `exp. ${expiry}` : null].filter(Boolean).join(" · ");
+  const Icon = paymentMethodIcon(method.method_type);
+  const primary = paymentMethodLabel(method, dict.app.billing.paymentMethods.savedMethod);
 
   return (
     <div className="flex items-center gap-2.5 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 min-w-0">
-      <CreditCard size={15} className="shrink-0 text-slate-400" />
+      <Icon size={15} className="shrink-0 text-slate-400" />
       <div className="min-w-0 flex-1">
-        <div className="text-sm font-medium text-slate-800">
-          {last4 ? `•••• ${last4}` : "Saved card"}
-        </div>
+        <div className="text-sm font-medium text-slate-800">{primary}</div>
         {meta && <div className="text-xs text-slate-400 truncate">{meta}</div>}
       </div>
     </div>

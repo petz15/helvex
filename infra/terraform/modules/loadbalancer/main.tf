@@ -24,11 +24,15 @@ resource "hcloud_load_balancer_target" "this" {
 }
 
 # HTTP — Traefik listens on port 80 via hostPort on all k3s nodes
+# proxyprotocol: without it, the LB's plain TCP passthrough hides the real
+# client IP from Traefik (it only ever sees the LB's private IP), which
+# breaks IP-based rate limiting and activity-log IPs app-wide.
 resource "hcloud_load_balancer_service" "http" {
   load_balancer_id = hcloud_load_balancer.this.id
   protocol         = "tcp"
   listen_port      = 80
   destination_port = 80
+  proxyprotocol    = true
 
   health_check {
     protocol = "tcp"
@@ -45,6 +49,7 @@ resource "hcloud_load_balancer_service" "https" {
   protocol         = "tcp"
   listen_port      = 443
   destination_port = 443
+  proxyprotocol    = true
 
   health_check {
     protocol = "tcp"

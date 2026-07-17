@@ -3,8 +3,9 @@
 For the Saferpay API request/response contract (what fields go where), see
 the existing [`docs/payment-flows.md`](../payment-flows.md) — it's detailed
 and accurate, no need to duplicate it here. This doc covers the **code
-structure and risk** angle: what's fragile, where test coverage is still thin
-(Payment Page + proration), and the still-open `upgrade_proration_credits` lead.
+structure and risk** angle: what's fragile and where test coverage is still thin
+(Payment Page + proration). The `upgrade_proration_credits` integrity risk this
+doc used to flag has since been **fixed** (see that section below).
 
 > **2026-07 update — Stripe is gone, Payment Page is in.** This doc previously
 > compared a `stripe_webhook` handler against the Worldline ones. There is no
@@ -19,7 +20,7 @@ structure and risk** angle: what's fragile, where test coverage is still thin
 business logic inline in the route (not delegated to a service — this diverges
 from the thin-route layering CLAUDE.md describes):
 
-- `worldline_return` (`webhooks.py:38`) — ~375 lines of inline logic: token/
+- `worldline_return` (`webhooks.py:39`) — ~370 lines of inline logic: token/
   context extraction, the 15-minute pending-payment expiry check, settling the
   transaction (`assert_payment_page` **or** `authorize_transaction` depending
   on interface — see below), parsing three different possible locations for the
@@ -43,7 +44,7 @@ timed out, and Kubernetes killed the pod. FastAPI runs a plain `def` route in
 its threadpool, so the blocking work no longer stalls the loop. **Do not add
 `async` back to either handler** unless you also convert every blocking call to
 `await`. A companion fix clears the pending alias token on *failure* too
-(`webhooks.py:513`), so a retried/cancelled registration takes the fast
+(`webhooks.py:514`), so a retried/cancelled registration takes the fast
 `missing_token → cancel_url` path instead of re-running the 10s retry storm.
 
 **Test coverage (corrected).** Both handlers *are* covered — the earlier
@@ -58,11 +59,14 @@ exercises them via `TestClient`: `test_worldline_return_authorizes_and_redirects
 remain are the **Payment Page (`assert_payment_page`) branch** and the
 proration path — the existing tests drive the Transaction interface.
 
-**Simplification opportunity, not just a bug risk:** the token-resolution +
-pending-lookup logic (`_WORLDLINE_PLACEHOLDER_TOKENS` handling, "no token but
-we have an order_reference, look up the pending row" fallback) is near-identical
-between the two handlers. A future refactor extracting it into a shared helper
-would shrink both and remove a place where they can silently drift apart.
+**Simplification done (2026-07).** The identical token-normalization logic
+(`_WORLDLINE_PLACEHOLDER_TOKENS` handling + the `TOKEN`/`token`/`Token` query
+aliases) is now a single shared helper, `_normalize_worldline_token`
+(`_shared.py:114`), called by both handlers — so the placeholder handling can no
+longer drift between them. Note the *pending-lookup* fallbacks were deliberately
+**not** merged: they hit different stores (`worldline_return` looks up a pending
+`PaymentTransaction` by `order_reference`; `worldline_card_return` looks up an
+in-memory pending alias token), so folding them together would have been wrong.
 
 ## Payment Page interface (newest)
 
@@ -74,8 +78,8 @@ Worldline is now driven through **two interfaces**, selected per-checkout:
 | **Transaction** (`transaction`) | Charging a saved alias (one-click) | `authorize_transaction()` + conditional capture | No method picker; direct alias charge |
 
 **Selection logic** lives in the checkout routes, not the provider. In both
-`create_subscription_checkout` (`checkout.py:74`) and `create_topup_checkout`
-(`checkout.py:184`):
+`create_subscription_checkout` (`checkout.py:84`) and `create_topup_checkout`
+(`checkout.py:194`):
 
 ```python
 use_payment_page = (
@@ -92,7 +96,7 @@ resolved alias. A saved-alias charge always stays on the Transaction interface.
 `interface = "paymentpage" if use_payment_page else "transaction"`
 (`worldline_provider.py:850` / `:899`) and bakes it into the signed callback
 URL. On return, `worldline_return` reads `interface` back out of the callback
-context and branches (`webhooks.py:180`):
+context and branches (`webhooks.py:173`):
 
 ```python
 if interface == "paymentpage":
@@ -114,7 +118,7 @@ fork. Worth preserving if either provider method changes.
 The webhook no longer trusts the return query params for *what was bought*.
 When a pending transaction exists, tier / credits / kind are **re-derived from
 that row's stored `order_reference`**, not from the (unsigned) callback params
-(`webhooks.py:148-173`). If there is neither a pending tx nor a validly signed
+(`webhooks.py:143-166`). If there is neither a pending tx nor a validly signed
 context, the handler **refuses to grant any entitlement**
 (`billing.worldline_untrusted_grant_blocked`). This closes the earlier hole
 where anyone holding a valid token could forge a higher tier or a large credit
@@ -123,56 +127,50 @@ grant via crafted query params.
 Defense in depth also present: after settlement the handler verifies the amount
 Worldline actually authorized covers the expected amount (±1%, currency must be
 CHF) before applying, and voids the transaction on a clear mismatch
-(`webhooks.py:308-349`).
+(`webhooks.py:301-349`).
 
-**Important caveat — this re-derivation does NOT cover proration** (next
-section). `upgrade_proration_credits` is read straight off the pending row as
-the client set it at checkout; it is not encoded in `order_reference` and is
-not recomputed.
+**Note on proration:** `upgrade_proration_credits` is still not encoded in the
+signed `order_reference`, but it is no longer client-trusted either — it's now
+recomputed server-side at checkout (see next section), so the re-derivation gap
+that used to apply to it is closed by a different mechanism.
 
-## Still open: `upgrade_proration_credits` is client-supplied, unvalidated
+## Fixed (2026-07): `upgrade_proration_credits` is now recomputed server-side
 
-This remains the most actionable finding. Trace:
+This used to be the most actionable finding — the proration credit grant was
+client-supplied and trusted. It is now computed server-side and the request
+field is gone:
 
-1. `SubscriptionCheckoutRequest.upgrade_proration_credits` (`_shared.py:40`) is
-   a plain field on the **incoming request body** — set by the frontend.
-2. `create_subscription_checkout` (`checkout.py:110`) stores that value verbatim
-   on the new pending `PaymentTransaction` row, with **no server-side
-   recomputation or bound-checking** against the org's actual current tier,
-   remaining period, or any proration formula.
-3. When the webhook confirms the payment, `apply_successful_payment`
-   (`payment_transactions.py:376`) reads it back off the row and **grants it as
-   real credits**:
-   ```python
-   proration = payment_tx.upgrade_proration_credits
-   if proration and proration > 0:
-       credits.grant_credits(db, org_id=payment_tx.org_id, amount=proration, ...)
-   ```
+1. `SubscriptionCheckoutRequest` **no longer accepts** `upgrade_proration_credits`
+   (`_shared.py`); any value a client sends is ignored.
+2. `create_subscription_checkout` (`checkout.py:68`) calls the trusted helper
+   `compute_upgrade_proration_credits(db, org, target_tier=body.tier)`
+   (`_shared.py:122`) and stores **that** value on the pending row
+   (`checkout.py:120`). The helper returns `0` unless the org is genuinely
+   upgrading (currently on a paid tier, active period, not scheduled to cancel,
+   and `target_tier` strictly higher than the current tier).
+3. `apply_successful_payment` (`payment_transactions.py:376`) still reads
+   `upgrade_proration_credits` off the row and grants it — but the value is now
+   the server-computed one, so there is nothing client-controlled left to grant.
 
-Note there **is** a server-side proration calculator —
-`POST /subscription/upgrade-proration` (`subscription.py:109`) — but it is
-advisory: the frontend calls it to display a number, then sends its own
-`upgrade_proration_credits` on the checkout. Nothing forces the granted amount
-to equal what that endpoint would compute.
+The advisory endpoint `POST /subscription/upgrade-proration` (`subscription.py:109`)
+now shares the **same** `compute_upgrade_proration_credits` helper, so the number
+the UI displays and the number actually granted come from one code path.
 
-**Payment integrity risk:** nothing stops a client from sending an inflated
-`upgrade_proration_credits` on *any* subscription checkout (not just a genuine
-upgrade) and receiving that many free credits the moment the (possibly
-minimum-amount) payment captures. Whether it's exploitable end-to-end depends
-on frontend behavior — but the backend alone does not defend against it. The
-fix is to recompute proration server-side at checkout (reuse the
-`upgrade-proration` calculator) and ignore the client value, or to bind it into
-the signed `order_reference` the way tier/credits already are.
+**Residual note:** the grant is still not bound into the signed `order_reference`
+— it relies on the pending-row value being server-written at checkout. That's
+sufficient because the client can no longer influence it, but if the threat model
+ever expands to a tampered pending row, encoding it in `order_reference` (like
+tier/credits) would be the next hardening step.
 
 ## Other things worth a look while you're in this area
 
 - `worldline_return`'s exception handling special-cases `"TOKEN_INVALID"` /
   `"TRANSACTION_IN_WRONG_STATE"` substring-matching on a `RuntimeError` message
-  (`webhooks.py:410`) to decide the payment already went through — string
+  (`webhooks.py:403`) to decide the payment already went through — string
   matching on an external provider's error text is brittle if Saferpay ever
   changes the wording.
 - The duplicate-payment guard (`get_payment_transaction_by_external_id`,
-  `webhooks.py:122`) and the 15-minute pending-expiry check (`webhooks.py:127`)
+  `webhooks.py:115`) and the 15-minute pending-expiry check (`webhooks.py:120`)
   are good defensive patterns already in place — don't remove them without
   understanding why they're there (double-webhook-delivery and
   abandoned-checkout cases).

@@ -67,6 +67,11 @@ variable "admin_cidrs" {
   description = "CIDRs allowed to SSH in. Also used to scope sudo on the control-plane node via pam_access, as defense-in-depth behind the firewall rule."
 }
 
+variable "cluster_private_cidr" {
+  type        = string
+  description = "Private subnet CIDR (e.g. 10.0.1.0/24). Configured as Traefik's trusted PROXY protocol / forwarded-headers source, since the Hetzner LB connects to nodes over this network."
+}
+
 variable "db_volume_size_gb" {
   type        = number
   default     = 80

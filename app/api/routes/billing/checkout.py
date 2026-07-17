@@ -77,7 +77,12 @@ def create_subscription_checkout(
             "billing.subscription_checkout calling_provider provider=%s org_id=%s",
             body.provider or "default", org.id,
         )
-        _sub_alias = _resolve_worldline_payment_alias(db, org, _user, body.selected_alias_id) if body.provider in {None, "worldline"} else None
+        # Honor an explicit "new card" choice: when use_new_card is set we do NOT
+        # resolve a saved alias, so the checkout falls through to the Payment Page
+        # even if the org has a card on file (mirrors the top-up flow).
+        _sub_alias = None
+        if body.provider in {None, "worldline"} and not body.use_new_card:
+            _sub_alias = _resolve_worldline_payment_alias(db, org, _user, body.selected_alias_id)
         # Fresh payments (no saved alias to charge) route through the Payment Page so
         # TWINT/PayPal/Apple Pay are offered; saved-alias charges stay on the Transaction
         # interface (one-click, no method picker).
