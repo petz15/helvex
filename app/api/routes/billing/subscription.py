@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 from datetime import datetime, timezone
+
+from app.config import settings
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import HTMLResponse
@@ -227,9 +230,15 @@ def get_payment_invoice(
         if tx.credits_bonus:
             description += f" (incl. {tx.credits_bonus:,} bonus)"
 
-    invoice_number = f"INV-{tx.id:06d}"
     issued_date = tx.authorized_at or tx.created_at
     issued_str = issued_date.strftime("%d %B %Y") if issued_date else "—"
+    # Non-sequential invoice number: issue date + a stable short hash of the provider
+    # reference, so the number can't be used to infer transaction volume/ordering.
+    _inv_seed = str(tx.provider_transaction_id or tx.external_id or tx.order_reference or tx.id)
+    _inv_short = hashlib.sha1(_inv_seed.encode("utf-8")).hexdigest()[:6].upper()
+    _inv_date = issued_date or datetime.now(tz=timezone.utc)
+    invoice_number = f"INV-{_inv_date:%Y%m%d}-{_inv_short}"
+    brand_domain = settings.app_base_url.split("://")[-1].strip("/")
 
     html = f"""<!DOCTYPE html>
 <html lang="en">
@@ -241,7 +250,9 @@ def get_payment_invoice(
   * {{ box-sizing: border-box; margin: 0; padding: 0; }}
   body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; font-size: 14px; color: #1e293b; background: #fff; padding: 40px; max-width: 720px; margin: 0 auto; }}
   .header {{ display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 40px; padding-bottom: 24px; border-bottom: 2px solid #e2e8f0; }}
+  .brand-row {{ display: flex; align-items: center; gap: 12px; margin-bottom: 8px; }}
   .brand {{ font-size: 22px; font-weight: 700; color: #0f172a; letter-spacing: -0.5px; }}
+  .brand-by {{ color: #64748b; font-weight: 600; font-size: 15px; }}
   .brand-sub {{ font-size: 12px; color: #64748b; margin-top: 2px; }}
   .invoice-meta {{ text-align: right; }}
   .invoice-meta .label {{ font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; color: #64748b; }}
@@ -272,10 +283,16 @@ def get_payment_invoice(
 <body>
   <div class="header">
     <div>
-      <div class="brand">HELVEX by Balogh Consulting</div>
-      <div class="brand-sub">helvex.balogh-consulting.ch</div>
-      <div class="label">MWST: CHE-457.771.278</div>
-      <div class="label">Address: Balogh Consulting, Dorfstrasse 43, 3073 Gümligen</div>
+      <div class="brand-row">
+        <svg width="38" height="38" viewBox="0 0 38 38" aria-hidden="true">
+          <rect width="38" height="38" rx="9" fill="#2563eb"/>
+          <path d="M13 11 V27 M25 11 V27 M13 19 H25" stroke="#ffffff" stroke-width="2.6" stroke-linecap="round"/>
+        </svg>
+        <div class="brand">{settings.invoice_brand_name} <span class="brand-by">by {settings.invoice_company_name}</span></div>
+      </div>
+      <div class="brand-sub">{brand_domain}</div>
+      <div class="label">VAT: {settings.invoice_vat_id}</div>
+      <div class="label">{settings.invoice_company_name}, {settings.invoice_company_address}</div>
     </div>
     <div class="invoice-meta">
       <div class="label">Invoice</div>
@@ -332,7 +349,7 @@ def get_payment_invoice(
 
   <div class="footer">
     <p>Transaction ID: {tx.id} &nbsp;·&nbsp; Order ref: {tx.order_reference or '—'} &nbsp;·&nbsp; Provider: {tx.provider.title()}</p>
-    <p style="margin-top:6px;">This document serves as your receipt. For support, contact support@firmiq.io.</p>
+    <p style="margin-top:6px;">This document serves as your receipt. For support, contact {settings.invoice_support_email}.</p>
     {f'<p class="refund-note" style="margin-top:6px;">Refund of {refund_str} issued {tx.refunded_at.strftime("%d %B %Y") if tx.refunded_at else "—"}. Reason: {tx.refund_reason or "—"}</p>' if tx.refunded_at else ''}
   </div>
 </body>

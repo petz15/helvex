@@ -439,6 +439,19 @@
         "savedCard": "Carte enregistrée",
         "savedMethod": "Moyen de paiement enregistré"
       },
+      "banners": {
+        "topupSuccess": "Recharge réussie ! {credits} crédits ajoutés à votre solde.",
+        "topupBonusSuffix": " (dont {bonus} bonus)",
+        "subscriptionActivated": "Abonnement {tier} activé avec succès.",
+        "subscriptionActivatedGeneric": "Abonnement activé avec succès.",
+        "savedMethodRegistered": "Moyen de paiement enregistré avec succès.",
+        "alreadyProcessed": "Ce paiement a déjà été traité. Aucune modification n'a été appliquée deux fois.",
+        "downgradeScheduled": "Rétrogradation planifiée. Votre offre changera à la fin de la période de facturation en cours.",
+        "paymentCompleted": "Paiement effectué avec succès.",
+        "invalidReference": "Le paiement n'a pas pu être associé à une organisation.",
+        "declined": "Le paiement a été refusé ou annulé.",
+        "cancelled": "Paiement annulé ou refusé."
+      },
       "creditLedger": {
         "title": "Registre des crédits",
         "transactions": "{count} transactions",

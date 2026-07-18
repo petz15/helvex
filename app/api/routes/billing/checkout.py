@@ -20,6 +20,7 @@ from app.api.routes.billing._shared import (
     SubscriptionCheckoutRequest,
     TopupCheckoutRequest,
     compute_upgrade_proration_credits,
+    _resolve_alias_method_type,
     _resolve_billing_address,
     _resolve_tier_amount_chf,
     _resolve_worldline_payment_alias,
@@ -83,6 +84,13 @@ def create_subscription_checkout(
         _sub_alias = None
         if body.provider in {None, "worldline"} and not body.use_new_card:
             _sub_alias = _resolve_worldline_payment_alias(db, org, _user, body.selected_alias_id)
+        # Non-card saved aliases (TWINT/PayPal) cannot be charged through the Transaction
+        # alias interface — Saferpay returns ACTION_NOT_SUPPORTED. Drop the alias so the
+        # payment routes to the Payment Page, where the method can be used again.
+        _sub_force_pp = _sub_alias is not None and _resolve_alias_method_type(db, org, _sub_alias) not in (None, "card")
+        if _sub_force_pp:
+            logger.info("billing.subscription_checkout noncard_alias_to_payment_page org_id=%s", org.id)
+            _sub_alias = None
         # Fresh payments (no saved alias to charge) route through the Payment Page so
         # TWINT/PayPal/Apple Pay are offered; saved-alias charges stay on the Transaction
         # interface (one-click, no method picker).
@@ -91,6 +99,11 @@ def create_subscription_checkout(
             and _sub_alias is None
             and body.provider in {None, "worldline"}
         )
+        if _sub_force_pp and not _sub_use_pp:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="This saved payment method (e.g. TWINT) requires the Payment Page, which is not enabled. Please use a card or contact support.",
+            )
         session = payments.create_subscription_checkout(
             org_id=org.id,
             user_id=_user.id,
@@ -195,12 +208,23 @@ def create_topup_checkout(
         _topup_alias = None
         if body.provider in {None, "worldline"} and not body.use_new_card:
             _topup_alias = _resolve_worldline_payment_alias(db, org, _user, body.selected_alias_id)
+        # Non-card saved aliases (TWINT/PayPal) can't be charged via the Transaction alias
+        # interface (Saferpay: ACTION_NOT_SUPPORTED) — route them to the Payment Page.
+        _topup_force_pp = _topup_alias is not None and _resolve_alias_method_type(db, org, _topup_alias) not in (None, "card")
+        if _topup_force_pp:
+            logger.info("billing.topup_checkout noncard_alias_to_payment_page org_id=%s", org.id)
+            _topup_alias = None
         # Fresh payment (new card / no saved alias) → Payment Page for alt methods.
         _topup_use_pp = (
             bool(payments.settings.worldline_payment_page_enabled)
             and _topup_alias is None
             and body.provider in {None, "worldline"}
         )
+        if _topup_force_pp and not _topup_use_pp:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="This saved payment method (e.g. TWINT) requires the Payment Page, which is not enabled. Please use a card or contact support.",
+            )
         session = payments.create_topup_checkout(
             org_id=org.id,
             user_id=_user.id,

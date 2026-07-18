@@ -723,3 +723,203 @@ def test_payment_history_expiration_triggers_worldline_cancel_when_provider_tx_i
     db.refresh(stale)
     assert stale.status == "declined"
     assert stale.error_code == "PENDING_TIMEOUT"
+
+
+# ---------------------------------------------------------------------------
+# Interface routing: Gate 2 (use_new_card) + non-card (TWINT/PayPal) aliases
+# ---------------------------------------------------------------------------
+
+def _fake_sub_checkout(captured):
+    def _f(*, org_id, user_id, payment_alias_id, save_payment_method, tier, billing_cycle,
+           success_url, cancel_url, billing_address, preferred_provider=None,
+           amount_chf=None, use_payment_page=False):
+        captured["payment_alias_id"] = payment_alias_id
+        captured["use_payment_page"] = use_payment_page
+        return CheckoutSession(provider="worldline", checkout_url="https://pp/tok",
+                               external_id="tok_sub", order_reference="wl_sub_x")
+    return _f
+
+
+def _fake_topup_checkout(captured):
+    def _f(*, org_id, user_id, payment_alias_id, save_payment_method, credits,
+           success_url, cancel_url, billing_address, preferred_provider=None,
+           amount_chf=None, use_payment_page=False):
+        captured["payment_alias_id"] = payment_alias_id
+        captured["use_payment_page"] = use_payment_page
+        return CheckoutSession(provider="worldline", checkout_url="https://pp/tok",
+                               external_id="tok_topup", order_reference="wl_topup_x")
+    return _f
+
+
+def _enable_pp(monkeypatch, enabled=True):
+    monkeypatch.setattr("app.services.billing.payments.settings.worldline_payment_page_enabled", enabled)
+
+
+def _override_user_with_alias(org_id, alias_id):
+    app.dependency_overrides[get_current_user] = lambda: User(
+        id=1, email="billing@example.com", hashed_password="x", is_active=True,
+        billing_address_json=json.dumps({"first_name": "B", "last_name": "U", "street": "S",
+                                         "number": "1", "postal_code": "8000", "city": "Zurich",
+                                         "country": "CH", "company_name": ""}),
+        email_verified=True, is_superadmin=False, org_id=org_id, org_role="owner",
+        payment_customer_id=alias_id,
+    )
+
+
+def _seed_org_method(db, org_id, alias_id, method_type, is_default=True, display_text=None, masked=None):
+    from app.models.org_payment_method import OrgPaymentMethod
+    info = {"method_type": method_type}
+    if display_text:
+        info["display_text"] = display_text
+    if masked:
+        info["masked_number"] = masked
+    db.add(OrgPaymentMethod(org_id=org_id, alias_id=alias_id, card_info_json=json.dumps(info),
+                            is_default=is_default, added_by_user_id=1))
+    db.commit()
+
+
+def test_subscription_use_new_card_forces_payment_page(client, db, monkeypatch):
+    org = _seed_org(db, org_id=30)
+    _override_user_with_alias(org.id, "alias_card_30")
+    u = db.get(User, 1); u.payment_customer_id = "alias_card_30"; db.commit()
+    _enable_pp(monkeypatch)
+    captured = {}
+    monkeypatch.setattr("app.services.billing.payments.create_subscription_checkout", _fake_sub_checkout(captured))
+
+    resp = client.post("/api/v1/billing/checkout/subscription", json={
+        "tier": "simple", "billing_cycle": "monthly",
+        "success_url": "https://example.com/success", "cancel_url": "https://example.com/cancel",
+        "use_new_card": True,
+    })
+    assert resp.status_code == 200
+    assert captured["payment_alias_id"] is None       # saved alias ignored
+    assert captured["use_payment_page"] is True        # -> Payment Page
+
+
+def test_subscription_saved_card_uses_transaction_interface(client, db, monkeypatch):
+    org = _seed_org(db, org_id=31)
+    _override_user_with_alias(org.id, "alias_card_31")
+    u = db.get(User, 1); u.payment_customer_id = "alias_card_31"; db.commit()
+    _enable_pp(monkeypatch)
+    captured = {}
+    monkeypatch.setattr("app.services.billing.payments.create_subscription_checkout", _fake_sub_checkout(captured))
+
+    resp = client.post("/api/v1/billing/checkout/subscription", json={
+        "tier": "simple", "billing_cycle": "monthly",
+        "success_url": "https://example.com/success", "cancel_url": "https://example.com/cancel",
+    })
+    assert resp.status_code == 200
+    # Card alias (unknown method_type defaults to card) -> one-click Transaction interface.
+    assert captured["payment_alias_id"] == "alias_card_31"
+    assert captured["use_payment_page"] is False
+
+
+def test_subscription_noncard_alias_routes_to_payment_page(client, db, monkeypatch):
+    org = _seed_org(db, org_id=32)
+    _override_user(org.id)
+    _seed_org_method(db, org.id, "alias_twint_32", "twint", display_text="TWINT")
+    _enable_pp(monkeypatch)
+    captured = {}
+    monkeypatch.setattr("app.services.billing.payments.create_subscription_checkout", _fake_sub_checkout(captured))
+
+    resp = client.post("/api/v1/billing/checkout/subscription", json={
+        "tier": "simple", "billing_cycle": "monthly",
+        "success_url": "https://example.com/success", "cancel_url": "https://example.com/cancel",
+    })
+    assert resp.status_code == 200
+    assert captured["payment_alias_id"] is None        # TWINT alias not sent to Transaction interface
+    assert captured["use_payment_page"] is True
+
+
+def test_subscription_noncard_alias_requires_payment_page_else_503(client, db, monkeypatch):
+    org = _seed_org(db, org_id=33)
+    _override_user(org.id)
+    _seed_org_method(db, org.id, "alias_twint_33", "twint", display_text="TWINT")
+    _enable_pp(monkeypatch, enabled=False)
+    monkeypatch.setattr("app.services.billing.payments.create_subscription_checkout", _fake_sub_checkout({}))
+
+    resp = client.post("/api/v1/billing/checkout/subscription", json={
+        "tier": "simple", "billing_cycle": "monthly",
+        "success_url": "https://example.com/success", "cancel_url": "https://example.com/cancel",
+    })
+    assert resp.status_code == 503
+    assert "Payment Page" in resp.json()["detail"]
+
+
+def test_topup_noncard_alias_routes_to_payment_page(client, db, monkeypatch):
+    org = _seed_org(db, org_id=34)
+    _override_user(org.id)
+    _seed_org_method(db, org.id, "alias_twint_34", "twint", display_text="TWINT")
+    _enable_pp(monkeypatch)
+    captured = {}
+    monkeypatch.setattr("app.services.billing.payments.create_topup_checkout", _fake_topup_checkout(captured))
+
+    resp = client.post("/api/v1/billing/checkout/topup", json={
+        "credits": 10000,
+        "success_url": "https://example.com/success", "cancel_url": "https://example.com/cancel",
+    })
+    assert resp.status_code == 200
+    assert captured["payment_alias_id"] is None
+    assert captured["use_payment_page"] is True
+
+
+def test_payment_methods_returns_method_type_and_display_text(client, db):
+    org = _seed_org(db, org_id=35)
+    _seed_org_method(db, org.id, "alias_twint_35", "twint", display_text="TWINT")
+    # The endpoint reads the personal card off the current-user object, so set it there.
+    app.dependency_overrides[get_current_user] = lambda: User(
+        id=1, email="billing@example.com", hashed_password="x", is_active=True,
+        billing_address_json=org.billing_address_json, email_verified=True,
+        is_superadmin=False, org_id=org.id, org_role="owner",
+        payment_customer_id="alias_card_35",
+        payment_card_info_json=json.dumps({"method_type": "card", "display_text": "Visa 4242",
+                                           "masked_number": "xxxx4242", "brand": "VISA"}),
+    )
+
+    resp = client.get("/api/v1/billing/payment-methods")
+    assert resp.status_code == 200
+    items = {i["alias_id"]: i for i in resp.json()["items"]}
+    assert items["alias_twint_35"]["method_type"] == "twint"
+    assert items["alias_twint_35"]["display_text"] == "TWINT"
+    assert items["alias_card_35"]["method_type"] == "card"
+
+
+def test_upgrade_proration_computed_server_side(db):
+    from app.api.routes.billing._shared import compute_upgrade_proration_credits
+    future = datetime.now(tz=timezone.utc) + timedelta(days=15)
+
+    def _org(tier, cancel=False, period_end=future):
+        return Organization(name="x", slug="x", tier=tier,
+                            subscription_cancel_at_period_end=cancel,
+                            subscription_period_end=period_end,
+                            subscription_billing_cycle="monthly")
+
+    assert compute_upgrade_proration_credits(db, _org("free"), target_tier="simple")[0] == 0
+    assert compute_upgrade_proration_credits(db, _org("simple"), target_tier="explorer")[0] > 0
+    assert compute_upgrade_proration_credits(db, _org("explorer"), target_tier="simple")[0] == 0
+    assert compute_upgrade_proration_credits(db, _org("simple", cancel=True), target_tier="explorer")[0] == 0
+    assert compute_upgrade_proration_credits(
+        db, _org("simple", period_end=datetime.now(tz=timezone.utc) - timedelta(days=1)), target_tier="explorer")[0] == 0
+
+
+def test_invoice_uses_config_issuer_and_nonsequential_number(client, db):
+    from app.config import settings
+    org = _seed_org(db, org_id=36)
+    _override_user(org.id)
+    tx = PaymentTransaction(
+        org_id=org.id, provider="worldline", external_id="tok_inv_36",
+        order_reference="wl_topup_36_1_10000_abcdef", amount_chf=1.0, currency="CHF",
+        kind="topup", status="captured", credits_purchased=10000, credits_total_granted=11500,
+        credits_bonus=1500, provider_transaction_id="wl_provider_tx_36",
+        authorized_at=datetime(2026, 7, 18, tzinfo=timezone.utc),
+        created_at=datetime(2026, 7, 18, tzinfo=timezone.utc),
+    )
+    db.add(tx); db.commit()
+
+    resp = client.get(f"/api/v1/billing/payments/{tx.id}/invoice")
+    assert resp.status_code == 200
+    html = resp.text
+    assert settings.invoice_support_email in html
+    assert "firmiq" not in html.lower()
+    assert "INV-20260718-" in html                 # date-based, non-sequential
+    assert settings.invoice_brand_name in html

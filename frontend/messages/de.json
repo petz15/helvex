@@ -467,6 +467,19 @@
         "savedCard": "Gespeicherte Karte",
         "savedMethod": "Gespeicherte Zahlungsmethode"
       },
+      "banners": {
+        "topupSuccess": "Aufladung erfolgreich! {credits} Credits wurden Ihrem Guthaben gutgeschrieben.",
+        "topupBonusSuffix": " (inkl. {bonus} Bonus)",
+        "subscriptionActivated": "{tier}-Abo erfolgreich aktiviert.",
+        "subscriptionActivatedGeneric": "Abonnement erfolgreich aktiviert.",
+        "savedMethodRegistered": "Zahlungsmethode erfolgreich gespeichert.",
+        "alreadyProcessed": "Diese Zahlung wurde bereits verarbeitet. Es wurden keine doppelten Änderungen vorgenommen.",
+        "downgradeScheduled": "Downgrade geplant. Ihr Tarif wechselt am Ende der aktuellen Abrechnungsperiode.",
+        "paymentCompleted": "Zahlung erfolgreich abgeschlossen.",
+        "invalidReference": "Die Zahlung konnte keiner Organisation zugeordnet werden.",
+        "declined": "Die Zahlung wurde abgelehnt oder abgebrochen.",
+        "cancelled": "Zahlung abgebrochen oder abgelehnt."
+      },
       "creditLedger": {
         "title": "Credit-Ledger",
         "transactions": "{count} Transaktionen",

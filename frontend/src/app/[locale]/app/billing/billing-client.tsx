@@ -1029,46 +1029,56 @@ export function BillingClient() {
 
     if (!checkout && !alreadyProcessed && !reason && !saved && !downgradeScheduled) return;
 
+    const b = dict.app.billing.banners;
+
     if (downgradeScheduled) {
       // eslint-disable-next-line react-hooks/set-state-in-effect
-      setReturnBanner({ kind: "success", message: "Downgrade scheduled. Your plan will switch at the end of the current billing period." });
+      setReturnBanner({ kind: "success", message: b.downgradeScheduled });
       void mutateSummary();
       window.history.replaceState({}, "", window.location.pathname);
       return;
     }
 
     if (alreadyProcessed) {
-      setReturnBanner({ kind: "success", message: "This payment was already processed. No changes were applied twice." });
+      setReturnBanner({ kind: "success", message: b.alreadyProcessed });
     } else if (saved && checkout === "success") {
-      setReturnBanner({ kind: "success", message: "Saved card registered successfully." });
+      setReturnBanner({ kind: "success", message: b.savedMethodRegistered });
       void mutateSummary();
       void mutatePaymentMethods();
     } else if (checkout === "success") {
       if (kind === "topup") {
-        setReturnBanner({
-          kind: "success",
-          message: `Top-up successful! ${credits ? `${fmtNum(Number(credits))} credits` : "Credits"} added to your balance.`,
-        });
         void mutateSummary();
+        // Show the actual granted total (purchased + tier bonus), read from the
+        // just-captured transaction; fall back to the URL's purchased amount.
+        void (async () => {
+          let granted = credits ? Number(credits) : 0;
+          let bonus = 0;
+          try {
+            const hist = await fetchPaymentHistory(1, 5);
+            const tx = hist.items.find(t => t.kind === "topup" && (t.credits_total_granted ?? 0) > 0);
+            if (tx) { granted = tx.credits_total_granted ?? granted; bonus = tx.credits_bonus ?? 0; }
+          } catch { /* keep URL fallback */ }
+          const msg = b.topupSuccess.replace("{credits}", fmtNum(granted))
+            + (bonus > 0 ? b.topupBonusSuffix.replace("{bonus}", fmtNum(bonus)) : "");
+          setReturnBanner({ kind: "success", message: msg });
+        })();
       } else if (kind === "subscription") {
         setReturnBanner({
           kind: "success",
-          message: `${tier ? `${tier} plan` : "Subscription"} activated successfully.`,
+          message: tier ? b.subscriptionActivated.replace("{tier}", tier) : b.subscriptionActivatedGeneric,
         });
         void mutateSummary();
       } else {
-        setReturnBanner({ kind: "success", message: "Payment completed successfully." });
+        setReturnBanner({ kind: "success", message: b.paymentCompleted });
         void mutateSummary();
       }
     } else {
       setReturnBanner({
         kind: "error",
         message:
-          reason === "invalid_reference"
-            ? "Payment could not be matched to an organization."
-            : reason === "payment_declined"
-              ? "Payment was declined or cancelled."
-              : "Payment cancelled or declined.",
+          reason === "invalid_reference" ? b.invalidReference
+            : reason === "payment_declined" ? b.declined
+              : b.cancelled,
       });
     }
 

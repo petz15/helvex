@@ -257,6 +257,36 @@ def _resolve_worldline_payment_alias(
     return str(owner.payment_customer_id or "").strip() or None
 
 
+def _resolve_alias_method_type(db: Session, org: Organization, alias_id: str | None) -> str | None:
+    """Return the stored `method_type` ("card"/"twint"/"paypal"/…) for a resolved
+    alias, or None if unknown. Used to detect non-card aliases, which Saferpay
+    cannot charge via the Transaction/alias interface (they must go to the
+    Payment Page). Looks up the org payment method first, then any user whose
+    saved alias matches.
+    """
+    from app.models.org_payment_method import OrgPaymentMethod
+    if not alias_id:
+        return None
+    card_info_json: str | None = None
+    m = db.query(OrgPaymentMethod).filter(
+        OrgPaymentMethod.org_id == org.id,
+        OrgPaymentMethod.alias_id == alias_id,
+    ).first()
+    if m is not None:
+        card_info_json = m.card_info_json
+    if card_info_json is None:
+        u = db.query(User).filter(User.payment_customer_id == alias_id).first()
+        card_info_json = u.payment_card_info_json if u is not None else None
+    if not card_info_json:
+        return None
+    try:
+        info = json.loads(card_info_json)
+        mt = info.get("method_type")
+        return str(mt) if mt else None
+    except (ValueError, TypeError):
+        return None
+
+
 def _cancel_provider_transaction(tx: PaymentTransaction) -> None:
     """Best-effort provider-side cancellation for pending transactions."""
     if tx.provider != "worldline":

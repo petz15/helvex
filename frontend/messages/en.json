@@ -439,6 +439,19 @@
         "savedCard": "Saved card",
         "savedMethod": "Saved payment method"
       },
+      "banners": {
+        "topupSuccess": "Top-up successful! {credits} credits added to your balance.",
+        "topupBonusSuffix": " (incl. {bonus} bonus)",
+        "subscriptionActivated": "{tier} plan activated successfully.",
+        "subscriptionActivatedGeneric": "Subscription activated successfully.",
+        "savedMethodRegistered": "Payment method registered successfully.",
+        "alreadyProcessed": "This payment was already processed. No changes were applied twice.",
+        "downgradeScheduled": "Downgrade scheduled. Your plan will switch at the end of the current billing period.",
+        "paymentCompleted": "Payment completed successfully.",
+        "invalidReference": "Payment could not be matched to an organization.",
+        "declined": "Payment was declined or cancelled.",
+        "cancelled": "Payment cancelled or declined."
+      },
       "creditLedger": {
         "title": "Credit ledger",
         "transactions": "{count} transactions",

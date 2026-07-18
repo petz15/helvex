@@ -60,6 +60,15 @@ class Settings(BaseSettings):
     smtp_from: str = ""          # e.g. "Helvex <noreply@helvex.dicy.ch>"
     app_base_url: str = "https://helvex.dicy.ch"   # used in email links
 
+    # Invoice / receipt issuer details — shown on the HTML invoice at
+    # GET /billing/payments/{id}/invoice. Overridable via env so the legal entity
+    # isn't hardcoded in the template.
+    invoice_brand_name: str = "Helvex"
+    invoice_company_name: str = "Balogh Consulting"
+    invoice_company_address: str = "Dorfstrasse 43, 3073 Gümligen, Switzerland"
+    invoice_vat_id: str = "CHE-457.771.278 MWST"
+    invoice_support_email: str = "support@helvex.dicy.ch"
+
     # S3 — for async CSV export file storage (Hetzner Object Storage, same region as DB backups)
     s3_access_key: str = ""
     s3_secret_key: str = ""

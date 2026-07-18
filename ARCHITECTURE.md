@@ -361,6 +361,22 @@ methods show `DisplayText` with a generic wallet icon. Legacy rows without `meth
 `"card"` when a masked number is present. Billing copy/i18n is method-neutral ("payment method",
 key `paymentMethods.savedMethod` across en/de/fr/it).
 
+**Charging a non-card alias:** Saferpay cannot charge a saved TWINT/PayPal alias through the
+Transaction interface — `Transaction/Initialize` with such an alias returns `402
+ACTION_NOT_SUPPORTED`. So both checkout routes look up a resolved alias's `method_type`
+(`_resolve_alias_method_type`) and, when it is non-card, **drop the alias and route to the
+Payment Page** (where the method can be re-selected). If the Payment Page flag is off, checkout
+returns `503` with a clear message rather than a provider 402. Amount-less alias *registration*
+(`Alias/Insert`, the standalone "add payment method" flow) remains card-only — Saferpay has no
+amount-less registration for TWINT/PayPal; those are saved during an actual Payment Page payment
+with "save this payment method" checked.
+
+**Invoice issuer details** (`GET /billing/payments/{id}/invoice`) come from `Settings`
+(`invoice_brand_name`, `invoice_company_name`, `invoice_company_address`, `invoice_vat_id`,
+`invoice_support_email`), overridable via env — not hardcoded. The invoice number is
+`INV-{YYYYMMDD}-{sha1(provider_ref)[:6]}` (date-based, non-sequential — can't be used to infer
+transaction volume).
+
 For the Saferpay
 API request/response contract, see
 [`docs/payment-flows.md`](docs/payment-flows.md); for the code-structure risk
@@ -2069,6 +2085,16 @@ alembic upgrade head
 ---
 
 ## 16. Web Crawler Pipeline
+
+> ⚠️ **Identity scoring is being reworked.** The current single `web_score`/`confidence`
+> scalar conflates three questions (is this the company's site? / how good is the site? /
+> how relevant is it to me?) and emits false signals — pre-crawl snippet scores leak into
+> the verdict, `compute_verdict` silently max-picks among ambiguous candidates, and UID
+> matching is a crude binary compare. The approved redesign splits **identity** (probability
+> + category + evidence ledger, ledger-first then a GBM) from **content** (global facts) and
+> moves **fit** to the per-org scoring layer; `web_score` is retired as a relevance input.
+> See [`docs/code-review/web-identity-rework.md`](docs/code-review/web-identity-rework.md).
+> The description below is the *current* implementation.
 
 ### Overview
 
