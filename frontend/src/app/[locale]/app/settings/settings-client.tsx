@@ -550,9 +550,6 @@ export function SettingsClient() {
             <span className="text-sm text-slate-700">{dict.app.settings.admin.enabled}</span>
           </label>
         </Field>
-        <Field label={dict.app.settings.admin.dailyQuota}>
-          <input type="number" min="1" value={form.google_daily_quota ?? "100"} onChange={e => set("google_daily_quota", e.target.value)} className={inputCls} />
-        </Field>
       </div>
 
       <SectionTitle title={dict.app.settings.admin.googleScoringFilters} />

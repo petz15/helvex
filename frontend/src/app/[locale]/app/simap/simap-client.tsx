@@ -6,6 +6,7 @@ import {
   Award, Building2, Search, Download, ChevronLeft, ChevronRight,
   SlidersHorizontal, X, ExternalLink,
 } from "lucide-react";
+import { useI18n } from "@/i18n/context";
 
 interface SimapResult {
   id: number;
@@ -58,6 +59,8 @@ async function searchSimap(params: URLSearchParams): Promise<SearchResponse> {
 }
 
 export function SimapSearchClient({ locale }: { locale: string }) {
+  const { dict } = useI18n();
+  const t = dict.app.simap;
   // Filter state
   const [q, setQ] = useState("");
   const [fromDate, setFromDate] = useState("");
@@ -109,11 +112,11 @@ export function SimapSearchClient({ locale }: { locale: string }) {
       setResults(data);
       setPage(pg);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Search failed");
+      setError(e instanceof Error ? e.message : t.searchFailed);
     } finally {
       setLoading(false);
     }
-  }, [buildParams]);
+  }, [buildParams, t]);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -157,9 +160,9 @@ export function SimapSearchClient({ locale }: { locale: string }) {
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
           <Award size={20} className="text-slate-500" />
-          <h1 className="text-xl font-semibold text-slate-800">Public Contracts (SIMAP)</h1>
+          <h1 className="text-xl font-semibold text-slate-800">{t.title}</h1>
           {results && (
-            <span className="text-sm text-slate-400 ml-1">{results.total.toLocaleString()} results</span>
+            <span className="text-sm text-slate-400 ml-1">{t.results.replace("{count}", results.total.toLocaleString())}</span>
           )}
         </div>
         <div className="flex items-center gap-2">
@@ -168,7 +171,7 @@ export function SimapSearchClient({ locale }: { locale: string }) {
             className={`${btnCls} border ${showFilters ? "bg-blue-50 border-blue-300 text-blue-700" : "border-slate-200 text-slate-600 hover:bg-slate-50"}`}
           >
             <SlidersHorizontal size={14} />
-            Filters
+            {t.filters}
           </button>
           {results && results.total > 0 && (
             <button
@@ -190,7 +193,7 @@ export function SimapSearchClient({ locale }: { locale: string }) {
             type="text"
             value={q}
             onChange={e => setQ(e.target.value)}
-            placeholder="Search contract title or authority… (e.g. Strassenbau, Kanalisation)"
+            placeholder={t.searchPlaceholder}
             className={`${inputCls} pl-9`}
           />
           {q && (
@@ -204,7 +207,7 @@ export function SimapSearchClient({ locale }: { locale: string }) {
           disabled={loading}
           className={`${btnCls} bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50 shrink-0`}
         >
-          {loading ? "Searching…" : "Search"}
+          {loading ? t.searching : t.search}
         </button>
       </form>
 
@@ -212,35 +215,35 @@ export function SimapSearchClient({ locale }: { locale: string }) {
       {showFilters && (
         <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 grid grid-cols-2 md:grid-cols-3 gap-3">
           <div>
-            <label className="text-xs font-medium text-slate-500 block mb-1">From date</label>
+            <label className="text-xs font-medium text-slate-500 block mb-1">{t.fromDate}</label>
             <input type="date" value={fromDate} onChange={e => setFromDate(e.target.value)} className={inputCls} />
           </div>
           <div>
-            <label className="text-xs font-medium text-slate-500 block mb-1">To date</label>
+            <label className="text-xs font-medium text-slate-500 block mb-1">{t.toDate}</label>
             <input type="date" value={toDate} onChange={e => setToDate(e.target.value)} className={inputCls} />
           </div>
           <div>
-            <label className="text-xs font-medium text-slate-500 block mb-1">CPV code prefix</label>
-            <input type="text" value={cpv} onChange={e => setCpv(e.target.value)} placeholder="e.g. 451" className={inputCls} />
+            <label className="text-xs font-medium text-slate-500 block mb-1">{t.cpv}</label>
+            <input type="text" value={cpv} onChange={e => setCpv(e.target.value)} placeholder={t.cpvPlaceholder} className={inputCls} />
           </div>
           <div>
-            <label className="text-xs font-medium text-slate-500 block mb-1">Min price (CHF)</label>
+            <label className="text-xs font-medium text-slate-500 block mb-1">{t.minPrice}</label>
             <input type="number" value={minPrice} onChange={e => setMinPrice(e.target.value)} placeholder="0" className={inputCls} />
           </div>
           <div>
-            <label className="text-xs font-medium text-slate-500 block mb-1">Max price (CHF)</label>
-            <input type="number" value={maxPrice} onChange={e => setMaxPrice(e.target.value)} placeholder="unlimited" className={inputCls} />
+            <label className="text-xs font-medium text-slate-500 block mb-1">{t.maxPrice}</label>
+            <input type="number" value={maxPrice} onChange={e => setMaxPrice(e.target.value)} placeholder={t.maxPricePlaceholder} className={inputCls} />
           </div>
           <div>
-            <label className="text-xs font-medium text-slate-500 block mb-1">Vendor name (fuzzy)</label>
-            <input type="text" value={vendorName} onChange={e => setVendorName(e.target.value)} placeholder="e.g. Müller Bau" className={inputCls} />
+            <label className="text-xs font-medium text-slate-500 block mb-1">{t.vendorName}</label>
+            <input type="text" value={vendorName} onChange={e => setVendorName(e.target.value)} placeholder={t.vendorPlaceholder} className={inputCls} />
           </div>
           <div>
-            <label className="text-xs font-medium text-slate-500 block mb-1">Data source</label>
+            <label className="text-xs font-medium text-slate-500 block mb-1">{t.dataSource}</label>
             <select value={source} onChange={e => setSource(e.target.value as "" | "api" | "archive")} className={inputCls}>
-              <option value="">All</option>
-              <option value="api">Post-2024 (simap.ch)</option>
-              <option value="archive">Pre-2024 archive</option>
+              <option value="">{t.sourceAll}</option>
+              <option value="api">{t.sourceApi}</option>
+              <option value="archive">{t.sourceArchive}</option>
             </select>
           </div>
           <div className="flex items-end">
@@ -251,7 +254,7 @@ export function SimapSearchClient({ locale }: { locale: string }) {
                 onChange={e => setMatchedOnly(e.target.checked)}
                 className="rounded"
               />
-              Matched to our companies only
+              {t.matchedOnly}
             </label>
           </div>
         </div>
@@ -269,19 +272,19 @@ export function SimapSearchClient({ locale }: { locale: string }) {
               <thead className="bg-slate-50 border-b border-slate-200">
                 <tr>
                   <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">
-                    <SortBtn col="title" label="Contract" />
+                    <SortBtn col="title" label={t.colContract} />
                   </th>
                   <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider hidden md:table-cell">
-                    Authority
+                    {t.colAuthority}
                   </th>
                   <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">
-                    Vendor
+                    {t.colVendor}
                   </th>
                   <th className="text-right px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">
-                    <SortBtn col="price" label="Price" />
+                    <SortBtn col="price" label={t.colPrice} />
                   </th>
                   <th className="text-right px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider hidden lg:table-cell">
-                    <SortBtn col="date" label="Date" />
+                    <SortBtn col="date" label={t.colDate} />
                   </th>
                   <th className="px-4 py-3 hidden lg:table-cell"></th>
                 </tr>
@@ -332,7 +335,7 @@ export function SimapSearchClient({ locale }: { locale: string }) {
                     <td className="px-4 py-3 hidden lg:table-cell">
                       <div className="flex items-center gap-2 justify-end">
                         {row.source === "archive" ? (
-                          <span className="text-xs px-1.5 py-0.5 rounded bg-slate-100 text-slate-500">archive</span>
+                          <span className="text-xs px-1.5 py-0.5 rounded bg-slate-100 text-slate-500">{t.archiveBadge}</span>
                         ) : null}
                         {!row.simap_project_id.startsWith("arch-") && (
                           <a
@@ -340,7 +343,7 @@ export function SimapSearchClient({ locale }: { locale: string }) {
                             target="_blank"
                             rel="noopener noreferrer"
                             className="text-slate-300 hover:text-blue-500 transition-colors"
-                            title="View on simap.ch"
+                            title={t.viewOnSimap}
                           >
                             <ExternalLink size={13} />
                           </a>
@@ -357,7 +360,7 @@ export function SimapSearchClient({ locale }: { locale: string }) {
           {results.pages > 1 && (
             <div className="border-t border-slate-100 px-4 py-3 flex items-center justify-between bg-slate-50">
               <p className="text-xs text-slate-500">
-                Page {results.page} of {results.pages} ({results.total.toLocaleString()} results)
+                {t.pageOf.replace("{page}", String(results.page)).replace("{pages}", String(results.pages)).replace("{total}", results.total.toLocaleString())}
               </p>
               <div className="flex items-center gap-1">
                 <button
@@ -381,15 +384,15 @@ export function SimapSearchClient({ locale }: { locale: string }) {
       ) : hasSearched && !loading && results ? (
         <div className="text-center py-16 text-slate-400">
           <Award size={32} className="mx-auto mb-3 opacity-30" />
-          <p className="text-sm">No contracts found for this query.</p>
-          <p className="text-xs mt-1">Try different keywords or remove filters.</p>
+          <p className="text-sm">{t.noResults}</p>
+          <p className="text-xs mt-1">{t.noResultsHint}</p>
         </div>
       ) : !hasSearched ? (
         <div className="text-center py-16 text-slate-400">
           <Award size={32} className="mx-auto mb-3 opacity-30" />
-          <p className="text-sm font-medium">Search 116k+ public procurement contracts</p>
+          <p className="text-sm font-medium">{t.emptyTitle}</p>
           <p className="text-xs mt-1">
-            Covers 2007–2023 (archive) and July 2024–present (live). Vendors linked to company profiles where possible.
+            {t.emptyHint}
           </p>
           <div className="mt-4 flex flex-wrap gap-2 justify-center text-xs text-slate-500">
             {["Strassenbau", "Reinigungsarbeiten", "Softwareentwicklung", "Beratung"].map(ex => (

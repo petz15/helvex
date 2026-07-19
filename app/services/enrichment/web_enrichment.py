@@ -552,21 +552,8 @@ def run_batch_collect(
             stats["warnings"].append(f"Google enrichment skipped: {reason}.")
             run_google = False
 
-    if run_google:
-        quota = int(crud.get_setting(db, "google_daily_quota", str(settings.google_daily_quota)))
-        searches_today = crud.get_company_stats(db)["searches_today"]
-        available = max(0, quota - searches_today)
-        if available == 0:
-            stats["warnings"].append(
-                f"Daily Google quota reached: {searches_today}/{quota} searches used today. "
-                f"Google enrichment skipped. Reset at midnight UTC or raise quota in settings."
-            )
-            run_google = False
-        elif limit > available:
-            stats["warnings"].append(
-                f"Batch limited to {available} companies (quota: {searches_today}/{quota} searches used today)."
-            )
-            limit = available
+    # No daily Google search quota — enrichment volume is bounded only by the
+    # requested `limit` and per-action credits.
 
     # Branch offices (Zweigniederlassung) don't have independent websites;
     # skip them to avoid wasting Serper quota on sites that redirect to the parent.
@@ -589,7 +576,12 @@ def run_batch_collect(
 
     # ── Status / registration ────────────────────────────────────────────────
     if active_only:
-        query = query.filter(Company.status.notin_(list(_DELETED_STATUSES)))
+        # NULL status is not "deleted" — include it. In SQL `NULL NOT IN (...)`
+        # evaluates to NULL (falsy), which would silently drop every company Zefix
+        # returned without a status.
+        query = query.filter(
+            or_(Company.status.is_(None), Company.status.notin_(list(_DELETED_STATUSES)))
+        )
     _excl_reg: list[str] = []
     if skip_uid_only:
         _excl_reg.append("uid_only")

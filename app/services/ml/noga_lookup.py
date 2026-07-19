@@ -18,7 +18,7 @@ def load_noga_hierarchy() -> dict[str, Any]:
     if _NOGA_CACHE is not None:
         return _NOGA_CACHE
 
-    lookup_path = Path(__file__).resolve().parents[3] / "noga_lookup.json"
+    lookup_path = Path(__file__).resolve().parents[2] / "data" / "noga_lookup.json"
     try:
         with lookup_path.open("r", encoding="utf-8") as f:
             noga_data = json.load(f)

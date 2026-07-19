@@ -687,7 +687,6 @@
         "googleSearch": "Google search",
         "enableGoogleSearch": "Enable Google search",
         "enabled": "Enabled",
-        "dailyQuota": "Daily quota",
         "googleScoringFilters": "Google scoring filters",
         "seedDescription": "Seed the database with all built-in defaults: Google stopwords, directory domains, and TF-IDF stopwords. Safe to run multiple times — skips existing rows.",
         "seedDefaults": "Seed defaults",

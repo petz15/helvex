@@ -548,7 +548,6 @@
         "googleSearch": "Ricerca Google",
         "enableGoogleSearch": "Abilita ricerca Google",
         "enabled": "Abilitato",
-        "dailyQuota": "Quota giornaliera",
         "googleScoringFilters": "Filtri di scoring Google",
         "seedDescription": "Popola il database con tutti i valori predefiniti integrati: stopword Google, domini di directory e stopword TF-IDF. Sicuro da eseguire più volte — ignora le righe esistenti.",
         "seedDefaults": "Seed valori predefiniti",

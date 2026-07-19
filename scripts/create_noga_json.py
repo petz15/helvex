@@ -12,8 +12,8 @@ https://www.i14y.admin.ch/de/catalog/concepts/08dd28d2-a693-5049-a3fe-0ee83005b6
 
 DIR = pathlib.Path("C:\\D\\coding_projects\\zefix_analyzer\\")
 INPUT_FILE = "CodelistEntries_nogaCode-2.0.0.json"
-OUTPUT_TREE_FILE = "noga_tree.json"
-OUTPUT_LOOKUP_FILE = "noga_lookup.json"
+OUTPUT_TREE_FILE = "app/data/noga_tree.json"
+OUTPUT_LOOKUP_FILE = "app/data/noga_lookup.json"
 
 
 _CODE_PATTERNS: list[tuple[str, re.Pattern[str], int, str]] = [

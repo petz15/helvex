@@ -17,15 +17,16 @@ import {
   type NotificationPreferences,
 } from "@/lib/api";
 import { OrgClient } from "@/app/[locale]/app/org/org-client";
+import { useI18n } from "@/i18n/context";
 
 const inputCls =
   "w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-300 focus:border-transparent bg-white";
 
-const ROLE_META: Record<string, { label: string; icon: React.ElementType; cls: string }> = {
-  owner:  { label: "Owner",  icon: Crown,  cls: "text-purple-600 bg-purple-50 border-purple-200" },
-  admin:  { label: "Admin",  icon: Shield, cls: "text-blue-600 bg-blue-50 border-blue-200" },
-  member: { label: "Member", icon: User,   cls: "text-slate-600 bg-slate-50 border-slate-200" },
-  viewer: { label: "Viewer", icon: Eye,    cls: "text-slate-400 bg-slate-50 border-slate-100" },
+const ROLE_META: Record<string, { icon: React.ElementType; cls: string }> = {
+  owner:  { icon: Crown,  cls: "text-purple-600 bg-purple-50 border-purple-200" },
+  admin:  { icon: Shield, cls: "text-blue-600 bg-blue-50 border-blue-200" },
+  member: { icon: User,   cls: "text-slate-600 bg-slate-50 border-slate-200" },
+  viewer: { icon: Eye,    cls: "text-slate-400 bg-slate-50 border-slate-100" },
 };
 
 const TIER_COLORS: Record<string, string> = {
@@ -64,9 +65,12 @@ function OrgCard({
   switching: boolean;
   leaving: boolean;
 }) {
+  const { dict } = useI18n();
+  const t = dict.app.organizations;
   const role = org.role ?? "member";
   const meta = ROLE_META[role] ?? ROLE_META.member;
   const RoleIcon = meta.icon;
+  const roleLabel = t.roles[role as keyof typeof t.roles] ?? t.roles.member;
 
   return (
     <div className={`relative rounded-xl border p-5 transition-all duration-200 ${
@@ -77,7 +81,7 @@ function OrgCard({
       {isActive && (
         <div className="absolute top-3 right-3 flex items-center gap-1 text-xs font-medium text-blue-600 bg-blue-100 px-2 py-0.5 rounded-full">
           <Check size={10} />
-          Active
+          {t.active}
         </div>
       )}
 
@@ -96,7 +100,7 @@ function OrgCard({
       <div className="mt-4 flex items-center gap-2 flex-wrap">
         <span className={`inline-flex items-center gap-1 border text-xs font-medium px-2 py-0.5 rounded-full ${meta.cls}`}>
           <RoleIcon size={10} />
-          {meta.label}
+          {roleLabel}
         </span>
         <span className={`inline-flex items-center text-xs font-medium px-2 py-0.5 rounded-full capitalize ${TIER_COLORS[org.tier] ?? "bg-slate-100 text-slate-600"}`}>
           {org.tier}
@@ -111,11 +115,11 @@ function OrgCard({
             className="flex items-center gap-1.5 text-sm font-medium text-blue-600 hover:text-blue-800 disabled:opacity-50 transition-colors"
           >
             {switching ? <Loader2 size={13} className="animate-spin" /> : <ArrowRight size={13} />}
-            Switch to this org
+            {t.switchTo}
           </button>
         )}
         {isActive && (
-          <span className="text-xs text-slate-400">Currently active workspace</span>
+          <span className="text-xs text-slate-400">{t.currentlyActive}</span>
         )}
         <div className="ml-auto">
           {role !== "owner" && (
@@ -124,7 +128,7 @@ function OrgCard({
               disabled={leaving}
               className="text-xs text-red-400 hover:text-red-600 font-medium disabled:opacity-50 transition-colors"
             >
-              {leaving ? "Leaving…" : "Leave"}
+              {leaving ? t.leaving : t.leave}
             </button>
           )}
         </div>
@@ -133,11 +137,11 @@ function OrgCard({
   );
 }
 
-const NOTIF_ITEMS: { key: keyof NotificationPreferences; label: string; description: string }[] = [
-  { key: "notif_low_credit",   label: "Low credit alert",    description: "When your credit balance is running low" },
-  { key: "notif_export_ready", label: "Export ready",         description: "When a CSV export has finished" },
-  { key: "notif_job_failed",   label: "Job failures",         description: "When a background job fails" },
-  { key: "notif_saved_view",   label: "Saved view matches",   description: "When new companies match a saved search" },
+const NOTIF_ITEMS: { key: keyof NotificationPreferences; tkey: "low_credit" | "export_ready" | "job_failed" | "saved_view" }[] = [
+  { key: "notif_low_credit",   tkey: "low_credit" },
+  { key: "notif_export_ready", tkey: "export_ready" },
+  { key: "notif_job_failed",   tkey: "job_failed" },
+  { key: "notif_saved_view",   tkey: "saved_view" },
 ];
 
 function Toggle({ checked, onChange, disabled }: { checked: boolean; onChange: (v: boolean) => void; disabled?: boolean }) {
@@ -162,6 +166,8 @@ function Toggle({ checked, onChange, disabled }: { checked: boolean; onChange: (
 }
 
 function NotificationSettings({ orgId }: { orgId: number }) {
+  const { dict } = useI18n();
+  const t = dict.app.organizations;
   const { data: prefs, mutate } = useSWR(
     `my-notifications-${orgId}`,
     () => fetchMyNotificationPreferences(orgId),
@@ -191,7 +197,7 @@ function NotificationSettings({ orgId }: { orgId: number }) {
     return (
       <div className="flex items-center gap-2 text-xs text-slate-400 py-2">
         <Loader2 size={12} className="animate-spin" />
-        Loading preferences…
+        {t.loadingPrefs}
       </div>
     );
   }
@@ -203,8 +209,8 @@ function NotificationSettings({ orgId }: { orgId: number }) {
       {/* Master toggle */}
       <div className="flex items-center justify-between py-2.5 border-b border-slate-100">
         <div>
-          <p className="text-sm font-medium text-slate-800">Email notifications</p>
-          <p className="text-xs text-slate-400 mt-0.5">Master switch for all email alerts</p>
+          <p className="text-sm font-medium text-slate-800">{t.emailNotifications}</p>
+          <p className="text-xs text-slate-400 mt-0.5">{t.emailMaster}</p>
         </div>
         <Toggle
           checked={masterOn}
@@ -215,11 +221,11 @@ function NotificationSettings({ orgId }: { orgId: number }) {
 
       {/* Individual toggles */}
       <div className={`space-y-0 transition-opacity duration-200 ${masterOn ? "opacity-100" : "opacity-40 pointer-events-none"}`}>
-        {NOTIF_ITEMS.map(({ key, label, description }) => (
+        {NOTIF_ITEMS.map(({ key, tkey }) => (
           <div key={key} className="flex items-center justify-between py-2.5">
             <div>
-              <p className="text-sm text-slate-700">{label}</p>
-              <p className="text-xs text-slate-400">{description}</p>
+              <p className="text-sm text-slate-700">{t.notif[tkey].label}</p>
+              <p className="text-xs text-slate-400">{t.notif[tkey].desc}</p>
             </div>
             <Toggle
               checked={prefs[key] as boolean}
@@ -235,6 +241,8 @@ function NotificationSettings({ orgId }: { orgId: number }) {
 
 export function OrganizationsClient() {
   const router = useRouter();
+  const { dict } = useI18n();
+  const t = dict.app.organizations;
   const { data: me, mutate: reloadMe } = useSWR("me", fetchCurrentUser);
   const { data: orgs = [], mutate: reloadOrgs } = useSWR(me ? "my-orgs" : null, fetchMyOrgs);
 
@@ -259,10 +267,10 @@ export function OrganizationsClient() {
       await Promise.all([reloadMe(), reloadOrgs()]);
       setOrgName("");
       setShowCreate(false);
-      flash("success", "Organization created. You are now the owner.");
+      flash("success", t.created);
       router.refresh();
     } catch (err) {
-      flash("error", err instanceof Error ? err.message : "Failed to create organization");
+      flash("error", err instanceof Error ? err.message : t.createFailed);
     } finally {
       setCreating(false);
     }
@@ -274,31 +282,31 @@ export function OrganizationsClient() {
     try {
       await switchOrg(orgId);
       await Promise.all([reloadMe(), reloadOrgs()]);
-      flash("success", "Switched organization.");
+      flash("success", t.switched);
       router.refresh();
     } catch (err) {
-      flash("error", err instanceof Error ? err.message : "Failed to switch organization");
+      flash("error", err instanceof Error ? err.message : t.switchFailed);
     } finally {
       setSwitchingId(null);
     }
   }
 
   async function handleLeave(org: OrgInfo) {
-    if (!confirm(`Leave "${org.name}"? You will lose access to its data.`)) return;
+    if (!confirm(t.leaveConfirm.replace("{name}", org.name))) return;
     setLeavingId(org.id);
     try {
       await leaveOrg(org.id);
       await Promise.all([reloadMe(), reloadOrgs()]);
-      flash("success", `You have left "${org.name}".`);
+      flash("success", t.leftOrg.replace("{name}", org.name));
       router.refresh();
     } catch (err) {
-      flash("error", err instanceof Error ? err.message : "Failed to leave organization");
+      flash("error", err instanceof Error ? err.message : t.leaveFailed);
     } finally {
       setLeavingId(null);
     }
   }
 
-  if (!me) return <div className="p-6 text-slate-400 text-sm">Loading…</div>;
+  if (!me) return <div className="p-6 text-slate-400 text-sm">{t.loading}</div>;
 
   const activeOrgId = me.org_id;
 
@@ -306,9 +314,9 @@ export function OrganizationsClient() {
     <div className="p-6 max-w-3xl mx-auto space-y-8">
       {/* Header */}
       <div>
-        <h1 className="text-xl font-semibold text-slate-900">Organizations</h1>
+        <h1 className="text-xl font-semibold text-slate-900">{t.title}</h1>
         <p className="text-sm text-slate-500 mt-0.5">
-          Manage the workspaces you belong to. Each organization is an independent workspace with its own members, settings, and billing.
+          {t.subtitle}
         </p>
       </div>
 
@@ -318,14 +326,14 @@ export function OrganizationsClient() {
       <div className="space-y-4">
         <div className="flex items-center justify-between">
           <h2 className="text-sm font-semibold text-slate-500 uppercase tracking-wider">
-            Your organizations <span className="normal-case font-normal text-slate-400 ml-1">({orgs.length})</span>
+            {t.yourOrgs} <span className="normal-case font-normal text-slate-400 ml-1">({orgs.length})</span>
           </h2>
           <button
             onClick={() => setShowCreate((v) => !v)}
             className="flex items-center gap-1.5 text-sm font-medium text-blue-600 hover:text-blue-800 transition-colors"
           >
             <Plus size={14} />
-            New organization
+            {t.newOrg}
           </button>
         </div>
 
@@ -337,17 +345,17 @@ export function OrganizationsClient() {
           >
             <div className="flex items-center gap-2 text-sm font-semibold text-blue-700">
               <Building2 size={15} />
-              Create a new organization
+              {t.createTitle}
             </div>
             <div>
-              <label className="block text-xs font-medium text-slate-600 mb-1">Organization name</label>
+              <label className="block text-xs font-medium text-slate-600 mb-1">{t.orgName}</label>
               <input
                 autoFocus
                 required
                 value={orgName}
                 onChange={(e) => setOrgName(e.target.value)}
                 className={inputCls}
-                placeholder="e.g. Acme Corp"
+                placeholder={t.orgNamePlaceholder}
               />
             </div>
             <div className="flex gap-2">
@@ -357,14 +365,14 @@ export function OrganizationsClient() {
                 className="flex items-center gap-1.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-60 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors"
               >
                 {creating ? <Loader2 size={14} className="animate-spin" /> : <Building2 size={14} />}
-                Create
+                {t.create}
               </button>
               <button
                 type="button"
                 onClick={() => { setShowCreate(false); setOrgName(""); }}
                 className="px-4 py-2 text-sm text-slate-500 hover:text-slate-700 rounded-lg hover:bg-white/60 transition-colors"
               >
-                Cancel
+                {t.cancel}
               </button>
             </div>
           </form>
@@ -374,8 +382,8 @@ export function OrganizationsClient() {
         {orgs.length === 0 ? (
           <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50 p-8 text-center">
             <Building2 size={28} className="text-slate-300 mx-auto mb-3" />
-            <p className="text-sm text-slate-500">You are not part of any organization.</p>
-            <p className="text-xs text-slate-400 mt-1">Create one above or ask a team owner for an invite.</p>
+            <p className="text-sm text-slate-500">{t.emptyTitle}</p>
+            <p className="text-xs text-slate-400 mt-1">{t.emptyHint}</p>
           </div>
         ) : (
           <div className="grid gap-3 sm:grid-cols-2">
@@ -400,10 +408,10 @@ export function OrganizationsClient() {
           <div className="border-t border-slate-100 pt-6">
             <div className="flex items-center gap-2 mb-1">
               <Users size={16} className="text-slate-500" />
-              <h2 className="text-sm font-semibold text-slate-500 uppercase tracking-wider">Team</h2>
+              <h2 className="text-sm font-semibold text-slate-500 uppercase tracking-wider">{t.team}</h2>
             </div>
             <p className="text-xs text-slate-400">
-              Manage members of your active organization.
+              {t.teamHint}
             </p>
           </div>
           <div className="rounded-xl border border-slate-200 bg-white p-4">
@@ -418,10 +426,10 @@ export function OrganizationsClient() {
           <div className="border-t border-slate-100 pt-6">
             <div className="flex items-center gap-2 mb-1">
               <Bell size={16} className="text-slate-500" />
-              <h2 className="text-sm font-semibold text-slate-500 uppercase tracking-wider">Notifications</h2>
+              <h2 className="text-sm font-semibold text-slate-500 uppercase tracking-wider">{t.notifications}</h2>
             </div>
             <p className="text-xs text-slate-400">
-              Your personal email notification preferences for this organization.
+              {t.notifHint}
             </p>
           </div>
           <div className="rounded-xl border border-slate-200 bg-white px-5 py-3">

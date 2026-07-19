@@ -5,7 +5,7 @@ import Link from "next/link";
 import useSWR from "swr";
 import {
   Search, Building2, Users, ListTree, ChevronRight, ChevronLeft, Globe, MapPin, ArrowRight,
-  Briefcase, SlidersHorizontal,
+  SlidersHorizontal,
 } from "lucide-react";
 import { fetchCompanies, fetchCantons, fetchNogaHierarchy, searchPersonEntities } from "@/lib/api";
 import type { NogaNode } from "@/lib/api";
@@ -389,9 +389,14 @@ export function SearchLandingClient({ locale }: SearchLandingClientProps) {
 
   const { data: cantons = [] } = useSWR("cantons", fetchCantons);
 
+  // Fetch companies + people regardless of the active tab so every tab badge
+  // shows its result count up front (page/offset only apply on the active tab).
+  // Off the companies tab we only need `total` for the badge, so fetch a single row
+  // instead of a full page of 25.
+  const companiesActive = tab === "companies";
   const { data: companiesPage, isLoading: loadingCompanies } = useSWR(
-    hasSearched && tab === "companies" && submittedQuery
-      ? ["search-landing-companies", submittedQuery, canton, legalForm, nogaSection, page]
+    hasSearched && submittedQuery
+      ? ["search-landing-companies", submittedQuery, canton, legalForm, nogaSection, companiesActive ? page : 1, companiesActive ? 25 : 1]
       : null,
     () => fetchCompanies({
       q: submittedQuery,
@@ -399,37 +404,35 @@ export function SearchLandingClient({ locale }: SearchLandingClientProps) {
       legal_form: legalForm || undefined,
       noga_code: nogaSection || undefined,
       sort: "name",
-      page,
-      page_size: 25,
+      page: companiesActive ? page : 1,
+      page_size: companiesActive ? 25 : 1,
     }),
     { keepPreviousData: true }
   );
 
   const { data: people = [], isLoading: loadingPeople } = useSWR(
-    hasSearched && tab === "people" && (submittedQuery || personFiltersActive)
-      ? ["search-landing-people", submittedQuery, personRoleCategory, personMinCompanies, page]
+    hasSearched && (submittedQuery || personFiltersActive)
+      ? ["search-landing-people", submittedQuery, personRoleCategory, personMinCompanies, tab === "people" ? page : 1]
       : null,
     () => searchPersonEntities({
       q: submittedQuery || undefined,
       role_category: personRoleCategory || undefined,
       min_total_companies: personMinCompanies > 0 ? personMinCompanies : undefined,
       limit: 25,
-      offset: (page - 1) * 25,
+      offset: tab === "people" ? (page - 1) * 25 : 0,
     }),
     { keepPreviousData: true }
   );
 
-  const { data: nogaHierarchy = [] } = useSWR(
-    hasSearched && tab === "noga" ? "noga-hierarchy" : null,
-    fetchNogaHierarchy
-  );
-
+  // Single NOGA hierarchy fetch (shared SWR key) powers both the filter dropdown
+  // and the NOGA tab matches + badge.
   const { data: filterNogaHierarchy = [] } = useSWR("noga-hierarchy", fetchNogaHierarchy);
+  const nogaHierarchy = filterNogaHierarchy;
 
   const nogaMatches = useMemo(() => {
-    if (!submittedQuery || nogaHierarchy.length === 0) return [];
-    return flattenNoga(nogaHierarchy).filter(n => matchesNoga(n, submittedQuery)).slice(0, 40);
-  }, [submittedQuery, nogaHierarchy]);
+    if (!submittedQuery || filterNogaHierarchy.length === 0) return [];
+    return flattenNoga(filterNogaHierarchy).filter(n => matchesNoga(n, submittedQuery)).slice(0, 40);
+  }, [submittedQuery, filterNogaHierarchy]);
 
   const nogaSections = useMemo(
     () => filterNogaHierarchy.filter(n => n.level === "section"),
@@ -553,19 +556,18 @@ export function SearchLandingClient({ locale }: SearchLandingClientProps) {
               </div>
             </button>
 
-            <button
-              type="button"
-              onClick={() => openWizard("jobs", 1)}
+            <Link
+              href={`/${locale}/app/companies?view=noga`}
               className="flex-1 flex flex-col items-center gap-3 p-5 rounded-2xl text-center transition-all bg-white border border-[#e6e8ec] hover:border-slate-300 hover:bg-slate-50"
             >
               <div className="w-11 h-11 rounded-xl flex items-center justify-center bg-[#eff4fe] text-blue-600">
-                <Briefcase size={22} />
+                <ListTree size={22} />
               </div>
               <div>
-                <p className="text-[17px] font-semibold" style={{ color: "#1f2733" }}>Jobs</p>
-                <p className="text-[13px] mt-0.5" style={{ color: "#6b7480" }}>Open positions</p>
+                <p className="text-[17px] font-semibold" style={{ color: "#1f2733" }}>Industries</p>
+                <p className="text-[13px] mt-0.5" style={{ color: "#6b7480" }}>Browse by NOGA sector</p>
               </div>
-            </button>
+            </Link>
           </div>
 
           {/* Skip to advanced */}
@@ -596,13 +598,15 @@ export function SearchLandingClient({ locale }: SearchLandingClientProps) {
   }
 
   // ── active search state ──────────────────────────────────────────────────────
+  // Counts are computed for every tab (not just the active one) so the badges
+  // reveal where the results are — e.g. searching a person name shows the People
+  // badge even while the (empty) Companies tab is in front.
+  // `more` marks a count that is capped by the fetch limit (the persons API returns
+  // no total; NOGA matches are sliced) so the badge can show e.g. "25+".
   const TAB_CONFIG = [
-    { id: "companies" as Tab, label: "Companies", Icon: Building2,
-      count: tab === "companies" ? companiesPage?.total : undefined },
-    { id: "people" as Tab, label: "People", Icon: Users,
-      count: tab === "people" ? people.length : undefined },
-    { id: "noga" as Tab, label: "NOGA", Icon: ListTree,
-      count: tab === "noga" ? nogaMatches.length : undefined },
+    { id: "companies" as Tab, label: "Companies", Icon: Building2, count: companiesPage?.total, more: false },
+    { id: "people" as Tab, label: "People", Icon: Users, count: people.length, more: people.length >= 25 },
+    { id: "noga" as Tab, label: "NOGA", Icon: ListTree, count: nogaMatches.length, more: nogaMatches.length >= 40 },
   ];
 
   return (
@@ -633,7 +637,7 @@ export function SearchLandingClient({ locale }: SearchLandingClientProps) {
 
         {/* Tabs — underline indicator style */}
         <div className="flex gap-0">
-          {TAB_CONFIG.map(({ id, label, Icon, count }) => (
+          {TAB_CONFIG.map(({ id, label, Icon, count, more }) => (
             <button
               key={id}
               onClick={() => switchTab(id)}
@@ -651,7 +655,7 @@ export function SearchLandingClient({ locale }: SearchLandingClientProps) {
                   "text-[10px] font-bold px-1.5 py-0.5 rounded-full tabular-nums",
                   tab === id ? "bg-blue-100 text-blue-700" : "bg-slate-100 text-slate-500"
                 )}>
-                  {count > 999 ? `${Math.floor(count / 1000)}k+` : count}
+                  {count > 999 ? `${Math.floor(count / 1000)}k+` : `${count}${more ? "+" : ""}`}
                 </span>
               )}
             </button>

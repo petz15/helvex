@@ -191,7 +191,6 @@ export interface JobEvent {
 
 export interface AppSettings {
   google_search_enabled: string;
-  google_daily_quota: string;
   google_search_provider: string;
   serper_api_key: string;
   scrapingdog_api_key: string;

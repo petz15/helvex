@@ -44,9 +44,10 @@ def _enqueue_or_http_error(
     db: Session,
     org_id: int | None = None,
     user_id: int | None = None,
+    credit_deduction: dict | None = None,
 ):
     try:
-        return enqueue_job(request.app, job_type=job_type, label=label, params=params, db=db, org_id=org_id, user_id=user_id)
+        return enqueue_job(request.app, job_type=job_type, label=label, params=params, db=db, org_id=org_id, user_id=user_id, credit_deduction=credit_deduction)
     except ValueError as exc:
         msg = str(exc)
         http_status = status.HTTP_402_PAYMENT_REQUIRED if "Insufficient credits" in msg else 400
@@ -233,6 +234,36 @@ def rerun_job(
     if body.mode == "continue" and job.progress_done:
         params = {**params, "resume_from": job.progress_done}
 
+    # Re-charge jobs whose credits were taken at the route rather than the enqueue
+    # path (e.g. csv_export). A plain re-enqueue would run them free — metered jobs
+    # (claude_classify etc.) are still charged by _apply_credit_deduction_if_needed.
+    credit_deduction = None
+    old_stats = {}
+    if job.stats_json:
+        try:
+            old_stats = _json.loads(job.stats_json)
+        except Exception:
+            old_stats = {}
+    old_ded = old_stats.get("_credit_deduction") if isinstance(old_stats, dict) else None
+    if (
+        isinstance(old_ded, dict)
+        and old_ded.get("source") == "route"
+        and job.org_id
+        and not current_user.is_superadmin
+    ):
+        _action = str(old_ded.get("action") or "")
+        _count = int(old_ded.get("count") or 0)
+        if _action and _count > 0:
+            if not credits_service.check_and_deduct(
+                db, job.org_id, _action, _count,
+                reference_id=f"rerun:{job.job_type}:job_{job_id}:user_{current_user.id}",
+            ):
+                raise HTTPException(
+                    status_code=status.HTTP_402_PAYMENT_REQUIRED,
+                    detail="Insufficient credits to rerun this job.",
+                )
+            credit_deduction = old_ded
+
     label_prefix = "↺ " if body.mode == "new" else "⏩ "
     new_job = _enqueue_or_http_error(
         request,
@@ -242,8 +273,9 @@ def rerun_job(
         db=db,
         org_id=job.org_id,
         user_id=current_user.id,
+        credit_deduction=credit_deduction,
     )
-    return new_job
+    return JobOut.from_orm_obj(new_job)
 
 
 @router.get("/jobs/stream/active")
@@ -1648,7 +1680,10 @@ def enqueue_csv_export(
     check_job_rate_limit(request, current_user, "csv_export", org_tier=org_tier)
 
     # Deduct credits before enqueuing. We charge for the tier cap (worst case)
-    # rounded up to the nearest 10k unit so the cost is deterministic.
+    # rounded up to the nearest 10k unit so the cost is deterministic. The
+    # deduction is recorded on the job (credit_deduction) so a failed/cancelled
+    # export is fully refunded — the enqueue path must NOT charge again.
+    _csv_deduction = None
     if current_user.org_id and not current_user.is_superadmin:
         cap = row_limit or 0
         units = max(1, -(-cap // 10_000))  # ceiling division
@@ -1666,6 +1701,13 @@ def enqueue_csv_export(
                     f"{credits_service.compute_cost('bulk_export_basic', units):,} credits."
                 ),
             )
+        _csv_deduction = {
+            "action": "bulk_export_basic",
+            "count": units,
+            "cost": credits_service.compute_cost("bulk_export_basic", units),
+            "prorate": False,
+            "source": "route",
+        }
 
     crud.cancel_active_csv_exports(db, user_id=current_user.id)
 
@@ -1684,6 +1726,7 @@ def enqueue_csv_export(
         db=db,
         org_id=current_user.org_id,
         user_id=current_user.id,
+        credit_deduction=_csv_deduction,
     )
     return JobOut.from_orm_obj(job)
 

@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import json
 import logging
-import math
 import os
 import threading
 import time
@@ -183,17 +182,10 @@ def _resolve_credit_action_and_count(db: Session, *, job_type: str, params: dict
     if job_type == "tfidf_kmeans_cluster":
         return "recluster", 1
 
-    if job_type == "csv_export":
-        filters = dict(params or {})
-        filters.pop("sort", None)
-        filters["name_filter"] = filters.pop("q", None)
-        filters["uid_filter"] = filters.pop("uid", None)
-        rows = crud.count_companies(
-            db,
-            **{k: v for k, v in filters.items() if v is not None},
-        )
-        units = max(1, math.ceil(max(1, int(rows)) / 10_000))
-        return "bulk_export_basic", units
+    # NOTE: csv_export is charged at the ROUTE level (by tier cap), which then
+    # passes the deduction to enqueue_job(credit_deduction=...). It must NOT be
+    # charged here as well — doing so double-charged and, worse, counted *all*
+    # matching rows ignoring the tier cap.
 
     return None
 
@@ -260,6 +252,7 @@ def _refund_job_credits_if_needed(
             return
         action = deduction["action"]
         cost = int(deduction["cost"])
+        prorate = bool(deduction.get("prorate", True))
         if cost <= 0:
             return
     except (KeyError, ValueError, TypeError):
@@ -292,10 +285,13 @@ def _refund_job_credits_if_needed(
     # that don't track progress get a full refund.
     done = int(job.progress_done or 0)
     total = int(job.progress_total or 0)
-    if total > 0 and done > 0:
+    if prorate and total > 0 and done > 0:
+        # Metered jobs persist partial work → refund only the undone fraction.
         undone = max(0, total - done)
         refund_amount = int(round(cost * undone / total))
     else:
+        # Non-prorated (e.g. CSV export: atomic deliverable), never-started, or
+        # untracked jobs → full refund.
         refund_amount = cost
     if refund_amount <= 0:
         logger.info(
@@ -724,6 +720,7 @@ def _enqueue_job_in_session(
     params: dict,
     org_id: int | None = None,
     user_id: int | None = None,
+    credit_deduction: dict | None = None,
 ) -> object:
     # ── Dedup check ──────────────────────────────────────────────────────────
     # If an active job of the same type+org already exists, return it without
@@ -776,6 +773,22 @@ def _enqueue_job_in_session(
             "action": action,
             "count": count,
             "cost": CREDIT_COSTS.get(action, 0) * count,
+            "prorate": True,   # metered jobs persist partial work → prorate refunds
+        }
+    elif credit_deduction is not None:
+        # The caller already charged (e.g. the CSV export route, charged by tier
+        # cap). Record it so the runner can refund on failure. Exports produce an
+        # atomic deliverable (an S3 file on completion), so a failed/cancelled
+        # export keeps nothing — hence prorate defaults to False for these.
+        initial_stats["_credit_deduction"] = {
+            "action": str(credit_deduction.get("action")),
+            "count": int(credit_deduction.get("count") or 0),
+            "cost": int(credit_deduction.get("cost") or 0),
+            "prorate": bool(credit_deduction.get("prorate", False)),
+            # Marks a charge made outside the enqueue path (at the route). rerun_job
+            # re-charges these; the auto-deduction path above is left unmarked so
+            # reruns of metered jobs are charged by _apply_credit_deduction_if_needed.
+            "source": str(credit_deduction.get("source") or "route"),
         }
     from sqlalchemy.exc import IntegrityError as _IntegrityError
     try:
@@ -816,12 +829,13 @@ def enqueue_job(
     db: Session | None = None,
     org_id: int | None = None,
     user_id: int | None = None,
+    credit_deduction: dict | None = None,
 ) -> object:
     if db is None:
         with SessionLocal() as session:
-            job = _enqueue_job_in_session(session, job_type=job_type, label=label, params=params, org_id=org_id, user_id=user_id)
+            job = _enqueue_job_in_session(session, job_type=job_type, label=label, params=params, org_id=org_id, user_id=user_id, credit_deduction=credit_deduction)
     else:
-        job = _enqueue_job_in_session(db, job_type=job_type, label=label, params=params, org_id=org_id, user_id=user_id)
+        job = _enqueue_job_in_session(db, job_type=job_type, label=label, params=params, org_id=org_id, user_id=user_id, credit_deduction=credit_deduction)
 
     if app is None:
         raise JobEnqueueError("Thread worker mode requires a FastAPI app instance")

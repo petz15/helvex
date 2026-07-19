@@ -364,6 +364,63 @@ def grant_credits(
     db.commit()
 
 
+def refund_action(
+    db: Session,
+    org_id: int,
+    action: str,
+    count: int,
+    *,
+    reference_id: str,
+) -> bool:
+    """Refund a previously-deducted *inline* action whose work failed (e.g. an
+    immediate web search that errored). Writes a linked ``refund`` ledger row so
+    net consumption reflects the actual result.
+
+    Mirrors the free/unlimited exemptions in ``check_and_deduct`` so we never add
+    credits an org was never charged. Idempotent by ``reference_id`` (a retried or
+    doubled handler is a no-op). Returns True iff a refund row was written.
+    """
+    org = (
+        db.query(Organization)
+        .filter(Organization.id == org_id)
+        .with_for_update()
+        .first()
+    )
+    if org is None or org.credits_unlimited:
+        return False
+    # Free entitlement — nothing was deducted, so nothing to refund.
+    if action == "flex_rescore" and get_tier_rank(org) >= 2:
+        return False
+    # Idempotency: never refund the same reference twice.
+    already = (
+        db.query(OrgCreditTransaction.id)
+        .filter(
+            OrgCreditTransaction.reference_id == reference_id,
+            OrgCreditTransaction.type == "refund",
+        )
+        .first()
+    )
+    if already is not None:
+        return False
+
+    cost = compute_cost(action, count)
+    before = int(org.credits_balance or 0)
+    after = before + cost
+    org.credits_balance = after
+    _create_ledger_row(
+        db,
+        org_id=org_id,
+        amount=cost,
+        tx_type="refund",
+        action_type=action,
+        reference_id=reference_id,
+        credits_before=before,
+        credits_after=after,
+    )
+    db.commit()
+    return True
+
+
 def grant_monthly_entitlements(db: Session, org_id: int) -> None:
     """Reset monthly entitlement flags at billing cycle rollover."""
     # Simple tier monthly free rescore has been removed from the product.

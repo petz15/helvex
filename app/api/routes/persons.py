@@ -529,26 +529,37 @@ def get_person_appearances(
         qry = qry.filter(SogcPersonAppearance.is_current == is_current)
     appearances = qry.order_by(SogcPersonAppearance.pub_date.desc()).limit(limit).all()
 
-    # Batch-fetch company id+name to avoid N+1
-    uids = [a.company_uid for a in appearances if a.company_uid]
-    company_lookup: dict[str, tuple[int, str]] = {}
+    # Resolve company id + name. Prefer the appearance's company_id FK — it is set
+    # even when the printed UID failed to parse — and fall back to a UID lookup for
+    # older rows that only stored a UID.
+    from app.models.company import Company as CompanyModel
+    ids = [a.company_id for a in appearances if a.company_id]
+    uids = [a.company_uid for a in appearances if a.company_uid and not a.company_id]
+    id_lookup: dict[int, str] = {}
+    uid_lookup: dict[str, tuple[int, str]] = {}
+    if ids:
+        for cid, cname in db.query(CompanyModel.id, CompanyModel.name).filter(CompanyModel.id.in_(ids)).all():
+            id_lookup[cid] = cname
     if uids:
-        from app.models.company import Company as CompanyModel
         for uid, cid, cname in (
             db.query(CompanyModel.uid, CompanyModel.id, CompanyModel.name)
             .filter(CompanyModel.uid.in_(uids))
             .all()
         ):
-            company_lookup[uid] = (cid, cname)
+            uid_lookup[uid] = (cid, cname)
 
-    return [
-        PersonAppearanceOut.from_orm(
-            a,
-            company_id=company_lookup.get(a.company_uid, (None, None))[0] if a.company_uid else None,
-            company_name=company_lookup.get(a.company_uid, (None, None))[1] if a.company_uid else None,
-        )
-        for a in appearances
-    ]
+    def _resolve(a) -> tuple[int | None, str | None]:
+        if a.company_id is not None and a.company_id in id_lookup:
+            return a.company_id, id_lookup[a.company_id]
+        if a.company_uid and a.company_uid in uid_lookup:
+            return uid_lookup[a.company_uid]
+        return None, None
+
+    out = []
+    for a in appearances:
+        cid, cname = _resolve(a)
+        out.append(PersonAppearanceOut.from_orm(a, company_id=cid, company_name=cname))
+    return out
 
 
 class CoDirectorOut(BaseModel):

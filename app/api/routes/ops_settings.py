@@ -21,7 +21,6 @@ router = APIRouter(tags=["settings"])
 
 class SettingsBody(BaseModel):
     google_search_enabled: bool = True
-    google_daily_quota: str = "100"
     # "serper" | "scrapingdog"
     google_search_provider: str = "serper"
     serper_api_key: str = ""
@@ -136,10 +135,6 @@ def get_settings(db: Session = Depends(get_db), current_user: User = Depends(get
 @router.put("/settings")
 def save_settings(body: SettingsBody, db: Session = Depends(get_db), _: User = Depends(require_superadmin)):
     crud.set_setting(db, "google_search_enabled", "true" if body.google_search_enabled else "false")
-    try:
-        crud.set_setting(db, "google_daily_quota", str(max(1, int(body.google_daily_quota))))
-    except (ValueError, TypeError):
-        crud.set_setting(db, "google_daily_quota", "100")
     provider = body.google_search_provider.strip().lower()
     if provider not in ("serper", "scrapingdog"):
         provider = "serper"

@@ -190,9 +190,13 @@ def _extract_card_info_from_worldline(result: dict) -> dict:
         method_type = next((v for k, v in _markers.items() if k in pm), None)
     if method_type is None and card:
         method_type = "card"
+    # DisplayText is sometimes an object (e.g. TWINT returns {'paymentmethod': ...});
+    # only keep a genuine human string so the UI never shows a stringified dict.
+    _dt = pm.get("DisplayText")
+    display_text = _dt.strip() if isinstance(_dt, str) else ""
     return {
         "method_type": method_type,
-        "display_text": str(pm.get("DisplayText") or ""),
+        "display_text": display_text,
         "masked_number": str(card.get("MaskedNumber") or ""),
         "brand": str(card.get("Brand") or pm.get("Brand") or ""),
         "holder_name": str(card.get("HolderName") or ""),

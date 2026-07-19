@@ -36,7 +36,7 @@ import numpy as np
 from app.services.platform import s3_client
 from app.services.ml.embeddings import DEFAULT_MODEL, embed_texts
 
-LOOKUP_PATH = Path(__file__).resolve().parents[1] / "noga_lookup.json"
+LOOKUP_PATH = Path(__file__).resolve().parents[1] / "app" / "data" / "noga_lookup.json"
 S3_EMBEDDINGS_KEY = "models/noga_embeddings.npy"
 S3_IDS_KEY = "models/noga_embedding_ids.json"
 

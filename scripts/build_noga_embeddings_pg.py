@@ -33,11 +33,11 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 
 # 5 level files, in hierarchy order
 LEVEL_FILES = [
-    (REPO_ROOT / "noga_level_1.json", 1),
-    (REPO_ROOT / "noga_level_2.json", 2),
-    (REPO_ROOT / "noga_level_3.json", 3),
-    (REPO_ROOT / "noga_level_4.json", 4),
-    (REPO_ROOT / "noga_level_5.json", 5),
+    (REPO_ROOT / "app" / "data" / "noga_level_1.json", 1),
+    (REPO_ROOT / "app" / "data" / "noga_level_2.json", 2),
+    (REPO_ROOT / "app" / "data" / "noga_level_3.json", 3),
+    (REPO_ROOT / "app" / "data" / "noga_level_4.json", 4),
+    (REPO_ROOT / "app" / "data" / "noga_level_5.json", 5),
 ]
 
 # Annotation types used for INCLUDES embeddings

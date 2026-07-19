@@ -122,8 +122,8 @@ def _build_market_segments(db: Session) -> list[dict]:
     from datetime import date
     from sqlalchemy import text as sa_text
 
-    from app.services.ml.noga import _repo_root
-    lookup_path = _repo_root() / "noga_lookup.json"
+    from app.services.ml.noga import noga_lookup_path
+    lookup_path = noga_lookup_path()
     section_labels: dict[str, dict[str, str]] = {}
     if lookup_path.exists():
         import json as _json

@@ -6,18 +6,21 @@ import { ScoreBar } from "@/components/ui/score-bar";
 import { Badge } from "@/components/ui/badge";
 import { proposalBadgeClass } from "@/lib/utils";
 import { fetchCompanies, updateCompany } from "@/lib/api";
+import { useI18n } from "@/i18n/context";
 import type { Company } from "@/lib/types";
 
 const COLUMNS = [
-  { key: "potential_proposal", label: "Potential Proposal", color: "bg-blue-50 border-blue-200", headerColor: "bg-blue-100 text-blue-800" },
-  { key: "confirmed_proposal", label: "Confirmed Proposal", color: "bg-green-50 border-green-200", headerColor: "bg-green-100 text-green-800" },
-  { key: "potential_generic", label: "Potential Generic", color: "bg-sky-50 border-sky-200", headerColor: "bg-sky-100 text-sky-800" },
-  { key: "confirmed_generic", label: "Confirmed Generic", color: "bg-teal-50 border-teal-200", headerColor: "bg-teal-100 text-teal-800" },
-  { key: "interesting", label: "Interesting", color: "bg-yellow-50 border-yellow-200", headerColor: "bg-yellow-100 text-yellow-800" },
-  { key: "rejected", label: "Rejected", color: "bg-red-50 border-red-200", headerColor: "bg-red-100 text-red-700" },
-];
+  { key: "potential_proposal", color: "bg-blue-50 border-blue-200", headerColor: "bg-blue-100 text-blue-800" },
+  { key: "confirmed_proposal", color: "bg-green-50 border-green-200", headerColor: "bg-green-100 text-green-800" },
+  { key: "potential_generic", color: "bg-sky-50 border-sky-200", headerColor: "bg-sky-100 text-sky-800" },
+  { key: "confirmed_generic", color: "bg-teal-50 border-teal-200", headerColor: "bg-teal-100 text-teal-800" },
+  { key: "interesting", color: "bg-yellow-50 border-yellow-200", headerColor: "bg-yellow-100 text-yellow-800" },
+  { key: "rejected", color: "bg-red-50 border-red-200", headerColor: "bg-red-100 text-red-700" },
+] as const;
 
 function CompanyCard({ company, onStatusChange }: { company: Company; onStatusChange: (id: number, status: string) => void }) {
+  const { dict } = useI18n();
+  const t = dict.app.pipeline;
   return (
     <div className="bg-white rounded-lg border border-slate-200 p-3 shadow-sm hover:shadow-md transition-shadow">
       <Link href={`/app/companies/${company.id}`} className="block">
@@ -47,8 +50,7 @@ function CompanyCard({ company, onStatusChange }: { company: Company; onStatusCh
         onClick={(e) => e.stopPropagation()}
         className="mt-2 w-full rounded border border-slate-200 px-1.5 py-1 text-xs text-slate-500 bg-slate-50 focus:outline-none focus:ring-1 focus:ring-blue-400"
       >
-        {COLUMNS.map((c) => <option key={c.key} value={c.key}>{c.label}</option>)}
-        <option value="rejected">Rejected</option>
+        {COLUMNS.map((c) => <option key={c.key} value={c.key}>{t.col[c.key]}</option>)}
       </select>
     </div>
   );
@@ -59,15 +61,17 @@ function KanbanColumn({ col, companies, onStatusChange }: {
   companies: Company[];
   onStatusChange: (id: number, status: string) => void;
 }) {
+  const { dict } = useI18n();
+  const t = dict.app.pipeline;
   return (
     <div className={`flex flex-col rounded-xl border ${col.color} min-w-[240px] w-64 shrink-0`}>
       <div className={`flex items-center justify-between px-3 py-2 rounded-t-xl ${col.headerColor}`}>
-        <span className="text-xs font-semibold">{col.label}</span>
+        <span className="text-xs font-semibold">{t.col[col.key]}</span>
         <span className="text-xs opacity-70">{companies.length}</span>
       </div>
       <div className="flex-1 overflow-y-auto p-2 space-y-2 max-h-[calc(100vh-12rem)]">
         {companies.length === 0 ? (
-          <p className="text-xs text-center text-slate-400 py-6">Empty</p>
+          <p className="text-xs text-center text-slate-400 py-6">{t.empty}</p>
         ) : (
           companies.map((c) => (
             <CompanyCard key={c.id} company={c} onStatusChange={onStatusChange} />

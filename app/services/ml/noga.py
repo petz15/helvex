@@ -72,8 +72,9 @@ class _NogaIndex:
     code_meta: dict[str, dict[str, Any]]
 
 
-def _repo_root() -> Path:
-    return Path(__file__).resolve().parents[3]
+def noga_lookup_path() -> Path:
+    """Path to the NOGA lookup JSON — kept with the app data (app/data/noga_lookup.json)."""
+    return Path(__file__).resolve().parents[2] / "data" / "noga_lookup.json"
 
 
 def _normalize_text(value: str) -> str:
@@ -161,7 +162,7 @@ def _extract_node_tokens(node: dict[str, Any]) -> set[str]:
 
 @lru_cache(maxsize=1)
 def _load_noga_index() -> _NogaIndex:
-    lookup_path = _repo_root() / "noga_lookup.json"
+    lookup_path = noga_lookup_path()
     if not lookup_path.exists():
         raise FileNotFoundError(
             f"NOGA lookup not found at {lookup_path}. Run scripts/create_noga_json.py once first."
@@ -188,7 +189,7 @@ def _load_noga_index() -> _NogaIndex:
 
 @lru_cache(maxsize=1)
 def _load_parent_map() -> dict[str, str]:
-    lookup_path = _repo_root() / "noga_lookup.json"
+    lookup_path = noga_lookup_path()
     with lookup_path.open("r", encoding="utf-8") as f:
         payload: dict = json.load(f)
     return {

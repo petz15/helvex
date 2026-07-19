@@ -404,7 +404,6 @@ export function GuidedWizard({
             <div className="flex gap-3">
               <ScopeTile icon={Building2} title="Companies" sub="700,000+ registered" selected={scope === "companies"} onClick={() => setState(s => ({ ...s, scope: "companies" }))} />
               <ScopeTile icon={Users} title="People" sub="Founders, directors, owners" selected={scope === "people"} onClick={() => setState(s => ({ ...s, scope: "people" }))} />
-              <ScopeTile icon={Briefcase} title="Jobs" sub="Open positions" selected={scope === "jobs"} onClick={() => setState(s => ({ ...s, scope: "jobs" }))} />
             </div>
           )}
 

@@ -569,7 +569,6 @@
         "googleSearch": "Google-Suche",
         "enableGoogleSearch": "Google-Suche aktivieren",
         "enabled": "Aktiviert",
-        "dailyQuota": "Tägliches Limit",
         "googleScoringFilters": "Google-Scoring-Filter",
         "seedDescription": "Datenbank mit allen integrierten Vorgaben initialisieren: Google-Stoppwörter, Verzeichnisdomänen und TF-IDF-Stoppwörter. Kann mehrfach sicher ausgeführt werden — überspringt vorhandene Zeilen.",
         "seedDefaults": "Vorgaben initialisieren",

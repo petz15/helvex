@@ -66,7 +66,7 @@ def _build_parser() -> argparse.ArgumentParser:
         "--limit",
         type=int,
         default=100,
-        help="Maximum companies to process (default: 100, matches free Google quota).",
+        help="Maximum companies to process (default: 100).",
     )
     batch.add_argument(
         "--all-companies",

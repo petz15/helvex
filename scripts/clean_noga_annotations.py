@@ -2,7 +2,7 @@ import json
 import sys
 
 # Input/output file can be passed as argument, else default to noga_level_5.json
-infile = sys.argv[1] if len(sys.argv) > 1 else "noga_level_5.json"
+infile = sys.argv[1] if len(sys.argv) > 1 else "app/data/noga_level_5.json"
 outfile = sys.argv[2] if len(sys.argv) > 2 else infile.replace(".json", "_clean.json")
 
 with open(infile, "r", encoding="utf-8") as f:

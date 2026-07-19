@@ -21,6 +21,7 @@ import {
   triggerJob,
   type OrgMember,
 } from "@/lib/api";
+import { useI18n } from "@/i18n/context";
 
 const inputCls =
   "w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-300 focus:border-transparent bg-white";
@@ -50,6 +51,8 @@ const ALL_SETTING_KEYS = [
 type SettingKey = typeof ALL_SETTING_KEYS[number];
 
 export function OrgScoringSection({ orgId, isAdmin }: { orgId: number; isAdmin: boolean }) {
+  const { dict } = useI18n();
+  const t = dict.app.org;
   const { data: saved = {}, mutate: reloadSettings } = useSWR(
     ["org-settings", orgId],
     () => fetchOrgSettings(orgId),
@@ -68,10 +71,10 @@ export function OrgScoringSection({ orgId, isAdmin }: { orgId: number; isAdmin: 
     setClassifyBanner(null);
     try {
       await triggerJob("jobs/scoring/claude", { limit: 500, only_unscored: false });
-      setClassifyBanner("AI classification job queued.");
+      setClassifyBanner(t.classifyQueued);
       setTimeout(() => setClassifyBanner(null), 5000);
     } catch {
-      setClassifyBanner("Failed to start classification job.");
+      setClassifyBanner(t.classifyFailed);
     } finally {
       setClassifying(false);
     }
@@ -102,10 +105,10 @@ export function OrgScoringSection({ orgId, isAdmin }: { orgId: number; isAdmin: 
       await reloadSettings();
       setForm({});
       setDirty(false);
-      setBanner({ kind: "success", message: "Scoring & AI config saved." });
+      setBanner({ kind: "success", message: t.cfgSaved });
       setTimeout(() => setBanner(null), 4000);
     } catch (e) {
-      setBanner({ kind: "error", message: e instanceof Error ? e.message : "Failed to save." });
+      setBanner({ kind: "error", message: e instanceof Error ? e.message : t.cfgSaveFailed });
     } finally {
       setSaving(false);
     }
@@ -127,13 +130,13 @@ export function OrgScoringSection({ orgId, isAdmin }: { orgId: number; isAdmin: 
         {/* Anthropic API key */}
         <div className="space-y-1.5">
           <label className="block text-sm font-semibold text-slate-700">
-            Anthropic API key
+            {t.anthropicKey}
             {apiKeyIsSet && !apiKeyDraftSet && (
-              <span className="ml-2 text-xs font-normal text-green-600 bg-green-50 border border-green-200 rounded px-1.5 py-0.5">configured</span>
+              <span className="ml-2 text-xs font-normal text-green-600 bg-green-50 border border-green-200 rounded px-1.5 py-0.5">{t.configured}</span>
             )}
           </label>
           <p className="text-xs text-slate-500">
-            Required for AI scoring. Stored per-workspace — never shared across orgs.
+            {t.anthropicKeyDesc}
           </p>
           {apiKeyIsSet && !apiKeyDraftSet ? (
             <div className="flex items-center gap-2">
@@ -144,7 +147,7 @@ export function OrgScoringSection({ orgId, isAdmin }: { orgId: number; isAdmin: 
                   onClick={() => set("anthropic_api_key", "")}
                   className="text-xs text-blue-600 hover:underline"
                 >
-                  Replace
+                  {t.replace}
                 </button>
               )}
             </div>
@@ -164,14 +167,14 @@ export function OrgScoringSection({ orgId, isAdmin }: { orgId: number; isAdmin: 
         {/* AI target description — most important */}
         <div className="space-y-1.5">
           <label className="block text-sm font-semibold text-slate-700">
-            What are you looking for?
+            {t.lookingFor}
           </label>
           <p className="text-xs text-slate-500">
-            Describe your ideal target company. This is appended to the AI classification prompt and directly shapes lead scores for your org.
+            {t.lookingForDesc}
           </p>
           <textarea
             rows={4}
-            placeholder="e.g. We are looking for B2B software companies in the DACH region with 5–50 employees that could benefit from HR automation tools."
+            placeholder={t.lookingForPlaceholder}
             value={val("claude_target_description")}
             onChange={(e) => set("claude_target_description", e.target.value)}
             disabled={!isAdmin}
@@ -181,9 +184,9 @@ export function OrgScoringSection({ orgId, isAdmin }: { orgId: number; isAdmin: 
 
         {/* AI categories */}
         <div className="space-y-1.5">
-          <label className="block text-sm font-medium text-slate-700">Custom categories</label>
+          <label className="block text-sm font-medium text-slate-700">{t.customCategories}</label>
           <p className="text-xs text-slate-500">
-            One category per line. If set, the AI will only output these exact labels instead of free-form ones. Leave empty to use free-form categorisation.
+            {t.customCategoriesDesc}
           </p>
           <textarea
             rows={5}
@@ -202,7 +205,7 @@ export function OrgScoringSection({ orgId, isAdmin }: { orgId: number; isAdmin: 
           className="flex items-center gap-1.5 text-xs text-slate-500 hover:text-slate-700 transition-colors"
         >
           {showAdvanced ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
-          {showAdvanced ? "Hide advanced settings" : "Show advanced settings"}
+          {showAdvanced ? t.hideAdvanced : t.showAdvanced}
         </button>
 
         {showAdvanced && (
@@ -211,13 +214,13 @@ export function OrgScoringSection({ orgId, isAdmin }: { orgId: number; isAdmin: 
             {/* Flex score — cluster targets */}
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-1.5">
-                <label className="block text-sm font-medium text-slate-700">Target clusters</label>
-                <p className="text-xs text-slate-500">Pipe-separated cluster label substrings. Hits add points to Flex score.</p>
+                <label className="block text-sm font-medium text-slate-700">{t.targetClusters}</label>
+                <p className="text-xs text-slate-500">{t.targetClustersDesc}</p>
                 <textarea rows={3} value={val("scoring_target_clusters")} onChange={(e) => set("scoring_target_clusters", e.target.value)} disabled={!isAdmin} className={textareaCls} placeholder="software|tech|digital" />
               </div>
               <div className="space-y-1.5">
-                <label className="block text-sm font-medium text-slate-700">Exclude clusters</label>
-                <p className="text-xs text-slate-500">Pipe-separated cluster label substrings to penalise.</p>
+                <label className="block text-sm font-medium text-slate-700">{t.excludeClusters}</label>
+                <p className="text-xs text-slate-500">{t.excludeClustersDesc}</p>
                 <textarea rows={3} value={val("scoring_exclude_clusters")} onChange={(e) => set("scoring_exclude_clusters", e.target.value)} disabled={!isAdmin} className={textareaCls} placeholder="immobilien|gastronomie" />
               </div>
             </div>
@@ -225,21 +228,21 @@ export function OrgScoringSection({ orgId, isAdmin }: { orgId: number; isAdmin: 
             {/* Flex score — keyword targets */}
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-1.5">
-                <label className="block text-sm font-medium text-slate-700">Target keywords</label>
-                <p className="text-xs text-slate-500">Pipe-separated purpose keyword substrings. Hits add points.</p>
+                <label className="block text-sm font-medium text-slate-700">{t.targetKeywords}</label>
+                <p className="text-xs text-slate-500">{t.targetKeywordsDesc}</p>
                 <textarea rows={3} value={val("scoring_target_keywords")} onChange={(e) => set("scoring_target_keywords", e.target.value)} disabled={!isAdmin} className={textareaCls} placeholder="software|beratung|entwicklung" />
               </div>
               <div className="space-y-1.5">
-                <label className="block text-sm font-medium text-slate-700">Exclude keywords</label>
-                <p className="text-xs text-slate-500">Pipe-separated keywords to penalise.</p>
+                <label className="block text-sm font-medium text-slate-700">{t.excludeKeywords}</label>
+                <p className="text-xs text-slate-500">{t.excludeKeywordsDesc}</p>
                 <textarea rows={3} value={val("scoring_exclude_keywords")} onChange={(e) => set("scoring_exclude_keywords", e.target.value)} disabled={!isAdmin} className={textareaCls} placeholder="treuhand|buchhaltung" />
               </div>
             </div>
 
             {/* Distance origin */}
             <div className="space-y-1.5">
-              <label className="block text-sm font-medium text-slate-700">Distance origin (lat / lon)</label>
-              <p className="text-xs text-slate-500">Your geographic base for distance scoring. Closer companies score higher.</p>
+              <label className="block text-sm font-medium text-slate-700">{t.distanceOrigin}</label>
+              <p className="text-xs text-slate-500">{t.distanceOriginDesc}</p>
               <div className="flex gap-3">
                 <input type="number" step="0.0001" value={val("scoring_origin_lat")} onChange={(e) => set("scoring_origin_lat", e.target.value)} disabled={!isAdmin} className={inputCls + " max-w-[180px]"} placeholder="46.9266" />
                 <input type="number" step="0.0001" value={val("scoring_origin_lon")} onChange={(e) => set("scoring_origin_lon", e.target.value)} disabled={!isAdmin} className={inputCls + " max-w-[180px]"} placeholder="7.4817" />
@@ -248,20 +251,20 @@ export function OrgScoringSection({ orgId, isAdmin }: { orgId: number; isAdmin: 
 
             {/* Legal form scores */}
             <div className="space-y-1.5">
-              <label className="block text-sm font-medium text-slate-700">Legal form scores</label>
-              <p className="text-xs text-slate-500">Comma-separated <code className="bg-slate-100 px-1 rounded text-xs">form:points</code> pairs, e.g. <code className="bg-slate-100 px-1 rounded text-xs">ag:20,gmbh:15,eg:10</code></p>
+              <label className="block text-sm font-medium text-slate-700">{t.legalFormScores}</label>
+              <p className="text-xs text-slate-500">{t.legalFormScoresDesc}</p>
               <input type="text" value={val("scoring_legal_form_scores")} onChange={(e) => set("scoring_legal_form_scores", e.target.value)} disabled={!isAdmin} className={inputCls} placeholder="ag:20,gmbh:15,eg:10,einzelfirma:8" />
             </div>
 
             {/* Combined score weights */}
             <div className="space-y-1.5">
-              <label className="block text-sm font-medium text-slate-700">Combined score weights</label>
-              <p className="text-xs text-slate-500">How much each score type contributes to the combined score. Defaults: AI 70 %, Web 20 %, Flex 10 %.</p>
+              <label className="block text-sm font-medium text-slate-700">{t.combinedWeights}</label>
+              <p className="text-xs text-slate-500">{t.combinedWeightsDesc}</p>
               <div className="flex gap-3">
                 {(["scoring_weight_ai", "scoring_weight_web", "scoring_weight_flex"] as const).map((key) => (
                   <div key={key} className="flex-1">
                     <label className="block text-xs text-slate-500 mb-1">
-                      {key === "scoring_weight_ai" ? "AI" : key === "scoring_weight_web" ? "Web" : "Flex"}
+                      {key === "scoring_weight_ai" ? t.weightAi : key === "scoring_weight_web" ? t.weightWeb : t.weightFlex}
                     </label>
                     <div className="flex items-center gap-2">
                       <input
@@ -282,9 +285,9 @@ export function OrgScoringSection({ orgId, isAdmin }: { orgId: number; isAdmin: 
 
             {/* Prompt override */}
             <div className="space-y-1.5">
-              <label className="block text-sm font-medium text-slate-700">AI prompt override</label>
+              <label className="block text-sm font-medium text-slate-700">{t.promptOverride}</label>
               <p className="text-xs text-slate-500">
-                Replaces the entire default classification prompt. Advanced — leave empty to use the default prompt with your target description appended.
+                {t.promptOverrideDesc}
               </p>
               <textarea
                 rows={6}
@@ -292,7 +295,7 @@ export function OrgScoringSection({ orgId, isAdmin }: { orgId: number; isAdmin: 
                 onChange={(e) => set("claude_classify_prompt", e.target.value)}
                 disabled={!isAdmin}
                 className={textareaCls}
-                placeholder="Leave empty to use the default prompt…"
+                placeholder={t.promptOverridePlaceholder}
               />
             </div>
           </div>
@@ -310,7 +313,7 @@ export function OrgScoringSection({ orgId, isAdmin }: { orgId: number; isAdmin: 
               className="flex items-center gap-1.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors"
             >
               {saving ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />}
-              Save config
+              {t.saveConfig}
             </button>
             <button
               onClick={handleClassify}
@@ -318,17 +321,17 @@ export function OrgScoringSection({ orgId, isAdmin }: { orgId: number; isAdmin: 
               className="flex items-center gap-1.5 bg-purple-600 hover:bg-purple-700 disabled:opacity-50 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors"
             >
               {classifying ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />}
-              Run AI Classification
+              {t.runClassification}
             </button>
             {dirty && (
               <button
                 onClick={() => { setForm({}); setDirty(false); }}
                 className="text-sm text-slate-500 hover:text-slate-700 px-3 py-2 rounded-lg hover:bg-slate-100 transition-colors"
               >
-                Discard
+                {t.discard}
               </button>
             )}
-            {!dirty && <span className="text-xs text-slate-400">No unsaved changes</span>}
+            {!dirty && <span className="text-xs text-slate-400">{t.noUnsavedChanges}</span>}
           </div>
         )}
       </div>
@@ -347,10 +350,13 @@ const ROLE_COLORS: Record<Role, string> = {
 };
 
 function RoleBadge({ role }: { role: string }) {
+  const { dict } = useI18n();
+  const t = dict.app.org;
   const cls = ROLE_COLORS[role as Role] ?? "bg-slate-100 text-slate-600";
+  const label = t.roles[role as keyof typeof t.roles] ?? role;
   return (
-    <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium capitalize ${cls}`}>
-      {role}
+    <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${cls}`}>
+      {label}
     </span>
   );
 }
@@ -379,6 +385,8 @@ function SectionTitle({ title }: { title: string }) {
 }
 
 export function OrgClient({ embedded = false }: { embedded?: boolean }) {
+  const { dict } = useI18n();
+  const t = dict.app.org;
   const { data: me, mutate: reloadMe } = useSWR("me", fetchCurrentUser);
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -441,7 +449,7 @@ export function OrgClient({ embedded = false }: { embedded?: boolean }) {
   async function handleDeleteOrg() {
     if (!orgId || !org) return;
     const confirmed = confirm(
-      `Delete "${org.name}"? All ${org.member_count} member(s) will be removed from the org. This cannot be undone.`
+      t.deleteConfirm.replace("{name}", org.name).replace("{count}", String(org.member_count))
     );
     if (!confirmed) return;
     setDeletingOrg(true);
@@ -450,7 +458,7 @@ export function OrgClient({ embedded = false }: { embedded?: boolean }) {
       await reloadMe();
       router.push("/app/search");
     } catch (e) {
-      flash(setNameBanner, "error", e instanceof Error ? e.message : "Failed to delete org");
+      flash(setNameBanner, "error", e instanceof Error ? e.message : t.deleteFailed);
       setDeletingOrg(false);
     }
   }
@@ -462,9 +470,9 @@ export function OrgClient({ embedded = false }: { embedded?: boolean }) {
       await updateOrg(orgId, { name: nameValue.trim() });
       await reloadOrg();
       setEditingName(false);
-      flash(setNameBanner, "success", "Organization name updated.");
+      flash(setNameBanner, "success", t.nameUpdated);
     } catch (e) {
-      flash(setNameBanner, "error", e instanceof Error ? e.message : "Failed to update name");
+      flash(setNameBanner, "error", e instanceof Error ? e.message : t.nameUpdateFailed);
     } finally {
       setSavingName(false);
     }
@@ -484,9 +492,9 @@ export function OrgClient({ embedded = false }: { embedded?: boolean }) {
       setAddForm({ email: "", password: "", org_role: "member" });
       setShowAddForm(false);
       await reloadMembers();
-      flash(setMemberBanner, "success", `User "${addForm.email}" added to org.`);
+      flash(setMemberBanner, "success", t.memberAdded.replace("{email}", addForm.email));
     } catch (e) {
-      flash(setAddBanner, "error", e instanceof Error ? e.message : "Failed to add member");
+      flash(setAddBanner, "error", e instanceof Error ? e.message : t.memberAddFailed);
     } finally {
       setAddingMember(false);
     }
@@ -501,9 +509,9 @@ export function OrgClient({ embedded = false }: { embedded?: boolean }) {
       await sendInvite(orgId, inviteEmail);
       setInviteEmail("");
       setShowInviteForm(false);
-      flash(setMemberBanner, "success", `Invite sent to ${inviteEmail}.`);
+      flash(setMemberBanner, "success", t.inviteSent.replace("{email}", inviteEmail));
     } catch (err) {
-      flash(setInviteBanner, "error", err instanceof Error ? err.message : "Failed to send invite");
+      flash(setInviteBanner, "error", err instanceof Error ? err.message : t.inviteFailed);
     } finally {
       setSendingInvite(false);
     }
@@ -516,9 +524,9 @@ export function OrgClient({ embedded = false }: { embedded?: boolean }) {
       await updateMemberRole(orgId, member.id, pendingRole);
       await reloadMembers();
       setEditingRoleFor(null);
-      flash(setMemberBanner, "success", `Role updated for "${member.email}".`);
+      flash(setMemberBanner, "success", t.roleUpdated.replace("{email}", member.email));
     } catch (e) {
-      flash(setMemberBanner, "error", e instanceof Error ? e.message : "Failed to update role");
+      flash(setMemberBanner, "error", e instanceof Error ? e.message : t.roleUpdateFailed);
     } finally {
       setSavingRole(false);
     }
@@ -526,29 +534,29 @@ export function OrgClient({ embedded = false }: { embedded?: boolean }) {
 
   async function handleRemove(member: OrgMember) {
     if (!orgId) return;
-    if (!confirm(`Remove "${member.email}" from the org?`)) return;
+    if (!confirm(t.removeConfirm.replace("{email}", member.email))) return;
     setRemovingId(member.id);
     try {
       await removeOrgMember(orgId, member.id);
       await reloadMembers();
       await reloadOrg();
-      flash(setMemberBanner, "success", `"${member.email}" removed from org.`);
+      flash(setMemberBanner, "success", t.memberRemoved.replace("{email}", member.email));
     } catch (e) {
-      flash(setMemberBanner, "error", e instanceof Error ? e.message : "Failed to remove member");
+      flash(setMemberBanner, "error", e instanceof Error ? e.message : t.memberRemoveFailed);
     } finally {
       setRemovingId(null);
     }
   }
 
   if (!me || !org) {
-    return <div className={embedded ? "text-slate-400 text-sm" : "p-6 text-slate-400 text-sm"}>Loading…</div>;
+    return <div className={embedded ? "text-slate-400 text-sm" : "p-6 text-slate-400 text-sm"}>{t.loading}</div>;
   }
 
   if (!me.org_id) {
     return (
       <div className={embedded ? "" : "p-6 max-w-xl mx-auto"}>
         <div className="rounded-lg border border-slate-200 bg-slate-50 p-6 text-center text-slate-500 text-sm">
-          You are not a member of any organization.
+          {t.notMember}
         </div>
       </div>
     );
@@ -557,7 +565,7 @@ export function OrgClient({ embedded = false }: { embedded?: boolean }) {
   if (!isAdmin) {
     return (
       <div className={embedded ? "text-slate-500 text-sm" : "p-6 max-w-xl mx-auto text-slate-500 text-sm"}>
-        You need admin or owner role to manage the organization.
+        {t.needAdmin}
       </div>
     );
   }
@@ -566,8 +574,8 @@ export function OrgClient({ embedded = false }: { embedded?: boolean }) {
     return (
       <div className={embedded ? "flex flex-col items-center justify-center py-16 text-center" : "p-6 max-w-3xl mx-auto flex flex-col items-center justify-center py-24 text-center"}>
         <span className="text-5xl mb-4 select-none">😢</span>
-        <h2 className="text-lg font-semibold text-slate-800 mb-2">You are sadly not part of a Team.</h2>
-        <p className="text-sm text-slate-500">Create one and invite others!</p>
+        <h2 className="text-lg font-semibold text-slate-800 mb-2">{t.noTeamTitle}</h2>
+        <p className="text-sm text-slate-500">{t.noTeamDesc}</p>
       </div>
     );
   }
@@ -579,11 +587,11 @@ export function OrgClient({ embedded = false }: { embedded?: boolean }) {
         <div className="flex items-center gap-3">
           <Building2 size={22} className="text-blue-600" />
           <div>
-            <h1 className="text-xl font-semibold text-slate-900">Organization</h1>
-            <p className="text-sm text-slate-500 mt-0.5">Manage your org and its members</p>
+            <h1 className="text-xl font-semibold text-slate-900">{t.title}</h1>
+            <p className="text-sm text-slate-500 mt-0.5">{t.subtitle}</p>
             {isSuperadminOrgOverride && (
               <span className="mt-2 inline-flex items-center rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 text-xs font-medium text-amber-800">
-                Viewing as org #{org.id} ({org.name})
+                {t.viewingAs.replace("{id}", String(org.id)).replace("{name}", org.name)}
               </span>
             )}
           </div>
@@ -591,7 +599,7 @@ export function OrgClient({ embedded = false }: { embedded?: boolean }) {
       )}
 
       {/* Org info */}
-      <SectionTitle title="Organization info" />
+      <SectionTitle title={t.orgInfo} />
       {nameBanner && <Banner {...nameBanner} />}
       <div className="rounded-xl border border-slate-200 bg-white p-5 space-y-4">
         <div className="flex items-center justify-between gap-4">
@@ -603,7 +611,7 @@ export function OrgClient({ embedded = false }: { embedded?: boolean }) {
                   value={nameValue}
                   onChange={(e) => setNameValue(e.target.value)}
                   className={inputCls + " max-w-xs"}
-                  placeholder="Organization name"
+                  placeholder={t.orgNamePlaceholder}
                 />
                 <button
                   onClick={handleSaveName}
@@ -638,14 +646,14 @@ export function OrgClient({ embedded = false }: { embedded?: boolean }) {
             <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-50 text-blue-700 capitalize">
               {org.tier}
             </span>
-            <p className="text-xs text-slate-400 mt-1">{org.member_count} member{org.member_count !== 1 ? "s" : ""}</p>
+            <p className="text-xs text-slate-400 mt-1">{(org.member_count === 1 ? t.memberCount : t.memberCountPlural).replace("{count}", String(org.member_count))}</p>
           </div>
         </div>
       </div>
 
       {/* Members */}
       <div className="flex items-center justify-between">
-        <SectionTitle title="Members" />
+        <SectionTitle title={t.members} />
         {isAdmin && (
           <div className="flex items-center gap-3 mt-1">
             <button
@@ -653,7 +661,7 @@ export function OrgClient({ embedded = false }: { embedded?: boolean }) {
               className="flex items-center gap-1.5 text-sm text-blue-600 hover:text-blue-800 font-medium transition-colors"
             >
               <Mail size={14} />
-              Invite by email
+              {t.inviteByEmail}
             </button>
             {isOwner && (
               <button
@@ -661,7 +669,7 @@ export function OrgClient({ embedded = false }: { embedded?: boolean }) {
                 className="flex items-center gap-1.5 text-sm text-slate-500 hover:text-slate-700 font-medium transition-colors"
               >
                 <Plus size={14} />
-                Create account
+                {t.createAccount}
               </button>
             )}
           </div>
@@ -678,7 +686,7 @@ export function OrgClient({ embedded = false }: { embedded?: boolean }) {
         >
           <div className="flex items-center gap-2 text-sm font-medium text-blue-700">
             <Mail size={14} />
-            Invite by email
+            {t.inviteByEmail}
           </div>
           {inviteBanner && (
             <div className={`rounded border px-3 py-2 text-xs ${inviteBanner.kind === "success" ? "border-green-200 bg-green-50 text-green-700" : "border-red-200 bg-red-50 text-red-700"}`}>
@@ -700,17 +708,17 @@ export function OrgClient({ embedded = false }: { embedded?: boolean }) {
               className="flex items-center gap-1.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-60 text-white px-3 py-2 rounded-lg text-sm font-medium transition-colors shrink-0"
             >
               {sendingInvite ? <Loader2 size={14} className="animate-spin" /> : <Mail size={14} />}
-              Send invite
+              {t.sendInvite}
             </button>
             <button
               type="button"
               onClick={() => setShowInviteForm(false)}
               className="px-3 py-2 rounded-lg text-sm text-slate-600 hover:bg-slate-100 transition-colors"
             >
-              Cancel
+              {t.cancel}
             </button>
           </div>
-          <p className="text-xs text-blue-600">The invite link is valid for 7 days.</p>
+          <p className="text-xs text-blue-600">{t.inviteValidity}</p>
         </form>
       )}
 
@@ -722,12 +730,12 @@ export function OrgClient({ embedded = false }: { embedded?: boolean }) {
         >
           <div className="flex items-center gap-2 text-sm font-medium text-blue-700">
             <UserCog size={14} />
-            New member
+            {t.newMember}
           </div>
           {addBanner && <Banner {...addBanner} />}
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="block text-xs font-medium text-slate-600 mb-1">Email *</label>
+              <label className="block text-xs font-medium text-slate-600 mb-1">{t.emailLabel}</label>
               <input
                 required
                 type="email"
@@ -738,21 +746,21 @@ export function OrgClient({ embedded = false }: { embedded?: boolean }) {
               />
             </div>
             <div>
-              <label className="block text-xs font-medium text-slate-600 mb-1">Role *</label>
+              <label className="block text-xs font-medium text-slate-600 mb-1">{t.roleLabel}</label>
               <select
                 value={addForm.org_role}
                 onChange={(e) => setAddForm((f) => ({ ...f, org_role: e.target.value as Role }))}
                 className={inputCls}
               >
                 {ROLES.map((r) => (
-                  <option key={r} value={r} className="capitalize">
-                    {r}
+                  <option key={r} value={r}>
+                    {t.roles[r]}
                   </option>
                 ))}
               </select>
             </div>
             <div className="col-span-2">
-              <label className="block text-xs font-medium text-slate-600 mb-1">Temporary password *</label>
+              <label className="block text-xs font-medium text-slate-600 mb-1">{t.tempPassword}</label>
               <input
                 required
                 type="password"
@@ -760,7 +768,7 @@ export function OrgClient({ embedded = false }: { embedded?: boolean }) {
                 value={addForm.password}
                 onChange={(e) => setAddForm((f) => ({ ...f, password: e.target.value }))}
                 className={inputCls}
-                placeholder="Min. 8 characters"
+                placeholder={t.tempPasswordPlaceholder}
                 autoComplete="new-password"
               />
             </div>
@@ -772,14 +780,14 @@ export function OrgClient({ embedded = false }: { embedded?: boolean }) {
               className="flex items-center gap-1.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-60 text-white px-3 py-2 rounded-lg text-sm font-medium transition-colors"
             >
               {addingMember ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} />}
-              Create user
+              {t.createUser}
             </button>
             <button
               type="button"
               onClick={() => setShowAddForm(false)}
               className="px-3 py-2 rounded-lg text-sm text-slate-600 hover:bg-slate-100 transition-colors"
             >
-              Cancel
+              {t.cancel}
             </button>
           </div>
         </form>
@@ -788,15 +796,15 @@ export function OrgClient({ embedded = false }: { embedded?: boolean }) {
       {/* Members table */}
       <div className="rounded-xl border border-slate-200 bg-white overflow-hidden">
         {members.length === 0 ? (
-          <div className="p-6 text-center text-slate-400 text-sm">No members yet.</div>
+          <div className="p-6 text-center text-slate-400 text-sm">{t.noMembers}</div>
         ) : (
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-slate-100 text-xs text-slate-500 uppercase tracking-wider">
-                <th className="px-4 py-3 text-left font-medium">User</th>
-                <th className="px-4 py-3 text-left font-medium">Email</th>
-                <th className="px-4 py-3 text-left font-medium">Role</th>
-                {isOwner && <th className="px-4 py-3 text-right font-medium">Actions</th>}
+                <th className="px-4 py-3 text-left font-medium">{t.colUser}</th>
+                <th className="px-4 py-3 text-left font-medium">{t.colEmail}</th>
+                <th className="px-4 py-3 text-left font-medium">{t.colRole}</th>
+                {isOwner && <th className="px-4 py-3 text-right font-medium">{t.colActions}</th>}
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
@@ -806,10 +814,10 @@ export function OrgClient({ embedded = false }: { embedded?: boolean }) {
                     <div className="flex items-center gap-2">
                       <span className="font-medium text-slate-800">{member.email}</span>
                       {member.id === me.id && (
-                        <span className="text-xs text-slate-400">(you)</span>
+                        <span className="text-xs text-slate-400">{t.you}</span>
                       )}
                       {!member.is_active && (
-                        <span className="text-xs text-red-400">inactive</span>
+                        <span className="text-xs text-red-400">{t.inactive}</span>
                       )}
                     </div>
                   </td>
@@ -823,7 +831,7 @@ export function OrgClient({ embedded = false }: { embedded?: boolean }) {
                           className="text-xs border border-slate-200 rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-blue-300"
                         >
                           {ROLES.map((r) => (
-                            <option key={r} value={r}>{r}</option>
+                            <option key={r} value={r}>{t.roles[r]}</option>
                           ))}
                         </select>
                         <button
@@ -884,17 +892,17 @@ export function OrgClient({ embedded = false }: { embedded?: boolean }) {
       {/* Scoring & AI config — moved to Settings page */}
       <div className="flex items-center gap-2 pt-2">
         <Sparkles size={15} className="text-blue-500" />
-        <SectionTitle title="Scoring & AI config" />
+        <SectionTitle title={t.scoringAiConfig} />
       </div>
       <div className="rounded-xl border border-blue-100 bg-blue-50 p-4 flex items-center justify-between">
         <p className="text-sm text-blue-700">
-          LLM configuration, FLEX scoring parameters, and AI classification settings have moved to the Settings page.
+          {t.settingsMoved}
         </p>
         <Link
           href="/app/settings?tab=llm"
           className="ml-4 shrink-0 flex items-center gap-1.5 bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded-lg text-sm font-medium transition-colors"
         >
-          <Sparkles size={13} /> Open Settings
+          <Sparkles size={13} /> {t.openSettings}
         </Link>
       </div>
 
@@ -902,13 +910,13 @@ export function OrgClient({ embedded = false }: { embedded?: boolean }) {
       {isOwner && (
         <div className="mt-6">
           <h2 className="text-sm font-semibold text-red-500 uppercase tracking-wider pt-4 pb-2 border-b border-red-100">
-            Danger Zone
+            {t.dangerZone}
           </h2>
           <div className="mt-3 rounded-xl border border-red-200 bg-red-50 p-4 flex items-center justify-between">
             <div>
-              <p className="text-sm font-medium text-red-800">Delete organization</p>
+              <p className="text-sm font-medium text-red-800">{t.deleteOrgTitle}</p>
               <p className="text-xs text-red-600 mt-0.5">
-                Permanently deletes the org and removes all members. This cannot be undone.
+                {t.deleteOrgDesc}
               </p>
             </div>
             <button
@@ -917,7 +925,7 @@ export function OrgClient({ embedded = false }: { embedded?: boolean }) {
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-red-600 hover:bg-red-700 text-white text-xs font-medium disabled:opacity-50 transition-colors"
             >
               {deletingOrg ? <Loader2 size={13} className="animate-spin" /> : <Trash2 size={13} />}
-              Delete org
+              {t.deleteOrgBtn}
             </button>
           </div>
         </div>

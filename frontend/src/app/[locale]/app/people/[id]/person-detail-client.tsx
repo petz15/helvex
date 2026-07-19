@@ -13,12 +13,16 @@ import {
   Clock,
   Network,
   X,
+  FileText,
+  Building2,
 } from "lucide-react";
-import { fetchPersonNetwork, reportPersonFlag } from "@/lib/api";
+import { fetchPersonNetwork, fetchPersonAppearances, reportPersonFlag } from "@/lib/api";
+import { cn } from "@/lib/utils";
 import type {
   SogcPersonEntity,
   PersonNetworkData,
   MandateItem,
+  SogcPersonAppearance,
 } from "@/lib/types";
 
 // ── Constants ──────────────────────────────────────────────────────────────────
@@ -530,6 +534,98 @@ function NetworkGraph({
   );
 }
 
+// ── SOGC publications (raw appearance history) ─────────────────────────────────
+
+const CHANGE_LABEL: Record<string, { label: string; cls: string }> = {
+  person_added:    { label: "Added",   cls: "bg-emerald-50 text-emerald-700 border-emerald-200" },
+  person_removed:  { label: "Removed", cls: "bg-red-50 text-red-600 border-red-200" },
+  person_modified: { label: "Changed", cls: "bg-amber-50 text-amber-700 border-amber-200" },
+};
+
+function changeCfg(t: string): { label: string; cls: string } {
+  return CHANGE_LABEL[t] ?? { label: t.replace(/^person_/, "").replace(/_/g, " "), cls: "bg-slate-50 text-slate-600 border-slate-200" };
+}
+
+function SogcPublicationsSection({ entityId, locale }: { entityId: number; locale: string }) {
+  const { data: appearances, isLoading } = useSWR<SogcPersonAppearance[]>(
+    `person-appearances-${entityId}`,
+    () => fetchPersonAppearances(entityId),
+    { revalidateOnFocus: false }
+  );
+
+  return (
+    <div className="bg-white rounded-xl border border-slate-200 shadow-sm">
+      <div className="flex items-center gap-2 px-5 py-3 border-b border-slate-100">
+        <FileText size={14} className="text-slate-400" />
+        <h2 className="text-sm font-semibold text-slate-700">SOGC publications</h2>
+        {appearances && (
+          <span className="text-[11px] text-slate-400 tabular-nums">({appearances.length})</span>
+        )}
+      </div>
+
+      {isLoading ? (
+        <div className="flex items-center gap-2 text-sm text-slate-400 py-10 justify-center">
+          <div className="w-4 h-4 border-2 border-slate-300 border-t-slate-600 rounded-full animate-spin" />
+          Loading publications…
+        </div>
+      ) : !appearances || appearances.length === 0 ? (
+        <p className="text-xs text-slate-400 py-10 text-center">No SOGC publications recorded.</p>
+      ) : (
+        <div className="divide-y divide-slate-50">
+          {appearances.map(a => {
+            const cfg = changeCfg(a.change_type);
+            const companyLabel = a.company_name ?? a.company_uid ?? "Company not linked";
+            return (
+              <div key={a.id} className="flex items-start gap-3 px-5 py-3">
+                <div className="w-20 shrink-0 pt-0.5">
+                  <span className="text-xs font-mono text-slate-500">{a.pub_date?.slice(0, 10) ?? "—"}</span>
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className={cn("text-[10px] font-semibold px-1.5 py-0.5 rounded-full border uppercase tracking-wide", cfg.cls)}>
+                      {cfg.label}
+                    </span>
+                    {a.company_id ? (
+                      <Link
+                        href={`/${locale}/app/companies/${a.company_id}`}
+                        className="inline-flex items-center gap-1 text-xs font-medium text-blue-600 hover:underline truncate"
+                        title={companyLabel}
+                      >
+                        <Building2 size={11} className="shrink-0" />
+                        {companyLabel}
+                      </Link>
+                    ) : (
+                      <span className="inline-flex items-center gap-1 text-xs text-slate-500 truncate" title={companyLabel}>
+                        <Building2 size={11} className="shrink-0 opacity-50" />
+                        {companyLabel}
+                        {a.company_uid && a.company_name == null && (
+                          <span className="font-mono text-[10px] text-slate-400">({a.company_uid})</span>
+                        )}
+                      </span>
+                    )}
+                    {a.is_current === false && (
+                      <span className="text-[10px] text-slate-400">· past</span>
+                    )}
+                  </div>
+                  {a.role && (
+                    <p className="mt-1 text-xs text-slate-600">
+                      {a.role}
+                      {a.residence_municipality && <span className="text-slate-400"> · {a.residence_municipality}</span>}
+                    </p>
+                  )}
+                  {a.raw_excerpt && (
+                    <p className="mt-1 text-[11px] text-slate-400 leading-relaxed line-clamp-2">{a.raw_excerpt}</p>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Main export ────────────────────────────────────────────────────────────────
 
 export function PersonDetailClient({
@@ -736,6 +832,11 @@ export function PersonDetailClient({
             <NetworkGraph entity={entity} mandates={network.mandates} locale={locale} />
           )}
         </div>
+
+        {/* Raw SOGC publication history — always shown, so a person whose companies
+            were deleted or whose UID failed to parse (empty mandates above) is still
+            explainable from the underlying publications. */}
+        <SogcPublicationsSection entityId={entity.id} locale={locale} />
       </div>
 
       {showFlag && <FlagModal entity={entity} onClose={() => setShowFlag(false)} />}

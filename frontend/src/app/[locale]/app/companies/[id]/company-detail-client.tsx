@@ -95,24 +95,26 @@ interface OldNameEntry {
 // ── Inline atoms ────────────────────────────────────────────────────────────
 
 function StatusPill({ status }: { status: string | null }) {
+  const { dict } = useI18n();
+  const t = dict.app.companydetail;
   if (!status) return null;
   const s = status.toUpperCase();
   if (s === "ACTIVE")
     return (
       <span className="inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-[12px] font-semibold" style={{ background: "#e9f6ee", color: "#15803d" }}>
-        <span className="h-1.5 w-1.5 rounded-full bg-[#15803d]" /> Active
+        <span className="h-1.5 w-1.5 rounded-full bg-[#15803d]" /> {t.statusActive}
       </span>
     );
   if (s === "BEING_CANCELLED")
     return (
       <span className="inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-[12px] font-semibold" style={{ background: "#fdf3e7", color: "#b45309" }}>
-        <span className="h-1.5 w-1.5 rounded-full bg-[#b45309]" /> Being cancelled
+        <span className="h-1.5 w-1.5 rounded-full bg-[#b45309]" /> {t.statusBeingCancelled}
       </span>
     );
   if (s === "CANCELLED" || s === "GELÖSCHT")
     return (
       <span className="inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-[12px] font-semibold" style={{ background: "#fdeaea", color: "#b91c1c" }}>
-        <span className="h-1.5 w-1.5 rounded-full bg-[#b91c1c]" /> {s === "GELÖSCHT" ? "Deleted" : "Cancelled"}
+        <span className="h-1.5 w-1.5 rounded-full bg-[#b91c1c]" /> {s === "GELÖSCHT" ? t.statusDeleted : t.statusCancelled}
       </span>
     );
   return (
@@ -434,7 +436,7 @@ export function CompanyDetailClient({ company: initial, readOnlyDemo = false, is
                     : enabled ? "border-transparent text-[#6b7480] hover:text-[#1f2733]"
                     : "border-transparent text-[#9aa2ad] cursor-not-allowed"
                   )}>
-                  {tab}
+                  {t[`tab${tab}` as keyof typeof t]}
                 </button>
               );
             })}
@@ -450,11 +452,11 @@ export function CompanyDetailClient({ company: initial, readOnlyDemo = false, is
           <div className="flex items-center gap-1.5 text-[13px] mb-4" style={{ color: "#6b7480" }}>
             {readOnlyDemo ? (
               <Link href="/demo" className="hover:text-[#1f2733] flex items-center gap-1">
-                <ChevronLeft size={14} /> Demo
+                <ChevronLeft size={14} /> {t.breadcrumbDemo}
               </Link>
             ) : (
               <button type="button" onClick={() => router.back()} className="hover:text-[#1f2733] flex items-center gap-1">
-                <ChevronLeft size={14} /> Companies
+                <ChevronLeft size={14} /> {t.breadcrumbCompanies}
               </button>
             )}
             <span style={{ color: "#e6e8ec" }}>›</span>
@@ -482,7 +484,7 @@ export function CompanyDetailClient({ company: initial, readOnlyDemo = false, is
                       {company.uid && (
                         <>
                           <span className="font-mono">{company.uid}</span>
-                          <button type="button" title="Copy UID"
+                          <button type="button" title={t.copyUid}
                             onClick={() => navigator.clipboard.writeText(company.uid ?? "")}
                             className="ml-1 mr-3 transition-colors" style={{ color: "#9aa2ad" }}
                             onMouseEnter={e => (e.currentTarget.style.color = "#3f4854")}
@@ -515,20 +517,20 @@ export function CompanyDetailClient({ company: initial, readOnlyDemo = false, is
                     onClick={() => { if (typeof window !== "undefined") navigator.clipboard.writeText(window.location.href); }}
                     className="flex items-center gap-1.5 text-[13px] px-3 py-1.5 rounded-[10px] border border-[#e6e8ec] hover:bg-[#f7f9fc] transition-colors"
                     style={{ color: "#3f4854" }}>
-                    <Share2 size={14} /> Share
+                    <Share2 size={14} /> {t.share}
                   </button>
                   {company.cantonal_excerpt_web && (
                     <a href={company.cantonal_excerpt_web} target="_blank" rel="noopener noreferrer"
                       className="flex items-center gap-1.5 text-[13px] px-3 py-1.5 rounded-[10px] border border-[#e6e8ec] hover:bg-[#f7f9fc] transition-colors"
                       style={{ color: "#3f4854" }}>
-                      Registry <ExternalLink size={11} />
+                      {t.registry} <ExternalLink size={11} />
                     </a>
                   )}
                   {company.website_url && (
                     <a href={company.website_url} target="_blank" rel="noopener noreferrer"
                       className="flex items-center gap-1.5 text-[13px] px-3 py-1.5 rounded-[10px] border border-[#cdddfb] hover:bg-[#eff4fe] transition-colors"
                       style={{ color: "#2563eb" }}>
-                      <Globe size={13} /> Website <ExternalLink size={11} />
+                      <Globe size={13} /> {t.website} <ExternalLink size={11} />
                     </a>
                   )}
                   {!readOnlyDemo && !company.website_checked_at && (
@@ -536,7 +538,7 @@ export function CompanyDetailClient({ company: initial, readOnlyDemo = false, is
                       className="flex items-center gap-1.5 text-[13px] px-3 py-1.5 rounded-[10px] border transition-colors disabled:opacity-50"
                       style={{ borderColor: "#c8e6c9", color: "#15803d" }}>
                       {searchingWeb ? <Loader2 size={13} className="animate-spin" /> : <Search size={13} />}
-                      {searchingWeb ? "Searching…" : t.runwebsearch}
+                      {searchingWeb ? t.searching : t.runwebsearch}
                     </button>
                   )}
                   {isSuperadmin && (
@@ -592,12 +594,12 @@ export function CompanyDetailClient({ company: initial, readOnlyDemo = false, is
                   <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
                     <path d="M12 1L9.5 8.5 2 6l5.5 6L2 18l7.5-2.5L12 23l2.5-7.5L22 18l-5.5-6L22 6l-7.5 2.5z" />
                   </svg>
-                  <span className="font-mono font-bold uppercase" style={{ fontSize: 11, letterSpacing: "0.08em" }}>AI Summary</span>
+                  <span className="font-mono font-bold uppercase" style={{ fontSize: 11, letterSpacing: "0.08em" }}>{t.aiSummary}</span>
                 </div>
                 {company.ai_freeform ? (
                   <p style={{ fontSize: 15, lineHeight: 1.6, color: "#3f4854" }}>{company.ai_freeform}</p>
                 ) : (
-                  <p className="italic" style={{ fontSize: 14, color: "#9aa2ad" }}>No AI summary available yet.</p>
+                  <p className="italic" style={{ fontSize: 14, color: "#9aa2ad" }}>{t.noAiSummary}</p>
                 )}
                 <div className="flex flex-wrap gap-1.5 mt-3">
                   {company.sogc_date && <span className="text-[11px] bg-white border border-[#eef0f3] rounded-full px-2 py-0.5" style={{ color: "#6b7480" }}>SOGC</span>}
@@ -610,13 +612,13 @@ export function CompanyDetailClient({ company: initial, readOnlyDemo = false, is
               <div className="p-6">
                 <div className="grid grid-cols-2 gap-4">
                   <div>
-                    <div className="font-mono font-semibold uppercase mb-0.5" style={{ fontSize: 11, letterSpacing: "0.06em", color: "#9aa2ad" }}>Founded</div>
+                    <div className="font-mono font-semibold uppercase mb-0.5" style={{ fontSize: 11, letterSpacing: "0.06em", color: "#9aa2ad" }}>{t.founded}</div>
                     <div className="font-mono font-bold" style={{ fontSize: 17, color: "#1f2733" }}>
                       {company.sogc_date ? company.sogc_date.slice(0, 4) : "—"}
                     </div>
                   </div>
                   <div>
-                    <div className="font-mono font-semibold uppercase mb-0.5" style={{ fontSize: 11, letterSpacing: "0.06em", color: "#9aa2ad" }}>Share capital</div>
+                    <div className="font-mono font-semibold uppercase mb-0.5" style={{ fontSize: 11, letterSpacing: "0.06em", color: "#9aa2ad" }}>{t.shareCapital}</div>
                     {company.capital_nominal ? (
                       <div className="font-bold" style={{ fontSize: 15, color: "#1f2733" }}>
                         {company.capital_currency} {Number(company.capital_nominal).toLocaleString("de-CH")}
@@ -626,13 +628,13 @@ export function CompanyDetailClient({ company: initial, readOnlyDemo = false, is
                     )}
                   </div>
                   <div>
-                    <div className="font-mono font-semibold uppercase mb-0.5" style={{ fontSize: 11, letterSpacing: "0.06em", color: "#9aa2ad" }}>Size</div>
+                    <div className="font-mono font-semibold uppercase mb-0.5" style={{ fontSize: 11, letterSpacing: "0.06em", color: "#9aa2ad" }}>{t.size}</div>
                     <div className="font-mono font-bold" style={{ fontSize: 17, color: "#9aa2ad" }}>—</div>
                   </div>
                   <div>
-                    <div className="font-mono font-semibold uppercase mb-0.5" style={{ fontSize: 11, letterSpacing: "0.06em", color: "#9aa2ad" }}>Auditor</div>
+                    <div className="font-mono font-semibold uppercase mb-0.5" style={{ fontSize: 11, letterSpacing: "0.06em", color: "#9aa2ad" }}>{t.auditor}</div>
                     <div style={{ fontSize: 13, fontWeight: 500, color: auditCompanies.length > 0 ? "#1f2733" : "#9aa2ad" }}>
-                      {auditCompanies.length > 0 ? (auditCompanies[0].name ?? "—") : "Opted out"}
+                      {auditCompanies.length > 0 ? (auditCompanies[0].name ?? "—") : t.optedOut}
                     </div>
                   </div>
                 </div>
@@ -762,18 +764,18 @@ export function CompanyDetailClient({ company: initial, readOnlyDemo = false, is
               {/* Scoring — only shown when at least one score has been computed */}
               {(company.combined_score != null || company.ai_score != null || company.web_score != null) && (
                 <div className="bg-white rounded-2xl border border-[#e6e8ec] p-5">
-                  <h2 className="font-bold mb-4" style={{ fontSize: 15, color: "#1f2733" }}>Scores</h2>
+                  <h2 className="font-bold mb-4" style={{ fontSize: 15, color: "#1f2733" }}>{t.scores}</h2>
                   <div className="flex items-center gap-4 mb-5">
                     <ScoreRing value={Math.round(company.combined_score ?? 0)} size={72} />
                     <div>
-                      <div className="font-semibold uppercase mb-0.5" style={{ fontSize: 12, letterSpacing: "0.04em", color: "#9aa2ad" }}>Combined</div>
-                      <div style={{ fontSize: 12, color: "#6b7480" }}>70% AI · 20% Web · 10% Flex</div>
+                      <div className="font-semibold uppercase mb-0.5" style={{ fontSize: 12, letterSpacing: "0.04em", color: "#9aa2ad" }}>{t.combined}</div>
+                      <div style={{ fontSize: 12, color: "#6b7480" }}>{t.scoreWeights}</div>
                     </div>
                   </div>
                   <div className="space-y-3">
-                    <ScoreBar value={Math.round(company.web_score ?? 0)} label="Web" />
-                    <ScoreBar value={Math.round(company.ai_score ?? 0)} label="AI" />
-                    <ScoreBar value={Math.round(company.flex_score ?? 0)} label="Flex" />
+                    <ScoreBar value={Math.round(company.web_score ?? 0)} label={t.scoreWeb} />
+                    <ScoreBar value={Math.round(company.ai_score ?? 0)} label={t.scoreAi} />
+                    <ScoreBar value={Math.round(company.flex_score ?? 0)} label={t.scoreFlex} />
                   </div>
                 </div>
               )}
@@ -784,7 +786,7 @@ export function CompanyDetailClient({ company: initial, readOnlyDemo = false, is
                   <div ref={mapRef} className="h-44 w-full" />
                 )}
                 <div className="p-5">
-                  <h2 className="font-bold mb-2" style={{ fontSize: 15, color: "#1f2733" }}>Location</h2>
+                  <h2 className="font-bold mb-2" style={{ fontSize: 15, color: "#1f2733" }}>{t.location}</h2>
                   {company.address && (
                     <p className="mt-1" style={{ fontSize: 13, color: "#3f4854" }}>{company.address}</p>
                   )}
@@ -795,11 +797,11 @@ export function CompanyDetailClient({ company: initial, readOnlyDemo = false, is
                   )}
                   {branchOffices.length > 0 && (
                     <p className="mt-1.5" style={{ fontSize: 12, color: "#6b7480" }}>
-                      {branchOffices.length} branch office{branchOffices.length !== 1 ? "s" : ""}
+                      {(branchOffices.length === 1 ? t.branchOfficeCount : t.branchOfficeCountPlural).replace("{count}", String(branchOffices.length))}
                     </p>
                   )}
                   {company.lat == null && (
-                    <p className="italic" style={{ fontSize: 13, color: "#9aa2ad" }}>Not geocoded</p>
+                    <p className="italic" style={{ fontSize: 13, color: "#9aa2ad" }}>{t.notGeocoded}</p>
                   )}
                 </div>
               </div>
@@ -807,11 +809,11 @@ export function CompanyDetailClient({ company: initial, readOnlyDemo = false, is
               {/* Website */}
               <div className="bg-white rounded-2xl border border-[#e6e8ec] p-5">
                 <div className="flex items-center justify-between mb-3">
-                  <h2 className="font-bold" style={{ fontSize: 15, color: "#1f2733" }}>Website</h2>
+                  <h2 className="font-bold" style={{ fontSize: 15, color: "#1f2733" }}>{t.website}</h2>
                   {!readOnlyDemo && !company.website_checked_at && (
                     <button type="button" onClick={handleWebSearch} disabled={searchingWeb}
                       className="hover:underline disabled:opacity-50" style={{ fontSize: 12, color: "#2563eb" }}>
-                      {searchingWeb ? "Searching…" : "Find website"}
+                      {searchingWeb ? t.searching : t.findWebsite}
                     </button>
                   )}
                 </div>
@@ -823,14 +825,14 @@ export function CompanyDetailClient({ company: initial, readOnlyDemo = false, is
                     <ExternalLink size={11} className="shrink-0" />
                   </a>
                 ) : (
-                  <p className="italic" style={{ fontSize: 13, color: "#9aa2ad" }}>No website found</p>
+                  <p className="italic" style={{ fontSize: 13, color: "#9aa2ad" }}>{t.noWebsiteFound}</p>
                 )}
               </div>
 
               {/* Keywords */}
               {(company.purpose_keywords || company.tfidf_cluster) && (
                 <div className="bg-white rounded-2xl border border-[#e6e8ec] p-5">
-                  <h2 className="font-bold mb-3" style={{ fontSize: 15, color: "#1f2733" }}>Keywords</h2>
+                  <h2 className="font-bold mb-3" style={{ fontSize: 15, color: "#1f2733" }}>{t.keywords}</h2>
                   <div className="flex flex-wrap gap-1.5">
                     {company.purpose_keywords?.split(",").filter(Boolean).map(k => k.trim()).filter(Boolean).map(k => (
                       <Link key={k} href={`/app/search?purpose_keywords=${encodeURIComponent(k)}`}>
@@ -858,7 +860,7 @@ export function CompanyDetailClient({ company: initial, readOnlyDemo = false, is
                   <h2 className="font-bold" style={{ fontSize: 15, color: "#1f2733" }}>{t.classification}</h2>
                   {company.ai_category && (
                     <div>
-                      <div className="font-semibold uppercase mb-1" style={{ fontSize: 11, letterSpacing: "0.06em", color: "#9aa2ad" }}>AI category</div>
+                      <div className="font-semibold uppercase mb-1" style={{ fontSize: 11, letterSpacing: "0.06em", color: "#9aa2ad" }}>{t.aiCategory}</div>
                       <Link href={`/app/search?ai_category=${encodeURIComponent(company.ai_category)}`}>
                         <Badge className="bg-slate-100 text-slate-700 text-xs cursor-pointer hover:bg-slate-200">{company.ai_category}</Badge>
                       </Link>
@@ -866,7 +868,7 @@ export function CompanyDetailClient({ company: initial, readOnlyDemo = false, is
                   )}
                   {company.purpose_language && (
                     <div className="flex items-center gap-2">
-                      <div className="font-semibold uppercase" style={{ fontSize: 11, letterSpacing: "0.06em", color: "#9aa2ad" }}>Language</div>
+                      <div className="font-semibold uppercase" style={{ fontSize: 11, letterSpacing: "0.06em", color: "#9aa2ad" }}>{t.language}</div>
                       <Badge className="bg-indigo-50 text-indigo-700 text-xs">{company.purpose_language.toUpperCase()}</Badge>
                     </div>
                   )}
@@ -875,16 +877,16 @@ export function CompanyDetailClient({ company: initial, readOnlyDemo = false, is
 
               {/* Source coverage */}
               <div className="bg-white rounded-2xl border border-[#e6e8ec] p-5">
-                <h2 className="font-bold mb-3" style={{ fontSize: 15, color: "#1f2733" }}>Source coverage</h2>
+                <h2 className="font-bold mb-3" style={{ fontSize: 15, color: "#1f2733" }}>{t.sourceCoverage}</h2>
                 <div className="grid grid-cols-2 gap-x-4 gap-y-2">
-                  <CoverageItem label={company.source === 'uid' ? 'UID Register' : 'Zefix'} present={true} />
-                  <CoverageItem label="Purpose" present={!!company.purpose} />
-                  <CoverageItem label="NOGA" present={!!company.noga_code} />
-                  <CoverageItem label="AI class." present={!!company.ai_category} />
-                  <CoverageItem label="Website" present={!!company.website_url} />
-                  <CoverageItem label="Geocoded" present={company.lat != null} />
+                  <CoverageItem label={company.source === 'uid' ? t.covUidRegister : 'Zefix'} present={true} />
+                  <CoverageItem label={t.purpose} present={!!company.purpose} />
+                  <CoverageItem label={t.noga} present={!!company.noga_code} />
+                  <CoverageItem label={t.covAiClass} present={!!company.ai_category} />
+                  <CoverageItem label={t.website} present={!!company.website_url} />
+                  <CoverageItem label={t.covGeocoded} present={company.lat != null} />
                   <CoverageItem label="SOGC" present={!!company.sogc_date} />
-                  <CoverageItem label="AI score" present={(company.ai_score ?? 0) > 0} />
+                  <CoverageItem label={t.covAiScore} present={(company.ai_score ?? 0) > 0} />
                 </div>
               </div>
 
@@ -952,7 +954,7 @@ export function CompanyDetailClient({ company: initial, readOnlyDemo = false, is
               <div>
                 <h2 className="font-bold" style={{ fontSize: 15, color: "#1f2733" }}>{t.selectdifferentwebsite}</h2>
                 <p className="mt-0.5" style={{ fontSize: 12, color: "#9aa2ad" }}>
-                  Scores (0–100) reflect name + location + purpose match quality
+                  {t.pickerSubtitle}
                 </p>
               </div>
               <button type="button" onClick={() => setShowWebsitePicker(false)} className="transition-colors ml-4 mt-0.5" style={{ color: "#9aa2ad" }}>
@@ -962,7 +964,7 @@ export function CompanyDetailClient({ company: initial, readOnlyDemo = false, is
             <div className="overflow-y-auto p-6 space-y-3">
               {googleResults.length === 0 ? (
                 <p className="text-center py-8 italic" style={{ fontSize: 13, color: "#9aa2ad" }}>
-                  No search results yet. Run a web search first.
+                  {t.noSearchResults}
                 </p>
               ) : googleResults.map(r => {
                 const score = Math.round(r.score);
@@ -980,7 +982,7 @@ export function CompanyDetailClient({ company: initial, readOnlyDemo = false, is
                           </div>
                           {isCurrent && (
                             <span className="font-semibold rounded-full px-2 py-0.5" style={{ fontSize: 11, background: "#e9f6ee", color: "#15803d" }}>
-                              Current
+                              {t.current}
                             </span>
                           )}
                         </div>
@@ -990,7 +992,7 @@ export function CompanyDetailClient({ company: initial, readOnlyDemo = false, is
                           <div className="mt-1 line-clamp-2" style={{ fontSize: 12, color: "#6b7480" }}>{r.snippet}</div>
                         )}
                         <div className="mt-2" style={{ fontSize: 11, color: "#9aa2ad" }}>
-                          Score: company name match + location ({company.municipality ?? "—"}) + purpose keyword relevance
+                          {t.scoreExplain.replace("{place}", company.municipality ?? "—")}
                         </div>
                       </div>
                       {!isCurrent && (
@@ -1004,7 +1006,7 @@ export function CompanyDetailClient({ company: initial, readOnlyDemo = false, is
                           )}
                           style={{ fontSize: 13 }}>
                           {selectingWebsite === r.link ? (
-                            <><Loader2 size={12} className="animate-spin inline mr-1" />Selecting…</>
+                            <><Loader2 size={12} className="animate-spin inline mr-1" />{t.selectingWebsite}</>
                           ) : t.useThisWebsite}
                         </button>
                       )}

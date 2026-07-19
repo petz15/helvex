@@ -93,7 +93,12 @@ def _apply_filters(query, *, name_filter, uid_filter=None, canton, review_status
                    business_model=None, purpose_language=None,
                    active_only: bool = True):
     if active_only and not zefix_status and not shab_type:
-        query = query.filter(Company.status.notin_(list(_DELETED_STATUSES)))
+        # NULL status is not "deleted" — keep it. SQL `NULL NOT IN (...)` is NULL
+        # (falsy), which would otherwise silently drop every company Zefix returned
+        # without a status from the list/export/alert results.
+        query = query.filter(
+            (Company.status.is_(None)) | (Company.status.notin_(list(_DELETED_STATUSES)))
+        )
     if zefix_status:
         query = query.filter(Company.status == zefix_status)
     if has_website is True:

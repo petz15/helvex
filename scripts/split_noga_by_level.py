@@ -1,7 +1,7 @@
 import json
 
 # Load the flat NOGA lookup table
-with open("noga_lookup.json", "r", encoding="utf-8") as f:
+with open("app/data/noga_lookup.json", "r", encoding="utf-8") as f:
     data = json.load(f)
 
 # Group entries by level_no
@@ -13,7 +13,7 @@ for code, entry in data.items():
 
 # Save each level to a separate file
 for level, entries in by_level.items():
-    out_path = f"noga_level_{level}.json"
+    out_path = f"app/data/noga_level_{level}.json"
     with open(out_path, "w", encoding="utf-8") as f:
         json.dump(entries, f, ensure_ascii=False, indent=2)
     print(f"Saved {len(entries)} entries to {out_path}")

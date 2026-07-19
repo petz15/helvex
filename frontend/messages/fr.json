@@ -548,7 +548,6 @@
         "googleSearch": "Recherche Google",
         "enableGoogleSearch": "Activer la recherche Google",
         "enabled": "Activé",
-        "dailyQuota": "Quota quotidien",
         "googleScoringFilters": "Filtres de scoring Google",
         "seedDescription": "Alimenter la base de données avec tous les paramètres par défaut intégrés : mots-clés vides Google, domaines de répertoire et mots-clés vides TF-IDF. Sûr à exécuter plusieurs fois — ignore les lignes existantes.",
         "seedDefaults": "Paramètres de semence par défaut",

@@ -34,7 +34,6 @@ class Settings(BaseSettings):
     google_search_enabled: bool = True
     serper_api_key: str = ""
     scrapingdog_api_key: str = ""
-    google_daily_quota: int = 100
 
     # Global URL exclusion: comma-separated keywords (case-insensitive) that, if present
     # anywhere in a candidate URL, force it to be excluded from scoring.

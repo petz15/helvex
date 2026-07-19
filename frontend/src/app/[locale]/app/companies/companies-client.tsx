@@ -4,6 +4,7 @@ import { useCallback } from "react";
 import { cn } from "@/lib/utils";
 import { SearchClient } from "@/app/[locale]/app/search/search-client";
 import { MapClient } from "@/app/[locale]/app/map/map-client";
+import { useI18n } from "@/i18n/context";
 import type { CompanyFilters, CompanyStats } from "@/lib/types";
 import dynamic from "next/dynamic";
 
@@ -11,11 +12,7 @@ const NogaClient = dynamic(() => import("@/app/[locale]/app/noga/noga-client"), 
 
 type View = "list" | "noga" | "map";
 
-const VIEWS: { id: View; label: string }[] = [
-  { id: "list", label: "List" },
-  { id: "noga", label: "NOGA tree" },
-  { id: "map", label: "Map" },
-];
+const VIEW_IDS: View[] = ["list", "noga", "map"];
 
 interface CompaniesClientProps {
   initialCantons: string[];
@@ -29,6 +26,8 @@ export function CompaniesClient({ initialCantons, initialStats, initialFilters, 
   const router = useRouter();
   const searchParams = useSearchParams();
   const pathname = usePathname();
+  const { dict } = useI18n();
+  const t = dict.app.companies;
 
   const view: View = ((searchParams?.get("view")) as View) || initialView;
 
@@ -42,7 +41,7 @@ export function CompaniesClient({ initialCantons, initialStats, initialFilters, 
     <div className="flex flex-col h-[calc(100vh-5rem)] overflow-hidden">
       {/* View tab strip */}
       <div className="flex items-center gap-1 px-4 py-2 border-b border-slate-200 bg-white shrink-0">
-        {VIEWS.map(({ id, label }) => (
+        {VIEW_IDS.map((id) => (
           <button
             key={id}
             onClick={() => switchView(id)}
@@ -53,7 +52,7 @@ export function CompaniesClient({ initialCantons, initialStats, initialFilters, 
                 : "text-slate-600 hover:bg-slate-100 hover:text-slate-900"
             )}
           >
-            {label}
+            {t.views[id]}
           </button>
         ))}
       </div>

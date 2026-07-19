@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import secrets
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
@@ -253,6 +254,16 @@ def google_search_for_company(
     current_user: User = Depends(get_current_user),
 ):
     """Run Google enrichment for an existing company. Rate-limited to 30 searches per user per 10 minutes."""
+    # Resolve the company before charging so a 404 never consumes credits.
+    db_company = crud.get_company(db, company_id)
+    if not db_company:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Company not found")
+
+    # Per-attempt reference so repeated failed searches of the same company each
+    # get their own refund row (a shared ref would let refund_action's idempotency
+    # suppress the refund for every attempt after the first).
+    _ws_ref = f"google_search:company_{company_id}:user_{current_user.id}:{secrets.token_hex(8)}"
+    _ws_charged = False
     if not current_user.is_superadmin:
         key = f"user_{current_user.id}"
         check_rate_limit(key, "google_search", window=600, max_calls=30, detail="Too many Google search requests. Maximum 30 per 10 minutes.")
@@ -268,15 +279,13 @@ def google_search_for_company(
                 current_user.org_id,
                 "web_search",
                 1,
-                reference_id=f"google_search:company_{company_id}:user_{current_user.id}",
+                reference_id=_ws_ref,
             ):
                 raise HTTPException(
                     status_code=status.HTTP_402_PAYMENT_REQUIRED,
                     detail=f"Insufficient credits. A web search costs {credits_service.CREDIT_COSTS['web_search']:,} credits.",
                 )
-    db_company = crud.get_company(db, company_id)
-    if not db_company:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Company not found")
+            _ws_charged = True
 
     log_activity(
         db,
@@ -288,30 +297,45 @@ def google_search_for_company(
         meta={"company_id": company_id, "name": db_company.name},
     )
 
+    # Only the search itself is refundable: a failure in enrich_company_website means
+    # the provider call didn't deliver. Result parsing below is post-processing — a
+    # parse error there must NOT refund a search that actually ran and was billed.
+    def _refund_failed_search() -> None:
+        if _ws_charged and current_user.org_id:
+            # Clear any partial/failed transaction state so the refund query/commit
+            # can't inherit a poisoned session (the deduction was already committed).
+            db.rollback()
+            credits_service.refund_action(db, current_user.org_id, "web_search", 1, reference_id=_ws_ref)
+
     try:
         enrich_company_website(db, db_company, num=num)
-        db.refresh(db_company)
+    except ValueError as exc:
+        _refund_failed_search()
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
+    except Exception as exc:
+        _refund_failed_search()
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
 
-        raw = db_company.google_search_results_raw or "[]"
+    # Search succeeded and was billed — parse stored results defensively (a corrupt
+    # blob yields an empty list, never a refund).
+    db.refresh(db_company)
+    raw = db_company.google_search_results_raw or "[]"
+    try:
         stored = json.loads(raw)
         if not isinstance(stored, list):
             stored = []
+    except (ValueError, TypeError):
+        stored = []
 
-        results = [
-            GoogleSearchResult(
-                title=str(item.get("title") or ""),
-                link=str(item.get("link") or ""),
-                snippet=(str(item.get("snippet")) if item.get("snippet") is not None else None),
-            )
-            for item in stored
-            if isinstance(item, dict) and (item.get("link") or "")
-        ]
-    except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
-    except Exception as exc:
-        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
-
-    return results
+    return [
+        GoogleSearchResult(
+            title=str(item.get("title") or ""),
+            link=str(item.get("link") or ""),
+            snippet=(str(item.get("snippet")) if item.get("snippet") is not None else None),
+        )
+        for item in stored
+        if isinstance(item, dict) and (item.get("link") or "")
+    ]
 
 
 @router.get("/{company_id}/serp-analysis", summary="SERP position analysis for the company's website")

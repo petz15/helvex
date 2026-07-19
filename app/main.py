@@ -143,12 +143,10 @@ def _seed_settings(app_state) -> None:
     from app.crud import seed_defaults
     from app.database import SessionLocal
 
-    #TODO: remove the google_search params from defaults. should be managed elsewhere? atleast not here
-    defaults = {
-        "google_search_enabled": "true" if settings.google_search_enabled else "false",
-        "google_daily_quota": str(settings.google_daily_quota),
-    }
-    defaults.update(get_default_scoring_config())
+    # Google search is not seeded/limited here: availability is gated only by the
+    # SERPER_API_KEY (see _google_search_ready) and per-action credits — there is no
+    # daily search quota.
+    defaults = dict(get_default_scoring_config())
     try:
         with SessionLocal() as db:
             seed_defaults(db, defaults)

@@ -24,6 +24,7 @@ import type {
   SogcPersonEntity,
   SogcAuditor,
 } from "@/lib/types";
+import { useI18n } from "@/i18n/context";
 
 // ── Constants ──────────────────────────────────────────────────────────────────
 
@@ -50,6 +51,8 @@ function clamp(v: number, lo: number, hi: number): number {
 // ── Flag modal ─────────────────────────────────────────────────────────────────
 
 function FlagModal({ entity, onClose }: { entity: SogcPersonEntity; onClose: () => void }) {
+  const { dict } = useI18n();
+  const t = dict.app.people;
   const [flagType, setFlagType] = useState<"should_merge" | "should_split">("should_merge");
   const [reason, setReason] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -71,40 +74,40 @@ function FlagModal({ entity, onClose }: { entity: SogcPersonEntity; onClose: () 
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
       <div className="bg-white rounded-xl shadow-xl w-full max-w-md p-6 mx-4">
         <div className="flex items-center justify-between mb-4">
-          <h3 className="text-sm font-semibold text-slate-800">Report issue — {name}</h3>
+          <h3 className="text-sm font-semibold text-slate-800">{t.reportIssue.replace("{name}", name)}</h3>
           <button onClick={onClose} className="text-slate-400 hover:text-slate-600"><X size={16} /></button>
         </div>
         {done ? (
           <div className="flex items-center gap-2 text-emerald-700 text-sm">
-            <CheckCircle size={16} /> Reported. Thank you.
+            <CheckCircle size={16} /> {t.reported}
           </div>
         ) : (
           <form onSubmit={submit} className="space-y-4">
             <div>
-              <label className="block text-xs font-medium text-slate-600 mb-1">Issue type</label>
+              <label className="block text-xs font-medium text-slate-600 mb-1">{t.issueType}</label>
               <select
                 value={flagType}
                 onChange={e => setFlagType(e.target.value as "should_merge" | "should_split")}
                 className="w-full rounded border border-slate-200 px-3 py-1.5 text-sm"
               >
-                <option value="should_merge">Two entries are the same person (should merge)</option>
-                <option value="should_split">This entry contains different people (should split)</option>
+                <option value="should_merge">{t.shouldMerge}</option>
+                <option value="should_split">{t.shouldSplit}</option>
               </select>
             </div>
             <div>
-              <label className="block text-xs font-medium text-slate-600 mb-1">Reason (optional)</label>
+              <label className="block text-xs font-medium text-slate-600 mb-1">{t.reasonOptional}</label>
               <textarea
                 value={reason}
                 onChange={e => setReason(e.target.value)}
                 rows={3}
-                placeholder="Describe the issue…"
+                placeholder={t.describeIssue}
                 className="w-full rounded border border-slate-200 px-3 py-1.5 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-blue-200"
               />
             </div>
             <div className="flex gap-2 justify-end">
-              <button type="button" onClick={onClose} className="px-3 py-1.5 text-sm text-slate-600 hover:text-slate-800">Cancel</button>
+              <button type="button" onClick={onClose} className="px-3 py-1.5 text-sm text-slate-600 hover:text-slate-800">{t.cancel}</button>
               <button type="submit" disabled={submitting} className="px-3 py-1.5 text-sm bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50">
-                {submitting ? "Sending…" : "Submit"}
+                {submitting ? t.sending : t.submit}
               </button>
             </div>
           </form>
@@ -132,12 +135,14 @@ interface AuditorGroup {
 }
 
 function AuditorClientsTimeline({ group, locale }: { group: AuditorGroup; locale: string }) {
+  const { dict } = useI18n();
+  const t = dict.app.people;
   const today = new Date().toISOString().slice(0, 10);
   const companies = group.companies;
 
   const dates = companies.map(c => c.pub_date).filter(Boolean) as string[];
   if (!dates.length) {
-    return <p className="text-xs text-slate-400 py-3">No date data available.</p>;
+    return <p className="text-xs text-slate-400 py-3">{t.noDateData}</p>;
   }
 
   const minYear = Math.floor(Math.min(...dates.map(d => new Date(d).getFullYear())));
@@ -176,7 +181,7 @@ function AuditorClientsTimeline({ group, locale }: { group: AuditorGroup; locale
               className="absolute top-0 bottom-0 border-l border-red-400 border-dashed opacity-70"
               style={{ left: `${todayPct}%` }}
             >
-              <span className="absolute -top-0 left-1 text-[9px] text-red-400 font-mono whitespace-nowrap leading-none">now</span>
+              <span className="absolute -top-0 left-1 text-[9px] text-red-400 font-mono whitespace-nowrap leading-none">{t.now}</span>
             </div>
           </div>
 
@@ -237,6 +242,8 @@ function AuditorDetailPanel({
   locale: string;
   onClose: () => void;
 }) {
+  const { dict } = useI18n();
+  const t = dict.app.people;
   return (
     <div className="bg-white rounded-xl border border-slate-200 shadow-md overflow-hidden">
       <div className="px-4 py-3 border-b border-slate-200 bg-slate-50/50 flex items-start gap-3">
@@ -251,15 +258,15 @@ function AuditorDetailPanel({
         <div className="flex items-center gap-2 shrink-0">
           <span className="text-xs text-slate-500">
             <span className="font-mono font-semibold text-slate-700">{group.companies.length}</span>{" "}
-            {group.companies.length === 1 ? "client" : "clients"}
+            {group.companies.length === 1 ? t.client.replace("{count} ", "") : t.clients.replace("{count} ", "")}
           </span>
-          <button onClick={onClose} className="text-slate-400 hover:text-slate-600 p-0.5" title="Close">
+          <button onClick={onClose} className="text-slate-400 hover:text-slate-600 p-0.5" title={t.close}>
             <X size={14} />
           </button>
         </div>
       </div>
       <div className="p-4">
-        <p className="text-[11px] font-medium text-slate-500 uppercase tracking-wide mb-3">Client timeline</p>
+        <p className="text-[11px] font-medium text-slate-500 uppercase tracking-wide mb-3">{t.clientTimeline}</p>
         <AuditorClientsTimeline group={group} locale={locale} />
       </div>
     </div>
@@ -277,6 +284,8 @@ function PersonEntityCard({
   locale: string;
   isSuperAdmin?: boolean;
 }) {
+  const { dict } = useI18n();
+  const t = dict.app.people;
   const [showFlag, setShowFlag] = useState(false);
   const name = [entity.firstname, entity.lastname].filter(Boolean).join(" ") || entity.normalized_key;
 
@@ -289,7 +298,7 @@ function PersonEntityCard({
               <div className="flex items-center gap-2 flex-wrap">
                 <span className="text-sm font-semibold text-slate-800">{name}</span>
                 {entity.is_verified && (
-                  <CheckCircle size={13} className="text-emerald-500 shrink-0" aria-label="Verified identity" />
+                  <CheckCircle size={13} className="text-emerald-500 shrink-0" aria-label={t.verifiedIdentity} />
                 )}
                 {isSuperAdmin && (
                   <span
@@ -299,35 +308,35 @@ function PersonEntityCard({
                   </span>
                 )}
                 {entity.is_foreign && entity.nationality && (
-                  <span className="text-[9px] text-slate-400 italic">{entity.nationality} national</span>
+                  <span className="text-[9px] text-slate-400 italic">{t.nationalSuffix.replace("{nat}", entity.nationality)}</span>
                 )}
               </div>
 
               <div className="flex flex-wrap gap-x-3 mt-0.5">
                 {entity.hometown_municipality && (
-                  <p className="text-xs text-slate-500">von {entity.hometown_municipality}</p>
+                  <p className="text-xs text-slate-500">{t.fromMunicipality.replace("{place}", entity.hometown_municipality)}</p>
                 )}
                 {entity.current_residence_municipality && (
-                  <p className="text-xs text-slate-500">in {entity.current_residence_municipality}</p>
+                  <p className="text-xs text-slate-500">{t.inMunicipality.replace("{place}", entity.current_residence_municipality)}</p>
                 )}
               </div>
 
               {isSuperAdmin && entity.confidence_level === "low" && (
                 <p className="text-[9px] text-amber-600/80 mt-0.5 flex items-center gap-1">
                   <AlertCircle size={9} />
-                  Identity match approximate
+                  {t.identityApprox}
                 </p>
               )}
 
               <div className="flex flex-wrap gap-1.5 mt-2">
                 {entity.active_company_count > 0 && (
                   <span className="text-[11px] bg-blue-50 text-blue-700 px-2 py-0.5 rounded-full border border-blue-100">
-                    {entity.active_company_count} active {entity.active_company_count === 1 ? "company" : "companies"}
+                    {(entity.active_company_count === 1 ? t.activeCompany : t.activeCompanies).replace("{count}", String(entity.active_company_count))}
                   </span>
                 )}
                 {entity.appearance_count > entity.active_company_count && (
                   <span className="text-[11px] bg-slate-100 text-slate-500 px-2 py-0.5 rounded-full">
-                    {entity.appearance_count} total
+                    {t.totalAppearances.replace("{count}", String(entity.appearance_count))}
                   </span>
                 )}
               </div>
@@ -337,7 +346,7 @@ function PersonEntityCard({
               <button
                 onClick={e => { e.preventDefault(); e.stopPropagation(); setShowFlag(true); }}
                 className="text-slate-300 hover:text-amber-500 transition-colors p-1 relative z-10"
-                title="Report identity issue"
+                title={t.reportIssueTitle}
               >
                 <AlertCircle size={14} />
               </button>
@@ -385,6 +394,8 @@ function AuditorCard({
   isSelected: boolean;
   onSelect: (key: string) => void;
 }) {
+  const { dict } = useI18n();
+  const t = dict.app.people;
   const [expanded, setExpanded] = useState(false);
   const showToggle = group.companies.length > COLLAPSE_THRESHOLD;
   const visible = showToggle && !expanded ? group.companies.slice(0, COLLAPSE_THRESHOLD) : group.companies;
@@ -408,7 +419,7 @@ function AuditorCard({
           </div>
           <div className="flex items-center gap-1.5 shrink-0">
             <span className="text-[11px] bg-slate-100 text-slate-500 px-2 py-0.5 rounded-full">
-              {group.companies.length} {group.companies.length === 1 ? "client" : "clients"}
+              {(group.companies.length === 1 ? t.client : t.clients).replace("{count}", String(group.companies.length))}
             </span>
             <span className="text-slate-400 p-0.5">
               {isSelected ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
@@ -439,7 +450,7 @@ function AuditorCard({
                 className="flex items-center gap-1 text-[11px] text-blue-600 hover:text-blue-800 mt-1"
               >
                 {expanded ? <ChevronDown size={11} /> : <ChevronRight size={11} />}
-                {expanded ? "Show less" : `Show ${group.companies.length - COLLAPSE_THRESHOLD} more`}
+                {expanded ? t.showLess : t.showMore.replace("{count}", String(group.companies.length - COLLAPSE_THRESHOLD))}
               </button>
             )}
           </div>
@@ -460,6 +471,8 @@ export function PeopleClient({
 } = {}) {
   const params = useParams();
   const locale = (params?.locale as string) ?? "de";
+  const { dict } = useI18n();
+  const t = dict.app.people;
 
   const { data: me } = useSWR("me", fetchCurrentUser, { revalidateOnFocus: false });
   const isSuperAdmin = !!me?.is_superadmin;
@@ -537,25 +550,25 @@ export function PeopleClient({
     <div className="max-w-4xl mx-auto p-6 space-y-5">
       <div className="flex items-center gap-3">
         <Users size={20} className="text-slate-400" />
-        <h1 className="text-xl font-semibold text-slate-800">People</h1>
+        <h1 className="text-xl font-semibold text-slate-800">{t.title}</h1>
       </div>
 
       {/* Tabs */}
       <div className="flex border-b border-slate-200">
-        {(["persons", "auditors"] as const).map(t => (
+        {(["persons", "auditors"] as const).map(tabId => (
           <button
-            key={t}
-            onClick={() => { setTab(t); setSelectedAuditorKey(null); }}
+            key={tabId}
+            onClick={() => { setTab(tabId); setSelectedAuditorKey(null); }}
             className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
-              tab === t
+              tab === tabId
                 ? "border-blue-500 text-blue-700"
                 : "border-transparent text-slate-500 hover:text-slate-700"
             }`}
           >
-            {t === "persons" ? (
-              <><Users size={13} className="inline mr-1.5" />Persons</>
+            {tabId === "persons" ? (
+              <><Users size={13} className="inline mr-1.5" />{t.tabs.persons}</>
             ) : (
-              <><Building2 size={13} className="inline mr-1.5" />Auditors</>
+              <><Building2 size={13} className="inline mr-1.5" />{t.tabs.auditors}</>
             )}
           </button>
         ))}
@@ -569,7 +582,7 @@ export function PeopleClient({
               <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
               <input
                 type="search"
-                placeholder="Search by name…"
+                placeholder={t.searchName}
                 value={q}
                 onChange={e => { setQ(e.target.value); resetOffset(); }}
                 className="pl-8 pr-3 py-1.5 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-200 w-52"
@@ -577,21 +590,21 @@ export function PeopleClient({
             </div>
             <input
               type="text"
-              placeholder="Hometown…"
+              placeholder={t.hometown}
               value={hometown}
               onChange={e => { setHometown(e.target.value); resetOffset(); }}
               className="px-3 py-1.5 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-200 w-36"
             />
             <input
               type="text"
-              placeholder="Nationality…"
+              placeholder={t.nationality}
               value={nationality}
               onChange={e => { setNationality(e.target.value); resetOffset(); }}
               className="px-3 py-1.5 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-200 w-32"
             />
             <input
               type="number"
-              placeholder="Min companies"
+              placeholder={t.minCompanies}
               value={minCompanies}
               min={0}
               onChange={e => { setMinCompanies(e.target.value); resetOffset(); }}
@@ -603,10 +616,10 @@ export function PeopleClient({
                 onChange={e => { setConfidenceFilter(e.target.value); resetOffset(); }}
                 className="px-3 py-1.5 rounded-lg border border-slate-200 text-sm text-slate-600 bg-white"
               >
-                <option value="">All confidence</option>
-                <option value="high">High</option>
-                <option value="medium">Medium</option>
-                <option value="low">Low (foreign)</option>
+                <option value="">{t.allConfidence}</option>
+                <option value="high">{t.confHigh}</option>
+                <option value="medium">{t.confMedium}</option>
+                <option value="low">{t.confLow}</option>
               </select>
             )}
             <select
@@ -614,16 +627,16 @@ export function PeopleClient({
               onChange={e => { setSortBy(e.target.value); resetOffset(); }}
               className="px-3 py-1.5 rounded-lg border border-slate-200 text-sm text-slate-600 bg-white"
             >
-              <option value="companies">Sort: Companies</option>
-              {isSuperAdmin && <option value="confidence">Sort: Confidence</option>}
-              <option value="appearances">Sort: Appearances</option>
+              <option value="companies">{t.sortCompanies}</option>
+              {isSuperAdmin && <option value="confidence">{t.sortConfidence}</option>}
+              <option value="appearances">{t.sortAppearances}</option>
             </select>
           </div>
 
           {personsLoading ? (
-            <p className="text-sm text-slate-400">Loading…</p>
+            <p className="text-sm text-slate-400">{t.loading}</p>
           ) : persons.length === 0 ? (
-            <p className="text-sm text-slate-400">No results.</p>
+            <p className="text-sm text-slate-400">{t.noResults}</p>
           ) : (
             <div className="space-y-2">
               {persons.map(entity => (
@@ -638,14 +651,14 @@ export function PeopleClient({
               onClick={() => setOffset(Math.max(0, offset - LIMIT))}
               className="text-sm px-3 py-1.5 rounded border border-slate-200 disabled:opacity-40 hover:bg-slate-50"
             >
-              Previous
+              {t.previous}
             </button>
             <button
               disabled={persons.length < LIMIT}
               onClick={() => setOffset(offset + LIMIT)}
               className="text-sm px-3 py-1.5 rounded border border-slate-200 disabled:opacity-40 hover:bg-slate-50"
             >
-              Next
+              {t.next}
             </button>
           </div>
         </>
@@ -659,7 +672,7 @@ export function PeopleClient({
               <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
               <input
                 type="search"
-                placeholder="Search auditor name…"
+                placeholder={t.searchAuditor}
                 value={auditorQ}
                 onChange={e => { setAuditorQ(e.target.value); resetAuditorOffset(); setSelectedAuditorKey(null); }}
                 className="pl-8 pr-3 py-1.5 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-200 w-52"
@@ -667,14 +680,14 @@ export function PeopleClient({
             </div>
             <input
               type="text"
-              placeholder="Location…"
+              placeholder={t.location}
               value={auditorLocation}
               onChange={e => { setAuditorLocation(e.target.value); resetAuditorOffset(); }}
               className="px-3 py-1.5 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-200 w-32"
             />
             <input
               type="text"
-              placeholder="Legal form…"
+              placeholder={t.legalForm}
               value={auditorLegalForm}
               onChange={e => { setAuditorLegalForm(e.target.value); resetAuditorOffset(); }}
               className="px-3 py-1.5 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-200 w-28"
@@ -684,8 +697,8 @@ export function PeopleClient({
               onChange={e => setAuditorSortBy(e.target.value)}
               className="px-3 py-1.5 rounded-lg border border-slate-200 text-sm text-slate-600 bg-white"
             >
-              <option value="clients">Sort: Most clients</option>
-              <option value="name">Sort: Name A–Z</option>
+              <option value="clients">{t.sortMostClients}</option>
+              <option value="name">{t.sortNameAz}</option>
             </select>
             <label className="flex items-center gap-1.5 text-sm text-slate-600 cursor-pointer select-none">
               <input
@@ -694,14 +707,14 @@ export function PeopleClient({
                 onChange={e => { setAuditorCurrentOnly(e.target.checked); resetAuditorOffset(); }}
                 className="rounded border-slate-300"
               />
-              Current only
+              {t.currentOnly}
             </label>
           </div>
 
           {auditorsLoading ? (
-            <p className="text-sm text-slate-400">Loading…</p>
+            <p className="text-sm text-slate-400">{t.loading}</p>
           ) : auditorGroups.length === 0 ? (
-            <p className="text-sm text-slate-400">No results.</p>
+            <p className="text-sm text-slate-400">{t.noResults}</p>
           ) : (
             <div className="space-y-2">
               {auditorGroups.map(group => (
@@ -732,14 +745,14 @@ export function PeopleClient({
               onClick={() => { setAuditorOffset(Math.max(0, auditorOffset - LIMIT)); setSelectedAuditorKey(null); }}
               className="text-sm px-3 py-1.5 rounded border border-slate-200 disabled:opacity-40 hover:bg-slate-50"
             >
-              Previous
+              {t.previous}
             </button>
             <button
               disabled={auditors.length < LIMIT}
               onClick={() => { setAuditorOffset(auditorOffset + LIMIT); setSelectedAuditorKey(null); }}
               className="text-sm px-3 py-1.5 rounded border border-slate-200 disabled:opacity-40 hover:bg-slate-50"
             >
-              Next
+              {t.next}
             </button>
           </div>
         </>

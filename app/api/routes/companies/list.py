@@ -198,6 +198,7 @@ def export_companies_csv(
     else:
         row_limit = 100
 
+    _csv_deduction = None
     if current_user.org_id and not current_user.is_superadmin:
         cap = row_limit or 0
         units = max(1, -(-cap // 10_000))
@@ -215,6 +216,14 @@ def export_companies_csv(
                     f"{credits_service.compute_cost('bulk_export_basic', units):,} credits."
                 ),
             )
+        # Record the (single) charge on the job so a failed export is fully refunded.
+        _csv_deduction = {
+            "action": "bulk_export_basic",
+            "count": units,
+            "cost": credits_service.compute_cost("bulk_export_basic", units),
+            "prorate": False,
+            "source": "route",
+        }
 
     crud.cancel_active_csv_exports(db, user_id=current_user.id)
 
@@ -254,6 +263,7 @@ def export_companies_csv(
         db=db,
         org_id=current_user.org_id,
         user_id=current_user.id,
+        credit_deduction=_csv_deduction,
     )
     log_activity(
         db, action="company_exported",

@@ -923,3 +923,91 @@ def test_invoice_uses_config_issuer_and_nonsequential_number(client, db):
     assert "firmiq" not in html.lower()
     assert "INV-20260718-" in html                 # date-based, non-sequential
     assert settings.invoice_brand_name in html
+
+
+# ---------------------------------------------------------------------------
+# Inline web search: charge is refunded when the search fails (net-zero)
+# ---------------------------------------------------------------------------
+
+def test_web_search_failure_refunds_credits(client, db):
+    from unittest.mock import patch
+    from app.models.company import Company
+    org = _seed_org(db, org_id=40)
+    org.tier = "simple"; org.credits_balance = 100; db.commit()  # simple tier has web_search
+    _override_user(org.id)
+    db.add(Company(id=5000, uid="CHE-111.111.111", name="Test AG")); db.commit()
+
+    with patch("app.api.routes.companies.detail.enrich_company_website", side_effect=Exception("serper down")):
+        resp = client.get("/api/v1/companies/5000/google-search")
+    assert resp.status_code == 502
+    db.refresh(org)
+    assert org.credits_balance == 100  # 20 deducted then refunded → net zero
+
+
+def test_web_search_success_charges_without_refund(client, db):
+    from unittest.mock import patch
+    from app.models.company import Company
+    org = _seed_org(db, org_id=41)
+    org.tier = "simple"; org.credits_balance = 100; db.commit()
+    _override_user(org.id)
+    db.add(Company(id=5001, uid="CHE-222.222.222", name="OK AG")); db.commit()
+
+    def _ok(db_, company, *, num=10):
+        company.google_search_results_raw = json.dumps([{"title": "x", "link": "https://x.ch"}])
+        db_.add(company); db_.commit()
+
+    with patch("app.api.routes.companies.detail.enrich_company_website", side_effect=_ok):
+        resp = client.get("/api/v1/companies/5001/google-search")
+    assert resp.status_code == 200
+    db.refresh(org)
+    assert org.credits_balance == 80  # charged 20, no refund on success
+
+
+def test_web_search_missing_company_does_not_charge(client, db):
+    org = _seed_org(db, org_id=42)
+    org.tier = "simple"; org.credits_balance = 100; db.commit()
+    _override_user(org.id)
+
+    resp = client.get("/api/v1/companies/999999/google-search")
+    assert resp.status_code == 404
+    db.refresh(org)
+    assert org.credits_balance == 100  # 404 resolved before any deduction
+
+
+def test_web_search_repeated_failures_each_refund(client, db):
+    from unittest.mock import patch
+    from app.models.company import Company
+    org = _seed_org(db, org_id=43)
+    org.tier = "simple"; org.credits_balance = 100; db.commit()
+    _override_user(org.id)
+    db.add(Company(id=5002, uid="CHE-333.333.333", name="Fail AG")); db.commit()
+
+    with patch("app.api.routes.companies.detail.enrich_company_website", side_effect=Exception("serper down")):
+        r1 = client.get("/api/v1/companies/5002/google-search")
+        r2 = client.get("/api/v1/companies/5002/google-search")
+    assert r1.status_code == 502 and r2.status_code == 502
+    db.refresh(org)
+    # Both attempts charge 20 then refund 20 — a per-attempt reference means the
+    # SECOND refund isn't suppressed by the first. Net zero.
+    assert org.credits_balance == 100
+
+
+def test_csv_export_rerun_recharges_credits(client, db):
+    import json as _json
+    org = _seed_org(db, org_id=44)
+    org.credits_balance = 100_000; db.commit()
+    _override_user(org.id)
+    db.add(JobRun(
+        id=7001, job_type="csv_export", label="CSV export", status="failed",
+        org_id=org.id, user_id=1,
+        stats_json=_json.dumps({"_credit_deduction": {
+            "action": "bulk_export_basic", "count": 1, "cost": 6000, "prorate": False, "source": "route",
+        }}),
+        params_json=_json.dumps({"row_limit": 5000}),
+    ))
+    db.commit()
+
+    resp = client.post("/api/v1/jobs/7001/rerun", json={"mode": "new"})
+    assert resp.status_code in (200, 202)
+    db.refresh(org)
+    assert org.credits_balance == 94_000  # rerun re-charged the route-sourced export (6000)
