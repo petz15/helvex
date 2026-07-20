@@ -7,6 +7,7 @@ import { Download, Loader2 } from "lucide-react";
 import { FilterBar } from "@/components/dashboard/filter-bar";
 import { CompanyTable } from "@/components/dashboard/company-table";
 import { CompanyPreview } from "@/components/dashboard/company-preview";
+import { Pagination } from "@/components/dashboard/pagination";
 import { BaloghAdCard } from "@/components/balogh-ad-card";
 import { fetchCompanies, fetchStats, fetchCantons, fetchTaxonomy, fetchSavedViews, saveView, deleteView, enqueueCSVExport, toggleViewAlert } from "@/lib/api";
 import type { Company, CompanyFilters, CompanyStats } from "@/lib/types";
@@ -167,6 +168,14 @@ export function SearchClient({ initialCantons, initialStats, initialFilters, bas
             filters={filters}
             onSort={handleSort}
             isLoading={isLoading}
+          />
+          <Pagination
+            page={page?.page ?? 1}
+            pages={page?.pages ?? 1}
+            total={page?.total ?? 0}
+            pageSize={filters.page_size ?? 50}
+            onChange={(p) => setFilters((f) => ({ ...f, page: p }))}
+            onPageSizeChange={(s) => setFilters((f) => ({ ...f, page_size: s, page: 1 }))}
           />
         </div>
 
