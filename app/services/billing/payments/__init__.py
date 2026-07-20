@@ -67,6 +67,7 @@ def _pick_provider(preferred: ProviderName | None = None) -> PaymentProvider:
     return _provider_instance(enabled[0])
 
 
+
 # ── Top-level checkout helpers ─────────────────────────────────────────────────
 
 def create_subscription_checkout(
