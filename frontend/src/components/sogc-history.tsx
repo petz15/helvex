@@ -317,6 +317,8 @@ function ChangeItem({ change }: { change: { id: number; change_type: string; raw
 // ─── Person card ──────────────────────────────────────────────────────────────
 
 function PersonCard({ person, variant = "current" }: { person: Person; variant?: "current" | "added" | "removed" | "mutated" }) {
+  const { dict } = useI18n();
+  const t = dict.app.sogcHistory;
   const iconMap = {
     current: null,
     added: <UserPlus size={12} className="text-green-600 shrink-0 mt-0.5" />,
@@ -342,14 +344,14 @@ function PersonCard({ person, variant = "current" }: { person: Person; variant?:
           <p className="text-xs text-slate-500 leading-snug">{person.role}</p>
         )}
         {person.signatureType && (
-          <p className="text-xs text-slate-400">mit {person.signatureType}</p>
+          <p className="text-xs text-slate-400">{t.with} {person.signatureType}</p>
         )}
         {person.bisher && (
-          <p className="text-xs text-amber-600">bisher: {person.bisher}</p>
+          <p className="text-xs text-amber-600">{t.previously} {person.bisher}</p>
         )}
         {(person.origin || person.city) && (
           <p className="text-xs text-slate-400">
-            {[person.origin ? `von ${person.origin}` : null, person.city ? `in ${person.city}` : null]
+            {[person.origin ? `${t.from} ${person.origin}` : null, person.city ? `${t.in} ${person.city}` : null]
               .filter(Boolean)
               .join(", ")}
           </p>
@@ -364,6 +366,8 @@ function PersonCard({ person, variant = "current" }: { person: Person; variant?:
 const LONG_MSG_THRESHOLD = 400;
 
 function TimelineEntry({ entry }: { entry: SogcEntry }) {
+  const { dict } = useI18n();
+  const t = dict.app.sogcHistory;
   const [expanded, setExpanded] = useState(false);
   const isOrgane = entry.mutationTypes.some((m) => m.key === "aenderungorgane");
   const decodedMessage = decodeHtmlEntities(entry.message);
@@ -419,7 +423,7 @@ function TimelineEntry({ entry }: { entry: SogcEntry }) {
               onClick={() => setExpanded(true)}
               className="ml-1 inline-flex items-center gap-0.5 text-blue-600 hover:underline"
             >
-              mehr <ChevronDown size={11} />
+              {t.more} <ChevronDown size={11} />
             </button>
           </>
         ) : (
@@ -431,7 +435,7 @@ function TimelineEntry({ entry }: { entry: SogcEntry }) {
                 onClick={() => setExpanded(false)}
                 className="ml-1 inline-flex items-center gap-0.5 text-blue-600 hover:underline"
               >
-                weniger <ChevronUp size={11} />
+                {t.less} <ChevronUp size={11} />
               </button>
             )}
           </>
@@ -513,6 +517,8 @@ export function SignersPanel({ sogcPubJson }: { sogcPubJson: string | null }) {
 // ─── DB-backed timeline (uses sogc_publications table) ────────────────────────
 
 function TimelineEntryDB({ pub }: { pub: SogcPublicationDetail }) {
+  const { dict } = useI18n();
+  const t = dict.app.sogcHistory;
   const [rawExpanded, setRawExpanded] = useState(false);
 
   const text =
@@ -572,7 +578,7 @@ function TimelineEntryDB({ pub }: { pub: SogcPublicationDetail }) {
             className="inline-flex items-center gap-1 text-xs text-slate-400 hover:text-slate-600"
           >
             {rawExpanded ? <ChevronUp size={11} /> : <ChevronDown size={11} />}
-            Zefix Rohdaten
+            {t.rawData}
           </button>
           {rawExpanded && (
             <div className="mt-2 text-xs text-slate-600 leading-relaxed border-t border-slate-100 pt-2">
@@ -599,7 +605,7 @@ export function SogcTimelineDB({ companyId }: { companyId: number }) {
     return (
       <div className="bg-white rounded-xl border border-slate-200 p-5 shadow-sm">
         <h2 className="text-sm font-semibold text-slate-700 mb-3">{t.shabhistory}</h2>
-        <p className="text-xs text-slate-400">Loading…</p>
+        <p className="text-xs text-slate-400">{dict.app.sogcHistory.loading}</p>
       </div>
     );
   }

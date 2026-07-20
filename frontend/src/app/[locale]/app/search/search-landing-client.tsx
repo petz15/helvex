@@ -13,6 +13,7 @@ import type { Company, SogcPersonEntity, CompanyFilters } from "@/lib/types";
 import { HelvexMark } from "@/components/helvex-logo";
 import { cn } from "@/lib/utils";
 import { GuidedWizard, type WizardFilters } from "@/components/guided-wizard";
+import { useI18n } from "@/i18n/context";
 
 type Tab = "companies" | "people" | "noga";
 
@@ -64,11 +65,13 @@ function SkeletonRows() {
 }
 
 function ResultsHeader({ total, query }: { total: number; query: string }) {
+  const { dict } = useI18n();
+  const t = dict.app.searchLanding;
   return (
     <div className="px-4 py-2.5 bg-slate-50/80 border-b border-slate-100 flex items-center justify-between">
       <p className="text-xs text-slate-500">
         <span className="font-semibold text-slate-700 tabular-nums">{total.toLocaleString()}</span>
-        {" "}result{total !== 1 ? "s" : ""} for{" "}
+        {" "}{total === 1 ? t.result : t.results} {t.for}{" "}
         <span className="font-semibold text-slate-700">&ldquo;{query}&rdquo;</span>
       </p>
     </div>
@@ -78,6 +81,8 @@ function ResultsHeader({ total, query }: { total: number; query: string }) {
 function Pagination({ page, total, pageSize, onPage }: {
   page: number; total: number; pageSize: number; onPage: (p: number) => void;
 }) {
+  const { dict } = useI18n();
+  const t = dict.app.searchLanding;
   const totalPages = Math.ceil(total / pageSize);
   if (totalPages <= 1) return null;
   const from = (page - 1) * pageSize + 1;
@@ -90,7 +95,7 @@ function Pagination({ page, total, pageSize, onPage }: {
           onClick={() => onPage(page - 1)} disabled={page <= 1}
           className="flex items-center gap-1 px-2.5 py-1.5 rounded-md text-xs font-medium text-slate-600 border border-slate-200 hover:bg-slate-50 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
         >
-          <ChevronLeft size={11} /> Prev
+          <ChevronLeft size={11} /> {t.prev}
         </button>
         <span className="px-2.5 text-xs text-slate-400 tabular-nums min-w-[56px] text-center">
           {page} / {totalPages}
@@ -99,7 +104,7 @@ function Pagination({ page, total, pageSize, onPage }: {
           onClick={() => onPage(page + 1)} disabled={page >= totalPages}
           className="flex items-center gap-1 px-2.5 py-1.5 rounded-md text-xs font-medium text-slate-600 border border-slate-200 hover:bg-slate-50 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
         >
-          Next <ChevronRight size={11} />
+          {t.next} <ChevronRight size={11} />
         </button>
       </div>
     </div>
@@ -107,11 +112,13 @@ function Pagination({ page, total, pageSize, onPage }: {
 }
 
 function StatusBadge({ status }: { status: string | null }) {
+  const { dict } = useI18n();
+  const t = dict.app.searchLanding;
   if (!status) return null;
   const cfg = {
-    ACTIVE: { dot: "bg-emerald-400", pill: "bg-emerald-50 text-emerald-700 border-emerald-200", label: "Active" },
-    CANCELLED: { dot: "bg-red-400", pill: "bg-red-50 text-red-600 border-red-200", label: "Cancelled" },
-    BEING_CANCELLED: { dot: "bg-amber-400", pill: "bg-amber-50 text-amber-700 border-amber-200", label: "Pending" },
+    ACTIVE: { dot: "bg-emerald-400", pill: "bg-emerald-50 text-emerald-700 border-emerald-200", label: t.statusActive },
+    CANCELLED: { dot: "bg-red-400", pill: "bg-red-50 text-red-600 border-red-200", label: t.statusCancelled },
+    BEING_CANCELLED: { dot: "bg-amber-400", pill: "bg-amber-50 text-amber-700 border-amber-200", label: t.statusPending },
   }[status] ?? { dot: "bg-slate-300", pill: "bg-slate-50 text-slate-500 border-slate-200", label: status };
   return (
     <span className={cn("inline-flex items-center gap-1 text-[10px] font-semibold px-1.5 py-0.5 rounded-full border", cfg.pill)}>
@@ -149,6 +156,8 @@ function findMatchedOldName(oldNamesJson: string | null, query: string): string 
 }
 
 function CompanyRow({ company, locale, query }: { company: Company; locale: string; query?: string }) {
+  const { dict } = useI18n();
+  const t = dict.app.searchLanding;
   const domain = domainFromUrl(company.website_url);
   const matchedOldName = query && !company.name.toLowerCase().includes(query.toLowerCase())
     ? findMatchedOldName(company.old_names ?? null, query)
@@ -197,7 +206,7 @@ function CompanyRow({ company, locale, query }: { company: Company; locale: stri
 
         {matchedOldName && (
           <p className="mt-1 text-[11px] text-amber-600 leading-none">
-            formerly: {matchedOldName}
+            {t.formerly.replace("{name}", matchedOldName)}
           </p>
         )}
         {!matchedOldName && company.purpose && (
@@ -216,7 +225,9 @@ function CompanyRow({ company, locale, query }: { company: Company; locale: stri
 }
 
 function PersonRow({ person, locale }: { person: SogcPersonEntity; locale: string }) {
-  const name = [person.firstname, person.lastname].filter(Boolean).join(" ") || "Unknown";
+  const { dict } = useI18n();
+  const t = dict.app.searchLanding;
+  const name = [person.firstname, person.lastname].filter(Boolean).join(" ") || t.unknown;
   const confidenceCfg = {
     high: "text-emerald-700 bg-emerald-50 border-emerald-200",
     medium: "text-amber-700 bg-amber-50 border-amber-200",
@@ -254,7 +265,7 @@ function PersonRow({ person, locale }: { person: SogcPersonEntity; locale: strin
             "text-[11px] font-semibold leading-none",
             person.total_company_count > 0 ? "text-blue-600" : "text-slate-400"
           )}>
-            {person.total_company_count} {person.total_company_count === 1 ? "company" : "companies"}
+            {person.total_company_count} {person.total_company_count === 1 ? t.company : t.companies}
           </span>
           {person.role_categories.map(rc => (
             <span key={rc} className="text-[10px] font-medium px-1.5 py-0.5 rounded-full border border-slate-200 bg-slate-50 text-slate-600 capitalize leading-none">
@@ -270,10 +281,12 @@ function PersonRow({ person, locale }: { person: SogcPersonEntity; locale: strin
 }
 
 function NogaRow({ node, locale }: { node: NogaNode; locale: string }) {
+  const { dict } = useI18n();
+  const t = dict.app.searchLanding;
   const label = node.labels?.de || node.labels?.en || node.label;
   const isTopLevel = node.level === "section" || node.level === "0";
   const levelLabel: Record<string, string> = {
-    section: "Section", division: "Division", group: "Group", class: "Class", type: "Type",
+    section: t.levelSection, division: t.levelDivision, group: t.levelGroup, class: t.levelClass, type: t.levelType,
   };
 
   return (
@@ -300,7 +313,7 @@ function NogaRow({ node, locale }: { node: NogaNode; locale: string }) {
           <span className="text-[11px] text-slate-400">{levelLabel[node.level] ?? node.level}</span>
           <span className="text-slate-200">·</span>
           <span className="text-[11px] font-semibold text-slate-500 tabular-nums">
-            {node.count.toLocaleString()} companies
+            {node.count.toLocaleString()} {t.companies}
           </span>
         </div>
       </div>
@@ -329,6 +342,8 @@ interface SearchLandingClientProps {
 }
 
 export function SearchLandingClient({ locale }: SearchLandingClientProps) {
+  const { dict } = useI18n();
+  const t = dict.app.searchLanding;
   const router = useRouter();
   const searchParams = useSearchParams();
 
@@ -481,7 +496,7 @@ export function SearchLandingClient({ locale }: SearchLandingClientProps) {
                 type="text"
                 value={query}
                 onChange={e => handleQueryChange(e.target.value)}
-                placeholder="Search companies, people, NOGA…"
+                placeholder={t.searchPlaceholder}
                 className="w-full pl-12 pr-36 py-4 text-[16px] rounded-2xl bg-white placeholder:text-[#9aa2ad] text-[#1f2733] focus:outline-none transition-all"
                 style={{
                   border: "1.5px solid #2563eb",
@@ -498,32 +513,32 @@ export function SearchLandingClient({ locale }: SearchLandingClientProps) {
                 type="submit"
                 className="absolute right-2 top-1/2 -translate-y-1/2 px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white text-[15px] font-semibold rounded-xl transition-colors"
               >
-                Search →
+                {t.searchArrow}
               </button>
             </div>
           </form>
 
           {/* Hint */}
           <p className="mt-3 text-[13px]" style={{ color: "#9aa2ad" }}>
-            700,000+ Swiss companies · press{" "}
+            {t.hintPrefix}{" "}
             <kbd className="px-1.5 py-0.5 bg-white border border-[#e6e8ec] rounded text-[10px] font-mono shadow-sm">
               Enter
             </kbd>{" "}
-            to search
+            {t.hintSuffix}
           </p>
 
           {/* Divider */}
           <div className="w-full max-w-[760px] flex items-center gap-3 my-7">
             <div className="flex-1 h-px bg-[#e6e8ec]" />
             <span className="text-[13.5px] font-semibold" style={{ color: "#6b7480" }}>
-              or let us guide you
+              {t.orGuide}
             </span>
             <div className="flex-1 h-px bg-[#e6e8ec]" />
           </div>
 
           {/* What question */}
           <p className="text-[19px] font-bold mb-4" style={{ color: "#1f2733" }}>
-            What are you looking for?
+            {t.whatLookingFor}
           </p>
 
           {/* 3 entry tiles */}
@@ -537,8 +552,8 @@ export function SearchLandingClient({ locale }: SearchLandingClientProps) {
                 <Building2 size={22} />
               </div>
               <div>
-                <p className="text-[17px] font-semibold" style={{ color: "#1f2733" }}>Companies</p>
-                <p className="text-[13px] mt-0.5" style={{ color: "#6b7480" }}>700,000+ registered</p>
+                <p className="text-[17px] font-semibold" style={{ color: "#1f2733" }}>{t.tileCompanies}</p>
+                <p className="text-[13px] mt-0.5" style={{ color: "#6b7480" }}>{t.tileCompaniesSub}</p>
               </div>
             </button>
 
@@ -551,8 +566,8 @@ export function SearchLandingClient({ locale }: SearchLandingClientProps) {
                 <Users size={22} />
               </div>
               <div>
-                <p className="text-[17px] font-semibold" style={{ color: "#1f2733" }}>People</p>
-                <p className="text-[13px] mt-0.5" style={{ color: "#6b7480" }}>Founders, directors, owners</p>
+                <p className="text-[17px] font-semibold" style={{ color: "#1f2733" }}>{t.tilePeople}</p>
+                <p className="text-[13px] mt-0.5" style={{ color: "#6b7480" }}>{t.tilePeopleSub}</p>
               </div>
             </button>
 
@@ -564,8 +579,8 @@ export function SearchLandingClient({ locale }: SearchLandingClientProps) {
                 <ListTree size={22} />
               </div>
               <div>
-                <p className="text-[17px] font-semibold" style={{ color: "#1f2733" }}>Industries</p>
-                <p className="text-[13px] mt-0.5" style={{ color: "#6b7480" }}>Browse by NOGA sector</p>
+                <p className="text-[17px] font-semibold" style={{ color: "#1f2733" }}>{t.tileIndustries}</p>
+                <p className="text-[13px] mt-0.5" style={{ color: "#6b7480" }}>{t.tileIndustriesSub}</p>
               </div>
             </Link>
           </div>
@@ -577,7 +592,7 @@ export function SearchLandingClient({ locale }: SearchLandingClientProps) {
             style={{ color: "#6b7480" }}
           >
             <SlidersHorizontal size={13} />
-            Skip to advanced filters →
+            {t.skipAdvanced}
           </Link>
         </div>
 
@@ -604,9 +619,9 @@ export function SearchLandingClient({ locale }: SearchLandingClientProps) {
   // `more` marks a count that is capped by the fetch limit (the persons API returns
   // no total; NOGA matches are sliced) so the badge can show e.g. "25+".
   const TAB_CONFIG = [
-    { id: "companies" as Tab, label: "Companies", Icon: Building2, count: companiesPage?.total, more: false },
-    { id: "people" as Tab, label: "People", Icon: Users, count: people.length, more: people.length >= 25 },
-    { id: "noga" as Tab, label: "NOGA", Icon: ListTree, count: nogaMatches.length, more: nogaMatches.length >= 40 },
+    { id: "companies" as Tab, label: t.tabCompanies, Icon: Building2, count: companiesPage?.total, more: false },
+    { id: "people" as Tab, label: t.tabPeople, Icon: Users, count: people.length, more: people.length >= 25 },
+    { id: "noga" as Tab, label: t.tabNoga, Icon: ListTree, count: nogaMatches.length, more: nogaMatches.length >= 40 },
   ];
 
   return (
@@ -622,7 +637,7 @@ export function SearchLandingClient({ locale }: SearchLandingClientProps) {
             type="text"
             value={query}
             onChange={e => handleQueryChange(e.target.value)}
-            placeholder="Search companies, people, NOGA…"
+            placeholder={t.searchPlaceholder}
             className="w-full pl-9 pr-20 py-2.5 text-sm rounded-lg border border-slate-200 bg-white
               focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent
               placeholder:text-slate-400 text-slate-900 transition-shadow"
@@ -631,7 +646,7 @@ export function SearchLandingClient({ locale }: SearchLandingClientProps) {
             type="submit"
             className="absolute right-1.5 top-1/2 -translate-y-1/2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold px-3 py-1.5 rounded-md transition-colors"
           >
-            Search
+            {t.search}
           </button>
         </form>
 
@@ -669,40 +684,40 @@ export function SearchLandingClient({ locale }: SearchLandingClientProps) {
         {tab === "companies" && (
           <div className="w-52 shrink-0 border-r border-slate-200 bg-white overflow-y-auto flex flex-col">
             <div className="p-3 border-b border-slate-100">
-              <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-widest">Filters</p>
+              <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-widest">{t.filters}</p>
             </div>
             <div className="p-3 space-y-4 flex-1">
               <div>
-                <label className="text-[11px] font-semibold text-slate-600 mb-1.5 block">Canton</label>
+                <label className="text-[11px] font-semibold text-slate-600 mb-1.5 block">{t.canton}</label>
                 <select
                   value={canton}
                   onChange={e => { setCanton(e.target.value); setPage(1); }}
                   className="w-full text-xs border border-slate-200 rounded-md px-2 py-1.5 bg-white text-slate-700 focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-400 transition-colors"
                 >
-                  <option value="">All cantons</option>
+                  <option value="">{t.allCantons}</option>
                   {cantons.map(c => <option key={c} value={c}>{c}</option>)}
                 </select>
               </div>
 
               <div>
-                <label className="text-[11px] font-semibold text-slate-600 mb-1.5 block">Legal Form</label>
+                <label className="text-[11px] font-semibold text-slate-600 mb-1.5 block">{t.legalForm}</label>
                 <input
                   type="text"
                   value={legalForm}
                   onChange={e => { setLegalForm(e.target.value); setPage(1); }}
-                  placeholder="AG, GmbH, …"
+                  placeholder={t.legalFormPlaceholder}
                   className="w-full text-xs border border-slate-200 rounded-md px-2 py-1.5 text-slate-700 focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-400 placeholder:text-slate-400 transition-colors"
                 />
               </div>
 
               <div>
-                <label className="text-[11px] font-semibold text-slate-600 mb-1.5 block">NOGA Section</label>
+                <label className="text-[11px] font-semibold text-slate-600 mb-1.5 block">{t.nogaSection}</label>
                 <select
                   value={nogaSection}
                   onChange={e => { setNogaSection(e.target.value); setPage(1); }}
                   className="w-full text-xs border border-slate-200 rounded-md px-2 py-1.5 bg-white text-slate-700 focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-400 transition-colors"
                 >
-                  <option value="">All sections</option>
+                  <option value="">{t.allSections}</option>
                   {nogaSections.map(n => (
                     <option key={n.code} value={n.code}>
                       {n.code} – {n.labels?.de || n.label}
@@ -716,7 +731,7 @@ export function SearchLandingClient({ locale }: SearchLandingClientProps) {
                   onClick={() => { setCanton(""); setLegalForm(""); setNogaSection(""); setPage(1); }}
                   className="text-[11px] text-blue-600 hover:text-blue-800 hover:underline font-medium transition-colors"
                 >
-                  ✕ Clear filters
+                  {t.clearFilters}
                 </button>
               )}
             </div>
@@ -726,7 +741,7 @@ export function SearchLandingClient({ locale }: SearchLandingClientProps) {
                 href={`/${locale}/app/companies?view=list${submittedQuery ? `&q=${encodeURIComponent(submittedQuery)}` : ""}`}
                 className="flex items-center gap-1 text-[11px] text-blue-600 hover:text-blue-800 font-medium transition-colors group"
               >
-                Advanced filters
+                {t.advancedFilters}
                 <ArrowRight size={10} className="group-hover:translate-x-0.5 transition-transform" />
               </Link>
             </div>
@@ -741,12 +756,12 @@ export function SearchLandingClient({ locale }: SearchLandingClientProps) {
             <>
               {loadingCompanies && !companiesPage && <SkeletonRows />}
               {!loadingCompanies && !submittedQuery && (
-                <EmptyState title="Enter a company name above" sub="Press Enter or click Search to see results" />
+                <EmptyState title={t.enterCompanyName} sub={t.pressEnterHint} />
               )}
               {!loadingCompanies && submittedQuery && companiesPage?.items.length === 0 && (
                 <EmptyState
-                  title={`No companies found for "${submittedQuery}"`}
-                  sub="Try a different name, or remove filters on the left"
+                  title={t.noCompaniesFor.replace("{query}", submittedQuery)}
+                  sub={t.tryDifferentName}
                 />
               )}
               {companiesPage && companiesPage.total > 0 && (
@@ -764,12 +779,12 @@ export function SearchLandingClient({ locale }: SearchLandingClientProps) {
             <>
               {loadingPeople && !people.length && <SkeletonRows />}
               {!loadingPeople && !submittedQuery && !personFiltersActive && (
-                <EmptyState title="Enter a name above" sub="Press Enter or click Search to see results" />
+                <EmptyState title={t.enterName} sub={t.pressEnterHint} />
               )}
               {!loadingPeople && (submittedQuery || personFiltersActive) && people.length === 0 && (
                 <EmptyState
-                  title={submittedQuery ? `No people found for "${submittedQuery}"` : "No people match these filters"}
-                  sub="Try searching by last name, or loosen the role/company filters"
+                  title={submittedQuery ? t.noPeopleFor.replace("{query}", submittedQuery) : t.noPeopleFilters}
+                  sub={t.tryLastName}
                 />
               )}
               {people.length > 0 && (
@@ -782,7 +797,7 @@ export function SearchLandingClient({ locale }: SearchLandingClientProps) {
                     onClick={() => setPage(p => p + 1)}
                     className="text-xs font-medium text-blue-600 hover:text-blue-800 transition-colors flex items-center gap-1"
                   >
-                    Load more <ChevronRight size={11} />
+                    {t.loadMore} <ChevronRight size={11} />
                   </button>
                 </div>
               )}
@@ -793,13 +808,13 @@ export function SearchLandingClient({ locale }: SearchLandingClientProps) {
           {tab === "noga" && (
             <>
               {!submittedQuery && (
-                <EmptyState title="Search NOGA classifications" sub="Enter a term above and press Enter — e.g. 'Finanz', 'retail', 'agriculture'" />
+                <EmptyState title={t.searchNoga} sub={t.searchNogaHint} />
               )}
               {submittedQuery && nogaHierarchy.length === 0 && <SkeletonRows />}
               {submittedQuery && nogaHierarchy.length > 0 && nogaMatches.length === 0 && (
                 <EmptyState
-                  title={`No NOGA classes match "${submittedQuery}"`}
-                  sub="Try a broader term or a different language"
+                  title={t.noNogaMatch.replace("{query}", submittedQuery)}
+                  sub={t.tryBroaderTerm}
                 />
               )}
               {nogaMatches.length > 0 && (

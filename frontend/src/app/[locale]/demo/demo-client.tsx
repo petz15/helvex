@@ -6,6 +6,7 @@ import { SogcTimeline, SignersPanel } from "@/components/sogc-history";
 import { Badge } from "@/components/ui/badge";
 import { scoreColor, cn } from "@/lib/utils";
 import type { Company } from "@/lib/types";
+import { useI18n } from "@/i18n/context";
 
 async function fetchDemoCompany(): Promise<Company> {
   const res = await fetch("/api/v1/companies/demo");
@@ -24,6 +25,8 @@ function ScorePill({ label, value }: { label: string; value: number | null }) {
 }
 
 export default function DemoClient() {
+  const { dict } = useI18n();
+  const t = dict.app.demo;
   const { data: company, isLoading, error } = useSWR("demo-company", fetchDemoCompany, {
     shouldRetryOnError: false,
   });
@@ -33,9 +36,9 @@ export default function DemoClient() {
       {/* Sign-up banner */}
       <div className="mb-6 rounded-xl bg-blue-50 border border-blue-200 px-4 py-3 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
         <div>
-          <p className="text-sm font-semibold text-blue-800">You&apos;re viewing a guest demo</p>
+          <p className="text-sm font-semibold text-blue-800">{t.guestDemo}</p>
           <p className="text-xs text-blue-600 mt-0.5">
-            Sign up free to search and track all 700,000+ Swiss registered companies.
+            {t.signUpHint}
           </p>
         </div>
         <div className="flex items-center gap-2 shrink-0">
@@ -43,30 +46,30 @@ export default function DemoClient() {
             href="/demo/company"
             className="px-3 py-1.5 rounded-lg border border-slate-300 text-sm text-slate-700 hover:bg-slate-100 transition-colors"
           >
-            Full profile demo
+            {t.fullProfileDemo}
           </Link>
           <Link
             href="/login"
             className="px-3 py-1.5 rounded-lg border border-blue-300 text-sm text-blue-700 hover:bg-blue-100 transition-colors"
           >
-            Sign in
+            {t.signIn}
           </Link>
           <Link
             href="/register"
             className="px-3 py-1.5 rounded-lg bg-blue-600 text-white text-sm font-medium hover:bg-blue-700 transition-colors"
           >
-            Sign up free →
+            {t.signUpFree}
           </Link>
         </div>
       </div>
 
       {isLoading && (
-        <div className="text-center py-20 text-slate-400 text-sm">Loading company data…</div>
+        <div className="text-center py-20 text-slate-400 text-sm">{t.loadingCompany}</div>
       )}
 
       {error && (
         <div className="text-center py-20 text-slate-400 text-sm">
-          Demo data is currently unavailable.
+          {t.unavailable}
         </div>
       )}
 
@@ -100,9 +103,9 @@ export default function DemoClient() {
 
               {/* Score pills */}
               <div className="flex items-center gap-4 shrink-0">
-                <ScorePill label="Register" value={company.flex_score} />
-                <ScorePill label="Web" value={company.web_score} />
-                <ScorePill label="AI" value={company.ai_score} />
+                <ScorePill label={t.scoreRegister} value={company.flex_score} />
+                <ScorePill label={t.scoreWeb} value={company.web_score} />
+                <ScorePill label={t.scoreAi} value={company.ai_score} />
               </div>
             </div>
           </div>
@@ -114,7 +117,7 @@ export default function DemoClient() {
                 <div className="flex items-start gap-2">
                   <MapPin size={14} className="text-slate-400 mt-0.5 shrink-0" />
                   <div>
-                    <dt className="text-xs text-slate-400 mb-0.5">Seat</dt>
+                    <dt className="text-xs text-slate-400 mb-0.5">{t.seat}</dt>
                     <dd className="text-slate-700 font-medium">
                       {company.municipality}{company.canton ? `, ${company.canton}` : ""}
                     </dd>
@@ -125,7 +128,7 @@ export default function DemoClient() {
                 <div className="flex items-start gap-2">
                   <Building2 size={14} className="text-slate-400 mt-0.5 shrink-0" />
                   <div>
-                    <dt className="text-xs text-slate-400 mb-0.5">Capital</dt>
+                    <dt className="text-xs text-slate-400 mb-0.5">{t.capital}</dt>
                     <dd className="text-slate-700 font-medium">
                       {[company.capital_currency, company.capital_nominal].filter(Boolean).join(" ")}
                     </dd>
@@ -136,7 +139,7 @@ export default function DemoClient() {
                 <div className="flex items-start gap-2">
                   <ExternalLink size={14} className="text-slate-400 mt-0.5 shrink-0" />
                   <div>
-                    <dt className="text-xs text-slate-400 mb-0.5">Website</dt>
+                    <dt className="text-xs text-slate-400 mb-0.5">{t.website}</dt>
                     <dd>
                       <a
                         href={company.website_url}
@@ -154,7 +157,7 @@ export default function DemoClient() {
                 <div className="flex items-start gap-2">
                   <Building2 size={14} className="text-slate-400 mt-0.5 shrink-0" />
                   <div>
-                    <dt className="text-xs text-slate-400 mb-0.5">AI Category</dt>
+                    <dt className="text-xs text-slate-400 mb-0.5">{t.aiCategory}</dt>
                     <dd className="text-slate-700 font-medium">{company.ai_category}</dd>
                   </div>
                 </div>
@@ -166,7 +169,7 @@ export default function DemoClient() {
                 <div className="flex items-start gap-2">
                   <FileText size={14} className="text-slate-400 mt-0.5 shrink-0" />
                   <div>
-                    <dt className="text-xs text-slate-400 mb-1">Purpose</dt>
+                    <dt className="text-xs text-slate-400 mb-1">{t.purpose}</dt>
                     <dd className="text-sm text-slate-600 leading-relaxed">{company.purpose}</dd>
                   </div>
                 </div>
@@ -181,13 +184,13 @@ export default function DemoClient() {
           {/* Bottom CTA */}
           <div className="text-center py-8">
             <p className="text-slate-500 text-sm mb-3">
-              Want to search all 700,000+ Swiss companies?
+              {t.wantToSearch}
             </p>
             <Link
               href="/register"
               className="inline-block px-5 py-2.5 rounded-lg bg-blue-600 text-white font-semibold text-sm hover:bg-blue-700 transition-colors"
             >
-              Create your free account →
+              {t.createAccount}
             </Link>
           </div>
         </div>

@@ -18,6 +18,7 @@ import {
 } from "lucide-react";
 import { fetchPersonNetwork, fetchPersonAppearances, reportPersonFlag } from "@/lib/api";
 import { cn } from "@/lib/utils";
+import { useI18n } from "@/i18n/context";
 import type {
   SogcPersonEntity,
   PersonNetworkData,
@@ -27,17 +28,17 @@ import type {
 
 // ── Constants ──────────────────────────────────────────────────────────────────
 
-const ROLE_COLORS: Record<string, { fill: string; label: string }> = {
-  director: { fill: "#dc2626", label: "Director" },
-  officer:  { fill: "#2563eb", label: "Officer" },
-  other:    { fill: "#d97706", label: "Other" },
+const ROLE_COLORS: Record<string, { fill: string; labelKey: "roleDirector" | "roleOfficer" | "roleOther" }> = {
+  director: { fill: "#dc2626", labelKey: "roleDirector" },
+  officer:  { fill: "#2563eb", labelKey: "roleOfficer" },
+  other:    { fill: "#d97706", labelKey: "roleOther" },
 };
 const FALLBACK_COLOR = "#94a3b8";
 
-const CONFIDENCE_CHIP: Record<string, { bg: string; text: string; label: string }> = {
-  high:   { bg: "bg-emerald-500/20", text: "text-emerald-300", label: "High confidence" },
-  medium: { bg: "bg-amber-500/20",   text: "text-amber-300",   label: "Medium confidence" },
-  low:    { bg: "bg-red-500/20",     text: "text-red-300",     label: "Low confidence" },
+const CONFIDENCE_CHIP: Record<string, { bg: string; text: string; labelKey: "confHigh" | "confMedium" | "confLow" }> = {
+  high:   { bg: "bg-emerald-500/20", text: "text-emerald-300", labelKey: "confHigh" },
+  medium: { bg: "bg-amber-500/20",   text: "text-amber-300",   labelKey: "confMedium" },
+  low:    { bg: "bg-red-500/20",     text: "text-red-300",     labelKey: "confLow" },
 };
 
 // ── Utilities ──────────────────────────────────────────────────────────────────
@@ -54,6 +55,8 @@ function clamp(v: number, lo: number, hi: number): number {
 // ── Flag modal ─────────────────────────────────────────────────────────────────
 
 function FlagModal({ entity, onClose }: { entity: SogcPersonEntity; onClose: () => void }) {
+  const { dict } = useI18n();
+  const t = dict.app.people;
   const [flagType, setFlagType] = useState<"should_merge" | "should_split">("should_merge");
   const [reason, setReason] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -75,40 +78,40 @@ function FlagModal({ entity, onClose }: { entity: SogcPersonEntity; onClose: () 
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
       <div className="bg-white rounded-xl shadow-2xl w-full max-w-md p-6 mx-4">
         <div className="flex items-center justify-between mb-4">
-          <h3 className="text-sm font-semibold text-slate-800">Report issue — {name}</h3>
+          <h3 className="text-sm font-semibold text-slate-800">{t.reportIssue.replace("{name}", name)}</h3>
           <button onClick={onClose} className="text-slate-400 hover:text-slate-600"><X size={16} /></button>
         </div>
         {done ? (
           <div className="flex items-center gap-2 text-emerald-700 text-sm">
-            <CheckCircle size={16} /> Reported. Thank you.
+            <CheckCircle size={16} /> {t.reported}
           </div>
         ) : (
           <form onSubmit={submit} className="space-y-4">
             <div>
-              <label className="block text-xs font-medium text-slate-600 mb-1">Issue type</label>
+              <label className="block text-xs font-medium text-slate-600 mb-1">{t.issueType}</label>
               <select
                 value={flagType}
                 onChange={e => setFlagType(e.target.value as "should_merge" | "should_split")}
                 className="w-full rounded border border-slate-200 px-3 py-1.5 text-sm"
               >
-                <option value="should_merge">Two entries are the same person (should merge)</option>
-                <option value="should_split">This entry contains different people (should split)</option>
+                <option value="should_merge">{t.shouldMerge}</option>
+                <option value="should_split">{t.shouldSplit}</option>
               </select>
             </div>
             <div>
-              <label className="block text-xs font-medium text-slate-600 mb-1">Reason (optional)</label>
+              <label className="block text-xs font-medium text-slate-600 mb-1">{t.reasonOptional}</label>
               <textarea
                 value={reason}
                 onChange={e => setReason(e.target.value)}
                 rows={3}
-                placeholder="Describe the issue…"
+                placeholder={t.describeIssue}
                 className="w-full rounded border border-slate-200 px-3 py-1.5 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-blue-200"
               />
             </div>
             <div className="flex gap-2 justify-end">
-              <button type="button" onClick={onClose} className="px-3 py-1.5 text-sm text-slate-600 hover:text-slate-800">Cancel</button>
+              <button type="button" onClick={onClose} className="px-3 py-1.5 text-sm text-slate-600 hover:text-slate-800">{t.cancel}</button>
               <button type="submit" disabled={submitting} className="px-3 py-1.5 text-sm bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50">
-                {submitting ? "Sending…" : "Submit"}
+                {submitting ? t.sending : t.submit}
               </button>
             </div>
           </form>
@@ -121,6 +124,8 @@ function FlagModal({ entity, onClose }: { entity: SogcPersonEntity; onClose: () 
 // ── Tenure timeline (Gantt) ────────────────────────────────────────────────────
 
 function TenureTimeline({ mandates, locale }: { mandates: MandateItem[]; locale: string }) {
+  const { dict } = useI18n();
+  const t = dict.app.personDetail;
   const today = new Date().toISOString().slice(0, 10);
   const allDates = mandates.flatMap(m =>
     [m.date_from, m.is_current ? today : m.date_to].filter(Boolean) as string[]
@@ -139,7 +144,7 @@ function TenureTimeline({ mandates, locale }: { mandates: MandateItem[]; locale:
   }, [mandates]);
 
   if (!allDates.length) {
-    return <p className="text-xs text-slate-400 py-8 text-center">No mandate dates available.</p>;
+    return <p className="text-xs text-slate-400 py-8 text-center">{t.noMandateDates}</p>;
   }
 
   const minYear = Math.floor(Math.min(...allDates.map(d => new Date(d).getFullYear())));
@@ -168,7 +173,7 @@ function TenureTimeline({ mandates, locale }: { mandates: MandateItem[]; locale:
         ))}
         <span className="flex items-center gap-1.5 ml-auto">
           <span className="w-3 h-2.5 inline-block rounded-sm opacity-35 shrink-0" style={{ background: "#334155" }} />
-          Past / inactive
+          {t.pastInactive}
         </span>
       </div>
 
@@ -189,7 +194,7 @@ function TenureTimeline({ mandates, locale }: { mandates: MandateItem[]; locale:
             </div>
           ))}
           <div className="absolute top-0 bottom-0 border-l border-red-400 border-dashed opacity-70" style={{ left: `${todayPct}%` }}>
-            <span className="absolute -top-0 left-1 text-[9px] text-red-400 font-mono whitespace-nowrap leading-none">now</span>
+            <span className="absolute -top-0 left-1 text-[9px] text-red-400 font-mono whitespace-nowrap leading-none">{t.now}</span>
           </div>
         </div>
 
@@ -281,6 +286,8 @@ function NetworkGraph({
   mandates: MandateItem[];
   locale: string;
 }) {
+  const { dict } = useI18n();
+  const t = dict.app.personDetail;
   const router = useRouter();
   const routerRef = useRef(router);
   useEffect(() => { routerRef.current = router; }, [router]);
@@ -493,7 +500,7 @@ function NetworkGraph({
     return () => { sim.stop(); clearTimeout(t); };
   }, [entity.id, locale, mandates, name, initials]);
 
-  if (!n) return <p className="text-xs text-slate-400 py-8 text-center">No company mandates to display.</p>;
+  if (!n) return <p className="text-xs text-slate-400 py-8 text-center">{t.noMandatesGraph}</p>;
 
   return (
     <div
@@ -514,20 +521,20 @@ function NetworkGraph({
       )}
 
       <div className="absolute bottom-3 right-3 text-[10px] text-slate-400 bg-white/80 backdrop-blur-sm rounded px-2 py-1 border border-slate-100 select-none">
-        Scroll to zoom · drag to pan/move · double-click to reset
+        {t.zoomHint}
       </div>
 
       <div className="absolute top-3 left-3 bg-white/90 backdrop-blur-sm rounded-lg border border-slate-200 px-3 py-2.5 text-[11px] text-slate-500 space-y-1.5 shadow-sm">
-        <div className="text-[9px] font-mono text-slate-400 uppercase tracking-widest mb-1.5">Legend</div>
+        <div className="text-[9px] font-mono text-slate-400 uppercase tracking-widest mb-1.5">{t.legend}</div>
         {Object.entries(ROLE_COLORS).map(([k, v]) => (
           <div key={k} className="flex items-center gap-1.5">
             <span className="w-3 h-2.5 inline-block rounded-sm" style={{ background: "white", borderLeft: `3px solid ${v.fill}`, border: `1px solid ${v.fill}` }} />
-            {v.label}
+            {t[v.labelKey]}
           </div>
         ))}
         <div className="flex items-center gap-1.5">
           <span className="w-3 h-3 inline-block rounded-full border border-slate-400 bg-white" />
-          co-director (size = boards)
+          {t.coDirectorHint}
         </div>
       </div>
     </div>
@@ -536,17 +543,21 @@ function NetworkGraph({
 
 // ── SOGC publications (raw appearance history) ─────────────────────────────────
 
-const CHANGE_LABEL: Record<string, { label: string; cls: string }> = {
-  person_added:    { label: "Added",   cls: "bg-emerald-50 text-emerald-700 border-emerald-200" },
-  person_removed:  { label: "Removed", cls: "bg-red-50 text-red-600 border-red-200" },
-  person_modified: { label: "Changed", cls: "bg-amber-50 text-amber-700 border-amber-200" },
+const CHANGE_LABEL: Record<string, { labelKey: "changeAdded" | "changeRemoved" | "changeModified"; cls: string }> = {
+  person_added:    { labelKey: "changeAdded",    cls: "bg-emerald-50 text-emerald-700 border-emerald-200" },
+  person_removed:  { labelKey: "changeRemoved",  cls: "bg-red-50 text-red-600 border-red-200" },
+  person_modified: { labelKey: "changeModified", cls: "bg-amber-50 text-amber-700 border-amber-200" },
 };
 
-function changeCfg(t: string): { label: string; cls: string } {
-  return CHANGE_LABEL[t] ?? { label: t.replace(/^person_/, "").replace(/_/g, " "), cls: "bg-slate-50 text-slate-600 border-slate-200" };
+function changeCfg(changeType: string, t: ReturnType<typeof useI18n>["dict"]["app"]["personDetail"]): { label: string; cls: string } {
+  const meta = CHANGE_LABEL[changeType];
+  if (meta) return { label: t[meta.labelKey], cls: meta.cls };
+  return { label: changeType.replace(/^person_/, "").replace(/_/g, " "), cls: "bg-slate-50 text-slate-600 border-slate-200" };
 }
 
 function SogcPublicationsSection({ entityId, locale }: { entityId: number; locale: string }) {
+  const { dict } = useI18n();
+  const t = dict.app.personDetail;
   const { data: appearances, isLoading } = useSWR<SogcPersonAppearance[]>(
     `person-appearances-${entityId}`,
     () => fetchPersonAppearances(entityId),
@@ -557,7 +568,7 @@ function SogcPublicationsSection({ entityId, locale }: { entityId: number; local
     <div className="bg-white rounded-xl border border-slate-200 shadow-sm">
       <div className="flex items-center gap-2 px-5 py-3 border-b border-slate-100">
         <FileText size={14} className="text-slate-400" />
-        <h2 className="text-sm font-semibold text-slate-700">SOGC publications</h2>
+        <h2 className="text-sm font-semibold text-slate-700">{t.sogcPublications}</h2>
         {appearances && (
           <span className="text-[11px] text-slate-400 tabular-nums">({appearances.length})</span>
         )}
@@ -566,15 +577,15 @@ function SogcPublicationsSection({ entityId, locale }: { entityId: number; local
       {isLoading ? (
         <div className="flex items-center gap-2 text-sm text-slate-400 py-10 justify-center">
           <div className="w-4 h-4 border-2 border-slate-300 border-t-slate-600 rounded-full animate-spin" />
-          Loading publications…
+          {t.loadingPublications}
         </div>
       ) : !appearances || appearances.length === 0 ? (
-        <p className="text-xs text-slate-400 py-10 text-center">No SOGC publications recorded.</p>
+        <p className="text-xs text-slate-400 py-10 text-center">{t.noPublications}</p>
       ) : (
         <div className="divide-y divide-slate-50">
           {appearances.map(a => {
-            const cfg = changeCfg(a.change_type);
-            const companyLabel = a.company_name ?? a.company_uid ?? "Company not linked";
+            const cfg = changeCfg(a.change_type, t);
+            const companyLabel = a.company_name ?? a.company_uid ?? t.companyNotLinked;
             return (
               <div key={a.id} className="flex items-start gap-3 px-5 py-3">
                 <div className="w-20 shrink-0 pt-0.5">
@@ -604,7 +615,7 @@ function SogcPublicationsSection({ entityId, locale }: { entityId: number; local
                       </span>
                     )}
                     {a.is_current === false && (
-                      <span className="text-[10px] text-slate-400">· past</span>
+                      <span className="text-[10px] text-slate-400">{t.past}</span>
                     )}
                   </div>
                   {a.role && (
@@ -635,6 +646,8 @@ export function PersonDetailClient({
   entity: SogcPersonEntity;
   locale: string;
 }) {
+  const { dict } = useI18n();
+  const t = dict.app.personDetail;
   const [view, setView] = useState<"timeline" | "network">("timeline");
   const [includePast, setIncludePast] = useState(true);
   const [showFlag, setShowFlag] = useState(false);
@@ -677,7 +690,7 @@ export function PersonDetailClient({
             className="inline-flex items-center gap-1.5 text-sm text-slate-500 hover:text-slate-800 transition-colors"
           >
             <ChevronLeft size={15} />
-            People
+            {t.people}
           </Link>
         </div>
       </div>
@@ -697,20 +710,20 @@ export function PersonDetailClient({
                 <h1 className="text-2xl font-semibold text-white tracking-tight">{name}</h1>
                 {entity.is_verified && (
                   <span className="flex items-center gap-1 text-emerald-400 text-xs font-medium">
-                    <CheckCircle size={12} /> Verified
+                    <CheckCircle size={12} /> {t.verified}
                   </span>
                 )}
                 <span className={`text-[11px] font-medium px-2 py-0.5 rounded-full ${conf.bg} ${conf.text}`}>
-                  {conf.label}
+                  {t[conf.labelKey]}
                 </span>
                 {entity.is_foreign && entity.nationality && (
-                  <span className="text-xs text-slate-400 italic">{entity.nationality} national</span>
+                  <span className="text-xs text-slate-400 italic">{t.nationalSuffix.replace("{nat}", entity.nationality)}</span>
                 )}
               </div>
 
               <div className="flex flex-wrap gap-x-4 mt-1.5 text-sm text-slate-400">
-                {entity.hometown_municipality && <span>von {entity.hometown_municipality}</span>}
-                {entity.current_residence_municipality && <span>in {entity.current_residence_municipality}</span>}
+                {entity.hometown_municipality && <span>{t.fromMunicipality.replace("{place}", entity.hometown_municipality)}</span>}
+                {entity.current_residence_municipality && <span>{t.inMunicipality.replace("{place}", entity.current_residence_municipality)}</span>}
               </div>
 
               {entity.identity_notes && (
@@ -727,14 +740,14 @@ export function PersonDetailClient({
                     rel="noopener noreferrer"
                     className="inline-flex items-center gap-1.5 text-xs text-blue-400 hover:text-blue-300 transition-colors"
                   >
-                    <ExternalLink size={11} /> LinkedIn
+                    <ExternalLink size={11} /> {t.linkedin}
                   </a>
                 )}
                 <button
                   onClick={() => setShowFlag(true)}
                   className="inline-flex items-center gap-1.5 text-xs text-slate-500 hover:text-amber-400 transition-colors"
                 >
-                  <AlertCircle size={11} /> Report issue
+                  <AlertCircle size={11} /> {t.reportIssue}
                 </button>
               </div>
             </div>
@@ -743,11 +756,11 @@ export function PersonDetailClient({
             <div className="shrink-0 text-right space-y-1">
               <div>
                 <span className="text-3xl font-bold text-white">{entity.active_company_count}</span>
-                <p className="text-xs text-slate-400 mt-0.5">active {entity.active_company_count === 1 ? "company" : "companies"}</p>
+                <p className="text-xs text-slate-400 mt-0.5">{entity.active_company_count === 1 ? t.activeCompany : t.activeCompanies}</p>
               </div>
               <div className="mt-2">
                 <span className="text-xl font-semibold text-slate-300">{entity.appearance_count}</span>
-                <p className="text-xs text-slate-500">total appearances</p>
+                <p className="text-xs text-slate-500">{t.totalAppearances}</p>
               </div>
             </div>
           </div>
@@ -760,21 +773,22 @@ export function PersonDetailClient({
           <div className="max-w-5xl mx-auto px-6 py-2.5 flex flex-wrap gap-5 text-xs text-slate-500">
             <span>
               <span className="font-mono font-semibold text-slate-700">{network.mandates.length}</span>{" "}
-              mandates shown
+              {t.mandatesShown}
             </span>
             {Object.entries(roleBreakdown).map(([role, count]) => {
               const color = ROLE_COLORS[role]?.fill ?? FALLBACK_COLOR;
+              const roleLabel = ROLE_COLORS[role] ? t[ROLE_COLORS[role].labelKey] : role;
               return (
                 <span key={role} className="flex items-center gap-1.5">
                   <span className="w-2 h-2 rounded-sm inline-block" style={{ background: color }} />
                   <span className="font-mono font-semibold" style={{ color }}>{count}</span>
-                  {" "}{ROLE_COLORS[role]?.label ?? role}
+                  {" "}{roleLabel}
                 </span>
               );
             })}
             {firstSeen && (
               <span className="ml-auto text-slate-400">
-                First seen <span className="font-mono font-medium text-slate-600">{firstSeen.slice(0, 7)}</span>
+                {t.firstSeen} <span className="font-mono font-medium text-slate-600">{firstSeen.slice(0, 7)}</span>
               </span>
             )}
           </div>
@@ -792,7 +806,7 @@ export function PersonDetailClient({
                 view === "timeline" ? "bg-slate-900 text-white" : "text-slate-500 hover:bg-slate-50"
               }`}
             >
-              <Clock size={13} /> Timeline
+              <Clock size={13} /> {t.timeline}
             </button>
             <button
               onClick={() => setView("network")}
@@ -800,7 +814,7 @@ export function PersonDetailClient({
                 view === "network" ? "bg-slate-900 text-white" : "text-slate-500 hover:bg-slate-50"
               }`}
             >
-              <Network size={13} /> Network
+              <Network size={13} /> {t.network}
             </button>
           </div>
 
@@ -811,7 +825,7 @@ export function PersonDetailClient({
               onChange={e => setIncludePast(e.target.checked)}
               className="rounded border-slate-300 w-3.5 h-3.5 accent-slate-600"
             />
-            Include past mandates
+            {t.includePastMandates}
           </label>
         </div>
 
@@ -820,12 +834,12 @@ export function PersonDetailClient({
           {isLoading ? (
             <div className="flex items-center gap-2 text-sm text-slate-400 py-12 justify-center">
               <div className="w-4 h-4 border-2 border-slate-300 border-t-slate-600 rounded-full animate-spin" />
-              Loading mandate data…
+              {t.loadingMandateData}
             </div>
           ) : error ? (
-            <p className="text-xs text-red-500 py-8 text-center">Failed to load — try refreshing.</p>
+            <p className="text-xs text-red-500 py-8 text-center">{t.failedToLoad}</p>
           ) : !network || network.mandates.length === 0 ? (
-            <p className="text-xs text-slate-400 py-8 text-center">No mandate data found for this person.</p>
+            <p className="text-xs text-slate-400 py-8 text-center">{t.noMandateData}</p>
           ) : view === "timeline" ? (
             <TenureTimeline mandates={network.mandates} locale={locale} />
           ) : (

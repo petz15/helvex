@@ -8,6 +8,7 @@ import * as d3 from "d3";
 import { Users, Building2, AlertCircle, CheckCircle, X, BarChart2, Network } from "lucide-react";
 import { fetchCompanyPersons, fetchCompanyAuditors, reportPersonFlag } from "@/lib/api";
 import type { SogcPersonAppearance, SogcAuditor } from "@/lib/types";
+import { useI18n } from "@/i18n/context";
 
 // ── Dynamic role colours ───────────────────────────────────────────────────────
 
@@ -38,14 +39,17 @@ const CONFIDENCE_BADGE: Record<string, string> = {
   medium: "bg-amber-50 text-amber-700 border-amber-200",
   low:    "bg-red-50 text-red-700 border-red-200",
 };
-const CONFIDENCE_LABEL: Record<string, string> = {
-  high: "High", medium: "Medium", low: "Low — approx.",
+const CONFIDENCE_LABEL_KEYS: Record<string, "confHigh" | "confMedium" | "confLow"> = {
+  high: "confHigh", medium: "confMedium", low: "confLow",
 };
 
 function ConfidenceBadge({ level }: { level: string }) {
+  const { dict } = useI18n();
+  const t = dict.app.boardPanel;
+  const labelKey = CONFIDENCE_LABEL_KEYS[level];
   return (
     <span className={`text-[10px] px-1.5 py-0.5 rounded border font-medium ${CONFIDENCE_BADGE[level] ?? CONFIDENCE_BADGE.medium}`}>
-      {CONFIDENCE_LABEL[level] ?? level}
+      {labelKey ? t[labelKey] : level}
     </span>
   );
 }
@@ -53,6 +57,8 @@ function ConfidenceBadge({ level }: { level: string }) {
 // ── Flag modal ────────────────────────────────────────────────────────────────
 
 function FlagModal({ entityId, personName, onClose }: { entityId: number; personName: string; onClose: () => void }) {
+  const { dict } = useI18n();
+  const t = dict.app.people;
   const [flagType, setFlagType] = useState<"should_merge" | "should_split">("should_merge");
   const [reason, setReason] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -72,38 +78,38 @@ function FlagModal({ entityId, personName, onClose }: { entityId: number; person
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
       <div className="bg-white rounded-xl shadow-xl w-full max-w-md p-6 mx-4">
         <div className="flex items-center justify-between mb-4">
-          <h3 className="text-sm font-semibold text-slate-800">Report identity issue — {personName}</h3>
+          <h3 className="text-sm font-semibold text-slate-800">{t.reportIssue.replace("{name}", personName)}</h3>
           <button onClick={onClose} className="text-slate-400 hover:text-slate-600"><X size={16} /></button>
         </div>
         {done ? (
-          <div className="flex items-center gap-2 text-emerald-700 text-sm"><CheckCircle size={16} /> Reported. Thank you.</div>
+          <div className="flex items-center gap-2 text-emerald-700 text-sm"><CheckCircle size={16} /> {t.reported}</div>
         ) : (
           <form onSubmit={handleSubmit} className="space-y-4">
             <div>
-              <label className="block text-xs font-medium text-slate-600 mb-1">Issue type</label>
+              <label className="block text-xs font-medium text-slate-600 mb-1">{t.issueType}</label>
               <select
                 value={flagType}
                 onChange={e => setFlagType(e.target.value as "should_merge" | "should_split")}
                 className="w-full rounded border border-slate-200 px-3 py-1.5 text-sm"
               >
-                <option value="should_merge">Two entries are the same person (should merge)</option>
-                <option value="should_split">This entry contains different people (should split)</option>
+                <option value="should_merge">{t.shouldMerge}</option>
+                <option value="should_split">{t.shouldSplit}</option>
               </select>
             </div>
             <div>
-              <label className="block text-xs font-medium text-slate-600 mb-1">Reason (optional)</label>
+              <label className="block text-xs font-medium text-slate-600 mb-1">{t.reasonOptional}</label>
               <textarea
                 value={reason}
                 onChange={e => setReason(e.target.value)}
                 rows={3}
-                placeholder="Describe the issue…"
+                placeholder={t.describeIssue}
                 className="w-full rounded border border-slate-200 px-3 py-1.5 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-blue-200"
               />
             </div>
             <div className="flex gap-2 justify-end">
-              <button type="button" onClick={onClose} className="px-3 py-1.5 text-sm text-slate-600 hover:text-slate-800">Cancel</button>
+              <button type="button" onClick={onClose} className="px-3 py-1.5 text-sm text-slate-600 hover:text-slate-800">{t.cancel}</button>
               <button type="submit" disabled={submitting} className="px-3 py-1.5 text-sm bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50">
-                {submitting ? "Sending…" : "Submit"}
+                {submitting ? t.sending : t.submit}
               </button>
             </div>
           </form>
@@ -122,6 +128,8 @@ function PersonCard({
   locale: string;
   isSuperAdmin?: boolean;
 }) {
+  const { dict } = useI18n();
+  const t = dict.app.boardPanel;
   const [showFlag, setShowFlag] = useState(false);
   const displayName = appearance.raw_excerpt
     ? appearance.raw_excerpt.split(",").slice(0, 2).join(",").trim()
@@ -140,7 +148,7 @@ function PersonCard({
           <button
             onClick={() => setShowFlag(true)}
             className="opacity-0 group-hover:opacity-100 transition-opacity text-slate-300 hover:text-amber-500 shrink-0"
-            title="Report identity issue"
+            title={t.reportIdentityIssue}
           >
             <AlertCircle size={13} />
           </button>
@@ -185,6 +193,8 @@ function dedupeByEntityRole(persons: SogcPersonAppearance[]): SogcPersonAppearan
 // ── Role bar chart ────────────────────────────────────────────────────────────
 
 function RoleBarChart({ persons, locale }: { persons: SogcPersonAppearance[]; locale: string }) {
+  const { dict } = useI18n();
+  const t = dict.app.boardPanel;
   // Sort by role so same-colored rows are visually grouped
   const sorted = [...persons].sort((a, b) => {
     const ra = a.role?.trim() || a.role_category || "";
@@ -215,7 +225,7 @@ function RoleBarChart({ persons, locale }: { persons: SogcPersonAppearance[]; lo
                 {name}
               </span>
               {!p.is_current && (
-                <span className="text-[9px] text-slate-400 shrink-0 italic">past</span>
+                <span className="text-[9px] text-slate-400 shrink-0 italic">{t.past}</span>
               )}
               <span
                 className="text-[10px] shrink-0 px-1.5 py-0.5 rounded-md font-medium max-w-[180px] truncate"
@@ -270,6 +280,8 @@ function BoardNetworkGraph({
   companyName: string;
   locale: string;
 }) {
+  const { dict } = useI18n();
+  const t = dict.app.boardPanel;
   // Deduplicate: one node per entity (keep most-recent graph-relevant appearance per entity)
   const persons = dedupeByEntityRole(rawPersons.filter(isGraphRelevant));
   const router = useRouter();
@@ -426,11 +438,11 @@ function BoardNetworkGraph({
       companySel.attr("transform", `translate(${companyNode.x ?? W / 2},${companyNode.y ?? H / 2})`);
     });
 
-    const t = setTimeout(() => { companyNode.fx = null; companyNode.fy = null; }, 1500);
-    return () => { sim.stop(); clearTimeout(t); };
+    const releaseTimer = setTimeout(() => { companyNode.fx = null; companyNode.fy = null; }, 1500);
+    return () => { sim.stop(); clearTimeout(releaseTimer); };
   }, [persons, locale, companyName]);
 
-  if (!persons.length) return <p className="text-xs text-slate-400 py-6 text-center">No board members.</p>;
+  if (!persons.length) return <p className="text-xs text-slate-400 py-6 text-center">{t.noBoardMembers}</p>;
 
   return (
     <div ref={containerRef} className="relative overflow-hidden rounded-lg bg-slate-50/30 border border-slate-100" style={{ height: 420 }}>
@@ -445,7 +457,7 @@ function BoardNetworkGraph({
         </div>
       )}
       <div className="absolute bottom-2 right-2 text-[10px] text-slate-400 bg-white/80 rounded px-2 py-1 border border-slate-100 select-none">
-        Scroll to zoom · drag · double-click to reset
+        {t.zoomHint}
       </div>
       <div className="absolute top-2 left-2 bg-white/90 backdrop-blur-sm rounded-lg border border-slate-200 px-2.5 py-2 text-[11px] text-slate-500 space-y-1 shadow-sm max-w-[180px]">
         {[...new Set(persons.map(p => p.role?.trim() || p.role_category || "—"))].map(role => (
@@ -477,6 +489,8 @@ function AuditorCard({ auditor }: { auditor: SogcAuditor }) {
 // ── Board panel ───────────────────────────────────────────────────────────────
 
 export function BoardPanel({ companyId }: { companyId: number }) {
+  const { dict } = useI18n();
+  const t = dict.app.boardPanel;
   const params = useParams();
   const locale = (params?.locale as string) ?? "de";
   const [view, setView] = useState<"bar" | "network">("bar");
@@ -501,9 +515,9 @@ export function BoardPanel({ companyId }: { companyId: number }) {
       <div className="flex items-center justify-between mb-4">
         <h2 className="text-sm font-semibold text-slate-700 flex items-center gap-1.5">
           <Users size={15} className="text-slate-400" />
-          Board &amp; Officers
+          {t.boardOfficers}
           <span className="ml-1.5 text-[11px] font-normal text-slate-400">
-            {graphPersons.filter(p => p.is_current).length} active · {graphPersons.length} total
+            {t.activeTotal.replace("{active}", String(graphPersons.filter(p => p.is_current).length)).replace("{total}", String(graphPersons.length))}
           </span>
         </h2>
         <div className="flex items-center gap-2">
@@ -515,7 +529,7 @@ export function BoardPanel({ companyId }: { companyId: number }) {
                 onChange={e => setShowPast(e.target.checked)}
                 className="w-3 h-3 accent-slate-600"
               />
-              Past
+              {t.pastLabel}
             </label>
           )}
           <div className="flex rounded-lg border border-slate-200 overflow-hidden text-xs bg-white">
@@ -523,13 +537,13 @@ export function BoardPanel({ companyId }: { companyId: number }) {
               onClick={() => setView("bar")}
               className={`flex items-center gap-1.5 px-2.5 py-1.5 transition-colors ${view === "bar" ? "bg-slate-900 text-white" : "text-slate-500 hover:bg-slate-50"}`}
             >
-              <BarChart2 size={12} /> Bar
+              <BarChart2 size={12} /> {t.bar}
             </button>
             <button
               onClick={() => setView("network")}
               className={`flex items-center gap-1.5 px-2.5 py-1.5 border-l border-slate-200 transition-colors ${view === "network" ? "bg-slate-900 text-white" : "text-slate-500 hover:bg-slate-50"}`}
             >
-              <Network size={12} /> Network
+              <Network size={12} /> {t.network}
             </button>
           </div>
         </div>
@@ -551,6 +565,8 @@ export function BoardPanel({ companyId }: { companyId: number }) {
 // ── Auditors panel ────────────────────────────────────────────────────────────
 
 export function AuditorsPanel({ companyId }: { companyId: number }) {
+  const { dict } = useI18n();
+  const t = dict.app.boardPanel;
   const { data: auditors = [] } = useSWR(
     `company-auditors-${companyId}`,
     () => fetchCompanyAuditors(companyId),
@@ -563,7 +579,7 @@ export function AuditorsPanel({ companyId }: { companyId: number }) {
     <div className="bg-white rounded-xl border border-slate-200 p-5 shadow-sm">
       <h2 className="text-sm font-semibold text-slate-700 flex items-center gap-1.5 mb-3">
         <Building2 size={15} className="text-slate-400" />
-        Auditors
+        {t.auditors}
       </h2>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
         {auditors.map(a => <AuditorCard key={a.id} auditor={a} />)}

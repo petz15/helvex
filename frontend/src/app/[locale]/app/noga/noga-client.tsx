@@ -4,6 +4,9 @@ import { useRouter } from "next/navigation";
 import useSWR from "swr";
 import { fetchNogaHierarchy, fetchNogaDescription, semanticSearch } from "@/lib/api";
 import type { NogaNode, NogaAnnotation, SemanticSearchResult } from "@/lib/api";
+import { useI18n } from "@/i18n/context";
+
+type NogaDict = ReturnType<typeof useI18n>["dict"]["app"]["nogaClient"];
 
 // App colour palette — matches the rest of the product
 const T = {
@@ -26,17 +29,17 @@ const SERIF = "'Instrument Serif',Georgia,'Times New Roman',serif";
 const SANS  = "ui-sans-serif,system-ui,-apple-system,sans-serif";
 
 const LEVEL_META = [
-  { de: "Abschnitt", en: "section",  hint: "1 letter" },
-  { de: "Abteilung", en: "division", hint: "2 digits" },
-  { de: "Gruppe",    en: "group",    hint: "3 digits" },
-  { de: "Klasse",    en: "class",    hint: "4 digits" },
-  { de: "Art",       en: "type",     hint: "5 digits · CH" },
-] as const;
+  { de: "Abschnitt", en: "section",  hintKey: "hint1letter" },
+  { de: "Abteilung", en: "division", hintKey: "hint2digits" },
+  { de: "Gruppe",    en: "group",    hintKey: "hint3digits" },
+  { de: "Klasse",    en: "class",    hintKey: "hint4digits" },
+  { de: "Art",       en: "type",     hintKey: "hint5digits" },
+] as const satisfies readonly { de: string; en: string; hintKey: keyof NogaDict }[];
 
-const ANNOT_LABEL: Record<string, string> = {
-  INCLUDES: "INCLUDES",
-  INCLUDES_ALSO: "ALSO INCLUDES",
-  EXCLUDES: "EXCLUDES",
+const ANNOT_LABEL_KEYS: Record<string, keyof NogaDict> = {
+  INCLUDES: "annotIncludes",
+  INCLUDES_ALSO: "annotAlsoIncludes",
+  EXCLUDES: "annotExcludes",
 };
 const SHOWN_ANNOT_TYPES = new Set(["INCLUDES", "INCLUDES_ALSO", "EXCLUDES"]);
 
@@ -73,6 +76,8 @@ function SectionStrip({
   locale: string;
   onSelect: (c: string) => void;
 }) {
+  const { dict } = useI18n();
+  const t = dict.app.nogaClient;
   const total = sections.reduce((s, n) => s + n.count, 0);
   return (
     <div style={{ display: "flex", alignItems: "stretch", height: 26, marginTop: 10 }}>
@@ -111,7 +116,7 @@ function SectionStrip({
         fontFamily: MONO, fontSize: 9.5, color: T.ink3, whiteSpace: "nowrap",
         background: T.paper2, border: `1px solid ${T.rule}`, borderLeft: "none",
       }}>
-        {total.toLocaleString()} · {sections.length} sections
+        {total.toLocaleString()} · {sections.length} {t.sections}
       </div>
     </div>
   );
@@ -199,6 +204,8 @@ function MillerColumn({
   searchQuery: string;
   onSelect: (c: string) => void;
 }) {
+  const { dict } = useI18n();
+  const t = dict.app.nogaClient;
   const meta      = LEVEL_META[depth];
   const q         = searchQuery.toLowerCase();
   const shown     = q ? items.filter((n) => matches(n, q, locale)) : items;
@@ -221,7 +228,7 @@ function MillerColumn({
           <div style={{ fontFamily: MONO, fontSize: 9.5, color: T.ink3, letterSpacing: "0.1em" }}>
             L{depth + 1} · {meta.de.toUpperCase()}
           </div>
-          <div style={{ fontFamily: MONO, fontSize: 9, color: T.ink4 }}>{meta.hint}</div>
+          <div style={{ fontFamily: MONO, fontSize: 9, color: T.ink4 }}>{t[meta.hintKey]}</div>
         </div>
         <span style={{ fontFamily: MONO, fontSize: 9.5, color: T.ink3 }}>{shown.length}</span>
       </div>
@@ -243,7 +250,7 @@ function MillerColumn({
             fontFamily: MONO, fontSize: 10,
             borderTop: `1px dashed ${T.rule}`,
           }}>
-            leaf level · companies →
+            {t.leafLevel}
           </div>
         )}
         {shown.length === 0 && (
@@ -251,7 +258,7 @@ function MillerColumn({
             padding: "16px 12px", color: T.ink4,
             fontFamily: MONO, fontSize: 10, textAlign: "center",
           }}>
-            {items.length === 0 ? "select parent →" : "no matches"}
+            {items.length === 0 ? t.selectParent : t.noMatches}
           </div>
         )}
       </div>
@@ -268,6 +275,8 @@ function DetailPane({
   locale: string;
   onBrowse: (code: string) => void;
 }) {
+  const { dict } = useI18n();
+  const t = dict.app.nogaClient;
   const deepest = [...pathNodes].reverse().find(Boolean) ?? null;
 
   const { data: descData } = useSWR(
@@ -284,8 +293,8 @@ function DetailPane({
         alignItems: "center", justifyContent: "center",
         padding: 32, color: T.ink4, fontFamily: MONO, fontSize: 10, textAlign: "center",
       }}>
-        <div style={{ color: T.ink3, marginBottom: 8, letterSpacing: "0.1em" }}>SELECT A NODE</div>
-        click any section to explore the hierarchy
+        <div style={{ color: T.ink3, marginBottom: 8, letterSpacing: "0.1em" }}>{t.selectNode}</div>
+        {t.clickToExplore}
       </div>
     );
   }
@@ -361,9 +370,9 @@ function DetailPane({
       {/* Stats row */}
       <div style={{ display: "flex", borderBottom: `1px solid ${T.rule}`, background: T.paper, flexShrink: 0 }}>
         {[
-          { k: "COMPANIES", v: deepest.count.toLocaleString(), sub: `in ${deepest.code}`, accent: false },
-          { k: "FRESH · 30d", v: "—",  sub: "not yet wired", accent: true },
-          { k: "AVG SCORE",  v: "—",  sub: "combined", accent: false },
+          { k: t.companies, v: deepest.count.toLocaleString(), sub: t.inCode.replace("{code}", deepest.code), accent: false },
+          { k: t.freshLabel, v: "—",  sub: t.notWired, accent: true },
+          { k: t.avgScore,  v: "—",  sub: t.combined, accent: false },
         ].map((s, si) => (
           <div key={s.k} style={{
             flex: 1, padding: "10px 12px",
@@ -391,7 +400,7 @@ function DetailPane({
             fontFamily: MONO, fontSize: 11, cursor: "pointer", borderRadius: 2,
           }}
         >
-          open all {deepest.count.toLocaleString()} in results →
+          {t.openAllInResults.replace("{count}", deepest.count.toLocaleString())}
         </button>
       </div>
 
@@ -404,7 +413,7 @@ function DetailPane({
               <div style={{
                 fontFamily: MONO, fontSize: 9.5, color: T.ink3, letterSpacing: "0.1em",
               }}>
-                {ANNOT_LABEL[a.type] ?? a.type}
+                {ANNOT_LABEL_KEYS[a.type] ? t[ANNOT_LABEL_KEYS[a.type]] : a.type}
               </div>
               <div style={{ fontSize: 12, color: T.ink2, marginTop: 5, lineHeight: 1.55 }}>
                 {text}
@@ -424,6 +433,8 @@ function DetailPane({
 // ── Main ──────────────────────────────────────────────────────────────────────
 
 export default function NogaClient({ locale }: { locale: string }) {
+  const { dict } = useI18n();
+  const t = dict.app.nogaClient;
   const router = useRouter();
   const [path, setPath]                     = useState<(string | null)[]>([null, null, null, null, null]);
   const [search, setSearch]                 = useState("");
@@ -529,7 +540,7 @@ export default function NogaClient({ locale }: { locale: string }) {
         display: "flex", alignItems: "center", justifyContent: "center",
         fontFamily: MONO, fontSize: 12, color: T.ink3,
       }}>
-        loading hierarchy…
+        {t.loadingHierarchy}
       </div>
     );
   }
@@ -554,20 +565,20 @@ export default function NogaClient({ locale }: { locale: string }) {
               fontFamily: MONO, fontSize: 10, color: T.ink3,
               letterSpacing: "0.12em", textTransform: "uppercase", marginBottom: 6,
             }}>
-              classification · NOGA 2025 · CH
+              {t.classificationHeader}
             </div>
             <h1 style={{
               fontFamily: SERIF, fontStyle: "italic", fontWeight: 400,
               fontSize: 30, lineHeight: 1, letterSpacing: "-0.02em",
               margin: 0, color: T.ink,
             }}>
-              The Swiss federal taxonomy,{" "}
-              <span style={{ color: T.ink3 }}>walked one level at a time.</span>
+              {t.heroTitle}{" "}
+              <span style={{ color: T.ink3 }}>{t.heroTitleAccent}</span>
             </h1>
           </div>
           <div style={{ fontFamily: MONO, fontSize: 10.5, color: T.ink3, textAlign: "right", flexShrink: 0 }}>
-            {total.toLocaleString()} classified<br />
-            <span style={{ color: T.ink4 }}>5 levels · {sections.length} sections</span>
+            {total.toLocaleString()} {t.classified}<br />
+            <span style={{ color: T.ink4 }}>{t.levelsSections.replace("{count}", String(sections.length))}</span>
           </div>
         </div>
         <SectionStrip
@@ -593,12 +604,12 @@ export default function NogaClient({ locale }: { locale: string }) {
             padding: "7px 12px", display: "flex", alignItems: "center", gap: 10,
           }}>
             <span style={{ fontFamily: MONO, fontSize: 10, color: T.ink3, letterSpacing: "0.1em", flexShrink: 0 }}>
-              CODE / NAME
+              {t.codeName}
             </span>
             <input
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              placeholder="43.22 · Wärmepumpe · heat pump…"
+              placeholder={t.codeNamePlaceholder}
               style={{
                 flex: 1, border: "none", outline: "none",
                 background: "transparent", fontFamily: SANS, fontSize: 13, color: T.ink,
@@ -650,13 +661,13 @@ export default function NogaClient({ locale }: { locale: string }) {
             padding: "7px 12px", display: "flex", alignItems: "center", gap: 10,
           }}>
             <span style={{ fontFamily: MONO, fontSize: 10, color: T.accent, letterSpacing: "0.1em", flexShrink: 0 }}>
-              ASK · SEMANTIC
+              {t.askSemantic}
             </span>
             <input
               value={semanticQuery}
               onChange={(e) => setSemanticQuery(e.target.value)}
               onKeyDown={(e) => { if (e.key === "Enter") runSemanticSearch(); }}
-              placeholder="companies that install heat pumps…"
+              placeholder={t.semanticPlaceholder}
               style={{
                 flex: 1, border: "none", outline: "none",
                 background: "transparent", fontFamily: SANS, fontSize: 13, color: T.ink,
@@ -726,7 +737,7 @@ export default function NogaClient({ locale }: { locale: string }) {
             letterSpacing: "0.05em",
           }}
         >
-          reset
+          {t.reset}
         </button>
       </div>
 

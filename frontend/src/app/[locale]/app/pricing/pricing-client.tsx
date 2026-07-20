@@ -29,6 +29,7 @@ const TIER_BONUS_RATE: Record<TierId, number> = {
 
 export function PricingClient() {
   const { dict } = useI18n();
+  const t = dict.app.pricing;
   const [yearly, setYearly] = useState(false);
   const [creditTier, setCreditTier] = useState<TierId>("explorer");
   const [checkoutLoading, setCheckoutLoading] = useState<string | null>(null);
@@ -43,14 +44,14 @@ export function PricingClient() {
     if (!checkout && !alreadyProcessed && !reason) return;
     if (alreadyProcessed) {
       // eslint-disable-next-line react-hooks/set-state-in-effect
-      setCheckoutMessage({ kind: "success", message: "This checkout was already processed." });
+      setCheckoutMessage({ kind: "success", message: t.alreadyProcessed });
     } else if (checkout === "cancel") {
       setCheckoutMessage({
         kind: "error",
-        message: tier ? `${tier} checkout was cancelled.` : reason === "payment_declined" ? "Payment was declined or cancelled." : "Checkout cancelled.",
+        message: tier ? t.checkoutCancelledTier.replace("{tier}", tier) : reason === "payment_declined" ? t.paymentDeclined : t.checkoutCancelled,
       });
     } else if (checkout === "success") {
-      setCheckoutMessage({ kind: "success", message: tier ? `${tier} checkout completed.` : "Checkout completed." });
+      setCheckoutMessage({ kind: "success", message: tier ? t.checkoutCompletedTier.replace("{tier}", tier) : t.checkoutCompleted });
     }
     window.history.replaceState({}, "", window.location.pathname);
   }, []);
@@ -102,12 +103,12 @@ export function PricingClient() {
             {dict.app.pricing.title}
           </h1>
           <p className="text-slate-500 max-w-xl mx-auto">
-            A flat monthly plan plus consumption-based credits. Higher tiers receive bonus credits on every top-up purchase.
+            {t.subtitle}
           </p>
 
           {/* Billing toggle */}
           <div className="inline-flex items-center gap-3 mt-4 rounded-full border border-slate-200 bg-white px-4 py-2 shadow-sm">
-            <span className={`text-sm font-medium ${!yearly ? "text-slate-900" : "text-slate-400"}`}>Monthly</span>
+            <span className={`text-sm font-medium ${!yearly ? "text-slate-900" : "text-slate-400"}`}>{t.monthly}</span>
             <button
               role="switch"
               aria-checked={yearly}
@@ -117,7 +118,7 @@ export function PricingClient() {
               <span className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${yearly ? "translate-x-6" : "translate-x-1"}`} />
             </button>
             <span className={`text-sm font-medium ${yearly ? "text-slate-900" : "text-slate-400"}`}>
-              Yearly <span className="ml-1 rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-semibold text-emerald-700">2 months free</span>
+              {t.yearly} <span className="ml-1 rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-semibold text-emerald-700">{t.twoMonthsFree}</span>
             </span>
           </div>
         </div>
@@ -141,7 +142,7 @@ export function PricingClient() {
               >
                 {isPopular && (
                   <span className="absolute -top-3 left-1/2 -translate-x-1/2 rounded-full bg-blue-600 px-3 py-0.5 text-[11px] font-semibold text-white shadow">
-                    Most popular
+                    {t.mostPopular}
                   </span>
                 )}
                 <p className={`text-xs font-semibold uppercase tracking-widest ${isDark ? "text-slate-400" : "text-slate-500"}`}>
@@ -149,11 +150,11 @@ export function PricingClient() {
                 </p>
                 <div className="mt-2 flex items-end gap-1">
                   <span className={`text-3xl font-bold ${isDark ? "text-white" : "text-slate-900"}`}>
-                    {price === 0 ? "Free" : `CHF ${price}`}
+                    {price === 0 ? t.free : `CHF ${price}`}
                   </span>
                   {price > 0 && (
                     <span className={`mb-1 text-xs ${isDark ? "text-slate-400" : "text-slate-400"}`}>
-                      /{yearly ? "yr" : "mo"}
+                      {yearly ? t.perYear : t.perMonth}
                     </span>
                   )}
                 </div>
@@ -176,11 +177,11 @@ export function PricingClient() {
                       : "bg-slate-900 text-white hover:bg-slate-800"
                   }`}
                 >
-                  {checkoutLoading === tier.id ? "Starting…" : `Start ${tier.name} checkout`}
+                  {checkoutLoading === tier.id ? t.starting : t.startCheckout.replace("{tier}", tier.name)}
                 </button>
                 {price > 0 && (
                   <p className={`mt-2 text-center text-[10px] ${isDark ? "text-slate-500" : "text-slate-400"}`}>
-                    Renews automatically · cancel anytime
+                    {t.renewsAutoCancelAnytime}
                   </p>
                 )}
               </div>
@@ -207,45 +208,42 @@ export function PricingClient() {
         {/* ── Consumption-based pricing ── */}
         <div className="space-y-5">
           <div>
-            <h2 className="text-xl font-semibold text-slate-900">Consumption credits</h2>
+            <h2 className="text-xl font-semibold text-slate-900">{t.consumptionCredits}</h2>
             <p className="mt-1 text-sm text-slate-500">
-              1 credit = CHF 0.0001. Credits are deducted at full base cost per action.
-              Higher tiers receive bonus credits on top of every top-up purchase — the bonus is applied automatically at checkout.
-              Unused subscription-granted credits expire after 12 months; purchased credits never expire.
+              {t.consumptionDesc}
             </p>
           </div>
 
           {/* Topup bonus preview — pick a tier to see how many bonus credits you'd receive */}
           <div className="rounded-xl border border-slate-200 bg-slate-50 px-5 py-4 space-y-3">
             <p className="text-sm font-medium text-slate-700">
-              Topup bonus preview — credits are always deducted at full base cost. Bonuses are added when you buy credits.
+              {t.topupBonusPreview}
             </p>
             <div className="flex flex-wrap items-center gap-2">
-              <span className="text-xs text-slate-500">Your tier:</span>
-              {TIERS.map((t) => (
+              <span className="text-xs text-slate-500">{t.yourTier}</span>
+              {TIERS.map((tr) => (
                 <button
-                  key={t.id}
-                  onClick={() => setCreditTier(t.id)}
+                  key={tr.id}
+                  onClick={() => setCreditTier(tr.id)}
                   className={`rounded-full px-3 py-1 text-xs font-semibold transition-colors ${
-                    creditTier === t.id
+                    creditTier === tr.id
                       ? "bg-blue-600 text-white"
                       : "bg-white border border-slate-200 text-slate-600 hover:bg-slate-100"
                   }`}
                 >
-                  {t.name}
+                  {tr.name}
                 </button>
               ))}
             </div>
             {TIER_BONUS_RATE[creditTier] > 0 ? (
               <p className="text-sm text-emerald-700 font-medium">
-                Buying <strong>10,000 credits (CHF 1.00)</strong> → you receive{" "}
-                <strong>{(10_000 + Math.round(10_000 * TIER_BONUS_RATE[creditTier])).toLocaleString()} credits</strong>{" "}
-                ({(TIER_BONUS_RATE[creditTier] * 100).toFixed(0)}% bonus,{" "}
-                {Math.round(10_000 * TIER_BONUS_RATE[creditTier]).toLocaleString()} extra)
+                {t.buyingCredits} <strong>{t.creditsChf}</strong> {t.youReceive}{" "}
+                <strong>{(10_000 + Math.round(10_000 * TIER_BONUS_RATE[creditTier])).toLocaleString()} {t.creditsWord}</strong>{" "}
+                {t.bonusPct.replace("{pct}", (TIER_BONUS_RATE[creditTier] * 100).toFixed(0)).replace("{extra}", Math.round(10_000 * TIER_BONUS_RATE[creditTier]).toLocaleString())}
               </p>
             ) : (
               <p className="text-sm text-slate-500">
-                Free tier receives no bonus credits. Upgrade for a topup bonus.
+                {t.freeNoBonusCredits}
               </p>
             )}
           </div>
@@ -255,10 +253,10 @@ export function PricingClient() {
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-slate-200 bg-slate-100">
-                  <th className="px-4 py-3 text-left font-semibold text-slate-600">Action</th>
-                  <th className="px-4 py-3 text-center font-semibold text-slate-600">Unit</th>
-                  <th className="px-4 py-3 text-center font-semibold text-slate-600">Credits</th>
-                  <th className="px-4 py-3 text-center font-semibold text-slate-600">CHF</th>
+                  <th className="px-4 py-3 text-left font-semibold text-slate-600">{t.colAction}</th>
+                  <th className="px-4 py-3 text-center font-semibold text-slate-600">{t.colUnit}</th>
+                  <th className="px-4 py-3 text-center font-semibold text-slate-600">{t.colCredits}</th>
+                  <th className="px-4 py-3 text-center font-semibold text-slate-600">{t.colChf}</th>
                 </tr>
               </thead>
               <tbody>
@@ -278,18 +276,18 @@ export function PricingClient() {
         {/* ── Custom tier configurator ── */}
         <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm space-y-6">
           <div>
-            <h2 className="text-xl font-semibold text-slate-900">Custom tier configurator</h2>
+            <h2 className="text-xl font-semibold text-slate-900">{t.customConfigurator}</h2>
             <p className="mt-1 text-sm text-slate-500">
-              Build a modular plan with exactly the features you need. The base plan (CHF 1/mo) includes no-ads and multi-user.
+              {t.customConfiguratorDesc}
             </p>
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
             {/* Number stepper */}
             {[
-              { label: "Web result privacy months", sublabel: "+CHF 1/mo per month", value: webMonths, min: 0, max: 24, set: setWebMonths },
-              { label: "Topup bonus steps (5% each, max 40%)", sublabel: "+CHF 2/mo per step", value: bonusSteps, min: 0, max: 8, set: setBonusSteps },
-              { label: "Queue priority level (max 4)", sublabel: "+CHF 2/mo per level", value: priority, min: 0, max: 4, set: setPriority },
+              { label: t.webPrivacyMonths, sublabel: t.webPrivacyMonthsSub, value: webMonths, min: 0, max: 24, set: setWebMonths },
+              { label: t.topupBonusSteps, sublabel: t.topupBonusStepsSub, value: bonusSteps, min: 0, max: 8, set: setBonusSteps },
+              { label: t.queuePriority, sublabel: t.queuePrioritySub, value: priority, min: 0, max: 4, set: setPriority },
             ].map(({ label, sublabel, value, min, max, set }) => (
               <div key={label} className="flex items-center justify-between gap-3 rounded-xl border border-slate-200 px-4 py-3">
                 <div>
@@ -316,11 +314,11 @@ export function PricingClient() {
 
             {/* Checkboxes */}
             {[
-              { label: "Export 100k rows", sublabel: "+CHF 2/mo", checked: export100k, set: setExport100k },
-              { label: "Immediate LLM scoring", sublabel: "+CHF 1/mo", checked: immediateLlm, set: setImmediateLlm },
-              { label: "Bring your own LLM keys", sublabel: "+CHF 14/mo", checked: byoKeys, set: setByoKeys },
-              { label: "Flex auto-score new companies", sublabel: "+CHF 1/mo", checked: flexAuto, set: setFlexAuto },
-              { label: "LLM auto-score new companies", sublabel: "+CHF 1/mo", checked: llmAuto, set: setLlmAuto },
+              { label: t.export100k, sublabel: t.export100kSub, checked: export100k, set: setExport100k },
+              { label: t.immediateLlm, sublabel: t.immediateLlmSub, checked: immediateLlm, set: setImmediateLlm },
+              { label: t.byoKeys, sublabel: t.byoKeysSub, checked: byoKeys, set: setByoKeys },
+              { label: t.flexAuto, sublabel: t.flexAutoSub, checked: flexAuto, set: setFlexAuto },
+              { label: t.llmAuto, sublabel: t.llmAutoSub, checked: llmAuto, set: setLlmAuto },
             ].map(({ label, sublabel, checked, set }) => (
               <button
                 key={label}
@@ -351,21 +349,21 @@ export function PricingClient() {
           {/* Price summary */}
           <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 rounded-xl border border-slate-100 bg-slate-50 px-5 py-4">
             <div className="space-y-1">
-              <p className="text-xs text-slate-500 uppercase tracking-wide font-semibold">Estimated price</p>
+              <p className="text-xs text-slate-500 uppercase tracking-wide font-semibold">{t.estimatedPrice}</p>
               <div className="flex items-end gap-2">
                 <span className="text-3xl font-bold text-slate-900">
                   CHF {yearly ? customMonthly * 10 : customMonthly}
                 </span>
-                <span className="mb-1 text-sm text-slate-400">/{yearly ? "yr" : "mo"}</span>
+                <span className="mb-1 text-sm text-slate-400">{yearly ? t.perYear : t.perMonth}</span>
               </div>
               {customBonus > 0 && (
                 <p className="text-xs text-emerald-600 font-medium">
-                  {(customBonus * 100).toFixed(0)}% topup bonus included
+                  {t.bonusIncluded.replace("{pct}", (customBonus * 100).toFixed(0))}
                 </p>
               )}
             </div>
             <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-xs text-amber-800 max-w-xs">
-              Use the plan buttons above to start a live checkout, or open the dev billing page for direct subscription and top-up probes.
+              {t.useButtonsHint}
             </div>
           </div>
           <div className="flex flex-wrap items-center justify-between gap-3">
@@ -374,7 +372,7 @@ export function PricingClient() {
                 href="/app/dev/billing"
                 className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-600 transition-colors hover:bg-slate-50"
               >
-                Open dev billing test page
+                {t.openDevBilling}
               </Link>
             )}
           </div>
@@ -382,7 +380,7 @@ export function PricingClient() {
 
         {/* ── Footer note ── */}
         <p className="text-center text-xs text-slate-400 pb-4">
-          All prices in CHF (Swiss francs) including VAT. Yearly billing charged as a single annual payment. Credits are shared across your organization.
+          {t.footerNote}
         </p>
 
       </div>

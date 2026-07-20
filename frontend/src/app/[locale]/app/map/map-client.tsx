@@ -98,9 +98,12 @@ export function MapClient() {
         iconAnchor: [size / 2, size / 2] as [number, number],
       });
       const marker = L.marker([cell.lat, cell.lon], { icon });
-      // Click to zoom in one step past DETAIL_ZOOM
+      // Click to zoom in one step, capped at one step past DETAIL_ZOOM
       marker.on("click", () => {
-        mapInstanceRef.current?.setView([cell.lat, cell.lon], DETAIL_ZOOM + 1);
+        const map = mapInstanceRef.current;
+        if (!map) return;
+        const nextZoom = Math.min(map.getZoom() + 1, DETAIL_ZOOM + 1);
+        map.setView([cell.lat, cell.lon], nextZoom);
       });
       layer.addLayer(marker);
     }

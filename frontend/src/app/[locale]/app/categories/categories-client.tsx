@@ -32,11 +32,12 @@ function barColor(index: number) {
 // ── Custom tooltip for the bar chart ─────────────────────────────────────────
 
 function CategoryTooltip({ active, payload }: { active?: boolean; payload?: { value: number; payload: { name: string } }[] }) {
+  const { dict } = useI18n();
   if (!active || !payload?.length) return null;
   return (
     <div className="bg-white border border-slate-200 rounded-lg px-3 py-2 shadow text-sm">
       <p className="font-medium text-slate-800">{payload[0].payload.name}</p>
-      <p className="text-slate-500">{payload[0].value.toLocaleString()} companies</p>
+      <p className="text-slate-500">{payload[0].value.toLocaleString()} {dict.app.categories.companies}</p>
     </div>
   );
 }
@@ -50,6 +51,8 @@ function Section({ title, subtitle, children, searchValue, onSearchChange }: {
   searchValue?: string;
   onSearchChange?: (v: string) => void;
 }) {
+  const { dict } = useI18n();
+  const t = dict.app.categories;
   return (
     <section className="space-y-4">
       <div className="flex items-center justify-between gap-4 flex-wrap">
@@ -64,7 +67,7 @@ function Section({ title, subtitle, children, searchValue, onSearchChange }: {
               type="text"
               value={searchValue ?? ""}
               onChange={(e) => onSearchChange(e.target.value)}
-              placeholder="Filter…"
+              placeholder={t.filterPlaceholder}
               className="pl-7 pr-3 py-1.5 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-300 bg-white w-48"
             />
           </div>
@@ -78,11 +81,13 @@ function Section({ title, subtitle, children, searchValue, onSearchChange }: {
 // ── Export helper ─────────────────────────────────────────────────────────────
 
 function ExportButton({ filterKey, filterValue, label }: { filterKey: string; filterValue: string; label: string }) {
+  const { dict } = useI18n();
+  const t = dict.app.categories;
   return (
     <a
       href={`/api/v1/companies/export.csv?${filterKey}=${encodeURIComponent(filterValue)}`}
       className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs text-slate-400 hover:text-emerald-600 hover:bg-emerald-50 transition-colors"
-      title={`Export ${label} as CSV`}
+      title={t.exportAs.replace("{label}", label)}
     >
       <Download size={11} />
     </a>
@@ -150,6 +155,7 @@ function nodeMatchesFilter(node: NogaNode, q: string): boolean {
 
 export function CategoriesClient() {
   const { dict } = useI18n();
+  const t = dict.app.categories;
   const { data: taxonomy, isLoading, error } = useSWR("taxonomy", fetchTaxonomy, { revalidateOnFocus: false, dedupingInterval: 60000 });
   const { data: nogaTree = [], isLoading: nogaLoading } = useSWR("noga-hierarchy", fetchNogaHierarchy, { revalidateOnFocus: false, dedupingInterval: 60000 });
   const { data: me } = useSWR("me", fetchCurrentUser, { revalidateOnFocus: false, dedupingInterval: 60000 });
@@ -173,8 +179,8 @@ export function CategoriesClient() {
   const [showAllCategories, setShowAllCategories] = useState(false);
   const [markingIrrelevant, setMarkingIrrelevant] = useState<string | null>(null);
 
-  if (isLoading) return <div className="max-w-7xl mx-auto px-4 py-6 text-sm text-slate-400">Loading…</div>;
-  if (error) return <div className="max-w-7xl mx-auto px-4 py-6 text-sm text-red-500">Failed to load taxonomy data.</div>;
+  if (isLoading) return <div className="max-w-7xl mx-auto px-4 py-6 text-sm text-slate-400">{t.loading}</div>;
+  if (error) return <div className="max-w-7xl mx-auto px-4 py-6 text-sm text-red-500">{t.failedTaxonomy}</div>;
 
   const maxCategoryCount = categories[0]?.[1] ?? 1;
   const maxKeywordCount = keywords[0]?.[1] ?? 1;
@@ -224,19 +230,19 @@ export function CategoriesClient() {
       <div>
         <h1 className="text-2xl font-bold text-slate-900">{dict.app.categories.title}</h1>
         <p className="text-sm text-slate-500 mt-1">
-          Browse keywords and classifications — click any item to open the dashboard filtered to that value.
+          {t.subtitle}
         </p>
       </div>
 
       {/* ── AI Categories ──────────────────────────────────────────────── */}
       <Section
-        title="AI Categories"
-        subtitle={`${categories.length} distinct categories — assigned by Claude Haiku (claude_classify job). Each company receives a short human-readable label and a confidence score. Categories and the classification prompt are customisable per org.`}
+        title={t.aiCategories}
+        subtitle={t.aiCategoriesSubtitle.replace("{count}", String(categories.length))}
         searchValue={categorySearch}
         onSearchChange={setCategorySearch}
       >
         {categories.length === 0 ? (
-          <p className="text-sm text-slate-400">No categories found. Run an AI classification job first.</p>
+          <p className="text-sm text-slate-400">{t.noCategoriesFound}</p>
         ) : (
           <div className="bg-white rounded-xl border border-slate-200 p-5 shadow-sm space-y-3">
             <ResponsiveContainer width="100%" height={Math.max(300, categoryData.length * 32)}>
@@ -260,7 +266,7 @@ export function CategoriesClient() {
             {/* Per-category actions row */}
             {orgId && isAdmin && (
               <div className="border-t border-slate-100 pt-3 space-y-1">
-                <p className="text-xs text-slate-400 mb-2">Mark a category as irrelevant for your org (appends to classification exclusion list):</p>
+                <p className="text-xs text-slate-400 mb-2">{t.markIrrelevantHint}</p>
                 <div className="flex flex-wrap gap-2">
                   {filteredCategories.slice(0, 50).map(([name, count]) => (
                     <div key={name} className="inline-flex items-center gap-1 border border-slate-200 rounded-full px-2 py-0.5 text-xs bg-slate-50">
@@ -269,7 +275,7 @@ export function CategoriesClient() {
                       <ExportButton filterKey="ai_category" filterValue={name} label={name} />
                       <button
                         type="button"
-                        title="Mark irrelevant for this org"
+                        title={t.markIrrelevantTitle}
                         disabled={markingIrrelevant === name}
                         onClick={() => markCategoryIrrelevant(name)}
                         className="text-slate-300 hover:text-red-500 transition-colors disabled:opacity-50"
@@ -288,7 +294,7 @@ export function CategoriesClient() {
                 onClick={() => setShowAllCategories((v) => !v)}
                 className="text-xs text-blue-600 hover:underline"
               >
-                {showAllCategories ? "Show less" : `Show all ${filteredCategories.length} categories`}
+                {showAllCategories ? t.showLess : t.showAllCategories.replace("{count}", String(filteredCategories.length))}
               </button>
             )}
           </div>
@@ -297,13 +303,13 @@ export function CategoriesClient() {
 
       {/* ── Purpose Keywords ───────────────────────────────────────────── */}
       <Section
-        title="Purpose Keywords"
-        subtitle={`Top ${keywords.length} TF-IDF keywords extracted from company purpose texts (recompute_keywords job). These are distilled, lemmatized terms that represent each company's core activity — used as input for semantic clustering and NOGA classification.`}
+        title={t.purposeKeywords}
+        subtitle={t.purposeKeywordsSubtitle.replace("{count}", String(keywords.length))}
         searchValue={keywordSearch}
         onSearchChange={setKeywordSearch}
       >
         {keywords.length === 0 ? (
-          <p className="text-sm text-slate-400">No keywords found. Run the pipeline job to extract them.</p>
+          <p className="text-sm text-slate-400">{t.noKeywordsFound}</p>
         ) : (
           <div className="bg-white rounded-xl border border-slate-200 p-5 shadow-sm">
             <div className="flex flex-wrap gap-2">
@@ -330,13 +336,13 @@ export function CategoriesClient() {
 
       {/* ── Clusters ───────────────────────────────────────────────────── */}
       <Section
-        title="Clusters"
-        subtitle={`${clusters.length} active clusters — assigned by tfidf_kmeans_cluster. Each cluster groups companies with related business activities. Click any cluster to filter the dashboard.`}
+        title={t.clusters}
+        subtitle={t.clustersSubtitle.replace("{count}", String(clusters.length))}
         searchValue={clusterSearch}
         onSearchChange={setClusterSearch}
       >
         {clusters.length === 0 ? (
-          <p className="text-sm text-slate-400">No clusters found. Run a clustering job first.</p>
+          <p className="text-sm text-slate-400">{t.noClustersFound}</p>
         ) : (
           <div className="bg-white rounded-xl border border-slate-200 p-5 shadow-sm space-y-3">
             <div className="flex flex-wrap gap-2">
@@ -363,7 +369,7 @@ export function CategoriesClient() {
                 onClick={() => setShowAllClusters((v) => !v)}
                 className="text-xs text-blue-600 hover:underline"
               >
-                {showAllClusters ? "Show less" : `Show all ${filteredClusters.length} clusters`}
+                {showAllClusters ? t.showLess : t.showAllClusters.replace("{count}", String(filteredClusters.length))}
               </button>
             )}
           </div>
@@ -372,15 +378,15 @@ export function CategoriesClient() {
 
       {/* ── NOGA Hierarchy ─────────────────────────────────────────────── */}
       <Section
-        title="NOGA Classification"
-        subtitle="Official Swiss industry taxonomy (reclassify_noga job). Each company is assigned a NOGA code via hybrid token-matching + sentence-transformer embeddings. Counts include all sub-levels. Click any code to filter."
+        title={t.nogaClassification}
+        subtitle={t.nogaSubtitle}
         searchValue={nogaSearch}
         onSearchChange={setNogaSearch}
       >
         {nogaLoading ? (
-          <p className="text-sm text-slate-400">Loading NOGA hierarchy…</p>
+          <p className="text-sm text-slate-400">{t.loadingNoga}</p>
         ) : nogaTree.length === 0 ? (
-          <p className="text-sm text-slate-400">No NOGA classifications found yet.</p>
+          <p className="text-sm text-slate-400">{t.noNogaFound}</p>
         ) : (
           <div className="bg-white rounded-xl border border-slate-200 p-5 shadow-sm">
             {nogaTree.map((root) => (

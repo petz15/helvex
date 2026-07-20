@@ -87,6 +87,7 @@ export function PaymentGatewayClient() {
   const params = useSearchParams();
   const router = useRouter();
   const { dict } = useI18n();
+  const t = dict.app.paymentGateway;
 
   const kind        = params?.get("kind") as "subscription" | "topup" | null;
   const tier        = params?.get("tier") ?? "";
@@ -182,7 +183,7 @@ export function PaymentGatewayClient() {
       setShowDowngradeConfirm(false);
       await doCheckout();
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to process downgrade");
+      setError(e instanceof Error ? e.message : t.downgradeFailed);
     } finally {
       setDowngradeLoading(false);
     }
@@ -195,7 +196,7 @@ export function PaymentGatewayClient() {
       await scheduleDowngrade(tier);
       router.replace(`${successPath}?downgrade_scheduled=1`);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to schedule downgrade");
+      setError(e instanceof Error ? e.message : t.scheduleFailed);
       setScheduleLoading(false);
     }
   }
@@ -209,7 +210,7 @@ export function PaymentGatewayClient() {
       setProrationClaimed(true);
       setShowUpgradeProration(true);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to calculate upgrade credits");
+      setError(e instanceof Error ? e.message : t.prorationFailed);
     } finally {
       setProrationLoading(false);
     }
@@ -223,14 +224,14 @@ export function PaymentGatewayClient() {
   // ── handlers ──────────────────────────────────────────────────────────────
 
   async function handleProceed() {
-    if (isSameTier) { setError("You already have an active subscription to this plan."); return; }
+    if (isSameTier) { setError(t.alreadySubscribed); return; }
     if (isDowngrade && !showDowngradeChoice && !showDowngradeConfirm) { setShowDowngradeChoice(true); return; }
     if (isUpgrade && !prorationClaimed) { void handleOpenUpgrade(); return; }
     await doCheckout();
   }
 
   async function doCheckout() {
-    if (!billingAddress) { setError("Add a billing address before proceeding."); return; }
+    if (!billingAddress) { setError(t.addAddressFirst); return; }
     setLoading(true);
     setError(null);
     try {
@@ -267,14 +268,14 @@ export function PaymentGatewayClient() {
         setIframeUrl(session.checkout_url);
       }
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Checkout failed");
+      setError(e instanceof Error ? e.message : t.checkoutFailed);
     } finally {
       setLoading(false);
     }
   }
 
   async function handleSaveCard() {
-    if (!billingAddress) { setError("Add a billing address before saving a card."); return; }
+    if (!billingAddress) { setError(t.addAddressBeforeCard); return; }
     setCardLoading(true);
     setError(null);
     try {
@@ -294,7 +295,7 @@ export function PaymentGatewayClient() {
       });
       setIframeUrl(session.checkout_url);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Card registration failed");
+      setError(e instanceof Error ? e.message : t.cardRegFailed);
     } finally {
       setCardLoading(false);
     }
@@ -321,13 +322,13 @@ export function PaymentGatewayClient() {
         <div className="flex items-center justify-between px-5 py-3 border-b border-slate-200 bg-white shrink-0">
           <div className="flex items-center gap-2 text-sm font-semibold text-slate-800">
             <ShieldCheck size={15} className="text-blue-500 shrink-0" />
-            Secure payment — Worldline Saferpay
+            {t.securePayment}
           </div>
           <button
             onClick={() => { setIframeUrl(null); setLoading(false); }}
             className="text-xs text-slate-500 hover:text-slate-700 underline"
           >
-            Cancel
+            {t.cancel}
           </button>
         </div>
         <iframe
@@ -345,15 +346,15 @@ export function PaymentGatewayClient() {
 
       {/* Header */}
       <div>
-        <h1 className="text-2xl font-bold text-slate-900">Payment</h1>
-        <p className="text-sm text-slate-500 mt-1">Review your details before proceeding to the payment provider.</p>
+        <h1 className="text-2xl font-bold text-slate-900">{t.title}</h1>
+        <p className="text-sm text-slate-500 mt-1">{t.subtitle}</p>
       </div>
 
       {/* Card saved banner */}
       {cardSaved && (
         <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800 flex items-center gap-2">
           <CheckCircle2 size={15} className="shrink-0" />
-          Payment method saved successfully. You can now proceed with your saved payment method.
+          {t.cardSavedBanner}
         </div>
       )}
 
@@ -365,7 +366,7 @@ export function PaymentGatewayClient() {
 
       {/* Order summary */}
       <div className="rounded-2xl border border-slate-200 bg-white p-5 space-y-3">
-        <h2 className="text-sm font-semibold text-slate-700">Order summary</h2>
+        <h2 className="text-sm font-semibold text-slate-700">{t.orderSummary}</h2>
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2 text-slate-800">
             {kind === "subscription"
@@ -424,19 +425,18 @@ export function PaymentGatewayClient() {
             <div className="space-y-2">
               <div className="grid grid-cols-2 gap-2 text-xs">
                 <div className="rounded-lg border border-slate-100 bg-slate-50 px-3 py-2">
-                  <div className="text-slate-400 font-medium uppercase tracking-wide text-[10px]">Starts</div>
+                  <div className="text-slate-400 font-medium uppercase tracking-wide text-[10px]">{t.starts}</div>
                   <div className="font-semibold text-slate-700 mt-0.5">{fmtDate(startDate)}</div>
                 </div>
                 <div className="rounded-lg border border-slate-100 bg-slate-50 px-3 py-2">
-                  <div className="text-slate-400 font-medium uppercase tracking-wide text-[10px]">Next billing</div>
+                  <div className="text-slate-400 font-medium uppercase tracking-wide text-[10px]">{t.nextBilling}</div>
                   <div className="font-semibold text-slate-700 mt-0.5">{fmtDate(nextDate)}</div>
                 </div>
               </div>
               <div className="flex items-start gap-2 rounded-lg border border-blue-100 bg-blue-50 px-3 py-2.5 text-xs text-blue-700">
                 <Info size={13} className="shrink-0 mt-0.5" />
                 <span>
-                  Renews automatically every {billingCycle === "yearly" ? "year" : "month"} until you cancel.
-                  No minimum term — cancel any time from your billing page.
+                  {t.renewsNote.replace("{period}", billingCycle === "yearly" ? t.year : t.month)}
                 </span>
               </div>
             </div>
@@ -447,12 +447,12 @@ export function PaymentGatewayClient() {
       {/* Billing address */}
       <div className="rounded-2xl border border-slate-200 bg-white p-5 space-y-3">
         <div className="flex items-center justify-between">
-          <h2 className="text-sm font-semibold text-slate-700">Billing address</h2>
+          <h2 className="text-sm font-semibold text-slate-700">{t.billingAddress}</h2>
           <Link
             href={`/app/addresses?return_to=${encodeURIComponent(`/app/payment?${params?.toString() ?? ""}`)}`}
             className="text-xs text-blue-600 hover:underline"
           >
-            Manage addresses
+            {t.manageAddresses}
           </Link>
         </div>
 
@@ -466,7 +466,7 @@ export function PaymentGatewayClient() {
           </div>
         ) : (
           <div className="space-y-3">
-            <p className="text-sm text-amber-600">No billing address set. Add one to continue.</p>
+            <p className="text-sm text-amber-600">{t.noAddressSet}</p>
             <AddressBookManager
               returnTo={`/app/payment?${params?.toString() ?? ""}&resume_address=1`}
             />
@@ -476,13 +476,13 @@ export function PaymentGatewayClient() {
 
       {/* Payment method */}
       <div className="rounded-2xl border border-slate-200 bg-white p-5 space-y-3">
-        <h2 className="text-sm font-semibold text-slate-700">Payment method</h2>
+        <h2 className="text-sm font-semibold text-slate-700">{t.paymentMethod}</h2>
 
         {/* Saved payment method selector */}
         <div className="space-y-2">
           {savedMethods.map(m => {
-            const scopeLabel = m.scope === "org" ? (m.is_default ? "Org · Default" : "Org") : "Personal";
-            const label = [paymentMethodLabel(m, "Saved payment method"), scopeLabel].filter(Boolean).join(" · ");
+            const scopeLabel = m.scope === "org" ? (m.is_default ? t.orgDefault : t.org) : t.personal;
+            const label = [paymentMethodLabel(m, t.savedPaymentMethod), scopeLabel].filter(Boolean).join(" · ");
             const Icon = paymentMethodIcon(m.method_type);
             const active = selectedCard === m.alias_id;
             return (
@@ -506,7 +506,7 @@ export function PaymentGatewayClient() {
           >
             <CreditCard size={14} className={usingNewCard ? "text-blue-500" : "text-slate-400"} />
             <span className={`text-sm ${usingNewCard ? "font-medium text-blue-800" : "text-slate-500"}`}>
-              New payment method
+              {t.newPaymentMethod}
             </span>
           </button>
         </div>
@@ -520,7 +520,7 @@ export function PaymentGatewayClient() {
               onChange={e => setSaveCard(e.target.checked)}
               className="h-3.5 w-3.5 rounded border-slate-300 text-blue-600 accent-blue-600"
             />
-            Save this payment method for future payments (optional)
+            {t.savePaymentMethodOptional}
           </label>
         )}
 
@@ -532,7 +532,7 @@ export function PaymentGatewayClient() {
             className="text-xs text-slate-500 hover:text-slate-700 disabled:opacity-50 flex items-center gap-1"
           >
             {cardLoading ? <Loader2 size={11} className="animate-spin" /> : <CreditCard size={11} />}
-            {savedMethods.length > 0 ? "Add another payment method" : "Save a payment method without paying now"}
+            {savedMethods.length > 0 ? t.addAnotherMethod : t.saveMethodNoPay}
           </button>
         </div>
       </div>
@@ -540,7 +540,7 @@ export function PaymentGatewayClient() {
       {/* Security note */}
       <div className="flex items-center gap-2 text-xs text-slate-400">
         <ShieldCheck size={13} className="shrink-0" />
-        Payments are processed securely by Worldline Saferpay. Your payment details never reach our servers.
+        {t.securityNote}
       </div>
 
       {/* AGB acceptance */}
@@ -552,9 +552,9 @@ export function PaymentGatewayClient() {
           className="mt-0.5 h-4 w-4 shrink-0 rounded border-slate-300 text-blue-600 accent-blue-600"
         />
         <span className="text-sm text-slate-700">
-          I have read and accepted the{" "}
+          {t.agbAccept}{" "}
           <Link href="/agb" target="_blank" className="text-blue-600 underline hover:text-blue-800">
-            General Terms and Conditions (AGB)
+            {t.agbLink}
           </Link>{" "}
           .
         </span>
@@ -563,7 +563,7 @@ export function PaymentGatewayClient() {
       {/* Same-tier block */}
       {isSameTier && (
         <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-          You already have an active <strong className="capitalize">{currentTier}</strong> subscription. To change your plan, cancel your current subscription first or choose a different tier.
+          {t.alreadyActiveSub.replace("{tier}", currentTier)}
         </div>
       )}
 
@@ -571,11 +571,11 @@ export function PaymentGatewayClient() {
       {isDowngrade && showDowngradeChoice && !showDowngradeConfirm && (
         <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 space-y-3">
           <p className="text-sm font-semibold text-amber-900">
-            Downgrade to <span className="capitalize">{tier}</span> — when?
+            {t.downgradeTo.replace("{tier}", tier)}
           </p>
           <p className="text-xs text-amber-700">
-            Your current <strong className="capitalize">{currentTier}</strong> plan is active until{" "}
-            <strong>{summary?.subscription_period_end ? fmtDate(new Date(summary.subscription_period_end)) : "the end of your billing period"}</strong>.
+            {t.planActiveUntil.replace("{tier}", currentTier)}{" "}
+            <strong>{summary?.subscription_period_end ? fmtDate(new Date(summary.subscription_period_end)) : t.endOfBillingPeriod}</strong>.
           </p>
           {error && <p className="text-xs text-red-600">{error}</p>}
           <div className="flex flex-col sm:flex-row gap-2">
@@ -584,8 +584,8 @@ export function PaymentGatewayClient() {
               disabled={!termsAccepted}
               className="flex-1 rounded-lg border border-amber-300 bg-white px-3 py-2.5 text-xs font-semibold text-amber-900 hover:bg-amber-100 disabled:opacity-60 text-left space-y-0.5"
             >
-              <div>Downgrade immediately</div>
-              <div className="font-normal text-amber-700">Cancel now and start the new plan today. No refund for remaining time.</div>
+              <div>{t.downgradeImmediately}</div>
+              <div className="font-normal text-amber-700">{t.downgradeImmediatelyDesc}</div>
             </button>
             <button
               onClick={() => void handleScheduleDowngrade()}
@@ -594,12 +594,12 @@ export function PaymentGatewayClient() {
             >
               <div className="flex items-center gap-1.5">
                 {scheduleLoading && <Loader2 size={11} className="animate-spin shrink-0" />}
-                Downgrade at end of period
+                {t.downgradeAtPeriodEnd}
               </div>
               <div className="font-normal text-amber-700">
-                Keep <span className="capitalize">{currentTier}</span> until{" "}
-                {summary?.subscription_period_end ? fmtDate(new Date(summary.subscription_period_end)) : "period end"},
-                then switch to <span className="capitalize">{tier}</span> automatically.
+                {t.keepUntil.replace("{tier}", currentTier)}{" "}
+                {summary?.subscription_period_end ? fmtDate(new Date(summary.subscription_period_end)) : t.endOfBillingPeriod},{" "}
+                {t.switchAutomatically.replace("{tier}", tier)}
               </div>
             </button>
           </div>
@@ -607,7 +607,7 @@ export function PaymentGatewayClient() {
             onClick={() => setShowDowngradeChoice(false)}
             className="text-xs text-amber-700 hover:underline"
           >
-            Keep current plan
+            {t.keepCurrentPlan}
           </button>
         </div>
       )}
@@ -615,11 +615,11 @@ export function PaymentGatewayClient() {
       {/* Downgrade: immediate confirmation */}
       {isDowngrade && showDowngradeConfirm && (
         <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 space-y-2">
-          <p className="text-sm font-semibold text-amber-900">Downgrade to <span className="capitalize">{tier}</span> immediately?</p>
+          <p className="text-sm font-semibold text-amber-900">{t.downgradeImmediatelyQ.replace("{tier}", tier)}</p>
           <p className="text-xs text-amber-800">
-            Your current <strong className="capitalize">{currentTier}</strong> plan will be cancelled and stays active until{" "}
-            <strong>{summary?.subscription_period_end ? fmtDate(new Date(summary.subscription_period_end)) : "the end of your billing period"}</strong>.
-            The new <strong className="capitalize">{tier}</strong> plan starts immediately. No refund is issued for remaining time.
+            {t.planWillCancel.replace("{tier}", currentTier)}{" "}
+            <strong>{summary?.subscription_period_end ? fmtDate(new Date(summary.subscription_period_end)) : t.endOfBillingPeriod}</strong>.
+            {" "}{t.newPlanStarts.replace("{tier}", tier)}
           </p>
           {error && <p className="text-xs text-red-600">{error}</p>}
           <div className="flex gap-2">
@@ -628,13 +628,13 @@ export function PaymentGatewayClient() {
               disabled={downgradeLoading || !termsAccepted}
               className="rounded-lg bg-amber-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-amber-700 disabled:opacity-60"
             >
-              {downgradeLoading ? "Processing…" : `Yes, switch to ${tier.charAt(0).toUpperCase() + tier.slice(1)} now`}
+              {downgradeLoading ? t.processing : t.yesSwitchNow.replace("{tier}", tier.charAt(0).toUpperCase() + tier.slice(1))}
             </button>
             <button
               onClick={() => { setShowDowngradeConfirm(false); setShowDowngradeChoice(true); }}
               className="rounded-lg border border-amber-200 px-3 py-1.5 text-xs text-amber-800 hover:bg-amber-100"
             >
-              Back
+              {t.back}
             </button>
           </div>
         </div>
@@ -643,15 +643,14 @@ export function PaymentGatewayClient() {
       {/* Upgrade proration modal */}
       {isUpgrade && showUpgradeProration && proration && (
         <div className="rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 space-y-2">
-          <p className="text-sm font-semibold text-blue-900">Upgrade to {tier.charAt(0).toUpperCase() + tier.slice(1)}?</p>
+          <p className="text-sm font-semibold text-blue-900">{t.upgradeTo.replace("{tier}", tier.charAt(0).toUpperCase() + tier.slice(1))}</p>
           <p className="text-xs text-blue-800">
-            You have <strong>{proration.remaining_days} days</strong> remaining on your current{" "}
-            <strong className="capitalize">{currentTier}</strong> plan (CHF {proration.plan_cost_chf.toFixed(2)}/cycle).
-            As a thank-you for upgrading, we&apos;ll credit your account with{" "}
-            <strong>{proration.credits_granted.toLocaleString()} credits (≈ CHF {proration.credits_chf.toFixed(4)})</strong>.
+            {t.remainingDays.replace("{days}", String(proration.remaining_days)).replace("{tier}", currentTier).replace("{cost}", proration.plan_cost_chf.toFixed(2))}
+            {" "}{t.thankYouCredit}{" "}
+            <strong>{proration.credits_granted.toLocaleString()} {t.creditsApprox.replace("{chf}", proration.credits_chf.toFixed(4))}</strong>.
           </p>
           <p className="text-xs text-blue-700 font-medium">
-            These credits have already been added to your balance. Proceed to pay for your new plan.
+            {t.creditsAlreadyAdded}
           </p>
           {error && <p className="text-xs text-red-600">{error}</p>}
           <div className="flex gap-2">
@@ -661,13 +660,13 @@ export function PaymentGatewayClient() {
               className="flex items-center gap-1.5 rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-blue-700 disabled:opacity-60"
             >
               {loading ? <Loader2 size={11} className="animate-spin" /> : <ArrowRight size={11} />}
-              {loading ? "Opening payment…" : "Proceed to payment"}
+              {loading ? t.openingPayment : t.proceedToPayment}
             </button>
             <button
               onClick={() => setShowUpgradeProration(false)}
               className="rounded-lg border border-blue-200 px-3 py-1.5 text-xs text-blue-800 hover:bg-blue-100"
             >
-              Cancel
+              {t.cancel}
             </button>
           </div>
         </div>
@@ -680,7 +679,7 @@ export function PaymentGatewayClient() {
             href={cancelPath}
             className="text-sm text-slate-500 hover:underline"
           >
-            Cancel
+            {t.cancel}
           </Link>
           <button
             onClick={() => void handleProceed()}
@@ -688,7 +687,7 @@ export function PaymentGatewayClient() {
             className="flex items-center gap-2 rounded-xl bg-blue-600 px-6 py-3 text-sm font-semibold text-white shadow hover:bg-blue-700 disabled:opacity-60 transition-colors"
           >
             {(loading || prorationLoading) ? <Loader2 size={15} className="animate-spin" /> : <ArrowRight size={15} />}
-            {loading ? "Opening payment…" : prorationLoading ? "Calculating credits…" : "Proceed to payment"}
+            {loading ? t.openingPayment : prorationLoading ? t.calculatingCredits : t.proceedToPayment}
           </button>
         </div>
       )}
@@ -696,7 +695,7 @@ export function PaymentGatewayClient() {
       {/* Cancel link when a modal is open */}
       {(showDowngradeChoice || showDowngradeConfirm || showUpgradeProration) && (
         <Link href={cancelPath} className="text-sm text-slate-500 hover:underline">
-          Cancel
+          {t.cancel}
         </Link>
       )}
     </div>

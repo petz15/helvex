@@ -20,6 +20,7 @@ import type { NogaNode, MarketSegment, OrgEffectiveSettings, SemanticSearchRespo
 import type { Company, CompanyFilters, CompanyStats } from "@/lib/types";
 import { cn, formatClusterLabel } from "@/lib/utils";
 import { getExportLimit } from "@/lib/entitlements";
+import { useI18n } from "@/i18n/context";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -46,20 +47,22 @@ function buildExportUrl(filters: CompanyFilters): string {
 // ── SetupGateBanner ───────────────────────────────────────────────────────────
 
 function SetupGateBanner({ hasApiKey, hasTargetDescription }: { hasApiKey: boolean; hasTargetDescription: boolean }) {
+  const { dict } = useI18n();
+  const t = dict.app.explorer;
   if (hasApiKey && hasTargetDescription) return null;
   const missing: string[] = [];
-  if (!hasApiKey) missing.push("Anthropic API key");
-  if (!hasTargetDescription) missing.push("target company description");
+  if (!hasApiKey) missing.push(t.setupApiKey);
+  if (!hasTargetDescription) missing.push(t.setupTargetDesc);
   return (
     <div className="mx-4 mt-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 flex items-start gap-3">
       <Sparkles size={16} className="text-amber-500 shrink-0 mt-0.5" />
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2">
-          <p className="text-sm font-medium text-amber-800">AI scoring is not configured</p>
+          <p className="text-sm font-medium text-amber-800">{t.setupNotConfigured}</p>
           <span className="inline-flex items-center gap-1 text-[10px] uppercase tracking-wide text-amber-700 bg-amber-100 border border-amber-300 rounded px-1.5 py-0.5 font-semibold">Pro</span>
         </div>
         <p className="text-xs text-amber-700 mt-0.5">
-          AI lead scoring is a paid feature that uses credits per company. Set your {missing.join(" and ")} in <Link href="/app/settings" className="underline">Settings → Scoring</Link> to enable it. Free-tier filtering by NOGA, canton, and score is unaffected.
+          {t.setupText1.replace("{missing}", missing.join(` ${t.and} `))}<Link href="/app/settings" className="underline">{t.setupLink}</Link>{t.setupText2}
         </p>
       </div>
     </div>
@@ -84,6 +87,8 @@ function MarketMap({
   onSectionClick: (section: string | null) => void;
   locale: string;
 }) {
+  const { dict } = useI18n();
+  const t = dict.app.explorer;
   const { data: segments = [], isLoading } = useSWR("market-segments", fetchMarketSegments, {
     dedupingInterval: 3_600_000,
   });
@@ -130,7 +135,7 @@ function MarketMap({
             onClick={() => onSectionClick(null)}
             className="px-2.5 py-1.5 rounded-xl border border-slate-200 bg-white text-xs text-slate-500 hover:text-slate-800 transition-colors flex items-center gap-1"
           >
-            <X size={11} /> Clear
+            <X size={11} /> {t.clear}
           </button>
         )}
       </div>
@@ -149,6 +154,8 @@ function SubSegmentStrip({
   activeDivision: string | null;
   onDivisionClick: (division: string | null) => void;
 }) {
+  const { dict } = useI18n();
+  const t = dict.app.explorer;
   const { data: hierarchy = [] } = useSWR("noga-hierarchy", fetchNogaHierarchy, {
     dedupingInterval: 3_600_000,
   });
@@ -161,7 +168,7 @@ function SubSegmentStrip({
   return (
     <div className="px-4 py-2 border-b border-slate-100 bg-slate-50 shrink-0">
       <div className="flex items-center gap-2 overflow-x-auto">
-        <span className="text-[10px] font-medium text-slate-400 uppercase tracking-wide shrink-0">Division</span>
+        <span className="text-[10px] font-medium text-slate-400 uppercase tracking-wide shrink-0">{t.division}</span>
         {sectionNode.children.map((div) => {
           const isActive = activeDivision === div.code;
           return (
@@ -291,10 +298,12 @@ interface FilterSidebarProps {
 }
 
 function FilterSidebar({ filters, cantons, onChange, collapsed, onToggle }: FilterSidebarProps) {
+  const { dict } = useI18n();
+  const t = dict.app.explorer;
   if (collapsed) {
     return (
       <div className="w-8 border-r border-slate-100 bg-white flex flex-col items-center pt-3 shrink-0">
-        <button onClick={onToggle} className="text-slate-400 hover:text-slate-700" title="Expand filters">
+        <button onClick={onToggle} className="text-slate-400 hover:text-slate-700" title={t.expandFilters}>
           <SlidersHorizontal size={15} />
         </button>
       </div>
@@ -306,7 +315,7 @@ function FilterSidebar({ filters, cantons, onChange, collapsed, onToggle }: Filt
       {/* Header */}
       <div className="flex items-center justify-between px-3 py-2.5 border-b border-slate-100">
         <span className="text-xs font-semibold text-slate-500 uppercase tracking-wide flex items-center gap-1.5">
-          <SlidersHorizontal size={12} /> Filters
+          <SlidersHorizontal size={12} /> {t.filters}
         </span>
         <button onClick={onToggle} className="text-slate-400 hover:text-slate-600">
           <ChevronLeft size={14} />
@@ -317,17 +326,17 @@ function FilterSidebar({ filters, cantons, onChange, collapsed, onToggle }: Filt
 
         {/* Score range */}
         <div>
-          <label className="block font-medium text-slate-500 mb-1.5">Score range</label>
+          <label className="block font-medium text-slate-500 mb-1.5">{t.scoreRange}</label>
           <div className="flex items-center gap-1">
             <input
-              type="number" min={0} max={100} placeholder="Min"
+              type="number" min={0} max={100} placeholder={t.min}
               value={filters.min_combined_score ?? ""}
               onChange={e => onChange({ min_combined_score: e.target.value ? Number(e.target.value) : undefined, page: 1 })}
               className="w-full border border-slate-200 rounded px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-blue-300"
             />
             <span className="text-slate-400">–</span>
             <input
-              type="number" min={0} max={100} placeholder="Max"
+              type="number" min={0} max={100} placeholder={t.max}
               value={filters.max_combined_score ?? ""}
               onChange={e => onChange({ max_combined_score: e.target.value ? Number(e.target.value) : undefined, page: 1 })}
               className="w-full border border-slate-200 rounded px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-blue-300"
@@ -337,20 +346,20 @@ function FilterSidebar({ filters, cantons, onChange, collapsed, onToggle }: Filt
 
         {/* Canton */}
         <div>
-          <label className="block font-medium text-slate-500 mb-1.5">Canton</label>
+          <label className="block font-medium text-slate-500 mb-1.5">{t.canton}</label>
           <select
             value={filters.canton ?? ""}
             onChange={e => onChange({ canton: e.target.value || undefined, page: 1 })}
             className="w-full border border-slate-200 rounded px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-blue-300 bg-white"
           >
-            <option value="">All cantons</option>
+            <option value="">{t.allCantons}</option>
             {cantons.map(c => <option key={c} value={c}>{c}</option>)}
           </select>
         </div>
 
         {/* Language */}
         <div>
-          <label className="block font-medium text-slate-500 mb-1.5">Language</label>
+          <label className="block font-medium text-slate-500 mb-1.5">{t.language}</label>
           <div className="flex gap-1 flex-wrap">
             {LANGUAGE_CHIPS.map(({ value, label }) => (
               <button
@@ -371,9 +380,9 @@ function FilterSidebar({ filters, cantons, onChange, collapsed, onToggle }: Filt
 
         {/* Legal form */}
         <div>
-          <label className="block font-medium text-slate-500 mb-1.5">Legal form</label>
+          <label className="block font-medium text-slate-500 mb-1.5">{t.legalForm}</label>
           <input
-            type="text" placeholder="e.g. GmbH, AG"
+            type="text" placeholder={t.legalFormPlaceholder}
             value={filters.legal_form ?? ""}
             onChange={e => onChange({ legal_form: e.target.value || undefined, page: 1 })}
             className="w-full border border-slate-200 rounded px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-blue-300"
@@ -382,43 +391,43 @@ function FilterSidebar({ filters, cantons, onChange, collapsed, onToggle }: Filt
 
         {/* Review status */}
         <div>
-          <label className="block font-medium text-slate-500 mb-1.5">Review status</label>
+          <label className="block font-medium text-slate-500 mb-1.5">{t.reviewStatus}</label>
           <select
             value={filters.review_status ?? ""}
             onChange={e => onChange({ review_status: e.target.value || undefined, page: 1 })}
             className="w-full border border-slate-200 rounded px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-blue-300 bg-white"
           >
-            <option value="">Any</option>
-            <option value="_none">Not set</option>
-            <option value="potential_proposal">Potential proposal</option>
-            <option value="confirmed_proposal">Confirmed proposal</option>
-            <option value="interesting">Interesting</option>
-            <option value="rejected">Rejected</option>
+            <option value="">{t.any}</option>
+            <option value="_none">{t.notSet}</option>
+            <option value="potential_proposal">{t.rsPotentialProposal}</option>
+            <option value="confirmed_proposal">{t.rsConfirmedProposal}</option>
+            <option value="interesting">{t.rsInteresting}</option>
+            <option value="rejected">{t.rsRejected}</option>
           </select>
         </div>
 
         {/* Contact status */}
         <div>
-          <label className="block font-medium text-slate-500 mb-1.5">Contact status</label>
+          <label className="block font-medium text-slate-500 mb-1.5">{t.contactStatus}</label>
           <select
             value={filters.contact_status ?? ""}
             onChange={e => onChange({ contact_status: e.target.value || undefined, page: 1 })}
             className="w-full border border-slate-200 rounded px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-blue-300 bg-white"
           >
-            <option value="">Any</option>
-            <option value="_none">Not set</option>
-            <option value="sent">Sent</option>
-            <option value="responded">Responded</option>
-            <option value="converted">Converted</option>
-            <option value="rejected">Rejected</option>
+            <option value="">{t.any}</option>
+            <option value="_none">{t.notSet}</option>
+            <option value="sent">{t.csSent}</option>
+            <option value="responded">{t.csResponded}</option>
+            <option value="converted">{t.csConverted}</option>
+            <option value="rejected">{t.csRejected}</option>
           </select>
         </div>
 
         {/* Tags */}
         <div>
-          <label className="block font-medium text-slate-500 mb-1.5">Tags</label>
+          <label className="block font-medium text-slate-500 mb-1.5">{t.tags}</label>
           <input
-            type="text" placeholder="Comma-separated"
+            type="text" placeholder={t.tagsPlaceholder}
             value={filters.tags ?? ""}
             onChange={e => onChange({ tags: e.target.value || undefined, page: 1 })}
             className="w-full border border-slate-200 rounded px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-blue-300"
@@ -427,7 +436,7 @@ function FilterSidebar({ filters, cantons, onChange, collapsed, onToggle }: Filt
 
         {/* Date range */}
         <div>
-          <label className="block font-medium text-slate-500 mb-1.5">Registered after</label>
+          <label className="block font-medium text-slate-500 mb-1.5">{t.registeredAfter}</label>
           <input
             type="date"
             value={filters.registered_after ?? ""}
@@ -441,7 +450,7 @@ function FilterSidebar({ filters, cantons, onChange, collapsed, onToggle }: Filt
           onClick={() => onChange({ ...BROWSE_DEFAULTS, sort: filters.sort })}
           className="w-full text-center text-xs text-slate-400 hover:text-slate-600 pt-1"
         >
-          Clear all filters
+          {t.clearAll}
         </button>
       </div>
     </div>
@@ -461,6 +470,8 @@ function ScoringWizard({
   onClose: () => void;
   onSaved: () => void;
 }) {
+  const { dict } = useI18n();
+  const t = dict.app.explorer;
   const [step, setStep] = useState(1);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -496,13 +507,13 @@ function ScoringWizard({
       });
       onSaved();
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to save settings");
+      setError(e instanceof Error ? e.message : t.saveSettingsFailed);
     } finally {
       setSaving(false);
     }
   }
 
-  const STEPS = ["Clusters", "Keywords", "NOGA targets", "Save"];
+  const STEPS = [t.secClusters, t.secKeywords, t.stepNogaTargets, t.stepSave];
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
@@ -513,7 +524,7 @@ function ScoringWizard({
         <div className="flex items-center justify-between px-6 pt-5 pb-4 border-b border-slate-100">
           <div className="flex items-center gap-2">
             <Wand2 size={18} className="text-blue-600" />
-            <h2 className="text-base font-semibold text-slate-800">Scoring Wizard</h2>
+            <h2 className="text-base font-semibold text-slate-800">{t.wizardTitle}</h2>
           </div>
           <button onClick={onClose} className="text-slate-400 hover:text-slate-600"><X size={18} /></button>
         </div>
@@ -537,48 +548,48 @@ function ScoringWizard({
         <div className="flex-1 overflow-y-auto px-6 py-5 space-y-4">
           {step === 1 && (
             <div className="space-y-4">
-              <p className="text-sm text-slate-600">Search and select clusters to target in flex scoring.</p>
+              <p className="text-sm text-slate-600">{t.wizStep1Desc}</p>
               <AutocompleteInput
-                placeholder="Type to search clusters…"
+                placeholder={t.wizClusterPlaceholder}
                 fetchFn={clusterSearch}
                 valueKey="cluster"
                 value={targetClusters}
                 onChange={setTargetClusters}
               />
-              <p className="text-xs text-slate-400">Companies whose cluster label matches any selected term score higher.</p>
+              <p className="text-xs text-slate-400">{t.wizStep1Hint}</p>
             </div>
           )}
 
           {step === 2 && (
             <div className="space-y-4">
-              <p className="text-sm text-slate-600">Keywords that boost or penalise the flex score.</p>
+              <p className="text-sm text-slate-600">{t.wizStep2Desc}</p>
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="text-xs font-medium text-emerald-700 block mb-1">Target keywords (boost)</label>
+                  <label className="text-xs font-medium text-emerald-700 block mb-1">{t.wizTargetKw}</label>
                   <AutocompleteInput
-                    placeholder="Search…"
+                    placeholder={t.wizSearchPlaceholder}
                     fetchFn={keywordSearch}
                     valueKey="keyword"
                     value={targetKws}
                     onChange={setTargetKws}
                   />
                   <div className="mt-1 flex items-center gap-1">
-                    <span className="text-xs text-slate-400">Points per hit:</span>
+                    <span className="text-xs text-slate-400">{t.wizPointsPerHit}</span>
                     <input type="number" value={kwHitPts} onChange={e => setKwHitPts(e.target.value)}
                       className="w-14 text-xs border border-slate-200 rounded px-2 py-0.5 text-center" />
                   </div>
                 </div>
                 <div>
-                  <label className="text-xs font-medium text-red-600 block mb-1">Exclude keywords (penalty)</label>
+                  <label className="text-xs font-medium text-red-600 block mb-1">{t.wizExcludeKw}</label>
                   <AutocompleteInput
-                    placeholder="Search…"
+                    placeholder={t.wizSearchPlaceholder}
                     fetchFn={keywordSearch}
                     valueKey="keyword"
                     value={excludeKws}
                     onChange={setExcludeKws}
                   />
                   <div className="mt-1 flex items-center gap-1">
-                    <span className="text-xs text-slate-400">Points per hit:</span>
+                    <span className="text-xs text-slate-400">{t.wizPointsPerHit}</span>
                     <input type="number" value={kwExclPts} onChange={e => setKwExclPts(e.target.value)}
                       className="w-14 text-xs border border-slate-200 rounded px-2 py-0.5 text-center" />
                   </div>
@@ -590,8 +601,7 @@ function ScoringWizard({
           {step === 3 && (
             <div className="space-y-4">
               <p className="text-sm text-slate-600">
-                Bonus points by NOGA code. Format:{" "}
-                <code className="font-mono text-xs bg-slate-100 px-1 rounded">CODE:points</code>, pipe-separated.
+                {t.wizStep3Desc}
               </p>
               <textarea
                 value={nogaTargets}
@@ -601,7 +611,7 @@ function ScoringWizard({
                 placeholder="e.g. J:20|62:35|620:40|M:15"
               />
               <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs text-slate-600 space-y-1">
-                <p><strong>J</strong> (section) → <strong>62</strong> (division) → <strong>620</strong> (group). Most specific match wins.</p>
+                <p>{t.wizStep3Hint}</p>
               </div>
             </div>
           )}
@@ -609,15 +619,15 @@ function ScoringWizard({
           {step === 4 && (
             <div className="space-y-4">
               <div className="bg-slate-50 rounded-xl border border-slate-200 p-4 space-y-2 text-sm">
-                <p className="font-medium text-slate-700">Summary</p>
+                <p className="font-medium text-slate-700">{t.wizSummary}</p>
                 <div className="space-y-1 text-xs text-slate-600">
-                  <div><span className="font-medium">Target clusters:</span> {targetClusters || "(none)"}</div>
-                  <div><span className="font-medium">Target keywords:</span> {targetKws || "(none)"} (+{kwHitPts}pts)</div>
-                  <div><span className="font-medium">Exclude keywords:</span> {excludeKws || "(none)"} (-{kwExclPts}pts)</div>
-                  <div><span className="font-medium">NOGA targets:</span> {nogaTargets || "(none)"}</div>
+                  <div><span className="font-medium">{t.wizSumClusters}</span> {targetClusters || t.wizNone}</div>
+                  <div><span className="font-medium">{t.wizSumKeywords}</span> {targetKws || t.wizNone} (+{kwHitPts}pts)</div>
+                  <div><span className="font-medium">{t.wizSumExclude}</span> {excludeKws || t.wizNone} (-{kwExclPts}pts)</div>
+                  <div><span className="font-medium">{t.wizSumNoga}</span> {nogaTargets || t.wizNone}</div>
                 </div>
               </div>
-              <p className="text-xs text-slate-500">After saving, go to <strong>Settings → Admin → Recalculate Scores</strong> to apply new scoring.</p>
+              <p className="text-xs text-slate-500">{t.wizApplyHint}</p>
               {error && <p className="text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">{error}</p>}
             </div>
           )}
@@ -628,14 +638,14 @@ function ScoringWizard({
             onClick={() => step > 1 ? setStep(s => s - 1) : onClose()}
             className="text-sm text-slate-500 hover:text-slate-700"
           >
-            {step > 1 ? "← Back" : "Cancel"}
+            {step > 1 ? t.back : t.cancel}
           </button>
           {step < STEPS.length ? (
             <button
               onClick={() => setStep(s => s + 1)}
               className="px-4 py-2 rounded-lg bg-blue-600 text-white text-sm font-medium hover:bg-blue-700"
             >
-              Next →
+              {t.next}
             </button>
           ) : (
             <button
@@ -643,7 +653,7 @@ function ScoringWizard({
               disabled={saving}
               className="px-4 py-2 rounded-lg bg-emerald-600 text-white text-sm font-medium hover:bg-emerald-700 disabled:opacity-50"
             >
-              {saving ? "Saving…" : "Save settings"}
+              {saving ? t.saving : t.saveSettings}
             </button>
           )}
         </div>
@@ -661,6 +671,8 @@ interface ExplorerPageProps {
 }
 
 function ExplorerPage({ initialCantons, initialStats, locale }: ExplorerPageProps) {
+  const { dict } = useI18n();
+  const t = dict.app.explorer;
   const searchParams = useSearchParams();
   const urlNogaCode = searchParams?.get("noga_code") ?? null;
 
@@ -801,7 +813,7 @@ function ExplorerPage({ initialCantons, initialStats, locale }: ExplorerPageProp
               value={semanticQuery}
               onChange={e => { setSemanticQuery(e.target.value); if (purposeHits) setPurposeHits(null); }}
               onKeyDown={e => { if (e.key === "Enter" && semanticQuery.trim()) runPurposeSearch(semanticQuery); }}
-              placeholder="Describe what you're looking for… (Enter for company search)"
+              placeholder={t.searchPlaceholder}
               className={cn(
                 "w-full pl-8 pr-3 py-2 text-sm border rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-300",
                 purposeHits ? "border-blue-400 bg-blue-50" : "border-slate-200",
@@ -816,13 +828,13 @@ function ExplorerPage({ initialCantons, initialStats, locale }: ExplorerPageProp
             {/* Semantic dropdown */}
             {(semanticLoading || semanticResults) && semanticQuery && (
               <div className="absolute top-full left-0 right-0 mt-1 bg-white border border-slate-200 rounded-xl shadow-xl z-30 max-h-80 overflow-y-auto">
-                {semanticLoading && <div className="px-4 py-3 text-sm text-slate-500">Searching…</div>}
+                {semanticLoading && <div className="px-4 py-3 text-sm text-slate-500">{t.searching}</div>}
                 {semanticResults && (() => {
                   const sections: Array<{ label: string; type: string; items: SemanticSearchResult[] }> = [
-                    { label: "Clusters", type: "clusters", items: semanticResults.clusters ?? [] },
-                    { label: "Keywords", type: "keywords", items: semanticResults.keywords ?? [] },
-                    { label: "NOGA", type: "noga_codes", items: semanticResults.noga_codes ?? [] },
-                    { label: "Categories", type: "categories", items: semanticResults.categories ?? [] },
+                    { label: t.secClusters, type: "clusters", items: semanticResults.clusters ?? [] },
+                    { label: t.secKeywords, type: "keywords", items: semanticResults.keywords ?? [] },
+                    { label: t.secNoga, type: "noga_codes", items: semanticResults.noga_codes ?? [] },
+                    { label: t.secCategories, type: "categories", items: semanticResults.categories ?? [] },
                   ].filter(s => s.items.length > 0);
                   return sections.map(sec => (
                     <div key={sec.type}>
@@ -846,8 +858,8 @@ function ExplorerPage({ initialCantons, initialStats, locale }: ExplorerPageProp
 
           {/* Stats strip */}
           <div className="hidden md:flex items-center gap-3 text-xs text-slate-500">
-            <span><span className="font-semibold text-slate-700">{total.toLocaleString()}</span> companies</span>
-            {avgScore != null && <span>avg score <span className="font-semibold text-slate-700">{avgScore}</span></span>}
+            <span><span className="font-semibold text-slate-700">{total.toLocaleString()}</span> {t.companies}</span>
+            {avgScore != null && <span>{t.avgScore} <span className="font-semibold text-slate-700">{avgScore}</span></span>}
           </div>
 
           {/* Wizard button */}
@@ -856,7 +868,7 @@ function ExplorerPage({ initialCantons, initialStats, locale }: ExplorerPageProp
               onClick={() => setWizardOpen(true)}
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border border-slate-200 bg-white text-slate-600 hover:border-blue-300 hover:text-blue-600 transition-colors shrink-0"
             >
-              <Wand2 size={12} /> Configure Scoring
+              <Wand2 size={12} /> {t.configureScoring}
             </button>
           )}
         </div>
@@ -898,17 +910,17 @@ function ExplorerPage({ initialCantons, initialStats, locale }: ExplorerPageProp
               {purposeHits ? (
                 <>
                   <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-blue-100 text-blue-700 font-medium">
-                    <Search size={10} /> Semantic
+                    <Search size={10} /> {t.semantic}
                   </span>
-                  <span><span className="font-semibold text-slate-700">{purposeHits.length}</span> matches for &ldquo;{semanticQuery}&rdquo;</span>
-                  <button onClick={clearPurposeSearch} className="text-slate-400 hover:text-slate-600 underline">clear</button>
+                  <span>{t.matchesFor.replace("{count}", String(purposeHits.length))} &ldquo;{semanticQuery}&rdquo;</span>
+                  <button onClick={clearPurposeSearch} className="text-slate-400 hover:text-slate-600 underline">{t.clearLower}</button>
                 </>
               ) : (
                 <>
                   <span className="font-semibold text-slate-700">{total.toLocaleString()}</span>
-                  <span>companies</span>
+                  <span>{t.companies}</span>
                   {activeSection && (
-                    <span className="text-blue-600 font-medium">· Section {activeSection}{activeDivision ? ` / ${activeDivision}` : ""}</span>
+                    <span className="text-blue-600 font-medium">· {t.sectionLabel} {activeSection}{activeDivision ? ` / ${activeDivision}` : ""}</span>
                   )}
                 </>
               )}
@@ -920,7 +932,7 @@ function ExplorerPage({ initialCantons, initialStats, locale }: ExplorerPageProp
                   target="_blank"
                   className="flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs border border-slate-200 bg-white text-slate-600 hover:border-slate-300 transition-colors"
                 >
-                  <Download size={11} /> Export CSV
+                  <Download size={11} /> {t.exportCsv}
                 </a>
               )}
             </div>
@@ -1038,8 +1050,9 @@ function ExplorerInner({ initialCantons, initialStats, locale = "de" }: Explorer
 // ── Public export ─────────────────────────────────────────────────────────────
 
 export default function ExplorerClient(props: ExplorerClientProps) {
+  const { dict } = useI18n();
   return (
-    <Suspense fallback={<div className="flex items-center justify-center h-96 text-slate-400">Loading…</div>}>
+    <Suspense fallback={<div className="flex items-center justify-center h-96 text-slate-400">{dict.app.explorer.loading}</div>}>
       <ExplorerInner {...props} />
     </Suspense>
   );

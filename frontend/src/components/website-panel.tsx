@@ -12,6 +12,7 @@ import {
   fetchSerpAnalysis,
   type WebExtractSummary, type SerpAnalysis, type SerpAboveItem,
 } from "@/lib/api";
+import { useI18n } from "@/i18n/context";
 
 interface WebExtract {
   url_candidate_id: number;
@@ -58,7 +59,7 @@ async function fetchWebExtract(companyId: number): Promise<WebExtractResponse> {
   const res = await fetch(`/api/v1/companies/${companyId}/web-extract`, {
     credentials: "include",
   });
-  if (!res.ok) throw new Error("Failed to load web extract");
+  if (!res.ok) throw new Error("Failed to load web extract");  // dev-only; UI shows failLoadData
   return res.json();
 }
 
@@ -113,6 +114,8 @@ function AllExtractsPanel({ companyId, bestCandidateId, onMutate }: {
   bestCandidateId: number | undefined;
   onMutate: () => void;
 }) {
+  const { dict } = useI18n();
+  const t = dict.app.websitePanel;
   const { data: extracts, mutate } = useSWR<WebExtractSummary[]>(
     `web-extracts-all-${companyId}`,
     () => fetchAllWebExtracts(companyId),
@@ -144,16 +147,16 @@ function AllExtractsPanel({ companyId, bestCandidateId, onMutate }: {
   }
 
   return (
-    <Card title={`All URL candidates (${extracts.length})`} icon={Globe}>
+    <Card title={t.allCandidates.replace("{count}", String(extracts.length))} icon={Globe}>
       <div className="overflow-x-auto -m-1 p-1">
         <table className="w-full text-[12px]">
           <thead>
             <tr className="text-slate-400 border-b border-slate-100">
-              <th className="text-left font-medium py-1.5 pr-3">URL</th>
-              <th className="text-center font-medium py-1.5 pr-3">Conf</th>
-              <th className="text-center font-medium py-1.5 pr-3">UID</th>
-              <th className="text-left font-medium py-1.5 pr-3">Status</th>
-              <th className="text-center font-medium py-1.5 pr-3">Flag</th>
+              <th className="text-left font-medium py-1.5 pr-3">{t.colUrl}</th>
+              <th className="text-center font-medium py-1.5 pr-3">{t.colConf}</th>
+              <th className="text-center font-medium py-1.5 pr-3">{t.colUid}</th>
+              <th className="text-left font-medium py-1.5 pr-3">{t.colStatus}</th>
+              <th className="text-center font-medium py-1.5 pr-3">{t.colFlag}</th>
               <th className="py-1.5" />
             </tr>
           </thead>
@@ -169,7 +172,7 @@ function AllExtractsPanel({ companyId, bestCandidateId, onMutate }: {
                         </a>
                       : <span className="text-slate-300">—</span>
                     }
-                    {isBest && <span className="text-[10px] text-blue-600 font-medium">best</span>}
+                    {isBest && <span className="text-[10px] text-blue-600 font-medium">{t.best}</span>}
                   </td>
                   <td className="py-1.5 pr-3 text-center"><ConfBadge conf={ex.confidence} /></td>
                   <td className="py-1.5 pr-3 text-center">
@@ -200,7 +203,7 @@ function AllExtractsPanel({ companyId, bestCandidateId, onMutate }: {
                         <button
                           onClick={() => handlePromote(ex.url_candidate_id)}
                           disabled={acting !== null}
-                          title="Promote to best"
+                          title={t.promoteTitle}
                           className="p-1 rounded hover:bg-green-50 text-green-600 disabled:opacity-40"
                         >
                           {acting === ex.url_candidate_id ? <Loader2 size={12} className="animate-spin" /> : <ChevronUp size={12} />}
@@ -209,7 +212,7 @@ function AllExtractsPanel({ companyId, bestCandidateId, onMutate }: {
                       <button
                         onClick={() => handleDiscard(ex.url_candidate_id)}
                         disabled={acting !== null || isBest}
-                        title="Discard & reject"
+                        title={t.discardTitle}
                         className="p-1 rounded hover:bg-red-50 text-red-500 disabled:opacity-40"
                       >
                         <Trash2 size={12} />
@@ -228,27 +231,31 @@ function AllExtractsPanel({ companyId, bestCandidateId, onMutate }: {
 
 // ── SERP Presence ─────────────────────────────────────────────────────────────
 
-const TYPE_META: Record<SerpAboveItem["type"], { label: string; cls: string }> = {
-  directory: { label: "Dir",     cls: "bg-orange-50 text-orange-600 border-orange-200" },
-  social:    { label: "Social",  cls: "bg-sky-50 text-sky-600 border-sky-200" },
-  news:      { label: "News",    cls: "bg-purple-50 text-purple-600 border-purple-200" },
-  own:       { label: "Web",     cls: "bg-slate-100 text-slate-500 border-slate-200" },
-  none:      { label: "Other",   cls: "bg-slate-100 text-slate-400 border-slate-200" },
+const TYPE_META: Record<SerpAboveItem["type"], { labelKey: "typeDir" | "typeSocial" | "typeNews" | "typeWeb" | "typeOther"; cls: string }> = {
+  directory: { labelKey: "typeDir",    cls: "bg-orange-50 text-orange-600 border-orange-200" },
+  social:    { labelKey: "typeSocial", cls: "bg-sky-50 text-sky-600 border-sky-200" },
+  news:      { labelKey: "typeNews",   cls: "bg-purple-50 text-purple-600 border-purple-200" },
+  own:       { labelKey: "typeWeb",    cls: "bg-slate-100 text-slate-500 border-slate-200" },
+  none:      { labelKey: "typeOther",  cls: "bg-slate-100 text-slate-400 border-slate-200" },
 };
 
 function PositionBadge({ pos }: { pos: number | null }) {
-  if (pos == null) return <span className="text-[12px] text-slate-400">Not found</span>;
+  const { dict } = useI18n();
+  const t = dict.app.websitePanel;
+  if (pos == null) return <span className="text-[12px] text-slate-400">{t.notFound}</span>;
   const cls = pos <= 3 ? "bg-green-50 text-green-700 border-green-200"
     : pos <= 7 ? "bg-amber-50 text-amber-700 border-amber-200"
     : "bg-red-50 text-red-600 border-red-200";
   return (
     <span className={`text-[12px] font-semibold px-2 py-0.5 rounded-full border ${cls}`}>
-      #{pos} organic
+      #{pos} {t.organic}
     </span>
   );
 }
 
 function SeoScoreBadge({ score }: { score: number | null }) {
+  const { dict } = useI18n();
+  const t = dict.app.websitePanel;
   if (score == null) return null;
   const cls = score >= 70 ? "bg-green-50 text-green-700 border-green-200"
     : score >= 40 ? "bg-amber-50 text-amber-700 border-amber-200"
@@ -256,14 +263,16 @@ function SeoScoreBadge({ score }: { score: number | null }) {
   return (
     <span
       className={`text-[12px] font-semibold px-2 py-0.5 rounded-full border ${cls}`}
-      title="Organic rank discounted by ads and SERP features above it — distinct from web_score (URL-match confidence)"
+      title={t.seoTitle}
     >
-      SEO visibility {score}
+      {t.seoVisibility} {score}
     </span>
   );
 }
 
 function SerpPresenceCard({ companyId }: { companyId: number }) {
+  const { dict } = useI18n();
+  const t = dict.app.websitePanel;
   const { data, isLoading, error } = useSWR<SerpAnalysis>(
     `serp-analysis-${companyId}`,
     () => fetchSerpAnalysis(companyId),
@@ -271,7 +280,7 @@ function SerpPresenceCard({ companyId }: { companyId: number }) {
 
   if (isLoading) return (
     <div className="bg-white rounded-xl border border-[#e6e8ec] p-4 flex items-center gap-2 text-slate-400 text-[13px]">
-      <Loader2 size={14} className="animate-spin" /> Loading search presence…
+      <Loader2 size={14} className="animate-spin" /> {t.loadingPresence}
     </div>
   );
 
@@ -282,28 +291,28 @@ function SerpPresenceCard({ companyId }: { companyId: number }) {
   const hasUrl = Boolean(data.company_url);
 
   return (
-    <Card title="Search Presence" icon={Search}>
+    <Card title={t.searchPresence} icon={Search}>
       {/* Summary row */}
       <div className="flex flex-wrap items-center gap-3 mb-4">
         {hasUrl ? (
           <PositionBadge pos={pos} />
         ) : (
-          <span className="text-[12px] text-slate-400">No website on file</span>
+          <span className="text-[12px] text-slate-400">{t.noWebsiteOnFile}</span>
         )}
         <SeoScoreBadge score={data.seo_visibility_score} />
         {data.ads_count > 0 && (
           <span className="text-[12px] px-2 py-0.5 rounded-full border bg-red-50 text-red-600 border-red-200">
-            {data.ads_count} ad{data.ads_count !== 1 ? "s" : ""} above organic
+            {(data.ads_count === 1 ? t.adAbove : t.adsAbove).replace("{count}", String(data.ads_count))}
           </span>
         )}
         {data.has_local_pack && (
           <span className="text-[12px] px-2 py-0.5 rounded-full border bg-indigo-50 text-indigo-700 border-indigo-200">
-            Maps pack ({data.local_count})
+            {t.mapsPack.replace("{count}", String(data.local_count))}
           </span>
         )}
         {data.has_knowledge_graph && (
           <span className="text-[12px] px-2 py-0.5 rounded-full border bg-slate-100 text-slate-500 border-slate-200">
-            Knowledge graph
+            {t.knowledgeGraph}
           </span>
         )}
         {data.search_query && (
@@ -319,7 +328,7 @@ function SerpPresenceCard({ companyId }: { companyId: number }) {
           {/* Ads */}
           {data.ads.map((ad, i) => (
             <div key={i} className="flex items-center gap-2 py-1 text-[12px]">
-              <span className="shrink-0 text-[10px] px-1.5 py-0.5 rounded border bg-red-50 text-red-600 border-red-200 font-medium w-14 text-center">Ad</span>
+              <span className="shrink-0 text-[10px] px-1.5 py-0.5 rounded border bg-red-50 text-red-600 border-red-200 font-medium w-14 text-center">{t.adLabel}</span>
               <a href={ad.link} target="_blank" rel="noopener noreferrer"
                  className="text-slate-500 hover:text-blue-600 truncate flex items-center gap-1">
                 {ad.title || ad.link} <ExternalLink size={10} className="shrink-0 opacity-60" />
@@ -328,15 +337,15 @@ function SerpPresenceCard({ companyId }: { companyId: number }) {
           ))}
           {data.ads_count > data.ads.length && (
             <div className="py-1 text-[11px] text-slate-400 pl-16">
-              +{data.ads_count - data.ads.length} more ad{data.ads_count - data.ads.length !== 1 ? "s" : ""}
+              {(data.ads_count - data.ads.length === 1 ? t.moreAd : t.moreAds).replace("{count}", String(data.ads_count - data.ads.length))}
             </div>
           )}
 
           {/* Local pack */}
           {data.has_local_pack && (
             <div className="flex items-center gap-2 py-1 text-[12px]">
-              <span className="shrink-0 text-[10px] px-1.5 py-0.5 rounded border bg-indigo-50 text-indigo-700 border-indigo-200 font-medium w-14 text-center">Maps</span>
-              <span className="text-slate-500">{data.local_count} local result{data.local_count !== 1 ? "s" : ""}</span>
+              <span className="shrink-0 text-[10px] px-1.5 py-0.5 rounded border bg-indigo-50 text-indigo-700 border-indigo-200 font-medium w-14 text-center">{t.mapsLabel}</span>
+              <span className="text-slate-500">{(data.local_count === 1 ? t.localResult : t.localResults).replace("{count}", String(data.local_count))}</span>
             </div>
           )}
 
@@ -346,7 +355,7 @@ function SerpPresenceCard({ companyId }: { companyId: number }) {
             return (
               <div key={r.link} className="flex items-center gap-2 py-1 text-[12px]">
                 <span className={`shrink-0 text-[10px] px-1.5 py-0.5 rounded border font-medium w-14 text-center ${meta.cls}`}>
-                  #{r.position} {meta.label}
+                  #{r.position} {t[meta.labelKey]}
                 </span>
                 <a href={r.link} target="_blank" rel="noopener noreferrer"
                    className="text-slate-500 hover:text-blue-600 truncate flex items-center gap-1">
@@ -366,12 +375,12 @@ function SerpPresenceCard({ companyId }: { companyId: number }) {
                  className="text-green-700 font-medium hover:underline truncate flex items-center gap-1">
                 {data.company_url} <ExternalLink size={10} className="shrink-0" />
               </a>
-              <span className="shrink-0 text-[10px] text-green-600 font-medium">✓ your site</span>
+              <span className="shrink-0 text-[10px] text-green-600 font-medium">{t.yourSite}</span>
             </div>
           )}
           {hasUrl && pos == null && (
             <div className="py-2 text-[12px] text-slate-400">
-              Website URL on file but not found in the {data.total_organic} stored organic results — may appear on page 2+.
+              {t.notInOrganic.replace("{count}", String(data.total_organic))}
             </div>
           )}
         </div>
@@ -380,24 +389,29 @@ function SerpPresenceCard({ companyId }: { companyId: number }) {
   );
 }
 
-const WEBSITE_STATUS_META: Record<string, { label: string; cls: string; hint: string }> = {
-  verified:       { label: "Verified website",  cls: "bg-green-50 text-green-700 border-green-200",     hint: "Crawl matched the Swiss UID or name+address from Zefix" },
-  confirmed:      { label: "Confirmed website", cls: "bg-emerald-50 text-emerald-700 border-emerald-200", hint: "Own-domain found with high confidence (no UID proof)" },
-  likely:         { label: "Likely website",   cls: "bg-amber-50 text-amber-700 border-amber-200",      hint: "Own-domain candidate exists, mid confidence" },
-  social_only:    { label: "Social media only", cls: "bg-sky-50 text-sky-700 border-sky-200",            hint: "No own website found — only a social profile" },
-  directory_only: { label: "Directory only",   cls: "bg-slate-100 text-slate-500 border-slate-200",     hint: "Only directory/registry listings found" },
-  none:           { label: "No website",       cls: "bg-red-50 text-red-600 border-red-200",            hint: "Searched/crawled — nothing credible found" },
+const WEBSITE_STATUS_META: Record<string, { labelKey: string; cls: string; hintKey: string }> = {
+  verified:       { labelKey: "statusVerified",      cls: "bg-green-50 text-green-700 border-green-200",       hintKey: "hintVerified" },
+  confirmed:      { labelKey: "statusConfirmed",     cls: "bg-emerald-50 text-emerald-700 border-emerald-200", hintKey: "hintConfirmed" },
+  likely:         { labelKey: "statusLikely",        cls: "bg-amber-50 text-amber-700 border-amber-200",       hintKey: "hintLikely" },
+  social_only:    { labelKey: "statusSocialOnly",    cls: "bg-sky-50 text-sky-700 border-sky-200",             hintKey: "hintSocialOnly" },
+  directory_only: { labelKey: "statusDirectoryOnly", cls: "bg-slate-100 text-slate-500 border-slate-200",      hintKey: "hintDirectoryOnly" },
+  none:           { labelKey: "statusNone",          cls: "bg-red-50 text-red-600 border-red-200",             hintKey: "hintNone" },
 };
 
 function WebsiteStatusBadge({ status, count }: { status: string | null | undefined; count: number | null | undefined }) {
+  const { dict } = useI18n();
+  const t = dict.app.websitePanel;
   if (!status) return null;
-  const meta = WEBSITE_STATUS_META[status] ?? { label: status, cls: "bg-slate-100 text-slate-500 border-slate-200", hint: "" };
+  const meta = WEBSITE_STATUS_META[status];
+  const label = meta ? t[meta.labelKey as keyof typeof t] : status;
+  const hint = meta ? t[meta.hintKey as keyof typeof t] : "";
+  const cls = meta?.cls ?? "bg-slate-100 text-slate-500 border-slate-200";
   return (
     <div className="flex items-center gap-1.5">
-      <span title={meta.hint} className={`text-[11px] px-2 py-0.5 rounded-full border ${meta.cls}`}>{meta.label}</span>
+      <span title={hint} className={`text-[11px] px-2 py-0.5 rounded-full border ${cls}`}>{label}</span>
       {(count ?? 0) >= 2 && (
-        <span title={`${count} distinct websites detected`} className="text-[11px] px-2 py-0.5 rounded-full border bg-indigo-50 text-indigo-700 border-indigo-200">
-          {count} sites
+        <span title={t.distinctDetected.replace("{count}", String(count))} className="text-[11px] px-2 py-0.5 rounded-full border bg-indigo-50 text-indigo-700 border-indigo-200">
+          {t.sitesCount.replace("{count}", String(count))}
         </span>
       )}
     </div>
@@ -405,6 +419,8 @@ function WebsiteStatusBadge({ status, count }: { status: string | null | undefin
 }
 
 export function WebsitePanel({ companyId, isSuperadmin = false, websiteStatus = null, websiteCount = null }: { companyId: number; isSuperadmin?: boolean; websiteStatus?: string | null; websiteCount?: number | null }) {
+  const { dict } = useI18n();
+  const t = dict.app.websitePanel;
   const { data, error, isLoading, mutate } = useSWR(
     `web-extract-${companyId}`,
     () => fetchWebExtract(companyId),
@@ -430,7 +446,7 @@ export function WebsitePanel({ companyId, isSuperadmin = false, websiteStatus = 
   }
 
   if (error) {
-    return <div className="p-6 text-sm text-red-500">Failed to load website data.</div>;
+    return <div className="p-6 text-sm text-red-500">{t.failLoadData}</div>;
   }
 
   const extract = data?.extract;
@@ -446,9 +462,9 @@ export function WebsitePanel({ companyId, isSuperadmin = false, websiteStatus = 
         {websiteStatus && (
           <div className="flex justify-center mb-3"><WebsiteStatusBadge status={websiteStatus} count={websiteCount} /></div>
         )}
-        <p className="text-sm text-slate-500">This company has not been crawled yet.</p>
+        <p className="text-sm text-slate-500">{t.notCrawled}</p>
         <p className="text-xs text-slate-400 mt-1">
-          Run the web crawler to fetch and extract website data.
+          {t.runCrawler}
         </p>
         {isSuperadmin && (
           <button
@@ -457,7 +473,7 @@ export function WebsitePanel({ companyId, isSuperadmin = false, websiteStatus = 
             className="mt-4 inline-flex items-center gap-1.5 text-[12px] px-3 py-1.5 rounded-lg border border-purple-200 text-purple-700 hover:bg-purple-50 disabled:opacity-50 transition-colors"
           >
             {rerunning ? <Loader2 size={12} className="animate-spin" /> : <RefreshCw size={12} />}
-            {rerunning ? "Searching…" : "Rerun web search"}
+            {rerunning ? t.searching : t.rerunWebSearch}
           </button>
         )}
         </div>
@@ -486,28 +502,28 @@ export function WebsitePanel({ companyId, isSuperadmin = false, websiteStatus = 
               {extract.url} <ExternalLink size={11} className="shrink-0" />
             </a>
           ) : (
-            <span className="text-[13px] text-slate-400">No URL</span>
+            <span className="text-[13px] text-slate-400">{t.noUrl}</span>
           )}
         </div>
         <div className="flex items-center gap-1.5">
-          <span className="text-[12px] text-slate-400">Confidence</span>
+          <span className="text-[12px] text-slate-400">{t.confidence}</span>
           <span className={`text-[13px] font-semibold ${confColour}`}>{confPct}</span>
         </div>
         <div className="flex items-center gap-1.5">
-          <span className="text-[12px] text-slate-400">Method</span>
+          <span className="text-[12px] text-slate-400">{t.method}</span>
           <span className="text-[13px] text-slate-600 font-mono">{extract?.extraction_method ?? "—"}</span>
         </div>
         <div className="flex items-center gap-1.5">
-          <span className="text-[12px] text-slate-400">Pages</span>
+          <span className="text-[12px] text-slate-400">{t.pages}</span>
           <span className="text-[13px] text-slate-600">{extract?.page_count ?? pages.length}</span>
         </div>
         <div className="flex items-center gap-1.5">
-          <span className="text-[12px] text-slate-400">Crawled</span>
+          <span className="text-[12px] text-slate-400">{t.crawled}</span>
           <span className="text-[13px] text-slate-600">{fmtDate(extract?.extracted_at ?? null)}</span>
         </div>
         {(data?.candidate_count ?? 0) > 1 && (
           <span className="text-[11px] px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 border border-amber-200">
-            {data!.candidate_count} URL candidates extracted
+            {t.candidatesExtracted.replace("{count}", String(data!.candidate_count))}
           </span>
         )}
         {isSuperadmin && (
@@ -517,14 +533,14 @@ export function WebsitePanel({ companyId, isSuperadmin = false, websiteStatus = 
             className="ml-auto flex items-center gap-1.5 text-[12px] px-2.5 py-1 rounded-lg border border-purple-200 text-purple-700 hover:bg-purple-50 disabled:opacity-50 transition-colors"
           >
             {rerunning ? <Loader2 size={12} className="animate-spin" /> : <RefreshCw size={12} />}
-            {rerunning ? "Searching…" : "Rerun search"}
+            {rerunning ? t.searching : t.rerunSearch}
           </button>
         )}
       </div>
 
       {!extract && (
         <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 text-sm text-amber-800">
-          Pages were crawled but no structured data could be extracted. See crawl coverage below.
+          {t.noStructuredData}
         </div>
       )}
 
@@ -532,48 +548,48 @@ export function WebsitePanel({ companyId, isSuperadmin = false, websiteStatus = 
 
       <div className="grid md:grid-cols-2 gap-4">
         {/* ── Contact ── */}
-        <Card title="Contact" icon={Mail}>
-          <Field label="Emails" empty={!extract?.emails.length}>
+        <Card title={t.contact} icon={Mail}>
+          <Field label={t.emails} empty={!extract?.emails.length}>
             <div className="space-y-0.5">
               {extract?.emails.map((e, i) => (
                 <a key={e} href={`mailto:${e}`} className="flex items-center gap-1.5 text-blue-600 hover:underline">
                   {e}
                   {i === 0 && (
-                    <span className="text-[10px] px-1.5 py-px rounded-full bg-blue-50 text-blue-600 border border-blue-200">primary</span>
+                    <span className="text-[10px] px-1.5 py-px rounded-full bg-blue-50 text-blue-600 border border-blue-200">{t.primary}</span>
                   )}
                 </a>
               ))}
             </div>
           </Field>
-          <Field label="Phones" empty={!extract?.phones.length}>
+          <Field label={t.phones} empty={!extract?.phones.length}>
             <div className="space-y-0.5">
               {extract?.phones.map(p => (
                 <a key={p} href={`tel:${p}`} className="block text-blue-600 hover:underline">{p}</a>
               ))}
             </div>
           </Field>
-          <Field label="Address" empty={!extract?.address}>
+          <Field label={t.address} empty={!extract?.address}>
             <span className="flex items-start gap-1.5">
               <MapPin size={13} className="text-slate-400 mt-0.5 shrink-0" />
               {extract?.address}
             </span>
           </Field>
-          <Field label="UID on site" empty={!extract?.uid}>
+          <Field label={t.uidOnSite} empty={!extract?.uid}>
             <span className="flex items-center gap-2">
               <span className="font-mono">{extract?.uid}</span>
               {extract?.uid_matches_zefix === true && (
                 <span className="inline-flex items-center gap-1 text-[11px] text-green-700">
-                  <CheckCircle2 size={12} /> matches Zefix
+                  <CheckCircle2 size={12} /> {t.matchesZefix}
                 </span>
               )}
               {extract?.uid_matches_zefix === false && (
                 <span className="inline-flex items-center gap-1 text-[11px] text-red-600">
-                  <AlertTriangle size={12} /> differs from Zefix
+                  <AlertTriangle size={12} /> {t.differsZefix}
                 </span>
               )}
               {extract?.uid_matches_zefix == null && extract?.name_address_verified && (
                 <span className="inline-flex items-center gap-1 text-[11px] text-green-700">
-                  <CheckCircle2 size={12} /> name + address verified
+                  <CheckCircle2 size={12} /> {t.nameAddrVerified}
                 </span>
               )}
             </span>
@@ -581,7 +597,7 @@ export function WebsitePanel({ companyId, isSuperadmin = false, websiteStatus = 
         </Card>
 
         {/* ── Socials ── */}
-        <Card title="Social profiles" icon={Link2}>
+        <Card title={t.socialProfiles} icon={Link2}>
           {extract && Object.keys(extract.socials).length > 0 ? (
             <div className="space-y-1.5">
               {Object.entries(extract.socials).map(([platform, url]) => (
@@ -594,23 +610,23 @@ export function WebsitePanel({ companyId, isSuperadmin = false, websiteStatus = 
               ))}
             </div>
           ) : (
-            <p className="text-[13px] text-slate-300">No social profiles found.</p>
+            <p className="text-[13px] text-slate-300">{t.noSocials}</p>
           )}
         </Card>
       </div>
 
       {/* ── Content ── */}
-      <Card title="Content" icon={FileText}>
-        <Field label="Description" empty={!extract?.description}>
+      <Card title={t.content} icon={FileText}>
+        <Field label={t.description} empty={!extract?.description}>
           <p className="leading-relaxed">{extract?.description}</p>
         </Field>
-        <Field label="Languages" empty={!extract?.languages.length}>
+        <Field label={t.languages} empty={!extract?.languages.length}>
           <span className="flex items-center gap-1.5">
             <Languages size={13} className="text-slate-400" />
             {extract?.languages.map(l => l.toUpperCase()).join(", ")}
           </span>
         </Field>
-        <Field label="Keywords" empty={!extract?.service_keywords.length}>
+        <Field label={t.keywords} empty={!extract?.service_keywords.length}>
           <div className="flex flex-wrap gap-1.5">
             {extract?.service_keywords.map(k => (
               <span key={k} className="inline-flex items-center gap-1 text-[12px] px-2 py-0.5 rounded-full bg-slate-100 text-slate-600">
@@ -619,7 +635,7 @@ export function WebsitePanel({ companyId, isSuperadmin = false, websiteStatus = 
             ))}
           </div>
         </Field>
-        <Field label="People" empty={!extract?.persons.length}>
+        <Field label={t.people} empty={!extract?.persons.length}>
           <div className="flex flex-wrap gap-1.5">
             {extract?.persons.map(p => (
               <span key={p} className="inline-flex items-center gap-1 text-[12px] px-2 py-0.5 rounded-full bg-indigo-50 text-indigo-700">
@@ -631,23 +647,23 @@ export function WebsitePanel({ companyId, isSuperadmin = false, websiteStatus = 
       </Card>
 
       {/* ── Crawl coverage (debug) ── */}
-      <Card title="Crawl coverage" icon={Hash}>
+      <Card title={t.crawlCoverage} icon={Hash}>
         {pages.length === 0 ? (
-          <p className="text-[13px] text-slate-300">No pages recorded.</p>
+          <p className="text-[13px] text-slate-300">{t.noPages}</p>
         ) : (
           <div className="overflow-x-auto -m-1 p-1">
             <table className="w-full text-[12px]">
               <thead>
                 <tr className="text-slate-400 border-b border-slate-100">
-                  <th className="text-left font-medium py-1.5 pr-3">Page</th>
-                  <th className="text-left font-medium py-1.5 pr-3">URL</th>
-                  <th className="text-right font-medium py-1.5 pr-3">HTTP</th>
-                  <th className="text-left font-medium py-1.5 pr-3">Lang</th>
-                  <th className="text-right font-medium py-1.5 pr-3">Words</th>
-                  <th className="text-right font-medium py-1.5 pr-3">Img</th>
-                  <th className="text-right font-medium py-1.5 pr-3">Vid</th>
-                  <th className="text-center font-medium py-1.5 pr-3">Form</th>
-                  <th className="text-center font-medium py-1.5">HTML</th>
+                  <th className="text-left font-medium py-1.5 pr-3">{t.colPage}</th>
+                  <th className="text-left font-medium py-1.5 pr-3">{t.colUrl}</th>
+                  <th className="text-right font-medium py-1.5 pr-3">{t.colHttp}</th>
+                  <th className="text-left font-medium py-1.5 pr-3">{t.colLang}</th>
+                  <th className="text-right font-medium py-1.5 pr-3">{t.colWords}</th>
+                  <th className="text-right font-medium py-1.5 pr-3">{t.colImg}</th>
+                  <th className="text-right font-medium py-1.5 pr-3">{t.colVid}</th>
+                  <th className="text-center font-medium py-1.5 pr-3">{t.colForm}</th>
+                  <th className="text-center font-medium py-1.5">{t.colHtml}</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-50">

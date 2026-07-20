@@ -40,12 +40,14 @@ function Label({ children }: { children: React.ReactNode }) {
 }
 
 function ProTag() {
+  const { dict } = useI18n();
+  const t = dict.app.filters;
   return (
     <span
       className="inline-flex items-center text-[9px] uppercase tracking-wide font-semibold text-amber-700 bg-amber-50 border border-amber-200 rounded px-1 py-px ml-1.5 align-middle"
-      title="AI feature — uses credits per company"
+      title={t.proTitle}
     >
-      Pro
+      {t.proTag}
     </span>
   );
 }
@@ -58,6 +60,8 @@ function CantonMultiSelect({
   onChange: (value: string | undefined) => void;
   placeholder: string;
 }) {
+  const { dict } = useI18n();
+  const t = dict.app.filters;
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   const selected = value ? value.split(",").map((s) => s.trim()).filter(Boolean) : [];
@@ -75,7 +79,7 @@ function CantonMultiSelect({
     onChange(next.length > 0 ? next.join(",") : undefined);
   };
 
-  const label = selected.length === 0 ? placeholder : selected.length === 1 ? selected[0] : `${selected.length} cantons`;
+  const label = selected.length === 0 ? placeholder : selected.length === 1 ? selected[0] : t.cantonsCount.replace("{count}", String(selected.length));
 
   return (
     <div ref={ref} className="relative flex-1 min-w-[5.5rem] sm:flex-none">
@@ -137,31 +141,27 @@ function ScoreRange({
   );
 }
 
-const CHIP_LABELS: Partial<Record<keyof CompanyFilters, string>> = {
-  q: "Name", uid: "UID", canton: "Canton", review_status: "Review", contact_status: "Contact",
-  has_website: "Website",
-  google_searched: "Web search", tags: "Tags", ai_category: "AI Class.",
-  tfidf_cluster: "Cluster", purpose_keywords: "Keyword",
-  noga_code: "NOGA code", noga_label: "NOGA label", noga_level: "NOGA level",
-  purpose_language: "Language",
-  business_model: "Business model",
-  legal_form: "Legal form", registered_after: "First SOGC after", registered_before: "First SOGC before",
-  min_web_score: "Min Web", max_web_score: "Max Web",
-  min_flex_score: "Min Flex", max_flex_score: "Max Flex",
-  min_ai_score: "Min AI", max_ai_score: "Max AI",
-  min_combined_score: "Min Combined", max_combined_score: "Max Combined",
-  exclude_review_status: "Excl. review", exclude_contact_status: "Excl. contact",
-  exclude_canton: "Excl. canton", exclude_tags: "Excl. tags",
-  exclude_tfidf_cluster: "Excl. cluster", exclude_purpose_keywords: "Excl. keyword",
-  exclude_ai_category: "Excl. AI class.",
-  exclude_noga_code: "Excl. NOGA code", exclude_noga_label: "Excl. NOGA label", exclude_noga_level: "Excl. NOGA level",
+const CHIP_LABEL_KEYS: Partial<Record<keyof CompanyFilters, string>> = {
+  q: "q", uid: "uid", canton: "canton", review_status: "review_status", contact_status: "contact_status",
+  has_website: "has_website",
+  google_searched: "google_searched", tags: "tags", ai_category: "ai_category",
+  tfidf_cluster: "tfidf_cluster", purpose_keywords: "purpose_keywords",
+  noga_code: "noga_code", noga_label: "noga_label", noga_level: "noga_level",
+  purpose_language: "purpose_language",
+  business_model: "business_model",
+  legal_form: "legal_form", registered_after: "registered_after", registered_before: "registered_before",
+  min_web_score: "min_web_score", max_web_score: "max_web_score",
+  min_flex_score: "min_flex_score", max_flex_score: "max_flex_score",
+  min_ai_score: "min_ai_score", max_ai_score: "max_ai_score",
+  min_combined_score: "min_combined_score", max_combined_score: "max_combined_score",
+  exclude_review_status: "exclude_review_status", exclude_contact_status: "exclude_contact_status",
+  exclude_canton: "exclude_canton", exclude_tags: "exclude_tags",
+  exclude_tfidf_cluster: "exclude_tfidf_cluster", exclude_purpose_keywords: "exclude_purpose_keywords",
+  exclude_ai_category: "exclude_ai_category",
+  exclude_noga_code: "exclude_noga_code", exclude_noga_label: "exclude_noga_label", exclude_noga_level: "exclude_noga_level",
 };
 
-const ZEFIX_STATUSES = [
-  { value: "ACTIVE", label: "Active" },
-  { value: "CANCELLED", label: "Cancelled" },
-  { value: "BEING_CANCELLED", label: "Being cancelled" },
-];
+const ZEFIX_STATUS_VALUES = ["ACTIVE", "CANCELLED", "BEING_CANCELLED"] as const;
 
 export function FilterBar({
   filters, cantons, taxonomy, onChange, onClear, resultCount,
@@ -245,7 +245,11 @@ export function FilterBar({
           <select className={cn(selectCls, "w-full sm:w-36")} value={filters.status ?? ""}
             onChange={(e) => set("status" as keyof CompanyFilters, e.target.value)}>
             <option value="">{t.status}</option>
-            {ZEFIX_STATUSES.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
+            {ZEFIX_STATUS_VALUES.map((v) => (
+              <option key={v} value={v}>
+                {v === "ACTIVE" ? t.statusActive : v === "CANCELLED" ? t.statusCancelled : t.statusBeingCancelled}
+              </option>
+            ))}
           </select>
           <ChevronDown size={13} className="pointer-events-none absolute right-2 top-2 text-slate-400" />
         </div>
@@ -268,7 +272,7 @@ export function FilterBar({
           )}
         >
           <SlidersHorizontal size={13} />
-          Filters
+          {t.filtersBtn}
           {activeCount > 0 && (
             <span className={cn(
               "rounded-full px-1.5 py-0.5 text-xs font-semibold",
@@ -285,7 +289,8 @@ export function FilterBar({
           {activeEntries
             .filter(([k]) => !["q", "uid", "canton", "status"].includes(String(k)))
             .flatMap(([k, v]) => {
-              const label = CHIP_LABELS[k] ?? String(k).replace(/_/g, " ");
+              const chipKey = CHIP_LABEL_KEYS[k];
+              const label = chipKey ? t.chipLabels[chipKey as keyof typeof t.chipLabels] : String(k).replace(/_/g, " ");
               const isExclude = String(k).startsWith("exclude_");
               const strVal = String(v);
               // Split comma-separated multi-select fields into individual chips
@@ -335,8 +340,8 @@ export function FilterBar({
                   <span className="text-slate-400">{label}:</span>
                   <span>
                     {k === "has_website"
-                      ? (strVal === "true" ? "Yes" : "No")
-                      : CLUSTER_KEYS.includes(k) ? formatClusterLabel(strVal) : strVal.replace(/^_none$/, "none").replace(/^_any$/, "any")}
+                      ? (strVal === "true" ? t.yes : t.no)
+                      : CLUSTER_KEYS.includes(k) ? formatClusterLabel(strVal) : strVal.replace(/^_none$/, t.none).replace(/^_any$/, t.any)}
                   </span>
                   <button type="button" onClick={() => unset(k)} className="text-slate-400 hover:text-slate-700">
                     <X size={11} />
@@ -360,7 +365,7 @@ export function FilterBar({
                 onClick={() => { setShowViewsMenu((v) => !v); setShowSaveInput(false); }}
                 className="flex items-center gap-1 text-xs text-slate-500 hover:text-slate-700 px-2 py-1 rounded border border-slate-200 bg-white hover:bg-slate-50"
               >
-                <BookmarkCheck size={13} /> Views ({savedViews.length})
+                <BookmarkCheck size={13} /> {t.views.replace("{count}", String(savedViews.length))}
               </button>
               {showViewsMenu && (
                 <div className="absolute right-0 top-full mt-1 z-50 bg-white border border-slate-200 rounded-lg shadow-lg min-w-[180px]">
@@ -377,7 +382,7 @@ export function FilterBar({
                         <button
                           type="button"
                           onClick={() => onToggleAlert?.(v.id, !v.alert_enabled)}
-                          title={v.alert_enabled ? "Disable daily alert" : "Enable daily alert for new companies"}
+                          title={v.alert_enabled ? t.disableAlert : t.enableAlert}
                           className={cn(
                             "transition-colors",
                             v.alert_enabled ? "text-amber-500 hover:text-amber-700" : "text-slate-300 hover:text-slate-500"
@@ -404,7 +409,7 @@ export function FilterBar({
               <input
                 autoFocus
                 type="text"
-                placeholder="View name…"
+                placeholder={t.viewNamePlaceholder}
                 value={saveViewName}
                 onChange={(e) => setSaveViewName(e.target.value)}
                 onKeyDown={(e) => { if (e.key === "Enter") handleSaveView(); if (e.key === "Escape") setShowSaveInput(false); }}
@@ -416,7 +421,7 @@ export function FilterBar({
                 disabled={!saveViewName.trim()}
                 className="text-xs bg-blue-600 text-white px-2 py-1 rounded hover:bg-blue-700 disabled:opacity-50"
               >
-                Save
+                {t.save}
               </button>
               <button type="button" onClick={() => setShowSaveInput(false)} className="text-slate-400 hover:text-slate-600">
                 <X size={13} />
@@ -428,11 +433,11 @@ export function FilterBar({
               onClick={() => { setShowSaveInput(true); setShowViewsMenu(false); }}
               className="flex items-center gap-1 text-xs text-slate-500 hover:text-slate-700 px-2 py-1 rounded border border-slate-200 bg-white hover:bg-slate-50"
             >
-              <Bookmark size={13} /> Save view
+              <Bookmark size={13} /> {t.saveView}
             </button>
           )}
           <span className="text-xs text-slate-600 px-1">
-            {resultCount.toLocaleString()} result{resultCount !== 1 ? "s" : ""}
+            {(resultCount === 1 ? t.result : t.results).replace("{count}", resultCount.toLocaleString())}
           </span>
         </div>
       </div>
@@ -449,8 +454,8 @@ export function FilterBar({
               <div className="relative">
                 <select className={cn(selectCls)} value={filters.review_status ?? ""}
                   onChange={(e) => set("review_status", e.target.value)}>
-                  <option value="">All</option>
-                  <option value="_none">Pending (none)</option>
+                  <option value="">{t.all}</option>
+                  <option value="_none">{t.pendingNone}</option>
                   {REVIEW_STATUSES.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
                 </select>
                 <ChevronDown size={13} className="pointer-events-none absolute right-2 top-2 text-slate-400" />
@@ -461,8 +466,8 @@ export function FilterBar({
               <div className="relative">
                 <select className={cn(selectCls)} value={filters.contact_status ?? ""}
                   onChange={(e) => set("contact_status", e.target.value)}>
-                  <option value="">All</option>
-                  <option value="_none">Not sent (none)</option>
+                  <option value="">{t.all}</option>
+                  <option value="_none">{t.notSentNone}</option>
                   {CONTACT_STATUSES.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
                 </select>
                 <ChevronDown size={13} className="pointer-events-none absolute right-2 top-2 text-slate-400" />
@@ -480,7 +485,7 @@ export function FilterBar({
                 onChange={(v) => set("ai_category", v)}
                 placeholder={t.search.replace("{input}", t.aiclassification)}
                 options={categories}
-                extraOptions={[{ value: "_none", label: "None (unset)" }]}
+                extraOptions={[{ value: "_none", label: t.noneUnset }]}
                 variant="include"
               />
             </div>
@@ -492,7 +497,7 @@ export function FilterBar({
                 placeholder={t.search.replace("{input}", t.noga)}
                 options={nogaOptions}
                 formatValue={formatNogaValue}
-                extraOptions={[{ value: "_none", label: "None (unset)" }, { value: "_any", label: "Any (set)" }]}
+                extraOptions={[{ value: "_none", label: t.noneUnset }, { value: "_any", label: t.anySet }]}
                 variant="include"
               />
             </div>
@@ -506,25 +511,25 @@ export function FilterBar({
               />
             </div>
             <div>
-              <Label>Language</Label>
+              <Label>{t.language}</Label>
               <div className="relative">
                 <select
                   className={cn(selectCls)}
                   value={filters.purpose_language ?? ""}
                   onChange={(e) => set("purpose_language", e.target.value)}
                 >
-                  <option value="">All</option>
-                  <option value="de">🇩🇪 German</option>
-                  <option value="fr">🇫🇷 French</option>
-                  <option value="it">🇮🇹 Italian</option>
-                  <option value="en">🇬🇧 English</option>
-                  <option value="rm">Romansh</option>
+                  <option value="">{t.all}</option>
+                  <option value="de">🇩🇪 {t.langDe}</option>
+                  <option value="fr">🇫🇷 {t.langFr}</option>
+                  <option value="it">🇮🇹 {t.langIt}</option>
+                  <option value="en">🇬🇧 {t.langEn}</option>
+                  <option value="rm">{t.langRm}</option>
                 </select>
                 <ChevronDown size={13} className="pointer-events-none absolute right-2 top-2 text-slate-400" />
               </div>
             </div>
             <div>
-              <Label>Website</Label>
+              <Label>{t.website}</Label>
               <div className="relative">
                 <select
                   className={cn(selectCls)}
@@ -537,9 +542,9 @@ export function FilterBar({
                     })
                   }
                 >
-                  <option value="">Any</option>
-                  <option value="true">Has website</option>
-                  <option value="false">No website</option>
+                  <option value="">{t.any}</option>
+                  <option value="true">{t.hasWebsite}</option>
+                  <option value="false">{t.noWebsite}</option>
                 </select>
                 <ChevronDown size={13} className="pointer-events-none absolute right-2 top-2 text-slate-400" />
               </div>

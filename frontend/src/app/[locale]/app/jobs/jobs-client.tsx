@@ -54,16 +54,16 @@ function statusIcon(status: Job["status"]) {
   }
 }
 
-function statusBadge(status: Job["status"]) {
+function statusBadge(status: Job["status"], t: ReturnType<typeof useI18n>["dict"]["app"]["jobs"]) {
   const base = "inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium";
   switch (status) {
-    case "completed": return <span className={cn(base, "bg-emerald-50 text-emerald-700")}>{statusIcon(status)} completed</span>;
-    case "failed": return <span className={cn(base, "bg-red-50 text-red-700")}>{statusIcon(status)} failed</span>;
-    case "cancelled": return <span className={cn(base, "bg-slate-100 text-slate-500")}>{statusIcon(status)} cancelled</span>;
-    case "running": return <span className={cn(base, "bg-blue-50 text-blue-700")}>{statusIcon(status)} running</span>;
-    case "paused": return <span className={cn(base, "bg-amber-50 text-amber-700")}>{statusIcon(status)} paused</span>;
-    case "waiting_external": return <span className={cn(base, "bg-violet-50 text-violet-700")}>{statusIcon(status)} waiting for Anthropic</span>;
-    default: return <span className={cn(base, "bg-slate-100 text-slate-600")}>{statusIcon(status)} queued</span>;
+    case "completed": return <span className={cn(base, "bg-emerald-50 text-emerald-700")}>{statusIcon(status)} {t.statusCompleted}</span>;
+    case "failed": return <span className={cn(base, "bg-red-50 text-red-700")}>{statusIcon(status)} {t.statusFailed}</span>;
+    case "cancelled": return <span className={cn(base, "bg-slate-100 text-slate-500")}>{statusIcon(status)} {t.statusCancelled}</span>;
+    case "running": return <span className={cn(base, "bg-blue-50 text-blue-700")}>{statusIcon(status)} {t.statusRunning}</span>;
+    case "paused": return <span className={cn(base, "bg-amber-50 text-amber-700")}>{statusIcon(status)} {t.statusPaused}</span>;
+    case "waiting_external": return <span className={cn(base, "bg-violet-50 text-violet-700")}>{statusIcon(status)} {t.statusWaitingExternal}</span>;
+    default: return <span className={cn(base, "bg-slate-100 text-slate-600")}>{statusIcon(status)} {t.statusQueued}</span>;
   }
 }
 
@@ -78,6 +78,8 @@ function ProgressBar({ done, total }: { done: number | null; total: number | nul
 }
 
 function JobEvents({ jobId }: { jobId: number }) {
+  const { dict } = useI18n();
+  const t = dict.app.jobs;
   const { data: events = [] } = useSWR<JobEvent[]>(`events-${jobId}`, () => fetchJobEvents(jobId), { refreshInterval: 3000 });
   const [verbose, setVerbose] = useState(false);
   const visible = verbose ? events : events.filter(e => e.level !== "debug");
@@ -86,10 +88,10 @@ function JobEvents({ jobId }: { jobId: number }) {
       <label className="flex items-center gap-1.5 text-xs text-slate-400 mb-1 cursor-pointer select-none w-fit">
         <input type="checkbox" checked={verbose} onChange={e => setVerbose(e.target.checked)}
           className="rounded border-slate-300 text-blue-600 focus:ring-blue-300" />
-        Verbose
+        {t.verbose}
       </label>
       <div className="max-h-48 overflow-y-auto bg-slate-950 rounded-lg p-3 font-mono text-xs space-y-0.5">
-        {visible.length === 0 && <p className="text-slate-500">No events</p>}
+        {visible.length === 0 && <p className="text-slate-500">{t.noEvents}</p>}
         {[...visible].reverse().map(e => (
           <div key={e.id} className={cn(
             "leading-relaxed",
@@ -109,6 +111,8 @@ function JobEvents({ jobId }: { jobId: number }) {
 }
 
 function JobRow({ job, onAction }: { job: Job; onAction: (updated?: Job[]) => void }) {
+  const { dict } = useI18n();
+  const t = dict.app.jobs;
   const [expanded, setExpanded] = useState(false);
   const active = job.status === "running" || job.status === "queued" || job.status === "paused" || job.status === "waiting_external";
   const failed = job.status === "failed" || job.status === "cancelled";
@@ -147,12 +151,12 @@ function JobRow({ job, onAction }: { job: Job; onAction: (updated?: Job[]) => vo
       <div className="flex items-start gap-3">
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
-            {statusBadge(job.status)}
+            {statusBadge(job.status, t)}
             <span className="text-xs text-slate-400 font-mono">#{job.id}</span>
             <span className="text-xs text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded">{job.job_type}</span>
             {job.restart_count > 0 && (
-              <span className="text-xs text-orange-600 bg-orange-50 px-1.5 py-0.5 rounded" title="Number of crash-restarts">
-                {job.restart_count}× restarted
+              <span className="text-xs text-orange-600 bg-orange-50 px-1.5 py-0.5 rounded" title={t.restartTitle}>
+                {t.restartCount.replace("{count}", String(job.restart_count))}
               </span>
             )}
           </div>
@@ -167,17 +171,17 @@ function JobRow({ job, onAction }: { job: Job; onAction: (updated?: Job[]) => vo
         </div>
         <div className="flex items-center gap-1.5 shrink-0">
           {job.status === "running" && (
-            <button onClick={doPause} className="p-1.5 rounded-lg hover:bg-amber-50 text-amber-500 hover:text-amber-600 transition-colors" title="Pause">
+            <button onClick={doPause} className="p-1.5 rounded-lg hover:bg-amber-50 text-amber-500 hover:text-amber-600 transition-colors" title={t.pause}>
               <PauseCircle size={16} />
             </button>
           )}
           {job.status === "paused" && (
-            <button onClick={doResume} className="p-1.5 rounded-lg hover:bg-blue-50 text-blue-500 hover:text-blue-600 transition-colors" title="Resume">
+            <button onClick={doResume} className="p-1.5 rounded-lg hover:bg-blue-50 text-blue-500 hover:text-blue-600 transition-colors" title={t.resume}>
               <Play size={16} />
             </button>
           )}
           {active && (
-            <button onClick={doCancel} className="p-1.5 rounded-lg hover:bg-red-50 text-red-400 hover:text-red-500 transition-colors" title="Cancel">
+            <button onClick={doCancel} className="p-1.5 rounded-lg hover:bg-red-50 text-red-400 hover:text-red-500 transition-colors" title={t.cancel}>
               <Square size={16} />
             </button>
           )}
@@ -186,7 +190,7 @@ function JobRow({ job, onAction }: { job: Job; onAction: (updated?: Job[]) => vo
               <button
                 onClick={doRerunNew}
                 className="p-1.5 rounded-lg hover:bg-slate-100 text-slate-500 hover:text-slate-700 transition-colors"
-                title="Rerun from the beginning (same settings)"
+                title={t.rerunTitle}
               >
                 <RotateCcw size={16} />
               </button>
@@ -194,7 +198,7 @@ function JobRow({ job, onAction }: { job: Job; onAction: (updated?: Job[]) => vo
                 <button
                   onClick={doRerunContinue}
                   className="p-1.5 rounded-lg hover:bg-blue-50 text-blue-500 hover:text-blue-600 transition-colors"
-                  title={`Continue from where it stopped (${job.progress_done} done)`}
+                  title={t.continueTitle.replace("{count}", String(job.progress_done))}
                 >
                   <FastForward size={16} />
                 </button>
@@ -207,13 +211,13 @@ function JobRow({ job, onAction }: { job: Job; onAction: (updated?: Job[]) => vo
         </div>
       </div>
       <div className="mt-2 flex gap-3 text-xs text-slate-400">
-        <span>Created {new Date(job.created_at).toLocaleString("de-CH")}</span>
-        {job.started_at && <span>Started {new Date(job.started_at).toLocaleString("de-CH")}</span>}
-        {job.finished_at && <span>Finished {new Date(job.finished_at).toLocaleString("de-CH")}</span>}
+        <span>{t.created.replace("{date}", new Date(job.created_at).toLocaleString("de-CH"))}</span>
+        {job.started_at && <span>{t.started.replace("{date}", new Date(job.started_at).toLocaleString("de-CH"))}</span>}
+        {job.finished_at && <span>{t.finished.replace("{date}", new Date(job.finished_at).toLocaleString("de-CH"))}</span>}
       </div>
       {job.error && (
         <details className="mt-2">
-          <summary className="text-xs text-red-500 cursor-pointer">Show error</summary>
+          <summary className="text-xs text-red-500 cursor-pointer">{t.showError}</summary>
           <pre className="mt-1 text-xs text-red-400 bg-red-50 rounded-lg p-2 overflow-auto max-h-32 whitespace-pre-wrap">{job.error}</pre>
         </details>
       )}
@@ -224,6 +228,7 @@ function JobRow({ job, onAction }: { job: Job; onAction: (updated?: Job[]) => vo
 
 export function JobsClient() {
   const { dict } = useI18n();
+  const t = dict.app.jobs;
   const { jobs, setJobs, isLoading, reload: reloadJobs } = useJobsSSE();
   const { data: exportStatus, mutate: reloadExportStatus, isLoading: loadingExportStatus } = useSWR(
     "csv-export-status",
@@ -244,18 +249,18 @@ export function JobsClient() {
     <div className="p-6 max-w-4xl mx-auto space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-xl font-semibold text-slate-900">{dict.app.jobs.title}</h1>
-          <p className="text-sm text-slate-500 mt-0.5">{active.length} active · {finished.length} finished</p>
+          <h1 className="text-xl font-semibold text-slate-900">{t.title}</h1>
+          <p className="text-sm text-slate-500 mt-0.5">{t.activeCount.replace("{active}", String(active.length)).replace("{finished}", String(finished.length))}</p>
         </div>
         <button
           onClick={() => reloadJobs()}
           className="flex items-center gap-1.5 text-sm text-slate-500 hover:text-slate-700 px-3 py-1.5 rounded-lg border border-slate-200 hover:bg-slate-50 transition-colors"
         >
-          <RefreshCw size={14} /> Refresh
+          <RefreshCw size={14} /> {t.refresh}
         </button>
       </div>
 
-      {isLoading && <p className="text-slate-400 text-sm">Loading…</p>}
+      {isLoading && <p className="text-slate-400 text-sm">{t.loading}</p>}
 
       
 
@@ -263,10 +268,10 @@ export function JobsClient() {
         <div className="flex items-start justify-between gap-4">
           <div>
             <p className="text-sm font-medium text-slate-800 flex items-center gap-1.5">
-              <FileText size={14} className="text-slate-400" /> CSV exports
+              <FileText size={14} className="text-slate-400" /> {t.csvExports}
             </p>
             <p className="text-xs text-slate-500 mt-0.5">
-              Queue exports from Search/Explorer/Dashboard and download them here.
+              {t.csvExportsHint}
             </p>
           </div>
           <button
@@ -274,26 +279,26 @@ export function JobsClient() {
             disabled={loadingExportStatus}
             className="text-xs text-slate-400 hover:text-slate-600 transition-colors shrink-0"
           >
-            {loadingExportStatus ? <Loader2 size={12} className="animate-spin" /> : "Refresh"}
+            {loadingExportStatus ? <Loader2 size={12} className="animate-spin" /> : t.refresh}
           </button>
         </div>
 
         {!csvJob && (
-          <p className="text-xs text-slate-400">No export queued yet.</p>
+          <p className="text-xs text-slate-400">{t.noExportQueued}</p>
         )}
 
         {csvJob && (
           <div className="border-t border-slate-100 pt-3 space-y-2">
             <div className="flex items-center gap-2 text-xs flex-wrap">
-              {statusBadge(csvJob.status)}
+              {statusBadge(csvJob.status, t)}
               {csvJob.progress_done != null && csvJob.progress_total != null && csvJob.status === "running" && (
-                <span className="text-slate-500">{csvJob.progress_done.toLocaleString()} / {csvJob.progress_total.toLocaleString()} rows</span>
+                <span className="text-slate-500">{csvJob.progress_done.toLocaleString()} / {csvJob.progress_total.toLocaleString()} {t.rows}</span>
               )}
               {exportStatus?.row_count != null && csvJob.status === "completed" && (
-                <span className="text-slate-500">{exportStatus.row_count.toLocaleString()} rows</span>
+                <span className="text-slate-500">{exportStatus.row_count.toLocaleString()} {t.rows}</span>
               )}
               {exportStatus?.expires_at && (
-                <span className="text-slate-400">expires {formatExpiry(exportStatus.expires_at)}</span>
+                <span className="text-slate-400">{t.expires.replace("{date}", formatExpiry(exportStatus.expires_at))}</span>
               )}
             </div>
 
@@ -305,16 +310,16 @@ export function JobsClient() {
                 download="helvex_export.csv"
                 className="inline-flex items-center gap-1.5 text-xs bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded-lg font-medium transition-colors"
               >
-                <Download size={12} /> Download CSV
+                <Download size={12} /> {t.downloadCsv}
               </a>
             )}
             {exportStatus?.capped && exportStatus.upgrade_to && (
               <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
-                Export capped at {exportStatus.tier_limit?.toLocaleString()} rows
-                {exportStatus.total_matching != null && ` — ${exportStatus.total_matching.toLocaleString()} matched your filters`}.{" "}
+                {t.exportCapped.replace("{limit}", String(exportStatus.tier_limit?.toLocaleString()))}
+                {exportStatus.total_matching != null && t.matchedFilters.replace("{count}", exportStatus.total_matching.toLocaleString())}.{" "}
                 <Link href="/app/billing" className="underline font-medium capitalize">
-                  Upgrade to {exportStatus.upgrade_to}
-                </Link>{" "}for more.
+                  {t.upgradeTo.replace("{tier}", exportStatus.upgrade_to)}
+                </Link>{t.forMore}
               </div>
             )}
 
@@ -327,7 +332,7 @@ export function JobsClient() {
 
       {active.length > 0 && (
         <section>
-          <h2 className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-3">Active</h2>
+          <h2 className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-3">{t.active}</h2>
           <div className="space-y-3">
             {active.map(j => <JobRow key={j.id} job={j} onAction={(updated) => { if (updated) setJobs(updated); }} />)}
           </div>
@@ -336,7 +341,7 @@ export function JobsClient() {
 
       {finished.length > 0 && (
         <section>
-          <h2 className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-3">History</h2>
+          <h2 className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-3">{t.history}</h2>
           <div className="space-y-2">
             {finished.map(j => <JobRow key={j.id} job={j} onAction={(updated) => { if (updated) setJobs(updated); }} />)}
           </div>
@@ -346,7 +351,7 @@ export function JobsClient() {
       {!isLoading && jobs.length === 0 && (
         <div className="text-center py-16 text-slate-400">
           <Clock size={32} className="mx-auto mb-3 opacity-40" />
-          <p>No jobs yet</p>
+          <p>{t.noJobsYet}</p>
         </div>
       )}
     </div>

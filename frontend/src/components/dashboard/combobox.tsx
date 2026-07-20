@@ -2,6 +2,7 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import { ChevronDown, X } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useI18n } from "@/i18n/context";
 
 interface ComboboxProps {
   options: [string, number][];   // [value, count]
@@ -14,7 +15,10 @@ interface ComboboxProps {
 const inputCls =
   "w-full rounded border border-slate-200 bg-white px-2 py-1.5 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-transparent";
 
-export function Combobox({ options, value, onChange, placeholder = "Type to search…", extraOptions = [] }: ComboboxProps) {
+export function Combobox({ options, value, onChange, placeholder, extraOptions = [] }: ComboboxProps) {
+  const { dict } = useI18n();
+  const t = dict.app.combobox;
+  const effectivePlaceholder = placeholder ?? t.typeToSearch;
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const containerRef = useRef<HTMLDivElement>(null);
@@ -57,7 +61,7 @@ export function Combobox({ options, value, onChange, placeholder = "Type to sear
           ref={inputRef}
           type="text"
           className={cn(inputCls, "pr-12")}
-          placeholder={value ? selectedLabel : placeholder}
+          placeholder={value ? selectedLabel : effectivePlaceholder}
           value={open ? query : (value ? selectedLabel : "")}
           onFocus={() => setOpen(true)}
           onChange={(e) => { setOpen(true); setQuery(e.target.value); }}
@@ -68,7 +72,7 @@ export function Combobox({ options, value, onChange, placeholder = "Type to sear
               type="button"
               onClick={(e) => { e.stopPropagation(); select(undefined); }}
               className="p-0.5 text-slate-400 hover:text-slate-700"
-              aria-label="Clear"
+              aria-label={t.clear}
             >
               <X size={12} />
             </button>
@@ -77,7 +81,7 @@ export function Combobox({ options, value, onChange, placeholder = "Type to sear
             type="button"
             onClick={() => { setOpen((o) => !o); inputRef.current?.focus(); }}
             className="p-0.5 text-slate-400 hover:text-slate-600"
-            aria-label="Toggle"
+            aria-label={t.toggle}
           >
             <ChevronDown size={13} className={cn("transition-transform", open && "rotate-180")} />
           </button>
@@ -91,7 +95,7 @@ export function Combobox({ options, value, onChange, placeholder = "Type to sear
             onClick={() => select(undefined)}
             className="w-full text-left px-2 py-1.5 text-slate-400 hover:bg-slate-50"
           >
-            — All —
+            {t.allOption}
           </button>
           {extraOptions.map((o) => (
             <button
@@ -107,7 +111,7 @@ export function Combobox({ options, value, onChange, placeholder = "Type to sear
             </button>
           ))}
           {filtered.length === 0 && (
-            <div className="px-2 py-1.5 text-slate-400 italic">No matches</div>
+            <div className="px-2 py-1.5 text-slate-400 italic">{t.noMatches}</div>
           )}
           {filtered.map(([v, cnt]) => (
             <button

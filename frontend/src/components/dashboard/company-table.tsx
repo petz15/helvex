@@ -10,6 +10,7 @@ import { cn, reviewBadgeClass, proposalBadgeClass, scoreColor, formatClusterLabe
 import { ScoreBar } from "@/components/ui/score-bar";
 import { Badge } from "@/components/ui/badge";
 import type { Company, CompanyFilters } from "@/lib/types";
+import { useI18n } from "@/i18n/context";
 
 const ch = createColumnHelper<Company>();
 
@@ -67,12 +68,14 @@ function scoreTextClass(score: number | null): string {
 }
 
 function ProTag() {
+  const { dict } = useI18n();
+  const t = dict.app.companyTable;
   return (
     <span
       className="inline-flex items-center text-[9px] uppercase tracking-wide font-semibold text-amber-700 bg-amber-50 border border-amber-200 rounded px-1 py-px"
-      title="AI feature — uses credits per company"
+      title={t.proTitle}
     >
-      Pro
+      {t.proTag}
     </span>
   );
 }
@@ -89,6 +92,8 @@ interface FlexBreakdown {
 }
 
 function FlexScoreCell({ score, breakdownJson }: { score: number | null; breakdownJson: string | null }) {
+  const { dict } = useI18n();
+  const t = dict.app.companyTable;
   let bd: FlexBreakdown | null = null;
   try { if (breakdownJson) bd = JSON.parse(breakdownJson); } catch { /* ignore */ }
 
@@ -99,16 +104,16 @@ function FlexScoreCell({ score, breakdownJson }: { score: number | null; breakdo
         <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1.5 z-50 hidden group-hover:block pointer-events-none">
           <div className="bg-slate-800 text-white text-xs rounded-lg px-3 py-2 shadow-xl w-44 space-y-1">
             {bd.cancelled ? (
-              <p className="text-slate-300 italic">Cancelled / dissolved</p>
+              <p className="text-slate-300 italic">{t.cancelledDissolved}</p>
             ) : (
               <>
-                <p className="font-semibold text-slate-200 mb-1.5">Flex breakdown</p>
+                <p className="font-semibold text-slate-200 mb-1.5">{t.flexBreakdown}</p>
                 {[
-                  ["Clusters", bd.clusters],
-                  ["Keywords", bd.keywords],
-                  ["Distance", bd.distance],
-                  ["Legal form", bd.legal_form],
-                  ["Data quality", bd.data_quality],
+                  [t.clusters, bd.clusters],
+                  [t.keywords, bd.keywords],
+                  [t.distance, bd.distance],
+                  [t.legalForm, bd.legal_form],
+                  [t.dataQuality, bd.data_quality],
                 ].map(([label, val]) => (
                   <div key={label as string} className="flex justify-between gap-2">
                     <span className="text-slate-400">{label}</span>
@@ -118,7 +123,7 @@ function FlexScoreCell({ score, breakdownJson }: { score: number | null; breakdo
                   </div>
                 ))}
                 <div className="border-t border-slate-600 pt-1 flex justify-between gap-2">
-                  <span className="text-slate-300 font-medium">Score</span>
+                  <span className="text-slate-300 font-medium">{t.score}</span>
                   <span className="tabular-nums font-bold text-white">{bd.final_score}</span>
                 </div>
               </>
@@ -132,23 +137,27 @@ function FlexScoreCell({ score, breakdownJson }: { score: number | null; breakdo
 }
 
 /** Compact badge for the company-level website verdict. */
-const WEBSITE_STATUS_META: Record<string, { label: string; cls: string }> = {
-  verified:       { label: "Verified",   cls: "bg-green-50 text-green-700 border-green-200" },
-  confirmed:      { label: "Confirmed",  cls: "bg-emerald-50 text-emerald-700 border-emerald-200" },
-  likely:         { label: "Likely",     cls: "bg-amber-50 text-amber-700 border-amber-200" },
-  social_only:    { label: "Social only", cls: "bg-sky-50 text-sky-700 border-sky-200" },
-  directory_only: { label: "Directory",  cls: "bg-slate-100 text-slate-500 border-slate-200" },
-  none:           { label: "No website", cls: "bg-red-50 text-red-600 border-red-200" },
+const WEBSITE_STATUS_META: Record<string, { labelKey: string; cls: string }> = {
+  verified:       { labelKey: "statusVerified",   cls: "bg-green-50 text-green-700 border-green-200" },
+  confirmed:      { labelKey: "statusConfirmed",  cls: "bg-emerald-50 text-emerald-700 border-emerald-200" },
+  likely:         { labelKey: "statusLikely",     cls: "bg-amber-50 text-amber-700 border-amber-200" },
+  social_only:    { labelKey: "statusSocialOnly", cls: "bg-sky-50 text-sky-700 border-sky-200" },
+  directory_only: { labelKey: "statusDirectory",  cls: "bg-slate-100 text-slate-500 border-slate-200" },
+  none:           { labelKey: "statusNoWebsite",  cls: "bg-red-50 text-red-600 border-red-200" },
 };
 
 function WebsiteStatusBadge({ status, count }: { status: string | null; count: number | null }) {
+  const { dict } = useI18n();
+  const t = dict.app.companyTable;
   if (!status) return <span className="text-slate-300 text-xs">—</span>;
-  const meta = WEBSITE_STATUS_META[status] ?? { label: status, cls: "bg-slate-100 text-slate-500 border-slate-200" };
+  const meta = WEBSITE_STATUS_META[status];
+  const label = meta ? t[meta.labelKey as keyof typeof t] : status;
+  const cls = meta?.cls ?? "bg-slate-100 text-slate-500 border-slate-200";
   return (
     <span className="inline-flex items-center gap-1">
-      <span className={`text-[10px] px-1.5 py-0.5 rounded-full border ${meta.cls}`}>{meta.label}</span>
+      <span className={`text-[10px] px-1.5 py-0.5 rounded-full border ${cls}`}>{label}</span>
       {(count ?? 0) >= 2 && (
-        <span title={`${count} websites detected`} className="text-[10px] px-1 py-0.5 rounded-full border bg-indigo-50 text-indigo-700 border-indigo-200">
+        <span title={t.websitesDetected.replace("{count}", String(count))} className="text-[10px] px-1 py-0.5 rounded-full border bg-indigo-50 text-indigo-700 border-indigo-200">
           ×{count}
         </span>
       )}
@@ -156,7 +165,21 @@ function WebsiteStatusBadge({ status, count }: { status: string | null; count: n
   );
 }
 
+type CompanyTableDict = ReturnType<typeof useI18n>["dict"]["app"]["companyTable"];
+
+const COLUMN_LABEL_MAP: Record<string, (t: CompanyTableDict) => string> = {
+  name: (t) => t.colCompany, canton: (t) => t.colCanton, status: (t) => t.colStatus,
+  tfidf_cluster: (t) => t.colCluster, noga: (t) => t.colNoga, website: (t) => t.colWebsite,
+  website_status: (t) => t.colSiteStatus, web_score: (t) => t.colWeb, flex_score: (t) => t.colFlex,
+  ai_score: (t) => t.colAi, ai_category: (t) => t.colCategory, combined_score: (t) => t.colCombined,
+  review_status: (t) => t.colReview, contact_status: (t) => t.colContact,
+  website_checked_at: (t) => t.colLastGoogle, flex_scored_at: (t) => t.colLastFlex,
+  ai_scored_at: (t) => t.colLastAi, updated_at: (t) => t.colUpdated,
+};
+
 export function CompanyTable({ companies, selectedId, onSelect, filters, onSort, isLoading, selectedIds, onToggleSelect, onSelectAll, onUpdateReview }: CompanyTableProps) {
+  const { dict } = useI18n();
+  const t = dict.app.companyTable;
   const sort = filters.sort ?? "-updated";
 
   const [columnVisibility, setColumnVisibility] = useState<VisibilityState>({
@@ -178,7 +201,7 @@ export function CompanyTable({ companies, selectedId, onSelect, filters, onSort,
   const columns = useMemo<any[]>(
     () => [
       ch.accessor("name", {
-        header: "Company",
+        header: t.colCompany,
         cell: (info) => (
           <div
             className={cn(
@@ -198,20 +221,20 @@ export function CompanyTable({ companies, selectedId, onSelect, filters, onSort,
         ),
       }),
       ch.accessor("canton", {
-        header: "Canton",
+        header: t.colCanton,
         cell: (info) => <span className="text-slate-600 text-xs">{info.getValue() as string ?? "—"}</span>,
       }),
       ch.accessor("status", {
-        header: "Status",
+        header: t.colStatus,
         cell: (info) => <span className="text-slate-700 text-xs">{info.getValue() as string ?? "—"}</span>,
       }),
       ch.accessor("tfidf_cluster", {
-        header: "Cluster",
+        header: t.colCluster,
         cell: (info) => <span className="text-slate-600 text-xs truncate max-w-[140px] block" title={(info.getValue() as string) ?? undefined}>{formatClusterLabel((info.getValue() as string)?.split("|")[0] ?? "") || "—"}</span>,
       }),
       ch.accessor("noga_label", {
         id: "noga",
-        header: "NOGA",
+        header: t.colNoga,
         cell: (info) => {
           const row = info.row.original;
           const codes = (row.noga_path ?? "").split("|").filter(Boolean);
@@ -235,7 +258,7 @@ export function CompanyTable({ companies, selectedId, onSelect, filters, onSort,
       }),
       ch.accessor("website_url", {
         id: "website",
-        header: "Website",
+        header: t.colWebsite,
         cell: (info) => {
           const url = info.getValue() as string | null;
           return url
@@ -246,7 +269,7 @@ export function CompanyTable({ companies, selectedId, onSelect, filters, onSort,
       }),
       ch.accessor("website_status", {
         id: "website_status",
-        header: "Site status",
+        header: t.colSiteStatus,
         enableSorting: false,
         cell: (info) => (
           <WebsiteStatusBadge
@@ -256,11 +279,11 @@ export function CompanyTable({ companies, selectedId, onSelect, filters, onSort,
         ),
       }),
       ch.accessor("web_score", {
-        header: "Web",
+        header: t.colWeb,
         cell: (info) => <ScoreBar score={info.getValue() as number | null} />,
       }),
       ch.accessor("flex_score", {
-        header: "Flex",
+        header: t.colFlex,
         cell: (info) => (
           <FlexScoreCell
             score={info.getValue() as number | null}
@@ -269,15 +292,15 @@ export function CompanyTable({ companies, selectedId, onSelect, filters, onSort,
         ),
       }),
       ch.accessor("ai_score", {
-        header: () => <span className="inline-flex items-center gap-1">AI <ProTag /></span>,
+        header: () => <span className="inline-flex items-center gap-1">{t.colAi} <ProTag /></span>,
         cell: (info) => <ScoreBar score={info.getValue() as number | null} />,
       }),
       ch.accessor("ai_category", {
-        header: () => <span className="inline-flex items-center gap-1">Category <ProTag /></span>,
+        header: () => <span className="inline-flex items-center gap-1">{t.colCategory} <ProTag /></span>,
         cell: (info) => <span className="text-slate-600 text-xs truncate max-w-[120px] block">{info.getValue() as string ?? "—"}</span>,
       }),
       ch.accessor("combined_score", {
-        header: "Combined",
+        header: t.colCombined,
         cell: (info) => {
           const v = info.getValue() as number | null;
           const row = info.row.original;
@@ -293,10 +316,10 @@ export function CompanyTable({ companies, selectedId, onSelect, filters, onSort,
               {hasComponents && (
                 <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1.5 z-50 hidden group-hover:block pointer-events-none">
                   <div className="bg-slate-800 text-white text-xs rounded-lg px-3 py-2 shadow-xl w-40 space-y-1">
-                    <p className="font-semibold text-slate-200 mb-1.5">Score breakdown</p>
+                    <p className="font-semibold text-slate-200 mb-1.5">{t.scoreBreakdown}</p>
                     {[
-                      ["AI", row.ai_score, "70%"],
-                      ["Web", row.web_score, "20%"],
+                      [t.colAi, row.ai_score, "70%"],
+                      [t.colWeb, row.web_score, "20%"],
                       ["FLEX", row.flex_score, "10%"],
                     ].map(([label, val]) => (
                       <div key={label as string} className="flex justify-between gap-2">
@@ -307,7 +330,7 @@ export function CompanyTable({ companies, selectedId, onSelect, filters, onSort,
                       </div>
                     ))}
                     <div className="border-t border-slate-600 pt-1 flex justify-between gap-2">
-                      <span className="text-slate-300 font-medium">Combined</span>
+                      <span className="text-slate-300 font-medium">{t.combined}</span>
                       <span className="tabular-nums font-bold text-white">{v == null ? "—" : Math.round(v)}</span>
                     </div>
                     <div className="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-slate-800" />
@@ -319,15 +342,15 @@ export function CompanyTable({ companies, selectedId, onSelect, filters, onSort,
         },
       }),
       ch.accessor("review_status", {
-        header: "Review",
+        header: t.colReview,
         cell: (info) => (
           <Badge className={cn("text-xs", reviewBadgeClass(info.getValue() as string | null))}>
-            {(info.getValue() as string)?.replace(/_/g, " ") ?? "pending"}
+            {(info.getValue() as string)?.replace(/_/g, " ") ?? t.pending}
           </Badge>
         ),
       }),
       ch.accessor("contact_status", {
-        header: "Contact",
+        header: t.colContact,
         cell: (info) => {
           const v = info.getValue() as string | null;
           if (!v || v === "not_sent") return <span className="text-slate-300 text-xs">—</span>;
@@ -335,34 +358,34 @@ export function CompanyTable({ companies, selectedId, onSelect, filters, onSort,
         },
       }),
       ch.accessor("website_checked_at", {
-        header: "Last Google",
+        header: t.colLastGoogle,
         cell: (info) => {
           const v = info.getValue() as string | null;
           return <span className="text-slate-600 text-xs">{v ? new Date(v).toLocaleDateString("de-CH") : "—"}</span>;
         },
       }),
       ch.accessor("flex_scored_at", {
-        header: "Last Flex",
+        header: t.colLastFlex,
         cell: (info) => {
           const v = info.getValue() as string | null;
           return <span className="text-slate-600 text-xs">{v ? new Date(v).toLocaleDateString("de-CH") : "—"}</span>;
         },
       }),
       ch.accessor("ai_scored_at", {
-        header: "Last AI",
+        header: t.colLastAi,
         cell: (info) => {
           const v = info.getValue() as string | null;
           return <span className="text-slate-600 text-xs">{v ? new Date(v).toLocaleDateString("de-CH") : "—"}</span>;
         },
       }),
       ch.accessor("updated_at", {
-        header: "Updated",
+        header: t.colUpdated,
         cell: (info) => (
           <span className="text-slate-600 text-xs">{new Date(info.getValue() as string).toLocaleDateString("de-CH")}</span>
         ),
       }),
     ],
-    []
+    [t]
   );
 
   const table = useReactTable({
@@ -390,7 +413,7 @@ export function CompanyTable({ companies, selectedId, onSelect, filters, onSort,
             onClick={() => setShowColPicker((v) => !v)}
             className="flex items-center gap-1.5 text-xs text-slate-500 hover:text-slate-700 px-2 py-1 rounded border border-slate-200 hover:bg-slate-50"
           >
-            <Settings2 size={13} /> Columns
+            <Settings2 size={13} /> {t.columns}
           </button>
           {showColPicker && (
             <div className="absolute right-0 top-full mt-1 z-50 bg-white border border-slate-200 rounded-lg shadow-lg p-3 w-48 grid grid-cols-1 gap-1">
@@ -402,7 +425,7 @@ export function CompanyTable({ companies, selectedId, onSelect, filters, onSort,
                     onChange={col.getToggleVisibilityHandler()}
                     className="rounded border-slate-300 text-blue-600"
                   />
-                  {col.id.replace(/_/g, " ")}
+                  {COLUMN_LABEL_MAP[col.id]?.(t) ?? col.id.replace(/_/g, " ")}
                 </label>
               ))}
             </div>
@@ -451,11 +474,11 @@ export function CompanyTable({ companies, selectedId, onSelect, filters, onSort,
           <tbody>
             {isLoading ? (
               <tr>
-                <td colSpan={columns.length} className="text-center py-12 text-slate-500 text-sm">Loading…</td>
+                <td colSpan={columns.length} className="text-center py-12 text-slate-500 text-sm">{t.loading}</td>
               </tr>
             ) : companies.length === 0 ? (
               <tr>
-                <td colSpan={columns.length} className="text-center py-12 text-slate-500 text-sm">No companies found</td>
+                <td colSpan={columns.length} className="text-center py-12 text-slate-500 text-sm">{t.noCompaniesFound}</td>
               </tr>
             ) : (
               table.getRowModel().rows.map((row) => (
@@ -491,7 +514,7 @@ export function CompanyTable({ companies, selectedId, onSelect, filters, onSort,
                     <td className="px-2 py-2 align-middle w-24" onClick={(e) => e.stopPropagation()}>
                       <div className="invisible group-hover:visible flex items-center gap-0.5">
                         <button
-                          title="Mark interesting"
+                          title={t.markInteresting}
                           onClick={() => onUpdateReview(row.original.id, row.original.review_status === "interesting" ? null : "interesting")}
                           className={cn(
                             "p-1 rounded transition-colors",
@@ -503,14 +526,14 @@ export function CompanyTable({ companies, selectedId, onSelect, filters, onSort,
                           <ThumbsUp size={12} />
                         </button>
                         <button
-                          title="Skip (clear review)"
+                          title={t.skipClearReview}
                           onClick={() => onUpdateReview(row.original.id, null)}
                           className="p-1 rounded text-slate-300 hover:text-slate-600 hover:bg-slate-100 transition-colors"
                         >
                           <Minus size={12} />
                         </button>
                         <button
-                          title="Reject"
+                          title={t.reject}
                           onClick={() => onUpdateReview(row.original.id, row.original.review_status === "rejected" ? null : "rejected")}
                           className={cn(
                             "p-1 rounded transition-colors",

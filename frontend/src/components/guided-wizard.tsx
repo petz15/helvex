@@ -9,6 +9,9 @@ import { cn } from "@/lib/utils";
 import { fetchCompanies } from "@/lib/api";
 import type { NogaNode } from "@/lib/api";
 import type { CompanyFilters } from "@/lib/types";
+import { useI18n } from "@/i18n/context";
+
+type WizardDict = ReturnType<typeof useI18n>["dict"]["app"]["guidedWizard"];
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -46,64 +49,64 @@ export interface GuidedWizardProps {
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
-const POPULAR_INDUSTRIES = [
-  { label: "Restaurants & food", code: "56" },
-  { label: "IT & Software", code: "62" },
-  { label: "Construction", code: "41" },
-  { label: "Healthcare", code: "86" },
-  { label: "Retail trade", code: "47" },
-  { label: "Consulting", code: "702" },
-  { label: "Real estate", code: "68" },
-  { label: "Manufacturing", code: "10" },
-  { label: "Finance & insurance", code: "64" },
+const POPULAR_INDUSTRIES: Array<{ key: keyof WizardDict; code: string }> = [
+  { key: "industryRestaurants", code: "56" },
+  { key: "industryIt", code: "62" },
+  { key: "industryConstruction", code: "41" },
+  { key: "industryHealthcare", code: "86" },
+  { key: "industryRetail", code: "47" },
+  { key: "industryConsulting", code: "702" },
+  { key: "industryRealEstate", code: "68" },
+  { key: "industryManufacturing", code: "10" },
+  { key: "industryFinance", code: "64" },
 ];
 
 const LEGAL_FORMS = ["AG", "GmbH", "Einzelfirma", "SA", "Sàrl"];
 
-const SIZE_OPTIONS: Array<{ label: string; value: SizeBucket }> = [
-  { label: "Any", value: "" },
-  { label: "Small 1–9", value: "small" },
-  { label: "Medium 10–249", value: "medium" },
-  { label: "Large 250+", value: "large" },
+const SIZE_OPTIONS: Array<{ key: keyof WizardDict; value: SizeBucket }> = [
+  { key: "sizeAny", value: "" },
+  { key: "sizeSmall", value: "small" },
+  { key: "sizeMedium", value: "medium" },
+  { key: "sizeLarge", value: "large" },
 ];
 
-const ROLE_CATEGORIES = [
-  { label: "Director", value: "director" },
-  { label: "Officer", value: "officer" },
+const ROLE_CATEGORIES: Array<{ key: keyof WizardDict; value: string }> = [
+  { key: "roleDirector", value: "director" },
+  { key: "roleOfficer", value: "officer" },
 ];
 
-const MIN_COMPANIES_OPTIONS = [
-  { label: "Any", value: 0 },
-  { label: "1+", value: 1 },
-  { label: "3+", value: 3 },
-  { label: "5+", value: 5 },
+const MIN_COMPANIES_OPTIONS: Array<{ key: keyof WizardDict; value: number }> = [
+  { key: "minAny", value: 0 },
+  { key: "min1", value: 1 },
+  { key: "min3", value: 3 },
+  { key: "min5", value: 5 },
 ];
 
-function stepLabels(scope: Scope): string[] {
+function stepLabels(scope: Scope, t: WizardDict): string[] {
   return scope === "people"
-    ? ["WHAT", "WHERE", "ROLE", "REFINE", "REVIEW"]
-    : ["WHAT", "WHERE", "INDUSTRY", "REFINE", "REVIEW"];
+    ? [t.stepWhat, t.stepWhere, t.stepRole, t.stepRefine, t.stepReview]
+    : [t.stepWhat, t.stepWhere, t.stepIndustry, t.stepRefine, t.stepReview];
 }
-function stepQuestions(scope: Scope): string[] {
+function stepQuestions(scope: Scope, t: WizardDict): string[] {
   return scope === "people"
-    ? ["What are you looking for?", "Where in Switzerland?", "Role & involvement", "Refine your search", "Your search summary"]
-    : ["What are you looking for?", "Where in Switzerland?", "Which industry?", "Refine your search", "Your search summary"];
+    ? [t.qWhat, t.qWhere, t.qRole, t.qRefine, t.qReview]
+    : [t.qWhat, t.qWhere, t.qIndustry, t.qRefine, t.qReview];
 }
-function stepSubs(scope: Scope): string[] {
+function stepSubs(scope: Scope, t: WizardDict): string[] {
   return scope === "people"
     ? [
-        "Choose the type of result you want to find.",
-        "Select a canton or keep all of Switzerland.",
-        "Filter by role and how many companies they've been linked to.",
-        "Optional — narrow by legal form or company size.",
-        "These become editable filters in the People view.",
+        t.subWhat,
+        t.subWhere,
+        t.subRolePeople,
+        t.subRefine,
+        t.subReviewPeople,
       ]
     : [
-        "Choose the type of result you want to find.",
-        "Select a canton or keep all of Switzerland.",
-        "Type a keyword or pick a popular category.",
-        "Optional — narrow by legal form or company size.",
-        "These become editable filters in the Companies view.",
+        t.subWhat,
+        t.subWhere,
+        t.subIndustry,
+        t.subRefine,
+        t.subReviewCompanies,
       ];
 }
 
@@ -201,6 +204,7 @@ function ReviewRow({ icon: Icon, label, value, onEdit }: {
   value: string;
   onEdit: () => void;
 }) {
+  const { dict } = useI18n();
   return (
     <div className="flex items-center gap-3 px-4 py-3 rounded-xl border border-[#e6e8ec] bg-white">
       <div className="w-8 h-8 rounded-lg bg-[#eff4fe] flex items-center justify-center shrink-0">
@@ -215,7 +219,7 @@ function ReviewRow({ icon: Icon, label, value, onEdit }: {
         onClick={onEdit}
         className="text-[12px] font-medium text-blue-600 hover:text-blue-800 transition-colors shrink-0"
       >
-        Edit
+        {dict.app.guidedWizard.edit}
       </button>
     </div>
   );
@@ -232,6 +236,8 @@ export function GuidedWizard({
   onComplete,
   onClose,
 }: GuidedWizardProps) {
+  const { dict } = useI18n();
+  const t = dict.app.guidedWizard;
   const [state, setState] = useState<WizardState>({
     step: initialStep,
     scope: initialScope,
@@ -251,8 +257,8 @@ export function GuidedWizard({
 
   // Debounce typeahead
   useEffect(() => {
-    const t = setTimeout(() => setDebouncedQuery(typeaheadQuery), 250);
-    return () => clearTimeout(t);
+    const timer = setTimeout(() => setDebouncedQuery(typeaheadQuery), 250);
+    return () => clearTimeout(timer);
   }, [typeaheadQuery]);
 
   // Esc to close
@@ -339,16 +345,16 @@ export function GuidedWizard({
   if (!open) return null;
 
   const { step, scope, cantons: selectedCantons, allSwitzerland, nogaCodes, legalForm, sizeBucket, roleCategories, minCompanies } = state;
-  const labels = stepLabels(scope);
-  const questions = stepQuestions(scope);
-  const subs = stepSubs(scope);
+  const labels = stepLabels(scope, t);
+  const questions = stepQuestions(scope, t);
+  const subs = stepSubs(scope, t);
   const resultCount = countPage?.total;
   const continueLabel = step === 4
-    ? resultCount !== undefined ? `See ${resultCount.toLocaleString()} results →` : "See results →"
-    : "Continue →";
+    ? resultCount !== undefined ? t.seeResults.replace("{count}", resultCount.toLocaleString()) : t.seeResultsPlain
+    : t.continue;
 
   const scopeIcon = scope === "companies" ? Building2 : scope === "people" ? Users : Briefcase;
-  const scopeLabel = scope === "companies" ? "Companies" : scope === "people" ? "People" : "Jobs (→ Companies)";
+  const scopeLabel = scope === "companies" ? t.scopeCompanies : scope === "people" ? t.scopePeople : t.scopeJobs;
 
   return (
     <div
@@ -402,8 +408,8 @@ export function GuidedWizard({
           {/* Step 1 – What */}
           {step === 0 && (
             <div className="flex gap-3">
-              <ScopeTile icon={Building2} title="Companies" sub="700,000+ registered" selected={scope === "companies"} onClick={() => setState(s => ({ ...s, scope: "companies" }))} />
-              <ScopeTile icon={Users} title="People" sub="Founders, directors, owners" selected={scope === "people"} onClick={() => setState(s => ({ ...s, scope: "people" }))} />
+              <ScopeTile icon={Building2} title={t.tileCompanies} sub={t.tileCompaniesSub} selected={scope === "companies"} onClick={() => setState(s => ({ ...s, scope: "companies" }))} />
+              <ScopeTile icon={Users} title={t.tilePeople} sub={t.tilePeopleSub} selected={scope === "people"} onClick={() => setState(s => ({ ...s, scope: "people" }))} />
             </div>
           )}
 
@@ -411,7 +417,7 @@ export function GuidedWizard({
           {step === 1 && (
             <div className="flex flex-wrap gap-2">
               <Chip
-                label="All of Switzerland"
+                label={t.allSwitzerland}
                 selected={allSwitzerland}
                 onClick={() => setState(s => ({ ...s, allSwitzerland: true, cantons: [] }))}
               />
@@ -425,19 +431,19 @@ export function GuidedWizard({
           {step === 2 && scope === "people" && (
             <div className="space-y-6">
               <div>
-                <p className="text-[13px] font-bold text-[#1f2733] mb-3">Role</p>
+                <p className="text-[13px] font-bold text-[#1f2733] mb-3">{t.role}</p>
                 <div className="flex flex-wrap gap-2">
-                  <Chip label="Any" selected={roleCategories.length === 0} onClick={() => setState(s => ({ ...s, roleCategories: [] }))} />
-                  {ROLE_CATEGORIES.map(({ label, value }) => (
-                    <Chip key={value} label={label} selected={roleCategories.includes(value)} onClick={() => toggleRoleCategory(value)} />
+                  <Chip label={t.minAny} selected={roleCategories.length === 0} onClick={() => setState(s => ({ ...s, roleCategories: [] }))} />
+                  {ROLE_CATEGORIES.map(({ key, value }) => (
+                    <Chip key={value} label={t[key]} selected={roleCategories.includes(value)} onClick={() => toggleRoleCategory(value)} />
                   ))}
                 </div>
               </div>
               <div>
-                <p className="text-[13px] font-bold text-[#1f2733] mb-3">Companies involved with (current + past)</p>
+                <p className="text-[13px] font-bold text-[#1f2733] mb-3">{t.companiesInvolved}</p>
                 <div className="flex flex-wrap gap-2">
-                  {MIN_COMPANIES_OPTIONS.map(({ label, value }) => (
-                    <Chip key={value} label={label} selected={minCompanies === value} onClick={() => setState(s => ({ ...s, minCompanies: value }))} />
+                  {MIN_COMPANIES_OPTIONS.map(({ key, value }) => (
+                    <Chip key={value} label={t[key]} selected={minCompanies === value} onClick={() => setState(s => ({ ...s, minCompanies: value }))} />
                   ))}
                 </div>
               </div>
@@ -468,7 +474,7 @@ export function GuidedWizard({
                 type="text"
                 value={typeaheadQuery}
                 onChange={e => setTypeaheadQuery(e.target.value)}
-                placeholder="e.g. software, restaurants…"
+                placeholder={t.industryPlaceholder}
                 autoFocus
                 className="w-full px-4 py-2.5 rounded-xl text-[14px] text-[#1f2733] placeholder:text-[#9aa2ad] focus:outline-none transition-colors bg-white"
                 style={{
@@ -505,11 +511,11 @@ export function GuidedWizard({
 
               <div>
                 <p className="text-[11px] font-bold text-[#6b7480] uppercase tracking-[0.08em] mb-2.5">
-                  Popular categories
+                  {t.popularCategories}
                 </p>
                 <div className="flex flex-wrap gap-2">
-                  {POPULAR_INDUSTRIES.map(({ label, code }) => (
-                    <Chip key={code} label={label} selected={nogaCodes.includes(code)} onClick={() => toggleNogaCode(code)} />
+                  {POPULAR_INDUSTRIES.map(({ key, code }) => (
+                    <Chip key={code} label={t[key]} selected={nogaCodes.includes(code)} onClick={() => toggleNogaCode(code)} />
                   ))}
                 </div>
               </div>
@@ -520,23 +526,23 @@ export function GuidedWizard({
           {step === 3 && (
             <div className="space-y-6">
               <div>
-                <p className="text-[13px] font-bold text-[#1f2733] mb-3">Legal form</p>
+                <p className="text-[13px] font-bold text-[#1f2733] mb-3">{t.legalForm}</p>
                 <div className="flex flex-wrap gap-2">
-                  <Chip label="Any" selected={legalForm === ""} onClick={() => setState(s => ({ ...s, legalForm: "" }))} />
+                  <Chip label={t.sizeAny} selected={legalForm === ""} onClick={() => setState(s => ({ ...s, legalForm: "" }))} />
                   {LEGAL_FORMS.map(f => (
                     <Chip key={f} label={f} selected={legalForm === f} onClick={() => setState(s => ({ ...s, legalForm: f }))} />
                   ))}
                 </div>
               </div>
               <div>
-                <p className="text-[13px] font-bold text-[#1f2733] mb-3">Company size</p>
+                <p className="text-[13px] font-bold text-[#1f2733] mb-3">{t.companySize}</p>
                 <div className="flex flex-wrap gap-2">
-                  {SIZE_OPTIONS.map(({ label, value }) => (
-                    <Chip key={value} label={label} selected={sizeBucket === value} onClick={() => setState(s => ({ ...s, sizeBucket: value }))} />
+                  {SIZE_OPTIONS.map(({ key, value }) => (
+                    <Chip key={value} label={t[key]} selected={sizeBucket === value} onClick={() => setState(s => ({ ...s, sizeBucket: value }))} />
                   ))}
                 </div>
                 <p className="mt-2 text-[12px] text-[#9aa2ad]">
-                  Size filtering is informational — exact headcount data is not yet available.
+                  {t.sizeInfoNote}
                 </p>
               </div>
             </div>
@@ -547,27 +553,27 @@ export function GuidedWizard({
             <div className="space-y-2">
               <ReviewRow
                 icon={scopeIcon}
-                label="What"
+                label={t.reviewWhat}
                 value={scopeLabel}
                 onEdit={() => setState(s => ({ ...s, step: 0 }))}
               />
               <ReviewRow
                 icon={MapPin}
-                label="Where"
-                value={allSwitzerland ? "All of Switzerland" : selectedCantons.join(", ")}
+                label={t.reviewWhere}
+                value={allSwitzerland ? t.allSwitzerland : selectedCantons.join(", ")}
                 onEdit={() => setState(s => ({ ...s, step: 1 }))}
               />
               {scope === "people" ? (
                 <ReviewRow
                   icon={Users}
-                  label="Role & involvement"
+                  label={t.reviewRoleInvolvement}
                   value={
                     [
                       roleCategories.length > 0
-                        ? roleCategories.map(v => ROLE_CATEGORIES.find(r => r.value === v)?.label || v).join(", ")
+                        ? roleCategories.map(v => { const rc = ROLE_CATEGORIES.find(x => x.value === v); return rc ? t[rc.key] : v; }).join(", ")
                         : null,
-                      minCompanies > 0 ? `${minCompanies}+ companies` : null,
-                    ].filter(Boolean).join(" · ") || "Any"
+                      minCompanies > 0 ? t.companiesCount.replace("{count}", String(minCompanies)) : null,
+                    ].filter(Boolean).join(" · ") || t.minAny
                   }
                   onEdit={() => setState(s => ({ ...s, step: 2 }))}
                 />
@@ -575,18 +581,18 @@ export function GuidedWizard({
                 <>
                   <ReviewRow
                     icon={ListTree}
-                    label="Industry"
-                    value={nogaCodes.length > 0 ? nogaCodes.map(c => nogaLabelMap[c] || c).join(", ") : "Any"}
+                    label={t.reviewIndustry}
+                    value={nogaCodes.length > 0 ? nogaCodes.map(c => nogaLabelMap[c] || c).join(", ") : t.minAny}
                     onEdit={() => setState(s => ({ ...s, step: 2 }))}
                   />
                   <ReviewRow
                     icon={SlidersHorizontal}
-                    label="Refine"
+                    label={t.reviewRefine}
                     value={
                       [
-                        legalForm ? `Legal form: ${legalForm}` : null,
-                        sizeBucket ? `Size: ${SIZE_OPTIONS.find(o => o.value === sizeBucket)?.label}` : null,
-                      ].filter(Boolean).join(" · ") || "Any"
+                        legalForm ? t.legalFormValue.replace("{value}", legalForm) : null,
+                        sizeBucket ? t.sizeValue.replace("{value}", t[SIZE_OPTIONS.find(o => o.value === sizeBucket)?.key ?? "sizeAny"]) : null,
+                      ].filter(Boolean).join(" · ") || t.minAny
                     }
                     onEdit={() => setState(s => ({ ...s, step: 3 }))}
                   />
@@ -596,7 +602,7 @@ export function GuidedWizard({
               {scope === "companies" && resultCount !== undefined && (
                 <div className="mt-4 flex items-center gap-2 px-4 py-3 bg-blue-50 rounded-xl border border-blue-100">
                   <span className="text-[13px] font-semibold text-blue-700">
-                    {resultCount.toLocaleString()} companies match your filters
+                    {t.companiesMatch.replace("{count}", resultCount.toLocaleString())}
                   </span>
                 </div>
               )}
@@ -611,14 +617,14 @@ export function GuidedWizard({
               onClick={onClose}
               className="text-[13px] text-[#6b7480] hover:text-[#3f4854] transition-colors"
             >
-              Skip the guide
+              {t.skipGuide}
             </button>
           ) : (
             <button
               onClick={handleBack}
               className="flex items-center gap-1.5 px-4 py-2 rounded-xl border border-[#e6e8ec] text-[13px] font-medium text-[#3f4854] hover:bg-slate-50 transition-colors"
             >
-              ← Back
+              {t.back}
             </button>
           )}
 
@@ -628,7 +634,7 @@ export function GuidedWizard({
                 onClick={() => setState(s => ({ ...s, step: 4 }))}
                 className="text-[13px] text-[#6b7480] hover:text-[#3f4854] transition-colors"
               >
-                Skip →
+                {t.skip}
               </button>
             )}
             <button
