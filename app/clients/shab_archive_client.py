@@ -98,6 +98,10 @@ HR_SUBRUBRICS = frozenset({"HR01", "HR02", "HR03", "HR04"})
 # Swiss UID  CHE-xxx.xxx.xxx  (also tolerates spaces/dashes between digit groups)
 _UID_RE = re.compile(r"CHE[-\s]?(\d{3})[.\s-]?(\d{3})[.\s-]?(\d{3})", re.IGNORECASE)
 
+# Old cantonal Handelsregister number, e.g. "CH-035.3.029.394-7" (pre-2014 archive).
+# Tolerates whitespace introduced by PDF line-wrapping between groups.
+_OLD_UID_RE = re.compile(r"CH-\s*(\d{3})\s*\.\s*(\d)\s*\.\s*(\d{3})\s*\.\s*(\d{3})\s*-\s*(\d)")
+
 
 # ── Archive list API ──────────────────────────────────────────────────────────
 
@@ -243,6 +247,19 @@ def extract_uid_from_text(text: str) -> str | None:
         return None
     d1, d2, d3 = match.group(1), match.group(2), match.group(3)
     return f"CHE-{d1}.{d2}.{d3}"
+
+
+def extract_old_uid_from_text(text: str) -> str | None:
+    """Extract the first old cantonal HR number (CH-xxx.x.xxx.xxx-x) from text.
+
+    Pre-2014 SHAB publications reference this instead of the modern CHE-UID.
+    Returns the normalised canonical form so it can be matched against
+    ``companies.old_uids`` (populated from the UID register)."""
+    match = _OLD_UID_RE.search(text)
+    if not match:
+        return None
+    d1, d2, d3, d4, d5 = match.groups()
+    return f"CH-{d1}.{d2}.{d3}.{d4}-{d5}"
 
 
 # Canton code on the line immediately after the trilingual registry header line.

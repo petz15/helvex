@@ -39,9 +39,29 @@ uidregStatusEnterpriseDetail values:
 from __future__ import annotations
 
 import logging
+import re
 from typing import Any, Callable
 
 logger = logging.getLogger(__name__)
+
+
+def normalize_old_hr_number(raw: str | None) -> str | None:
+    """Canonicalise an old cantonal HR number to ``CH-DDD.D.DDD.DDD-D``.
+
+    Bridges the two representations that occur in the wild:
+      * UID register (OtherOrganisationId, category CH.HR): digits-only,
+        e.g. ``"CH10030251826"``
+      * SHAB publications:                                 dotted,
+        e.g. ``"CH-100.3.025.182-6"``
+    Both reduce to the same 11 digits (structure 3-1-3-3-1). Returns None if the
+    input does not carry exactly 11 digits (so 9-digit CHE-UIDs and other
+    identifiers are rejected)."""
+    if raw is None:
+        return None
+    digits = re.sub(r"\D", "", str(raw))
+    if len(digits) != 11:
+        return None
+    return f"CH-{digits[0:3]}.{digits[3]}.{digits[4:7]}.{digits[7:10]}-{digits[10]}"
 
 _WSDL = "https://www.uid-wse.admin.ch/V5.0/PublicServices.svc?wsdl"
 
@@ -242,10 +262,39 @@ def entity_to_dict(org_outer: dict) -> dict[str, Any]:
     }
 
 
+def extract_old_hr_numbers(oid: dict) -> list[str]:
+    """Extract old cantonal Handelsregister number(s) from organisationIdentification.
+
+    The UID register stores prior identifiers under ``OtherOrganisationId`` as
+    ``[{organisationId, organisationIdCategory}, …]``. The old HR number lives under
+    category ``CH.HR`` in DIGITS-ONLY form (e.g. ``"CH10030251826"``). We filter on
+    the category — NOT the digit shape — because sibling identifiers such as
+    ``CH.ESTVID`` (VAT, e.g. ``052.0017.5382``) also normalise to 11 digits and must
+    not be mistaken for an HR number. Each value is canonicalised to the dotted form
+    (``CH-100.3.025.182-6``) so it matches what SHAB publications print. Returns a
+    de-duplicated list preserving first-seen order; empty if none found.
+    """
+    others = oid.get("OtherOrganisationId") or []
+    if not isinstance(others, list):
+        others = [others]
+
+    found: list[str] = []
+    for entry in others:
+        if not isinstance(entry, dict):
+            continue
+        if _str_or_none(entry.get("organisationIdCategory")) != "CH.HR":
+            continue
+        num = normalize_old_hr_number(entry.get("organisationId"))
+        if num and num not in found:
+            found.append(num)
+    return found
+
+
 def detail_to_update(org_outer: dict) -> dict[str, Any]:
     """Extract the fields that GetByUID adds on top of Search results.
 
     Returns a dict of Company column names → values (only non-None).
+    Includes ``old_uids`` when the register carries old CH-format HR numbers.
     """
     org_inner: dict = org_outer.get("organisation") or {}
     oid: dict = org_inner.get("organisationIdentification") or {}
@@ -281,6 +330,9 @@ def detail_to_update(org_outer: dict) -> dict[str, Any]:
         update["address_city"] = town
     if canton:
         update["canton"] = canton
+    old_uids = extract_old_hr_numbers(oid)
+    if old_uids:
+        update["old_uids"] = old_uids
     return update
 
 
@@ -370,16 +422,22 @@ def build_search_params(
     return params
 
 
-def _run_search(
-    search_params: dict[str, Any],
+def _do_search(
+    search_parameters: dict[str, Any],
     *,
+    history: bool = False,
     abort_cb: Callable[[], None] | None = None,
     _retry: int = 0,
 ) -> tuple[list[dict[str, Any]], bool]:
-    """One Search call. Returns (parsed_entities, capped).
+    """One Search call against the FULL ``searchParameters`` request. Returns
+    (parsed_entities, capped).
 
-    capped is True when we received the 30-result cap (there may be more — the
-    caller must narrow with an additional filter/token). Retries up to 3 times on
+    ``search_parameters`` is the top-level request body, which may contain
+    ``uidEntitySearchParameters`` (name/address/register filters), ``uid`` (search
+    by CHE-UID), and/or ``otherOrganisationId`` (search by an old cantonal HR
+    number — see search_by_old_uid). ``history=True`` sets searchNameAndAddressHistory.
+
+    capped is True when we hit the 30-result cap. Retries up to 3 times on
     Request_limit_exceeded with exponential backoff. abort_cb runs after each
     successful call so the job worker can heartbeat / check cancellation.
     """
@@ -387,24 +445,24 @@ def _run_search(
     from zeep.helpers import serialize_object
 
     client = _get_client()
-    logger.info("uid_soap.search params=%s retry=%d", search_params, _retry)
+    logger.info("uid_soap.search params=%s retry=%d", search_parameters, _retry)
     try:
         raw_result = client.service.Search(
-            searchParameters={"uidEntitySearchParameters": search_params},
+            searchParameters=search_parameters,
             config={
                 "searchMode": "Normal",
                 "maxNumberOfRecords": _MAX_RECORDS_PER_CALL,
-                "searchNameAndAddressHistory": False,
+                "searchNameAndAddressHistory": history,
             },
         )
     except Exception as exc:
         if "Request_limit_exceeded" in str(exc):
             if _retry < 3:
                 delay = _RATE_LIMIT_BASE_DELAY * (2 ** _retry)
-                logger.warning("UID rate limited (params=%s), waiting %.0fs (retry %d)", search_params, delay, _retry + 1)
+                logger.warning("UID rate limited (params=%s), waiting %.0fs (retry %d)", search_parameters, delay, _retry + 1)
                 _chunked_sleep(delay, abort_cb=abort_cb)
-                return _run_search(search_params, abort_cb=abort_cb, _retry=_retry + 1)
-            raise UIDRateLimitError(f"Request_limit_exceeded after {_retry} retries (params={search_params})") from exc
+                return _do_search(search_parameters, history=history, abort_cb=abort_cb, _retry=_retry + 1)
+            raise UIDRateLimitError(f"Request_limit_exceeded after {_retry} retries (params={search_parameters})") from exc
         raise
 
     time.sleep(_INTER_CALL_DELAY)
@@ -428,11 +486,43 @@ def _run_search(
             d["_raw"] = org_outer
             parsed.append(d)
         except Exception:
-            logger.exception("Failed to parse V5.0 entity in _run_search")
+            logger.exception("Failed to parse V5.0 entity in _do_search")
 
     capped = len(parsed) >= _MAX_RECORDS_PER_CALL
-    logger.info("uid_soap.result params=%s n=%d capped=%s", search_params, len(parsed), capped)
+    logger.info("uid_soap.result params=%s n=%d capped=%s", search_parameters, len(parsed), capped)
     return parsed, capped
+
+
+def _run_search(
+    search_params: dict[str, Any],
+    *,
+    abort_cb: Callable[[], None] | None = None,
+) -> tuple[list[dict[str, Any]], bool]:
+    """One name/address/register Search (wraps params in uidEntitySearchParameters)."""
+    return _do_search({"uidEntitySearchParameters": search_params}, abort_cb=abort_cb)
+
+
+def search_by_old_uid(
+    old_number: str,
+    *,
+    category: str = "CH.HR",
+    abort_cb: Callable[[], None] | None = None,
+) -> dict[str, Any] | None:
+    """Reverse-resolve an old cantonal HR number to its modern entity.
+
+    Fills the TOP-LEVEL ``otherOrganisationId`` field of the Search request (a
+    sibling of ``uidEntitySearchParameters``, hence not covered by
+    build_search_params). The register indexes both the dotted
+    (``CH-100.3.025.182-6``) and digits-only forms, so either input works. The
+    match is unique, so returns the single parsed entity dict (entity_to_dict
+    shape, including the modern ``uid``) or None.
+    """
+    entities, _ = _do_search(
+        {"otherOrganisationId": {"organisationIdCategory": category, "organisationId": old_number}},
+        history=True,
+        abort_cb=abort_cb,
+    )
+    return entities[0] if entities else None
 
 
 def search_entities(

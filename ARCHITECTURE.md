@@ -1101,7 +1101,17 @@ Discovers the companies **not in Zefix** (the "gap": sole traders, MWST/VAT-only
 **Scoring note:** UID-only companies (no `purpose`) excluded at DB query level from NOGA, keyword extraction, Claude classification.
 
 **Job type:** `uid_import` | **Endpoint:** `POST /api/v1/jobs/collection/uid-import`
-**Detail job:** `uid_detail` | **Endpoint:** `POST /api/v1/jobs/collection/uid-detail` — calls `fetch_uid_details()`, which filters `source='uid' AND uid_detail_fetched_at IS NULL` so each company is fetched exactly once. `uid_detail_fetched_at` is set after every GetByUID attempt (success or not), preventing re-processing on subsequent runs even for entities with no address.
+**Detail job:** `uid_detail` | **Endpoint:** `POST /api/v1/jobs/collection/uid-detail` — calls `fetch_uid_details()`, which filters `source='uid' AND uid_detail_fetched_at IS NULL` so each company is fetched exactly once. `uid_detail_fetched_at` is set after every GetByUID attempt (success or not), preventing re-processing on subsequent runs even for entities with no address. `detail_to_update()` also captures `old_uids` from `OtherOrganisationId` (category `CH.HR`) whenever present.
+
+### Resolve SHAB Old-UIDs — `resolve_shab_old_uids` in `app/services/registry/shab_archive_import.py`
+
+Pre-2014 companies carry an **old cantonal Handelsregister number** (e.g. `CH-035.3.029.394-7`) that the pre-2014 SHAB archive references instead of the modern CHE-UID. This job links those publications by resolving the old number to a modern entity.
+
+- **Two representations, one canonical form:** the register returns the old number under `OtherOrganisationId` (category `CH.HR`) in **digits-only** form (`CH10030251826`); SHAB PDFs print the **dotted** form (`CH-100.3.025.182-6`). `uid_client.normalize_old_hr_number()` reduces both to the dotted canonical (11 digits, structure 3-1-3-3-1) used everywhere. Category filtering matters: `CH.ESTVID` (VAT) also normalises to 11 digits, so `extract_old_hr_numbers()` keys on `CH.HR`, not digit shape.
+- **Reverse lookup exists:** the Search request has a **top-level `otherOrganisationId`** field (a sibling of `uidEntitySearchParameters`, so *not* built by `build_search_params`). `uid_client.search_by_old_uid()` fills it and returns the unique modern entity. `_do_search()` is the shared core; `_run_search()` and `search_by_old_uid()` both delegate to it.
+- **Per publication** with `company_uid IS NULL` and an old number in `raw_json` (`extracted_old_uid` for Mode B, `ch_number` for Mode A): (1) try free local `old_uids` overlap; (2) on a miss, `search_by_old_uid()` (one API call per **distinct** number, cached per run) → link the pub, write the number into the company's `old_uids` (so later runs match locally), and create a **modern-UID `shab_stub`** for companies absent from our DB. Unique numbers with no register match are counted `unresolved`.
+- **Storage:** `companies.old_uids` — GIN-indexed `TEXT[]` (a company that changed canton can have several), also opportunistically populated by `uid_detail`'s `detail_to_update()`.
+- **Job type:** `resolve_shab_old_uids` | **Endpoint:** `POST /api/v1/jobs/collection/resolve-shab-old-uids` (superadmin). Params: `batch_size`, `max_lookups` (caps reverse-Search calls per run; rate ~17/min). Resumable — linked rows drop out of the `company_uid IS NULL` set; refuses to run while `uid_import`/`uid_detail` are active (shared SOAP limit). **Frontend:** Collection page → "Resolve SHAB old-UID publications (reverse UID Search)" section.
 
 ### SHAB Archive Import — `app/services/registry/shab_archive_import.py`
 
@@ -1120,7 +1130,7 @@ Pre-December 2012, SHAB published one PDF per day covering all cantons + all pub
 
 The `■` glyph is encoded differently by PyMuPDF depending on PDF year: `\x84` (U+0084, 2008–2011) or a Unicode PUA codepoint like U+F06E (2012+).
 
-**Workflow:** iterates weekdays Mon–Fri; skips 404s; calls `check_bulk_pdf_structure` → `parse_bulk_hr_entries`; upserts `SogcPublication` rows with `sogc_id = "shab_old_{YYYYMMDD}_{pub_number}"` and `company_uid = company_id = None` (old CH-xxx numbers don't map to CHE UIDs).
+**Workflow:** iterates weekdays Mon–Fri; skips 404s; calls `check_bulk_pdf_structure` → `parse_bulk_hr_entries`; upserts `SogcPublication` rows with `sogc_id = "shab_old_{YYYYMMDD}_{pub_number}"`. The parser exposes each entry's old cantonal number as `entry["ch_number"]`; it is normalised (`normalize_old_hr_number`) and resolved to a company via `_resolve_company_for_shab(..., old_uid=…)` (array overlap on `companies.old_uids`). Matched publications are linked (`company_uid`/`company_id` set); local misses (and unmatched-but-titled entries → a `shab_stub` keyed by the old number) are later reconciled by the `resolve_shab_old_uids` job via reverse UID Search.
 
 **Structural validation:** `check_bulk_pdf_structure` logs critical format changes to the Error Center (`company_errors` table, `source="shab_old_pdf"`) rather than silently skipping. Days with critical issues (HR end marker missing, zero delimiters) are counted in `days_skipped`.
 
@@ -1131,11 +1141,11 @@ Paginates the `shab.ch` public archive API (`https://www.shab.ch/api/v1/archive/
 **Workflow:**
 1. `fetch_archive_page(page, size)` — paginates the archive list (`includeContent=false`).
 2. For each HR01/HR02/HR03 entry: `fetch_pdf_bytes(id)` → `extract_text_from_pdf()` (pypdf).
-3. Extract UID via regex (`CHE-xxx.xxx.xxx`), detect language (lingua + canton fallback).
-4. `_resolve_company_for_shab(db, uid, title, canton, pub_date, uid_map, stats)` — looks up the company by UID (batch cache → DB). Three outcomes:
+3. Extract the modern UID via regex (`CHE-xxx.xxx.xxx`) **and** the old cantonal number (`extract_old_uid_from_text` → `CH-xxx.x.xxx.xxx-x`); detect language (lingua + canton fallback). The batch pre-resolver `_build_shab_uid_map` keys companies by **both** identifiers via two queries (`uid IN (…)` and `old_uids && ARRAY[…]`).
+4. `_resolve_company_for_shab(db, uid, title, canton, pub_date, uid_map, stats, old_uid=…)` — resolves by modern CHE UID first, then by old cantonal number (batch cache → DB). The returned `company_uid` is always the company's **canonical modern** uid, even when matched via the old number. Three outcomes:
    - **Found, same name** — link publication to company; no change.
    - **Found, different name** — merge SHAB title as a historical name into `company.old_names` (`{"name": ..., "source": "shab_archive", "date": ...}`), then link.
-   - **Not found** — create a `Company` stub with `source="shab_stub"`, `status="CANCELLED"`, `uid`, `name` (from API title), `canton`, `first_sogc_date`; add to batch `uid_map` to avoid duplicates within the same page.
+   - **Not found** — create a `Company` stub with `source="shab_stub"`, `status="CANCELLED"`, keyed by the modern uid if present else the old number (which is also stored in `old_uids`), `name` (from API title), `canton`, `first_sogc_date`; add to batch `uid_map` to avoid duplicates within the same page.
 5. Upsert `SogcPublication` with extracted text; detect changes via `_detect_changes` from `sogc_preprocessor.py`.
 6. Supports pause/resume: `progress_done` stores the last completed page number.
 

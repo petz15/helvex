@@ -384,6 +384,36 @@ export function CollectionClient() {
         </form>
       </Section>
 
+      <Section title="Resolve SHAB old-UID publications (reverse UID Search)">
+        <form onSubmit={async e => {
+          e.preventDefault();
+          const fd = new FormData(e.currentTarget);
+          const ml = parseInt(fd.get("resolve_max_lookups") as string);
+          await submit("collection/resolve-shab-old-uids", {
+            batch_size: parseInt(fd.get("resolve_batch") as string) || 200,
+            max_lookups: Number.isFinite(ml) && ml > 0 ? ml : null,
+          });
+        }} className="space-y-4">
+          <p className="text-sm text-slate-600 leading-relaxed">
+            Links pre-2014 SHAB publications that reference the <strong>old cantonal HR number</strong>{" "}
+            (e.g. <code>CH-035.3.029.394-7</code>) instead of the modern CHE-UID. Tries a free local{" "}
+            <code>old_uids</code> match first; on a miss, reverse-searches the UID register by{" "}
+            <code>otherOrganisationId</code> to get the modern UID, caches it, and links the
+            publication (unknown companies get a modern-UID stub). <strong>Resumable</strong> — shares
+            the UID SOAP rate limit, so it refuses to run alongside the UID imports above.
+          </p>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <Field label="Max API lookups" hint="Cap reverse-Search calls per run (~17/min). Blank = unlimited. Only distinct unmatched numbers cost a call.">
+              <input name="resolve_max_lookups" type="number" min={0} placeholder="unlimited" className={cn(inputCls, "w-36")} />
+            </Field>
+            <Field label="Batch size" hint="Publications scanned per DB batch/commit.">
+              <input name="resolve_batch" type="number" min={50} max={1000} defaultValue={200} className={cn(inputCls, "w-28")} />
+            </Field>
+          </div>
+          <SubmitBtn loading={loading === "collection/resolve-shab-old-uids"} />
+        </form>
+      </Section>
+
       <GroupHeader label="Zefix Import" />
 
       <Section title="Bulk import from Zefix">

@@ -1485,6 +1485,36 @@ def trigger_link_sogc_stubs(
     return JobOut.from_orm_obj(job)
 
 
+class ResolveShabOldUidsBody(BaseModel):
+    batch_size: int = 200
+    max_lookups: int | None = None   # cap reverse-Search API calls per run (rate ~17/min); None = unlimited
+
+
+@router.post("/collection/resolve-shab-old-uids", response_model=JobOut, status_code=status.HTTP_202_ACCEPTED)
+def trigger_resolve_shab_old_uids(
+    body: ResolveShabOldUidsBody,
+    request: Request,
+    db: Session = Depends(get_db),
+    _: User = Depends(require_superadmin),
+):
+    """Link pre-2014 SHAB publications that cite an OLD cantonal HR number.
+
+    Local ``old_uids`` overlap first (free); on a miss, reverse-Search the UID
+    register by ``otherOrganisationId`` to get the modern UID, cache it into
+    ``old_uids`` and link the publication (unknown companies get a modern-UID stub).
+    Resumable; shares the UID SOAP rate limit — refuses to run alongside
+    uid_import/uid_detail. Use ``max_lookups`` to bound API calls per run.
+    """
+    job = _enqueue_or_http_error(
+        request,
+        job_type="resolve_shab_old_uids",
+        label="Resolve SHAB old-UID publications (reverse UID Search)",
+        params={"batch_size": body.batch_size, "max_lookups": body.max_lookups},
+        db=db,
+    )
+    return JobOut.from_orm_obj(job)
+
+
 @router.post("/collection/sogc-preprocess", response_model=JobOut, status_code=status.HTTP_202_ACCEPTED)
 def trigger_sogc_preprocess(
     body: SogcPreprocessBody,

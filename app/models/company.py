@@ -148,6 +148,13 @@ class Company(Base):
     # Timestamp when GetByUID detail call was last attempted (success or not).
     # NULL = detail not yet fetched. Used to avoid re-fetching on every run.
     uid_detail_fetched_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Old cantonal Handelsregister number(s), e.g. "CH-035.3.029.394-7", from the UID
+    # register's OtherOrganisationId (category CH.HR). Pre-2014 SHAB archive
+    # publications reference these instead of the modern CHE-UID. GIN-indexed for
+    # array-overlap (&&) lookup during SHAB matching. A company that changed canton
+    # can have several. Populated by resolve_shab_old_uids (reverse UID Search) and,
+    # when present, by uid_detail's GetByUID enrichment.
+    old_uids: Mapped[list[str] | None] = mapped_column(ArrayOfText, nullable=True)
     # Exact search params sent to the Google Search API for this company's last search.
     # Keys: q, provider, gl/country, hl/language, location.
     # Stored so bad results (wrong language, wrong location) can be diagnosed after the fact.

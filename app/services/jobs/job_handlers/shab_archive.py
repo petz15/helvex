@@ -177,3 +177,69 @@ def handle_link_sogc_stubs(ctx: JobContext) -> tuple[dict, str]:
     if stats["errors"]:
         done_msg += f", {len(stats['errors'])} errors"
     return stats, done_msg
+
+
+def handle_resolve_shab_old_uids(ctx: JobContext) -> tuple[dict, str]:
+    """Resolve pre-2014 SHAB publications that reference an OLD cantonal HR number.
+
+    Local overlap on companies.old_uids first (free); on a miss, reverse-Search the
+    UID register by otherOrganisationId to get the modern UID, cache it into
+    old_uids and link the publication. Shares the UID SOAP rate limit — refuse to
+    run alongside uid_import / uid_detail.
+    """
+    from app.services.registry.shab_archive_import import resolve_shab_old_uids
+    from sqlalchemy import text as _text
+
+    active = ctx.db.execute(
+        _text(
+            "SELECT id, job_type FROM job_runs "
+            "WHERE job_type IN ('uid_import', 'uid_detail') "
+            "AND status IN ('queued', 'running') LIMIT 1"
+        )
+    ).fetchone()
+    if active:
+        raise RuntimeError(
+            "%s is currently running (job_runs id=%d). It shares the UID SOAP API "
+            "rate limit — wait for it to finish before starting resolve_shab_old_uids."
+            % (active[1], active[0])
+        )
+
+    batch_size = int(ctx.params.get("batch_size", 200))
+    max_lookups_raw = ctx.params.get("max_lookups")
+    max_lookups = int(max_lookups_raw) if max_lookups_raw else None
+
+    def _progress(done: int, total: int, _stats: dict) -> None:
+        ctx.assert_not_cancelled()
+        msg = (
+            f"Pub {done:,}/{total or '?':,} — "
+            f"{_stats.get('linked_local', 0):,} local, "
+            f"{_stats.get('resolved_api', 0):,} via API "
+            f"({_stats.get('api_lookups', 0)} lookups), "
+            f"{_stats.get('unresolved', 0):,} unresolved"
+            + (f", {_stats.get('api_errors', 0)} API errors" if _stats.get('api_errors') else "")
+        )
+        ctx.progress(done, total or 0, _stats, msg)
+
+    def _abort() -> None:
+        ctx._heartbeat()
+        ctx.assert_not_cancelled()
+
+    stats = resolve_shab_old_uids(
+        ctx.db,
+        resume_from=ctx.resume_from,
+        batch_size=batch_size,
+        max_lookups=max_lookups,
+        progress_cb=_progress,
+        status_cb=lambda m: ctx.status_with_stats(m),
+        abort_cb=_abort,
+    )
+
+    done_msg = (
+        f"Done — {stats['with_old_uid']:,} pubs with old number, "
+        f"{stats['linked_local']:,} linked locally, "
+        f"{stats['resolved_api']:,} resolved via API ({stats['api_lookups']} lookups, "
+        f"{stats['stubs_created']} stubs), {stats['unresolved']:,} unresolved"
+    )
+    if stats["api_errors"]:
+        done_msg += f", {stats['api_errors']} API errors"
+    return stats, done_msg

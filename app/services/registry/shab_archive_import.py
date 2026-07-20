@@ -37,6 +37,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 logger = logging.getLogger(__name__)
@@ -83,6 +84,23 @@ def _append_shab_old_name(existing_json: str | None, name: str, pub_date: str | 
     return json.dumps(entries)
 
 
+def _get_company_by_old_uid(db: Session, old_uid: str) -> Any | None:
+    """Look up a Company by an old cantonal HR number via array overlap on old_uids.
+
+    Postgres-only (`&&` array operator); the SHAB import never runs on SQLite.
+    Returns the ORM object (so old_names merges work) or None.
+    """
+    from app.models.company import Company as CompanyModel
+
+    row = db.execute(
+        text("SELECT id FROM companies WHERE old_uids && CAST(:arr AS text[]) LIMIT 1"),
+        {"arr": [old_uid]},
+    ).fetchone()
+    if not row:
+        return None
+    return db.get(CompanyModel, row[0])
+
+
 def _resolve_company_for_shab(
     db: Session,
     uid: str | None,
@@ -92,29 +110,45 @@ def _resolve_company_for_shab(
     uid_map: dict[str, Any] | None,
     stats: dict,
     *,
+    old_uid: str | None = None,
     merge_old_name: bool = True,
 ) -> tuple[str | None, int | None]:
     """Return (company_uid, company_id) for a SHAB publication.
 
-    Lookup order: uid_map batch cache → DB.  If the company is found and
-    the SHAB title differs from its canonical name, the title is recorded
-    as a historical name in old_names (merge_old_name=True path only, used
-    for new publications; re-imports skip this to avoid duplicate entries).
+    Resolution order: modern CHE ``uid`` (batch cache → DB) then, if unmatched,
+    the old cantonal ``old_uid`` (batch cache → old_uids array overlap). Pre-2014
+    archive entries only carry the old number; a local miss here is later resolved
+    by ``resolve_shab_old_uids`` (reverse UID Search), which also populates
+    companies.old_uids so subsequent imports match locally.
 
-    If no company is found, a minimal stub is created with source='shab_stub'
-    and status='CANCELLED'.  The stub is added to uid_map so subsequent
-    entries in the same page batch reuse it without hitting the DB.
+    When matched, the returned company_uid is the company's CANONICAL (modern)
+    uid, even if the match came via the old number.  If the SHAB title differs
+    from the canonical name it is recorded in old_names (merge_old_name path).
+
+    If no company is found, a minimal stub is created (source='shab_stub',
+    status='CANCELLED') keyed by whichever identifier is available — the modern
+    uid if present, else the old number, which is also stored in old_uids so a
+    later backfill/import can reconcile it.  Stubs are cached in uid_map.
     """
-    if not uid:
+    if not uid and not old_uid:
         return None, None
 
-    # 1. Batch cache, then DB
+    # 1. Resolve by modern CHE uid first, then by old cantonal number.
     company = None
-    if uid_map is not None:
-        company = uid_map.get(uid)
-    if company is None:
-        from app import crud
-        company = crud.get_company_by_uid(db, uid)
+    if uid:
+        if uid_map is not None:
+            company = uid_map.get(uid)
+        if company is None:
+            from app import crud
+            company = crud.get_company_by_uid(db, uid)
+
+    if company is None and old_uid:
+        if uid_map is not None:
+            company = uid_map.get(old_uid)
+        if company is None:
+            company = _get_company_by_old_uid(db, old_uid)
+        if company is not None:
+            stats["matched_by_old_uid"] = stats.get("matched_by_old_uid", 0) + 1
 
     if company is not None:
         if merge_old_name and title and title.strip() and title.strip() != company.name:
@@ -123,24 +157,29 @@ def _resolve_company_for_shab(
             )
             db.flush()
         if uid_map is not None:
-            uid_map[uid] = company
-        return uid, company.id
+            if uid:
+                uid_map[uid] = company
+            if old_uid:
+                uid_map[old_uid] = company
+        return company.uid, company.id
 
-    # 2. Company absent — create a stub for cancelled companies not in Zefix
+    # 2. Company absent — create a stub for cancelled companies not in Zefix.
+    stub_uid = uid or old_uid
     if not title or not title.strip():
-        return uid, None  # no name available; link uid only
+        return stub_uid, None  # no name available; link identifier only
 
     from app.models.company import Company as CompanyModel
     from sqlalchemy.exc import IntegrityError
 
     stub = CompanyModel(
-        uid=uid,
+        uid=stub_uid,
         name=title.strip()[:512],
         status="CANCELLED",
         source="shab_stub",
         canton=(canton or "")[:8] or None,
         first_sogc_date=pub_date,
         sogc_date=pub_date,
+        old_uids=[old_uid] if old_uid else None,
     )
     sp = db.begin_nested()
     try:
@@ -149,15 +188,18 @@ def _resolve_company_for_shab(
     except IntegrityError:
         sp.rollback()
         from app import crud
-        stub = crud.get_company_by_uid(db, uid)
+        stub = crud.get_company_by_uid(db, stub_uid)
         if stub is None:
             raise
 
     db.flush()
     stats["stubs_created"] = stats.get("stubs_created", 0) + 1
     if uid_map is not None:
-        uid_map[uid] = stub
-    return uid, stub.id
+        if uid:
+            uid_map[uid] = stub
+        if old_uid:
+            uid_map[old_uid] = stub
+    return stub.uid, stub.id
 
 
 def _date_windows(
@@ -222,6 +264,53 @@ def _prefetch_pdfs_for_page(
     return pdf_map
 
 
+def _build_shab_uid_map(db: Session, pdf_cache: dict[str, bytes | None]) -> dict[str, Any]:
+    """Pre-resolve companies for a page of PDFs by BOTH modern CHE and old HR number.
+
+    Extracts every CHE-UID and old cantonal number from the page's PDFs, then does
+    two batched queries (``uid IN (…)`` and ``old_uids && ARRAY[…]``). The returned
+    map is keyed by whichever identifier appears in each PDF, so _process_entry can
+    resolve either without a per-entry DB hit.
+    """
+    from app.clients.shab_archive_client import (
+        extract_text_from_pdf, extract_uid_from_text, extract_old_uid_from_text,
+    )
+    from app.models.company import Company
+
+    uids: set[str] = set()
+    old_uids: set[str] = set()
+    for pdf_bytes in pdf_cache.values():
+        if not pdf_bytes:
+            continue
+        raw = extract_text_from_pdf(pdf_bytes)
+        if not raw:
+            continue
+        u = extract_uid_from_text(raw)
+        if u:
+            uids.add(u)
+        ou = extract_old_uid_from_text(raw)
+        if ou:
+            old_uids.add(ou)
+
+    uid_map: dict[str, Any] = {}
+    if uids:
+        for c in db.query(Company).filter(Company.uid.in_(uids)).all():
+            uid_map[c.uid] = c
+    if old_uids:
+        rows = db.execute(
+            text("SELECT id FROM companies WHERE old_uids && CAST(:arr AS text[])"),
+            {"arr": list(old_uids)},
+        ).fetchall()
+        for (cid,) in rows:
+            c = db.get(Company, cid)
+            if c is None:
+                continue
+            for ou in (c.old_uids or []):
+                if ou in old_uids:
+                    uid_map[ou] = c
+    return uid_map
+
+
 def _process_entry(
     db: Session,
     entry: dict,
@@ -237,6 +326,7 @@ def _process_entry(
         extract_text_from_pdf,
         normalize_pdf_text,
         extract_uid_from_text,
+        extract_old_uid_from_text,
         extract_canton_from_text,
         is_hr_heading,
         parse_entry_fields,
@@ -289,6 +379,8 @@ def _process_entry(
         logger.warning("SHAB archive: PDF text empty for id=%s (bytes=%d)", archive_id, len(pdf_bytes))
     # Extract structured fields from raw text (canton regex relies on newlines)
     uid = extract_uid_from_text(pdf_text_raw) if pdf_text_raw else None
+    # Pre-2014 entries carry only the old cantonal HR number, not a CHE-UID.
+    old_uid = extract_old_uid_from_text(pdf_text_raw) if pdf_text_raw else None
     pdf_canton = extract_canton_from_text(pdf_text_raw) if pdf_text_raw else None
     lang = _detect_lang(pdf_text_raw or title, pdf_canton or canton)
     # Normalise for storage: rejoin hyphenated line-breaks, collapse newlines
@@ -310,6 +402,8 @@ def _process_entry(
     }
     if uid:
         raw_meta["extracted_uid"] = uid
+    if old_uid:
+        raw_meta["extracted_old_uid"] = old_uid
 
     try:
         existing = db.query(SogcPublication).filter_by(sogc_id=sogc_id).first()
@@ -327,12 +421,12 @@ def _process_entry(
                 setattr(pub, f"text_{lang}", pdf_text)
             pub.raw_json = json.dumps(raw_meta)
             pub.preprocessed_at = datetime.now(tz=timezone.utc)
-            if uid and not pub.company_uid:
+            if (uid or old_uid) and not pub.company_uid:
                 # Re-import: link company if not yet linked; skip name merging
                 # (already done on first import) to avoid duplicate old_names entries.
                 comp_uid, comp_id = _resolve_company_for_shab(
                     db, uid, title, pdf_canton or canton, pub_date,
-                    uid_map, stats, merge_old_name=False,
+                    uid_map, stats, old_uid=old_uid, merge_old_name=False,
                 )
                 if comp_uid:
                     pub.company_uid = comp_uid
@@ -350,7 +444,7 @@ def _process_entry(
         else:
             comp_uid, comp_id = _resolve_company_for_shab(
                 db, uid, title, pdf_canton or canton, pub_date,
-                uid_map, stats, merge_old_name=True,
+                uid_map, stats, old_uid=old_uid, merge_old_name=True,
             )
             pub = SogcPublication(
                 sogc_id=sogc_id,
@@ -408,9 +502,8 @@ def _paginate_window(
 ) -> None:
     """Paginate one date window (or the default window if no dates given)."""
     from app.clients.shab_archive_client import (
-        fetch_archive_page, get_entries, is_last_page, extract_text_from_pdf, extract_uid_from_text,
+        fetch_archive_page, get_entries, is_last_page,
     )
-    from app.models.company import Company
 
     page = start_page
     while True:
@@ -448,26 +541,8 @@ def _paginate_window(
                 all_entries, pdf_workers=pdf_workers, stats=stats,
             )
 
-            # ── Batch UID lookup ──────────────────────────────────────────────
-            # Extract UIDs from every successfully-downloaded PDF so we can do
-            # a single IN query instead of one per entry.
-            uids: set[str] = set()
-            for aid, pdf_bytes in pdf_cache.items():
-                if pdf_bytes:
-                    raw = extract_text_from_pdf(pdf_bytes)
-                    uid = extract_uid_from_text(raw) if raw else None
-                    if uid:
-                        uids.add(uid)
-
-            if uids:
-                companies = (
-                    db.query(Company)
-                    .filter(Company.uid.in_(uids))
-                    .all()
-                )
-                uid_map = {c.uid: c for c in companies}
-            else:
-                uid_map = {}
+            # ── Batch UID lookup (modern CHE + old cantonal HR number) ────────
+            uid_map = _build_shab_uid_map(db, pdf_cache)
 
         for entry in all_entries:
             if abort_cb:
@@ -615,24 +690,7 @@ def import_shab_archive(
                 pdf_cache_p = _prefetch_pdfs_for_page(
                     all_entries, pdf_workers=pdf_workers, stats=stats,
                 )
-                from app.clients.shab_archive_client import (
-                    extract_text_from_pdf as _etf, extract_uid_from_text as _euid,
-                )
-                from app.models.company import Company as _Company
-                uids_p: set[str] = set()
-                for _aid, _pb in pdf_cache_p.items():
-                    if _pb:
-                        _raw = _etf(_pb)
-                        _uid = _euid(_raw) if _raw else None
-                        if _uid:
-                            uids_p.add(_uid)
-                if uids_p:
-                    uid_map_p = {
-                        c.uid: c
-                        for c in db.query(_Company).filter(_Company.uid.in_(uids_p)).all()
-                    }
-                else:
-                    uid_map_p = {}
+                uid_map_p = _build_shab_uid_map(db, pdf_cache_p)
 
             for entry in all_entries:
                 if abort_cb:
@@ -866,6 +924,11 @@ def import_shab_old_pdfs(
                 job_run_id,
             )
 
+        from app.clients.uid_client import normalize_old_hr_number
+
+        # Per-day cache so repeated old numbers within an issue hit the DB once.
+        day_uid_map: dict[str, Any] = {}
+
         for entry in entries:
             if abort_cb:
                 abort_cb()
@@ -893,6 +956,18 @@ def import_shab_old_pdfs(
             }
 
             try:
+                # These PDFs carry only the old cantonal HR number (no CHE-UID); resolve
+                # via companies.old_uids locally — a miss is picked up later by
+                # resolve_shab_old_uids (reverse UID Search).
+                # Inside the try so a DB error here fails just this entry, not the job.
+                old_uid = normalize_old_hr_number(entry.get("ch_number"))
+                comp_uid, comp_id = _resolve_company_for_shab(
+                    db, None, entry.get("title"), entry.get("canton"), day_str,
+                    day_uid_map, stats, old_uid=old_uid, merge_old_name=True,
+                )
+                if comp_uid:
+                    raw_meta["resolved_company_uid"] = comp_uid
+
                 existing = db.query(SogcPublication).filter_by(sogc_id=sogc_id).first()
                 if existing:
                     pub = existing
@@ -902,6 +977,9 @@ def import_shab_old_pdfs(
                     pub.detected_language = lang
                     if entry["text"]:
                         setattr(pub, f"text_{lang}", entry["text"])
+                    if comp_uid and not pub.company_uid:
+                        pub.company_uid = comp_uid
+                        pub.company_id = comp_id
                     pub.raw_json = json.dumps(raw_meta)
                     pub.preprocessed_at = datetime.now(tz=timezone.utc)
                     db.query(SogcChange).filter_by(sogc_publication_id=pub.id).delete()
@@ -917,8 +995,8 @@ def import_shab_old_pdfs(
                 else:
                     pub = SogcPublication(
                         sogc_id=sogc_id,
-                        company_uid=None,
-                        company_id=None,
+                        company_uid=comp_uid,
+                        company_id=comp_id,
                         pub_date=day_str,
                         sub_rubric=entry["sub_rubric"],
                         pub_number=pub_number,
@@ -1123,5 +1201,219 @@ def run_link_sogc_stubs(
 
         if progress_cb:
             progress_cb(done, None, stats)
+
+    return stats
+
+
+# ── Reverse resolution of old cantonal HR numbers ─────────────────────────────
+
+def _old_uid_from_raw(raw_json: str | None) -> str | None:
+    """Pull a canonical old HR number out of a SogcPublication.raw_json blob.
+
+    Mode B (archive) stores the already-normalised ``extracted_old_uid``; Mode A
+    (old bulk PDF) stores the raw ``ch_number``. Both are normalised to the dotted
+    canonical form so they match companies.old_uids and the reverse Search input.
+    """
+    if not raw_json:
+        return None
+    try:
+        meta = json.loads(raw_json)
+    except Exception:
+        return None
+    if not isinstance(meta, dict):
+        return None
+    from app.clients.uid_client import normalize_old_hr_number
+    return normalize_old_hr_number(meta.get("extracted_old_uid") or meta.get("ch_number"))
+
+
+def _append_company_old_uid(db: Session, company: Any, old_uid: str) -> None:
+    """Idempotently add an old HR number to a company's old_uids array."""
+    existing = list(company.old_uids or [])
+    if old_uid not in existing:
+        company.old_uids = existing + [old_uid]
+        db.flush()
+
+
+def _create_uid_stub_from_entity(
+    db: Session, entity: dict, old_uid: str, stats: dict
+) -> Any | None:
+    """Create a shab_stub Company from a reverse-Search result (has the modern UID).
+
+    Unlike the title-only stubs made during import, this stub carries the proper
+    modern CHE-UID and any address/status the register returned, plus old_uid.
+    """
+    from app.models.company import Company as CompanyModel
+    from sqlalchemy.exc import IntegrityError
+
+    modern = entity.get("uid")
+    if not modern:
+        return None
+
+    stub = CompanyModel(
+        uid=modern,
+        name=(entity.get("name") or modern)[:512],
+        status=entity.get("status") or "CANCELLED",
+        source="shab_stub",
+        canton=(entity.get("canton") or "")[:8] or None,
+        municipality=entity.get("municipality"),
+        address=entity.get("address"),
+        address_zip=entity.get("address_zip"),
+        address_city=entity.get("address_city"),
+        registration_type=entity.get("registration_type"),
+        old_uids=[old_uid],
+    )
+    sp = db.begin_nested()
+    try:
+        db.add(stub)
+        sp.commit()
+    except IntegrityError:
+        sp.rollback()
+        from app import crud
+        stub = crud.get_company_by_uid(db, modern)
+        if stub is None:
+            raise
+        _append_company_old_uid(db, stub, old_uid)
+
+    db.flush()
+    stats["stubs_created"] = stats.get("stubs_created", 0) + 1
+    return stub
+
+
+def _apply_api_resolution(
+    db: Session, old_uid: str, entity: dict | None, stats: dict
+) -> tuple[str | None, int | None]:
+    """Turn a reverse-Search entity into a (company_uid, company_id) link.
+
+    Existing company → cache old_uid onto it. Unknown company → create a modern-UID
+    shab_stub. Returns (None, None) when the register had no match.
+    """
+    if not entity or not entity.get("uid"):
+        return (None, None)
+    modern = entity["uid"]
+    from app import crud
+    company = crud.get_company_by_uid(db, modern)
+    if company is not None:
+        _append_company_old_uid(db, company, old_uid)
+        return (company.uid, company.id)
+    stub = _create_uid_stub_from_entity(db, entity, old_uid, stats)
+    if stub is not None:
+        return (stub.uid, stub.id)
+    return (modern, None)
+
+
+def resolve_shab_old_uids(
+    db: Session,
+    *,
+    resume_from: int = 0,  # advisory only; the company_uid IS NULL filter drives resume
+    batch_size: int = 200,
+    max_lookups: int | None = None,
+    progress_cb=None,
+    status_cb=None,
+    abort_cb=None,
+) -> dict[str, Any]:
+    """Link pre-2014 SHAB publications that reference an OLD cantonal HR number.
+
+    For every ``sogc_publications`` row with no ``company_uid`` but an old number in
+    ``raw_json``: resolve the company by (1) local ``old_uids`` overlap — free — and
+    on a miss (2) a reverse UID-register Search on ``otherOrganisationId`` (one API
+    call per DISTINCT number, cached for the run). Resolved-via-API numbers are
+    written back into the company's ``old_uids`` (and unknown companies get a proper
+    modern-UID stub), so subsequent runs resolve them locally.
+
+    Resumable/idempotent: linked rows drop out of the ``company_uid IS NULL`` set, so
+    a re-run simply continues with what remains. ``max_lookups`` caps API calls per
+    run (rate limit ~17/min); unresolved rows are left for a later run.
+    """
+    from app.clients.uid_client import search_by_old_uid
+
+    stats: dict[str, Any] = {
+        "pubs_scanned": 0,
+        "with_old_uid": 0,
+        "linked_local": 0,
+        "resolved_api": 0,
+        "api_lookups": 0,
+        "unresolved": 0,
+        "stubs_created": 0,
+        "api_errors": 0,
+        "budget_exhausted": False,
+        "errors": [],
+    }
+    # old_uid -> (company_uid|None, company_id|None, source)
+    resolved: dict[str, tuple[str | None, int | None, str]] = {}
+
+    total: int = db.execute(
+        text(
+            "SELECT COUNT(*) FROM sogc_publications "
+            "WHERE company_uid IS NULL AND raw_json IS NOT NULL"
+        )
+    ).scalar() or 0
+
+    if status_cb:
+        status_cb(f"Resolving old-UID SHAB publications — {total:,} unmatched to scan…")
+
+    last_id = 0
+    processed = 0
+
+    while True:
+        if abort_cb:
+            abort_cb()
+
+        rows = db.execute(
+            text(
+                "SELECT id, raw_json FROM sogc_publications "
+                "WHERE company_uid IS NULL AND raw_json IS NOT NULL AND id > :last "
+                "ORDER BY id ASC LIMIT :lim"
+            ),
+            {"last": last_id, "lim": batch_size},
+        ).fetchall()
+
+        if not rows:
+            break
+
+        for pub_id, raw_json in rows:
+            last_id = pub_id
+            processed += 1
+            stats["pubs_scanned"] += 1
+
+            old_uid = _old_uid_from_raw(raw_json)
+            if not old_uid:
+                continue
+            stats["with_old_uid"] += 1
+
+            if old_uid not in resolved:
+                company = _get_company_by_old_uid(db, old_uid)
+                if company is not None:
+                    resolved[old_uid] = (company.uid, company.id, "local")
+                elif max_lookups is not None and stats["api_lookups"] >= max_lookups:
+                    stats["budget_exhausted"] = True
+                    continue  # defer to a later run
+                else:
+                    try:
+                        entity = search_by_old_uid(old_uid, abort_cb=abort_cb)
+                        stats["api_lookups"] += 1
+                    except Exception as exc:  # noqa: BLE001
+                        stats["api_errors"] += 1
+                        stats["errors"].append(f"[{old_uid}] Search: {exc}")
+                        continue
+                    cu, ci = _apply_api_resolution(db, old_uid, entity, stats)
+                    resolved[old_uid] = (cu, ci, "api")
+
+            comp_uid, comp_id, src = resolved[old_uid]
+            if comp_uid:
+                db.execute(
+                    text(
+                        "UPDATE sogc_publications SET company_uid = :u, company_id = :c "
+                        "WHERE id = :id"
+                    ),
+                    {"u": comp_uid, "c": comp_id, "id": pub_id},
+                )
+                stats["linked_local" if src == "local" else "resolved_api"] += 1
+            else:
+                stats["unresolved"] += 1
+
+        db.commit()
+
+        if progress_cb:
+            progress_cb(processed, total, stats)
 
     return stats
