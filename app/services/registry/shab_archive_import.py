@@ -89,13 +89,26 @@ def _get_company_by_old_uid(db: Session, old_uid: str) -> Any | None:
 
     Postgres-only (`&&` array operator); the SHAB import never runs on SQLite.
     Returns the ORM object (so old_names merges work) or None.
+
+    Defensive against statement_timeout: this job interleaves reads with writes
+    to the same GIN-indexed column within one long session, so a transient lock
+    wait or pending-list scan can occasionally exceed the 30s cap. Treat a
+    timeout as "not found locally" (falls through to the API lookup) instead of
+    aborting the whole job.
     """
+    from sqlalchemy.exc import OperationalError
+
     from app.models.company import Company as CompanyModel
 
-    row = db.execute(
-        text("SELECT id FROM companies WHERE old_uids && CAST(:arr AS text[]) LIMIT 1"),
-        {"arr": [old_uid]},
-    ).fetchone()
+    try:
+        row = db.execute(
+            text("SELECT id FROM companies WHERE old_uids && CAST(:arr AS text[]) LIMIT 1"),
+            {"arr": [old_uid]},
+        ).fetchone()
+    except OperationalError as exc:
+        db.rollback()
+        logger.warning("old_uids lookup timed out for %s, falling back to API: %s", old_uid, exc)
+        return None
     if not row:
         return None
     return db.get(CompanyModel, row[0])
