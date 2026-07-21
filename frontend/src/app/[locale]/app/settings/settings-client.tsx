@@ -813,7 +813,7 @@ export function SettingsClient() {
                 <span><code className="text-blue-700">\b</code> — word boundary (edge of a word)</span>
                 <span><code className="text-blue-700">(?:…)</code> — non-capturing group</span>
                 <span><code className="text-blue-700">[àa]</code> — character class — matches <em>à</em> or <em>a</em></span>
-                <span><code className="text-blue-700">["']</code> — matches straight or curly apostrophe</span>
+                <span><code className="text-blue-700">[&quot;&apos;]</code> — matches straight or curly apostrophe</span>
                 <span><code className="text-blue-700">{"{0,5}"}</code> — repeat 0 to 5 times</span>
                 <span><code className="text-blue-700">.*</code> — any characters, any length (greedy)</span>
                 <span><code className="text-blue-700">^</code> — start of string; <code className="text-blue-700">$</code> — end</span>

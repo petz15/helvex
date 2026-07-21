@@ -20,7 +20,6 @@ from app.services.billing.payments.pricing import apply_vat
 from app.services.billing.tiers import get_tier_price_chf
 
 from app.api.routes.billing._shared import (
-    WebhookResponse,
     _append_query_params,
     _emit,
     _extract_card_info_from_worldline,

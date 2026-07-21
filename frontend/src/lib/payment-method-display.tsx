@@ -1,5 +1,5 @@
 import { CreditCard, Wallet } from "lucide-react";
-import type { LucideIcon } from "lucide-react";
+import type { LucideProps } from "lucide-react";
 import type { PaymentMethod } from "@/lib/api";
 
 /** Subset of PaymentMethod fields needed to render a saved payment method. */
@@ -8,24 +8,31 @@ type MethodLike = Pick<
   "method_type" | "display_text" | "brand" | "masked_number"
 >;
 
+/** Method types that get the generic wallet glyph instead of the card glyph. */
+const WALLET_METHOD_TYPES = new Set([
+  "twint",
+  "paypal",
+  "klarna",
+  "alipay",
+  "bank_transfer",
+  "direct_debit",
+]);
+
 /**
  * Icon for a saved payment method. Cards get the card glyph; everything else
  * (TWINT, PayPal, Klarna, bank transfer, …) gets a generic wallet glyph, since
- * we don't ship per-brand logos.
+ * we don't ship per-brand logos. Renders the icon directly (rather than
+ * resolving to a variable) so the lookup doesn't count as creating a
+ * component during render.
  */
-export function paymentMethodIcon(methodType: string | null | undefined): LucideIcon {
-  switch (methodType) {
-    case "twint":
-    case "paypal":
-    case "klarna":
-    case "alipay":
-    case "bank_transfer":
-    case "direct_debit":
-      return Wallet;
-    case "card":
-    default:
-      return CreditCard;
+export function PaymentMethodIcon({
+  methodType,
+  ...props
+}: { methodType: string | null | undefined } & LucideProps) {
+  if (methodType && WALLET_METHOD_TYPES.has(methodType)) {
+    return <Wallet {...props} />;
   }
+  return <CreditCard {...props} />;
 }
 
 function cap(s: string): string {

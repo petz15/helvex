@@ -4,7 +4,7 @@ import useSWR from "swr";
 import { useI18n } from "@/i18n/context";
 import { ChevronLeft, ChevronRight, CreditCard, Zap, TrendingUp, ArrowUpRight, Loader2, AlertTriangle, BarChart2, ChevronDown } from "lucide-react";
 import Link from "next/link";
-import { paymentMethodIcon, paymentMethodLabel } from "@/lib/payment-method-display";
+import { PaymentMethodIcon, paymentMethodLabel } from "@/lib/payment-method-display";
 import {
   fetchCurrentUser,
   fetchBillingSummary,
@@ -561,12 +561,11 @@ function CardChip({ method }: { method: PaymentMethod }) {
     : null;
   // Card-only meta (brand / holder / expiry). Empty for non-card methods.
   const meta = [brand, method.holder_name, expiry ? `exp. ${expiry}` : null].filter(Boolean).join(" · ");
-  const Icon = paymentMethodIcon(method.method_type);
   const primary = paymentMethodLabel(method, dict.app.billing.paymentMethods.savedMethod);
 
   return (
     <div className="flex items-center gap-2.5 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 min-w-0">
-      <Icon size={15} className="shrink-0 text-slate-400" />
+      <PaymentMethodIcon methodType={method.method_type} size={15} className="shrink-0 text-slate-400" />
       <div className="min-w-0 flex-1">
         <div className="text-sm font-medium text-slate-800">{primary}</div>
         {meta && <div className="text-xs text-slate-400 truncate">{meta}</div>}

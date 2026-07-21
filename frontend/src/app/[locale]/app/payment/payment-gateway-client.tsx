@@ -23,7 +23,7 @@ import { useSearchParams, useRouter } from "next/navigation";
 import useSWR from "swr";
 import Link from "next/link";
 import { CreditCard, Zap, ArrowRight, CheckCircle2, Loader2, Info, ShieldCheck } from "lucide-react";
-import { paymentMethodIcon, paymentMethodLabel } from "@/lib/payment-method-display";
+import { PaymentMethodIcon, paymentMethodLabel } from "@/lib/payment-method-display";
 import {
   fetchCurrentUser,
   fetchBillingSummary,
@@ -483,7 +483,6 @@ export function PaymentGatewayClient() {
           {savedMethods.map(m => {
             const scopeLabel = m.scope === "org" ? (m.is_default ? t.orgDefault : t.org) : t.personal;
             const label = [paymentMethodLabel(m, t.savedPaymentMethod), scopeLabel].filter(Boolean).join(" · ");
-            const Icon = paymentMethodIcon(m.method_type);
             const active = selectedCard === m.alias_id;
             return (
               <button
@@ -493,7 +492,7 @@ export function PaymentGatewayClient() {
                   active ? "border-blue-400 bg-blue-50" : "border-slate-200 hover:border-slate-300"
                 }`}
               >
-                <Icon size={14} className={active ? "text-blue-500" : "text-slate-400"} />
+                <PaymentMethodIcon methodType={m.method_type} size={14} className={active ? "text-blue-500" : "text-slate-400"} />
                 <span className={`text-sm ${active ? "font-medium text-blue-800" : "text-slate-700"}`}>{label}</span>
               </button>
             );

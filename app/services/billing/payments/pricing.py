@@ -6,7 +6,6 @@ import json
 from pathlib import Path
 from typing import Any, Literal
 
-from app.config import settings
 from app.services.billing.payments._types import ProviderName
 from app.services.billing.tiers import calculate_custom_tier_price
 

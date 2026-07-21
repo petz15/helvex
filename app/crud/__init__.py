@@ -1,5 +1,9 @@
 from app.crud.app_setting import get_all_settings, get_effective_setting, get_effective_settings_batch, get_setting, seed_defaults, set_setting
-from app.crud.security_event import get_active_throttle_until, list_recent_security_events, record_security_event
+from app.crud.security_event import (
+    get_active_throttle_until,
+    list_recent_security_events,  # noqa: F401
+    record_security_event,
+)
 from app.crud import crawler as crawler
 from app.crud.boilerplate import (
     create_boilerplate_pattern,
@@ -65,11 +69,11 @@ from app.crud.company import (
 )
 from app.crud.directory_crawl_domain import (
     approve_directory_crawl_domain,
-    count_pending_directory_crawl_domains,
+    count_pending_directory_crawl_domains,  # noqa: F401
     delete_directory_crawl_domain,
     get_approved_directory_crawl_domains,
-    get_directory_crawl_domain,
-    get_directory_crawl_domain_by_value,
+    get_directory_crawl_domain,  # noqa: F401
+    get_directory_crawl_domain_by_value,  # noqa: F401
     list_directory_crawl_domains,
     reject_directory_crawl_domain,
     upsert_directory_crawl_domain,
@@ -274,4 +278,14 @@ __all__ = [
     "get_or_create_user_company_state",
     "update_user_ai_results",
     "update_personal_score_override",
+    # security events
+    "get_active_throttle_until",
+    "record_security_event",
+    # directory crawl domains
+    "approve_directory_crawl_domain",
+    "delete_directory_crawl_domain",
+    "get_approved_directory_crawl_domains",
+    "list_directory_crawl_domains",
+    "reject_directory_crawl_domain",
+    "upsert_directory_crawl_domain",
 ]

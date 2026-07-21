@@ -1507,7 +1507,7 @@ export function CollectionClient() {
             <span>
               <span className="font-medium">Truncation-trigger mode</span>
               <span className="block text-xs text-slate-500 mt-0.5">
-                Only inspects the <em>last sentence</em> of each purpose text — these are the clause-openers that mark where the boilerplate tail begins (e.g. <em>"Die Gesellschaft kann Zweigniederlassungen…"</em>).
+                Only inspects the <em>last sentence</em> of each purpose text — these are the clause-openers that mark where the boilerplate tail begins (e.g. <em>&ldquo;Die Gesellschaft kann Zweigniederlassungen…&rdquo;</em>).
                 Candidates are saved with <span className="font-medium text-amber-700">truncate=true</span> so one regex strips the entire tail.
                 Most efficient: one active truncate pattern can clean hundreds of thousands of records.
               </span>

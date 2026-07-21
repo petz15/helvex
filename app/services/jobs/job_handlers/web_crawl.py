@@ -1055,7 +1055,7 @@ def handle_directory_crawl(ctx: JobContext) -> tuple[dict, str]:
     already_done_clause = (
         ""
         if rerun
-        else f"AND NOT EXISTS (SELECT 1 FROM company_directory_data d WHERE d.company_id = u.company_id AND d.url = u.url)"
+        else "AND NOT EXISTS (SELECT 1 FROM company_directory_data d WHERE d.company_id = u.company_id AND d.url = u.url)"
     )
 
     count_sql = text(
