@@ -2501,6 +2501,29 @@ Zweigniederlassungen (branch offices) don't have independent websites. Two place
 
 `legal_form_uid` `0108` = branch of Swiss company; `0111` = branch of foreign company.
 
+### Branch office website inheritance (read-time only, not persisted)
+
+Since branch offices are skipped from search/crawl (above), their `website_url` stays `NULL`
+forever unless surfaced some other way. `get_company` (`app/api/routes/companies/detail.py`)
+resolves the parent via `head_offices` and, when `is_branch_office(db_company)` is true and the
+branch has never been searched (`website_checked_at IS NULL`), adds three response-only fields
+that are **never written to the DB**: `inherited_website_url`, `inherited_website_source_company_id`,
+`inherited_website_source_company_name`. The Website panel in `company-detail-client.tsx` shows
+this as "Same as {parent}" with a link to the parent's own site and detail page. Because nothing
+is persisted, a branch that later gets its own genuine site via manual "Find website" immediately
+takes priority (the `website_checked_at IS NULL` guard stops firing). `combined_score` for branches
+is intentionally **not** patched by this — it still computes off the branch's own `NULL` web_score;
+fixing that is deferred to the broader scoring-multitenancy rework.
+
+### SIMAP awards rollup for branch offices
+
+`GET /api/v1/companies/{id}/simap-awards` now also includes awards won by the company's branch
+offices (resolved via `branch_offices` JSON through `_resolve_branch_company_ids`), so a parent
+company's detail page shows contracts won under a Zweigniederlassung's own UID. Each award in the
+response carries `via_company_id` / `via_company_name`, non-null only when the award was won by a
+branch rather than the company itself. `SimapPanel` / `AwardCard` render a "via {branch name}"
+badge in that case. Branch detail pages are unaffected — they still only see their own awards.
+
 ---
 
 ## 17. Activity Log

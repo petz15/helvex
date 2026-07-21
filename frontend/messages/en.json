@@ -1590,6 +1590,7 @@
       "notGeocoded": "Not geocoded",
       "findWebsite": "Find website",
       "noWebsiteFound": "No website found",
+      "inheritedWebsite": "Same as parent company",
       "keywords": "Keywords",
       "aiCategory": "AI category",
       "language": "Language",

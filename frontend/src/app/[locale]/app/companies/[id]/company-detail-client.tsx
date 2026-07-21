@@ -824,6 +824,24 @@ export function CompanyDetailClient({ company: initial, readOnlyDemo = false, is
                     <span className="truncate">{company.website_url.replace(/^https?:\/\//, "")}</span>
                     <ExternalLink size={11} className="shrink-0" />
                   </a>
+                ) : company.inherited_website_url ? (
+                  <div className="space-y-1">
+                    <a href={company.inherited_website_url} target="_blank" rel="noopener noreferrer"
+                      className="flex items-center gap-2 min-w-0 hover:underline" style={{ fontSize: 13, color: "#2563eb" }}>
+                      <Globe size={13} className="shrink-0" />
+                      <span className="truncate">{company.inherited_website_url.replace(/^https?:\/\//, "")}</span>
+                      <ExternalLink size={11} className="shrink-0" />
+                    </a>
+                    <p style={{ fontSize: 12, color: "#9aa2ad" }}>
+                      {t.inheritedWebsite}{" "}
+                      {company.inherited_website_source_company_id && (
+                        <Link href={`/app/companies/${company.inherited_website_source_company_id}`}
+                          className="hover:underline" style={{ color: "#6b7480" }}>
+                          {company.inherited_website_source_company_name}
+                        </Link>
+                      )}
+                    </p>
+                  </div>
                 ) : (
                   <p className="italic" style={{ fontSize: 13, color: "#9aa2ad" }}>{t.noWebsiteFound}</p>
                 )}

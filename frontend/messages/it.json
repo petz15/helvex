@@ -1704,6 +1704,7 @@
       "notGeocoded": "Non geocodificato",
       "findWebsite": "Trova sito web",
       "noWebsiteFound": "Nessun sito web trovato",
+      "inheritedWebsite": "Uguale alla sede principale",
       "keywords": "Parole chiave",
       "aiCategory": "Categoria IA",
       "language": "Lingua",

@@ -1704,6 +1704,7 @@
       "notGeocoded": "Non géocodé",
       "findWebsite": "Trouver le site web",
       "noWebsiteFound": "Aucun site web trouvé",
+      "inheritedWebsite": "Identique à la maison mère",
       "keywords": "Mots-clés",
       "aiCategory": "Catégorie IA",
       "language": "Langue",

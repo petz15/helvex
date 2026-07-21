@@ -182,6 +182,11 @@ class CompanyRead(CompanyBase):
     updated_at: datetime
     notes: list[NoteRead] = []
     resolved_uids: dict[str, int] = {}
+    # Read-time only (never persisted): a branch office's website, falling back to its
+    # parent's when the branch itself has never been searched. See detail.get_company().
+    inherited_website_url: str | None = None
+    inherited_website_source_company_id: int | None = None
+    inherited_website_source_company_name: str | None = None
 
 
 class CompanyPage(BaseModel):

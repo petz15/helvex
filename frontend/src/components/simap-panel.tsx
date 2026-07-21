@@ -27,6 +27,8 @@ interface SimapAward {
   total_price_range_min: number | null;
   total_price_range_max: number | null;
   total_price_currency: string | null;
+  via_company_id: number | null;
+  via_company_name: string | null;
 }
 
 async function fetchSimapAwards(companyId: number): Promise<SimapAward[]> {
@@ -112,6 +114,11 @@ function AwardCard({ award }: { award: SimapAward }) {
             Direct award
           </span>
         )}
+        {award.via_company_name && (
+          <span className="text-xs bg-blue-50 text-blue-700 border border-blue-200 rounded px-1.5 py-0.5">
+            via {award.via_company_name}
+          </span>
+        )}
       </div>
     </div>
   );
@@ -142,8 +149,8 @@ export function SimapPanel({ companyId }: { companyId: number }) {
       </h2>
 
       <div className="space-y-2">
-        {visible.map((a) => (
-          <AwardCard key={a.id} award={a} />
+        {visible.map((a, i) => (
+          <AwardCard key={`${a.id}-${a.via_company_id ?? "self"}-${i}`} award={a} />
         ))}
       </div>
 

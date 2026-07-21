@@ -27,6 +27,7 @@ from app.schemas.note import NoteRead
 from app.services.billing import credits as credits_service
 from app.services.notifications.activity import log_activity
 from app.services.ingestion.collection import enrich_company_website
+from app.services.ml.noga import is_branch_office
 from app.services.scoring.scoring import is_social_lead_domain
 from app.services.billing.tiers import has_feature
 
@@ -39,6 +40,36 @@ from app.api.routes.companies._shared import (
 from app.services.jobs.job_worker import enqueue_job
 
 router = APIRouter()
+
+
+def _resolve_branch_company_ids(db: Session, db_company: Any) -> dict[int, str]:
+    """Resolve this company's `branch_offices` UIDs to (company_id -> branch name) for rows that exist in our DB."""
+    if not db_company.branch_offices:
+        return {}
+    from app.clients.zefix_client import _normalise_uid as _norm_uid
+    from app.models.company import Company as CompanyModel
+
+    try:
+        entries = json.loads(db_company.branch_offices)
+        if isinstance(entries, dict):
+            entries = [entries]
+    except (TypeError, ValueError):
+        return {}
+
+    uids = []
+    for e in entries:
+        if not isinstance(e, dict):
+            continue
+        raw_uid = e.get("uid") or e.get("UID") or ""
+        if raw_uid:
+            uids.append(_norm_uid(str(raw_uid)))
+    if not uids:
+        return {}
+
+    rows = db.execute(
+        select(CompanyModel.id, CompanyModel.name).where(CompanyModel.uid.in_(uids))
+    ).all()
+    return {row.id: row.name for row in rows}
 
 
 @router.post("/", response_model=CompanyRead, status_code=status.HTTP_201_CREATED, summary="Create company")
@@ -80,6 +111,7 @@ def get_company(
     result = result.model_copy(update={"notes": [NoteRead.model_validate(n) for n in scoped_notes]})
 
     parent_company_id: int | None = None
+    parent_company: Any = None
     if db_company.head_offices:
         try:
             entries = json.loads(db_company.head_offices)
@@ -91,11 +123,29 @@ def get_company(
                     parent = crud.get_company_by_uid(db, uid)
                     if parent:
                         parent_company_id = parent.id
+                        parent_company = parent
                     break
         except (TypeError, ValueError):
             pass
     if parent_company_id is not None:
         result = result.model_copy(update={"parent_company_id": parent_company_id})
+
+    # Branch offices (Zweigniederlassungen) are never searched/crawled themselves
+    # (see web_enrichment.py / web_crawl.py), so their website_url stays NULL forever.
+    # Surface the parent's website as a read-time-only fallback — nothing is written
+    # to the branch's own row, so a branch that gets its own genuine site later (via
+    # manual "Find website") takes priority automatically.
+    if (
+        parent_company is not None
+        and db_company.website_checked_at is None
+        and parent_company.website_url
+        and is_branch_office(db_company)
+    ):
+        result = result.model_copy(update={
+            "inherited_website_url": parent_company.website_url,
+            "inherited_website_source_company_id": parent_company.id,
+            "inherited_website_source_company_name": parent_company.name,
+        })
 
     # Resolve UIDs from all related-company JSON fields to company IDs in one query.
     # UIDs in the Zefix JSON may be compact (CHE233785975) or formatted (CHE-233.785.975);
@@ -586,14 +636,18 @@ def get_company_simap_awards(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> list[dict[str, Any]]:
-    """Return all SIMAP contract award records where this company was a winning vendor."""
+    """Return all SIMAP contract award records where this company, or one of its
+    branch offices (Zweigniederlassungen), was a winning vendor."""
     db_company = crud.get_company(db, company_id)
     if not db_company:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Company not found")
 
+    branch_names = _resolve_branch_company_ids(db, db_company)
+    vendor_company_ids = [company_id, *branch_names.keys()]
+
     rows = db.execute(
         select(SimapAwardVendor)
-        .where(SimapAwardVendor.company_id == company_id)
+        .where(SimapAwardVendor.company_id.in_(vendor_company_ids))
         .options(joinedload(SimapAwardVendor.award))
         .order_by(SimapAwardVendor.id.desc())
     ).scalars().all()
@@ -603,6 +657,9 @@ def get_company_simap_awards(
         a = v.award
         result.append({
             "id": a.id,
+            # Present only when the award was won by a branch office, not this company itself.
+            "via_company_id": v.company_id if v.company_id != company_id else None,
+            "via_company_name": branch_names.get(v.company_id) if v.company_id != company_id else None,
             "publication_date": a.publication_date.isoformat() if a.publication_date else None,
             "award_decision_date": a.award_decision_date.isoformat() if a.award_decision_date else None,
             "title_de": a.title_de,

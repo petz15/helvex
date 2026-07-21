@@ -68,6 +68,10 @@ export interface Company {
   updated_at: string;
   notes: Note[];
   resolved_uids?: Record<string, number>;
+  // Read-time only (never persisted): a branch office's website falling back to its parent's.
+  inherited_website_url?: string | null;
+  inherited_website_source_company_id?: number | null;
+  inherited_website_source_company_name?: string | null;
 }
 
 export interface GoogleScoredResult {

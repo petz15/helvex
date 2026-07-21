@@ -53,6 +53,7 @@
     - google ads library (https://adstransparency.google.com/?region=CH) and meta (https://www.facebook.com/ads/library/?active_status=active&ad_type=political_and_issue_ads&country=CH&is_targeted_country=false&media_type=all&sort_data[mode]=total_impressions&sort_data[direction]=desc) and linkedin (https://www.linkedin.com/ad-library/home) and bing (https://adlibrary.ads.microsoft.com/) and tiktok (https://library.tiktok.com/ads)
     - MCP and API server
     - different ai integration to create: summarizing capabilities per company, in total, other stuff (also connected with mcp?)
+    - add swissoffer to the simap stuff?
 
 
 ### MVP before public PROD
