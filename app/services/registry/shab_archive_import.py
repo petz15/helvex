@@ -94,19 +94,22 @@ def _get_company_by_old_uid(db: Session, old_uid: str) -> Any | None:
     to the same GIN-indexed column within one long session, so a transient lock
     wait or pending-list scan can occasionally exceed the 30s cap. Treat a
     timeout as "not found locally" (falls through to the API lookup) instead of
-    aborting the whole job.
+    aborting the whole job. Runs inside a SAVEPOINT so a timeout only discards
+    this lookup (autoflush included) rather than the rest of the open batch.
     """
     from sqlalchemy.exc import OperationalError
 
     from app.models.company import Company as CompanyModel
 
+    sp = db.begin_nested()
     try:
         row = db.execute(
             text("SELECT id FROM companies WHERE old_uids && CAST(:arr AS text[]) LIMIT 1"),
             {"arr": [old_uid]},
         ).fetchone()
+        sp.commit()
     except OperationalError as exc:
-        db.rollback()
+        sp.rollback()
         logger.warning("old_uids lookup timed out for %s, falling back to API: %s", old_uid, exc)
         return None
     if not row:
@@ -1240,11 +1243,30 @@ def _old_uid_from_raw(raw_json: str | None) -> str | None:
 
 
 def _append_company_old_uid(db: Session, company: Any, old_uid: str) -> None:
-    """Idempotently add an old HR number to a company's old_uids array."""
+    """Idempotently add an old HR number to a company's old_uids array.
+
+    Best-effort: this row may be locked by another job's still-open transaction
+    (e.g. a batch enrichment run mid-batch on the same company). Flushing inside
+    a SAVEPOINT means a lock-wait timeout only discards this one write — not the
+    rest of the current batch — and the pub still links via the caller's already-
+    resolved (company_uid, company_id); a future run will simply re-cache old_uid.
+    """
     existing = list(company.old_uids or [])
-    if old_uid not in existing:
-        company.old_uids = existing + [old_uid]
+    if old_uid in existing:
+        return
+    from sqlalchemy.exc import OperationalError
+
+    company.old_uids = existing + [old_uid]
+    sp = db.begin_nested()
+    try:
         db.flush()
+        sp.commit()
+    except OperationalError as exc:
+        sp.rollback()
+        logger.warning(
+            "old_uids write timed out for company_id=%s (lock contention?), "
+            "will retry on a future run: %s", company.id, exc,
+        )
 
 
 def _create_uid_stub_from_entity(
