@@ -585,7 +585,7 @@ def note_api_access(request: Request, user_id: int) -> None:
             sc.append(now)
             _anom_script[user_id] = sc
             script_n = len(sc)
-        if now - _anom_last_flag.get(user_id, 0.0) < _REFLAG_COOLDOWN:
+        if now - _anom_last_flag.get(user_id, float("-inf")) < _REFLAG_COOLDOWN:
             return
         if script_n >= _SCRIPT_THRESHOLD:
             reason, count = "script_access", script_n
