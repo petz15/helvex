@@ -166,7 +166,10 @@ class PageSignals:
     emails: set[str] = field(default_factory=set)
     phones: set[str] = field(default_factory=set)
     socials: dict[str, str] = field(default_factory=dict)
-    uid: str | None = None
+    # Every distinct, checksum-valid UID found on the page (order of first
+    # appearance) — a page can legitimately carry more than one. See
+    # _extract_uids for why the first-match-only behaviour was a false-MISMATCH risk.
+    uids: list[str] = field(default_factory=list)
     address: str | None = None
     description: str | None = None
     languages: set[str] = field(default_factory=set)
@@ -257,20 +260,40 @@ def _extract_socials(soup) -> dict[str, str]:
     return socials
 
 
-def _extract_uid(html_str: str) -> str | None:
-    m = _UID_RE.search(html_str)
-    if not m:
-        return None
-    candidate = f"CHE-{m.group(1)}.{m.group(2)}.{m.group(3)}"
+def _extract_uids(html_str: str) -> list[str]:
+    """Return every distinct, checksum-valid Swiss UID found on the page, in
+    the order first seen.
+
+    A page can legitimately carry more than one UID — a group-structure
+    impressum listing both a subsidiary and its parent, an agency credit in
+    the footer, a client/partner logo strip. Returning only the first regex
+    match (the previous behaviour) meant whichever UID happened to appear
+    earliest in the raw HTML always won, even when the company's own correct
+    UID was also present later on the same page — silently producing a false
+    uid_matches_zefix=False (MISMATCH) for a genuinely correct site.
+    Resolve_company_extract, which has the target Zefix UID in scope, picks
+    the matching one out of this list when present.
+    """
     try:
         from stdnum.ch import uid as stdnum_uid
     except ImportError:  # pragma: no cover
-        return candidate
-    # Checksum validation rejects regex false-positives (random digit runs
-    # that happen to match the CHE-xxx.xxx.xxx shape but aren't a real UID).
-    if not stdnum_uid.is_valid(candidate):
-        return None
-    return stdnum_uid.format(candidate)
+        stdnum_uid = None
+
+    out: list[str] = []
+    seen: set[str] = set()
+    for m in _UID_RE.finditer(html_str):
+        candidate = f"CHE-{m.group(1)}.{m.group(2)}.{m.group(3)}"
+        if stdnum_uid is not None:
+            # Checksum validation rejects regex false-positives (random digit
+            # runs that happen to match the CHE-xxx.xxx.xxx shape but aren't a
+            # real UID).
+            if not stdnum_uid.is_valid(candidate):
+                continue
+            candidate = stdnum_uid.format(candidate)
+        if candidate not in seen:
+            seen.add(candidate)
+            out.append(candidate)
+    return out
 
 
 def _extract_languages(soup) -> set[str]:
@@ -644,7 +667,7 @@ def extract_page(html: bytes, page_type: str = "") -> PageSignals:
     out.emails |= _extract_emails(html_str, soup)
     out.phones |= _extract_phones(html_str, soup)
     out.socials.update(_extract_socials(soup))
-    out.uid = _extract_uid(html_str)
+    out.uids = _extract_uids(html_str)
     out.languages |= _extract_languages(soup)
     out.description = _extract_meta_description(soup)
     out.title = _extract_title(soup)
@@ -876,7 +899,7 @@ def resolve_company_extract(
     phones: set[str] = set()
     socials: dict[str, str] = {}
     languages: set[str] = set()
-    uid_by_page: dict[str, str] = {}  # page_type -> uid (impressum preferred below)
+    uid_by_page: dict[str, list[str]] = {}  # page_type -> all UIDs found on that page
     address: str | None = None
     description: str | None = None
     titles: list[str] = []
@@ -900,8 +923,8 @@ def resolve_company_extract(
         languages |= sig.languages
         for k, v in sig.socials.items():
             socials.setdefault(k, v)
-        if sig.uid:
-            uid_by_page[page_type] = sig.uid
+        if sig.uids:
+            uid_by_page[page_type] = sig.uids
         if sig.title:
             titles.append(sig.title)
         if sig.address and (address is None or page_type == "impressum"):
@@ -953,15 +976,24 @@ def resolve_company_extract(
             description = para[:1000]
 
     # ── Verification: site UID vs Zefix UID ──────────────────────────────────
-    # Prefer impressum UID — it's the authoritative legal page.
-    # Homepage may carry a parent/holding company's UID instead.
-    uid = (
-        uid_by_page.get("impressum")
-        or uid_by_page.get("contact")
-        or next(iter(uid_by_page.values()), None)
+    # A page can carry more than one UID (group-structure impressum, agency
+    # footer credit, partner/client logos) — if the target's own UID is among
+    # ANY of them, that's the match, regardless of which one happened to be
+    # first in the raw HTML. Only when the target's UID appears nowhere do we
+    # fall back to "first found" (impressum preferred — the authoritative
+    # legal page; homepage may carry a parent/holding company's UID instead)
+    # for the mismatch/cross-attribution signal.
+    zefix_uid_n = _norm_uid(zefix_uid)
+    all_found_uids = [u for uids in uid_by_page.values() for u in uids]
+    matching_uid = next(
+        (u for u in all_found_uids if zefix_uid_n and _norm_uid(u) == zefix_uid_n), None
+    )
+    uid = matching_uid or (
+        (uid_by_page.get("impressum") or [None])[0]
+        or (uid_by_page.get("contact") or [None])[0]
+        or next(iter(all_found_uids), None)
     )
     site_uid_n = _norm_uid(uid)
-    zefix_uid_n = _norm_uid(zefix_uid)
     uid_matches: bool | None = None
     if site_uid_n and zefix_uid_n:
         uid_matches = site_uid_n == zefix_uid_n

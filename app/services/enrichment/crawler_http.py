@@ -342,13 +342,18 @@ async def crawl_company_http(
         soup = parse_soup(body)
         words = count_words(soup)
 
+        # Check JS-shell detection BEFORE the near-empty check: a minimal SPA
+        # shell (e.g. a bare <div id="root"> plus a script tag) can easily be
+        # under the near-empty threshold, and would otherwise be wrongly
+        # written off as no_content (a terminal, non-retried failure) instead
+        # of correctly escalating to the Playwright tier that can render it.
+        if detect_js_required(body_str, words):
+            result.needs_playwright = True
+            return result
+
         if words < 5 and len(body) < 500:
             result.failure_status = "no_content"
             result.failure_detail = f"Near-empty body ({len(body)} bytes)"
-            return result
-
-        if detect_js_required(body_str, words):
-            result.needs_playwright = True
             return result
 
         result.pages.append(

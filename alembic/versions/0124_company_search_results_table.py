@@ -16,16 +16,16 @@ no code reads these fields off org_company_state either (`_overlay()` only
 merges `_ORG_FIELDS`, which doesn't include them). See
 docs/code-review/scoring-multitenancy-rework.md.
 
-Revision ID: 0122
-Revises: 0121
+Revision ID: 0124
+Revises: 0122
 Create Date: 2026-07-24
 """
 
 import sqlalchemy as sa
 from alembic import op
 
-revision: str = "0122"
-down_revision: str = "0121"
+revision: str = "0124"
+down_revision: str = "0122"
 branch_labels = None
 depends_on = None
 

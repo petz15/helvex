@@ -22,16 +22,16 @@ Non-breaking: `companies.flex_score/web_score/combined_score/ai_score` are
 UNCHANGED and keep being written by existing code paths in this phase — read
 paths are not yet cut over. See architecture.md for phase status.
 
-Revision ID: 0123
-Revises: 0122
+Revision ID: 0125
+Revises: 0124
 Create Date: 2026-07-24
 """
 
 import sqlalchemy as sa
 from alembic import op
 
-revision: str = "0123"
-down_revision: str = "0122"
+revision: str = "0125"
+down_revision: str = "0124"
 branch_labels = None
 depends_on = None
 
