@@ -1336,6 +1336,44 @@ def _apply_api_resolution(
     return (modern, None)
 
 
+def _is_known_old_uid_miss(db: Session, old_uid: str) -> bool:
+    """True if a prior run already confirmed the UID register has no match for this number.
+
+    Best-effort: an OperationalError (lock contention) is treated as "not cached" so
+    the caller falls through to a real API attempt rather than aborting the batch.
+    """
+    from sqlalchemy.exc import OperationalError
+
+    sp = db.begin_nested()
+    try:
+        row = db.execute(
+            text("SELECT 1 FROM shab_old_uid_misses WHERE old_uid = :u"),
+            {"u": old_uid},
+        ).fetchone()
+        sp.commit()
+    except OperationalError:
+        sp.rollback()
+        return False
+    return row is not None
+
+
+def _record_old_uid_miss(db: Session, old_uid: str) -> None:
+    """Cache a confirmed "register has no match" result so future runs skip the API call.
+
+    Keyed by the number, not the publication — the same old_uid is often cited by
+    several publications (a company's later mutations).
+    """
+    db.execute(
+        text(
+            "INSERT INTO shab_old_uid_misses (old_uid, failed_at, attempts) "
+            "VALUES (:u, now(), 1) "
+            "ON CONFLICT (old_uid) DO UPDATE SET failed_at = now(), "
+            "attempts = shab_old_uid_misses.attempts + 1"
+        ),
+        {"u": old_uid},
+    )
+
+
 def resolve_shab_old_uids(
     db: Session,
     *,
@@ -1349,11 +1387,15 @@ def resolve_shab_old_uids(
     """Link pre-2014 SHAB publications that reference an OLD cantonal HR number.
 
     For every ``sogc_publications`` row with no ``company_uid`` but an old number in
-    ``raw_json``: resolve the company by (1) local ``old_uids`` overlap — free — and
-    on a miss (2) a reverse UID-register Search on ``otherOrganisationId`` (one API
-    call per DISTINCT number, cached for the run). Resolved-via-API numbers are
-    written back into the company's ``old_uids`` (and unknown companies get a proper
-    modern-UID stub), so subsequent runs resolve them locally.
+    ``raw_json``: resolve the company by (1) local ``old_uids`` overlap — free —, on a
+    miss (2) the ``shab_old_uid_misses`` cache of numbers a prior run already confirmed
+    the register has no match for — also free — and only then (3) a reverse UID-register
+    Search on ``otherOrganisationId`` (one API call per DISTINCT number, cached for the
+    run). Resolved-via-API numbers are written back into the company's ``old_uids`` (and
+    unknown companies get a proper modern-UID stub), so subsequent runs resolve them
+    locally; confirmed non-matches are written to ``shab_old_uid_misses`` so subsequent
+    runs don't re-spend the same slow, rate-limited API budget on numbers that will
+    never resolve.
 
     Resumable/idempotent: linked rows drop out of the ``company_uid IS NULL`` set, so
     a re-run simply continues with what remains. ``max_lookups`` caps API calls per
@@ -1367,6 +1409,7 @@ def resolve_shab_old_uids(
         "linked_local": 0,
         "resolved_api": 0,
         "api_lookups": 0,
+        "skipped_cached_miss": 0,
         "unresolved": 0,
         "stubs_created": 0,
         "api_errors": 0,
@@ -1419,6 +1462,9 @@ def resolve_shab_old_uids(
                 company = _get_company_by_old_uid(db, old_uid)
                 if company is not None:
                     resolved[old_uid] = (company.uid, company.id, "local")
+                elif _is_known_old_uid_miss(db, old_uid):
+                    stats["skipped_cached_miss"] += 1
+                    resolved[old_uid] = (None, None, "cached_miss")
                 elif max_lookups is not None and stats["api_lookups"] >= max_lookups:
                     stats["budget_exhausted"] = True
                     continue  # defer to a later run
@@ -1431,6 +1477,9 @@ def resolve_shab_old_uids(
                         stats["errors"].append(f"[{old_uid}] Search: {exc}")
                         continue
                     cu, ci = _apply_api_resolution(db, old_uid, entity, stats)
+                    if cu is None:
+                        # Confirmed non-match (not a transient error) — cache it.
+                        _record_old_uid_miss(db, old_uid)
                     resolved[old_uid] = (cu, ci, "api")
 
             comp_uid, comp_id, src = resolved[old_uid]
@@ -1450,5 +1499,248 @@ def resolve_shab_old_uids(
 
         if progress_cb:
             progress_cb(processed, total, stats)
+
+    return stats
+
+
+# ── Targeted backfill: recover identifiers lost to historical extraction gaps ────
+
+def backfill_shab_old_uid_extraction(
+    db: Session,
+    *,
+    batch_size: int = 500,
+    pdf_workers: int = 8,
+    request_delay: float = 0.5,
+    progress_cb=None,
+    status_cb=None,
+    abort_cb=None,
+) -> dict[str, Any]:
+    """Re-extract old_uid/uid for publications whose raw_json never captured one.
+
+    Targeted, SOAP-free repair pass — NOT a full historical re-import. Some
+    publications were imported by an older/buggier extraction pass (or hit a
+    transient PDF-parse failure) and ended up with neither ``extracted_uid`` nor
+    ``extracted_old_uid``/``ch_number`` in ``raw_json``. Those rows are invisible to
+    ``resolve_shab_old_uids`` — there is nothing in them to look up — so they sit
+    unresolved forever regardless of how well the reverse UID Search works.
+
+    Re-fetches only the affected source PDFs: one ``archive_id`` fetch per Mode B
+    row, one day fetch per distinct Mode A ``pub_date`` (entries on the same day
+    share one PDF, so this is far cheaper than one-fetch-per-row), re-runs the
+    CURRENT extraction functions, and updates ``raw_json``. When an identifier is
+    recovered, immediately tries a free local ``companies.old_uids``/``uid`` match
+    (same resolution path as a normal import) — a register (API) lookup for numbers
+    still unmatched locally is left to ``resolve_shab_old_uids``'s next run; this
+    job never calls the UID SOAP API itself.
+
+    Rows still missing an identifier after a genuine re-check are stamped with
+    ``old_uid_backfill_checked_at`` in ``raw_json`` so a future run doesn't re-fetch
+    the same dead PDF indefinitely.
+    """
+    from app.clients.shab_archive_client import (
+        fetch_pdf_bytes, extract_text_from_pdf, extract_uid_from_text,
+        extract_old_uid_from_text, extract_canton_from_text,
+        fetch_daily_pdf_bytes, parse_bulk_hr_entries,
+    )
+    from app.clients.uid_client import normalize_old_hr_number
+    from app.models.sogc_publication import SogcPublication
+
+    stats: dict[str, Any] = {
+        "pubs_scanned": 0,
+        "candidates_found": 0,
+        "mode_b_refetched": 0,
+        "mode_a_days_refetched": 0,
+        "identifiers_recovered": 0,
+        "linked_local": 0,
+        "stubs_created": 0,
+        "still_missing": 0,
+        "errors": [],
+    }
+
+    total: int = db.execute(
+        text("SELECT COUNT(*) FROM sogc_publications WHERE company_uid IS NULL AND raw_json IS NOT NULL")
+    ).scalar() or 0
+
+    if status_cb:
+        status_cb(f"Scanning {total:,} unmatched publications for missing identifiers…")
+
+    # ── Pass 1: find candidates. Python-side raw_json parse, same pattern as
+    # resolve_shab_old_uids — raw_json is plain TEXT, no JSON index to filter on. ──
+    mode_b: list[tuple[int, str]] = []                        # (pub_id, archive_id)
+    mode_a: dict[str, list[tuple[int, str | None]]] = {}       # pub_date -> [(pub_id, pub_number), ...]
+
+    last_id = 0
+    scanned = 0
+    while True:
+        if abort_cb:
+            abort_cb()
+        rows = db.execute(
+            text(
+                "SELECT id, raw_json, pub_number, pub_date FROM sogc_publications "
+                "WHERE company_uid IS NULL AND raw_json IS NOT NULL AND id > :last "
+                "ORDER BY id ASC LIMIT :lim"
+            ),
+            {"last": last_id, "lim": batch_size},
+        ).fetchall()
+        if not rows:
+            break
+
+        for pub_id, raw_json, pub_number, pub_date in rows:
+            last_id = pub_id
+            scanned += 1
+            stats["pubs_scanned"] += 1
+
+            try:
+                meta = json.loads(raw_json)
+            except Exception:
+                continue
+            if not isinstance(meta, dict):
+                continue
+            if meta.get("old_uid_backfill_checked_at"):
+                continue  # already re-checked by a prior backfill run, genuinely empty
+            if meta.get("extracted_uid") or meta.get("extracted_old_uid") or meta.get("ch_number"):
+                continue  # already has something for resolve_shab_old_uids to use
+
+            source = meta.get("source")
+            if source == "shab_archive" and meta.get("archive_id"):
+                mode_b.append((pub_id, str(meta["archive_id"])))
+                stats["candidates_found"] += 1
+            elif source == "shab_old_pdf" and pub_date:
+                mode_a.setdefault(pub_date, []).append((pub_id, pub_number))
+                stats["candidates_found"] += 1
+
+        if progress_cb:
+            progress_cb(scanned, total, stats)
+
+    mode_a_row_count = sum(len(v) for v in mode_a.values())
+    if status_cb:
+        status_cb(
+            f"Scan done — {stats['candidates_found']:,} candidates "
+            f"({len(mode_b):,} Mode B, {mode_a_row_count:,} Mode A across "
+            f"{len(mode_a):,} days). Re-fetching…"
+        )
+
+    total_candidates = len(mode_b) + mode_a_row_count
+    done = 0
+
+    def _finalize_row(
+        pub_id: int, meta: dict,
+        found_uid: str | None, found_old_uid: str | None, found_canton: str | None,
+    ) -> None:
+        nonlocal done
+        done += 1
+        if found_uid:
+            meta["extracted_uid"] = found_uid
+        if found_old_uid:
+            meta["extracted_old_uid"] = found_old_uid
+        if found_canton and not meta.get("canton"):
+            meta["canton"] = found_canton
+
+        pub = db.get(SogcPublication, pub_id)
+        if pub is None:
+            return
+
+        if found_uid or found_old_uid:
+            stats["identifiers_recovered"] += 1
+            comp_uid, comp_id = _resolve_company_for_shab(
+                db, found_uid, meta.get("title"), found_canton or meta.get("canton"), pub.pub_date,
+                None, stats, old_uid=found_old_uid, merge_old_name=True,
+            )
+            if comp_uid:
+                pub.company_uid = comp_uid
+                pub.company_id = comp_id
+                stats["linked_local"] += 1
+        else:
+            stats["still_missing"] += 1
+            meta["old_uid_backfill_checked_at"] = datetime.now(tz=timezone.utc).isoformat()
+
+        pub.raw_json = json.dumps(meta)
+        db.flush()
+
+    # ── Mode B — one PDF per affected row, fetched concurrently in chunks ────────
+    chunk_size = max(pdf_workers * 5, batch_size)
+    for i in range(0, len(mode_b), chunk_size):
+        if abort_cb:
+            abort_cb()
+        chunk = mode_b[i : i + chunk_size]
+
+        def _dl(item: tuple[int, str]) -> tuple[int, str, bytes | None]:
+            pub_id, archive_id = item
+            try:
+                return pub_id, archive_id, fetch_pdf_bytes(archive_id)
+            except Exception as exc:  # noqa: BLE001
+                stats["errors"].append(f"[archive_id={archive_id}] PDF fetch failed: {exc}")
+                return pub_id, archive_id, None
+
+        with ThreadPoolExecutor(max_workers=min(pdf_workers, len(chunk))) as pool:
+            results = list(pool.map(_dl, chunk))
+
+        for pub_id, _archive_id, pdf_bytes in results:
+            if abort_cb:
+                abort_cb()
+            stats["mode_b_refetched"] += 1
+            pub = db.get(SogcPublication, pub_id)
+            if pub is None or not pdf_bytes:
+                continue
+            try:
+                meta = json.loads(pub.raw_json) if pub.raw_json else {}
+            except Exception:
+                meta = {}
+            raw_text = extract_text_from_pdf(pdf_bytes)
+            found_uid = extract_uid_from_text(raw_text) if raw_text else None
+            found_old_uid = extract_old_uid_from_text(raw_text) if raw_text else None
+            found_canton = extract_canton_from_text(raw_text) if raw_text else None
+            _finalize_row(pub_id, meta, found_uid, found_old_uid, found_canton)
+
+        db.commit()
+        if progress_cb:
+            progress_cb(done, total_candidates, stats)
+
+    # ── Mode A — one PDF per affected day, entries matched back by pub_number ────
+    for day_idx, (day_str, entries) in enumerate(mode_a.items()):
+        if abort_cb:
+            abort_cb()
+        try:
+            pdf_bytes = fetch_daily_pdf_bytes(day_str)
+        except Exception as exc:  # noqa: BLE001
+            stats["errors"].append(f"[{day_str}] PDF fetch failed: {exc}")
+            pdf_bytes = None
+
+        stats["mode_a_days_refetched"] += 1
+
+        parsed_by_number: dict[str, dict] = {}
+        if pdf_bytes:
+            raw_text = extract_text_from_pdf(pdf_bytes)
+            if raw_text:
+                try:
+                    day_entries = parse_bulk_hr_entries(raw_text, day_str)
+                    parsed_by_number = {e["pub_number"]: e for e in day_entries}
+                except Exception as exc:  # noqa: BLE001
+                    stats["errors"].append(f"[{day_str}] parse_bulk_hr_entries failed: {exc}")
+
+        for pub_id, pub_number in entries:
+            if abort_cb:
+                abort_cb()
+            pub = db.get(SogcPublication, pub_id)
+            if pub is None:
+                continue
+            try:
+                meta = json.loads(pub.raw_json) if pub.raw_json else {}
+            except Exception:
+                meta = {}
+
+            entry = parsed_by_number.get(pub_number) if pub_number else None
+            found_old_uid = normalize_old_hr_number(entry.get("ch_number")) if entry else None
+            if not found_old_uid and entry and entry.get("text"):
+                found_old_uid = extract_old_uid_from_text(entry["text"])
+            found_canton = entry.get("canton") if entry else None
+            _finalize_row(pub_id, meta, None, found_old_uid, found_canton)
+
+        db.commit()
+        if progress_cb:
+            progress_cb(done, total_candidates, stats)
+
+        if day_idx < len(mode_a) - 1:
+            time.sleep(request_delay)
 
     return stats

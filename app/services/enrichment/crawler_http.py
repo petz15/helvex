@@ -5,19 +5,21 @@ rendering, sets CrawlResult.needs_playwright=True and returns without pages.
 """
 from __future__ import annotations
 
-import asyncio
-import ipaddress
 import logging
-import socket
+from urllib.parse import urljoin, urlparse
 
 import httpx
 
 from app.services.platform import s3_client
 from app.services.enrichment.crawler_common import (
     ACCEPT_LANGUAGE,
+    BOUNDED_ACCEPT_ENCODING,
     MAX_PAGE_BYTES,
+    MAX_RAW_BYTES,
     CrawlResult,
+    DecompressionBombError,
     PageResult,
+    classify_all_urls,
     classify_urls_by_path,
     client_hint_headers,
     count_media,
@@ -30,16 +32,22 @@ from app.services.enrichment.crawler_common import (
     parse_soup,
     pick_browser_profile,
     rate_limit,
+    read_bounded_body,
+    resolve_is_public,
+    ssrf_request_guard as _ssrf_request_guard,
 )
 
 logger = logging.getLogger(__name__)
 
 # Sec-Fetch-* headers signal a real top-level browser navigation.
 # Their absence is a bot indicator that Cloudflare and similar services check.
+# Accept-Encoding is intentionally narrower than a real browser's (no br/zstd) —
+# see BOUNDED_ACCEPT_ENCODING: those codecs' Python bindings can't be bounded
+# per-call, so we don't invite them.
 _BASE_HEADERS: dict[str, str] = {
     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
     "Accept-Language": ACCEPT_LANGUAGE,
-    "Accept-Encoding": "gzip, deflate, br, zstd",
+    "Accept-Encoding": BOUNDED_ACCEPT_ENCODING,
     "Cache-Control": "max-age=0",
     "Upgrade-Insecure-Requests": "1",
     "Sec-Fetch-Dest": "document",
@@ -60,43 +68,6 @@ def _make_headers(company_id: int) -> dict[str, str]:
     }
 
 
-def _ip_blocked(ip_str: str) -> bool:
-    """True if an address must not be crawled (internal / metadata / non-routable)."""
-    try:
-        ip = ipaddress.ip_address(ip_str)
-    except ValueError:
-        return True  # unparseable → block
-    return bool(
-        ip.is_private or ip.is_loopback or ip.is_link_local  # 169.254.169.254 cloud metadata is link-local
-        or ip.is_reserved or ip.is_multicast or ip.is_unspecified
-    )
-
-
-async def _ssrf_request_guard(request: httpx.Request) -> None:
-    """SSRF guard — blocks crawler requests (and redirect hops, since httpx runs
-    request hooks per hop) to non-public addresses. The crawler fetches URLs from
-    external search results and follows redirects, so without this a crawled or
-    redirected URL pointing at localhost / an internal service / the cloud
-    metadata endpoint (169.254.169.254) would be fetched server-side.
-    """
-    url = request.url
-    if url.scheme not in ("http", "https"):
-        raise httpx.RequestError(f"SSRF guard: blocked scheme {url.scheme!r}", request=request)
-    host = url.host
-    if not host:
-        raise httpx.RequestError("SSRF guard: request has no host", request=request)
-    try:
-        loop = asyncio.get_running_loop()
-        infos = await loop.run_in_executor(None, socket.getaddrinfo, host, None)
-    except OSError as exc:
-        raise httpx.RequestError(f"SSRF guard: cannot resolve {host}", request=request) from exc
-    for info in infos:
-        ip_str = info[4][0]
-        if _ip_blocked(ip_str):
-            logger.warning("crawler.ssrf_blocked host=%s ip=%s url=%s", host, ip_str, str(url)[:120])
-            raise httpx.RequestError(f"SSRF guard: {host} resolves to non-public {ip_str}", request=request)
-
-
 def _client(headers: dict[str, str], verify_ssl: bool = True) -> httpx.AsyncClient:
     # http2=True so the TLS/ALPN profile looks like a browser (HTTP/1.1-only
     # clients are a bot signal). Falls back to HTTP/1.1 transparently if the
@@ -110,6 +81,9 @@ def _client(headers: dict[str, str], verify_ssl: bool = True) -> httpx.AsyncClie
         return httpx.AsyncClient(headers=headers, max_redirects=5, verify=verify_ssl, event_hooks=hooks)
 
 
+_CURL_MAX_REDIRECTS = 5
+
+
 async def _fetch_curl_impersonate(
     company_id: int,
     url: str,
@@ -120,25 +94,67 @@ async def _fetch_curl_impersonate(
     httpx's TLS fingerprint is flagged by Cloudflare/Akamai regardless of headers.
     Used only as a fallback when the httpx fetch was bot-blocked, before escalating
     to Playwright. Returns None if curl_cffi is unavailable or the fetch fails.
+
+    Security notes (this path has no equivalent to httpx's per-hop event hook,
+    since curl_cffi/libcurl follows redirects internally in C code with no
+    interception point):
+      - allow_redirects=False here; we resolve+SSRF-check and re-issue each hop
+        ourselves, so a redirect to an internal address is refused just like
+        the primary httpx fetch (crawler_http._ssrf_request_guard).
+      - accept_encoding drops br (libcurl decodes it transparently in C with no
+        way for us to bound a single decompress() call's output — the
+        BOUNDED_ACCEPT_ENCODING codecs (gzip/deflate) are only genuinely bounded
+        on the primary httpx path; here we additionally cap cumulative bytes
+        read, which is a weaker but still real mitigation for this fallback tier.
     """
     try:
         from curl_cffi.requests import AsyncSession
     except ImportError:
         return None
     profile = pick_browser_profile(company_id)
+    next_url = url
     try:
-        await rate_limit(url, rate_limit_delay)
         async with AsyncSession() as s:
-            resp = await s.get(
-                url,
-                impersonate=profile.impersonate,
-                headers={"Accept-Language": ACCEPT_LANGUAGE},
-                timeout=15,
-                allow_redirects=True,
-                verify=False,  # Swiss SME sites commonly have bad certs
-            )
-            body = resp.content[:MAX_PAGE_BYTES]
-            return resp.status_code, str(resp.url), dict(resp.headers), body
+            for _ in range(_CURL_MAX_REDIRECTS):
+                host = urlparse(next_url).hostname
+                if not host or not await resolve_is_public(host):
+                    logger.warning("crawler.ssrf_blocked(curl_cffi) host=%s url=%s", host, next_url[:120])
+                    return None
+
+                await rate_limit(next_url, rate_limit_delay)
+                resp = await s.get(
+                    next_url,
+                    impersonate=profile.impersonate,
+                    headers={"Accept-Language": ACCEPT_LANGUAGE},
+                    accept_encoding=BOUNDED_ACCEPT_ENCODING,
+                    timeout=15,
+                    allow_redirects=False,
+                    verify=False,  # Swiss SME sites commonly have bad certs
+                    stream=True,
+                )
+
+                if resp.status_code in (301, 302, 303, 307, 308):
+                    location = resp.headers.get("location")
+                    await resp.aclose()
+                    if not location:
+                        return None
+                    next_url = urljoin(next_url, location)
+                    continue
+
+                cl = int(resp.headers.get("content-length", 0) or 0)
+                if cl > MAX_RAW_BYTES:
+                    await resp.aclose()
+                    return resp.status_code, str(resp.url), dict(resp.headers), b""
+
+                body = bytearray()
+                async for chunk in resp.aiter_content():
+                    body.extend(chunk)
+                    if len(body) >= MAX_PAGE_BYTES:
+                        break
+                final_url, status, headers = str(resp.url), resp.status_code, dict(resp.headers)
+                await resp.aclose()
+                return status, final_url, headers, bytes(body[:MAX_PAGE_BYTES])
+            return None  # too many redirects
     except Exception as exc:  # noqa: BLE001
         logger.debug("curl_cffi impersonation fetch failed for %s: %s", url, exc)
         return None
@@ -151,26 +167,24 @@ async def _fetch(
 ) -> tuple[int, str, dict, bytes]:
     """Fetch URL with rate limiting. Returns (status, final_url, headers, body).
 
-    Uses streaming so decompression is capped at MAX_PAGE_BYTES — a gzip bomb
-    (tiny compressed payload that expands to GBs) would fill memory before the
-    slice if we used resp.content directly.
+    Decodes the body ourselves via read_bounded_body rather than trusting
+    httpx's automatic decoder, which has no output-size bound and can be
+    forced to materialize gigabytes from a small crafted response (a
+    decompression / "zip" bomb) before any size check here would run.
     """
     await rate_limit(url, rate_limit_delay)
     async with client.stream("GET", url, follow_redirects=True, timeout=12) as resp:
-        # Reject before downloading if Content-Length already exceeds limit
+        # Reject before downloading if Content-Length (raw, on-the-wire size)
+        # already exceeds the raw cap — cheap early-out for huge declared bodies.
         cl = int(resp.headers.get("content-length", 0) or 0)
-        if cl > MAX_PAGE_BYTES:
+        if cl > MAX_RAW_BYTES:
             logger.debug("Skipping oversized response (%d bytes declared) for %s", cl, url)
             return resp.status_code, str(resp.url), dict(resp.headers), b""
-        chunks: list[bytes] = []
-        total = 0
-        async for chunk in resp.aiter_bytes(chunk_size=65_536):
-            chunks.append(chunk)
-            total += len(chunk)
-            if total >= MAX_PAGE_BYTES:
-                logger.debug("Capped streaming response at %d bytes for %s", MAX_PAGE_BYTES, url)
-                break
-        body = b"".join(chunks)[:MAX_PAGE_BYTES]
+        try:
+            body = await read_bounded_body(resp)
+        except DecompressionBombError as exc:
+            logger.warning("crawler.bounded_decode_refused url=%s reason=%s", url, exc)
+            body = b""
     return resp.status_code, str(resp.url), dict(resp.headers), body
 
 
@@ -270,6 +284,10 @@ async def crawl_company_http(
         overview = await discover_site_overview(url, user_agent=headers["User-Agent"])
         if overview.crawl_delay:
             effective_delay = max(rate_limit_delay, overview.crawl_delay)
+        if overview.urls:
+            # Full site inventory — independent of crawl success/failure below,
+            # since it only needs the sitemap, not a successful fetch.
+            result.inventory = classify_all_urls(overview.urls, url)
 
     async with _client(headers) as client:
         # ── Homepage ──────────────────────────────────────────────────────

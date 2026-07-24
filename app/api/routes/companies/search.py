@@ -13,6 +13,8 @@ from app.database import get_db
 from app.models.user import User
 from app.schemas.company import CompanyRead
 
+from app.crud import company_search_result as csr_crud
+
 from app.api.routes.companies._shared import _overlay
 
 router = APIRouter()
@@ -120,7 +122,7 @@ def get_demo_company(db: Session = Depends(get_db)):
     company = crud.get_company_by_uid(db, _DEMO_UID)
     if not company:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Demo company not found")
-    demo = _overlay(company, None)
+    demo = _overlay(company, None, csr_crud.get_search_result(db, company.id))
     return demo.model_copy(update={
         "review_status": None,
         "contact_status": None,

@@ -83,7 +83,6 @@ from app.crud.org_company_state import (
     get_or_create_org_company_state,
     get_org_company_state,
     update_org_company_state,
-    update_org_google_results,
 )
 from app.crud.user_company_state import (
     get_or_create_user_company_state,
@@ -272,7 +271,6 @@ __all__ = [
     "get_org_company_state",
     "get_or_create_org_company_state",
     "update_org_company_state",
-    "update_org_google_results",
     # user company state overlay
     "get_user_company_state",
     "get_or_create_user_company_state",

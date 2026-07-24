@@ -12,6 +12,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session, joinedload
 
 from app import crud
+from app.crud import company_search_result as csr_crud
 from app.crud import crawler as crawler_crud
 from app.auth import get_current_user, require_superadmin
 from app.services.jobs.rate_limit import check_rate_limit
@@ -19,7 +20,6 @@ from app.database import get_db
 from app.models.organization import Organization
 from app.models.company_url_candidate import CompanyUrlCandidate
 from app.models.company_web_extract import CompanyWebExtract
-from app.models.company_web_page import CompanyWebPage
 from app.models.simap_award_vendor import SimapAwardVendor
 from app.models.user import User
 from app.schemas.company import CompanyCreate, CompanyRead, CompanyUpdate, GoogleSearchResult
@@ -34,6 +34,7 @@ from app.services.billing.tiers import has_feature
 from app.api.routes.companies._shared import (
     _ORG_FIELDS,
     _apply_web_results_gate,
+    _bulk_scores,
     _clear_noga_cache,
     _overlay,
 )
@@ -107,7 +108,9 @@ def get_company(
         meta={"name": db_company.name},
     )
     db.commit()
-    result = _overlay(db_company, org_state)
+    search_result = csr_crud.get_search_result(db, company_id)
+    score = _bulk_scores(db, [company_id], current_user.org_id, current_user.id).get(company_id)
+    result = _overlay(db_company, org_state, search_result, score)
     result = result.model_copy(update={"notes": [NoteRead.model_validate(n) for n in scoped_notes]})
 
     parent_company_id: int | None = None
@@ -137,7 +140,7 @@ def get_company(
     # manual "Find website") takes priority automatically.
     if (
         parent_company is not None
-        and db_company.website_checked_at is None
+        and (search_result is None or search_result.searched_at is None)
         and parent_company.website_url
         and is_branch_office(db_company)
     ):
@@ -270,7 +273,8 @@ def update_company(
     )
     db.commit()
     org_state_final = crud.get_org_company_state(db, org_id=current_user.org_id, company_id=company_id) if current_user.org_id else None
-    return _overlay(db_company, org_state_final)
+    score_final = _bulk_scores(db, [company_id], current_user.org_id, current_user.id).get(company_id)
+    return _overlay(db_company, org_state_final, csr_crud.get_search_result(db, company_id), score_final)
 
 
 @router.delete("/{company_id}", status_code=status.HTTP_204_NO_CONTENT, summary="Delete company")
@@ -366,16 +370,10 @@ def google_search_for_company(
         _refund_failed_search()
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
 
-    # Search succeeded and was billed — parse stored results defensively (a corrupt
-    # blob yields an empty list, never a refund).
-    db.refresh(db_company)
-    raw = db_company.google_search_results_raw or "[]"
-    try:
-        stored = json.loads(raw)
-        if not isinstance(stored, list):
-            stored = []
-    except (ValueError, TypeError):
-        stored = []
+    # Search succeeded and was billed — read stored results defensively (a
+    # missing/corrupt row yields an empty list, never a refund).
+    search_result = csr_crud.get_search_result(db, company_id)
+    stored = search_result.results_raw if search_result and isinstance(search_result.results_raw, list) else []
 
     return [
         GoogleSearchResult(
@@ -396,8 +394,8 @@ def get_serp_analysis(
 ):
     """Return a structured SERP snapshot derived from stored Google search data.
 
-    Parses google_search_results_raw (organic position) and google_search_full_raw
-    (ads/local pack counts) without making any new API calls.
+    Reads results_raw (organic position) and full_raw (ads/local pack counts)
+    from company_search_results without making any new API calls.
     """
     from datetime import datetime, timezone
     from urllib.parse import urlparse
@@ -415,41 +413,35 @@ def get_serp_analysis(
         except Exception:
             return ""
 
-    # Parse organic results (each has a `position` field = 0-based Google rank)
-    organic_results: list[dict] = []
-    if db_company.google_search_results_raw:
-        try:
-            parsed = json.loads(db_company.google_search_results_raw)
-            if isinstance(parsed, list):
-                organic_results = parsed
-        except (json.JSONDecodeError, TypeError):
-            pass
+    search_result = csr_crud.get_search_result(db, company_id)
+
+    # Organic results (each has a `position` field = 0-based Google rank)
+    organic_results: list[dict] = (
+        search_result.results_raw if search_result and isinstance(search_result.results_raw, list) else []
+    )
 
     # Sort by original Google rank; results without `position` go to end
     has_positions = any(r.get("position") is not None for r in organic_results)
     organic_by_rank = sorted(organic_results, key=lambda r: r.get("position", 9999)) if has_positions else organic_results
 
-    # Parse full raw for ads and SERP features
+    # Full raw for ads and SERP features
     ads_count = 0
     ads_list: list[dict] = []
     has_local_pack = False
     local_count = 0
     has_knowledge_graph = False
 
-    if db_company.google_search_full_raw:
-        try:
-            full = json.loads(db_company.google_search_full_raw)
-            ads = full.get("ads") or full.get("paid_results") or []
-            if isinstance(ads, list):
-                ads_count = len(ads)
-                ads_list = [{"title": a.get("title", ""), "link": a.get("link", "")} for a in ads[:5]]
-            local = full.get("places") or full.get("local_results") or []
-            if isinstance(local, list):
-                has_local_pack = bool(local)
-                local_count = len(local)
-            has_knowledge_graph = bool(full.get("knowledgeGraph") or full.get("knowledge_graph"))
-        except (json.JSONDecodeError, TypeError):
-            pass
+    full = search_result.full_raw if search_result and isinstance(search_result.full_raw, dict) else None
+    if full:
+        ads = full.get("ads") or full.get("paid_results") or []
+        if isinstance(ads, list):
+            ads_count = len(ads)
+            ads_list = [{"title": a.get("title", ""), "link": a.get("link", "")} for a in ads[:5]]
+        local = full.get("places") or full.get("local_results") or []
+        if isinstance(local, list):
+            has_local_pack = bool(local)
+            local_count = len(local)
+        has_knowledge_graph = bool(full.get("knowledgeGraph") or full.get("knowledge_graph"))
 
     # Find company URL's organic position
     company_url = db_company.website_url
@@ -471,8 +463,8 @@ def get_serp_analysis(
             })
 
     search_query: str | None = None
-    if db_company.google_search_params and isinstance(db_company.google_search_params, dict):
-        search_query = db_company.google_search_params.get("q")
+    if search_result and isinstance(search_result.params, dict):
+        search_query = search_result.params.get("q")
 
     seo_score = compute_seo_visibility_score(
         organic_position,
@@ -497,7 +489,7 @@ def get_serp_analysis(
         "has_knowledge_graph": has_knowledge_graph,
         "organic_above": organic_above,
         "seo_visibility_score": seo_score,
-        "searched_at": db_company.website_checked_at.isoformat() if db_company.website_checked_at else None,
+        "searched_at": search_result.searched_at.isoformat() if search_result and search_result.searched_at else None,
     }
 
 
@@ -573,18 +565,15 @@ def select_company_website(
     if not db_company:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Company not found")
 
-    if not db_company.google_search_results_raw:
+    search_result = csr_crud.get_search_result(db, company_id)
+    if not search_result or not search_result.results_raw:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="No stored Google results for this company")
 
     wanted = (body.link or "").strip()
     if not wanted:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="link is required")
 
-    try:
-        stored = json.loads(db_company.google_search_results_raw)
-    except Exception as exc:
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)) from exc
-
+    stored = search_result.results_raw
     match: dict | None = next((r for r in stored if (r.get("link") or "").strip() == wanted), None)
     if match is None:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Selected link not found in stored results")
@@ -741,20 +730,22 @@ def get_company_web_extract(
             "uid_matches_zefix": (web_uid == zefix_uid) if (web_uid and zefix_uid) else None,
             "name_address_verified": bool(extract.name_address_verified),
             "persons": extract.persons or [],
+            "persons_struct": extract.persons_struct or [],
             "languages": extract.languages or [],
             "description": extract.description,
+            "about_text": extract.about_text,
             "service_keywords": extract.service_keywords or [],
+            "services_struct": extract.services_struct or [],
             "extraction_method": extract.extraction_method,
             "confidence": extract.confidence,
+            "evidence": extract.evidence or [],
+            "identity_category": extract.identity_category,
+            "identity_probability": extract.identity_probability,
             "page_count": extract.page_count,
             "extracted_at": extract.extracted_at.isoformat() if extract.extracted_at else None,
         }
 
-    pages = db.execute(
-        select(CompanyWebPage)
-        .where(CompanyWebPage.company_id == company_id)
-        .order_by(CompanyWebPage.page_type)
-    ).scalars().all()
+    pages = crawler_crud.get_page_inventory(db, company_id)
     pages_out = [
         {
             "page_type": p.page_type,
@@ -767,6 +758,8 @@ def get_company_web_extract(
             "video_count": p.video_count,
             "has_contact_form": p.has_contact_form,
             "has_html": p.s3_key_html is not None,
+            "crawled": p.crawled,
+            "discovered_via": p.discovered_via,
             "crawled_at": p.crawled_at.isoformat() if p.crawled_at else None,
         }
         for p in pages
@@ -812,6 +805,7 @@ def get_all_web_extracts(
             "uid_matches_zefix": ex.uid_matches_zefix,
             "name_address_verified": bool(ex.name_address_verified),
             "confidence": ex.confidence,
+            "identity_category": ex.identity_category,
             "extraction_method": ex.extraction_method,
             "page_count": ex.page_count,
             "review_flag": ex.review_flag,

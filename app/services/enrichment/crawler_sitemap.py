@@ -16,6 +16,13 @@ from urllib.parse import urljoin, urlparse
 
 import httpx
 
+from app.services.enrichment.crawler_common import (
+    BOUNDED_ACCEPT_ENCODING,
+    DecompressionBombError,
+    read_bounded_body,
+    ssrf_request_guard,
+)
+
 logger = logging.getLogger(__name__)
 
 _LOC_RE = re.compile(r"<loc>\s*([^<\s]+)\s*</loc>", re.IGNORECASE)
@@ -24,6 +31,7 @@ _CRAWL_DELAY_RE = re.compile(r"^\s*crawl-delay:\s*([0-9.]+)", re.IGNORECASE | re
 
 _MAX_URLS = 300
 _MAX_SITEMAPS = 5  # cap how many sitemap files we fetch per domain
+_MAX_TEXT_BYTES = 2_000_000  # cap decoded robots.txt/sitemap.xml body size
 
 
 @dataclass
@@ -38,12 +46,22 @@ def _origin(url: str) -> str:
 
 
 async def _get_text(client: httpx.AsyncClient, url: str) -> str | None:
+    """Fetch and decode a text resource, bounded against decompression bombs.
+
+    Reads via the same bounded-decode path as the page crawler (read_bounded_body)
+    instead of resp.text, which would fully decode the body (unbounded — a
+    pathological gzip'd robots.txt/sitemap.xml could expand to gigabytes)
+    before we ever got to truncate it.
+    """
     try:
-        resp = await client.get(url, follow_redirects=True, timeout=8)
-        if resp.status_code >= 400:
-            return None
-        # Cap body to avoid pathological sitemaps eating memory.
-        return resp.text[:2_000_000]
+        async with client.stream("GET", url, follow_redirects=True, timeout=8) as resp:
+            if resp.status_code >= 400:
+                return None
+            try:
+                body = await read_bounded_body(resp, cap=_MAX_TEXT_BYTES)
+            except DecompressionBombError:
+                return None
+        return body.decode("utf-8", errors="replace")
     except Exception:  # noqa: BLE001
         return None
 
@@ -63,11 +81,21 @@ async def discover_site_overview(
     if not origin.startswith("http"):
         return overview
 
-    headers = {"User-Agent": user_agent, "Accept": "text/plain,application/xml,*/*"}
+    headers = {
+        "User-Agent": user_agent,
+        "Accept": "text/plain,application/xml,*/*",
+        # No br/zstd — see BOUNDED_ACCEPT_ENCODING (their Python bindings can't
+        # bound a single decompress() call's output, unlike gzip/deflate).
+        "Accept-Encoding": BOUNDED_ACCEPT_ENCODING,
+    }
     sitemap_urls: list[str] = []
 
     try:
-        async with httpx.AsyncClient(headers=headers, verify=False) as client:
+        # SSRF guard on every request (incl. redirects, since httpx runs hooks
+        # per hop) — robots.txt/sitemap.xml URLs are derived from a crawled
+        # site and can redirect anywhere, including internal addresses.
+        hooks = {"request": [ssrf_request_guard]}
+        async with httpx.AsyncClient(headers=headers, verify=False, event_hooks=hooks) as client:
             # ── robots.txt ────────────────────────────────────────────────
             robots = await _get_text(client, urljoin(origin + "/", "robots.txt"))
             if robots:

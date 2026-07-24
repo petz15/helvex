@@ -181,7 +181,11 @@ def test_google_search_route(client):
     company_id = _create_company(client)
 
     def _mock_enrich(db, company, *, num=10):
-        company.google_search_results_raw = json.dumps([{"title": "Test AG", "link": "https://test-ag.ch"}])
+        from app.crud import company_search_result as csr_crud
+        csr_crud.upsert_search_result(
+            db, company.id,
+            results_raw=[{"title": "Test AG", "link": "https://test-ag.ch"}],
+        )
         company.website_url = "https://test-ag.ch"
         db.add(company)
         db.commit()

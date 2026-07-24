@@ -8,6 +8,7 @@ from __future__ import annotations
 import logging
 
 import os
+from urllib.parse import urlparse
 
 from app.services.platform import s3_client
 from app.services.enrichment.crawler_common import (
@@ -15,6 +16,7 @@ from app.services.enrichment.crawler_common import (
     MAX_PAGE_BYTES,
     CrawlResult,
     PageResult,
+    classify_all_urls,
     classify_urls_by_path,
     count_media,
     count_words,
@@ -25,6 +27,7 @@ from app.services.enrichment.crawler_common import (
     parse_soup,
     pick_user_agent,
     rate_limit,
+    resolve_is_public,
 )
 
 logger = logging.getLogger(__name__)
@@ -42,12 +45,30 @@ _CHANNEL = os.environ.get("PLAYWRIGHT_CHANNEL", "").strip() or None
 _BLOCKED_RESOURCE_TYPES = frozenset({"image", "media", "font"})
 
 
-async def _block_heavy_resources(route) -> None:
+async def _guard_and_filter_resources(route) -> None:
+    """Runs on every network request the page (or Playwright's own navigation)
+    makes. Two defenses combined:
+
+      - drops image/media/font (we only need DOM + text — also reduces the
+        automation footprint / speeds up the crawl, the original purpose).
+      - SSRF guard: unlike the httpx crawler, this one renders real JS, so a
+        malicious site's own script (fetch/XHR/further navigation) could
+        otherwise pivot to internal services from within the crawler's
+        network namespace. Every request — including the top-level navigation
+        to the crawled URL itself — is resolved and refused if it points at a
+        private/loopback/link-local/metadata/reserved address.
+    """
     try:
-        if route.request.resource_type in _BLOCKED_RESOURCE_TYPES:
+        request = route.request
+        if request.resource_type in _BLOCKED_RESOURCE_TYPES:
             await route.abort()
-        else:
-            await route.continue_()
+            return
+        host = urlparse(request.url).hostname
+        if not host or not await resolve_is_public(host):
+            logger.warning("crawler.ssrf_blocked(playwright) host=%s url=%s", host, request.url[:120])
+            await route.abort()
+            return
+        await route.continue_()
     except Exception:  # noqa: BLE001
         # If the route was already handled/closed, ignore.
         pass
@@ -154,6 +175,27 @@ async def _dismiss_consent_banner(page) -> None:
         pass  # Never let banner handling break the crawl
 
 
+async def _get_bounded_html(page, cap: int = MAX_PAGE_BYTES) -> str:
+    """Serialize the DOM, bounded against a pathologically huge document.
+
+    page.content() serializes the *entire* DOM over the CDP protocol — a
+    malicious page whose JS generates millions of nodes ("DOM bomb") would
+    transfer the whole multi-hundred-MB string before we ever got to truncate
+    it. Checking the length first (a cheap evaluate() round-trip returning
+    just a number) lets us pull only a bounded prefix over the wire instead.
+    """
+    try:
+        size = await page.evaluate("() => document.documentElement.outerHTML.length")
+    except Exception:  # noqa: BLE001
+        return await page.content()
+    if isinstance(size, (int, float)) and size > cap * 4:  # chars vs bytes — generous margin
+        try:
+            return await page.evaluate(f"() => document.documentElement.outerHTML.slice(0, {cap})")
+        except Exception:  # noqa: BLE001
+            pass
+    return await page.content()
+
+
 async def _fetch_page(
     page,
     url: str,
@@ -173,7 +215,7 @@ async def _fetch_page(
     status = response.status if response else 0
     final_url = page.url
     headers = dict(response.headers) if response else {}
-    html_str = await page.content()
+    html_str = await _get_bounded_html(page)
     html_bytes = html_str.encode("utf-8", errors="replace")[:MAX_PAGE_BYTES]
     return status, final_url, headers, html_bytes
 
@@ -254,6 +296,8 @@ async def crawl_company_playwright(
         overview = await discover_site_overview(url, user_agent=pick_user_agent(company_id))
         if overview.crawl_delay:
             effective_delay = max(rate_limit_delay, overview.crawl_delay)
+        if overview.urls:
+            result.inventory = classify_all_urls(overview.urls, url)
 
     # Stealth().use_async() wraps async_playwright and auto-applies stealth
     # patches to every new page/context before any navigation — replaces the
@@ -278,8 +322,9 @@ async def crawl_company_playwright(
             # small Swiss company sites). Equivalent to httpx verify=False.
             ignore_https_errors=True,
         )
-        # Drop images/fonts/media — we only need DOM + text.
-        await context.route("**/*", _block_heavy_resources)
+        # Drop images/fonts/media, and SSRF-guard every request the page's own
+        # JS might make (see _guard_and_filter_resources).
+        await context.route("**/*", _guard_and_filter_resources)
         page = await context.new_page()
 
         try:

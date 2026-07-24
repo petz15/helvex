@@ -1015,10 +1015,6 @@ export interface OrgCompanyState {
   contact_name: string | null;
   contact_email: string | null;
   contact_phone: string | null;
-  website_url: string | null;
-  web_score: number | null;
-  social_media_only: boolean | null;
-  website_checked_at: string | null;
 }
 
 export interface UserCompanyState {
@@ -1040,7 +1036,7 @@ export async function fetchOrgCompanyState(orgId: number, companyId: number): Pr
 export async function updateOrgCompanyState(
   orgId: number,
   companyId: number,
-  data: Partial<Omit<OrgCompanyState, "org_id" | "company_id" | "website_url" | "web_score" | "social_media_only" | "website_checked_at">>,
+  data: Partial<Omit<OrgCompanyState, "org_id" | "company_id">>,
 ): Promise<OrgCompanyState> {
   const res = await fetch(orgPath(orgId, `/companies/${companyId}/state`), {
     method: "PATCH",

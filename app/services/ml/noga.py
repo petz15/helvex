@@ -566,6 +566,34 @@ def _classify_v2_token_fallback(
     )
 
 
+def _web_content_text(db: Session, company_id: int, *, max_chars: int = 600) -> str | None:
+    """Supplementary business-activity text from the company's crawled website.
+
+    Combines about_text (longest cleaned about/homepage paragraph) with the
+    first few service/product titles — real-world descriptions of what the
+    company does, which meaningfully helps classification for companies whose
+    Zefix purpose text is thin or boilerplate-heavy (see ROADMAP "NOGA v2" pain
+    points). Appended after purpose, never replacing it. Best-effort: returns
+    None on any lookup failure rather than blocking classification.
+    """
+    try:
+        from app.crud import crawler as crawler_crud
+        extract = crawler_crud.get_best_web_extract(db, company_id)
+    except Exception:  # noqa: BLE001
+        return None
+    if extract is None:
+        return None
+    parts: list[str] = []
+    if extract.about_text:
+        parts.append(extract.about_text)
+    if extract.services_struct:
+        titles = [s.get("title", "") for s in extract.services_struct[:5] if s.get("title")]
+        if titles:
+            parts.append(" ".join(titles))
+    combined = " ".join(parts).strip()
+    return combined[:max_chars] or None
+
+
 def classify_company_noga(
     db: Session,
     company: Company,
@@ -574,8 +602,10 @@ def classify_company_noga(
 ) -> NogaClassification | None:
     """V2 NOGA classifier: global embedding search → peak → constrained descent.
 
-    Embed text: stripped purpose only (no purpose_keywords, no tfidf_cluster).
-    Token-only fallback runs when no embedding candidate reaches _EMB_MIN_CONFIDENCE.
+    Embed text: stripped purpose, supplemented with crawled website content
+    when available (see _web_content_text) — no purpose_keywords, no
+    tfidf_cluster. Token-only fallback runs when no embedding candidate
+    reaches _EMB_MIN_CONFIDENCE.
 
     If _vec_out is provided, the query embedding vector is appended to it when the
     embedding path is taken — allowing callers to store it without re-computing.
@@ -591,10 +621,13 @@ def classify_company_noga(
     boilerplate_patterns = crud.get_active_boilerplate_patterns(db)
     stripped_purpose = _strip_purpose_boilerplate(company.purpose or "", boilerplate_patterns)
 
+    web_text = _web_content_text(db, company.id)
+    classify_text = f"{stripped_purpose} {web_text}".strip() if web_text else stripped_purpose
+
     idx = _load_noga_index()
 
-    if stripped_purpose and _has_noga_embeddings(db):
-        result = _classify_v2_with_embedding(db, idx, stripped_purpose, lang, _vec_out=_vec_out)
+    if classify_text and _has_noga_embeddings(db):
+        result = _classify_v2_with_embedding(db, idx, classify_text, lang, _vec_out=_vec_out)
         if result is not None:
             return result
         logger.debug(
@@ -602,7 +635,7 @@ def classify_company_noga(
             company.uid,
         )
 
-    return _classify_v2_token_fallback(idx, company.name, stripped_purpose, lang)
+    return _classify_v2_token_fallback(idx, company.name, classify_text, lang)
 
 
 # ---------------------------------------------------------------------------

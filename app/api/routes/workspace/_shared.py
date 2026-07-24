@@ -40,10 +40,6 @@ class OrgStateOut(BaseModel):
     contact_name: str | None
     contact_email: str | None
     contact_phone: str | None
-    website_url: str | None
-    web_score: float | None
-    social_media_only: bool | None
-    website_checked_at: str | None
 
     model_config = {"from_attributes": True}
 
@@ -216,27 +212,13 @@ _NOTIF_KEYS = {
 
 
 def _get_user_org_setting(db: Session, user_id: int, org_id: int, key: str) -> str | None:
-    from app.models.user_org_setting import UserOrgSetting
-    row = db.query(UserOrgSetting).filter(
-        UserOrgSetting.user_id == user_id,
-        UserOrgSetting.org_id == org_id,
-        UserOrgSetting.key == key,
-    ).first()
-    return row.value if row else None
+    from app.crud.user_org_setting import get_user_org_setting
+    return get_user_org_setting(db, user_id, org_id, key)
 
 
 def _set_user_org_setting(db: Session, user_id: int, org_id: int, key: str, value: str) -> None:
-    from app.models.user_org_setting import UserOrgSetting
-    row = db.query(UserOrgSetting).filter(
-        UserOrgSetting.user_id == user_id,
-        UserOrgSetting.org_id == org_id,
-        UserOrgSetting.key == key,
-    ).first()
-    if row is None:
-        db.add(UserOrgSetting(user_id=user_id, org_id=org_id, key=key, value=value))
-    else:
-        row.value = value
-    db.commit()
+    from app.crud.user_org_setting import set_user_org_setting
+    set_user_org_setting(db, user_id, org_id, key, value)
 
 
 def _resolve_notif(db: Session, key: str, user_id: int, org_id: int) -> bool:

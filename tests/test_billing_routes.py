@@ -953,8 +953,9 @@ def test_web_search_success_charges_without_refund(client, db):
     db.add(Company(id=5001, uid="CHE-222.222.222", name="OK AG")); db.commit()
 
     def _ok(db_, company, *, num=10):
-        company.google_search_results_raw = json.dumps([{"title": "x", "link": "https://x.ch"}])
-        db_.add(company); db_.commit()
+        from app.crud import company_search_result as csr_crud
+        csr_crud.upsert_search_result(db_, company.id, results_raw=[{"title": "x", "link": "https://x.ch"}])
+        db_.commit()
 
     with patch("app.api.routes.companies.detail.enrich_company_website", side_effect=_ok):
         resp = client.get("/api/v1/companies/5001/google-search")

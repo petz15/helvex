@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import logging
 import time
 from datetime import datetime, timezone
@@ -14,8 +13,10 @@ from sqlalchemy.orm import Session
 from app import crud
 from app.clients.google_search_client import search_website
 from app.config import settings
+from app.crud import company_search_result as csr_crud
 from app.crud import crawler as crawler_crud
 from app.models.company import Company
+from app.models.company_search_result import CompanySearchResult
 from app.schemas.company import CompanyUpdate
 from app.services.ml._pipeline_utils import _is_control_signal_exception
 from app.services.scoring.scoring import (
@@ -109,17 +110,13 @@ def _organic_results_from_full_raw(full_raw: dict) -> list[dict]:
     return full_raw.get("organic_results") or full_raw.get("organic") or []
 
 
-def _enrich_stored_results(stored: list[dict], full_raw_json: str | None) -> list[dict]:
+def _enrich_stored_results(stored: list[dict], full_raw: dict | None) -> list[dict]:
     """Re-enrich stored {title,link,snippet,score} rows from full_raw if available.
 
     Used by rescore paths so old stored results get the same enrichment as new ones.
     Falls back to stored results unchanged when full_raw is absent.
     """
-    if not full_raw_json:
-        return stored
-    try:
-        full_raw = json.loads(full_raw_json)
-    except (ValueError, TypeError):
+    if not full_raw:
         return stored
     organics = _organic_results_from_full_raw(full_raw)
     if not organics:
@@ -285,16 +282,11 @@ def enrich_company_website(db: Session, company: Company, *, num: int = 10) -> t
     )
 
     if not results:
-        crud.update_company(
-            db,
-            company,
-            CompanyUpdate(
-                website_checked_at=now,
-                google_search_results_raw=json.dumps([], ensure_ascii=False),
-                google_search_full_raw=json.dumps(full_raw, ensure_ascii=False) if full_raw is not None else None,
-                google_search_params=search_params,
-            ),
+        csr_crud.upsert_search_result(
+            db, company.id,
+            provider=provider, results_raw=[], full_raw=full_raw, params=search_params, searched_at=now,
         )
+        db.commit()
         return False, None
 
     if full_raw is not None:
@@ -304,6 +296,10 @@ def enrich_company_website(db: Session, company: Company, *, num: int = 10) -> t
     scored = _score_google_results_for_company(db, company, raw_results)
     fields = _search_verdict_fields(db, scored)
 
+    csr_crud.upsert_search_result(
+        db, company.id,
+        provider=provider, results_raw=scored, full_raw=full_raw, params=search_params, searched_at=now,
+    )
     crud.update_company(
         db,
         company,
@@ -313,10 +309,6 @@ def enrich_company_website(db: Session, company: Company, *, num: int = 10) -> t
             social_media_only=fields["social_media_only"],
             website_status=fields["website_status"],
             website_count=fields["website_count"],
-            website_checked_at=now,
-            google_search_results_raw=json.dumps(scored, ensure_ascii=False),
-            google_search_full_raw=json.dumps(full_raw, ensure_ascii=False) if full_raw is not None else None,
-            google_search_params=search_params,
             combined_score=Company.compute_combined_score(
                 company.ai_score, company.noga_confidence, company.purpose_keywords,
                 web_score=fields["web_score"],
@@ -328,24 +320,25 @@ def enrich_company_website(db: Session, company: Company, *, num: int = 10) -> t
 
 
 def rescore_from_stored_results(db: Session, company: Company) -> bool:
-    """Re-score web_score from already-stored google_search_results_raw.
+    """Re-score web_score from already-stored search results (company_search_results).
 
     Called after a Zefix detail refresh so freshly fetched purpose / municipality /
     canton data is applied to the existing Google results without a new API call.
     Returns True if scoring was applied and saved, False otherwise.
     """
-    if not company.google_search_results_raw:
+    search_result = csr_crud.get_search_result(db, company.id)
+    if search_result is None or not search_result.results_raw:
         return False
-    try:
-        stored: list[dict] = json.loads(company.google_search_results_raw)
-    except (json.JSONDecodeError, TypeError):
-        return False
-    if not stored:
-        return False
+    stored = search_result.results_raw
 
-    stored = _enrich_stored_results(stored, getattr(company, "google_search_full_raw", None))
+    stored = _enrich_stored_results(stored, search_result.full_raw)
     rescored = _score_google_results_for_company(db, company, stored)
     fields = _search_verdict_fields(db, rescored)
+    csr_crud.upsert_search_result(
+        db, company.id,
+        provider=search_result.provider, results_raw=rescored,
+        full_raw=search_result.full_raw, params=search_result.params, searched_at=search_result.searched_at,
+    )
     crud.update_company(
         db,
         company,
@@ -355,7 +348,6 @@ def rescore_from_stored_results(db: Session, company: Company) -> bool:
             social_media_only=fields["social_media_only"],
             website_status=fields["website_status"],
             website_count=fields["website_count"],
-            google_search_results_raw=json.dumps(rescored, ensure_ascii=False),
             combined_score=Company.compute_combined_score(
                 company.ai_score, company.noga_confidence, company.purpose_keywords,
                 web_score=fields["web_score"],
@@ -375,22 +367,22 @@ def recalculate_google_scores(
     """Recompute web_score from stored Google results — only for companies that have them.
 
     Filters at the DB level so the 700k rows without search results are never loaded.
-    Ordered by id (stable) so OFFSET-based resume is consistent between restarts.
+    Ordered by company_id (stable) so OFFSET-based resume is consistent between restarts.
     """
     stats: dict[str, Any] = {"updated": 0, "skipped": 0, "errors": []}
 
-    total: int = (
-        db.query(func.count(Company.id))
-        .filter(Company.google_search_results_raw.isnot(None))
-        .scalar() or 0
+    base_query = (
+        db.query(CompanySearchResult, Company)
+        .join(Company, Company.id == CompanySearchResult.company_id)
+        .filter(CompanySearchResult.results_raw.isnot(None))
     )
+    total: int = base_query.with_entities(func.count(CompanySearchResult.company_id)).scalar() or 0
     offset = max(0, min(resume_from, total))
 
     while True:
         batch = (
-            db.query(Company)
-            .filter(Company.google_search_results_raw.isnot(None))
-            .order_by(Company.id.asc())
+            base_query
+            .order_by(CompanySearchResult.company_id.asc())
             .offset(offset)
             .limit(batch_size)
             .all()
@@ -398,16 +390,14 @@ def recalculate_google_scores(
         if not batch:
             break
 
-        for company in batch:
+        for search_result, company in batch:
             try:
-                raw_results = json.loads(company.google_search_results_raw)
+                raw_results = search_result.results_raw
                 if not isinstance(raw_results, list) or not raw_results:
                     stats["skipped"] += 1
                     continue
 
-                raw_results = _enrich_stored_results(
-                    raw_results, getattr(company, "google_search_full_raw", None)
-                )
+                raw_results = _enrich_stored_results(raw_results, search_result.full_raw)
                 rescored = _score_google_results_for_company(db, company, raw_results)
                 if not rescored:
                     stats["skipped"] += 1
@@ -419,16 +409,14 @@ def recalculate_google_scores(
                 company.social_media_only = fields["social_media_only"]
                 company.website_status = fields["website_status"]
                 company.website_count = fields["website_count"]
-                company.google_search_results_raw = json.dumps(rescored, ensure_ascii=False)
+                search_result.results_raw = rescored
                 company.combined_score = Company.compute_combined_score(
                     company.ai_score, company.noga_confidence, company.purpose_keywords,
                     web_score=company.web_score,
                 )
 
                 organic_position = find_organic_position(rescored, company.website_url)
-                ads_count, has_local_pack, has_knowledge_graph = extract_serp_features(
-                    getattr(company, "google_search_full_raw", None)
-                )
+                ads_count, has_local_pack, has_knowledge_graph = extract_serp_features(search_result.full_raw)
                 company.seo_visibility_score = compute_seo_visibility_score(
                     organic_position,
                     ads_count=ads_count,
@@ -466,8 +454,8 @@ def _enrich_one_concurrent(company_id: int) -> tuple[int, bool, str | None, Exce
         enriched, url = enrich_company_website(thread_db, company)
         if enriched:
             try:
-                thread_db.refresh(company)
-                raw = company.google_search_results_raw
+                search_result = csr_crud.get_search_result(thread_db, company_id)
+                raw = search_result.results_raw if search_result else None
                 candidates = crawler_crud.parse_google_results_raw(raw) if raw else []
                 if candidates:
                     crawler_crud.upsert_url_candidates(thread_db, company_id, candidates)
@@ -568,11 +556,15 @@ def run_batch_collect(
     )
 
     if only_missing_website:
-        # "Missing website" = never searched. Use website_checked_at (not website_url)
-        # because the verdict now gates website_url to NULL for companies that were
-        # checked but have no genuine site (social_only/directory_only/none) — keying
-        # off website_url would re-enrich those forever.
-        query = query.filter(Company.website_checked_at.is_(None))
+        # "Missing website" = never searched. Anti-join against company_search_results
+        # (not Company.website_url) because the verdict gates website_url to NULL for
+        # companies that were checked but have no genuine site (social_only/
+        # directory_only/none) — keying off website_url would re-enrich those forever.
+        query = query.filter(
+            ~db.query(CompanySearchResult.company_id)
+            .filter(CompanySearchResult.company_id == Company.id)
+            .exists()
+        )
 
     # ── Status / registration ────────────────────────────────────────────────
     if active_only:
@@ -707,7 +699,8 @@ def run_batch_collect(
         planned_ids = [
             row[0] for row in
             query.with_entities(Company.id)
-            .order_by(Company.website_checked_at.asc().nulls_first(), Company.id.desc())
+            .outerjoin(CompanySearchResult, CompanySearchResult.company_id == Company.id)
+            .order_by(CompanySearchResult.searched_at.asc().nulls_first(), Company.id.desc())
             .limit(keep_n).all()
         ]
     elif order_by == "created_asc":
@@ -840,7 +833,8 @@ def run_batch_collect(
                     if enriched:
                         stats["google_enriched"] += 1
                         try:
-                            raw = current.google_search_results_raw
+                            search_result = csr_crud.get_search_result(db, current.id)
+                            raw = search_result.results_raw if search_result else None
                             candidates = crawler_crud.parse_google_results_raw(raw) if raw else []
                             if candidates:
                                 crawler_crud.upsert_url_candidates(db, current.id, candidates)

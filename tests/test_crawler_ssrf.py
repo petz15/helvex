@@ -5,7 +5,8 @@ import asyncio
 import httpx
 import pytest
 
-from app.services.enrichment.crawler_http import _ip_blocked, _ssrf_request_guard
+from app.services.enrichment.crawler_common import _ip_blocked
+from app.services.enrichment.crawler_http import _ssrf_request_guard
 
 
 def _run(coro):

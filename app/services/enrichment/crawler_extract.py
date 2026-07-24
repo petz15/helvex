@@ -65,6 +65,27 @@ _PERSON_RE = re.compile(
     r"(?:\s+[A-ZÄÖÜ][a-zäöüàâéèêëïîôûç'\-]+){1,2})"
 )
 
+# Standalone name shape (no role label needed) — used on team pages where the
+# layout is usually "Name" then "Role" as separate heading/caption text, the
+# reverse order _PERSON_RE matches.
+_NAME_SHAPE_RE = re.compile(
+    r"^(?:Dr\.?\s+|Prof\.?\s+)?[A-ZÄÖÜ][a-zäöüàâéèêëïîôûç]+"
+    r"(?:\s+[A-ZÄÖÜ][a-zäöüàâéèêëïîôûç'\-]+){1,2}$"
+)
+
+# Role/title keywords (DE/FR/IT/EN) recognised as a caption under a team-page name.
+_ROLE_KEYWORDS = frozenset([
+    "geschäftsführer", "geschäftsführerin", "inhaber", "inhaberin", "gründer",
+    "gründerin", "eigentümer", "eigentümerin", "direktor", "direktorin",
+    "geschäftsleitung", "verwaltungsrat", "verwaltungsratspräsident", "leiter",
+    "leiterin", "teamleiter", "teamleiterin", "vorstand", "mitarbeiter",
+    "mitarbeiterin", "partner", "ceo", "cfo", "cto", "coo", "head of", "manager",
+    "président", "présidente", "directeur", "directrice", "administrateur",
+    "gérant", "gérante", "fondateur", "fondatrice", "responsable", "associé",
+    "amministratore", "titolare", "direttore", "direttrice", "fondatore",
+    "responsabile", "founder", "owner", "managing director", "chief",
+])
+
 _WORD_RE = re.compile(r"[A-Za-zÀ-ÿ]{4,}")
 _TOKEN_RE = re.compile(r"[A-Za-zÀ-ÿ]{3,}")
 
@@ -151,6 +172,10 @@ class PageSignals:
     languages: set[str] = field(default_factory=set)
     title: str = ""
     text: str = ""
+    # Structured team-page entries: [{"name": ..., "role": ... | None}]
+    persons_struct: list[dict] = field(default_factory=list)
+    # Structured services/products-page entries: [{"title": ..., "summary": ...}]
+    services_struct: list[dict] = field(default_factory=list)
 
 
 # ── Field extractors ─────────────────────────────────────────────────────────
@@ -515,10 +540,97 @@ def _contact_page_text(html_str: str) -> str:
     return soup.get_text(separator="\n", strip=True)[:10000]
 
 
+_HEADING_TAGS = ("h1", "h2", "h3", "h4")
+_MAX_STRUCT_ENTRIES = 20
+
+
+def _following_text(tag, max_chars: int) -> str:
+    """Short text immediately after `tag` in document order — the caption/summary
+    a heading is usually paired with (role under a name, blurb under a title).
+    Stops at the next heading. Best-effort: never raises."""
+    parts: list[str] = []
+    total = 0
+    for sib in tag.find_all_next():
+        if sib.name in _HEADING_TAGS:
+            break
+        text = sib.get_text(" ", strip=True) if hasattr(sib, "get_text") else ""
+        if text:
+            parts.append(text)
+            total += len(text)
+        if total >= max_chars or len(parts) >= 6:
+            break
+    return " ".join(parts)[:max_chars]
+
+
+def _extract_team_struct(soup) -> list[dict]:
+    """Parse a team page into [{"name", "role"}] entries.
+
+    Heuristic: headings whose text has the shape of a person's name (2–4
+    Title-Case tokens, no digits) are treated as team-member entries; the
+    short text immediately following is checked for a role keyword. Entries
+    with a name but no recognisable role are still kept (role=None) — the
+    name itself is the useful signal.
+    """
+    out: list[dict] = []
+    seen: set[str] = set()
+    for tag in soup.find_all(_HEADING_TAGS):
+        name = re.sub(r"\s+", " ", tag.get_text(" ", strip=True)).strip(" -–")
+        if not (5 <= len(name) <= 60) or not _NAME_SHAPE_RE.match(name):
+            continue
+        key = name.lower()
+        if key in seen:
+            continue
+        caption = _following_text(tag, 150)
+        role = caption if caption and any(k in caption.lower() for k in _ROLE_KEYWORDS) else None
+        seen.add(key)
+        out.append({"name": name, "role": role})
+        if len(out) >= _MAX_STRUCT_ENTRIES:
+            break
+    return out
+
+
+# Headings that are clearly nav/legal boilerplate, not a service/product entry.
+_NON_SERVICE_HEADINGS = frozenset([
+    "kontakt", "contact", "contatto", "impressum", "datenschutz", "privacy",
+    "newsletter", "menu", "navigation", "footer", "cookies", "team",
+])
+
+
+def _extract_services_struct(soup) -> list[dict]:
+    """Parse a services/products page into [{"title", "summary"}] entries.
+
+    Heuristic: each heading + the short text immediately following it (up to
+    the next heading) forms one entry. Skips headings that look like nav/legal
+    boilerplate rather than an actual service/product name.
+    """
+    out: list[dict] = []
+    seen: set[str] = set()
+    for tag in soup.find_all(_HEADING_TAGS):
+        title = re.sub(r"\s+", " ", tag.get_text(" ", strip=True)).strip(" -–")
+        if not (3 <= len(title) <= 150):
+            continue
+        if title.lower() in _NON_SERVICE_HEADINGS:
+            continue
+        key = title.lower()
+        if key in seen:
+            continue
+        summary = _following_text(tag, 400)
+        if len(summary) < 20:  # too thin to be a real service description
+            continue
+        seen.add(key)
+        out.append({"title": title, "summary": summary})
+        if len(out) >= _MAX_STRUCT_ENTRIES:
+            break
+    return out
+
+
 # ── Public API ───────────────────────────────────────────────────────────────
 
 # Pages whose main text we mine for keywords / address / persons.
-_TEXT_PAGES = frozenset({"", "homepage", "about", "services", "impressum", "contact"})
+_TEXT_PAGES = frozenset({"", "homepage", "about", "services", "team", "impressum", "contact"})
+# Page types that additionally get structured (not just plain-text) extraction.
+_TEAM_STRUCT_PAGES = frozenset({"team"})
+_SERVICES_STRUCT_PAGES = frozenset({"services", "products"})
 
 
 def extract_page(html: bytes, page_type: str = "") -> PageSignals:
@@ -548,6 +660,10 @@ def extract_page(html: bytes, page_type: str = "") -> PageSignals:
             out.text = _contact_page_text(html_str)
         else:
             out.text = _main_text(html_str)
+    if page_type in _TEAM_STRUCT_PAGES:
+        out.persons_struct = _extract_team_struct(soup)
+    if page_type in _SERVICES_STRUCT_PAGES:
+        out.services_struct = _extract_services_struct(soup)
     return out
 
 
@@ -693,6 +809,50 @@ def _norm_uid(raw: str | None) -> str | None:
     return raw.replace(" ", "").replace(".", "").replace("-", "").upper() or None
 
 
+def _build_evidence_ledger(
+    *,
+    uid: str | None,
+    uid_matches: bool | None,
+    addr_full_match: bool,
+    addr_partial_match: bool,
+    zone_name_conf: float,
+    base: float,
+) -> list[dict]:
+    """Typed evidence signals behind the confidence score below — persisted
+    alongside it, not yet used to drive any decision (see the web-pipeline
+    holistic rework's identity phase, which replaces the confidence ladder
+    with a categorical verdict computed from this same ledger).
+
+    Each entry: {dimension, direction: "+"|"-", strength, value}. Deliberately
+    mirrors the four layers of the confidence formula below — this restructures
+    existing signals into an inspectable form; it does not add new detection
+    (no is_marketplace/is_parked/phone_matches_reg yet — those need new
+    heuristics, left as a follow-up for the categorical-verdict phase).
+    """
+    evidence: list[dict] = []
+    if uid_matches is True:
+        evidence.append({"dimension": "uid_matches_zefix", "direction": "+", "strength": "decisive", "value": uid})
+    elif uid_matches is False:
+        evidence.append({"dimension": "uid_mismatch", "direction": "-", "strength": "strong", "value": uid})
+
+    if addr_full_match:
+        evidence.append({"dimension": "address_match", "direction": "+", "strength": "strong", "value": "full"})
+    elif addr_partial_match:
+        evidence.append({"dimension": "address_match", "direction": "+", "strength": "medium", "value": "partial"})
+
+    if zone_name_conf >= 0.55:
+        evidence.append({"dimension": "zone_name_match", "direction": "+", "strength": "strong", "value": round(zone_name_conf, 3)})
+    elif zone_name_conf >= 0.30:
+        evidence.append({"dimension": "zone_name_match", "direction": "+", "strength": "medium", "value": round(zone_name_conf, 3)})
+    elif zone_name_conf > 0:
+        evidence.append({"dimension": "zone_name_match", "direction": "+", "strength": "weak", "value": round(zone_name_conf, 3)})
+
+    if base > 0:
+        evidence.append({"dimension": "signal_coverage", "direction": "+", "strength": "weak", "value": round(base, 3)})
+
+    return evidence
+
+
 def resolve_company_extract(
     pages: list[tuple[str, bytes]],
     *,
@@ -722,7 +882,12 @@ def resolve_company_extract(
     titles: list[str] = []
     kw_text_parts: list[str] = []
     impressum_text_parts: list[str] = []
+    about_text_parts: list[str] = []
     all_text_parts: list[str] = []
+    persons_struct: list[dict] = []
+    persons_struct_seen: set[str] = set()
+    services_struct: list[dict] = []
+    services_struct_seen: set[str] = set()
 
     for page_type, html in pages:
         try:
@@ -743,14 +908,30 @@ def resolve_company_extract(
             address = sig.address
         if sig.description and (description is None or page_type == "homepage"):
             description = sig.description
+        for p in sig.persons_struct:
+            key = p["name"].lower()
+            if key not in persons_struct_seen:
+                persons_struct_seen.add(key)
+                persons_struct.append(p)
+        for s in sig.services_struct:
+            key = s["title"].lower()
+            if key not in services_struct_seen:
+                services_struct_seen.add(key)
+                services_struct.append(s)
         if sig.text:
             all_text_parts.append(sig.text)
             if page_type in ("", "homepage", "about", "services"):
                 kw_text_parts.append(sig.text)
-            if page_type in ("impressum", "contact", "about"):
+            if page_type in ("impressum", "contact", "about", "team"):
                 impressum_text_parts.append(sig.text)
+            if page_type in ("", "homepage", "about"):
+                about_text_parts.append(sig.text)
 
     impressum_text = "\n".join(impressum_text_parts) or "\n".join(all_text_parts)
+    # Best single "about" text for the ML feed (NOGA/AI) — longest candidate,
+    # since concatenating differently-sourced pages tends to be noisier than
+    # one coherent page's text. Capped well above description's 1000 chars.
+    about_text = max(about_text_parts, key=len)[:2000] if about_text_parts else None
 
     # Address fallback: parse Swiss postal address from impressum text.
     if address is None:
@@ -824,7 +1005,12 @@ def resolve_company_extract(
     signals_present = sum(bool(x) for x in (
         emails, phones, socials, uid, address, description, service_keywords, persons,
     )) + (1 if has_impressum_page else 0)
-    if signals_present == 0 and uid_matches is None:
+    # Structured team/services content doesn't feed the identity confidence math
+    # (kept unchanged here — see the web-pipeline holistic rework's identity
+    # phase for that), but a company with real content found should still get a
+    # persisted row rather than being silently dropped for lack of *identity* signals.
+    has_content = bool(persons_struct or services_struct or about_text)
+    if signals_present == 0 and uid_matches is None and not has_content:
         return {}
 
     # ── Confidence model (layered, additive) ─────────────────────────────────
@@ -840,6 +1026,12 @@ def resolve_company_extract(
     #   Layer 4 — signal coverage   (≤0.10 residual, diminishes as identity firms up)
     #
     base = min(1.0, signals_present / 7.0)
+
+    evidence = _build_evidence_ledger(
+        uid=uid, uid_matches=uid_matches,
+        addr_full_match=addr_full_match, addr_partial_match=addr_partial_match,
+        zone_name_conf=zone_name_conf, base=base,
+    )
 
     if uid_matches is True:
         # UID is near-proof — address and name add small incremental certainty.
@@ -897,10 +1089,14 @@ def resolve_company_extract(
         "name_address_verified": name_address_verified,
         "address": address,
         "persons": persons or None,
+        "persons_struct": persons_struct[:_MAX_STRUCT_ENTRIES] or None,
         "languages": sorted(languages) or None,
         "description": description,
+        "about_text": about_text,
         "service_keywords": service_keywords or None,
+        "services_struct": services_struct[:_MAX_STRUCT_ENTRIES] or None,
         "extraction_method": method,
         "confidence": confidence,
+        "evidence": evidence or None,
         "page_count": len(pages),
     }

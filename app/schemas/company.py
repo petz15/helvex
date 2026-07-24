@@ -94,11 +94,7 @@ class CompanyUpdate(BaseModel):
     purpose: str | None = None
     address: str | None = None
     website_url: str | None = None
-    website_checked_at: datetime | None = None
     zefix_raw: str | None = None
-    google_search_results_raw: str | None = None
-    google_search_full_raw: str | None = None
-    google_search_params: dict | None = None
     web_score: int | None = None
     social_media_only: bool | None = None
     website_status: str | None = None
@@ -165,8 +161,10 @@ class CompanyRead(CompanyBase):
     id: int
     purpose_language: str | None = None
     parent_company_id: int | None = None
+    # Sourced from company_search_results via the _overlay() merge — these are
+    # no longer attributes on the Company ORM object itself.
     website_checked_at: datetime | None = None
-    google_search_results_raw: str | None = None
+    google_search_results_raw: list[dict] | None = None
     web_score: int | None = None
     review_status: str | None = None
     contact_status: str | None = None

@@ -41,6 +41,42 @@ NONE = "none"
 # Verdicts for which website_url should hold a real own-domain link.
 POSITIVE = frozenset({VERIFIED, CONFIRMED, LIKELY})
 
+# ── Per-candidate identity categories (web-pipeline holistic rework, Layer B) ──
+# Categorical outcome for a SINGLE crawled candidate — replaces reasoning about
+# a bare confidence float with a labelled bucket. AMBIGUOUS and RELATED_ENTITY
+# are cross-candidate/cross-entity outcomes computed in compute_verdict, not here
+# (RELATED_ENTITY needs a parent/subsidiary graph lookup — not yet built).
+MATCH_UID = "MATCH_UID"
+MATCH_STRONG = "MATCH_STRONG"
+MATCH_WEAK = "MATCH_WEAK"
+MISMATCH = "MISMATCH"
+UNKNOWN = "UNKNOWN"
+
+
+def categorize_identity(
+    confidence: float | None,
+    uid_matches: bool | None,
+    has_evidence: bool,
+    thr: "Thresholds",
+) -> tuple[str, float]:
+    """Map one candidate's confidence + evidence into (category, probability).
+
+    probability is currently just `confidence` (the deterministic combine
+    already computed in resolve_company_extract) — a future trained model
+    replaces the combine step behind this same signature, per the identity
+    rework's staging plan (ledger-first, GBM later).
+    """
+    conf = confidence or 0.0
+    if uid_matches is False:
+        return MISMATCH, conf
+    if uid_matches is True:
+        return MATCH_UID, conf
+    if not has_evidence:
+        return UNKNOWN, conf
+    if conf >= thr.confirmed_conf:
+        return MATCH_STRONG, conf
+    return MATCH_WEAK, conf
+
 
 @dataclass
 class Thresholds:
@@ -78,6 +114,11 @@ class Verdict:
     website_url: str | None
     website_count: int  # distinct genuine websites (>=2 ⇒ multiple)
     web_score: int | None  # crawl-confidence-based (0–100) or floored search score for negatives
+    # True when ≥2 distinct-domain candidates tied on comparable strong evidence
+    # at the winning tier — website_url was still auto-picked (never left blank
+    # pending review), via the tiebreak in compute_verdict, but the pick was a
+    # judgment call worth surfacing rather than hiding behind a confident-looking url.
+    ambiguous: bool = False
 
 
 # ── Search-only (provisional) ────────────────────────────────────────────────
@@ -148,9 +189,14 @@ def _extract_tier(
     boost (up to +0.15) that can lift a borderline extract from likely → confirmed.
     """
     conf = confidence or 0.0
-    if uid_matches_zefix is True or name_address_verified:
+    # == not `is`: raw-SQL rows (get_web_extracts_with_urls uses text()) can come
+    # back as 0/1 ints rather than the bool singleton on some drivers/dialects
+    # (observed with SQLite; Postgres/psycopg2 already returns real bools) — `is`
+    # would silently misclassify those as the None branch. `==` preserves the
+    # None/True/False tri-state (None == True and None == False are both False).
+    if uid_matches_zefix == True or name_address_verified:  # noqa: E712
         return VERIFIED
-    if uid_matches_zefix is False:
+    if uid_matches_zefix == False:  # noqa: E712
         return None  # site belongs to another company — never counts as this company's
     # Purpose-semantic boost: linear 0 → +0.15 over sim range [0.30, 1.00].
     if purpose_sim is not None and purpose_sim > 0.30:
@@ -162,6 +208,34 @@ def _extract_tier(
     return None
 
 
+_AMBIGUITY_MARGIN = 0.05  # confidence gap within which two distinct domains "tie"
+
+
+def _pick_best_candidate(
+    candidates: list[tuple[str, float, bool, str]],
+) -> tuple[str, float, bool]:
+    """Auto-pick among tied candidates for one tier.
+
+    candidates: (root_domain, confidence, name_address_verified, url).
+    Tiebreak (independent of raw confidence, applied first): prefer
+    name_address_verified — corroborating evidence beyond the score itself —
+    then fall back to highest confidence. This is a partial implementation of
+    the identity rework's 4-step tiebreak (own-verified-socials-link and
+    UID-bearing-within-tier aren't differentiable with data we currently
+    collect; registry-phone doesn't exist yet — see ROADMAP).
+
+    Returns (url, confidence, is_ambiguous) — is_ambiguous is True when ≥2
+    distinct domains are within _AMBIGUITY_MARGIN of the winner.
+    """
+    best = max(candidates, key=lambda c: (c[2], c[1]))
+    distinct_domains = {c[0] for c in candidates}
+    is_ambiguous = len(distinct_domains) >= 2 and any(
+        d != best[0] and (best[1] - c) <= _AMBIGUITY_MARGIN
+        for d, c, _, _ in candidates
+    )
+    return best[3], best[1], is_ambiguous
+
+
 def compute_verdict(
     db: Session,
     company_id: int,
@@ -171,15 +245,20 @@ def compute_verdict(
 ) -> Verdict:
     """Authoritative verdict combining crawl extracts with the search fallback.
 
-    Crawl extracts win when present; otherwise falls back to the search verdict.
+    Crawl extracts win when present; the search-only fallback is used ONLY when
+    the company hasn't been crawled at all — never after a crawl found evidence
+    that simply didn't clear any tier, which would otherwise let a weak
+    pre-crawl snippet score smuggle in a "confirmed"/"likely" verdict despite
+    the crawl actively failing to confirm it (demoted to crawl-ordering only,
+    per the identity rework — see website_status.py's module docstring).
     """
     from app.crud import crawler as crawler_crud
     rows = crawler_crud.get_web_extracts_with_urls(db, company_id)
 
-    verified: list[tuple[str, float]] = []   # (root_domain, confidence)
-    confirmed: list[tuple[str, float]] = []
-    likely: list[tuple[str, float]] = []
-    best_url_by_tier: dict[str, tuple[float, str]] = {}
+    # (root_domain, confidence, name_address_verified, url) per tier.
+    verified: list[tuple[str, float, bool, str]] = []
+    confirmed: list[tuple[str, float, bool, str]] = []
+    likely: list[tuple[str, float, bool, str]] = []
 
     for row in rows:
         url = row.url or ""
@@ -191,38 +270,38 @@ def compute_verdict(
         if tier is None:
             continue
         conf = row.confidence or 0.0
+        entry = (dom, conf, bool(row.name_address_verified), url)
         if tier == VERIFIED:
-            verified.append((dom, conf))
+            verified.append(entry)
         elif tier == CONFIRMED:
-            confirmed.append((dom, conf))
+            confirmed.append(entry)
         elif tier == LIKELY:
-            likely.append((dom, conf))
-        # Track best url per tier (highest confidence) for website_url selection.
-        prev = best_url_by_tier.get(tier)
-        if prev is None or conf > prev[0]:
-            best_url_by_tier[tier] = (conf, url)
+            likely.append(entry)
 
     if verified or confirmed or likely:
         if verified:
-            status = VERIFIED
-            url = best_url_by_tier[VERIFIED][1]
-            best_conf = best_url_by_tier[VERIFIED][0]
+            status, winning = VERIFIED, verified
         elif confirmed:
-            status = CONFIRMED
-            url = best_url_by_tier[CONFIRMED][1]
-            best_conf = best_url_by_tier[CONFIRMED][0]
+            status, winning = CONFIRMED, confirmed
         else:
-            status = LIKELY
-            url = best_url_by_tier[LIKELY][1]
-            best_conf = best_url_by_tier[LIKELY][0]
-        strong_domains = {d for d, _ in verified} | {d for d, _ in confirmed}
+            status, winning = LIKELY, likely
+        url, best_conf, ambiguous = _pick_best_candidate(winning)
+
+        strong_domains = {d for d, *_ in verified} | {d for d, *_ in confirmed}
         if strong_domains:
             count = len(strong_domains)
         else:
-            count = len({d for d, _ in likely}) or 1
+            count = len({d for d, *_ in likely}) or 1
         # web_score driven by crawl confidence — more principled than the old ±delta.
         web_score = round(best_conf * 100)
-        return Verdict(status, url, count, web_score)
+        return Verdict(status, url, count, web_score, ambiguous=ambiguous)
 
-    # No usable crawl evidence — fall back to the search-only verdict.
+    if rows:
+        # A crawl was attempted and produced extract rows, but none cleared any
+        # tier (e.g. UID mismatches, or evidence too thin) — genuine negative
+        # evidence. Never fall back to the pre-crawl snippet score here: that
+        # would let a weak search-result guess overrule an actual crawl finding.
+        return Verdict(NONE, None, 0, 0)
+
+    # Never crawled — the search-only verdict is a legitimate provisional signal.
     return classify_search_results(scored_results, directory_domains, thr)

@@ -2,12 +2,19 @@
 from __future__ import annotations
 
 import asyncio
+import ipaddress
+import logging
 import re
+import socket
 import time
+import zlib
 from dataclasses import dataclass, field
+from typing import Any
 from urllib.parse import urljoin, urlparse
 
 from bs4 import BeautifulSoup
+
+logger = logging.getLogger(__name__)
 
 # ── Subpage keyword sets (DE / FR / IT / EN) ──────────────────────────────────
 
@@ -69,14 +76,91 @@ _SERVICES_KEYWORDS = frozenset([
     "what we do",
 ])
 
-# Priority order — determines fetch sequence when max_pages limits total pages.
+_TEAM_KEYWORDS = frozenset([
+    # DE
+    "team", "mitarbeiter", "unser team", "geschäftsleitung", "geschaeftsleitung",
+    "vorstand", "ansprechpartner",
+    # FR
+    "équipe", "equipe", "notre équipe", "notre equipe", "collaborateurs",
+    # IT
+    "il nostro team", "collaboratori", "management",
+    # EN
+    "our team", "people", "leadership", "meet the team",
+])
+
+_PRODUCTS_KEYWORDS = frozenset([
+    # DE
+    "produkte", "sortiment", "shop",
+    # FR
+    "produits", "boutique",
+    # IT
+    "prodotti", "negozio",
+    # EN
+    "products", "product", "catalog", "catalogue",
+])
+
+_REFERENCES_KEYWORDS = frozenset([
+    # DE
+    "referenzen", "projekte", "kunden", "fallstudien",
+    # FR
+    "références", "references", "projets", "clients",
+    # IT
+    "referenze", "progetti", "clienti",
+    # EN
+    "references", "portfolio", "case studies", "our clients", "projects",
+])
+
+_NEWS_KEYWORDS = frozenset([
+    # DE
+    "aktuelles", "neuigkeiten", "medien", "presse",
+    # FR
+    "actualités", "actualites", "médias", "medias", "presse",
+    # IT
+    "notizie", "novità", "novita", "media", "stampa",
+    # EN
+    "news", "blog", "press",
+])
+
+_JOBS_KEYWORDS = frozenset([
+    # DE
+    "karriere", "stellen", "offene stellen", "jobs",
+    # FR
+    "carrière", "carriere", "emplois", "offres d'emploi",
+    # IT
+    "carriera", "lavora con noi", "posizioni aperte",
+    # EN
+    "jobs", "careers", "join us", "open positions",
+])
+
+# Priority order — determines fetch sequence when max_pages limits total pages,
+# and classification order for the full sitemap page inventory (§Layer A).
 # impressum and privacy first because they carry legal/address/contact data.
 _SUBPAGE_PRIORITY: list[tuple[str, frozenset[str]]] = [
-    ("impressum", _IMPRESSUM_KEYWORDS),
-    ("privacy",   _PRIVACY_KEYWORDS),
-    ("contact",   _CONTACT_KEYWORDS),
-    ("about",     _ABOUT_KEYWORDS),
-    ("services",  _SERVICES_KEYWORDS),
+    ("impressum",  _IMPRESSUM_KEYWORDS),
+    ("privacy",    _PRIVACY_KEYWORDS),
+    ("contact",    _CONTACT_KEYWORDS),
+    ("about",      _ABOUT_KEYWORDS),
+    ("team",       _TEAM_KEYWORDS),
+    ("services",   _SERVICES_KEYWORDS),
+    ("products",   _PRODUCTS_KEYWORDS),
+    ("references", _REFERENCES_KEYWORDS),
+    ("news",       _NEWS_KEYWORDS),
+    ("jobs",       _JOBS_KEYWORDS),
+]
+
+# Types worth spending a crawl budget slot on (text-rich, identity/content signal).
+# news/jobs/products/references are inventoried but not fetched by default —
+# low signal-per-byte for identity/NOGA/AI use, high volume risk (e.g. paginated
+# job boards or catalogs). Fetch them later on demand from the profile UI.
+_FETCH_WORTHY_TYPES = frozenset({
+    "impressum", "privacy", "contact", "about", "team", "services",
+})
+
+# Fetch-selection uses only the fetch-worthy subset (still priority-ordered) so
+# raising the crawl budget later never starts spending it on job/news/product
+# listings. classify_all_urls (inventory) uses the full _SUBPAGE_PRIORITY instead.
+_FETCH_PRIORITY: list[tuple[str, frozenset[str]]] = [
+    (t, kw) for t, kw in _SUBPAGE_PRIORITY if t in _FETCH_WORTHY_TYPES
 ]
 
 # ── Browser profile pool (UA + matching client hints) ──────────────────────────
@@ -166,6 +250,160 @@ _JS_APP_ROOT = re.compile(
 # Pages larger than this are truncated before parsing/storing (prevents OOM).
 MAX_PAGE_BYTES: int = 5 * 1024 * 1024  # 5 MB
 
+# Hard cap on RAW (as-received-on-the-wire, possibly compressed) bytes read for
+# a single response — independent of MAX_PAGE_BYTES, which bounds the DECODED
+# size. Rejects pathologically large or slow transfers outright, regardless of
+# what they'd decompress to.
+MAX_RAW_BYTES: int = MAX_PAGE_BYTES * 20  # 100 MB
+
+# Raw bytes are fed to the decompressor in small increments so a single
+# malicious chunk can't force one huge decompress() call before we get a
+# chance to check the running total (see read_bounded_body).
+_RAW_READ_CHUNK: int = 8_192
+
+# Only encodings whose Python binding exposes a hard per-call OUTPUT size bound
+# (stdlib zlib's `max_length`) are accepted for the bounded-decode path — that
+# bound is what actually defeats a decompression ("zip") bomb, where a tiny
+# compressed body is crafted to expand to gigabytes. Real browsers also offer
+# br/zstd, but neither of the installed Python bindings (brotli, zstandard)
+# exposes a per-call output cap, so we deliberately don't advertise them in
+# BOUNDED_ACCEPT_ENCODING — a minor bot-fingerprint trade for airtight bounding.
+# A server that sends br/zstd anyway (ignoring our Accept-Encoding) is refused
+# (fail closed) rather than decoded unbounded.
+BOUNDED_ACCEPT_ENCODING: str = "gzip, deflate"
+
+
+class DecompressionBombError(Exception):
+    """Raised when a response's Content-Encoding can't be safely output-bounded."""
+
+
+def _make_bounded_decoder(content_encoding: str):
+    """Return an incremental zlib decompressor, or None for identity (no decoding).
+
+    Raises DecompressionBombError for any encoding we can't safely bound —
+    callers must treat that as a refused fetch, not fall back to unbounded decode.
+    """
+    enc = (content_encoding or "").split(";")[0].strip().lower()
+    if enc in ("", "identity"):
+        return None
+    if enc in ("gzip", "x-gzip"):
+        return zlib.decompressobj(zlib.MAX_WBITS | 16)
+    if enc == "deflate":
+        return zlib.decompressobj()
+    raise DecompressionBombError(f"refusing unbounded Content-Encoding: {enc!r}")
+
+
+async def read_bounded_body(
+    resp: Any,
+    *,
+    cap: int = MAX_PAGE_BYTES,
+    max_raw: int = MAX_RAW_BYTES,
+) -> bytes:
+    """Read an httpx streaming Response's body, decoding it ourselves with the
+    decoded output hard-capped at `cap` bytes — regardless of the server's
+    declared compression ratio. This is the actual zip-bomb defense: httpx's
+    own automatic decoder (used by aiter_bytes) calls decompress() with no
+    output-size bound, so a single crafted chunk can materialize gigabytes in
+    memory before any of our size checks run. Reading via aiter_raw (undecoded)
+    and decompressing ourselves in small increments with zlib's max_length lets
+    every single decompress() call be capped, so a decompression bomb can never
+    produce more than `cap` bytes in memory no matter the compression ratio.
+
+    Truncates (does not raise) on a merely oversized body or malformed/partial
+    compressed data. Raises DecompressionBombError only when the encoding
+    itself has no safe bound (see _make_bounded_decoder) — callers should treat
+    that the same as a fetch failure.
+    """
+    content_encoding = resp.headers.get("content-encoding", "")
+    decoder = _make_bounded_decoder(content_encoding)  # may raise DecompressionBombError
+
+    out = bytearray()
+    raw_total = 0
+    retried_raw_deflate = False
+    async for raw_chunk in resp.aiter_raw(chunk_size=_RAW_READ_CHUNK):
+        raw_total += len(raw_chunk)
+        if raw_total > max_raw:
+            logger.debug("Raw body exceeded %d bytes — aborting read", max_raw)
+            break
+        if decoder is None:
+            piece = raw_chunk
+        else:
+            remaining = cap - len(out)
+            if remaining <= 0:
+                break
+            try:
+                piece = decoder.decompress(raw_chunk, remaining)
+            except zlib.error:
+                # Some servers send raw deflate (no zlib header) despite
+                # Content-Encoding: deflate technically meaning zlib-wrapped.
+                if content_encoding.strip().lower() == "deflate" and not retried_raw_deflate:
+                    retried_raw_deflate = True
+                    decoder = zlib.decompressobj(-zlib.MAX_WBITS)
+                    try:
+                        piece = decoder.decompress(raw_chunk, remaining)
+                    except zlib.error:
+                        logger.debug("Malformed deflate body — truncating")
+                        break
+                else:
+                    logger.debug("Malformed compressed body (%s) — truncating", content_encoding)
+                    break
+        out.extend(piece)
+        if len(out) >= cap:
+            break
+    return bytes(out[:cap])
+
+
+def _ip_blocked(ip_str: str) -> bool:
+    """True if an address must not be crawled (internal / metadata / non-routable)."""
+    try:
+        ip = ipaddress.ip_address(ip_str)
+    except ValueError:
+        return True  # unparseable → block
+    return bool(
+        ip.is_private or ip.is_loopback or ip.is_link_local  # 169.254.169.254 cloud metadata is link-local
+        or ip.is_reserved or ip.is_multicast or ip.is_unspecified
+    )
+
+
+async def resolve_is_public(host: str) -> bool:
+    """SSRF guard core: resolve `host` and return False if any address it
+    resolves to is internal/private/metadata/reserved. Shared by the httpx
+    per-request hook (ssrf_request_guard) and any fetch path that can't use
+    httpx's event hooks (e.g. curl_cffi, which follows redirects inside libcurl
+    with no per-hop interception point of its own).
+    """
+    if not host:
+        return False
+    try:
+        loop = asyncio.get_running_loop()
+        infos = await loop.run_in_executor(None, socket.getaddrinfo, host, None)
+    except OSError:
+        return False
+    return not any(_ip_blocked(info[4][0]) for info in infos)
+
+
+async def ssrf_request_guard(request: Any) -> None:
+    """SSRF guard — blocks crawler requests (and redirect hops, since httpx runs
+    request hooks per hop) to non-public addresses. Every crawler fetch — page
+    content, robots.txt/sitemap.xml discovery — follows URLs harvested from
+    external sources and redirects, so without this a crawled/redirected URL
+    pointing at localhost / an internal service / the cloud metadata endpoint
+    (169.254.169.254) would be fetched server-side. Lives here (not in
+    crawler_http) so crawler_sitemap can use it too without a circular import
+    (crawler_http lazily imports crawler_sitemap inside a function body).
+
+    Pass as an httpx event hook: event_hooks={"request": [ssrf_request_guard]}.
+    """
+    import httpx
+
+    url = request.url
+    if url.scheme not in ("http", "https"):
+        raise httpx.RequestError(f"SSRF guard: blocked scheme {url.scheme!r}", request=request)
+    host = url.host
+    if not host or not await resolve_is_public(host):
+        logger.warning("crawler.ssrf_blocked host=%s url=%s", host, str(url)[:120])
+        raise httpx.RequestError(f"SSRF guard: {host!r} resolves to a non-public address", request=request)
+
 
 # ── Data classes ───────────────────────────────────────────────────────────────
 
@@ -193,6 +431,9 @@ class CrawlResult:
     failure_status: str | None = None
     failure_detail: str | None = None
     pages: list[PageResult] = field(default_factory=list)
+    # Full site inventory (page_type, url) from sitemap discovery — includes pages
+    # that were NOT fetched (beyond the crawl budget). See classify_all_urls.
+    inventory: list[tuple[str, str]] = field(default_factory=list)
 
 
 # ── Per-domain rate limiter ────────────────────────────────────────────────────
@@ -262,7 +503,8 @@ def find_subpage_links(
 ) -> dict[str, str]:
     """Return priority-ordered subpage URLs from nav/footer links.
 
-    Returns at most max_subpages entries in _SUBPAGE_PRIORITY order.
+    Returns at most max_subpages entries in _FETCH_PRIORITY order (only the
+    fetch-worthy types — see _FETCH_WORTHY_TYPES).
     Fragment-only links, cross-domain links, and duplicate URLs are excluded.
     """
     base_parsed = urlparse(base_url)
@@ -287,7 +529,7 @@ def find_subpage_links(
         if abs_no_fragment in seen_urls:
             continue
 
-        for page_type, keywords in _SUBPAGE_PRIORITY:
+        for page_type, keywords in _FETCH_PRIORITY:
             if page_type in type_to_url:
                 continue
             for kw in keywords:
@@ -311,9 +553,10 @@ def classify_urls_by_path(
 ) -> dict[str, str]:
     """Classify a flat URL list (e.g. from a sitemap) into subpage types by path.
 
-    Matches the same `_SUBPAGE_PRIORITY` keyword sets used for nav-link discovery,
-    but against the URL path only (no anchor text — there is none for sitemap URLs).
-    Used to fill subpage slots that homepage nav links didn't cover.
+    Matches the same `_FETCH_PRIORITY` keyword sets used for nav-link discovery
+    (fetch-worthy types only), against the URL path only (no anchor text — there
+    is none for sitemap URLs). Used to fill subpage slots that homepage nav links
+    didn't cover.
     """
     exclude = exclude_types or set()
     base_host = urlparse(base_url).netloc
@@ -324,7 +567,7 @@ def classify_urls_by_path(
         if parsed.netloc != base_host:
             continue
         path = parsed.path.lower()
-        for page_type, keywords in _SUBPAGE_PRIORITY:
+        for page_type, keywords in _FETCH_PRIORITY:
             if page_type in exclude or page_type in type_to_url:
                 continue
             # Compare against path segments; keywords may contain spaces, so also
@@ -337,6 +580,56 @@ def classify_urls_by_path(
             break
 
     return type_to_url
+
+
+# Hard cap on how many sitemap URLs get persisted as an inventory row per company.
+# Bounds table growth against pathological sitemaps (huge news/product catalogs)
+# — discover_site_overview already caps at 300 raw URLs; this caps what we keep.
+_MAX_INVENTORY_URLS = 60
+
+
+def classify_all_urls(
+    urls: list[str],
+    base_url: str,
+    *,
+    max_urls: int = _MAX_INVENTORY_URLS,
+) -> list[tuple[str, str]]:
+    """Classify every same-origin sitemap URL into a page_type for the site inventory.
+
+    Unlike classify_urls_by_path (which keeps only the first URL per type, to fill
+    a handful of crawl slots), this keeps every matching URL — the point is to show
+    what pages exist on the site, not just pick ones to fetch. Unmatched same-origin
+    URLs are classified "other". Order follows the input (sitemap) order; capped at
+    max_urls total to bound company_web_pages growth.
+
+    Returns a list of (page_type, url), de-duplicated by URL.
+    """
+    base_host = urlparse(base_url).netloc
+    out: list[tuple[str, str]] = []
+    seen: set[str] = set()
+
+    for url in urls:
+        parsed = urlparse(url)
+        if parsed.netloc != base_host:
+            continue
+        clean = parsed._replace(fragment="").geturl()
+        if clean in seen:
+            continue
+        seen.add(clean)
+
+        path = parsed.path.lower()
+        norm = path.replace("-", " ").replace("_", " ").replace("/", " ")
+        page_type = "other"
+        for candidate_type, keywords in _SUBPAGE_PRIORITY:
+            if any(kw in norm for kw in keywords):
+                page_type = candidate_type
+                break
+
+        out.append((page_type, clean))
+        if len(out) >= max_urls:
+            break
+
+    return out
 
 
 # ── Bot/JS detection ───────────────────────────────────────────────────────────

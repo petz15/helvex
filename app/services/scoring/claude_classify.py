@@ -214,6 +214,43 @@ def claude_classify_batch(
                 "review_count": row[5],
             })
 
+    # Pre-fetch crawled-website content (about_text + service titles) for all
+    # companies in this batch (one query) — supplements thin/boilerplate Zefix
+    # purpose text with what the company's own site actually says about itself.
+    # Reduced to best-per-company in Python (not SQL DISTINCT ON) so this stays
+    # portable to the SQLite test DB.
+    _web_text_by_company: dict[int, str] = {}
+    if _selected_ids:
+        from app.models.company_web_extract import CompanyWebExtract as _CompanyWebExtract
+        web_rows = (
+            db.query(
+                _CompanyWebExtract.company_id,
+                _CompanyWebExtract.about_text,
+                _CompanyWebExtract.services_struct,
+                _CompanyWebExtract.confidence,
+                _CompanyWebExtract.extracted_at,
+            )
+            .filter(_CompanyWebExtract.company_id.in_(_selected_ids))
+            .all()
+        )
+        _best_web_row: dict[int, tuple] = {}
+        for company_id, about_text, services_struct, confidence, extracted_at in web_rows:
+            if not about_text and not services_struct:
+                continue
+            rank = (confidence or 0.0, extracted_at)
+            if company_id not in _best_web_row or rank > _best_web_row[company_id][0]:
+                _best_web_row[company_id] = (rank, about_text, services_struct)
+        for company_id, (_, about_text, services_struct) in _best_web_row.items():
+            parts: list[str] = []
+            if about_text:
+                parts.append(about_text[:500])
+            if services_struct:
+                titles = [s.get("title", "") for s in services_struct[:5] if s.get("title")]
+                if titles:
+                    parts.append("Services: " + ", ".join(titles))
+            if parts:
+                _web_text_by_company[company_id] = " ".join(parts)
+
     def _build_user_text(company: Company) -> str:
         purpose = _strip_purpose_boilerplate(company.purpose or "", _boilerplate_patterns)
         if max_purpose_chars > 0 and len(purpose) > max_purpose_chars:
@@ -229,6 +266,9 @@ def claude_classify_batch(
             parts.append(f"Google score: {company.web_score} (0–100 confidence that the website belongs to this company)")
         if company.social_media_only:
             parts.append("Note: only social media presence found — no company website")
+        web_text = _web_text_by_company.get(company.id)
+        if web_text:
+            parts.append(f"Website content: {web_text}")
         dir_entries = _dir_data_by_company.get(company.id, [])
         if dir_entries:
             dir_lines = []

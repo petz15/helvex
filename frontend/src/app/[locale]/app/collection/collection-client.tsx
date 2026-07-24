@@ -414,6 +414,40 @@ export function CollectionClient() {
         </form>
       </Section>
 
+      <Section title="Backfill SHAB old-UID text extraction">
+        <form onSubmit={async e => {
+          e.preventDefault();
+          const fd = new FormData(e.currentTarget);
+          await submit("collection/backfill-shab-old-uid-extraction", {
+            batch_size: parseInt(fd.get("backfill_batch") as string) || 500,
+            pdf_workers: parseInt(fd.get("backfill_pdf_workers") as string) || 8,
+            request_delay: parseFloat(fd.get("backfill_request_delay") as string) || 0.5,
+          });
+        }} className="space-y-4">
+          <p className="text-sm text-slate-600 leading-relaxed">
+            Repairs publications whose <code>raw_json</code> never captured an identifier at all
+            (older/buggy extraction pass, or a transient PDF-parse failure) — these are invisible to{" "}
+            <strong>Resolve SHAB old-UID publications</strong> above, since there is nothing in them to
+            look up. Re-fetches only the affected PDFs (one per publication, or one per day for the
+            pre-2012 bulk format), re-runs the current extraction, and links what it can find locally.
+            <strong> No UID SOAP calls</strong> — safe to run alongside the UID imports and the resolve
+            job above.
+          </p>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <Field label="Batch size" hint="Publications scanned per DB batch/commit.">
+              <input name="backfill_batch" type="number" min={50} max={2000} defaultValue={500} className={cn(inputCls, "w-28")} />
+            </Field>
+            <Field label="PDF workers" hint="Concurrent PDF downloads for the post-2012 (Mode B) pass.">
+              <input name="backfill_pdf_workers" type="number" min={1} max={16} defaultValue={8} className={cn(inputCls, "w-24")} />
+            </Field>
+            <Field label="Day delay (seconds)" hint="Sleep between days in the pre-2012 (Mode A) bulk-PDF pass.">
+              <input name="backfill_request_delay" type="number" step="0.1" min="0" defaultValue={0.5} className={cn(inputCls, "w-28")} />
+            </Field>
+          </div>
+          <SubmitBtn loading={loading === "collection/backfill-shab-old-uid-extraction"} />
+        </form>
+      </Section>
+
       <GroupHeader label="Zefix Import" />
 
       <Section title="Bulk import from Zefix">

@@ -83,13 +83,21 @@ def _compute_dedup_key(job_type: str, org_id: int | None, params: dict) -> str |
     # web_crawl_http / web_crawl_playwright: claim_crawl_batch uses SELECT FOR UPDATE
     # SKIP LOCKED, so concurrent jobs claim disjoint rows — safe to run in parallel
     # and essential for utilising multiple HTTP pods.
-    NO_DEDUP = {"batch", "csv_export", "web_select_url", "web_crawl_single",
+    NO_DEDUP = {"csv_export", "web_select_url", "web_crawl_single",
                 "web_crawl_http", "web_crawl_playwright"}
 
     # Per-entity dedup (not per-org-type).
     if job_type == "noga_v2_explain":
         company_id = params.get("company_id")
         return f"{job_type}:{company_id}" if company_id is not None else None
+
+    # rescore_scope: per (org, user) scope, not per-org — otherwise two different
+    # users in the same org rescoring their own materialized scope would
+    # collide on the default "{type}:{org_id}" key and one would be skipped as
+    # "already running" despite targeting a different scope entirely.
+    if job_type == "rescore_scope":
+        user_id = params.get("user_id")
+        return f"rescore_scope:{org_id}:{user_id if user_id is not None else '-'}"
 
     if job_type in NO_DEDUP:
         return None
@@ -134,7 +142,7 @@ def _preflight_job(db: Session, *, job_type: str, params: dict) -> tuple[dict, l
     warnings: list[str] = []
     new_params = dict(params or {})
 
-    if job_type in {"batch", "initial"}:
+    if job_type in {"web_search_batch", "initial"}:
         if bool(new_params.get("run_google", True)):
             from app.services.ingestion.collection import _google_search_ready
 
@@ -167,10 +175,10 @@ def _resolve_credit_action_and_count(db: Session, *, job_type: str, params: dict
         action = "batch_llm" if bool(params.get("use_batch_api", False)) else "immediate_llm"
         return action, max(1, int(params.get("limit") or 500))
 
-    if job_type in {"batch", "initial"}:
+    if job_type in {"web_search_batch", "initial"}:
         if not bool(params.get("run_google", True)):
             return None
-        if job_type == "batch":
+        if job_type == "web_search_batch":
             return "web_search", max(1, int(params.get("limit") or 100))
         names = params.get("names") or []
         uids = params.get("uids") or []

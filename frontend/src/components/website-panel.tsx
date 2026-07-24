@@ -5,7 +5,7 @@ import useSWR from "swr";
 import {
   Globe, Mail, MapPin, Link2, Languages, Tag, FileText,
   CheckCircle2, AlertTriangle, ExternalLink, Loader2, Hash, Users,
-  ChevronUp, Trash2, Flag, RefreshCw, Search,
+  ChevronUp, Trash2, Flag, RefreshCw, Search, Briefcase,
 } from "lucide-react";
 import {
   fetchAllWebExtracts, promoteWebExtract, discardWebExtract, runCompanyWebSearch,
@@ -26,11 +26,17 @@ interface WebExtract {
   uid_matches_zefix: boolean | null;
   name_address_verified: boolean;
   persons: string[];
+  persons_struct: { name: string; role: string | null }[];
   languages: string[];
   description: string | null;
+  about_text: string | null;
   service_keywords: string[];
+  services_struct: { title: string; summary: string }[];
   extraction_method: string | null;
   confidence: number | null;
+  evidence: { dimension: string; direction: "+" | "-"; strength: string; value: unknown }[];
+  identity_category: string | null;
+  identity_probability: number | null;
   page_count: number | null;
   extracted_at: string | null;
 }
@@ -46,6 +52,8 @@ interface WebPage {
   video_count: number | null;
   has_contact_form: boolean | null;
   has_html: boolean;
+  crawled: boolean;
+  discovered_via: string | null;
   crawled_at: string | null;
 }
 
@@ -418,6 +426,26 @@ function WebsiteStatusBadge({ status, count }: { status: string | null | undefin
   );
 }
 
+// Per-candidate identity category (website-pipeline holistic rework, Layer B).
+// Distinct from WEBSITE_STATUS_META above, which is the company-level verdict.
+const IDENTITY_CATEGORY_META: Record<string, { labelKey: string; cls: string }> = {
+  MATCH_UID:    { labelKey: "identityMatchUid",    cls: "bg-green-50 text-green-700 border-green-200" },
+  MATCH_STRONG: { labelKey: "identityMatchStrong", cls: "bg-emerald-50 text-emerald-700 border-emerald-200" },
+  MATCH_WEAK:   { labelKey: "identityMatchWeak",   cls: "bg-amber-50 text-amber-700 border-amber-200" },
+  MISMATCH:     { labelKey: "identityMismatch",    cls: "bg-red-50 text-red-600 border-red-200" },
+  UNKNOWN:      { labelKey: "identityUnknown",     cls: "bg-slate-100 text-slate-500 border-slate-200" },
+};
+
+function IdentityCategoryBadge({ category }: { category: string | null | undefined }) {
+  const { dict } = useI18n();
+  const t = dict.app.websitePanel;
+  if (!category) return null;
+  const meta = IDENTITY_CATEGORY_META[category];
+  const label = meta ? t[meta.labelKey as keyof typeof t] : category;
+  const cls = meta?.cls ?? "bg-slate-100 text-slate-500 border-slate-200";
+  return <span className={`text-[11px] px-2 py-0.5 rounded-full border ${cls}`}>{label}</span>;
+}
+
 export function WebsitePanel({ companyId, isSuperadmin = false, websiteStatus = null, websiteCount = null }: { companyId: number; isSuperadmin?: boolean; websiteStatus?: string | null; websiteCount?: number | null }) {
   const { dict } = useI18n();
   const t = dict.app.websitePanel;
@@ -494,6 +522,7 @@ export function WebsitePanel({ companyId, isSuperadmin = false, websiteStatus = 
       {/* ── Source strip ── */}
       <div className="bg-white rounded-xl border border-[#e6e8ec] px-4 py-3 flex flex-wrap items-center gap-x-6 gap-y-2">
         <WebsiteStatusBadge status={websiteStatus} count={websiteCount} />
+        <IdentityCategoryBadge category={extract?.identity_category} />
         <div className="flex items-center gap-2 min-w-0">
           <Globe size={15} className="text-[#2563eb] shrink-0" />
           {extract?.url ? (
@@ -620,6 +649,9 @@ export function WebsitePanel({ companyId, isSuperadmin = false, websiteStatus = 
         <Field label={t.description} empty={!extract?.description}>
           <p className="leading-relaxed">{extract?.description}</p>
         </Field>
+        <Field label={t.aboutText} empty={!extract?.about_text || extract.about_text === extract.description}>
+          <p className="leading-relaxed text-slate-600">{extract?.about_text}</p>
+        </Field>
         <Field label={t.languages} empty={!extract?.languages.length}>
           <span className="flex items-center gap-1.5">
             <Languages size={13} className="text-slate-400" />
@@ -635,14 +667,38 @@ export function WebsitePanel({ companyId, isSuperadmin = false, websiteStatus = 
             ))}
           </div>
         </Field>
-        <Field label={t.people} empty={!extract?.persons.length}>
-          <div className="flex flex-wrap gap-1.5">
-            {extract?.persons.map(p => (
-              <span key={p} className="inline-flex items-center gap-1 text-[12px] px-2 py-0.5 rounded-full bg-indigo-50 text-indigo-700">
-                <Users size={10} /> {p}
-              </span>
+        <Field label={t.servicesFound} empty={!extract?.services_struct.length}>
+          <div className="space-y-2">
+            {extract?.services_struct.map(s => (
+              <div key={s.title} className="border-l-2 border-slate-200 pl-2.5">
+                <div className="flex items-center gap-1.5 font-medium text-slate-700">
+                  <Briefcase size={11} className="text-slate-400" /> {s.title}
+                </div>
+                <p className="text-[12px] text-slate-500 leading-snug">{s.summary}</p>
+              </div>
             ))}
           </div>
+        </Field>
+        <Field label={t.people} empty={!extract?.persons.length && !extract?.persons_struct.length}>
+          {extract && extract.persons_struct.length > 0 ? (
+            <div className="flex flex-wrap gap-1.5">
+              {extract.persons_struct.map(p => (
+                <span key={p.name} className="inline-flex items-center gap-1.5 text-[12px] px-2 py-0.5 rounded-full bg-indigo-50 text-indigo-700">
+                  <Users size={10} />
+                  {p.name}
+                  {p.role && <span className="text-indigo-400">· {p.role}</span>}
+                </span>
+              ))}
+            </div>
+          ) : (
+            <div className="flex flex-wrap gap-1.5">
+              {extract?.persons.map(p => (
+                <span key={p} className="inline-flex items-center gap-1 text-[12px] px-2 py-0.5 rounded-full bg-indigo-50 text-indigo-700">
+                  <Users size={10} /> {p}
+                </span>
+              ))}
+            </div>
+          )}
         </Field>
       </Card>
 
@@ -656,6 +712,7 @@ export function WebsitePanel({ companyId, isSuperadmin = false, websiteStatus = 
               <thead>
                 <tr className="text-slate-400 border-b border-slate-100">
                   <th className="text-left font-medium py-1.5 pr-3">{t.colPage}</th>
+                  <th className="text-left font-medium py-1.5 pr-3">{t.colStatus}</th>
                   <th className="text-left font-medium py-1.5 pr-3">{t.colUrl}</th>
                   <th className="text-right font-medium py-1.5 pr-3">{t.colHttp}</th>
                   <th className="text-left font-medium py-1.5 pr-3">{t.colLang}</th>
@@ -668,8 +725,16 @@ export function WebsitePanel({ companyId, isSuperadmin = false, websiteStatus = 
               </thead>
               <tbody className="divide-y divide-slate-50">
                 {pages.map((p, i) => (
-                  <tr key={i} className="text-slate-700">
+                  <tr key={i} className={p.crawled ? "text-slate-700" : "text-slate-400"}>
                     <td className="py-1.5 pr-3 font-medium capitalize">{p.page_type}</td>
+                    <td className="py-1.5 pr-3">
+                      <span className={
+                        "inline-flex items-center gap-1 text-[11px] px-1.5 py-0.5 rounded-full border "
+                        + (p.crawled ? "bg-emerald-50 text-emerald-700 border-emerald-200" : "bg-slate-50 text-slate-500 border-slate-200")
+                      }>
+                        {p.crawled ? t.statusCrawled : t.statusInventory}
+                      </span>
+                    </td>
                     <td className="py-1.5 pr-3 max-w-[220px]">
                       <a href={p.final_url ?? p.url} target="_blank" rel="noopener noreferrer"
                          className="text-blue-600 hover:underline truncate block">{p.url}</a>

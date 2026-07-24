@@ -9,11 +9,17 @@ from app.database import Base
 
 
 class CompanyWebPage(Base):
-    """One crawled page per company (homepage, impressum, privacy, other).
+    """One discovered or crawled page per company — the site page inventory.
 
-    Raw HTML is stored in S3 (s3_bucket_crawl) via s3_key_html.
-    needs_extraction=True flags this page for the future web_extract job
-    which reads S3 HTML and writes structured data (contacts, services, etc.).
+    Two kinds of row, distinguished by `crawled`:
+      - crawled=True: an actually-fetched page. Raw HTML is stored in S3
+        (s3_bucket_crawl) via s3_key_html. needs_extraction=True flags it for
+        the web_extract job which reads S3 HTML and writes structured data
+        (contacts, services, etc.).
+      - crawled=False: an inventory-only row — a URL the sitemap revealed that
+        wasn't fetched (crawl budget only fetches _FETCH_WORTHY_TYPES). Carries
+        page_type + discovered_via only; no HTML, no s3_key_html, http_status
+        NULL. `crawled_at` is the run timestamp the URL was *seen*, not fetched.
     """
 
     __tablename__ = "company_web_pages"
@@ -34,11 +40,20 @@ class CompanyWebPage(Base):
     url_candidate_id: Mapped[int | None] = mapped_column(
         Integer, ForeignKey("company_url_candidates.id", ondelete="SET NULL"), nullable=True
     )
-    # homepage | impressum | privacy | other
+    # homepage | impressum | privacy | contact | about | team | services |
+    # products | references | news | jobs | other
     page_type: Mapped[str] = mapped_column(String(32), nullable=False)
     url: Mapped[str] = mapped_column(Text, nullable=False)
     # URL after any HTTP redirects
     final_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # sitemap | robots | nav | homepage — how this URL was discovered.
+    # NULL for pre-existing rows predating this column.
+    discovered_via: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    # False for inventory-only rows (discovered via sitemap but not fetched).
+    # True for every row that actually has fetched content (existing rows too).
+    crawled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    # Crawl-order priority (lower = fetch sooner) from _SUBPAGE_PRIORITY position.
+    priority: Mapped[int | None] = mapped_column(Integer, nullable=True)
     crawled_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     http_status: Mapped[int | None] = mapped_column(Integer, nullable=True)
     # Detected page language from <html lang> or meta tag

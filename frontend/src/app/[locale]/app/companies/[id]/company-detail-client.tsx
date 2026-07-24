@@ -259,24 +259,15 @@ export function CompanyDetailClient({ company: initial, readOnlyDemo = false, is
 
   const googleResults = useMemo<GoogleScoredResult[]>(() => {
     const raw = company.google_search_results_raw;
-    if (!raw) return [];
-    try {
-      const parsed = JSON.parse(raw);
-      if (!Array.isArray(parsed)) return [];
-      return parsed
-        .map((r: unknown) => {
-          const obj = typeof r === "object" && r !== null ? (r as Record<string, unknown>) : {};
-          return {
-            title: String(obj.title ?? ""),
-            link: String(obj.link ?? ""),
-            snippet: String(obj.snippet ?? ""),
-            score: Number(obj.score ?? 0),
-          };
-        })
-        .filter(r => r.link);
-    } catch {
-      return [];
-    }
+    if (!raw || !Array.isArray(raw)) return [];
+    return raw
+      .map((r) => ({
+        title: String(r.title ?? ""),
+        link: String(r.link ?? ""),
+        snippet: String(r.snippet ?? ""),
+        score: Number(r.score ?? 0),
+      }))
+      .filter(r => r.link);
   }, [company.google_search_results_raw]);
 
   const headOffices = parseJsonList<CompanyShortEntry>(company.head_offices);

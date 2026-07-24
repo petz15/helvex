@@ -1,7 +1,7 @@
 """Job handlers for web crawling pipeline.
 
 Three job types:
-  web_url_populate   — seeds company_url_candidates from google_search_results_raw
+  web_url_populate   — seeds company_url_candidates from company_search_results
   web_crawl_http     — httpx crawler (crawler-http pods + ML worker idle-fill)
   web_crawl_playwright — Playwright crawler (ML worker idle-fill)
   web_select_url     — switches selected URL candidate for a company
@@ -60,13 +60,13 @@ def _self_preempt_if_ml_queued(ctx: JobContext) -> None:
 # ── web_url_populate ──────────────────────────────────────────────────────────
 
 def handle_web_url_populate(ctx: JobContext) -> tuple[dict, str]:
-    """Seed company_url_candidates from existing google_search_results_raw.
+    """Seed company_url_candidates from existing company_search_results.
 
     For each company that has Serper.dev results stored, creates URL candidate
     rows and a company_crawl_state record. The highest-scoring candidate is
     automatically marked as 'selected'.
 
-    Companies without google_search_results_raw are skipped (run the Serper
+    Companies without a company_search_results row are skipped (run the Serper
     enrichment job first).
     """
     batch_size = int(ctx.params.get("batch_size", 500))
@@ -79,18 +79,17 @@ def handle_web_url_populate(ctx: JobContext) -> tuple[dict, str]:
     # These don't have independent websites — crawling them wastes quota and produces false matches.
     _BRANCH_LEGAL_FORM_UIDS_SQL = "('0108', '0111')"
     _BRANCH_NAME_FILTER = (
-        "AND lower(name) NOT LIKE '%zweigniederlassung%' "
-        "AND lower(name) NOT LIKE '%succursale%' "
-        "AND lower(name) NOT LIKE '%filiale di%'"
+        "AND lower(c.name) NOT LIKE '%zweigniederlassung%' "
+        "AND lower(c.name) NOT LIKE '%succursale%' "
+        "AND lower(c.name) NOT LIKE '%filiale di%'"
     )
     _BASE_WHERE = (
-        "WHERE google_search_results_raw IS NOT NULL "
-        f"AND (legal_form_uid IS NULL OR legal_form_uid NOT IN {_BRANCH_LEGAL_FORM_UIDS_SQL}) "
+        f"AND (c.legal_form_uid IS NULL OR c.legal_form_uid NOT IN {_BRANCH_LEGAL_FORM_UIDS_SQL}) "
         f"{_BRANCH_NAME_FILTER}"
     )
 
     total_q = ctx.db.execute(
-        text(f"SELECT COUNT(*) FROM companies {_BASE_WHERE}")
+        text(f"SELECT COUNT(*) FROM companies c JOIN company_search_results csr ON csr.company_id = c.id WHERE csr.results_raw IS NOT NULL {_BASE_WHERE}")  # noqa: S608
     ).scalar() or 0
     total = int(total_q)
 
@@ -103,9 +102,10 @@ def handle_web_url_populate(ctx: JobContext) -> tuple[dict, str]:
 
         rows = ctx.db.execute(
             text(
-                f"SELECT id, google_search_results_raw FROM companies "
-                f"{_BASE_WHERE} "
-                "ORDER BY id "
+                "SELECT c.id, csr.results_raw FROM companies c "
+                "JOIN company_search_results csr ON csr.company_id = c.id "
+                f"WHERE csr.results_raw IS NOT NULL {_BASE_WHERE} "
+                "ORDER BY c.id "
                 "LIMIT :limit OFFSET :offset"
             ),
             {"limit": batch_size, "offset": offset},
@@ -114,9 +114,9 @@ def handle_web_url_populate(ctx: JobContext) -> tuple[dict, str]:
         if not rows:
             break
 
-        for company_id, raw_json in rows:
+        for company_id, raw_results in rows:
             try:
-                candidates = crawler_crud.parse_google_results_raw(raw_json)
+                candidates = crawler_crud.parse_google_results_raw(raw_results)
                 if not candidates:
                     stats["skipped_no_results"] += 1
                     continue
@@ -316,7 +316,8 @@ def _run_crawl_batch(
                 else:
                     crawler_crud.delete_web_pages_for_company(ctx.db, state.company_id)
                     pages_crawled = []
-                    for p in result.pages:
+                    fetched_urls: set[str] = set()
+                    for i, p in enumerate(result.pages):
                         crawler_crud.save_web_page(
                             ctx.db,
                             company_id=state.company_id,
@@ -332,8 +333,18 @@ def _run_crawl_batch(
                             video_count=p.video_count,
                             has_contact_form=p.has_contact_form,
                             s3_key_html=p.s3_key_html,
+                            discovered_via="homepage" if i == 0 else "nav",
+                            priority=i,
                         )
                         pages_crawled.append(p.page_type)
+                        fetched_urls.add(p.url)
+                    if result.inventory:
+                        crawler_crud.save_page_inventory(
+                            ctx.db,
+                            company_id=state.company_id,
+                            entries=result.inventory,
+                            already_saved_urls=fetched_urls,
+                        )
                     crawler_crud.mark_crawl_done(ctx.db, state, pages_crawled)
                     candidate.status = "crawled"
                     candidate.last_crawled_at = now
@@ -468,8 +479,6 @@ def handle_web_extract(ctx: JobContext) -> tuple[dict, str]:
     resolved row per company into company_web_extract. Marks pages extracted so
     they are not reprocessed. No API cost.
     """
-    import json
-
     from app.models.company import Company
     from app.services.enrichment import crawler_extract
     from app.services.platform import s3_client as _s3
@@ -492,12 +501,16 @@ def handle_web_extract(ctx: JobContext) -> tuple[dict, str]:
         if not company_ids:
             break
 
-        # Batch-fetch name + Zefix UID + address for verification-aware extraction.
+        # Batch-fetch name + Zefix UID + address for verification-aware extraction,
+        # plus the stored search results (company_search_results) for the
+        # company-level verdict fallback below — one query, no N+1.
         meta_rows = ctx.db.execute(
             text(
-                "SELECT id, name, uid, address_zip, address_city, web_score, "
-                "google_search_results_raw, ai_score, noga_confidence, purpose_keywords "
-                "FROM companies WHERE id = ANY(:ids)"
+                "SELECT c.id, c.name, c.uid, c.address_zip, c.address_city, c.web_score, "
+                "csr.results_raw, c.ai_score, c.noga_confidence, c.purpose_keywords "
+                "FROM companies c "
+                "LEFT JOIN company_search_results csr ON csr.company_id = c.id "
+                "WHERE c.id = ANY(:ids)"
             ),
             {"ids": company_ids},
         ).fetchall()
@@ -564,6 +577,12 @@ def handle_web_extract(ctx: JobContext) -> tuple[dict, str]:
                         page_types=[p.page_type for p in cand_pages],
                     ) if page_blobs else {}
                     if data:
+                        category, probability = ws.categorize_identity(
+                            data.get("confidence"), data.get("uid_matches_zefix"),
+                            bool(data.get("evidence")), _thr,
+                        )
+                        data["identity_category"] = category
+                        data["identity_probability"] = probability
                         # Cross-UID attribution: if a UID was found on the page but
                         # belongs to a different company, wire the URL to that company
                         # as a candidate and flag this extract for human review.
@@ -603,10 +622,7 @@ def handle_web_extract(ctx: JobContext) -> tuple[dict, str]:
                 # per company after all candidate groups finish, so it sees the best extract.
                 best = crawler_crud.get_best_web_extract(ctx.db, company_id)
                 if best is not None:
-                    try:
-                        scored_raw = json.loads(row[6]) if row and row[6] else []
-                    except Exception:  # noqa: BLE001
-                        scored_raw = []
+                    scored_raw = row[6] if row and isinstance(row[6], list) else []
                     verdict = ws.compute_verdict(ctx.db, company_id, scored_raw, _dir_domains, _thr)
 
                     update_fields: dict = {
@@ -709,8 +725,6 @@ def handle_recompute_website_status(ctx: JobContext) -> tuple[dict, str]:
     fallback. No API/crawl cost. Use to backfill the new verdict columns or after
     tuning thresholds. Chunked by id (keyset) for 700k-row safety.
     """
-    import json
-
     from app.models.company import Company
     from app.services.enrichment import website_status as ws
 
@@ -719,7 +733,7 @@ def handle_recompute_website_status(ctx: JobContext) -> tuple[dict, str]:
     dir_domains = crud.get_active_google_directory_domains(ctx.db)
 
     total = int(ctx.db.execute(
-        text("SELECT COUNT(*) FROM companies WHERE website_checked_at IS NOT NULL")
+        text("SELECT COUNT(*) FROM company_search_results")
     ).scalar() or 0)
 
     stats: dict = {"updated": 0, "multi_site": 0}
@@ -732,10 +746,12 @@ def handle_recompute_website_status(ctx: JobContext) -> tuple[dict, str]:
 
         rows = ctx.db.execute(
             text(
-                "SELECT id, google_search_results_raw, web_score, "
-                "ai_score, noga_confidence, purpose_keywords FROM companies "
-                "WHERE website_checked_at IS NOT NULL AND id > :last "
-                "ORDER BY id LIMIT :lim"
+                "SELECT c.id, csr.results_raw, c.web_score, "
+                "c.ai_score, c.noga_confidence, c.purpose_keywords "
+                "FROM companies c "
+                "JOIN company_search_results csr ON csr.company_id = c.id "
+                "WHERE c.id > :last "
+                "ORDER BY c.id LIMIT :lim"
             ),
             {"last": last_id, "lim": batch_size},
         ).fetchall()
@@ -744,10 +760,7 @@ def handle_recompute_website_status(ctx: JobContext) -> tuple[dict, str]:
 
         for row in rows:
             cid = row[0]
-            try:
-                scored = json.loads(row[1]) if row[1] else []
-            except Exception:  # noqa: BLE001
-                scored = []
+            scored = row[1] if isinstance(row[1], list) else []
             verdict = ws.compute_verdict(ctx.db, cid, scored, dir_domains, thr)
             update_fields: dict = {
                 "website_status": verdict.status,
@@ -815,11 +828,13 @@ def handle_web_crawl_single(ctx: JobContext) -> tuple[dict, str]:
       force             (optional, default false) — re-crawl even if already crawled
 
     Flow:
-      1. Check company has google_search_results_raw → populate candidates if needed
+      1. Check company has stored search results (company_search_results) → populate candidates if needed
       2. Ensure crawl_state exists with a selected URL (or use the specified candidate)
       3. Try HTTP crawler; escalate to Playwright if js_required
       4. Store results
     """
+    from app.crud import company_search_result as csr_crud
+    from app.models.company import Company
     from app.services.enrichment.crawler_http import crawl_company_http
     from app.services.enrichment.crawler_playwright import crawl_company_playwright
 
@@ -833,21 +848,19 @@ def handle_web_crawl_single(ctx: JobContext) -> tuple[dict, str]:
 
     # ── Step 1: ensure URL candidates exist ──────────────────────────────
     ctx.status(f"Checking URL candidates for company {company_id}…")
-    company = ctx.db.execute(
-        text("SELECT id, google_search_results_raw FROM companies WHERE id = :id"),
-        {"id": company_id},
-    ).fetchone()
+    company = ctx.db.get(Company, company_id)
     if not company:
         raise ValueError(f"Company {company_id} not found")
 
-    raw_json = company[1]
-    if not raw_json:
+    search_result = csr_crud.get_search_result(ctx.db, company_id)
+    raw_results = search_result.results_raw if search_result else None
+    if not raw_results:
         raise ValueError(
             f"Company {company_id} has no Google search results stored. "
             "Run the batch enrichment job first."
         )
 
-    candidates = crawler_crud.parse_google_results_raw(raw_json)
+    candidates = crawler_crud.parse_google_results_raw(raw_results)
     if candidates:
         crawler_crud.upsert_url_candidates(ctx.db, company_id, candidates)
 

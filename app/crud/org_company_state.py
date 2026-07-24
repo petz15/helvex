@@ -51,26 +51,3 @@ def update_org_company_state(
     db.commit()
     db.refresh(row)
     return row
-
-
-def update_org_google_results(
-    db: Session,
-    *,
-    org_id: int,
-    company_id: int,
-    website_url: str | None,
-    web_score: float | None,
-    google_search_results_raw: str | None,
-    website_checked_at,
-    social_media_only: bool | None,
-) -> OrgCompanyState:
-    """Upsert Google scoring results into the org overlay. Called by workers."""
-    row = get_or_create_org_company_state(db, org_id=org_id, company_id=company_id)
-    row.website_url = website_url
-    row.web_score = web_score
-    row.google_search_results_raw = google_search_results_raw
-    row.website_checked_at = website_checked_at
-    row.social_media_only = social_media_only
-    db.commit()
-    db.refresh(row)
-    return row

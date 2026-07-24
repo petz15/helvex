@@ -49,7 +49,7 @@ spec:
               value: "reclassify_noga,build_noga_embeddings,detect_language_bulk,reclassify_low_conf_noga,tfidf_kmeans_cluster,recompute_keywords,reextract_keywords,cluster_analysis,discover_stopwords,noga_v2_explain,embed_purpose_full,embed_purpose_clean,enrich_web_purpose_sim"
             {{- else if .Values.apiWorker.enabled }}
             - name: JOB_TYPE_BLACKLIST
-              value: "bulk,detail,initial,simap_daily,simap_backfill,shab_daily,shab_backfill,shab_archive,sogc_preprocess,extract_sogc_persons,resolve_bisher_links,repair_is_current,batch,re_geocode,recalculate_scores,recalculate_google_scores,recompute_website_status,reextract_purpose,reextract_zefix_raw,claude_classify,csv_export,analyze_boilerplate,billing_renewal,saved_view_alerts,enrich_web_purpose_sim"
+              value: "bulk,detail,initial,simap_daily,simap_backfill,shab_daily,shab_backfill,shab_archive,sogc_preprocess,extract_sogc_persons,resolve_bisher_links,repair_is_current,web_search_batch,re_geocode,recalculate_scores,recalculate_google_scores,recompute_website_status,reextract_purpose,reextract_zefix_raw,claude_classify,csv_export,analyze_boilerplate,billing_renewal,saved_view_alerts,enrich_web_purpose_sim"
             {{- end }}
           envFrom:
             - secretRef:

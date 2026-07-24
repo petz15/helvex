@@ -48,8 +48,8 @@ _SORT_MAP = {
     "-updated_at":          (Company.updated_at,          False),
     "created":              (Company.created_at,          True),
     "-created":             (Company.created_at,          False),
-    "website_checked_at":   (Company.website_checked_at,  True),
-    "-website_checked_at":  (Company.website_checked_at,  False),
+    # "website_checked_at" is special-cased in list_companies() — it now lives on
+    # company_search_results, a joined table, not a plain Company column.
     "flex_scored_at":       (Company.flex_scored_at,      True),
     "-flex_scored_at":      (Company.flex_scored_at,      False),
     "ai_scored_at":         (Company.ai_scored_at,        True),
@@ -171,15 +171,16 @@ def _apply_filters(query, *, name_filter, uid_filter=None, canton, review_status
         query = query.filter(Company.contact_status.is_(None))
     elif contact_status:
         query = query.filter(Company.contact_status == contact_status)
-    if google_searched == "yes":
-        query = query.filter(Company.website_checked_at.isnot(None))
-    elif google_searched == "no":
-        query = query.filter(Company.website_checked_at.is_(None))
-    elif google_searched == "no_result":
-        query = query.filter(
-            Company.website_checked_at.isnot(None),
-            Company.website_url.is_(None),
-        )
+    if google_searched in ("yes", "no", "no_result"):
+        from sqlalchemy import exists
+        from app.models.company_search_result import CompanySearchResult
+        _searched_exists = exists().where(CompanySearchResult.company_id == Company.id)
+        if google_searched == "yes":
+            query = query.filter(_searched_exists)
+        elif google_searched == "no":
+            query = query.filter(~_searched_exists)
+        elif google_searched == "no_result":
+            query = query.filter(_searched_exists, Company.website_url.is_(None))
     if min_web_score is not None:
         query = query.filter(Company.web_score >= min_web_score)
     if max_web_score is not None:
@@ -434,6 +435,14 @@ def list_companies(
         _expr = _sum / func.nullif(_count, 0)
         asc = sort == "combined_score"
         query = query.order_by(nullslast(_expr.asc() if asc else _expr.desc()))
+    elif sort in ("website_checked_at", "-website_checked_at"):
+        # Lives on company_search_results now — join only for this sort (not
+        # unconditionally, to keep the common no-sort case join-free at 700k rows).
+        from app.models.company_search_result import CompanySearchResult
+        query = query.outerjoin(CompanySearchResult, CompanySearchResult.company_id == Company.id)
+        asc = sort == "website_checked_at"
+        col = CompanySearchResult.searched_at
+        query = query.order_by(col.asc().nullslast() if asc else col.desc().nullslast())
     else:
         col, ascending = _SORT_MAP.get(sort, _SORT_MAP[_DEFAULT_SORT])
         query = query.order_by(col.asc() if ascending else col.desc())
@@ -541,17 +550,19 @@ def count_companies(
 
 
 def get_company_stats(db: Session) -> dict:
+    from app.models.company_search_result import CompanySearchResult
+
     total = db.query(Company).count()
-    searched = db.query(Company).filter(Company.website_checked_at.isnot(None)).count()
+    searched = db.query(CompanySearchResult).count()
     with_website = db.query(Company).filter(Company.website_url.isnot(None)).count()
 
-    # Google searches used today (by website_checked_at date)
+    # Google searches used today (by searched_at date)
     from datetime import datetime
     today_start = datetime.combine(date.today(), datetime.min.time())
     today_end = datetime.combine(date.today(), datetime.max.time())
     searches_today = (
-        db.query(Company)
-        .filter(Company.website_checked_at >= today_start, Company.website_checked_at <= today_end)
+        db.query(CompanySearchResult)
+        .filter(CompanySearchResult.searched_at >= today_start, CompanySearchResult.searched_at <= today_end)
         .count()
     )
 

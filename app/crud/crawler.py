@@ -454,6 +454,8 @@ def save_web_page(
     has_contact_form: bool | None = None,
     s3_key_html: str | None = None,
     bot_blocked: bool = False,
+    discovered_via: str | None = None,
+    priority: int | None = None,
 ) -> CompanyWebPage:
     page = CompanyWebPage(
         company_id=company_id,
@@ -461,6 +463,9 @@ def save_web_page(
         page_type=page_type,
         url=url,
         final_url=final_url,
+        discovered_via=discovered_via,
+        crawled=True,
+        priority=priority,
         crawled_at=crawled_at,
         http_status=http_status,
         lang=lang,
@@ -475,6 +480,57 @@ def save_web_page(
     db.add(page)
     db.flush()
     return page
+
+
+def save_page_inventory(
+    db: Session,
+    *,
+    company_id: int,
+    entries: list[tuple[str, str]],
+    already_saved_urls: set[str],
+    discovered_via: str = "sitemap",
+) -> int:
+    """Persist inventory-only rows for discovered-but-not-fetched pages.
+
+    entries: list of (page_type, url) from crawler_common.classify_all_urls.
+    already_saved_urls: URLs already inserted this run via save_web_page (skipped
+    here to avoid duplicate rows for the same URL within one crawl).
+    Returns the number of inventory rows inserted.
+    """
+    now = datetime.now(timezone.utc)
+    count = 0
+    for priority, (page_type, url) in enumerate(entries):
+        if url in already_saved_urls:
+            continue
+        db.add(CompanyWebPage(
+            company_id=company_id,
+            url_candidate_id=None,
+            page_type=page_type,
+            url=url,
+            discovered_via=discovered_via,
+            crawled=False,
+            priority=priority,
+            crawled_at=now,
+            needs_extraction=False,
+        ))
+        count += 1
+    if count:
+        db.flush()
+    return count
+
+
+def get_page_inventory(db: Session, company_id: int) -> list[CompanyWebPage]:
+    """All known pages for a company (fetched + inventory-only), priority-ordered."""
+    return (
+        db.query(CompanyWebPage)
+        .filter(CompanyWebPage.company_id == company_id)
+        .order_by(
+            CompanyWebPage.crawled.desc(),
+            CompanyWebPage.priority.asc().nullslast(),
+            CompanyWebPage.id.asc(),
+        )
+        .all()
+    )
 
 
 # ── Web extraction (web_extract job) ────────────────────────────────────────────
@@ -645,10 +701,20 @@ def get_selected_candidate(db: Session, company_id: int) -> CompanyUrlCandidate 
     )
 
 
-def parse_google_results_raw(raw_json: str) -> list[dict[str, Any]]:
-    """Parse google_search_results_raw JSON into a list of candidate dicts."""
+def parse_google_results_raw(raw: Any) -> list[dict[str, Any]]:
+    """Return a list of candidate dicts from stored search results.
+
+    `raw` is company_search_results.results_raw — normally a native list (JSON
+    column, ORM/psycopg2 already deserialize it), but this also accepts a JSON
+    string defensively for any raw-SQL path that returns one as-is.
+    """
+    if raw is None:
+        return []
+    if isinstance(raw, list):
+        return raw
     try:
-        return json.loads(raw_json) if raw_json else []
+        parsed = json.loads(raw)
+        return parsed if isinstance(parsed, list) else []
     except (ValueError, TypeError):
         return []
 

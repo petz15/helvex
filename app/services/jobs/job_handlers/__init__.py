@@ -84,6 +84,7 @@ from app.services.jobs.job_handlers import (  # noqa: E402
     clustering,
     export,
     noga,
+    rescore,
     shab,
     shab_archive,
     simap,
@@ -103,7 +104,7 @@ JOB_HANDLERS: dict[str, Callable[[JobContext], tuple[dict, str]]] = {
     "uid_detail":                uid_jobs.handle_uid_detail,
     # Zefix import
     "bulk":                      zefix_jobs.handle_bulk,
-    "batch":                     zefix_jobs.handle_batch,
+    "web_search_batch":          zefix_jobs.handle_batch,
     "initial":                   zefix_jobs.handle_initial,
     "detail":                    zefix_jobs.handle_detail,
     # Scoring / geocoding
@@ -141,6 +142,7 @@ JOB_HANDLERS: dict[str, Callable[[JobContext], tuple[dict, str]]] = {
     "shab_archive":              shab_archive.handle_shab_archive,
     "link_sogc_stubs":           shab_archive.handle_link_sogc_stubs,
     "resolve_shab_old_uids":     shab_archive.handle_resolve_shab_old_uids,
+    "backfill_shab_old_uid_extraction": shab_archive.handle_backfill_shab_old_uid_extraction,
     "sogc_preprocess":           sogc_preprocess.handle_sogc_preprocess,
     "extract_sogc_persons":      sogc_persons.handle_extract_sogc_persons,
     "resolve_bisher_links":      sogc_entity_resolution.handle_resolve_bisher_links,
@@ -151,6 +153,8 @@ JOB_HANDLERS: dict[str, Callable[[JobContext], tuple[dict, str]]] = {
     "billing_renewal":           billing.handle_billing_renewal,
     # Saved view alerts
     "saved_view_alerts":         alerts.handle_saved_view_alerts,
+    # Scoring / multi-tenancy rework
+    "rescore_scope":             rescore.handle_rescore_scope,
     # Web crawler
     "web_url_populate":          web_crawl.handle_web_url_populate,
     "web_crawl_http":            web_crawl.handle_web_crawl_http,

@@ -684,18 +684,15 @@ def find_organic_position(results: list[dict], url: str | None) -> int | None:
     return None
 
 
-def extract_serp_features(google_search_full_raw: str | None) -> tuple[int, bool, bool]:
+def extract_serp_features(full_raw: dict | None) -> tuple[int, bool, bool]:
     """Return (ads_count, has_local_pack, has_knowledge_graph) from stored provider JSON.
 
     Handles both Serper (ads/places/knowledgeGraph) and ScrapingDog
     (paid_results/local_results/knowledge_graph) field naming.
     """
-    if not google_search_full_raw:
+    if not full_raw:
         return 0, False, False
-    try:
-        full = json.loads(google_search_full_raw)
-    except (json.JSONDecodeError, TypeError):
-        return 0, False, False
+    full = full_raw
     ads = full.get("ads") or full.get("paid_results") or []
     ads_count = len(ads) if isinstance(ads, list) else 0
     local = full.get("places") or full.get("local_results") or []

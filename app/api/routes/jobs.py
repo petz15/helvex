@@ -537,8 +537,8 @@ def trigger_bulk(body: BulkImportBody, request: Request, db: Session = Depends(g
 def trigger_batch(body: BatchCollectBody, request: Request, db: Session = Depends(get_db), _: User = Depends(require_superadmin)):
     job = _enqueue_or_http_error(
         request,
-        job_type="batch",
-        label=f"Batch enrichment — up to {body.limit} companies",
+        job_type="web_search_batch",
+        label=f"URL search enrichment — up to {body.limit} companies",
         params=body.model_dump(),
         db=db,
     )
@@ -588,6 +588,28 @@ def trigger_recalc_google(request: Request, db: Session = Depends(get_db), _: Us
         label="Recalculate Google scores",
         params={},
         db=db,
+    )
+    return JobOut.from_orm_obj(job)
+
+
+@router.post("/scoring/rescore-scope", response_model=JobOut, status_code=status.HTTP_202_ACCEPTED)
+def trigger_rescore_scope(request: Request, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    """Recompute company_score for the caller's effective scope.
+
+    Resolves to the org-default scope unless the caller has scoring_*
+    overrides recorded for this org, in which case their own materialized
+    scope is (re)computed instead. See scoring/config_resolution.resolve_scope.
+    """
+    if not current_user.org_id:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No organization context")
+    job = _enqueue_or_http_error(
+        request,
+        job_type="rescore_scope",
+        label="Rescore companies",
+        params={"user_id": current_user.id},
+        db=db,
+        org_id=current_user.org_id,
+        user_id=current_user.id,
     )
     return JobOut.from_orm_obj(job)
 
@@ -1515,6 +1537,41 @@ def trigger_resolve_shab_old_uids(
     return JobOut.from_orm_obj(job)
 
 
+class BackfillShabOldUidExtractionBody(BaseModel):
+    batch_size: int = 500
+    pdf_workers: int = 8
+    request_delay: float = 0.5
+
+
+@router.post("/collection/backfill-shab-old-uid-extraction", response_model=JobOut, status_code=status.HTTP_202_ACCEPTED)
+def trigger_backfill_shab_old_uid_extraction(
+    body: BackfillShabOldUidExtractionBody,
+    request: Request,
+    db: Session = Depends(get_db),
+    _: User = Depends(require_superadmin),
+):
+    """Re-extract old_uid/uid for publications whose raw_json never captured one.
+
+    Targeted repair pass (not a full historical re-import): re-fetches only the
+    specific PDFs behind publications with neither an extracted_uid nor an
+    extracted_old_uid/ch_number, re-runs the current extraction, and updates
+    raw_json. No UID SOAP calls — safe to run alongside uid_import/uid_detail/
+    resolve_shab_old_uids.
+    """
+    job = _enqueue_or_http_error(
+        request,
+        job_type="backfill_shab_old_uid_extraction",
+        label="Backfill SHAB old-UID text extraction",
+        params={
+            "batch_size": body.batch_size,
+            "pdf_workers": body.pdf_workers,
+            "request_delay": body.request_delay,
+        },
+        db=db,
+    )
+    return JobOut.from_orm_obj(job)
+
+
 @router.post("/collection/sogc-preprocess", response_model=JobOut, status_code=status.HTTP_202_ACCEPTED)
 def trigger_sogc_preprocess(
     body: SogcPreprocessBody,
@@ -1857,7 +1914,7 @@ def trigger_web_url_populate(
     db: Session = Depends(get_db),
     _: User = Depends(require_superadmin),
 ):
-    """Seed company_url_candidates from existing google_search_results_raw.
+    """Seed company_url_candidates from existing company_search_results.
 
     Run the batch enrichment job first so companies have stored search results.
     """

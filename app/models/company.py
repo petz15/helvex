@@ -33,17 +33,10 @@ class Company(Base):
     canton: Mapped[str | None] = mapped_column(String(8), nullable=True)
     purpose: Mapped[str | None] = mapped_column(Text, nullable=True)
     address: Mapped[str | None] = mapped_column(Text, nullable=True)
-    # Website found via Google Search.
-    # DUAL-WRITE: website_url, website_checked_at, google_search_results_raw, web_score,
-    # and social_media_only also exist on org_company_state for org-specific re-scores.
-    # Company holds the global master result (seed value); org_company_state holds any
-    # org-specific override. Prefer org_company_state when org_id is available.
+    # Website found via Google Search. Raw search-provider data (results/full
+    # response/params/searched_at) lives in company_search_results — see
+    # CompanySearchResult; this table only keeps the derived verdict fields.
     website_url: Mapped[str | None] = mapped_column(String(1024), nullable=True)
-    website_checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    # Top-5 Google results as JSON [{title, link, snippet, score}, ...] sorted by score desc
-    google_search_results_raw: Mapped[str | None] = mapped_column(Text, nullable=True)
-    # Full provider JSON response (all fields: search_information, local_results, organic_results, etc.)
-    google_search_full_raw: Mapped[str | None] = mapped_column(Text, nullable=True)
     # 0-100 auto match score for the current website_url; None = not yet scored
     web_score: Mapped[int | None] = mapped_column(Integer, nullable=True)
     # 0-100 Google search VISIBILITY (distinct from web_score, which is URL-selection
@@ -155,10 +148,6 @@ class Company(Base):
     # can have several. Populated by resolve_shab_old_uids (reverse UID Search) and,
     # when present, by uid_detail's GetByUID enrichment.
     old_uids: Mapped[list[str] | None] = mapped_column(ArrayOfText, nullable=True)
-    # Exact search params sent to the Google Search API for this company's last search.
-    # Keys: q, provider, gl/country, hl/language, location.
-    # Stored so bad results (wrong language, wrong location) can be diagnosed after the fact.
-    google_search_params: Mapped[dict | None] = mapped_column(JSON, nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False

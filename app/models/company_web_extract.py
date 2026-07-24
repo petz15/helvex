@@ -68,10 +68,32 @@ class CompanyWebExtract(Base):
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     # Product/service keywords mined from cleaned main text
     service_keywords: Mapped[list[str] | None] = mapped_column(_ArrayOfText, nullable=True)
+    # Longest cleaned about/homepage paragraph — richer than `description` (1000
+    # chars), feeds NOGA/AI classification for companies with thin Zefix purpose text.
+    about_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Structured team-page entries: [{"name": ..., "role": ... | None}]
+    persons_struct: Mapped[list[dict] | None] = mapped_column(JSON, nullable=True)
+    # Structured services/products-page entries: [{"title": ..., "summary": ...}]
+    services_struct: Mapped[list[dict] | None] = mapped_column(JSON, nullable=True)
     # How values were obtained — e.g. "deterministic", "schema_org+regex"
     extraction_method: Mapped[str | None] = mapped_column(String(64), nullable=True)
     # 0.0–1.0 heuristic confidence in the resolved record
     confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
+    # Typed evidence signals behind `confidence`: [{dimension, direction, strength,
+    # value}, ...]. Not yet used to drive any decision — persisted for
+    # explainability and as the future categorical-verdict/GBM feature vector.
+    # See crawler_extract._build_evidence_ledger.
+    evidence: Mapped[list[dict] | None] = mapped_column(JSON, nullable=True)
+    # Categorical identity outcome for this single candidate:
+    # MATCH_UID | MATCH_STRONG | MATCH_WEAK | MISMATCH | UNKNOWN.
+    # See website_status.categorize_identity. Company-level cross-candidate
+    # outcomes (AMBIGUOUS, RELATED_ENTITY) are computed in compute_verdict, not
+    # stored per-row here.
+    identity_category: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    # Combine-step output backing identity_category — currently just `confidence`
+    # (the deterministic combine); a future trained model replaces this combine
+    # step behind the same field, per the identity rework's staging plan.
+    identity_probability: Mapped[float | None] = mapped_column(Float, nullable=True)
     # Cosine similarity (0–1) between Zefix purpose embedding and site description/keywords.
     # Set by the enrich_web_purpose_sim ML-worker job; NULL until that job runs.
     purpose_sim: Mapped[float | None] = mapped_column(Float, nullable=True)

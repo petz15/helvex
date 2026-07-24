@@ -11,7 +11,8 @@ export interface Company {
   address: string | null;
   website_url: string | null;
   website_checked_at: string | null;
-  google_search_results_raw: string | null;
+  // Native array now (was a JSON-encoded string) — company_search_results.results_raw
+  google_search_results_raw: { title?: string; link?: string; snippet?: string; score?: number }[] | null;
   web_score: number | null;
   social_media_only: boolean | null;
   website_status: string | null;

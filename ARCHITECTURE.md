@@ -236,7 +236,7 @@ HTML routes (browser, in `main.py`):
 | GET  | `/api/v1/jobs/stream/active` | SSE stream of active job status |
 | POST | `/api/v1/jobs/enqueue/bulk` | Enqueue bulk import |
 | POST | `/api/v1/jobs/enqueue/initial` | Enqueue detail fetch + geocode |
-| POST | `/api/v1/jobs/enqueue/batch` | Enqueue Google Search enrichment |
+| POST | `/api/v1/collection/batch` | Enqueue `web_search_batch` — Serper/ScrapingDog URL search enrichment |
 | POST | `/api/v1/jobs/enqueue/re-geocode` | Enqueue re-geocode all companies |
 | POST | `/api/v1/jobs/enqueue/derive-industry` | Enqueue industry derivation |
 | POST | `/api/v1/jobs/enqueue/tfidf-cluster` | Enqueue TF-IDF clustering |
@@ -595,7 +595,7 @@ Persistent record of every background job. Org-scoped: each job stores the org_i
 |---|---|
 | `org_id` | FK → organizations; used to resolve per-org API keys & scoring config |
 | `user_id` | FK → users; caller who triggered the job |
-| `job_type` | bulk / initial / batch / re_geocode / tfidf_cluster / claude_classify / derive_industry / csv_export |
+| `job_type` | bulk / initial / web_search_batch / re_geocode / tfidf_cluster / claude_classify / derive_industry / csv_export |
 | `status` | queued → running → paused / completed / cancelled / failed |
 | `cancel_requested` / `pause_requested` | Flags polled by the worker at checkpoints |
 | `progress_done` / `progress_total` | Resume pointer + UI progress bar |
@@ -915,7 +915,7 @@ The worker checks `cancel_requested` / `pause_requested` **between companies** (
 |---|---|---|---|
 | `bulk` | `canton`, `page_size`, `include_inactive` | Mass-import minimal company records from Zefix canton by canton | — |
 | `initial` | `limit`, `run_google` | Fetch Zefix detail + geocode for companies without lat/lon | — |
-| `batch` | `limit`, `refresh_zefix` | Google Search enrichment, quota-aware | — |
+| `web_search_batch` | `limit`, `refresh_zefix` | Serper/ScrapingDog URL search enrichment (formerly `batch`); dedup'd to one global instance — its query has no per-row claiming, so concurrent runs would double-process companies | — |
 | `re_geocode` | — | Re-geocode all companies to building-level precision | — |
 | `derive_industry` | `limit` | Re-derive industry field from taxonomy keyword mapping | — |
 | `tfidf_cluster` | `n_clusters`, `limit` | TF-IDF K-Means on purpose text | ✓ Uses org-effective scoring config |
@@ -1109,9 +1109,20 @@ Pre-2014 companies carry an **old cantonal Handelsregister number** (e.g. `CH-03
 
 - **Two representations, one canonical form:** the register returns the old number under `OtherOrganisationId` (category `CH.HR`) in **digits-only** form (`CH10030251826`); SHAB PDFs print the **dotted** form (`CH-100.3.025.182-6`). `uid_client.normalize_old_hr_number()` reduces both to the dotted canonical (11 digits, structure 3-1-3-3-1) used everywhere. Category filtering matters: `CH.ESTVID` (VAT) also normalises to 11 digits, so `extract_old_hr_numbers()` keys on `CH.HR`, not digit shape.
 - **Reverse lookup exists:** the Search request has a **top-level `otherOrganisationId`** field (a sibling of `uidEntitySearchParameters`, so *not* built by `build_search_params`). `uid_client.search_by_old_uid()` fills it and returns the unique modern entity. `_do_search()` is the shared core; `_run_search()` and `search_by_old_uid()` both delegate to it.
-- **Per publication** with `company_uid IS NULL` and an old number in `raw_json` (`extracted_old_uid` for Mode B, `ch_number` for Mode A): (1) try free local `old_uids` overlap; (2) on a miss, `search_by_old_uid()` (one API call per **distinct** number, cached per run) → link the pub, write the number into the company's `old_uids` (so later runs match locally), and create a **modern-UID `shab_stub`** for companies absent from our DB. Unique numbers with no register match are counted `unresolved`.
+- **Per publication** with `company_uid IS NULL` and an old number in `raw_json` (`extracted_old_uid` for Mode B, `ch_number` for Mode A): (1) try free local `old_uids` overlap; (2) on a miss, check the `shab_old_uid_misses` cache (also free) of numbers a prior run already confirmed the register has no match for; (3) only then `search_by_old_uid()` (one API call per **distinct** number, cached per run) → link the pub, write the number into the company's `old_uids` (so later runs match locally), and create a **modern-UID `shab_stub`** for companies absent from our DB. A confirmed non-match is written to `shab_old_uid_misses` (`old_uid` PK, `failed_at`, `attempts` — migration `0122`); without this, a failed lookup leaves `company_uid` NULL forever, so the same doomed number gets re-queried against the slow, rate-limited API on every future run instead of the run converging.
 - **Storage:** `companies.old_uids` — GIN-indexed `TEXT[]` (a company that changed canton can have several), also opportunistically populated by `uid_detail`'s `detail_to_update()`. `ix_companies_old_uids` has `fastupdate = off` (migration `0117`): this job interleaves `old_uids &&` reads with writes to the same column inside one long session, and GIN's default pending-list buffering makes reads scan that list linearly, degrading until they exceed the 30s `statement_timeout`. `_get_company_by_old_uid()` also catches a timeout defensively (rolls back, treats as a local miss, falls through to the API lookup) rather than failing the whole job.
+- **Real throughput:** a clean isolated `search_by_old_uid()` call is ~5s (3.5s deliberate `_INTER_CALL_DELAY` + ~1.5s real SOAP round-trip) — close to the documented ~17/min. If the job is running noticeably slower than that in practice, the extra time isn't the SOAP call; the remaining suspect is the local `old_uids &&` overlap check that runs before every API fallback (DB-side latency/contention, not API latency).
 - **Job type:** `resolve_shab_old_uids` | **Endpoint:** `POST /api/v1/jobs/collection/resolve-shab-old-uids` (superadmin). Params: `batch_size`, `max_lookups` (caps reverse-Search calls per run; rate ~17/min). Resumable — linked rows drop out of the `company_uid IS NULL` set; refuses to run while `uid_import`/`uid_detail` are active (shared SOAP limit). **Frontend:** Collection page → "Resolve SHAB old-UID publications (reverse UID Search)" section.
+
+### Backfill SHAB Old-UID Extraction — `backfill_shab_old_uid_extraction` in `app/services/registry/shab_archive_import.py`
+
+Targeted, SOAP-free repair pass — **not** a full historical re-import. Some publications were imported by an older/buggier extraction pass (or hit a transient PDF-parse failure) and ended up with neither `extracted_uid` nor `extracted_old_uid`/`ch_number` in `raw_json` at all. Those rows are invisible to `resolve_shab_old_uids` — there's nothing in them to look up — so they sit unresolved regardless of how well the reverse UID Search works.
+
+- **Pass 1 (scan):** Python-side `raw_json` parse over `company_uid IS NULL AND raw_json IS NOT NULL` (same pattern as `resolve_shab_old_uids` — `raw_json` is plain `TEXT`, no JSON index), keyset-paginated by `id`. Rows already stamped `old_uid_backfill_checked_at` (a prior run's confirmed-empty result) are skipped. Candidates are split by `source`: Mode B (`shab_archive`, has `archive_id`) vs Mode A (`shab_old_pdf`, has `pub_date`).
+- **Pass 2 (Mode B):** one `fetch_pdf_bytes(archive_id)` per affected row, concurrent (`pdf_workers`, same pattern as `_prefetch_pdfs_for_page`) — no archive pagination needed since `archive_id` is already in `raw_json`.
+- **Pass 3 (Mode A):** one `fetch_daily_pdf_bytes(day)` per **distinct** affected `pub_date` (entries on the same day share one PDF — far cheaper than one fetch per row), re-parsed via `parse_bulk_hr_entries()` and matched back to rows by `pub_number`. Falls back to `extract_old_uid_from_text()` on the entry's own text if the delimiter-based `ch_number` still comes back empty.
+- **On recovery:** updates `raw_json` with the new identifier(s) and immediately attempts local resolution via `_resolve_company_for_shab()` (free — no SOAP call); a register lookup for numbers still unmatched locally is left to `resolve_shab_old_uids`'s next run. On confirmed still-empty, stamps `old_uid_backfill_checked_at` so a re-run doesn't re-fetch the same dead PDF indefinitely.
+- **Job type:** `backfill_shab_old_uid_extraction` | **Endpoint:** `POST /api/v1/jobs/collection/backfill-shab-old-uid-extraction` (superadmin). Params: `batch_size`, `pdf_workers`, `request_delay` (Mode A day-to-day sleep). Not rate-limited by the UID SOAP API — safe to run alongside `uid_import`/`uid_detail`/`resolve_shab_old_uids`. **Frontend:** Collection page → "Backfill SHAB old-UID text extraction" section.
 
 ### SHAB Archive Import — `app/services/registry/shab_archive_import.py`
 
@@ -2144,7 +2155,10 @@ web_crawl_http         SKIP LOCKED claim → robots/sitemap discovery → httpx 
   http_error/timeout   → backoff retry via next_crawl_at (≤3×), then terminal
   no_content           → crawl_status=no_content
   success              → HTML → S3 (keyed crawl/{company_id}/{url_candidate_id}/{page}.html),
-                         company_web_pages rows, crawl_status=crawled
+                         company_web_pages rows (crawled=TRUE), crawl_status=crawled
+                         + full site inventory persisted (crawled=FALSE rows) from the
+                         sitemap URL list, classified by page_type (see below) — pages
+                         beyond the fetch budget are recorded but not fetched
                          Prometheus: crawl_result_total{tier, status} incremented per outcome
                          **auto-enqueues web_extract** (dedup returns existing if already running)
        ↓ (parallel)
@@ -2171,6 +2185,147 @@ directory_crawl        Queries company_url_candidates for URLs in DIRECTORY_CRAW
 Both crawler tiers run robots.txt + sitemap.xml discovery (`crawler_sitemap.py`) before
 page selection: sitemap URLs fill subpage slots the homepage nav misses, and the robots
 `Crawl-delay` raises the per-domain rate limit.
+
+#### Page inventory & taxonomy (web-pipeline holistic rework, Layer A — phase 1)
+
+The crawler discovers far more of the sitemap than it fetches. `crawler_common.classify_all_urls`
+classifies every same-origin sitemap URL (capped at 60/company — `_MAX_INVENTORY_URLS`) into a
+`page_type` and persists it as a `company_web_pages` row even when not fetched
+(`crawled=FALSE`, `discovered_via='sitemap'`, no HTML/S3 key). Fetched pages get `crawled=TRUE`,
+`discovered_via='homepage'|'nav'`, and a `priority` (fetch order).
+
+Page-type taxonomy (`_SUBPAGE_PRIORITY` in `crawler_common.py`, DE/FR/IT/EN keyword sets):
+`impressum`, `privacy`, `contact`, `about`, `team`, `services`, `products`, `references`,
+`news`, `jobs`, `other`. Only a fetch-worthy subset (`_FETCH_WORTHY_TYPES` =
+`impressum`/`privacy`/`contact`/`about`/`team`/`services`) is ever spent on the crawl budget
+(`_FETCH_PRIORITY`, used by `find_subpage_links`/`classify_urls_by_path`) — `news`/`jobs`/
+`products`/`references` are inventoried for visibility (paginated catalogs/job boards, low
+signal-per-byte) but not auto-fetched; a later phase adds on-demand fetch from the profile UI.
+
+`crud/crawler.py::save_page_inventory` inserts inventory-only rows, skipping URLs already saved
+as fetched pages this run; `get_page_inventory` returns the merged list (fetched first, then
+by priority) — used by `GET /{id}/web-extract`'s `pages` array and rendered in `WebsitePanel`'s
+"Crawl coverage" table with a Crawled/Discovered status badge.
+
+This is phase 1 of `docs/code-review/web-pipeline-holistic-rework.md` (ingestion only — no
+identity/scoring changes yet).
+
+#### Structured content extraction (phase 2 — team/services → NOGA/AI feed)
+
+`crawler_extract.py` now runs page-type-aware structured extraction alongside the existing
+plain-text/contact parsing, all deterministic (no API cost):
+
+- **`team` pages** → `_extract_team_struct(soup)`: headings shaped like a person's name (regex
+  `_NAME_SHAPE_RE`, 2–4 Title-Case tokens) become entries; the short text immediately following
+  (`_following_text`) is checked against `_ROLE_KEYWORDS` (DE/FR/IT/EN) to capture a role. Names
+  without a recognised role are still kept (`role=None`) — the name itself is useful signal.
+  Team text is also fed into the existing `_extract_persons`/`_extract_persons_ner` pipeline
+  (added to `impressum_text_parts`), so the plain `persons` list benefits too.
+- **`services`/`products` pages** → `_extract_services_struct(soup)`: each heading + its
+  following short text becomes `{"title", "summary"}`, skipping nav/legal-boilerplate headings
+  (`_NON_SERVICE_HEADINGS`) and too-thin summaries.
+- **`about`/`homepage`** → `about_text`: the longest cleaned paragraph among about/homepage
+  pages (capped 2000 chars) — richer than the existing 1000-char `description`.
+
+Aggregated (deduped across pages) in `resolve_company_extract()` and persisted on
+`company_web_extract` (migration `0119`): `persons_struct` JSONB, `services_struct` JSONB,
+`about_text` TEXT. A company whose only crawled evidence is team/services content (no
+impressum/contact/UID) now still gets a persisted row — the identity-confidence early-return
+gate was extended to check `has_content` alongside the existing identity signals, without
+changing the confidence formula itself (identity math is phase 3/4 territory).
+
+**Feeds back into classification** (the actual point — thin/boilerplate Zefix `purpose` text is
+a recurring NOGA quality complaint, see ROADMAP "NOGA v2"):
+- `app/services/ml/noga.py::classify_company_noga` — `_web_content_text()` fetches the
+  company's best web extract and appends `about_text` + up to 5 service titles (capped 600
+  chars) to the stripped-purpose text before embedding/token classification. One indexed query
+  per company (cheap relative to the embedding inference cost); doesn't expand NOGA eligibility
+  to companies with zero purpose (`only_detailed_raw` gating unchanged — a separate, bigger
+  decision left for later).
+- `app/services/scoring/claude_classify.py::claude_classify_batch` — bulk-prefetches
+  `about_text`/`services_struct` for the whole batch in one query (`_web_text_by_company`,
+  mirroring the existing `_dir_data_by_company` directory-profile prefetch pattern — reduced to
+  best-per-company in Python, not SQL `DISTINCT ON`, so it stays portable to the SQLite test DB),
+  appended to `_build_user_text()`'s prompt as `"Website content: …"`.
+
+Surfaced on the profile: `GET /{id}/web-extract` now returns `persons_struct`, `services_struct`,
+`about_text`; `WebsitePanel`'s Content card shows a Team field (name + role chips, falling back
+to the plain `persons` chips when no structured entries exist) and a Services field
+(title + summary per entry).
+
+Tests: `tests/test_crawler_extract_structured.py`, `tests/test_noga_web_content.py`.
+
+#### Evidence ledger (phase 3 — identity, additive only)
+
+`resolve_company_extract()` now also emits `evidence` (JSONB, migration `0120`): a typed,
+inspectable list of `{dimension, direction: "+"|"-", strength: decisive|strong|medium|weak,
+value}` entries built by `_build_evidence_ledger()` from the **same inputs already driving
+`confidence`** — this phase is a restructure, not new detection or a behavior change:
+
+| dimension | direction | strength | source |
+|---|---|---|---|
+| `uid_matches_zefix` | + | decisive | `uid_matches is True` |
+| `uid_mismatch` | − | strong | `uid_matches is False` |
+| `address_match` | + | strong / medium | `addr_full_match` / `addr_partial_match` |
+| `zone_name_match` | + | strong (≥0.55) / medium (≥0.30) / weak (>0) | `zone_name_conf` |
+| `signal_coverage` | + | weak | `base` (signal count / 7) |
+
+`confidence`/`method`/`compute_verdict` are **unchanged** — the ledger is persisted alongside
+them, not used yet. It's the feature vector the next phase (categorical verdict, replacing the
+confidence ladder) computes from; deliberately excludes dimensions the design calls for but
+that need new detection logic not yet built (`phone_matches_reg`, `is_marketplace`/`is_parked`,
+`purpose_sim` — the last is computed by a separate later ML-worker job, not at extraction time).
+Exposed via `GET /{id}/web-extract`'s `evidence` field (no frontend display yet — that lands
+with phase 4's identity card, which needs the categorical verdict to be meaningful).
+
+Tests: `tests/test_crawler_evidence_ledger.py`.
+
+#### Categorical identity verdict (phase 4 — per-candidate labels + verdict fixes)
+
+`website_status.py` gains a per-candidate categorical label alongside the scalar `confidence`,
+plus two real behavioral fixes to `compute_verdict` — all additive; the company-level
+`companies.website_status` vocabulary (verified/confirmed/likely/social_only/directory_only/none)
+is **unchanged** in this phase (a full vocabulary cutover is a separate, larger, cross-cutting
+change — frontend badge, tier gating, filters — deliberately deferred).
+
+- **`categorize_identity(confidence, uid_matches, has_evidence, thr) -> (category, probability)`**
+  — maps one candidate into `MATCH_UID` / `MATCH_STRONG` / `MATCH_WEAK` / `MISMATCH` / `UNKNOWN`.
+  `probability` is currently just `confidence` (the existing deterministic combine) — the future
+  GBM phase swaps the combine step behind this same signature. `AMBIGUOUS`/`RELATED_ENTITY` are
+  cross-candidate/cross-entity outcomes, computed in `compute_verdict`, not per-row here
+  (`RELATED_ENTITY` needs a parent/subsidiary graph lookup — not yet built).
+  Computed and persisted in `handle_web_extract` right after `resolve_company_extract` (which
+  already has `db`/thresholds in scope) onto `company_web_extract.identity_category` /
+  `identity_probability` (migration `0121`). Exposed via `/web-extract` and `/web-extracts`;
+  shown as a badge in `WebsitePanel` (`IdentityCategoryBadge`, distinct from the existing
+  company-level `WebsiteStatusBadge`).
+- **Auto-pick tiebreak** (`_pick_best_candidate`) — `compute_verdict` no longer silently
+  max-picks by raw confidence within a tier. It now prefers `name_address_verified` candidates
+  first, then confidence — a partial implementation of the identity rework's 4-step tiebreak
+  (steps 1 "own-verified-socials-link" and 2 "UID-bearing" aren't differentiable with data
+  collected today — UID-true candidates are always tier VERIFIED already, so they never compete
+  within CONFIRMED/LIKELY; registry-phone doesn't exist yet). Sets `Verdict.ambiguous: bool` when
+  ≥2 *distinct-domain* candidates land within `_AMBIGUITY_MARGIN` (0.05) of the winner — the pick
+  is still made (never left blank pending review), but the judgment call is now visible rather
+  than hidden behind a confident-looking URL.
+- **No snippet fallback after a real crawl** (the actual "Cut pre-crawl scoring" fix) —
+  previously, if a crawl was attempted but no candidate cleared any tier (e.g. every candidate's
+  UID mismatched), `compute_verdict` still fell through to `classify_search_results` (the
+  pre-crawl snippet score), letting a weak search-result guess overrule genuine negative crawl
+  evidence. Now: `rows` non-empty but nothing tiered → `Verdict(NONE, ...)` directly. The
+  snippet-score fallback only fires when the company was **never crawled at all** (no extract
+  rows exist) — its legitimate, intended use as a pre-crawl provisional signal.
+- **Fixed a real `is True`/`is False` bug** in `_extract_tier`: `get_web_extracts_with_urls` uses
+  raw SQL (`text()`), which returns plain 0/1 ints (not the bool singleton) on some
+  driver/dialect combinations (observed on SQLite; Postgres/psycopg2 already returns real bools)
+  — `uid_matches_zefix is True` silently misclassified those as the `None` branch. Changed to
+  `==`, which preserves the None/True/False tri-state correctly on both.
+
+Tests: `tests/test_website_status.py` (categorize_identity, tiebreak/ambiguity, the two
+`compute_verdict` behavior fixes).
+
+Remaining: per-org fit scoring (Layer D, coupled with the scoring-multitenancy rework) is not
+yet implemented — see `docs/code-review/web-pipeline-holistic-rework.md` §5/§10 for the plan.
 
 ### Website verdict — does this company have a website, and how many?
 
@@ -2269,6 +2424,202 @@ Grafana query: `rate(crawl_result_total[5m])` grouped by `tier` and `status`. Pe
 
 `web_crawl_http` and `web_crawl_playwright` check for queued ML jobs in every progress callback. If an ML job is waiting, `pause_requested` is set and `JobPausedError` is raised — the crawl saves its progress and the ML job runs next.
 
+### Crawler security hardening (2026-07-24)
+
+The crawler fetches attacker-controlled content (arbitrary company websites) across three
+fetch paths (httpx, curl_cffi fallback, Playwright browser) — hardened against decompression
+bombs and SSRF:
+
+- **Decompression ("zip") bomb defense** — httpx's automatic decoder (`Response.aiter_bytes`)
+  calls `decompressor.decompress(data)` with **no output-size bound**: a single raw network
+  chunk from a crafted gzip/deflate body can materialize gigabytes in one call before any size
+  check runs (verified: a 200 KB crafted gzip body decompresses to 200 MB in one `decompress()`
+  call). Fixed by `crawler_common.read_bounded_body()`, which reads **raw** (undecoded) bytes
+  via `resp.aiter_raw()` and decompresses in small increments using
+  `zlib.decompressobj().decompress(chunk, max_length=remaining)` — a hard per-call output cap
+  stdlib zlib guarantees, so cumulative decoded output can never exceed `MAX_PAGE_BYTES`
+  regardless of compression ratio. Used by `crawler_http._fetch` and `crawler_sitemap._get_text`
+  (previously read `resp.text` fully, unbounded, before truncating). Only `gzip`/`deflate` are
+  accepted (`BOUNDED_ACCEPT_ENCODING = "gzip, deflate"`, sent instead of a real browser's
+  `br, zstd` too) — `brotli`/`zstandard`'s Python bindings expose no per-call output bound, so
+  those encodings are refused (`DecompressionBombError`, fail closed) rather than decoded
+  unbounded. Regression tests: `tests/test_crawler_decompression_bomb.py` (proves a real 200 MB
+  gzip bomb is bounded to `MAX_PAGE_BYTES`, and documents the unbounded call it replaces).
+  - `_fetch_curl_impersonate` (bot-block fallback): libcurl decodes transparently in C with no
+    raw/undecoded access point, so the same technique doesn't apply — mitigated by requesting
+    `accept_encoding=BOUNDED_ACCEPT_ENCODING` (asks compliant servers not to send br) plus a
+    cumulative-bytes cap on the streamed, already-decoded body. Weaker than the httpx path;
+    acceptable since this is a secondary fallback tier.
+  - Playwright: `page.content()` fully serializes the DOM over CDP before any truncation could
+    apply — a "DOM bomb" (JS generating millions of nodes) would transfer the whole string.
+    `_get_bounded_html()` first checks `document.documentElement.outerHTML.length` via a cheap
+    `page.evaluate()` call, and only pulls a bounded prefix over the wire when it's large.
+- **SSRF** — every fetch path resolves the target host and refuses private/loopback/link-local
+  (incl. cloud metadata `169.254.169.254`)/reserved/multicast addresses, via shared
+  `crawler_common.resolve_is_public()` / `ssrf_request_guard()` (moved here from `crawler_http`
+  so `crawler_sitemap` can use it too without a circular import — `crawler_http` lazily imports
+  `crawler_sitemap` inside a function body):
+  - httpx (`crawler_http._client`, `crawler_sitemap.discover_site_overview`): `event_hooks`
+    fire per redirect hop, so a redirect to an internal address is refused mid-chain.
+  - curl_cffi (`_fetch_curl_impersonate`): libcurl follows redirects internally with no
+    interception point, so `allow_redirects=False` is set and redirects are followed manually
+    in a bounded loop (`_CURL_MAX_REDIRECTS = 5`), re-checking `resolve_is_public()` before
+    each hop — same guarantee as the httpx path, reimplemented at the application layer.
+  - Playwright (`_guard_and_filter_resources`, extends the existing image/media/font blocker):
+    since Playwright renders real JS, a malicious page's own script (fetch/XHR/further
+    navigation) could otherwise pivot to internal services from the crawler's network
+    namespace — every request the page makes, including the top-level navigation itself, is
+    resolved and aborted if non-public.
+  - Previously **`_fetch_curl_impersonate` had no SSRF guard at all** (a full bypass of the
+    protection the primary httpx path already had) and Playwright had none either — both closed
+    by this pass. `tests/test_crawler_ssrf.py` covers the shared `_ip_blocked`/guard logic.
+- **XSS** — verified the frontend never renders raw crawled HTML (no `dangerouslySetInnerHTML`
+  / `srcDoc` of crawler content anywhere); extracted fields only ever reach the UI as React text
+  content (auto-escaped). Raw HTML is stored to S3 and only ever parsed server-side
+  (BeautifulSoup/trafilatura — no JS execution) — Playwright is the only path that executes
+  page JS, and it runs in a disposable headless Chromium container, not the app process.
+
+### Search-result data extraction — `company_search_results` (2026-07-24)
+
+Company table normalization (ROADMAP): `google_search_results_raw`, `google_search_full_raw`,
+`google_search_params`, and `website_checked_at` moved off `companies` into their own table,
+`company_search_results` (PK `company_id`, one row per company — same pattern as
+`company_crawl_state`). This is search-**provider** data, not company master data; it's a
+global fact (same tier as `company_web_extract`/`company_web_page`), not an org-scoped overlay.
+The derived **verdict** fields (`website_url`, `web_score`, `website_status`, `website_count`,
+`social_media_only`) stay on `companies` for now — those are addressed separately by the
+scoring/multi-tenancy rework.
+
+- **Storage upgrade**: the old columns were `Text` holding JSON-encoded strings
+  (`json.dumps`/`json.loads` at every call site). The new columns are native `JSON`
+  (`results_raw: list[dict]`, `full_raw: dict`, `params: dict`) — no more manual (de)serialization.
+  `crud/company_search_result.py`: `get_search_result`, `upsert_search_result` (portable
+  get-or-create, not Postgres `ON CONFLICT` — kept SQLite-testable), `bulk_get_search_results`.
+- **Read path**: `_overlay()` (`app/api/routes/companies/_shared.py`) now also merges
+  `website_checked_at`/`google_search_results_raw` from a `CompanySearchResult` row (renamed
+  wire field kept for minimal frontend churn; type changed `str→list[dict]`), alongside its
+  existing `OrgCompanyState` overlay. `_bulk_search_results()` mirrors `_bulk_org_states()` for
+  list views (one query, no N+1). All 4 call sites (search.py demo, list.py bulk, detail.py ×2)
+  updated.
+- **Filters/sort moved off `Company` columns**: `crud/company.py::list_companies`'s
+  `google_searched` filter (yes/no/no_result) now uses a correlated `EXISTS` against
+  `company_search_results` instead of `Company.website_checked_at`; the `website_checked_at`
+  sort key is special-cased (outer-joins `CompanySearchResult` only when that sort is actually
+  requested, keeping the common no-sort case join-free at 700k rows) rather than living in the
+  static `_SORT_MAP` (which — since it's built at import time from `Company.<attr>` — would have
+  **crashed the app at startup** once the column was removed, had this not been special-cased).
+  `get_company_stats()`'s `searched`/`searches_today` now count `company_search_results` rows.
+- **Job handlers** (`web_crawl.py`): `handle_web_extract`'s per-batch meta query LEFT JOINs
+  `company_search_results` instead of selecting a `Company` column (same column position, so
+  downstream `row[N]` indexing is unchanged — only `json.loads(row[6])` → direct list use).
+  `handle_recompute_website_status` and `handle_web_url_populate` similarly switched their raw
+  SQL to JOIN the new table. `handle_web_crawl_single` fetches via `csr_crud.get_search_result`.
+- **Also cleaned up while touching this area**: `OrgCompanyState`'s Google-scoring shadow columns
+  (`website_url`/`web_score`/`google_search_results_raw`/`website_checked_at`/
+  `social_media_only`/`website_status`/`website_count`) were confirmed 100% dead — the intended
+  writer `update_org_google_results` had zero callers anywhere, and no code read these fields off
+  `OrgCompanyState` either (`_overlay()` only ever merged `_ORG_FIELDS`, which never included
+  them). Dropped the columns, the dead CRUD function, and the matching (also-dead) fields from
+  the `OrgStateOut` API schema and the frontend `OrgCompanyState` TS type — this was previously
+  flagged as a dead-code risk in `docs/code-review/scoring-multitenancy-rework.md` and as a
+  "Cleanup" step of that rework; done now since the area was already being touched.
+- Migration `0122`: creates `company_search_results`, backfills from the old `companies`
+  columns (`::jsonb` cast), drops the 4 `companies` columns + the 7 dead `org_company_state`
+  columns in one pass (not phased/deferred — this data is being relocated wholesale, not
+  gradually cut over like the score tables).
+
+Tests: `tests/test_company_search_result.py` (upsert/get/bulk-get, `google_searched` filter,
+`website_checked_at` sort, searched-count).
+
+### Scoring & multi-tenancy rework — phases 1-4 implemented (2026-07-24)
+
+Per `docs/code-review/scoring-multitenancy-rework.md`: flex/web/ai/combined scores were global
+on `companies`, so one org's rescore overwrote what every other org saw. This phase adds the
+per-scope score tables, a materialization job, and config resolution — **read-cutover is
+partial** (detail view + list items; map/CSV/sort are not yet cut over — see "Not done" below).
+Nothing currently breaks: the migration backfills an org-default `company_score` row for every
+org from the *then-current* global values, so the overlay is a no-op divergence until an org
+customizes its `scoring_*` config and reruns `rescore_scope` — `companies.flex_score/web_score/
+combined_score/ai_score` are still written by all existing code paths, unchanged.
+
+**New tables** (migration `0123`):
+- `company_score(org_id, user_id NULL|N, company_id)` — unique per scope. `user_id IS NULL` is
+  the org-default row; `user_id = N` exists only once that user has overridden ≥1 `scoring_*`
+  key. Holds `flex_score`, `web_score`, `combined_score`. Index `(org_id, user_id,
+  combined_score)` for sort/filter.
+- `org_company_ai(org_id, company_id)` — org-shared AI result: `ai_score` (promoted, sortable)
+  + `ai_data` JSONB (category/freeform now; future per-company summaries or named prompt-scores
+  need no migration). AI is computed once per org and reused by every member, never per-user.
+- Backfill: both tables seeded for **every existing org** via a `organizations × companies`
+  cross join in the migration (fine at current org counts; re-check row estimates before
+  re-running if org count has grown a lot — this is a one-time DB-side bulk `INSERT...SELECT`,
+  not an app-level 700k-row load, so it doesn't violate the batching rule, but it does scale
+  with `orgs × companies`).
+
+**Config resolution** (`app/services/scoring/config_resolution.py`) — reuses infrastructure that
+already existed for other settings, no new plumbing:
+- `effective_config(db, org_id, user_id=None)` — org's effective `scoring_*` settings (via the
+  existing `AppSetting` → `OrgSetting` → base-org fallback chain, `crud.app_setting
+  .get_effective_settings_batch`) with the user's own `UserOrgSetting` overrides layered on top
+  (new `app/crud/user_org_setting.py`; `workspace/_shared.py`'s per-user setting helpers now
+  delegate to it instead of duplicating the query).
+- `resolve_scope(db, org_id, user_id)` — returns `user_id` only if that user has recorded ≥1
+  `scoring_*` override for this org, else `None` (org-default). One indexed `(org_id, user_id)`
+  lookup per read, no per-row COALESCE across scopes, per the design doc's goal.
+
+**Materialization job** (`app/services/scoring/rescore_scope.py`, job type `rescore_scope`,
+handler `job_handlers/rescore.py`) — two-pass chunked batch (same shape as the existing
+`geocoding_pipeline.recalculate_flex_scores`, which this is modeled on): pass 1 computes each
+company's raw flex score via `compute_flex_score_breakdown(config=effective_config(...))`
+unchanged, in id-keyset batches; pass 2 population-wide min-max normalizes (flex_score requires
+seeing the whole scope's raw-score distribution, so can't be finalized company-by-company) and
+upserts `company_score` rows. `web_score` is copied from the global `Company.web_score` (**not**
+recomputed per org — there is no per-org web-scoring lever yet; the website identity verdict
+uses crawl confidence + global `AppSetting` thresholds, not `scoring_*` config. A known,
+documented simplification, not a placeholder bug). `ai_score` is read from `org_company_ai`
+(never recomputed here — that's `claude_classify`'s job). `combined_score` via the existing
+`Company.compute_combined_score(...)`, unchanged.
+- Dedup key: `rescore_scope:{org_id}:{user_id or '-'}` — **not** the job-type default
+  `"{type}:{org_id}"`, added as a special case in `job_worker._compute_dedup_key` (otherwise two
+  different users in the same org rescoring their own scope would collide and one would be
+  silently skipped as "already running").
+- Trigger: `POST /api/v1/jobs/scoring/rescore-scope` (any authenticated org member — resolves to
+  their own scope automatically). Shows up in the existing generic Jobs UI with no bespoke
+  frontend needed (same progress/event/cancel machinery every job type already gets).
+
+**Read-path cutover — done for `_overlay()`** (`app/api/routes/companies/_shared.py`): `_overlay`
+now takes an optional `score: CompanyScore` and overrides `flex_score`/`web_score`/
+`combined_score` on the `CompanyRead` when present; new `_bulk_scores()` mirrors
+`_bulk_org_states()`/`_bulk_search_results()` (one query, resolves scope via `resolve_scope`
+first). Wired into all 4 call sites (list.py bulk, detail.py ×2). Falls back to the global
+`Company` columns when no scope is materialized (org context is superadmin/absent, or
+`rescore_scope` hasn't run) — identical to pre-rework behavior.
+
+**Not done — flagged, not attempted, in this pass:**
+- **`map.py` and `csv_export.py` cutover** — both use `min_web_score`/`max_web_score`/etc. as
+  direct `Company` column **filters** (not just display), and `map.py` additionally computes a
+  weighted-average SQL expression directly against `CompanyModel.ai_score/web_score/flex_score`
+  for marker clustering. Cutting these over means joining `company_score` into filter/sort/
+  clustering queries used by the live map view and bulk CSV exports — higher risk, needs
+  dedicated verification (the design doc itself calls out "verify sort parity against the
+  pre-cutover global ordering" as a required check before this is safe).
+- **`list_companies`'s own sort/filter** (`crud/company.py`) — score-based filters
+  (`min/max_web_score` etc.) and the `combined_score` sort expression still read `Company`
+  columns directly, not `company_score`. Only the *displayed* values are cut over (via
+  `_overlay`), not what's filtered/sorted on. Same risk profile as map/CSV above.
+- **Phase 5 (config UI)** — no settings page yet exposing per-user `scoring_*` overrides or a
+  rescore-scope trigger button; the backend (`UserOrgSetting` overrides + the trigger endpoint)
+  is ready for one. Per the CLAUDE.md frontend-wiring rule, building this needs a UI/UX decision
+  on placement and interaction that wasn't specified.
+- **Phase 6 (cleanup)** — `companies.flex_score/web_score/combined_score/ai_score` and
+  `OrgCompanyState`'s (already-dead, already-dropped) shadow columns are the *old* dual-write
+  columns being superseded; they are deliberately **not** dropped or frozen yet. Retiring
+  `web_score` from `combined_score` (per the web-identity-rework doc) also lands here, later,
+  together — not attempted.
+
+Tests: `tests/test_rescore_scope.py` (config resolution, dedup-independent per-scope
+materialization), `tests/test_company_overlay_scores.py` (overlay fallback + override).
+
 ### Key CRUD functions — `app/crud/crawler.py`
 
 | Function | Purpose |
@@ -2277,6 +2628,8 @@ Grafana query: `rate(crawl_result_total[5m])` grouped by `tier` and `status`. Pe
 | `reset_playwright_crawled(db, canton)` | Reset crawled/failed playwright rows to pending for rerun |
 | `_CRAWL_ORDER_BY` | Dict mapping order_by string → SQL ORDER BY clause |
 | `release_in_progress_states(db, tier)` | Crash recovery — releases stuck in_progress rows |
+| `save_page_inventory(db, company_id, entries, already_saved_urls)` | Inserts inventory-only (`crawled=FALSE`) rows from `classify_all_urls`, skipping URLs already fetched this run |
+| `get_page_inventory(db, company_id)` | Merged fetched+inventory page list, fetched first then by `priority` — backs `GET /{id}/web-extract`'s `pages` |
 
 ### Tables
 
@@ -2284,8 +2637,9 @@ Grafana query: `rate(crawl_result_total[5m])` grouped by `tier` and `status`. Pe
 |---|---|
 | `company_url_candidates` | Serper/ScrapingDog URL candidates; one selected per company |
 | `company_crawl_state` | Per-company crawl status, tier, bot flags, re-crawl scheduling |
-| `company_web_pages` | Per-page crawl result; S3 key for raw HTML; `needs_extraction` flag |
+| `company_web_pages` | Site page inventory: fetched pages (`crawled=TRUE`, S3 key for raw HTML, `needs_extraction` flag) + inventory-only rows (`crawled=FALSE`, sitemap-discovered but not fetched). `discovered_via` (sitemap/robots/nav/homepage), `priority` |
 | `company_web_extract` | PK `(company_id, url_candidate_id)` — one row per company+URL crawled; `get_best_web_extract()` picks highest-confidence row for display/scoring. Includes `uid_matches_zefix` (verification flag), `name_address_verified` (migration `0100`, fallback verification when no UID found), `persons` (impressum management names + spaCy NER names), and `purpose_sim` (float, migration `0110`; cosine similarity between Zefix purpose embedding and site content, used as a confidence boost in `_extract_tier()`) |
+| `company_search_results` | PK `company_id` — raw Google/ScrapingDog search data (migration `0122`, moved off `companies`): `provider`, `results_raw` (scored+sorted list), `full_raw` (complete provider response), `params` (search params sent), `searched_at`. All native `JSON` columns. |
 
 ### Key files
 
@@ -2829,13 +3183,15 @@ In RQ mode with Redis, a **2 s periodic DB poll** runs alongside pub/sub to deli
 | **Default** — one active per org | All job types not listed below |
 | One active per org + param hash | `claude_classify` (distinct prompt configs may run concurrently) |
 | Per-company | `noga_v2_explain` |
-| No dedup (parallel-safe) | `batch`, `csv_export`, `web_select_url`, `web_crawl_single` |
+| No dedup (parallel-safe) | `csv_export`, `web_select_url`, `web_crawl_single`, `web_crawl_http`, `web_crawl_playwright` |
 
 New job types are automatically deduplicated without any code change. Add to `NO_DEDUP` only if the type genuinely supports concurrent runs.
 
 **Trade-offs:**
 - **Advantage:** Safe to trigger multiple times from UI or multiple pods; no wasted credits or duplicate DB writes.
 - **Disadvantage:** A paused job with a dedup key blocks re-enqueue until it is resumed or cancelled. Users who want a fresh run must cancel first.
+
+**`NO_DEDUP` requires per-row claiming.** Only add a type to `NO_DEDUP` if it claims disjoint rows under lock (e.g. `claim_crawl_batch`'s `SELECT ... FOR UPDATE SKIP LOCKED`) — otherwise concurrent runs race over the same query results. `web_search_batch` (formerly named `batch`) used to be in `NO_DEDUP` despite querying companies by filter+`LIMIT` with no locking: two runs (e.g. a double-click before the button disabled, or a retry) would both select the same unprocessed companies and double-spend Serper/ScrapingDog credits, while the second job just sat `queued` behind the first under the default `JOB_WORKER_CONCURRENCY=1`. Fixed by removing it from `NO_DEDUP`, falling back to the default one-active-per-org key (effectively a global singleton here since the route is superadmin-only/catalog-wide with `org_id=None`).
 
 ---
 

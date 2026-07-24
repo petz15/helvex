@@ -214,7 +214,8 @@ def handle_resolve_shab_old_uids(ctx: JobContext) -> tuple[dict, str]:
             f"Pub {done:,}/{total or '?':,} — "
             f"{_stats.get('linked_local', 0):,} local, "
             f"{_stats.get('resolved_api', 0):,} via API "
-            f"({_stats.get('api_lookups', 0)} lookups), "
+            f"({_stats.get('api_lookups', 0)} lookups, "
+            f"{_stats.get('skipped_cached_miss', 0):,} known-miss skipped), "
             f"{_stats.get('unresolved', 0):,} unresolved"
             + (f", {_stats.get('api_errors', 0)} API errors" if _stats.get('api_errors') else "")
         )
@@ -238,8 +239,59 @@ def handle_resolve_shab_old_uids(ctx: JobContext) -> tuple[dict, str]:
         f"Done — {stats['with_old_uid']:,} pubs with old number, "
         f"{stats['linked_local']:,} linked locally, "
         f"{stats['resolved_api']:,} resolved via API ({stats['api_lookups']} lookups, "
-        f"{stats['stubs_created']} stubs), {stats['unresolved']:,} unresolved"
+        f"{stats['stubs_created']} stubs), "
+        f"{stats['skipped_cached_miss']:,} known-miss skipped, "
+        f"{stats['unresolved']:,} unresolved"
     )
     if stats["api_errors"]:
         done_msg += f", {stats['api_errors']} API errors"
+    return stats, done_msg
+
+
+def handle_backfill_shab_old_uid_extraction(ctx: JobContext) -> tuple[dict, str]:
+    """Re-extract old_uid/uid for publications whose raw_json never captured one.
+
+    Targeted repair pass, not a full historical re-import — re-fetches only the
+    specific PDFs (or PDF-days) behind publications that have neither an
+    extracted_uid nor an extracted_old_uid/ch_number at all, so resolve_shab_old_uids
+    never even gets a chance to attempt them. No UID SOAP calls; safe to run
+    alongside uid_import/uid_detail/resolve_shab_old_uids.
+    """
+    from app.services.registry.shab_archive_import import backfill_shab_old_uid_extraction
+
+    batch_size = int(ctx.params.get("batch_size", 500))
+    pdf_workers = int(ctx.params.get("pdf_workers", 8))
+    request_delay = float(ctx.params.get("request_delay", 0.5))
+
+    def _progress(done: int, total: int, _stats: dict) -> None:
+        ctx.assert_not_cancelled()
+        msg = (
+            f"{done:,}/{total or '?':,} — "
+            f"{_stats.get('candidates_found', 0):,} candidates, "
+            f"{_stats.get('identifiers_recovered', 0):,} recovered "
+            f"({_stats.get('linked_local', 0):,} linked), "
+            f"{_stats.get('still_missing', 0):,} still missing"
+            + (f", {len(_stats.get('errors', []))} errors" if _stats.get('errors') else "")
+        )
+        ctx.progress(done, total or 0, _stats, msg)
+
+    stats = backfill_shab_old_uid_extraction(
+        ctx.db,
+        batch_size=batch_size,
+        pdf_workers=pdf_workers,
+        request_delay=request_delay,
+        progress_cb=_progress,
+        status_cb=lambda m: ctx.status_with_stats(m),
+        abort_cb=ctx.assert_not_cancelled,
+    )
+
+    done_msg = (
+        f"Done — {stats['pubs_scanned']:,} pubs scanned, {stats['candidates_found']:,} candidates "
+        f"({stats['mode_b_refetched']:,} Mode B PDFs, {stats['mode_a_days_refetched']:,} Mode A days), "
+        f"{stats['identifiers_recovered']:,} identifiers recovered, "
+        f"{stats['linked_local']:,} linked ({stats.get('stubs_created', 0)} stubs), "
+        f"{stats['still_missing']:,} still missing"
+    )
+    if stats["errors"]:
+        done_msg += f", {len(stats['errors'])} errors"
     return stats, done_msg

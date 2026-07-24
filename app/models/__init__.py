@@ -12,6 +12,8 @@ from app.models.company_directory_data import CompanyDirectoryData
 from app.models.company_error import CompanyError
 from app.models.directory_crawl_domain import DirectoryCrawlDomain
 from app.models.company_purpose_keyword import CompanyPurposeKeyword
+from app.models.company_score import CompanyScore
+from app.models.company_search_result import CompanySearchResult
 from app.models.company_url_candidate import CompanyUrlCandidate
 from app.models.company_web_extract import CompanyWebExtract
 from app.models.company_web_page import CompanyWebPage
@@ -22,6 +24,7 @@ from app.models.job_run import JobRun
 from app.models.job_run_event import JobRunEvent
 from app.models.note import Note
 from app.models.oauth_account import OAuthAccount
+from app.models.org_company_ai import OrgCompanyAi
 from app.models.org_company_state import OrgCompanyState
 from app.models.org_credit_transaction import OrgCreditTransaction
 from app.models.org_member import OrgMember
@@ -42,6 +45,7 @@ from app.models.tfidf_stopword import TfidfStopword
 from app.models.user import User
 from app.models.user_company_state import UserCompanyState
 from app.models.security_event import SecurityEvent
+from app.models.shab_old_uid_miss import ShabOldUidMiss
 from app.models.user_org_setting import UserOrgSetting
 from app.models.user_view import UserView
 
@@ -49,13 +53,13 @@ __all__ = [
     "ActivityLog", "AppSetting", "AuditLog", "BillingTier", "BoilerplateCandidate",
     "BoilerplatePattern", "ClusterRegistry", "CollectionRun", "Company",
     "CompanyCrawlState", "CompanyDirectoryData", "CompanyError", "DirectoryCrawlDomain",
-    "CompanyPurposeKeyword", "CompanyTfidfCluster",
+    "CompanyPurposeKeyword", "CompanyScore", "CompanySearchResult", "CompanyTfidfCluster",
     "CompanyUrlCandidate", "CompanyWebExtract", "CompanyWebPage",
     "GoogleDirectoryDomain", "GoogleStopword",
-    "JobRun", "JobRunEvent", "Note", "OAuthAccount", "OrgCompanyState",
+    "JobRun", "JobRunEvent", "Note", "OAuthAccount", "OrgCompanyAi", "OrgCompanyState",
     "OrgCreditTransaction", "OrgMember", "OrgPaymentMethod", "OrgSetting",
     "Organization", "PaymentTransaction",
-    "SecurityEvent",
+    "SecurityEvent", "ShabOldUidMiss",
     "SimapAward", "SimapAwardVendor",
     "SogcAuditor", "SogcChange", "SogcCorporateRole", "SogcPersonAppearance", "SogcPersonEntity",
     "SogcPersonFlag", "SogcPublication",

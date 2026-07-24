@@ -1,12 +1,11 @@
 """Org-shared overlay on top of the global company catalog.
 
-Stores workflow state, contact info, and Google scoring results
-per (org, company) pair. Multiple orgs can track the same catalog
-company with completely independent overlays.
+Stores workflow state and contact info per (org, company) pair. Multiple orgs
+can track the same catalog company with completely independent overlays.
 """
 from datetime import datetime
 
-from sqlalchemy import DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint, func
+from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, UniqueConstraint, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
@@ -29,20 +28,6 @@ class OrgCompanyState(Base):
     contact_name: Mapped[str | None] = mapped_column(String(256), nullable=True)
     contact_email: Mapped[str | None] = mapped_column(String(256), nullable=True)
     contact_phone: Mapped[str | None] = mapped_column(String(64), nullable=True)
-
-    # Google scoring (written by worker, paid tier).
-    # DUAL-WRITE: these same fields exist on Company (global Serper result, master copy).
-    # org_company_state holds the org-specific re-score; Company holds the seed value used
-    # to populate any org that hasn't run its own enrichment yet.
-    # Always read from org_company_state when org_id is available; fall back to Company
-    # only when no org context exists (e.g. superadmin or pre-enrichment queries).
-    website_url: Mapped[str | None] = mapped_column(String(512), nullable=True)
-    web_score: Mapped[float | None] = mapped_column(Float, nullable=True)
-    google_search_results_raw: Mapped[str | None] = mapped_column(Text, nullable=True)
-    website_checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    social_media_only: Mapped[bool | None] = mapped_column(nullable=True)
-    website_status: Mapped[str | None] = mapped_column(String(16), nullable=True)
-    website_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
