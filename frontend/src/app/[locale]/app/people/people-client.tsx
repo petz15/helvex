@@ -68,7 +68,7 @@ function FlagModal({ entity, onClose }: { entity: SogcPersonEntity; onClose: () 
     finally { setSubmitting(false); }
   }
 
-  const name = [entity.firstname, entity.lastname].filter(Boolean).join(" ") || entity.normalized_key;
+  const name = [entity.title, entity.firstname, entity.lastname].filter(Boolean).join(" ") || entity.normalized_key;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
@@ -287,7 +287,7 @@ function PersonEntityCard({
   const { dict } = useI18n();
   const t = dict.app.people;
   const [showFlag, setShowFlag] = useState(false);
-  const name = [entity.firstname, entity.lastname].filter(Boolean).join(" ") || entity.normalized_key;
+  const name = [entity.title, entity.firstname, entity.lastname].filter(Boolean).join(" ") || entity.normalized_key;
 
   return (
     <>

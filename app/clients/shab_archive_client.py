@@ -227,11 +227,19 @@ def normalize_pdf_text(text: str) -> str:
     1. Syllable-break hyphens: ``word-\\n`` followed by lowercase → drop hyphen
     2. Compound-break hyphens: ``word-\\n`` followed by uppercase → keep hyphen
     3. Remaining newlines → single space; runs of spaces → single space
+
+    SHAB publications are DE/FR/IT, so both letter classes include French/Italian
+    accented characters (àâçèéêëîïôœùû / ÀÂÇÈÉÊËÎÏÔŒÙÛ + Italian ìò/ÌÒ) — without
+    these, a line-wrap hyphen before an accented letter matched neither regex and
+    fell through to step 3 unrejoined, leaving a visible stray "word- word" in FR/IT text.
+
+    Some layouts leave stray inline whitespace between the newline and the wrapped
+    letter (e.g. "Fran-\\n çoise") — ``[ \\t]*`` absorbs it so the join still happens.
     """
     # Step 1: syllable break — "Einzelunter-\nschrift" → "Einzelunterschrift"
-    text = re.sub(r'-\n([a-zäöüß])', r'\1', text)
+    text = re.sub(r'-\n[ \t]*([a-zäöüßàâçèéêëîïôœùûìò])', r'\1', text)
     # Step 2: compound break — "Kommandit-\nGesellschaft" → "Kommandit-Gesellschaft"
-    text = re.sub(r'-\n([A-ZÄÖÜ])', r'-\1', text)
+    text = re.sub(r'-\n[ \t]*([A-ZÄÖÜÀÂÇÈÉÊËÎÏÔŒÙÛÌÒ])', r'-\1', text)
     # Step 3: collapse all remaining newlines and tidy whitespace
     text = re.sub(r'\n', ' ', text)
     text = re.sub(r'  +', ' ', text)

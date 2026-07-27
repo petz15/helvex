@@ -759,6 +759,7 @@ def get_company_web_extract(
             "has_contact_form": p.has_contact_form,
             "has_html": p.s3_key_html is not None,
             "crawled": p.crawled,
+            "needs_extraction": p.needs_extraction,
             "discovered_via": p.discovered_via,
             "crawled_at": p.crawled_at.isoformat() if p.crawled_at else None,
         }

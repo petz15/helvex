@@ -25,7 +25,7 @@ spec:
             matchExpressions:
               - key: app.kubernetes.io/component
                 operator: In
-                values: ["app", "api-worker", "ml-worker", "crawler-http"]
+                values: ["app", "api-worker", "ml-worker", "crawler-http", "db-export"]
       ports:
         - protocol: TCP
           port: 5432

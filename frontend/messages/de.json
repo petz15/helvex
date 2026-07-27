@@ -730,6 +730,7 @@
       "crawled": "Gecrawlt",
       "candidatesExtracted": "{count} URL-Kandidaten extrahiert",
       "noStructuredData": "Seiten wurden gecrawlt, aber es konnten keine strukturierten Daten extrahiert werden. Siehe Crawl-Abdeckung unten.",
+      "pendingExtraction": "Seiten wurden gecrawlt — die Extraktion in strukturierte Daten steht noch aus.",
       "contact": "Kontakt",
       "socialProfiles": "Social-Profile",
       "content": "Inhalt",

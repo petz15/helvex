@@ -137,7 +137,6 @@ spec:
                     delete "$remote" \
                     --min-age "${RETENTION_DAYS}d" \
                     --include "helvex-*.dump" \
-                    --exclude "**" \
                     --retries 3 \
                     --low-level-retries 10
               securityContext:

@@ -709,6 +709,7 @@
       "crawled": "Crawlé",
       "candidatesExtracted": "{count} candidats URL extraits",
       "noStructuredData": "Les pages ont été crawlées mais aucune donnée structurée n'a pu être extraite. Voir la couverture du crawl ci-dessous.",
+      "pendingExtraction": "Les pages ont été crawlées — l'extraction des données structurées n'a pas encore été effectuée.",
       "contact": "Contact",
       "socialProfiles": "Profils sociaux",
       "content": "Contenu",

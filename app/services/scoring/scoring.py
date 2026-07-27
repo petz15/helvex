@@ -1,6 +1,5 @@
 """Scoring logic for matching Google Search results to a company profile."""
 
-import json
 import logging
 import math
 import re

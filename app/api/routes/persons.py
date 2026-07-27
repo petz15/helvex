@@ -19,6 +19,7 @@ class PersonEntityOut(BaseModel):
     normalized_key: str
     lastname: str | None
     firstname: str | None
+    title: str | None
     hometown_municipality: str | None
     current_residence_municipality: str | None
     is_foreign: bool
@@ -51,6 +52,7 @@ class PersonEntityOut(BaseModel):
             normalized_key=e.normalized_key,
             lastname=e.lastname,
             firstname=e.firstname,
+            title=e.title,
             hometown_municipality=e.hometown_municipality,
             current_residence_municipality=residence,
             is_foreign=e.is_foreign,

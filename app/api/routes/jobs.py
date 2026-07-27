@@ -364,6 +364,7 @@ class BatchCollectBody(BaseModel):
     only_missing_website: bool = True
     refresh_zefix: bool = False
     run_google: bool = True
+    concurrency: int = 1                 # parallel Serper/ScrapingDog requests (2–5 recommended)
     # ── Geography ─────────────────────────────────────────────────────────────
     canton: str | None = None            # single-canton shorthand (backward compat)
     cantons: list[str] | None = None     # include any of these cantons

@@ -291,6 +291,7 @@ export interface SogcPersonEntity {
   normalized_key: string;
   lastname: string | null;
   firstname: string | null;
+  title: string | null;
   hometown_municipality: string | null;
   current_residence_municipality: string | null;
   is_foreign: boolean;

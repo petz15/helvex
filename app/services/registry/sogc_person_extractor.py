@@ -24,7 +24,20 @@ _BISHER_RE = re.compile(r"\[bisher:\s*([^\]]+)\]", re.I)
 _ANCIENNEMENT_RE = re.compile(r"\[anciennement:\s*([^\]]+)\]", re.I)
 _PRECEDEMMENT_RE = re.compile(r"\[précédemment:\s*([^\]]+)\]", re.I)
 
-_TITLE_RE = re.compile(r"\b(Dr\.|Prof\.|lic\.|dipl\.|Ing\.|MLaw|MAS|MBA|BSc|MSc)\b", re.I)
+# Fixed title keyword set (DE/FR/IT professional & academic titles seen in Swiss
+# commercial-register filings). "Dr."/"lic." are frequently followed by an academic
+# qualifier ("iur.", "oec.", "med.", "phil.", "theol.", "rer. publ.") which is
+# swallowed together with the title so it doesn't leak into the stripped name.
+_TITLE_QUALIFIER = r"(?:iur|oec|med|phil|theol|rer\.?\s*publ|sc(?:\.\s*nat)?)\.?"
+_TITLE_RE = re.compile(
+    r"\b(?:Dr|lic)\.(?:\s*" + _TITLE_QUALIFIER + r")?"
+    r"|\b(?:Prof|dipl|Ing|Dott|Avv)\."
+    r"|\bPD\b"
+    r"|\bMe\b"
+    r"|\b(?:MLaw|MAS|MBA|BSc|MSc)\b"
+    r"|\bFürsprecher(?:in)?\b",
+    re.I,
+)
 
 # German origin "von Zürich" / "von Eriswil und Roggwil BE"
 _DE_VON_RE = re.compile(r"^von\s+(.+)$", re.I)
@@ -156,16 +169,37 @@ def _split_fr_narrative_name(name_str: str) -> tuple[str, str, str]:
 
 
 def _normalize(text: str) -> str:
-    """NFKD-lowercase, strip combining chars, collapse whitespace."""
+    """NFKD-lowercase, strip combining chars, fold hyphens to spaces, collapse whitespace.
+
+    Hyphens are folded to spaces so "Marie-Magdeleine" and "Marie Magdeleine" —
+    the same name extracted with/without a hyphen from different PDF eras/OCR
+    passes — produce the same key instead of splitting into two person entities.
+    """
     if not text:
         return ""
     nfkd = unicodedata.normalize("NFKD", text)
     stripped = "".join(c for c in nfkd if not unicodedata.combining(c))
-    return " ".join(stripped.lower().split())
+    return " ".join(stripped.lower().replace("-", " ").split())
 
 
 def _normalize_key(lastname: str, firstname: str, hometown: str) -> str:
     return f"{_normalize(lastname)}|{_normalize(firstname)}|{_normalize(hometown)}"
+
+
+def _extract_title(text: str) -> tuple[str, str | None]:
+    """Strip every title match from ``text``, returning (clean_text, joined_titles).
+
+    Captures ALL matches (not just the first) so compound titles like
+    "Prof. Dr. iur." are fully removed from the name and fully preserved in
+    the returned title string, instead of silently dropping everything but
+    the first token.
+    """
+    matches = [m.group(0) for m in _TITLE_RE.finditer(text)]
+    if not matches:
+        return text, None
+    cleaned = _TITLE_RE.sub("", text).strip()
+    cleaned = re.sub(r"\s+", " ", cleaned)
+    return cleaned, " ".join(matches)
 
 
 # ── Role classification ────────────────────────────────────────────────────────
@@ -277,13 +311,14 @@ def _parse_person(raw_excerpt: str, change_type: str) -> dict | None:
         name_part = _fr_m.group(1).strip()
         role_word = _fr_m.group(2).strip() if _fr_m.group(2) else None
         if "," not in name_part and name_part:
+            name_part, narrative_title = _extract_title(name_part)
             lastname, firstname, hometown = _split_fr_narrative_name(name_part)
             if lastname:
                 _role = role_word[:256] if role_word else None
                 return {
                     "lastname": lastname[:256],
                     "firstname": firstname[:256] if firstname else None,
-                    "title": None,
+                    "title": narrative_title[:64] if narrative_title else None,
                     "hometown_municipality": hometown[:256] if hometown else None,
                     "residence_municipality": None,
                     "is_foreign": False,
@@ -307,24 +342,25 @@ def _parse_person(raw_excerpt: str, change_type: str) -> dict | None:
 
     lastname = parts[0]
 
-    # Extract inline title from lastname or check second part
-    title: str | None = None
-    title_m = _TITLE_RE.search(lastname)
-    if title_m:
-        title = title_m.group(0)
-        lastname = _TITLE_RE.sub("", lastname).strip()
+    # Extract inline title(s) from lastname or check second part — captures ALL
+    # matches so compound titles ("Prof. Dr. iur.") are fully removed, not just
+    # the first token.
+    title_parts: list[str] = []
+    lastname, lastname_title = _extract_title(lastname)
+    if lastname_title:
+        title_parts.append(lastname_title)
 
     # Second part: firstname if it doesn't look like origin/role/signature
     firstname = ""
     idx = 1
     if len(parts) > 1 and not _NON_NAME_PREFIXES.match(parts[1]):
         firstname = parts[1]
-        title_m2 = _TITLE_RE.search(firstname)
-        if title_m2:
-            if not title:
-                title = title_m2.group(0)
-            firstname = _TITLE_RE.sub("", firstname).strip()
+        firstname, firstname_title = _extract_title(firstname)
+        if firstname_title:
+            title_parts.append(firstname_title)
         idx = 2
+
+    title: str | None = " ".join(title_parts) if title_parts else None
 
     hometown: str = ""
     residence: str = ""
@@ -630,6 +666,7 @@ def _get_or_create_entity(db: Session, key: str, fields: dict):
             normalized_key=key,
             lastname=fields.get("lastname"),
             firstname=fields.get("firstname"),
+            title=fields.get("title"),
             hometown_municipality=fields.get("hometown_municipality"),
             is_foreign=fields.get("is_foreign", False),
             nationality=fields.get("nationality"),

@@ -2129,11 +2129,13 @@ Three-phase pipeline: crawl ~210k Swiss company websites → store raw HTML in S
 
 | Pod | Image | Job types | Node |
 |---|---|---|---|
-| `crawler-http` × 2 | `helvex-app` | `web_crawl_http`, `web_url_populate`, `web_select_url`, `web_crawl_single` | main node |
+| `crawler-http` × 2 | `helvex-app` | `web_crawl_http`, `web_url_populate`, `web_select_url`, `web_crawl_single`, `directory_crawl` | main node |
 | `api-worker` | `helvex-app` | (many others, no longer `web_extract`) | main node |
 | `ml-worker` | `helvex-ml` | `web_crawl_http`, `web_crawl_playwright` (idle-fill), **`web_extract`** + all ML job types | ml node (cax21) |
 
 `web_extract` runs **only on `ml-worker`** — it is the only image with the spaCy NER models (`fr/it/en_core_news_sm`, `de_core_news_md`) bundled (see `Dockerfile.ml-base`). This replaces the earlier "Pod A crawls, Pod B extracts" parallelism on `crawler-http`/`api-worker`: extraction no longer runs concurrently with crawling on the main node, it queues for ml-worker instead. Trade-off accepted to keep spaCy off the main-node app image.
+
+**Every `JOB_HANDLERS` entry must appear in some pod's `JOB_TYPE_WHITELIST`** (or be excluded from the main pod's `JOB_TYPE_BLACKLIST` so it falls through to it). In prod, `apiWorker` + `mlWorker` are both enabled, which sets `DISABLE_JOB_WORKER=true` on the main `app` pod (`deployment.yaml`) — so a job type reachable by *no* worker's whitelist just sits `queued` forever with no error, silently. This has recurred more than once when a new handler was registered in `job_handlers/__init__.py` without a matching whitelist entry (`backfill_shab_old_uid_extraction`, `discover_directory_domains`, `rescore_scope`, `directory_crawl` were all found orphaned and fixed together 2026-07-25). No automated check catches this today — when adding a `JOB_HANDLERS` entry, grep all three `*-deployment.yaml` whitelists (`api-worker`, `ml-worker`, `crawler-http`) to confirm the new type is covered by at least one.
 
 ### Workflow
 
@@ -3456,6 +3458,10 @@ Extracts structured person and auditor data from `sogc_changes` raw excerpts int
 - False split fix: `entity.merged_into_id` points old entity → canonical; all queries filter `merged_into_id IS NULL`
 
 **Bisher structured fields** — `sogc_person_appearances` carries five parsed bisher columns (`bisher_residence_municipality`, `bisher_lastname`, `bisher_firstname`, `bisher_is_foreign`, `bisher_nationality`) extracted from the `[bisher: ...]` annotation in each SOGC mutation. These encode the person's prior state at that company and are used by the bisher resolver to hard-link appearances across name changes.
+
+**Title extraction** — `_TITLE_RE` in `sogc_person_extractor.py` strips a fixed DE/FR/IT keyword set (`Dr., Prof., lic., dipl., Ing., Dott., Avv., PD, Me, MLaw, MAS, MBA, BSc, MSc, Fürsprecher(in)`) out of `lastname`/`firstname` into a dedicated `title` column, present on both `sogc_person_appearances` and (migration `0126`) `sogc_person_entities`. `Dr.`/`lic.` also swallow a trailing academic qualifier (`iur.|oec.|med.|phil.|theol.|rer. publ.`) so it doesn't leak into the name either. `_extract_title()` captures *every* match, not just the first, so compound titles ("Prof. Dr. iur.") are fully removed from the name and fully preserved in `title` — the original single-`search()` version silently dropped all but the first token. Applied in both the comma-split path and the French-narrative path (`_FR_NARRATIVE_*_RE`), which previously hardcoded `title=None` and never stripped it at all. Forward-only — existing rows are not backfilled.
+
+**Hyphen/space name-key fold** (2026-07-26) — `_normalize()` now folds hyphens to spaces before hashing, so "Marie-Magdeleine" and "Marie Magdeleine" (the same name extracted with/without a hyphen across different PDF eras) collapse to the same `normalized_key` instead of minting two entities. Related: `normalize_pdf_text()` in `shab_archive_client.py` (used upstream, before extraction) now also (a) covers French/Italian accented letters in its dehyphenation regex — previously German-only (`äöüß`/`ÄÖÜ`), so a line-wrap before an accented letter fell through unrejoined, leaving a visible stray "word- word" in FR/IT text — and (b) tolerates stray inline whitespace between the newline and the wrapped letter (`-\n çoise` → `çoise`, not just `-\nçoise`).
 
 ### Pipeline (full reindex)
 

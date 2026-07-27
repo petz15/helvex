@@ -227,7 +227,7 @@ function CompanyRow({ company, locale, query }: { company: Company; locale: stri
 function PersonRow({ person, locale }: { person: SogcPersonEntity; locale: string }) {
   const { dict } = useI18n();
   const t = dict.app.searchLanding;
-  const name = [person.firstname, person.lastname].filter(Boolean).join(" ") || t.unknown;
+  const name = [person.title, person.firstname, person.lastname].filter(Boolean).join(" ") || t.unknown;
   const confidenceCfg = {
     high: "text-emerald-700 bg-emerald-50 border-emerald-200",
     medium: "text-amber-700 bg-amber-50 border-amber-200",

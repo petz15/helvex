@@ -72,7 +72,7 @@ function FlagModal({ entity, onClose }: { entity: SogcPersonEntity; onClose: () 
     finally { setSubmitting(false); }
   }
 
-  const name = [entity.firstname, entity.lastname].filter(Boolean).join(" ") || entity.normalized_key;
+  const name = [entity.title, entity.firstname, entity.lastname].filter(Boolean).join(" ") || entity.normalized_key;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
@@ -298,7 +298,7 @@ function NetworkGraph({
     x: number; y: number; label: string; sublabel?: string;
   } | null>(null);
 
-  const name = [entity.firstname, entity.lastname].filter(Boolean).join(" ") || entity.normalized_key;
+  const name = [entity.title, entity.firstname, entity.lastname].filter(Boolean).join(" ") || entity.normalized_key;
   const initials = name.split(" ").map(s => s[0] ?? "").join("").slice(0, 2).toUpperCase();
   const n = mandates.length;
 
@@ -658,7 +658,7 @@ export function PersonDetailClient({
     { revalidateOnFocus: false }
   );
 
-  const name = [entity.firstname, entity.lastname].filter(Boolean).join(" ") || entity.normalized_key;
+  const name = [entity.title, entity.firstname, entity.lastname].filter(Boolean).join(" ") || entity.normalized_key;
   const initials = name.split(" ").map(s => s[0] ?? "").join("").slice(0, 2).toUpperCase();
   const conf = CONFIDENCE_CHIP[entity.confidence_level] ?? CONFIDENCE_CHIP.medium;
 

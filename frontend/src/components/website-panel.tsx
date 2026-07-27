@@ -53,6 +53,7 @@ interface WebPage {
   has_contact_form: boolean | null;
   has_html: boolean;
   crawled: boolean;
+  needs_extraction: boolean;
   discovered_via: string | null;
   crawled_at: string | null;
 }
@@ -479,6 +480,11 @@ export function WebsitePanel({ companyId, isSuperadmin = false, websiteStatus = 
 
   const extract = data?.extract;
   const pages = data?.pages ?? [];
+  // Pages can sit crawled-but-unextracted for a while if the web_extract job
+  // hasn't run yet (it's a separate, not-auto-triggered step) — that's a
+  // normal pending state, not a failure, so it must not share noStructuredData's
+  // "extraction ran and found nothing" warning styling.
+  const pendingExtraction = pages.some(p => p.crawled && p.needs_extraction);
 
   // Nothing crawled at all
   if (!extract && pages.length === 0) {
@@ -568,9 +574,15 @@ export function WebsitePanel({ companyId, isSuperadmin = false, websiteStatus = 
       </div>
 
       {!extract && (
-        <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 text-sm text-amber-800">
-          {t.noStructuredData}
-        </div>
+        pendingExtraction ? (
+          <div className="bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm text-slate-600">
+            {t.pendingExtraction}
+          </div>
+        ) : (
+          <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 text-sm text-amber-800">
+            {t.noStructuredData}
+          </div>
+        )
       )}
 
       <SerpPresenceCard companyId={companyId} />

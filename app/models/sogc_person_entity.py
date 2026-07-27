@@ -14,6 +14,7 @@ class SogcPersonEntity(Base):
 
     lastname: Mapped[str | None] = mapped_column(String(256), nullable=True)
     firstname: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    title: Mapped[str | None] = mapped_column(String(64), nullable=True)
     hometown_municipality: Mapped[str | None] = mapped_column(String(256), nullable=True)
     is_foreign: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     nationality: Mapped[str | None] = mapped_column(String(128), nullable=True)

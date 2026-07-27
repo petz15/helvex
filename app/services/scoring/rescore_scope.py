@@ -23,7 +23,6 @@ What's actually per-scope-configurable today:
 """
 from __future__ import annotations
 
-from datetime import datetime, timezone
 from typing import Any
 
 from sqlalchemy import func

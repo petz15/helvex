@@ -21,7 +21,10 @@ function SubSection({ title, children }: { title: string; children: React.ReactN
         {open ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
         {title}
       </button>
-      {open && <div className="space-y-3 pl-1">{children}</div>}
+      {/* Always mounted (not `{open && ...}`) — these inputs are uncontrolled
+          (defaultValue/defaultChecked read via FormData on submit), so unmounting
+          on collapse would discard whatever the user typed. */}
+      <div className={open ? "space-y-3 pl-1" : "hidden"}>{children}</div>
     </div>
   );
 }
@@ -37,7 +40,8 @@ function Section({ title, children, defaultOpen = false }: { title: string; chil
         <span className="font-semibold text-slate-800">{title}</span>
         {open ? <ChevronUp size={16} className="text-slate-400" /> : <ChevronDown size={16} className="text-slate-400" />}
       </button>
-      {open && <div className="px-5 pb-5 pt-3 bg-white border-t border-slate-100">{children}</div>}
+      {/* Always mounted — see SubSection comment above. */}
+      <div className={open ? "px-5 pb-5 pt-3 bg-white border-t border-slate-100" : "hidden"}>{children}</div>
     </div>
   );
 }
@@ -1754,73 +1758,6 @@ export function CollectionClient() {
 
       <GroupHeader label="Clustering" />
 
-      <Section title="Semantic K-Means clustering">
-        <form onSubmit={async e => {
-          e.preventDefault();
-          const fd = new FormData(e.currentTarget);
-          await submit("scoring/semantic-cluster", {
-            n_clusters: parseInt(fd.get("semantic_n_clusters") as string) || 150,
-            max_clusters_per_company: parseInt(fd.get("semantic_max_clusters_per_company") as string) || 3,
-            min_similarity: parseFloat(fd.get("semantic_min_similarity") as string) || 0.2,
-            n_components: parseInt(fd.get("semantic_n_components") as string) || 50,
-            top_terms: parseInt(fd.get("semantic_top_terms") as string) || 5,
-            canton: (fd.get("semantic_canton") as string)?.trim().toUpperCase() || null,
-            min_zefix_score: parseInt(fd.get("semantic_min_zefix_score") as string) || null,
-            max_zefix_score: parseInt(fd.get("semantic_max_zefix_score") as string) || null,
-            limit: parseInt(fd.get("semantic_limit") as string) || null,
-            embedding_batch_size: parseInt(fd.get("semantic_embedding_batch_size") as string) || 512,
-          });
-        }} className="space-y-4">
-          <div>
-            <h2 className="text-sm font-semibold text-slate-800">Semantic K-Means clustering</h2>
-            <p className="mt-1 text-xs text-slate-500">
-              Clusters companies by meaning using multilingual embeddings. Run Recompute Keywords first so the model has clean inputs.
-            </p>
-          </div>
-          <div className="grid grid-cols-2 gap-4">
-            <Field label="Clusters">
-              <input name="semantic_n_clusters" type="number" min="1" defaultValue="150" className={inputCls} />
-            </Field>
-            <Field label="Max clusters/company">
-              <input name="semantic_max_clusters_per_company" type="number" min="1" defaultValue="3" className={inputCls} />
-            </Field>
-          </div>
-          <div className="grid grid-cols-2 gap-4">
-            <Field label="Min similarity">
-              <input name="semantic_min_similarity" type="number" min="0" max="1" step="0.01" defaultValue="0.2" className={inputCls} />
-            </Field>
-            <Field label="Components">
-              <input name="semantic_n_components" type="number" min="2" defaultValue="50" className={inputCls} />
-            </Field>
-          </div>
-          <div className="grid grid-cols-2 gap-4">
-            <Field label="Top cluster terms">
-              <input name="semantic_top_terms" type="number" min="1" defaultValue="5" className={inputCls} />
-            </Field>
-            <Field label="Embedding batch size">
-              <input name="semantic_embedding_batch_size" type="number" min="1" defaultValue="512" className={inputCls} />
-            </Field>
-          </div>
-          <div className="grid grid-cols-2 gap-4">
-            <Field label="Canton">
-              <input name="semantic_canton" className={inputCls} placeholder="Any" />
-            </Field>
-            <Field label="Limit">
-              <input name="semantic_limit" type="number" min="1" className={inputCls} placeholder="All" />
-            </Field>
-          </div>
-          <div className="grid grid-cols-2 gap-4">
-            <Field label="Min Zefix score">
-              <input name="semantic_min_zefix_score" type="number" min="0" max="100" className={inputCls} placeholder="—" />
-            </Field>
-            <Field label="Max Zefix score">
-              <input name="semantic_max_zefix_score" type="number" min="0" max="100" className={inputCls} placeholder="—" />
-            </Field>
-          </div>
-          <SubmitBtn loading={loading === "scoring/semantic-cluster"} />
-        </form>
-      </Section>
-
       <Section title="TF-IDF + KMeans pipeline">
         <form onSubmit={async e => {
           e.preventDefault();
@@ -1913,31 +1850,6 @@ export function CollectionClient() {
             </Field>
           </div>
           <SubmitBtn loading={loading === "scoring/cluster-analysis"} />
-        </form>
-      </Section>
-
-      <Section title="Cluster drift check">
-        <form onSubmit={async e => {
-          e.preventDefault();
-          const fd = new FormData(e.currentTarget);
-          await submit("scoring/cluster-drift-check", {
-            days: parseInt(fd.get("drift_days") as string) || 7,
-            warn_threshold: parseFloat(fd.get("drift_threshold") as string) || 0.3,
-          });
-        }} className="space-y-4">
-          <div>
-            <h2 className="text-sm font-semibold text-slate-800">Cluster drift check</h2>
-            <p className="mt-1 text-xs text-slate-500">Check whether recent companies are falling through without cluster labels.</p>
-          </div>
-          <div className="grid grid-cols-2 gap-4">
-            <Field label="Days">
-              <input name="drift_days" type="number" min="1" defaultValue="7" className={inputCls} />
-            </Field>
-            <Field label="Warn threshold">
-              <input name="drift_threshold" type="number" min="0" max="1" step="0.01" defaultValue="0.3" className={inputCls} />
-            </Field>
-          </div>
-          <SubmitBtn loading={loading === "scoring/cluster-drift-check"} />
         </form>
       </Section>
     </div>
