@@ -177,8 +177,10 @@ def handle_batch(ctx: JobContext) -> tuple[dict, str]:
     provider = _active_provider(ctx.db)
     done_msg = (
         f"Done [{provider}] — {stats['google_enriched']} enriched, "
-        f"{stats['google_no_result']} no result, {len(stats['errors'])} errors"
+        f"{stats['google_no_result']} no result, {stats.get('error_count', len(stats['errors']))} errors"
     )
+    if stats.get("circuit_breaker_tripped"):
+        done_msg += " (stopped early — circuit breaker)"
     if stats.get("warnings"):
         done_msg += f", {len(stats['warnings'])} warning(s)"
     if ctx.resume_from:

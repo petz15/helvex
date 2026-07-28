@@ -628,8 +628,8 @@ export function CollectionClient() {
               <Field label="Limit" hint="Max companies to enrich in this run">
                 <input name="limit" type="number" min="1" defaultValue="100" className={inputCls} />
               </Field>
-              <Field label="Concurrency" hint="Parallel Serper requests (2–5 recommended)">
-                <input name="concurrency" type="number" min="1" max="10" defaultValue="1" className={inputCls} />
+              <Field label="Concurrency" hint="Parallel Serper/ScrapingDog requests (server caps at 100; a circuit breaker stops the batch early if the provider starts rejecting requests)">
+                <input name="concurrency" type="number" min="1" max="100" defaultValue="1" className={inputCls} />
               </Field>
             </div>
             <Field label="Order by" hint="Which companies are picked first">

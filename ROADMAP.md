@@ -34,7 +34,7 @@
 
 - **Major features**: 
     - Webcrawler for company websites -> started, needs to be checked
-    - Linkedin unoffical API or scraper for people finder/graph and get more information -> watch out for GDPR issues
+    - Linkedin unoffical API or scraper for people finder/graph and get more information -> watch out for GDPR issues -> see "Legal & Compliance" section, currently on-hold, higher risk than a scrape/GDPR checkbox
     - Integrations with other products such as appollo etc? Bauplatt xplorer
     - other industry specific directories -> best via scraping
         - Potentially other verbände such as Anwaltsverband, lobbywatch etc
@@ -194,10 +194,34 @@
 
 ## Org-/Usermanagement
 
-- [ ] **Flow for account deletion** - GDPR compliant flow for account deletion
+- [ ] **Flow for account deletion** - GDPR/nFADP compliant flow for account deletion — plan detailed under "Legal & Compliance" below. No endpoint/job exists yet (confirmed: no `deactivat*`/`anonymiz*`/delete-account code in `app/services`).
 
 
 
+
+## Legal & Compliance (Swiss FADP / GDPR)
+
+Not legal advice — have a Swiss lawyer review final ToS/Privacy Policy wording before publishing. Baseline: **nFADP** (Swiss revFADP, in force since 2023-09-01) always applies; **GDPR** applies additionally to any EU-resident customers/data subjects. nFADP protects natural persons only — Zefix company data itself isn't personal data, but `persons_struct`/team/board/contact data extracted from web crawling or SOGC is.
+
+### Privacy Policy & ToS — to draft
+- [ ] **Privacy Policy** — disclose data sources (Zefix, SHAB/SOGC, Serper, Claude/Anthropic), purposes, subprocessors + their country (Anthropic/Serper = US, Worldline = EU), retention periods, cross-border transfer basis (Swiss-US DPF or SCCs), and data-subject rights (access/rectification/objection under nFADP Art. 25/32/41).
+- [ ] **ToS** — B2B-only framing (Swiss law has no consumer 14-day withdrawal right for B2B contracts; keep it that way to avoid EU consumer-protection triggers), credit/refund policy on cancellation, renewal/price-change notice period. Automated-access clause already drafted — see "Terms of Service clause" under Security & Infrastructure (~line 274 above).
+- [ ] **DPA/SCC confirmation** — verify data-processing agreements exist with Worldline, Anthropic, Serper, and the hosting provider (Hetzner).
+- [ ] **Breach process** — informal internal incident runbook so FDPIC notification ("as soon as possible" for high-risk breaches, Art. 24) isn't improvised during an actual incident.
+
+### Account deletion vs. payment retention
+Core tension: nFADP gives a right to deletion of personal data, but **OR Art. 958f mandates 10-year retention of accounting records** (invoices, transactions) — can't honor a blanket "delete everything" request. Implementation pattern:
+1. On account/org deletion: anonymize/delete personal profile data (name, email, credentials) within a stated window (e.g. 30 days).
+2. Retain billing/invoice/transaction rows for 10 years (Art. 958f), unlinked from marketing/product use once the owning profile is anonymized.
+3. Only the deleting org's `org_company_state` rows are removed — the shared `companies` table (Zefix public-register data, multi-tenant) is untouched by design; state this explicitly in the ToS so it isn't mistaken for a deletion failure.
+4. Decide + document: unused credits forfeited or refunded on deletion (business decision, not a legal requirement either way).
+
+### Data source risk tiers — team & LinkedIn data
+- **Low risk, keep building:** a company's own published team/impressum data (`persons_struct` from `crawler_extract.py`) and SHAB/Zefix official signer/board data. Both are personal data the company itself published for exactly this identification purpose (Handelsregisterverordnung mandates public disclosure of signers) — strongest legal footing, matches the data's original publication purpose, no extra consent needed beyond standard privacy-notice disclosure. This is the safe backbone for the "people finder/graph" feature.
+- **High risk, do not scrape directly:** LinkedIn profile data. Two independent problems: (a) LinkedIn's User Agreement contractually prohibits scraping — breach risk (C&D, IP bans, contract claims) regardless of "it's a public profile" arguments; (b) repurposing LinkedIn's professional-networking data into a resold sales-intelligence product is a purpose-incompatibility problem under nFADP/GDPR that DPAs have actively pursued (unlike *hiQ v. LinkedIn* in the US, which is CFAA-specific and doesn't transfer to Swiss/EU data protection law). Treat as **on hold**, not a build item, until this section is revisited with counsel.
+- **Middle ground if still wanted:** (1) store only a LinkedIn *URL* the company itself published on its own team page — capturing a link isn't replicating profile content, much lower risk; (2) license from a third-party enrichment vendor carrying its own GDPR-compliant sourcing warranties (Cognism/Apollo-style) instead of building an in-house scraper, shifting compliance risk contractually.
+- **Same caution applies** to the existing "Find email of people by testing name@domain configurations" item (~line 51) — already flagged there as legal-grey; keep both under this same hold-and-review posture.
+- **Outsourcing the scrape (e.g. via ScrapingDog) does not shield Helvex.** LinkedIn pursues the commercial beneficiary of scraped data (i.e. the product surfacing it), not just the scraper, via C&D/litigation/inducement theories — using a vendor adds a middleman, not a shield. Separately, directing what gets collected and using the result makes Helvex the nFADP/GDPR **controller** regardless of who performed the collection; "a vendor did it" is not a recognized defense to a regulator. A vendor contract can only shift *financial* risk (and only if it contains an actual indemnification clause for third-party IP/ToS claims — generic scraping APIs usually disclaim this rather than warrant it). This makes a scraping-API-for-LinkedIn approach worse than building it in-house, not safer — same "on hold" verdict applies.
 
 ## Monetisation & Tiers
 

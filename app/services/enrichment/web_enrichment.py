@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import time
+from collections import deque
 from datetime import datetime, timezone
 from typing import Any
 
@@ -525,6 +526,8 @@ def run_batch_collect(
     """Run a recurring batch process over companies already in the DB."""
     import heapq
 
+    concurrency = max(1, min(int(concurrency), 100))
+
     stats: dict[str, Any] = {
         "selected": 0,
         "zefix_refreshed": 0,
@@ -781,6 +784,40 @@ def run_batch_collect(
 
     use_concurrent = run_google and concurrency > 1 and not refresh_zefix
 
+    # Circuit breaker: if a burst of the last N Google searches mostly failed (e.g. the
+    # provider is rejecting requests above its plan's concurrency limit), stop burning
+    # through the rest of the selection instead of hammering the provider + DB at full
+    # speed for every remaining company.
+    _CB_WINDOW = 20
+    _CB_ERROR_THRESHOLD = 15
+    _ERRORS_KEEP_MAX = 200
+    _recent_outcomes: deque[bool] = deque(maxlen=_CB_WINDOW)  # True = error
+    stats["error_count"] = 0
+    circuit_tripped = False
+
+    def _append_error(msg: str) -> None:
+        stats["error_count"] += 1
+        if len(stats["errors"]) < _ERRORS_KEEP_MAX:
+            stats["errors"].append(msg)
+
+    def _circuit_tripped_now() -> bool:
+        return len(_recent_outcomes) == _CB_WINDOW and sum(_recent_outcomes) >= _CB_ERROR_THRESHOLD
+
+    # Progress writes hit the DB (job_runs.stats_json + a job_events row) — on a large,
+    # fast-failing batch that's O(n) work per item, so throttle to wall-clock time
+    # instead of writing on every single completion.
+    _PROGRESS_MIN_INTERVAL = 1.0
+    _last_progress_write = 0.0
+
+    def _maybe_progress(done_n: int, *, force: bool = False) -> None:
+        nonlocal _last_progress_write
+        if not progress_cb:
+            return
+        now_t = time.monotonic()
+        if force or (now_t - _last_progress_write) >= _PROGRESS_MIN_INTERVAL:
+            _last_progress_write = now_t
+            progress_cb(done_n, stats["selected"], stats)
+
     if use_concurrent:
         from concurrent.futures import ThreadPoolExecutor, as_completed as _as_completed
         done = 0
@@ -789,10 +826,11 @@ def run_batch_collect(
             for future in _as_completed(futures):
                 done += 1
                 company_id_done, enriched, _url, exc = future.result()
+                _recent_outcomes.append(exc is not None)
                 if exc:
                     company_obj = futures[future]
                     logger.warning("Google search failed for %s: %s", company_obj.uid, exc)
-                    stats["errors"].append(f"Google search {company_obj.uid} [{type(exc).__name__}]: {exc}")
+                    _append_error(f"Google search {company_obj.uid} [{type(exc).__name__}]: {exc}")
                     try:
                         from app.crud.company_error import log_error as _log_err
                         _log_err(db, company_id=company_id_done, source="web_enrichment",
@@ -804,10 +842,27 @@ def run_batch_collect(
                     stats["google_enriched"] += 1
                 else:
                     stats["google_no_result"] += 1
-                if progress_cb:
-                    progress_cb(start_idx + done, stats["selected"], stats)
+
+                if not circuit_tripped and _circuit_tripped_now():
+                    circuit_tripped = True
+                    warn_msg = (
+                        f"Circuit breaker tripped: {sum(_recent_outcomes)}/{_CB_WINDOW} recent "
+                        f"Google searches failed — stopping batch early ({done}/{len(futures)} attempted)."
+                    )
+                    logger.warning(warn_msg)
+                    stats["warnings"].append(warn_msg)
+                    for f in futures:
+                        f.cancel()
+
+                is_last = done == len(futures)
+                _maybe_progress(start_idx + done, force=is_last or circuit_tripped)
+
+                if circuit_tripped:
+                    break
     else:
         for i, company in enumerate(companies, start=start_idx + 1):
+            if circuit_tripped:
+                break
             current = company
             if refresh_zefix:
                 try:
@@ -825,11 +880,12 @@ def run_batch_collect(
                     if _is_control_signal_exception(exc):
                         raise
                     logger.warning("Zefix refresh failed for %s: %s", company.uid, exc)
-                    stats["errors"].append(f"Zefix refresh {company.uid} [{type(exc).__name__}]: {exc}")
+                    _append_error(f"Zefix refresh {company.uid} [{type(exc).__name__}]: {exc}")
 
             if run_google:
                 try:
                     enriched, _ = enrich_company_website(db, current)
+                    _recent_outcomes.append(False)
                     if enriched:
                         stats["google_enriched"] += 1
                         try:
@@ -851,8 +907,9 @@ def run_batch_collect(
                     else:
                         stats["google_no_result"] += 1
                 except Exception as exc:  # noqa: BLE001
+                    _recent_outcomes.append(True)
                     logger.warning("Google search failed for %s: %s", current.uid, exc)
-                    stats["errors"].append(f"Google search {current.uid} [{type(exc).__name__}]: {exc}")
+                    _append_error(f"Google search {current.uid} [{type(exc).__name__}]: {exc}")
                     try:
                         from app.crud.company_error import log_error as _log_err
                         _log_err(db, company_id=current.id, source="web_enrichment",
@@ -861,7 +918,19 @@ def run_batch_collect(
                     except Exception:  # noqa: BLE001
                         pass
 
-            if progress_cb:
-                progress_cb(i, stats["selected"], stats)
+                if not circuit_tripped and _circuit_tripped_now():
+                    circuit_tripped = True
+                    warn_msg = (
+                        f"Circuit breaker tripped: {sum(_recent_outcomes)}/{_CB_WINDOW} recent "
+                        f"Google searches failed — stopping batch early ({i - start_idx}/{len(companies)} attempted)."
+                    )
+                    logger.warning(warn_msg)
+                    stats["warnings"].append(warn_msg)
+
+            is_last = i == start_idx + len(companies)
+            _maybe_progress(i, force=is_last or circuit_tripped)
+
+    if circuit_tripped:
+        stats["circuit_breaker_tripped"] = True
 
     return stats
