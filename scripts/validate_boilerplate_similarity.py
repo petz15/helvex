@@ -116,6 +116,44 @@ EXEMPLARS: dict[str, list[tuple[str, str]]] = {
 # within the next couple of sentences".
 WINDOW_SIZE = 3
 
+# Batch size for the --full path. A single unbatched query over the whole
+# language population blows past Postgres's statement_timeout on a 700k-row
+# table -- keyset-paginate instead (same pattern as recalculate_google_scores).
+BATCH_SIZE = 2000
+
+
+def iter_companies(db, lang: str, *, full: bool, limit: int):
+    """Yield (id, name, purpose) rows, streaming in batches for --full."""
+    if not full:
+        from sqlalchemy import func
+        rows = (
+            db.query(Company.id, Company.name, Company.purpose)
+            .filter(Company.purpose_language == lang, Company.purpose.isnot(None))
+            .order_by(func.random())
+            .limit(limit)
+            .all()
+        )
+        yield from rows
+        return
+
+    last_id = 0
+    while True:
+        batch = (
+            db.query(Company.id, Company.name, Company.purpose)
+            .filter(
+                Company.purpose_language == lang,
+                Company.purpose.isnot(None),
+                Company.id > last_id,
+            )
+            .order_by(Company.id)
+            .limit(BATCH_SIZE)
+            .all()
+        )
+        if not batch:
+            break
+        yield from batch
+        last_id = batch[-1][0]
+
 
 def find_trigger_window(sentences: list[str], trigger_re: re.Pattern) -> tuple[int, list[str]] | None:
     """Return (trigger_idx, window_sentences) for the first trigger match outside
@@ -150,32 +188,27 @@ def main() -> None:
     exemplar_vecs = embed_texts(list(exemplar_texts))
 
     with _make_session(args.db_url) as db:
-        from sqlalchemy import func
-
-        q = db.query(Company.id, Company.name, Company.purpose).filter(
-            Company.purpose_language == args.lang,
-            Company.purpose.isnot(None),
-        )
-        if not args.full:
-            q = q.order_by(func.random()).limit(args.limit)
-        rows = q.all()
-        print(f"Loaded {len(rows)} companies with purpose_language='{args.lang}'.")
-
+        total_loaded = 0
         candidates: list[tuple[int, str, list[str], int, list[str]]] = []
-        for cid, name, purpose in rows:
+        for cid, name, purpose in iter_companies(db, args.lang, full=args.full, limit=args.limit):
+            total_loaded += 1
             sentences = _split_sentences(purpose)
             found = find_trigger_window(sentences, trigger_re)
             if found:
                 trigger_idx, window = found
                 candidates.append((cid, name, sentences, trigger_idx, window))
+            if total_loaded % 20000 == 0:
+                print(f"  …scanned {total_loaded} companies so far ({len(candidates)} candidates)")
 
-        if not rows:
+        print(f"Loaded {total_loaded} companies with purpose_language='{args.lang}'.")
+
+        if not total_loaded:
             print("No companies found for this language.")
             return
 
         print(
             f"{len(candidates)} companies have the trigger outside sentence 1 "
-            f"({100 * len(candidates) / len(rows):.1f}% of the sample)."
+            f"({100 * len(candidates) / total_loaded:.1f}% of the sample)."
         )
         if not candidates:
             print("Nothing to score.")

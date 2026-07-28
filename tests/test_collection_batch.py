@@ -104,6 +104,71 @@ def test_run_batch_collect_processes_all_companies_across_chunks(db, monkeypatch
     assert stats["error_count"] == 0
 
 
+def test_run_batch_collect_pending_crawl_distinct_from_no_result(db, monkeypatch):
+    """Regression: the crawl-only verdict (identity rework phase 3) means a fresh
+    search essentially never sets a positive verdict by itself anymore — but that's
+    NOT the same as the provider genuinely returning nothing. Companies where the
+    provider found a real candidate (results non-empty) must land in
+    google_pending_crawl, not be lumped into google_no_result alongside searches
+    that truly found nothing — conflating the two made it look like search itself
+    was failing when company_search_results actually had real data."""
+    from app.services.enrichment import web_enrichment
+
+    monkeypatch.setattr(settings, "serper_api_key", "test-key")
+    _create_company(db, uid="CHE-400.000.001", name="Findable AG")
+
+    def _found(*args, **kwargs):
+        from app.schemas.company import GoogleSearchResult
+        return [GoogleSearchResult(title="Findable AG", link="https://findable.ch", snippet="Findable AG Zürich")], None
+
+    monkeypatch.setattr(web_enrichment, "search_website", _found)
+
+    stats = run_batch_collect(db, limit=10, run_google=True, concurrency=1)
+
+    assert stats["selected"] == 1
+    assert stats["google_enriched"] == 0        # crawl-gated: no crawl exists yet
+    assert stats["google_pending_crawl"] == 1   # but the provider DID find something
+    assert stats["google_no_result"] == 0       # must not be double-counted as "nothing found"
+
+
+def test_run_batch_collect_triggers_provider_backoff_on_circuit_break(db, monkeypatch):
+    """The 'used a lot of credits, barely searched anything' report traced to
+    rapid back-to-back web_search_batch runs, each burning through ~650 requests
+    before its own circuit breaker tripped. A per-run breaker isn't enough if
+    something immediately starts a new run — so a trip now also sets a
+    provider-level backoff (AppSetting), checked by _google_search_ready, so an
+    immediate re-trigger skips Google enrichment entirely instead of hammering
+    the already-struggling provider again."""
+    from app import crud
+    from app.services.enrichment import web_enrichment
+
+    monkeypatch.setattr(settings, "serper_api_key", "test-key")
+    for i in range(30):
+        _create_company(db, uid=f"CHE-500.000.{i:03d}", name=f"Backoff Co {i}")
+
+    def _boom(*args, **kwargs):
+        raise RuntimeError("provider exploded")
+
+    monkeypatch.setattr(web_enrichment, "search_website", _boom)
+
+    stats = run_batch_collect(db, limit=30, run_google=True, concurrency=1)
+    assert stats["circuit_breaker_tripped"] is True
+
+    backoff_raw = crud.get_setting(db, "google_search_backoff_until_serper", "")
+    assert backoff_raw, "circuit breaker trip should have recorded a backoff window"
+
+    # A fresh run right after should skip Google entirely instead of retrying the
+    # already-struggling provider.
+    for i in range(30, 35):
+        _create_company(db, uid=f"CHE-500.000.{i:03d}", name=f"Backoff Co {i}")
+    stats2 = run_batch_collect(db, limit=5, run_google=True, concurrency=1)
+    assert stats2["google_enriched"] == 0
+    assert stats2["google_pending_crawl"] == 0
+    assert stats2["google_no_result"] == 0
+    assert stats2["error_count"] == 0
+    assert any("backing off" in w for w in stats2["warnings"])
+
+
 def test_run_batch_collect_logs_processing_failure_distinct_from_api_failure(db, monkeypatch):
     """Regression: a bug in scoring/verdict/persistence AFTER a successful provider
     response used to propagate with no company_errors row at all (only the API-call

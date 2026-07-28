@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 import time
 from collections import deque
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from sqlalchemy import func, or_
@@ -48,6 +48,34 @@ def _get_search_api_key(db: Session, provider: str) -> str:
     return settings.serper_api_key or ""
 
 
+_BACKOFF_SETTING_PREFIX = "google_search_backoff_until_"
+_DEFAULT_BACKOFF_MINUTES = 10
+
+
+def _provider_backoff_until(db: Session, provider: str) -> datetime | None:
+    raw = crud.get_setting(db, f"{_BACKOFF_SETTING_PREFIX}{provider}", "")
+    if not raw:
+        return None
+    try:
+        until = datetime.fromisoformat(raw)
+    except ValueError:
+        return None
+    return until if until.tzinfo else until.replace(tzinfo=timezone.utc)
+
+
+def _trigger_provider_backoff(db: Session, provider: str, *, minutes: int = _DEFAULT_BACKOFF_MINUTES) -> None:
+    """Block new runs against this provider for a cooldown window.
+
+    Called when the batch circuit breaker trips (a burst of provider failures —
+    the classic signature of "sent too many requests while the provider was
+    already struggling"). Persisted as an AppSetting rather than in-process state
+    so it holds even if a new job run starts immediately after this one completes
+    (dedup lets that happen the instant this run's status flips to completed).
+    """
+    until = datetime.now(timezone.utc) + timedelta(minutes=minutes)
+    crud.set_setting(db, f"{_BACKOFF_SETTING_PREFIX}{provider}", until.isoformat())
+
+
 def _google_search_ready(db: Session) -> tuple[bool, str | None]:
     enabled = (crud.get_setting(db, "google_search_enabled", "true") or "").strip().lower() == "true"
     if not enabled:
@@ -56,6 +84,15 @@ def _google_search_ready(db: Session) -> tuple[bool, str | None]:
     if not _get_search_api_key(db, provider):
         key_name = "SCRAPINGDOG_API_KEY" if provider == "scrapingdog" else "SERPER_API_KEY"
         return False, f"{key_name} is not configured (website search cannot run)"
+    backoff_until = _provider_backoff_until(db, provider)
+    if backoff_until is not None:
+        now = datetime.now(timezone.utc)
+        if now < backoff_until:
+            remaining_min = max(1, int((backoff_until - now).total_seconds() // 60) + 1)
+            return False, (
+                f"{provider} search is backing off for ~{remaining_min} more minute(s) after a burst "
+                f"of provider failures (see /admin/errors, source=web_enrichment, for what failed)"
+            )
     return True, None
 
 
@@ -209,7 +246,7 @@ def _score_google_results_for_company(db: Session, company: Company, raw_results
     return scored
 
 
-def enrich_company_website(db: Session, company: Company, *, num: int = 10) -> tuple[bool, str | None]:
+def enrich_company_website(db: Session, company: Company, *, num: int = 10) -> tuple[bool, str | None, bool]:
     """Fetch top-N Google results, score each against the company profile, and persist.
 
     Stores all scored results in google_search_results_raw (JSON).
@@ -217,6 +254,15 @@ def enrich_company_website(db: Session, company: Company, *, num: int = 10) -> t
     Sets website_url and web_score to the best-scoring result.
     Sets website_checked_at on a successful call (zero results included) so callers
     know a search was genuinely attempted.
+
+    Returns (verdict_positive, website_url, had_results). Since the identity rework
+    (website_status.py's crawl-only verdict), `verdict_positive` is False for almost
+    every fresh search — a positive verdict now requires an actual crawl, not just a
+    good search hit. `had_results` distinguishes "the provider genuinely returned
+    nothing" (had_results=False — company_search_results.results_raw ends up empty)
+    from "the provider found candidates, they're just not crawl-confirmed yet"
+    (had_results=True, verdict_positive=False) — callers must not conflate these two
+    as the same "no result" outcome; check company_search_results if in doubt.
 
     Raises on failure — always logged to company_errors (source=web_enrichment)
     first, with the exact request params in detail_json, so a failure is never
@@ -332,7 +378,7 @@ def enrich_company_website(db: Session, company: Company, *, num: int = 10) -> t
                 provider=provider, results_raw=[], full_raw=full_raw, params=search_params, searched_at=now,
             )
             db.commit()
-            return False, None
+            return False, None, False
 
         if full_raw is not None:
             raw_results = [_enrich_organic_result(o) for o in _organic_results_from_full_raw(full_raw)]
@@ -361,7 +407,7 @@ def enrich_company_website(db: Session, company: Company, *, num: int = 10) -> t
             ),
         )
         # Returns the gated own-domain URL (None for social_only/directory_only/none).
-        return fields["website_url"] is not None, fields["website_url"]
+        return fields["website_url"] is not None, fields["website_url"], True
     except Exception as exc:
         logger.error(
             "Processing a successful %s response failed for company_id=%d: %s",
@@ -529,7 +575,7 @@ def _sync_url_candidates(db: Session, company_id: int) -> None:
             )
 
 
-def _enrich_one_concurrent(company_id: int) -> tuple[int, bool, str | None, Exception | None]:
+def _enrich_one_concurrent(company_id: int) -> tuple[int, bool, str | None, bool, Exception | None]:
     """Enrich one company using its own DB session (safe for ThreadPoolExecutor)."""
     from app.database import SessionLocal
 
@@ -537,16 +583,16 @@ def _enrich_one_concurrent(company_id: int) -> tuple[int, bool, str | None, Exce
     try:
         company = thread_db.get(Company, company_id)
         if company is None:
-            return company_id, False, None, None
-        enriched, url = enrich_company_website(thread_db, company)
+            return company_id, False, None, False, None
+        enriched, url, had_results = enrich_company_website(thread_db, company)
         try:
             _sync_url_candidates(thread_db, company_id)
             thread_db.commit()
         except Exception as exc_inner:
             logger.warning("URL candidate sync failed for company_id=%d: %s", company_id, exc_inner)
-        return company_id, enriched, url, None
+        return company_id, enriched, url, had_results, None
     except Exception as exc:
-        return company_id, False, None, exc
+        return company_id, False, None, False, exc
     finally:
         thread_db.close()
 
@@ -607,7 +653,8 @@ def run_batch_collect(
         "selected": 0,
         "zefix_refreshed": 0,
         "google_enriched": 0,
-        "google_no_result": 0,
+        "google_pending_crawl": 0,  # search found candidates; verdict awaits an actual crawl
+        "google_no_result": 0,      # search genuinely returned nothing
         "errors": [],
         "warnings": [],
     }
@@ -617,6 +664,7 @@ def run_batch_collect(
         if not ok:
             stats["warnings"].append(f"Google enrichment skipped: {reason}.")
             run_google = False
+    _search_provider = _active_provider(db)
 
     # No daily Google search quota — enrichment volume is bounded only by the
     # requested `limit` and per-action credits.
@@ -917,7 +965,7 @@ def run_batch_collect(
                 futures = {pool.submit(_enrich_one_concurrent, c.id): c for c in companies}
                 for future in _as_completed(futures):
                     done_total += 1
-                    company_id_done, enriched, _url, exc = future.result()
+                    company_id_done, enriched, _url, had_results, exc = future.result()
                     _recent_outcomes.append(exc is not None)
                     if exc:
                         company_obj = futures[future]
@@ -929,15 +977,19 @@ def run_batch_collect(
                         # overwrite it with a detail-less one via log_error's dedup update.
                     elif enriched:
                         stats["google_enriched"] += 1
+                    elif had_results:
+                        stats["google_pending_crawl"] += 1
                     else:
                         stats["google_no_result"] += 1
 
                     if not circuit_tripped and _circuit_tripped_now():
                         circuit_tripped = True
+                        _trigger_provider_backoff(db, _search_provider)
                         warn_msg = (
                             f"Circuit breaker tripped: {sum(_recent_outcomes)}/{_CB_WINDOW} recent "
                             f"Google searches failed — stopping batch early "
-                            f"({done_total}/{len(company_ids)} attempted)."
+                            f"({done_total}/{len(company_ids)} attempted). Backing off {_search_provider} "
+                            f"for {_DEFAULT_BACKOFF_MINUTES} minutes."
                         )
                         logger.warning(warn_msg)
                         stats["warnings"].append(warn_msg)
@@ -975,10 +1027,12 @@ def run_batch_collect(
 
                 if run_google:
                     try:
-                        enriched, _ = enrich_company_website(db, current)
+                        enriched, _, had_results = enrich_company_website(db, current)
                         _recent_outcomes.append(False)
                         if enriched:
                             stats["google_enriched"] += 1
+                        elif had_results:
+                            stats["google_pending_crawl"] += 1
                         else:
                             stats["google_no_result"] += 1
                         try:
@@ -998,10 +1052,12 @@ def run_batch_collect(
 
                     if not circuit_tripped and _circuit_tripped_now():
                         circuit_tripped = True
+                        _trigger_provider_backoff(db, _search_provider)
                         warn_msg = (
                             f"Circuit breaker tripped: {sum(_recent_outcomes)}/{_CB_WINDOW} recent "
                             f"Google searches failed — stopping batch early "
-                            f"({done_total}/{len(company_ids)} attempted)."
+                            f"({done_total}/{len(company_ids)} attempted). Backing off {_search_provider} "
+                            f"for {_DEFAULT_BACKOFF_MINUTES} minutes."
                         )
                         logger.warning(warn_msg)
                         stats["warnings"].append(warn_msg)

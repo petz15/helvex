@@ -948,6 +948,49 @@ the pod (job worker runs in-process by default; see `apiWorker` in `infra/charts
 - **Capped error list:** `stats["errors"]` keeps at most the last 200 entries;
   `stats["error_count"]` tracks the true total separately.
 
+#### Provider backoff after a circuit-breaker trip
+
+The per-run circuit breaker (above) stops a single `run_batch_collect` call early,
+but a real prod incident showed that's not enough on its own: `web_search_batch` is
+dedup'd to one global instance, so the instant a circuit-breaker-tripped run
+completes, a fresh run can start immediately — and did, repeatedly, each burning
+through ~650 requests against an already-struggling ScrapingDog before tripping
+again. Root-caused to the provider itself intermittently returning `HTTP 503
+Service Unavailable` alongside the earlier `400`s — a provider-side outage, not
+purely a concurrency-limit issue.
+
+Fix: `_trigger_provider_backoff(db, provider)` (`web_enrichment.py`) is called
+from both circuit-breaker-trip sites in `run_batch_collect` and writes an
+AppSetting (`google_search_backoff_until_{provider}`, ISO timestamp, default 10
+minutes out — `_DEFAULT_BACKOFF_MINUTES`). `_google_search_ready()` — already
+called at the top of `run_batch_collect` to gate `run_google` on a configured API
+key — now also checks this: if the cooldown hasn't elapsed, Google enrichment is
+skipped entirely for the whole run with a `stats["warnings"]` entry naming the
+remaining minutes, regardless of what re-triggered the job. This is deliberately
+persisted (AppSetting, not in-process state) so it holds across separate job runs
+and even pod restarts. Regression test:
+`test_run_batch_collect_triggers_provider_backoff_on_circuit_break`.
+
+#### `google_pending_crawl` — distinguishing "no result" from "not crawled yet"
+
+Also found while investigating the same incident: `run_batch_collect`'s
+`google_no_result` counter was conflating two very different outcomes —
+"the provider genuinely returned nothing" and "the provider found a real
+candidate, it just isn't crawl-confirmed yet" (expected for nearly every fresh
+search since the phase-3 crawl-only verdict — see "Website verdict" below). This
+made a healthy batch (searches succeeding, `company_search_results` genuinely
+populated) look like it was failing to find anything.
+
+`enrich_company_website()` now returns a 3-tuple: `(verdict_positive, website_url,
+had_results)` — `had_results` is `True` whenever the provider returned actual hits,
+independent of the crawl-gated verdict. All three callers that unpack it
+(`_enrich_one_concurrent`, `run_batch_collect`'s sequential path, `initial_collect`
+in `zefix_import.py`) now bucket into a new `stats["google_pending_crawl"]` when
+`had_results` is true but the verdict isn't, instead of lumping it into
+`google_no_result`. `detail.py`'s manual single-company route doesn't unpack the
+return value, so it's unaffected. Regression test:
+`test_run_batch_collect_pending_crawl_distinct_from_no_result`.
+
 #### `run_batch_collect` no longer loads the selection one row at a time
 
 Found while investigating a real stuck prod job (100002 selected, still showing

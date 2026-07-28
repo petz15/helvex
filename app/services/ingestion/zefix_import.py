@@ -626,7 +626,8 @@ def initial_collect(
         "created": 0,
         "updated": 0,
         "google_enriched": 0,
-        "google_no_result": 0,
+        "google_pending_crawl": 0,  # search found candidates; verdict awaits an actual crawl
+        "google_no_result": 0,      # search genuinely returned nothing
         "errors": [],
     }
 
@@ -679,9 +680,11 @@ def initial_collect(
             )
             stats["created" if created else "updated"] += 1
             if run_google:
-                enriched, _ = enrich_company_website(db, company)
+                enriched, _, had_results = enrich_company_website(db, company)
                 if enriched:
                     stats["google_enriched"] += 1
+                elif had_results:
+                    stats["google_pending_crawl"] += 1
                 else:
                     stats["google_no_result"] += 1
         except Exception as exc:  # noqa: BLE001

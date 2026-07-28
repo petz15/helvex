@@ -39,3 +39,4 @@ terraform.tfvars
 .tmp_wheels_linux/
 
 evaluate/
+scored_de.csv
