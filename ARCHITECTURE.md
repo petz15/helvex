@@ -948,6 +948,33 @@ the pod (job worker runs in-process by default; see `apiWorker` in `infra/charts
 - **Capped error list:** `stats["errors"]` keeps at most the last 200 entries;
   `stats["error_count"]` tracks the true total separately.
 
+#### `run_batch_collect` no longer loads the selection one row at a time
+
+Found while investigating a real stuck prod job (100002 selected, still showing
+"Processing 3/100002" after a long run, ScrapingDog dashboard showing healthy
+concurrent 200s the whole time — so the provider side was fine). The culprit:
+`companies = [db.get(Company, cid) for cid in company_ids]` — one individual
+round-trip per selected company. For a `limit` in the tens/hundreds of thousands
+(nothing caps it), that's tens of thousands of sequential DB queries *before any
+search request goes out*, during which nothing calls `progress_cb` (so no
+heartbeat, no progress update, no cancellation checkpoint — `ctx.assert_not_
+cancelled()` only runs inside the `_progress` callback). Looks exactly like a
+hung job from the outside. Also a straight violation of the project's own
+"never load the companies table unbatched" rule.
+
+Fixed: `company_ids` are now processed in fixed-size chunks (`_BATCH_LOAD_CHUNK
+= 1000`, module-level so tests can shrink it), each chunk loaded via one batched
+`db.query(Company).filter(Company.id.in_(chunk_ids))` instead of N individual
+`db.get()` calls — down from up to 100,000 round-trips to ~100 for that job. The
+circuit breaker, throttled progress writes, and `stats["error_count"]`/
+`stats["errors"]` accounting are unchanged, now just scoped across chunks via a
+`done_total` counter instead of per-call `done`/`i`. `abort_cb()` (if provided)
+is also now checked once per chunk, on top of the existing throttled-progress
+cancellation checkpoint. Regression test:
+`test_run_batch_collect_processes_all_companies_across_chunks`
+(`tests/test_collection_batch.py`) — shrinks `_BATCH_LOAD_CHUNK` to 3 and proves
+all 10 test companies get reached, not just the first chunk.
+
 #### `enrich_company_website` no longer swallows provider failures
 
 Found while debugging the above: `enrich_company_website` (`web_enrichment.py`) used

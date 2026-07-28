@@ -76,6 +76,34 @@ def test_run_batch_collect_circuit_breaker_on_provider_failures(db, monkeypatch)
     assert "provider exploded" in err["message"]
 
 
+def test_run_batch_collect_processes_all_companies_across_chunks(db, monkeypatch):
+    """Regression: run_batch_collect used to load every selected company via an
+    individual db.get() call before processing anything — for a large `limit`
+    (a real prod job selected 100002) that's tens of thousands of sequential
+    round-trips with zero progress/heartbeat/cancellation checkpoints reached the
+    whole time, which looks exactly like a stuck job. Now companies are loaded in
+    fixed-size batches; shrink the batch size here to prove multiple chunks are
+    each fully processed, not just the first."""
+    from app.services.enrichment import web_enrichment
+
+    monkeypatch.setattr(web_enrichment, "_BATCH_LOAD_CHUNK", 3)
+    monkeypatch.setattr(settings, "serper_api_key", "test-key")
+
+    for i in range(10):
+        _create_company(db, uid=f"CHE-300.000.{i:03d}", name=f"Chunked Co {i}")
+
+    def _ok(*args, **kwargs):
+        return [], {}  # empty results — "no result", but every company must be reached
+
+    monkeypatch.setattr(web_enrichment, "search_website", _ok)
+
+    stats = run_batch_collect(db, limit=10, run_google=True, concurrency=1)
+
+    assert stats["selected"] == 10
+    assert stats["google_no_result"] == 10
+    assert stats["error_count"] == 0
+
+
 def test_run_batch_collect_logs_processing_failure_distinct_from_api_failure(db, monkeypatch):
     """Regression: a bug in scoring/verdict/persistence AFTER a successful provider
     response used to propagate with no company_errors row at all (only the API-call

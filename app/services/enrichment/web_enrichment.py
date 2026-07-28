@@ -503,6 +503,11 @@ def recalculate_google_scores(
 
 _DELETED_STATUSES = ("Gelöscht", "CANCELLED", "BEING_CANCELLED")
 
+# Max Company rows (and ThreadPoolExecutor futures) held in memory at once in
+# run_batch_collect — module-level so tests can shrink it instead of needing
+# thousands of rows to exercise multi-chunk behavior.
+_BATCH_LOAD_CHUNK = 1000
+
 
 def _sync_url_candidates(db: Session, company_id: int) -> None:
     """Turn freshly stored search results into crawl candidates.
@@ -849,8 +854,6 @@ def run_batch_collect(
 
     start_idx = max(0, min(resume_from, len(planned_ids)))
     company_ids = planned_ids[start_idx: start_idx + max(0, int(limit))]
-    companies = [db.get(Company, cid) for cid in company_ids]
-    companies = [c for c in companies if c is not None]
 
     use_concurrent = run_google and concurrency > 1 and not refresh_zefix
 
@@ -888,101 +891,123 @@ def run_batch_collect(
             _last_progress_write = now_t
             progress_cb(done_n, stats["selected"], stats)
 
-    if use_concurrent:
-        from concurrent.futures import ThreadPoolExecutor, as_completed as _as_completed
-        done = 0
-        with ThreadPoolExecutor(max_workers=concurrency, thread_name_prefix="serper") as pool:
-            futures = {pool.submit(_enrich_one_concurrent, c.id): c for c in companies}
-            for future in _as_completed(futures):
-                done += 1
-                company_id_done, enriched, _url, exc = future.result()
-                _recent_outcomes.append(exc is not None)
-                if exc:
-                    company_obj = futures[future]
-                    logger.warning("Google search failed for %s: %s", company_obj.uid, exc)
-                    _append_error(f"Google search {company_obj.uid} [{type(exc).__name__}]: {exc}")
-                    # No log_error call here — enrich_company_website already logged a
-                    # company_errors row with the full request detail (on its own
-                    # thread_db session) before raising; a second call here would
-                    # overwrite it with a detail-less one via log_error's dedup update.
-                elif enriched:
-                    stats["google_enriched"] += 1
-                else:
-                    stats["google_no_result"] += 1
+    # Load + process company_ids in fixed-size chunks — never hold more than
+    # _BATCH_LOAD_CHUNK Company rows (or ThreadPoolExecutor futures) in memory at once.
+    # This used to be `companies = [db.get(Company, cid) for cid in company_ids]`,
+    # one individual round-trip per row: for a `limit` in the tens/hundreds of
+    # thousands (a real prod job selected 100002), that's tens of thousands of
+    # sequential DB round-trips before a single search request went out — no
+    # progress/heartbeat/cancellation checkpoint reached the whole time, which
+    # looks exactly like "stuck at company 3 of 100002" even though the provider
+    # side (once a request finally got sent) was working fine. Violates the
+    # project's own chunked-batch rule for the 700k-row companies table.
+    done_total = 0
+    for chunk_start in range(0, len(company_ids), _BATCH_LOAD_CHUNK):
+        if circuit_tripped:
+            break
+        if abort_cb:
+            abort_cb()
+        chunk_ids = company_ids[chunk_start: chunk_start + _BATCH_LOAD_CHUNK]
+        _by_id = {c.id: c for c in db.query(Company).filter(Company.id.in_(chunk_ids)).all()}
+        companies = [c for cid in chunk_ids if (c := _by_id.get(cid)) is not None]
 
-                if not circuit_tripped and _circuit_tripped_now():
-                    circuit_tripped = True
-                    warn_msg = (
-                        f"Circuit breaker tripped: {sum(_recent_outcomes)}/{_CB_WINDOW} recent "
-                        f"Google searches failed — stopping batch early ({done}/{len(futures)} attempted)."
-                    )
-                    logger.warning(warn_msg)
-                    stats["warnings"].append(warn_msg)
-                    for f in futures:
-                        f.cancel()
-
-                is_last = done == len(futures)
-                _maybe_progress(start_idx + done, force=is_last or circuit_tripped)
-
-                if circuit_tripped:
-                    break
-    else:
-        for i, company in enumerate(companies, start=start_idx + 1):
-            if circuit_tripped:
-                break
-            current = company
-            if refresh_zefix:
-                try:
-                    from app.services.ingestion.zefix_import import import_company_from_zefix_uid
-                    refreshed, _ = import_company_from_zefix_uid(
-                        db,
-                        company.uid,
-                        pause_on_zefix_500=True,
-                        status_cb=status_cb,
-                        abort_cb=abort_cb,
-                    )
-                    current = refreshed
-                    stats["zefix_refreshed"] += 1
-                except Exception as exc:  # noqa: BLE001
-                    if _is_control_signal_exception(exc):
-                        raise
-                    logger.warning("Zefix refresh failed for %s: %s", company.uid, exc)
-                    _append_error(f"Zefix refresh {company.uid} [{type(exc).__name__}]: {exc}")
-
-            if run_google:
-                try:
-                    enriched, _ = enrich_company_website(db, current)
-                    _recent_outcomes.append(False)
-                    if enriched:
+        if use_concurrent:
+            from concurrent.futures import ThreadPoolExecutor, as_completed as _as_completed
+            with ThreadPoolExecutor(max_workers=concurrency, thread_name_prefix="serper") as pool:
+                futures = {pool.submit(_enrich_one_concurrent, c.id): c for c in companies}
+                for future in _as_completed(futures):
+                    done_total += 1
+                    company_id_done, enriched, _url, exc = future.result()
+                    _recent_outcomes.append(exc is not None)
+                    if exc:
+                        company_obj = futures[future]
+                        logger.warning("Google search failed for %s: %s", company_obj.uid, exc)
+                        _append_error(f"Google search {company_obj.uid} [{type(exc).__name__}]: {exc}")
+                        # No log_error call here — enrich_company_website already logged a
+                        # company_errors row with the full request detail (on its own
+                        # thread_db session) before raising; a second call here would
+                        # overwrite it with a detail-less one via log_error's dedup update.
+                    elif enriched:
                         stats["google_enriched"] += 1
                     else:
                         stats["google_no_result"] += 1
-                    try:
-                        _sync_url_candidates(db, current.id)
-                    except Exception as exc_inner:  # noqa: BLE001
-                        logger.warning(
-                            "URL candidate sync failed for %s: %s", current.uid, exc_inner
+
+                    if not circuit_tripped and _circuit_tripped_now():
+                        circuit_tripped = True
+                        warn_msg = (
+                            f"Circuit breaker tripped: {sum(_recent_outcomes)}/{_CB_WINDOW} recent "
+                            f"Google searches failed — stopping batch early "
+                            f"({done_total}/{len(company_ids)} attempted)."
                         )
-                except Exception as exc:  # noqa: BLE001
-                    _recent_outcomes.append(True)
-                    logger.warning("Google search failed for %s: %s", current.uid, exc)
-                    _append_error(f"Google search {current.uid} [{type(exc).__name__}]: {exc}")
-                    # No log_error call here — enrich_company_website already logged a
-                    # company_errors row with the full request detail before raising; a
-                    # second call here would overwrite it with a detail-less one via
-                    # log_error's dedup update.
+                        logger.warning(warn_msg)
+                        stats["warnings"].append(warn_msg)
+                        for f in futures:
+                            f.cancel()
 
-                if not circuit_tripped and _circuit_tripped_now():
-                    circuit_tripped = True
-                    warn_msg = (
-                        f"Circuit breaker tripped: {sum(_recent_outcomes)}/{_CB_WINDOW} recent "
-                        f"Google searches failed — stopping batch early ({i - start_idx}/{len(companies)} attempted)."
-                    )
-                    logger.warning(warn_msg)
-                    stats["warnings"].append(warn_msg)
+                    is_last = done_total == len(company_ids)
+                    _maybe_progress(start_idx + done_total, force=is_last or circuit_tripped)
 
-            is_last = i == start_idx + len(companies)
-            _maybe_progress(i, force=is_last or circuit_tripped)
+                    if circuit_tripped:
+                        break
+        else:
+            for company in companies:
+                if circuit_tripped:
+                    break
+                done_total += 1
+                current = company
+                if refresh_zefix:
+                    try:
+                        from app.services.ingestion.zefix_import import import_company_from_zefix_uid
+                        refreshed, _ = import_company_from_zefix_uid(
+                            db,
+                            company.uid,
+                            pause_on_zefix_500=True,
+                            status_cb=status_cb,
+                            abort_cb=abort_cb,
+                        )
+                        current = refreshed
+                        stats["zefix_refreshed"] += 1
+                    except Exception as exc:  # noqa: BLE001
+                        if _is_control_signal_exception(exc):
+                            raise
+                        logger.warning("Zefix refresh failed for %s: %s", company.uid, exc)
+                        _append_error(f"Zefix refresh {company.uid} [{type(exc).__name__}]: {exc}")
+
+                if run_google:
+                    try:
+                        enriched, _ = enrich_company_website(db, current)
+                        _recent_outcomes.append(False)
+                        if enriched:
+                            stats["google_enriched"] += 1
+                        else:
+                            stats["google_no_result"] += 1
+                        try:
+                            _sync_url_candidates(db, current.id)
+                        except Exception as exc_inner:  # noqa: BLE001
+                            logger.warning(
+                                "URL candidate sync failed for %s: %s", current.uid, exc_inner
+                            )
+                    except Exception as exc:  # noqa: BLE001
+                        _recent_outcomes.append(True)
+                        logger.warning("Google search failed for %s: %s", current.uid, exc)
+                        _append_error(f"Google search {current.uid} [{type(exc).__name__}]: {exc}")
+                        # No log_error call here — enrich_company_website already logged a
+                        # company_errors row with the full request detail before raising; a
+                        # second call here would overwrite it with a detail-less one via
+                        # log_error's dedup update.
+
+                    if not circuit_tripped and _circuit_tripped_now():
+                        circuit_tripped = True
+                        warn_msg = (
+                            f"Circuit breaker tripped: {sum(_recent_outcomes)}/{_CB_WINDOW} recent "
+                            f"Google searches failed — stopping batch early "
+                            f"({done_total}/{len(company_ids)} attempted)."
+                        )
+                        logger.warning(warn_msg)
+                        stats["warnings"].append(warn_msg)
+
+                is_last = done_total == len(company_ids)
+                _maybe_progress(start_idx + done_total, force=is_last or circuit_tripped)
 
     if circuit_tripped:
         stats["circuit_breaker_tripped"] = True
