@@ -96,7 +96,7 @@ def test_compute_verdict_verified_on_uid_match(db):
         db, company_id=8001, url="https://muster.ch",
         confidence=0.9, uid_matches_zefix=True,
     )
-    verdict = ws.compute_verdict(db, 8001, [], set(), _thr())
+    verdict = ws.compute_verdict(db, 8001, _thr())
     assert verdict.status == ws.VERIFIED
     assert verdict.website_url == "https://muster.ch"
     assert verdict.ambiguous is False
@@ -112,16 +112,17 @@ def test_compute_verdict_no_snippet_fallback_after_failed_crawl(db):
         db, company_id=8002, url="https://wrong-site.ch",
         confidence=0.10, uid_matches_zefix=False,
     )
-    scored_results = [{"link": "https://wrong-site.ch", "score": 80}]
-    verdict = ws.compute_verdict(db, 8002, scored_results, set(), _thr())
+    verdict = ws.compute_verdict(db, 8002, _thr())
     assert verdict.status == ws.NONE
     assert verdict.website_url is None
 
 
-def test_compute_verdict_falls_back_to_search_when_never_crawled(db):
+def test_compute_verdict_unknown_when_never_crawled(db):
+    """Identity rework phase 3 ("cut pre-crawl scoring"): a company with no
+    company_web_extract rows is unknown, regardless of how good its search
+    snippet score was — the search-only fallback verdict was removed."""
     db.add(Company(id=8003, uid="CHE-800.300.000", name="Never Crawled AG"))
     db.commit()
-    scored_results = [{"link": "https://neverc.ch", "score": 80}]
-    verdict = ws.compute_verdict(db, 8003, scored_results, set(), _thr())
-    assert verdict.status == ws.CONFIRMED
-    assert verdict.website_url == "https://neverc.ch"
+    verdict = ws.compute_verdict(db, 8003, _thr())
+    assert verdict.status is None
+    assert verdict.website_url is None

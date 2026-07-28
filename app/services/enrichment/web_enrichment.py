@@ -137,22 +137,20 @@ def _enrich_stored_results(stored: list[dict], full_raw: dict | None) -> list[di
     return result
 
 
-def _search_verdict_fields(db: Session, scored: list[dict]) -> dict:
-    """Compute gated website fields from scored search results (search-only verdict).
+def _search_verdict_fields(db: Session, company_id: int) -> dict:
+    """Compute gated website fields for a company — crawl-authoritative (identity
+    rework phase 3): a fresh search result never sets website_url/website_status
+    by itself, only company_url_candidates for the crawler to work through. Until
+    a real crawl produces a company_web_extract row, this returns the "unknown"
+    verdict (NULL status/url), regardless of how good the search snippet looked.
 
     Returns a dict of {website_url, web_score, social_media_only, website_status,
     website_count} suitable for a CompanyUpdate or direct attribute assignment.
-
-    Replaces the old "force scored[0] into website_url" behaviour: website_url is
-    only populated when the verdict is a genuine own-domain match (POSITIVE).
     """
     from app.services.enrichment import website_status as ws
 
-    _, directory_domains = _google_scoring_overrides(db)
     thr = ws.load_thresholds(db)
-    verdict = ws.classify_search_results(scored, directory_domains, thr)
-    # verdict.web_score: best search score for positive verdicts; floored (10/5/0) for
-    # negative ones (social_only/directory_only/none) so combined_score reflects reality.
+    verdict = ws.compute_verdict(db, company_id, thr)
     return {
         "website_url": verdict.website_url,
         "web_score": verdict.web_score,
@@ -217,7 +215,21 @@ def enrich_company_website(db: Session, company: Company, *, num: int = 10) -> t
     Stores all scored results in google_search_results_raw (JSON).
     For ScrapingDog, also stores the complete provider JSON in google_search_full_raw.
     Sets website_url and web_score to the best-scoring result.
-    Always sets website_checked_at so callers know a search was attempted.
+    Sets website_checked_at on a successful call (zero results included) so callers
+    know a search was genuinely attempted.
+
+    Raises on failure — always logged to company_errors (source=web_enrichment)
+    first, with the exact request params in detail_json, so a failure is never
+    silent. Callers must catch this; a raise does NOT mean "no website found", it
+    means no usable outcome was produced. Two distinct error_types distinguish
+    where it happened:
+      - search_api_failed: the provider request itself failed (network error,
+        non-2xx, missing API key). company_search_results is left untouched so the
+        company is retried on the next batch run instead of being marked searched.
+      - search_processing_failed: the provider call succeeded (a real response came
+        back) but scoring/verdict/persistence afterwards raised — this is a bug on
+        our side, not a provider problem. If ScrapingDog/Serper's own dashboard
+        shows healthy 200s while jobs keep failing, check for this error_type.
     """
     from app.metrics import record_api_call, record_api_error
 
@@ -275,49 +287,98 @@ def enrich_company_website(db: Session, company: Company, *, num: int = 10) -> t
         duration = time.monotonic() - _t0
         record_api_error(provider, "unknown")
         logger.error("Google search failed for company_id=%d provider=%s: %s", company.id, provider, exc, exc_info=True)
-        return False, None
+        # Persist exactly what was sent + what came back — this used to be swallowed
+        # here entirely (return False, None with only a Python log line), which is
+        # why provider failures (e.g. ScrapingDog rejecting concurrent requests with
+        # a generic HTTP 400) were invisible in the job UI and never tripped the
+        # batch circuit breaker: no exception ever reached the caller. Now we log to
+        # company_errors (visible at /admin/errors) with the exact request params,
+        # then re-raise so callers (run_batch_collect, the manual web-search route,
+        # initial_collect) see the failure instead of a silent "no result".
+        try:
+            from app.crud.company_error import log_error as _log_err
+            status_code = getattr(getattr(exc, "response", None), "status_code", None)
+            _log_err(
+                db, company_id=company.id, source="web_enrichment", error_type="search_api_failed",
+                message=f"{provider} [{type(exc).__name__}]: {exc}",
+                detail={
+                    "provider": provider,
+                    "request": search_params,
+                    "status_code": status_code,
+                    "duration_ms": round(duration * 1000),
+                },
+            )
+            db.commit()
+        except Exception:  # noqa: BLE001
+            db.rollback()
+        raise
 
     logger.debug(
         "google_search provider=%s company_id=%d name=%r results=%d latency_ms=%.0f",
         provider, company.id, company.name, len(results), duration * 1000,
     )
 
-    if not results:
+    # The API call itself succeeded (provider returned a usable response) — from here
+    # on, a failure is OUR bug (scoring/verdict/persistence), not the provider's. This
+    # is deliberately a separate try/except from the one above: it's outside the block
+    # that logs error_type=search_api_failed, so without this a scoring/DB bug here
+    # would propagate with NO company_errors row at all — invisible even after the
+    # provider-failure fix, and indistinguishable from an actual provider error in the
+    # job's logs. error_type=search_processing_failed makes that distinction explicit.
+    try:
+        if not results:
+            csr_crud.upsert_search_result(
+                db, company.id,
+                provider=provider, results_raw=[], full_raw=full_raw, params=search_params, searched_at=now,
+            )
+            db.commit()
+            return False, None
+
+        if full_raw is not None:
+            raw_results = [_enrich_organic_result(o) for o in _organic_results_from_full_raw(full_raw)]
+        else:
+            raw_results = [{"title": r.title, "link": r.link, "snippet": r.snippet or ""} for r in results]
+        scored = _score_google_results_for_company(db, company, raw_results)
+        fields = _search_verdict_fields(db, company.id)
+
         csr_crud.upsert_search_result(
             db, company.id,
-            provider=provider, results_raw=[], full_raw=full_raw, params=search_params, searched_at=now,
+            provider=provider, results_raw=scored, full_raw=full_raw, params=search_params, searched_at=now,
         )
-        db.commit()
-        return False, None
-
-    if full_raw is not None:
-        raw_results = [_enrich_organic_result(o) for o in _organic_results_from_full_raw(full_raw)]
-    else:
-        raw_results = [{"title": r.title, "link": r.link, "snippet": r.snippet or ""} for r in results]
-    scored = _score_google_results_for_company(db, company, raw_results)
-    fields = _search_verdict_fields(db, scored)
-
-    csr_crud.upsert_search_result(
-        db, company.id,
-        provider=provider, results_raw=scored, full_raw=full_raw, params=search_params, searched_at=now,
-    )
-    crud.update_company(
-        db,
-        company,
-        CompanyUpdate(
-            website_url=fields["website_url"],
-            web_score=fields["web_score"],
-            social_media_only=fields["social_media_only"],
-            website_status=fields["website_status"],
-            website_count=fields["website_count"],
-            combined_score=Company.compute_combined_score(
-                company.ai_score, company.noga_confidence, company.purpose_keywords,
+        crud.update_company(
+            db,
+            company,
+            CompanyUpdate(
+                website_url=fields["website_url"],
                 web_score=fields["web_score"],
+                social_media_only=fields["social_media_only"],
+                website_status=fields["website_status"],
+                website_count=fields["website_count"],
+                combined_score=Company.compute_combined_score(
+                    company.ai_score, company.noga_confidence, company.purpose_keywords,
+                    web_score=fields["web_score"],
+                ),
             ),
-        ),
-    )
-    # Returns the gated own-domain URL (None for social_only/directory_only/none).
-    return fields["website_url"] is not None, fields["website_url"]
+        )
+        # Returns the gated own-domain URL (None for social_only/directory_only/none).
+        return fields["website_url"] is not None, fields["website_url"]
+    except Exception as exc:
+        logger.error(
+            "Processing a successful %s response failed for company_id=%d: %s",
+            provider, company.id, exc, exc_info=True,
+        )
+        try:
+            from app.crud.company_error import log_error as _log_err
+            db.rollback()
+            _log_err(
+                db, company_id=company.id, source="web_enrichment", error_type="search_processing_failed",
+                message=f"{provider} [{type(exc).__name__}]: {exc}",
+                detail={"provider": provider, "request": search_params, "result_count": len(results)},
+            )
+            db.commit()
+        except Exception:  # noqa: BLE001
+            db.rollback()
+        raise
 
 
 def rescore_from_stored_results(db: Session, company: Company) -> bool:
@@ -334,7 +395,7 @@ def rescore_from_stored_results(db: Session, company: Company) -> bool:
 
     stored = _enrich_stored_results(stored, search_result.full_raw)
     rescored = _score_google_results_for_company(db, company, stored)
-    fields = _search_verdict_fields(db, rescored)
+    fields = _search_verdict_fields(db, company.id)
     csr_crud.upsert_search_result(
         db, company.id,
         provider=search_result.provider, results_raw=rescored,
@@ -404,7 +465,7 @@ def recalculate_google_scores(
                     stats["skipped"] += 1
                     continue
 
-                fields = _search_verdict_fields(db, rescored)
+                fields = _search_verdict_fields(db, company.id)
                 company.website_url = fields["website_url"]
                 company.web_score = fields["web_score"]
                 company.social_media_only = fields["social_media_only"]
@@ -443,6 +504,26 @@ def recalculate_google_scores(
 _DELETED_STATUSES = ("Gelöscht", "CANCELLED", "BEING_CANCELLED")
 
 
+def _sync_url_candidates(db: Session, company_id: int) -> None:
+    """Turn freshly stored search results into crawl candidates.
+
+    Independent of the company-level website verdict (identity rework phase 3):
+    a search result no longer implies a positive verdict, but the crawler still
+    needs candidates to try regardless of what the pre-crawl snippet score says.
+    """
+    search_result = csr_crud.get_search_result(db, company_id)
+    raw = search_result.results_raw if search_result else None
+    candidates = crawler_crud.parse_google_results_raw(raw) if raw else []
+    if candidates:
+        crawler_crud.upsert_url_candidates(db, company_id, candidates)
+        if not crawler_crud.get_selected_candidate(db, company_id):
+            best = crawler_crud.select_best_candidate(db, company_id)
+            crawler_crud.get_or_create_crawl_state(
+                db, company_id,
+                selected_url_id=best.id if best else None,
+            )
+
+
 def _enrich_one_concurrent(company_id: int) -> tuple[int, bool, str | None, Exception | None]:
     """Enrich one company using its own DB session (safe for ThreadPoolExecutor)."""
     from app.database import SessionLocal
@@ -453,22 +534,11 @@ def _enrich_one_concurrent(company_id: int) -> tuple[int, bool, str | None, Exce
         if company is None:
             return company_id, False, None, None
         enriched, url = enrich_company_website(thread_db, company)
-        if enriched:
-            try:
-                search_result = csr_crud.get_search_result(thread_db, company_id)
-                raw = search_result.results_raw if search_result else None
-                candidates = crawler_crud.parse_google_results_raw(raw) if raw else []
-                if candidates:
-                    crawler_crud.upsert_url_candidates(thread_db, company_id, candidates)
-                    if not crawler_crud.get_selected_candidate(thread_db, company_id):
-                        best = crawler_crud.select_best_candidate(thread_db, company_id)
-                        crawler_crud.get_or_create_crawl_state(
-                            thread_db, company_id,
-                            selected_url_id=best.id if best else None,
-                        )
-                    thread_db.commit()
-            except Exception as exc_inner:
-                logger.warning("URL candidate sync failed for company_id=%d: %s", company_id, exc_inner)
+        try:
+            _sync_url_candidates(thread_db, company_id)
+            thread_db.commit()
+        except Exception as exc_inner:
+            logger.warning("URL candidate sync failed for company_id=%d: %s", company_id, exc_inner)
         return company_id, enriched, url, None
     except Exception as exc:
         return company_id, False, None, exc
@@ -831,13 +901,10 @@ def run_batch_collect(
                     company_obj = futures[future]
                     logger.warning("Google search failed for %s: %s", company_obj.uid, exc)
                     _append_error(f"Google search {company_obj.uid} [{type(exc).__name__}]: {exc}")
-                    try:
-                        from app.crud.company_error import log_error as _log_err
-                        _log_err(db, company_id=company_id_done, source="web_enrichment",
-                                 error_type="enrich_failed", message=str(exc))
-                        db.flush()
-                    except Exception:  # noqa: BLE001
-                        pass
+                    # No log_error call here — enrich_company_website already logged a
+                    # company_errors row with the full request detail (on its own
+                    # thread_db session) before raising; a second call here would
+                    # overwrite it with a detail-less one via log_error's dedup update.
                 elif enriched:
                     stats["google_enriched"] += 1
                 else:
@@ -888,35 +955,22 @@ def run_batch_collect(
                     _recent_outcomes.append(False)
                     if enriched:
                         stats["google_enriched"] += 1
-                        try:
-                            search_result = csr_crud.get_search_result(db, current.id)
-                            raw = search_result.results_raw if search_result else None
-                            candidates = crawler_crud.parse_google_results_raw(raw) if raw else []
-                            if candidates:
-                                crawler_crud.upsert_url_candidates(db, current.id, candidates)
-                                if not crawler_crud.get_selected_candidate(db, current.id):
-                                    best = crawler_crud.select_best_candidate(db, current.id)
-                                    crawler_crud.get_or_create_crawl_state(
-                                        db, current.id,
-                                        selected_url_id=best.id if best else None,
-                                    )
-                        except Exception as exc_inner:  # noqa: BLE001
-                            logger.warning(
-                                "URL candidate sync failed for %s: %s", current.uid, exc_inner
-                            )
                     else:
                         stats["google_no_result"] += 1
+                    try:
+                        _sync_url_candidates(db, current.id)
+                    except Exception as exc_inner:  # noqa: BLE001
+                        logger.warning(
+                            "URL candidate sync failed for %s: %s", current.uid, exc_inner
+                        )
                 except Exception as exc:  # noqa: BLE001
                     _recent_outcomes.append(True)
                     logger.warning("Google search failed for %s: %s", current.uid, exc)
                     _append_error(f"Google search {current.uid} [{type(exc).__name__}]: {exc}")
-                    try:
-                        from app.crud.company_error import log_error as _log_err
-                        _log_err(db, company_id=current.id, source="web_enrichment",
-                                 error_type="enrich_failed", message=str(exc))
-                        db.flush()
-                    except Exception:  # noqa: BLE001
-                        pass
+                    # No log_error call here — enrich_company_website already logged a
+                    # company_errors row with the full request detail before raising; a
+                    # second call here would overwrite it with a detail-less one via
+                    # log_error's dedup update.
 
                 if not circuit_tripped and _circuit_tripped_now():
                     circuit_tripped = True

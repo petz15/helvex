@@ -928,6 +928,66 @@ The worker checks `cancel_requested` / `pause_requested` **between companies** (
 | `shab_archive` | `start_page`, `end_page`, `page_size`, `request_delay`, `pdf_delay` | Fetch shab.ch archive, download PDFs, upsert `sogc_publications` + `sogc_changes`; resume via page cursor | ONE_PER_ORG |
 | `link_sogc_stubs` | `batch_size` | Back-fill `company_id` on existing `sogc_publications` + `sogc_person_appearances` rows; creates `shab_stub` Company rows for unknown UIDs — no API calls | — |
 
+#### `web_search_batch` concurrency safety (`run_batch_collect`, `web_enrichment.py`)
+
+`concurrency` (parallel Serper/ScrapingDog requests via `ThreadPoolExecutor`) is
+clamped server-side to 1–100 (`app/api/routes/jobs.py`'s `BatchCollectBody` UI hint,
+enforced in `run_batch_collect` itself) — added after a high-concurrency run against
+a ScrapingDog plan that doesn't support that many concurrent connections caused
+cascading `HTTP 400` failures that, combined with the two issues below, could starve
+the pod (job worker runs in-process by default; see `apiWorker` in `infra/charts/helvex/values.yaml`, disabled by default):
+
+- **Circuit breaker:** tracks the last 20 Google-search outcomes (both the
+  concurrent and sequential paths); if ≥15 of the last 20 failed, the batch stops
+  early instead of grinding through the rest of the selection at full speed.
+  Recorded in `stats["circuit_breaker_tripped"]` + a `stats["warnings"]` entry.
+- **Throttled progress writes:** `progress_cb` (→ `update_progress` → full
+  `json.dumps(stats)` + `db.commit()` on the `job_runs` row) previously fired once
+  per company; now at most once/second (always fires on the final item or when the
+  breaker trips), avoiding O(n²) DB writes on a long, fast-failing run.
+- **Capped error list:** `stats["errors"]` keeps at most the last 200 entries;
+  `stats["error_count"]` tracks the true total separately.
+
+#### `enrich_company_website` no longer swallows provider failures
+
+Found while debugging the above: `enrich_company_website` (`web_enrichment.py`) used
+to catch *any* exception from the Serper/ScrapingDog client — network errors, HTTP
+4xx/5xx, a missing API key — log one `logger.error(...)` line, and return `(False,
+None)` as if it were a normal "no result" search. That meant:
+
+- The circuit breaker above never actually tripped in practice — nothing that calls
+  `enrich_company_website` (`run_batch_collect`'s concurrent/sequential paths,
+  `initial_collect`, the manual `GET /companies/{id}/google-search` route) ever saw
+  an exception to react to, so a provider erroring on every request (e.g. a
+  ScrapingDog plan rejecting concurrent connections) would burn through the entire
+  batch — and the provider's request quota/credits — with zero visibility beyond a
+  raw Python log line the job UI never surfaces.
+- The manual web-search route's credit-refund logic (`detail.py`'s
+  `google_search_for_company` → `_refund_failed_search`) was dead code for this exact
+  failure mode: it only refunds on a caught exception, which never arrived.
+
+Now `enrich_company_website` logs a `company_errors` row (source `web_enrichment`,
+error_type `search_api_failed`) with the **exact request** (`provider`, `q`, `gl`,
+`hl`, `location`, `purpose_language_raw`, `municipality`, `address_zip`) plus
+`status_code` and `duration_ms` in `detail_json`, then **re-raises**. This is the way
+to inspect what was actually sent to ScrapingDog/Serper for a failing company:
+superadmin → `/admin/errors` → filter source "Web enrichment" → expand a row → the
+`Detail` panel is the raw request JSON, `Message` has the provider's response.
+Callers now correctly see the exception:
+- `run_batch_collect`: circuit breaker + `stats["errors"]` actually populate (no
+  longer double-logs to `company_errors` itself — would have overwritten the richer
+  detail via `log_error`'s per-company-id/source dedup).
+- `detail.py`'s manual route: the existing refund-on-failure path now actually fires.
+- `initial_collect` (`zefix_import.py`): falls into its existing per-UID
+  `except Exception` handler and gets counted in `stats["errors"]` instead of
+  `google_no_result`.
+
+`company_search_results` is deliberately left untouched on this path (unlike the
+"zero results" case, which does persist an empty row) so a transiently-failed
+company is retried on the next batch run rather than marked as permanently searched.
+Regression test: `test_run_batch_collect_circuit_breaker_on_provider_failures`
+(`tests/test_collection_batch.py`).
+
 #### Org-scoped job execution
 
 - **Job trigger**: Each user-initiated job stores `job.org_id = current_user.org_id`
@@ -2113,12 +2173,13 @@ alembic upgrade head
 
 > ⚠️ **Identity scoring is being reworked.** The current single `web_score`/`confidence`
 > scalar conflates three questions (is this the company's site? / how good is the site? /
-> how relevant is it to me?) and emits false signals — pre-crawl snippet scores leak into
-> the verdict, `compute_verdict` silently max-picks among ambiguous candidates, and UID
-> matching is a crude binary compare. The approved redesign splits **identity** (probability
-> + category + evidence ledger, ledger-first then a GBM) from **content** (global facts) and
-> moves **fit** to the per-org scoring layer; `web_score` is retired as a relevance input.
+> how relevant is it to me?) and UID matching is a crude binary compare. The approved
+> redesign splits **identity** (probability + category + evidence ledger, ledger-first
+> then a GBM) from **content** (global facts) and moves **fit** to the per-org scoring
+> layer; `web_score` is retired as a relevance input.
 > See [`docs/code-review/web-identity-rework.md`](docs/code-review/web-identity-rework.md).
+> Phases 1, 2, 3 and part of 4 have shipped (below); 4's full company-level vocabulary
+> cutover, UID hardening, `web_score` retirement, and the GBM (phases 4b–6) have not.
 > The description below is the *current* implementation.
 
 ### Overview
@@ -2310,20 +2371,39 @@ change — frontend badge, tier gating, filters — deliberately deferred).
   ≥2 *distinct-domain* candidates land within `_AMBIGUITY_MARGIN` (0.05) of the winner — the pick
   is still made (never left blank pending review), but the judgment call is now visible rather
   than hidden behind a confident-looking URL.
-- **No snippet fallback after a real crawl** (the actual "Cut pre-crawl scoring" fix) —
-  previously, if a crawl was attempted but no candidate cleared any tier (e.g. every candidate's
-  UID mismatched), `compute_verdict` still fell through to `classify_search_results` (the
-  pre-crawl snippet score), letting a weak search-result guess overrule genuine negative crawl
-  evidence. Now: `rows` non-empty but nothing tiered → `Verdict(NONE, ...)` directly. The
-  snippet-score fallback only fires when the company was **never crawled at all** (no extract
-  rows exist) — its legitimate, intended use as a pre-crawl provisional signal.
+- **No snippet fallback after a real crawl** — if a crawl was attempted but no candidate
+  cleared any tier (e.g. every candidate's UID mismatched), `compute_verdict` used to fall
+  through to `classify_search_results` (the pre-crawl snippet score), letting a weak
+  search-result guess overrule genuine negative crawl evidence. Now: `rows` non-empty but
+  nothing tiered → `Verdict(NONE, ...)` directly, no fallback.
+- **Cut pre-crawl scoring entirely (identity rework phase 3, fully landed)** — the remaining
+  fallback (never-crawled companies got a `classify_search_results` verdict) is gone too.
+  `compute_verdict` now returns `Verdict(None, None, 0, None)` — i.e. `website_status`/
+  `website_url` stay `NULL` — for any company with zero `company_web_extract` rows,
+  regardless of how good its search snippet score was. `web_enrichment.py`'s
+  `_search_verdict_fields` (used by `enrich_company_website`, `rescore_from_stored_results`,
+  `recalculate_google_scores`) now calls `compute_verdict` directly instead of
+  `classify_search_results` — so a fresh Google/ScrapingDog search **never** sets a
+  positive `website_status` by itself anymore; only an actual crawl does.
+  `classify_search_results` itself is unchanged and still callable (kept as a documented
+  crawl-ordering helper per the design doc's §3.4), it's just no longer wired into any
+  persisted verdict. Candidate creation for the crawler (`company_url_candidates` via
+  `_sync_url_candidates`) was decoupled from the verdict in the same change — it used to
+  run only `if enriched` (i.e. only on a positive verdict), which would have starved the
+  crawl queue entirely once fresh searches stopped producing positive verdicts; it now
+  runs unconditionally after every search. Existing rows written before this change keep
+  their pre-phase-3 search-only verdict until `recompute_website_status` is re-run (superadmin
+  crawler admin page) — that job already used `compute_verdict`, so re-running it backfills
+  the correct `NULL` for any never-crawled company. Regression test:
+  `test_compute_verdict_unknown_when_never_crawled`
+  (`tests/test_website_status.py`).
 - **Fixed a real `is True`/`is False` bug** in `_extract_tier`: `get_web_extracts_with_urls` uses
   raw SQL (`text()`), which returns plain 0/1 ints (not the bool singleton) on some
   driver/dialect combinations (observed on SQLite; Postgres/psycopg2 already returns real bools)
   — `uid_matches_zefix is True` silently misclassified those as the `None` branch. Changed to
   `==`, which preserves the None/True/False tri-state correctly on both.
 
-Tests: `tests/test_website_status.py` (categorize_identity, tiebreak/ambiguity, the two
+Tests: `tests/test_website_status.py` (categorize_identity, tiebreak/ambiguity, the
 `compute_verdict` behavior fixes).
 
 Remaining: per-org fit scoring (Layer D, coupled with the scoring-multitenancy rework) is not
@@ -2331,10 +2411,11 @@ yet implemented — see `docs/code-review/web-pipeline-holistic-rework.md` §5/�
 
 ### Website verdict — does this company have a website, and how many?
 
-`app/services/enrichment/website_status.py` aggregates the search + crawl evidence into one
-company-level verdict (`companies.website_status`) plus a distinct-website count
-(`companies.website_count`). No API cost. This replaces the old behaviour of forcing
-the top-scored search result into `website_url` regardless of quality.
+`app/services/enrichment/website_status.py` computes the company-level verdict
+(`companies.website_status`) plus a distinct-website count (`companies.website_count`).
+No API cost. This replaces the old behaviour of forcing the top-scored search result
+into `website_url` regardless of quality — and, since identity rework phase 3, is
+**crawl-only**: a search result alone never produces a positive verdict (see below).
 
 - **Domain buckets** (`scoring.classify_domain`): each result URL → `own` / `social` /
   `directory` / `news` / `none`, reusing the existing directory/social/news domain sets.
@@ -2345,28 +2426,39 @@ the top-scored search result into `website_url` regardless of quality.
   - Stored as `companies.seo_visibility_score` + `seo_visibility_computed_at` (migration `0113`).
   - Persisted on demand by `GET /api/v1/companies/{id}/serp-analysis`; backfilled in bulk by `recalculate_google_scores` (no new API calls).
   - Displayed in the Search Presence card on the company profile (green ≥70, amber 40–69, red <40).
-- **Provisional verdict** (search-only, in `enrich_company_website` / rescore paths):
-  `classify_search_results` → best own-domain by score vs DB thresholds
-  (`website_confirmed_search_score`, `website_likely_search_score`).
-- **Authoritative verdict** (post-crawl, in `handle_web_extract` and the
-  `recompute_website_status` job): `compute_verdict` reads every `company_web_extract`
-  row (joined to candidate URL, including `purpose_sim`) and tiers each via `_extract_tier()`:
+- **The only verdict path is `compute_verdict`** (called from `handle_web_extract`,
+  the `recompute_website_status` job, and — since phase 3 — `web_enrichment.py`'s
+  `_search_verdict_fields`, i.e. `enrich_company_website`/`rescore_from_stored_results`/
+  `recalculate_google_scores` too). It reads every `company_web_extract` row (joined to
+  candidate URL, including `purpose_sim`) and tiers each via `_extract_tier()`:
   - `uid_matches_zefix=True` or `name_address_verified` → **verified**
   - `uid_matches_zefix=False` → discarded (site belongs to another company)
   - else: purpose-semantic boost applied first (`purpose_sim > 0.30` → linear up to +0.15 on `confidence`), then confidence ≥ thresholds → **confirmed** / **likely** (`website_confirmed_confidence` default 0.65, `website_likely_confidence` 0.45)
-- **`web_score` from crawl confidence:** `compute_verdict` now returns `web_score = round(best_confidence × 100)` from the winning extract. Both `handle_web_extract` and `recompute_website_status` write this to `companies.web_score` and recompute `combined_score`. The old ±delta (`adjust_web_score_for_extraction`) is kept for backward-compat but no longer called on the main path.
-- **Negative verdict floors:** `classify_search_results` returns fixed `web_score` floors: `social_only`→10, `directory_only`→5, `none`→0. Prevents search snippet scores from inflating `web_score` when the company has no genuine website.
+  - no `company_web_extract` rows at all (never crawled) → `Verdict(None, None, 0, None)` —
+    **unknown**, regardless of search score. No search-snippet fallback exists anymore.
+- **`classify_search_results`** still exists (scores search results into
+  verified/confirmed/likely/social_only/directory_only/none by domain bucket + score vs
+  `website_confirmed_search_score`/`website_likely_search_score`), but per the design
+  doc's §3.4 it's demoted to a **crawl-queue-ordering helper** only — not called by
+  `compute_verdict` or `_search_verdict_fields`, and its output is never persisted to
+  `companies.website_status`/`website_url`.
+- **`web_score` from crawl confidence:** `compute_verdict` returns `web_score = round(best_confidence × 100)` from the winning extract (or `0` for a crawled-but-`NONE` verdict, or `None` for never-crawled). `handle_web_extract`, `recompute_website_status`, and now `enrich_company_website`/the rescore paths all write this to `companies.web_score` and recompute `combined_score`. The old ±delta (`adjust_web_score_for_extraction`) is kept for backward-compat but no longer called on the main path.
 - **Purpose-site semantic similarity (`purpose_sim`):** `company_web_extract.purpose_sim` (float 0–1) stores cosine similarity between the Zefix `purpose` embedding and the crawled site description/keywords embedding. Computed by ML-worker job `enrich_web_purpose_sim` (in `noga.py`). Migration `0110`. Trigger via `POST /api/v1/admin/jobs/crawler/enrich-purpose-sim` (UI: crawler admin page).
 - **Impressum/contact page bonus:** `resolve_company_extract` accepts `page_types: list[str] | None`. If `impressum` or `contact` is present in the fetched pages for a candidate, one extra signal is added to the base coverage count, raising base confidence.
 - **Verdict ladder:** `verified` › `confirmed` › `likely` › `social_only` ›
-  `directory_only` › `none` (NULL = unknown). `website_url` is set only for the
-  positive verdicts (verified/confirmed/likely); otherwise NULL.
+  `directory_only` › `none` (NULL = unknown / not yet crawled). `website_url` is set
+  only for the positive verdicts (verified/confirmed/likely); otherwise NULL. All six
+  named statuses now imply an actual crawl happened — a company that's only been
+  searched, never crawled, always shows NULL (frontend: `CoverageItem`/badges reading
+  `company.website_url`/`website_status` in `company-detail-client.tsx` naturally read
+  as "no website" until a crawl confirms one — this was the phase-3 fix).
 - **Multiple websites:** `website_count` = distinct root domains among verified+confirmed
   extracts (≥2 ⇒ company has multiple genuine sites). Surfaced as a badge on the company
   table (`Site status` column) and the detail page Website tab.
-- **Re-enrichment guard:** the batch `only_missing_website` filter now keys off
-  `website_checked_at IS NULL` (not `website_url`), so companies legitimately gated to
-  NULL aren't re-searched forever.
+- **Re-enrichment guard:** the batch `only_missing_website` filter anti-joins against
+  `company_search_results` (has this company ever been searched at all — not
+  `website_url`/`website_status`), so companies legitimately gated to NULL by the
+  crawl-only verdict aren't re-searched forever just because they show no website.
 - **Thresholds** are DB-configurable `AppSetting`s (`website_*`); `recompute_website_status`
   re-derives all verdicts after tuning them or to backfill.
 
@@ -2386,7 +2478,7 @@ Playwright-only: `rerun: bool` — calls `crawler_crud.reset_playwright_crawled(
 
 ### URL selection
 
-- **Automatic (new):** `run_batch_collect` upserts candidates immediately after each Google enrich. `select_best_candidate` only fires if no candidate is selected, so re-enriching a company never demotes a manually-chosen or already-crawled URL.
+- **Automatic (new):** `run_batch_collect` upserts candidates immediately after each Google enrich, via the shared `_sync_url_candidates` helper — unconditionally, regardless of the company-level verdict (identity rework phase 3 decoupled candidate creation from the verdict; see "Website verdict" below). `select_best_candidate` only fires if no candidate is selected, so re-enriching a company never demotes a manually-chosen or already-crawled URL.
 - **`web_url_populate`:** backfill job for companies enriched before the auto-populate was added; idempotent.
 - **`web_select_url`** (params: `company_id`, `url_candidate_id`): switch to a specific candidate, resets crawl state.
 - Failure statuses are terminal until manually re-queued, or use `rerun=True` on the playwright job.

@@ -488,7 +488,6 @@ def handle_web_extract(ctx: JobContext) -> tuple[dict, str]:
     stats: dict = {"extracted": 0, "empty": 0, "s3_errors": 0, "errors": [], "rescored": 0}
     # Loaded once per run; drives the company-level website verdict below.
     _thr = ws.load_thresholds(ctx.db)
-    _dir_domains = crud.get_active_google_directory_domains(ctx.db)
 
     total = crawler_crud.count_companies_pending_extraction(ctx.db)
     done = 0
@@ -501,15 +500,13 @@ def handle_web_extract(ctx: JobContext) -> tuple[dict, str]:
         if not company_ids:
             break
 
-        # Batch-fetch name + Zefix UID + address for verification-aware extraction,
-        # plus the stored search results (company_search_results) for the
-        # company-level verdict fallback below — one query, no N+1.
+        # Batch-fetch name + Zefix UID + address for verification-aware extraction —
+        # one query, no N+1.
         meta_rows = ctx.db.execute(
             text(
                 "SELECT c.id, c.name, c.uid, c.address_zip, c.address_city, c.web_score, "
-                "csr.results_raw, c.ai_score, c.noga_confidence, c.purpose_keywords "
+                "c.ai_score, c.noga_confidence, c.purpose_keywords "
                 "FROM companies c "
-                "LEFT JOIN company_search_results csr ON csr.company_id = c.id "
                 "WHERE c.id = ANY(:ids)"
             ),
             {"ids": company_ids},
@@ -615,15 +612,13 @@ def handle_web_extract(ctx: JobContext) -> tuple[dict, str]:
                 if not pages_by_candidate:
                     stats["empty"] += 1
 
-                # ── Company-level website verdict (authoritative) ──────────────────────
-                # Aggregates crawl-extract confidence + search-result fallback into one
-                # verdict. Verdict.web_score is now crawl-confidence-based (round(conf*100))
-                # which is more principled than the old ±40/−50 delta approach. Done once
-                # per company after all candidate groups finish, so it sees the best extract.
+                # ── Company-level website verdict (authoritative, crawl-only) ───────────
+                # Verdict.web_score is crawl-confidence-based (round(conf*100)) — more
+                # principled than the old ±40/−50 delta approach. Done once per company
+                # after all candidate groups finish, so it sees the best extract.
                 best = crawler_crud.get_best_web_extract(ctx.db, company_id)
                 if best is not None:
-                    scored_raw = row[6] if row and isinstance(row[6], list) else []
-                    verdict = ws.compute_verdict(ctx.db, company_id, scored_raw, _dir_domains, _thr)
+                    verdict = ws.compute_verdict(ctx.db, company_id, _thr)
 
                     update_fields: dict = {
                         "website_status": verdict.status,
@@ -633,9 +628,9 @@ def handle_web_extract(ctx: JobContext) -> tuple[dict, str]:
                     if verdict.web_score is not None:
                         prev_web_score = row[5] if row else None
                         if verdict.web_score != prev_web_score:
-                            ai_score = row[7] if row else None
-                            noga_confidence = row[8] if row else None
-                            purpose_keywords = row[9] if row else None
+                            ai_score = row[6] if row else None
+                            noga_confidence = row[7] if row else None
+                            purpose_keywords = row[8] if row else None
                             update_fields["web_score"] = verdict.web_score
                             update_fields["combined_score"] = Company.compute_combined_score(
                                 ai_score, noga_confidence, purpose_keywords,
@@ -644,7 +639,8 @@ def handle_web_extract(ctx: JobContext) -> tuple[dict, str]:
                             stats["rescored"] += 1
 
                     ctx.db.query(Company).filter(Company.id == company_id).update(update_fields)
-                    stats["verdict_" + verdict.status] = stats.get("verdict_" + verdict.status, 0) + 1
+                    verdict_key = "verdict_" + (verdict.status or "unknown")
+                    stats[verdict_key] = stats.get(verdict_key, 0) + 1
                     if (verdict.website_count or 0) >= 2:
                         stats["multi_site"] = stats.get("multi_site", 0) + 1
 
@@ -721,16 +717,17 @@ def handle_web_extract(ctx: JobContext) -> tuple[dict, str]:
 def handle_recompute_website_status(ctx: JobContext) -> tuple[dict, str]:
     """Recompute company-level website_status + website_count for all checked companies.
 
-    Authoritative verdict from crawl extracts (company_web_extract) with a search
-    fallback. No API/crawl cost. Use to backfill the new verdict columns or after
-    tuning thresholds. Chunked by id (keyset) for 700k-row safety.
+    Authoritative, crawl-only verdict from company_web_extract — no search-snippet
+    fallback (identity rework phase 3). Running this backfills any company still
+    carrying a pre-phase-3 search-only verdict down to unknown (NULL) unless it
+    has actually been crawled. No API/crawl cost. Chunked by id (keyset) for
+    700k-row safety.
     """
     from app.models.company import Company
     from app.services.enrichment import website_status as ws
 
     batch_size = int(ctx.params.get("batch_size", 1000))
     thr = ws.load_thresholds(ctx.db)
-    dir_domains = crud.get_active_google_directory_domains(ctx.db)
 
     total = int(ctx.db.execute(
         text("SELECT COUNT(*) FROM company_search_results")
@@ -746,7 +743,7 @@ def handle_recompute_website_status(ctx: JobContext) -> tuple[dict, str]:
 
         rows = ctx.db.execute(
             text(
-                "SELECT c.id, csr.results_raw, c.web_score, "
+                "SELECT c.id, c.web_score, "
                 "c.ai_score, c.noga_confidence, c.purpose_keywords "
                 "FROM companies c "
                 "JOIN company_search_results csr ON csr.company_id = c.id "
@@ -760,22 +757,22 @@ def handle_recompute_website_status(ctx: JobContext) -> tuple[dict, str]:
 
         for row in rows:
             cid = row[0]
-            scored = row[1] if isinstance(row[1], list) else []
-            verdict = ws.compute_verdict(ctx.db, cid, scored, dir_domains, thr)
+            verdict = ws.compute_verdict(ctx.db, cid, thr)
             update_fields: dict = {
                 "website_status": verdict.status,
                 "website_count": verdict.website_count or None,
                 "website_url": verdict.website_url,
             }
-            if verdict.web_score is not None and verdict.web_score != row[2]:
+            if verdict.web_score != row[1]:
                 update_fields["web_score"] = verdict.web_score
                 update_fields["combined_score"] = Company.compute_combined_score(
-                    row[3], row[4], row[5], web_score=verdict.web_score
+                    row[2], row[3], row[4], web_score=verdict.web_score
                 )
                 stats["rescored"] = stats.get("rescored", 0) + 1
             ctx.db.query(Company).filter(Company.id == cid).update(update_fields)
             stats["updated"] += 1
-            stats[verdict.status] = stats.get(verdict.status, 0) + 1
+            verdict_key = verdict.status or "unknown"
+            stats[verdict_key] = stats.get(verdict_key, 0) + 1
             if (verdict.website_count or 0) >= 2:
                 stats["multi_site"] += 1
             last_id = cid
@@ -785,7 +782,8 @@ def handle_recompute_website_status(ctx: JobContext) -> tuple[dict, str]:
         msg = (
             f"Recomputed {done}/{total} — "
             f"{stats.get('verified', 0)} verified, {stats.get('confirmed', 0)} confirmed, "
-            f"{stats.get('likely', 0)} likely, {stats['multi_site']} multi-site"
+            f"{stats.get('likely', 0)} likely, {stats.get('unknown', 0)} unknown (not yet crawled), "
+            f"{stats['multi_site']} multi-site"
         )
         crud.update_progress(ctx.db, ctx.job, message=msg, done=done, total=total, stats=dict(stats))
         crud.create_event(ctx.db, job_id=ctx.job.id, level="debug", message=msg)

@@ -1,26 +1,26 @@
 """Company-level website verdict — does this company have a website, and how many?
 
-Aggregates two evidence sources into one company-level verdict, with no API cost:
+The company-facing verdict is *crawl-authoritative only* (identity rework phase 3,
+"cut pre-crawl scoring" — see docs/code-review/web-identity-rework.md §3.4/§4). URL
+search results (Serper / ScrapingDog) are still scored per company (in
+google_search_results_raw) and that score orders which candidate the crawler tries
+first, but a snippet match is weak evidence and no longer drives a persisted
+verdict on its own: until a company has actually been crawled and produced a
+company_web_extract row, its verdict stays unknown (NULL), not "confirmed"/"likely".
 
-  1. URL search results (Serper / ScrapingDog), already scored per company in
-     google_search_results_raw — used for a *provisional* verdict before any crawl.
-  2. Per-candidate crawl-verification extracts (company_web_extract), which carry
-     uid_matches_zefix / name_address_verified / confidence — the *authoritative*
-     verdict once the company has been crawled.
-
-This replaces the old "force scored[0] into website_url" behaviour: website_url is
-only set when the verdict indicates a genuine own-domain match. Companies whose
-search/crawl turns up only social profiles, directory listings, or nothing get a
-negative verdict and a NULL website_url instead of a forced wrong guess.
+This also keeps the old "force scored[0] into website_url" behaviour retired:
+website_url is only set when the verdict indicates a genuine own-domain match.
+Companies whose crawl turns up only social profiles, directory listings, or
+nothing get a negative verdict and a NULL website_url instead of a forced guess.
 
 Verdicts (most → least certain):
     verified        crawl found Swiss UID matching Zefix, or name+address verified
-    confirmed       own-domain found with high extract/search confidence (no UID proof)
+    confirmed       own-domain found with high extract confidence (no UID proof)
     likely          own-domain candidate exists, mid confidence
-    social_only     no own-domain cleared the bar, but a social profile was found
-    directory_only  only directory/registry listings (moneyhouse, local.ch, …)
-    none            searched/crawled, nothing credible
-    (NULL)          unknown — not yet searched/crawled
+    social_only     crawled, no own-domain cleared the bar, but a social profile was found
+    directory_only  crawled, only directory/registry listings (moneyhouse, local.ch, …)
+    none            crawled, nothing credible confirmed
+    (NULL)          unknown — not yet crawled (regardless of search state)
 """
 from __future__ import annotations
 
@@ -110,7 +110,7 @@ def load_thresholds(db: Session) -> Thresholds:
 
 @dataclass
 class Verdict:
-    status: str
+    status: str | None  # None ⇒ unknown, not yet crawled — see module docstring
     website_url: str | None
     website_count: int  # distinct genuine websites (>=2 ⇒ multiple)
     web_score: int | None  # crawl-confidence-based (0–100) or floored search score for negatives
@@ -128,7 +128,12 @@ def classify_search_results(
     directory_domains: set[str],
     thr: Thresholds,
 ) -> Verdict:
-    """Provisional verdict from scored search results, before any crawl.
+    """Score-only classification of search results — crawl-queue prioritizer.
+
+    NOT wired into the persisted company-level verdict (see module docstring —
+    identity rework phase 3 demoted this to ordering input only). Kept as a
+    standalone helper: still useful for reasoning about what a raw search score
+    implies, e.g. to help order which candidate the crawler tries first.
 
     scored_results: google_search_results_raw rows ({link, score, ...}).
     """
@@ -239,18 +244,11 @@ def _pick_best_candidate(
 def compute_verdict(
     db: Session,
     company_id: int,
-    scored_results: list[dict],
-    directory_domains: set[str],
     thr: Thresholds,
 ) -> Verdict:
-    """Authoritative verdict combining crawl extracts with the search fallback.
-
-    Crawl extracts win when present; the search-only fallback is used ONLY when
-    the company hasn't been crawled at all — never after a crawl found evidence
-    that simply didn't clear any tier, which would otherwise let a weak
-    pre-crawl snippet score smuggle in a "confirmed"/"likely" verdict despite
-    the crawl actively failing to confirm it (demoted to crawl-ordering only,
-    per the identity rework — see website_status.py's module docstring).
+    """Authoritative, crawl-only verdict — see module docstring (identity rework
+    phase 3). No search-snippet fallback: a company with no company_web_extract
+    rows yet is unknown (Verdict(None, ...)), whether or not it's been searched.
     """
     from app.crud import crawler as crawler_crud
     rows = crawler_crud.get_web_extracts_with_urls(db, company_id)
@@ -303,5 +301,8 @@ def compute_verdict(
         # would let a weak search-result guess overrule an actual crawl finding.
         return Verdict(NONE, None, 0, 0)
 
-    # Never crawled — the search-only verdict is a legitimate provisional signal.
-    return classify_search_results(scored_results, directory_domains, thr)
+    # Never crawled — unknown. A raw search snippet is not trusted as a
+    # company-facing verdict (identity rework phase 3, "cut pre-crawl scoring");
+    # classify_search_results still exists as a crawl-queue-ordering helper, but
+    # its output is not surfaced here.
+    return Verdict(None, None, 0, None)
