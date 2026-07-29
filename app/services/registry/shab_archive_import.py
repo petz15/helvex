@@ -1658,7 +1658,23 @@ def backfill_shab_old_uid_extraction(
         db.flush()
 
     # ── Mode B — one PDF per affected row, fetched concurrently in chunks ────────
-    chunk_size = max(pdf_workers * 5, batch_size)
+    # Chunk size is deliberately independent of `batch_size` (that sizes the cheap
+    # Pass-1 SQL scan) and kept small. `abort_cb()` — which raises JobPausedError
+    # when a deploy calls job_worker.request_shutdown(), or the user cancels — is
+    # only checked once per chunk, and each item here is a real network PDF fetch
+    # with up to a 60s timeout plus exponential-backoff retries (see
+    # shab_archive_client._get_with_retry). The old `max(pdf_workers * 5,
+    # batch_size)` was dominated by batch_size (500 by default): 500 fetches / 8
+    # workers can take many minutes on a slow SHAB PDF server, during which a
+    # graceful-shutdown request goes unnoticed — past K8s' termination grace
+    # period, the pod gets SIGKILLed instead of pausing cleanly. A hard-killed pod
+    # can only be recovered via the 300s stale-heartbeat sweep
+    # (requeue_interrupted_jobs), and since this function accepts no resume_from,
+    # that recovery restarts the whole scan from the top. Smaller chunks mean
+    # abort_cb() is checked often enough to pause cleanly on the next deploy
+    # instead — note this still restarts Pass 1 from scratch on resume (no
+    # resume_from), it just gets there via a clean pause rather than a crash.
+    chunk_size = max(pdf_workers * 3, 10)
     for i in range(0, len(mode_b), chunk_size):
         if abort_cb:
             abort_cb()

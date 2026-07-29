@@ -963,44 +963,58 @@ def run_batch_collect(
             from concurrent.futures import ThreadPoolExecutor, as_completed as _as_completed
             with ThreadPoolExecutor(max_workers=concurrency, thread_name_prefix="serper") as pool:
                 futures = {pool.submit(_enrich_one_concurrent, c.id): c for c in companies}
-                for future in _as_completed(futures):
-                    done_total += 1
-                    company_id_done, enriched, _url, had_results, exc = future.result()
-                    _recent_outcomes.append(exc is not None)
-                    if exc:
-                        company_obj = futures[future]
-                        logger.warning("Google search failed for %s: %s", company_obj.uid, exc)
-                        _append_error(f"Google search {company_obj.uid} [{type(exc).__name__}]: {exc}")
-                        # No log_error call here — enrich_company_website already logged a
-                        # company_errors row with the full request detail (on its own
-                        # thread_db session) before raising; a second call here would
-                        # overwrite it with a detail-less one via log_error's dedup update.
-                    elif enriched:
-                        stats["google_enriched"] += 1
-                    elif had_results:
-                        stats["google_pending_crawl"] += 1
-                    else:
-                        stats["google_no_result"] += 1
+                try:
+                    for future in _as_completed(futures):
+                        done_total += 1
+                        company_id_done, enriched, _url, had_results, exc = future.result()
+                        _recent_outcomes.append(exc is not None)
+                        if exc:
+                            company_obj = futures[future]
+                            logger.warning("Google search failed for %s: %s", company_obj.uid, exc)
+                            _append_error(f"Google search {company_obj.uid} [{type(exc).__name__}]: {exc}")
+                            # No log_error call here — enrich_company_website already logged a
+                            # company_errors row with the full request detail (on its own
+                            # thread_db session) before raising; a second call here would
+                            # overwrite it with a detail-less one via log_error's dedup update.
+                        elif enriched:
+                            stats["google_enriched"] += 1
+                        elif had_results:
+                            stats["google_pending_crawl"] += 1
+                        else:
+                            stats["google_no_result"] += 1
 
-                    if not circuit_tripped and _circuit_tripped_now():
-                        circuit_tripped = True
-                        _trigger_provider_backoff(db, _search_provider)
-                        warn_msg = (
-                            f"Circuit breaker tripped: {sum(_recent_outcomes)}/{_CB_WINDOW} recent "
-                            f"Google searches failed — stopping batch early "
-                            f"({done_total}/{len(company_ids)} attempted). Backing off {_search_provider} "
-                            f"for {_DEFAULT_BACKOFF_MINUTES} minutes."
-                        )
-                        logger.warning(warn_msg)
-                        stats["warnings"].append(warn_msg)
-                        for f in futures:
-                            f.cancel()
+                        if not circuit_tripped and _circuit_tripped_now():
+                            circuit_tripped = True
+                            _trigger_provider_backoff(db, _search_provider)
+                            warn_msg = (
+                                f"Circuit breaker tripped: {sum(_recent_outcomes)}/{_CB_WINDOW} recent "
+                                f"Google searches failed — stopping batch early "
+                                f"({done_total}/{len(company_ids)} attempted). Backing off {_search_provider} "
+                                f"for {_DEFAULT_BACKOFF_MINUTES} minutes."
+                            )
+                            logger.warning(warn_msg)
+                            stats["warnings"].append(warn_msg)
+                            for f in futures:
+                                f.cancel()
 
-                    is_last = done_total == len(company_ids)
-                    _maybe_progress(start_idx + done_total, force=is_last or circuit_tripped)
+                        is_last = done_total == len(company_ids)
+                        _maybe_progress(start_idx + done_total, force=is_last or circuit_tripped)
 
-                    if circuit_tripped:
-                        break
+                        if circuit_tripped:
+                            break
+                except BaseException:
+                    # _maybe_progress → progress_cb → ctx.assert_not_cancelled() raises
+                    # JobCancelledError/JobPausedError straight out of this loop on a
+                    # user-initiated stop. Without cancelling the rest, exiting this `with`
+                    # block still calls pool.shutdown(wait=True), which drains every already
+                    # -submitted future in this chunk (up to _BATCH_LOAD_CHUNK=1000) one at a
+                    # time under concurrency=1 before the exception can propagate — the job
+                    # looks hung (no progress, no "cancelled" status) for as long as that
+                    # takes. Cancel every not-yet-started future first so only the
+                    # currently in-flight request(s) still have to finish.
+                    for f in futures:
+                        f.cancel()
+                    raise
         else:
             for company in companies:
                 if circuit_tripped:

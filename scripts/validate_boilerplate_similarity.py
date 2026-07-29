@@ -122,8 +122,17 @@ WINDOW_SIZE = 3
 BATCH_SIZE = 2000
 
 
-def iter_companies(db, lang: str, *, full: bool, limit: int):
+def iter_companies(db, lang: str, *, full: bool, limit: int, ids: list[int] | None = None):
     """Yield (id, name, purpose) rows, streaming in batches for --full."""
+    if ids:
+        rows = (
+            db.query(Company.id, Company.name, Company.purpose)
+            .filter(Company.id.in_(ids))
+            .all()
+        )
+        yield from rows
+        return
+
     if not full:
         from sqlalchemy import func
         rows = (
@@ -174,6 +183,11 @@ def main() -> None:
     parser.add_argument("--threshold", type=float, default=0.72, help="Cosine similarity threshold for 'boilerplate-like'")
     parser.add_argument("--out", default=None, help="CSV output path (default: scored_<lang>.csv)")
     parser.add_argument(
+        "--ids",
+        default=None,
+        help="Comma-separated company IDs to score directly, bypassing --limit/--full sampling entirely",
+    )
+    parser.add_argument(
         "--db-url",
         default=None,
         help="Override DB connection URL. If omitted, reads from .env via app.config.",
@@ -181,6 +195,7 @@ def main() -> None:
     args = parser.parse_args()
 
     out_path = args.out or f"scored_{args.lang}.csv"
+    id_list = [int(x) for x in args.ids.split(",")] if args.ids else None
     trigger_re = TRIGGER_PATTERNS[args.lang]
     exemplar_labels, exemplar_texts = zip(*EXEMPLARS[args.lang])
 
@@ -190,7 +205,7 @@ def main() -> None:
     with _make_session(args.db_url) as db:
         total_loaded = 0
         candidates: list[tuple[int, str, list[str], int, list[str]]] = []
-        for cid, name, purpose in iter_companies(db, args.lang, full=args.full, limit=args.limit):
+        for cid, name, purpose in iter_companies(db, args.lang, full=args.full, limit=args.limit, ids=id_list):
             total_loaded += 1
             sentences = _split_sentences(purpose)
             found = find_trigger_window(sentences, trigger_re)

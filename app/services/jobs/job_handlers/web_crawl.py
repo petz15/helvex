@@ -757,24 +757,39 @@ def handle_recompute_website_status(ctx: JobContext) -> tuple[dict, str]:
 
         for row in rows:
             cid = row[0]
-            verdict = ws.compute_verdict(ctx.db, cid, thr)
-            update_fields: dict = {
-                "website_status": verdict.status,
-                "website_count": verdict.website_count or None,
-                "website_url": verdict.website_url,
-            }
-            if verdict.web_score != row[1]:
-                update_fields["web_score"] = verdict.web_score
-                update_fields["combined_score"] = Company.compute_combined_score(
-                    row[2], row[3], row[4], web_score=verdict.web_score
-                )
-                stats["rescored"] = stats.get("rescored", 0) + 1
-            ctx.db.query(Company).filter(Company.id == cid).update(update_fields)
-            stats["updated"] += 1
-            verdict_key = verdict.status or "unknown"
-            stats[verdict_key] = stats.get(verdict_key, 0) + 1
-            if (verdict.website_count or 0) >= 2:
-                stats["multi_site"] += 1
+            try:
+                # A SAVEPOINT (not a full commit) around each row: if this row's
+                # UPDATE fails (e.g. a Postgres statement_timeout from lock
+                # contention with a concurrent crawler/extract job), only this
+                # row's work rolls back — the rest of the already-applied rows in
+                # this batch, and the outer transaction itself, stay intact. A bare
+                # `except` here without this would either (a) let the failure
+                # escape uncaught and kill the whole job (this handler had no
+                # try/except at all before — observed dying at 174000/302329), or
+                # (b) if caught and full-rolled-back naively, silently lose every
+                # already-processed-but-uncommitted row earlier in this same batch.
+                with ctx.db.begin_nested():
+                    verdict = ws.compute_verdict(ctx.db, cid, thr)
+                    update_fields: dict = {
+                        "website_status": verdict.status,
+                        "website_count": verdict.website_count or None,
+                        "website_url": verdict.website_url,
+                    }
+                    if verdict.web_score != row[1]:
+                        update_fields["web_score"] = verdict.web_score
+                        update_fields["combined_score"] = Company.compute_combined_score(
+                            row[2], row[3], row[4], web_score=verdict.web_score
+                        )
+                        stats["rescored"] = stats.get("rescored", 0) + 1
+                    ctx.db.query(Company).filter(Company.id == cid).update(update_fields)
+                stats["updated"] += 1
+                verdict_key = verdict.status or "unknown"
+                stats[verdict_key] = stats.get(verdict_key, 0) + 1
+                if (verdict.website_count or 0) >= 2:
+                    stats["multi_site"] += 1
+            except Exception as exc:  # noqa: BLE001
+                stats["errors"] = stats.get("errors", 0) + 1
+                logger.warning("recompute_website_status failed for company %d: %s", cid, exc)
             last_id = cid
 
         ctx.db.commit()
@@ -783,14 +798,14 @@ def handle_recompute_website_status(ctx: JobContext) -> tuple[dict, str]:
             f"Recomputed {done}/{total} — "
             f"{stats.get('verified', 0)} verified, {stats.get('confirmed', 0)} confirmed, "
             f"{stats.get('likely', 0)} likely, {stats.get('unknown', 0)} unknown (not yet crawled), "
-            f"{stats['multi_site']} multi-site"
+            f"{stats['multi_site']} multi-site, {stats.get('errors', 0)} errors"
         )
         crud.update_progress(ctx.db, ctx.job, message=msg, done=done, total=total, stats=dict(stats))
         crud.create_event(ctx.db, job_id=ctx.job.id, level="debug", message=msg)
 
     return stats, (
         f"Website status recomputed for {stats['updated']} companies "
-        f"({stats['multi_site']} with multiple websites)"
+        f"({stats['multi_site']} with multiple websites, {stats.get('errors', 0)} errors)"
     )
 
 

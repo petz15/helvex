@@ -770,6 +770,11 @@ def reextract_purpose_from_zefix_raw(
                 stats["updated"] += 1
 
             except Exception as exc:  # noqa: BLE001
+                # A failed flush/commit inside crud.update_company leaves the session
+                # pending-rollback — touching company.id without rolling back first
+                # raises PendingRollbackError and kills the whole batch (same class of
+                # bug as noga_pipeline.reclassify_noga).
+                db.rollback()
                 logger.warning("Purpose re-extraction failed for company %s: %s", company.id, exc)
                 stats["errors"].append(f"Company {company.id} [{type(exc).__name__}]: {exc}")
 

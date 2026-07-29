@@ -136,6 +136,12 @@ def reclassify_noga(
                     embedding_rows.append((company.id, "purpose_clean", vec_out[0], company.purpose_language))
 
             except Exception as exc:  # noqa: BLE001
+                # A failed flush/commit (e.g. statement timeout) leaves the session in a
+                # "pending rollback" state — any further attribute access on `company`
+                # (even just logging company.uid) raises PendingRollbackError and escapes
+                # this handler, killing the whole batch. Roll back first so the session
+                # is usable again before touching anything.
+                db.rollback()
                 logger.warning("NOGA classification failed for %s: %s", company.uid, exc)
                 stats["errors"].append(f"{company.uid} [{type(exc).__name__}]: {exc}")
 
@@ -219,6 +225,10 @@ def reclassify_low_confidence_noga(
                     embedding_rows.append((company.id, "purpose_clean", vec_out[0], company.purpose_language))
 
             except Exception as exc:  # noqa: BLE001
+                # See reclassify_noga's identical guard: a failed flush/commit leaves the
+                # session pending-rollback, and touching company.uid without rolling back
+                # first raises PendingRollbackError and kills the whole batch.
+                db.rollback()
                 logger.warning("NOGA reclassification failed for %s: %s", company.uid, exc)
                 stats["errors"].append(f"{company.uid}: {type(exc).__name__}: {exc}")
 

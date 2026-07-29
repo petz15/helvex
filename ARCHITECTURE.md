@@ -1018,6 +1018,28 @@ cancellation checkpoint. Regression test:
 (`tests/test_collection_batch.py`) — shrinks `_BATCH_LOAD_CHUNK` to 3 and proves
 all 10 test companies get reached, not just the first chunk.
 
+#### Cancelling `web_search_batch` with `concurrency > 1` used to hang (2026-07-29)
+
+Reported symptom: stopping a Serper/ScrapingDog batch job left it stuck — job
+stayed "running", no new progress, never flipped to "cancelled". Root cause in
+`run_batch_collect`'s concurrent branch (`use_concurrent = concurrency > 1`):
+`futures = {pool.submit(...): c for c in companies}` submits the *entire*
+chunk (up to `_BATCH_LOAD_CHUNK = 1000` companies) to the `ThreadPoolExecutor`
+up front. Cancellation is detected via the throttled `_maybe_progress` →
+`progress_cb` → `ctx.assert_not_cancelled()`, which raises `JobCancelledError`
+straight out of the `for future in as_completed(futures)` loop. Exiting the
+`with ThreadPoolExecutor(...)` block on that exception still runs the default
+`__exit__`, i.e. `pool.shutdown(wait=True)` — which blocks until *every*
+already-submitted future finishes, not just the in-flight one(s). With
+`concurrency=1` that means every remaining company in the chunk still gets its
+Serper call run, one at a time, before the exception can propagate — looking
+exactly like a hang from the outside. The circuit-breaker path already avoided
+this (`for f in futures: f.cancel()` before breaking); the
+cancellation-via-exception path never got the same treatment. Fixed: the
+`as_completed` loop is now wrapped in `try/except BaseException` that cancels
+every not-yet-started future before re-raising, so shutdown only has to wait
+for the currently-running task(s).
+
 #### `enrich_company_website` no longer swallows provider failures
 
 Found while debugging the above: `enrich_company_website` (`web_enrichment.py`) used
@@ -1253,6 +1275,8 @@ Targeted, SOAP-free repair pass — **not** a full historical re-import. Some pu
 - **Pass 3 (Mode A):** one `fetch_daily_pdf_bytes(day)` per **distinct** affected `pub_date` (entries on the same day share one PDF — far cheaper than one fetch per row), re-parsed via `parse_bulk_hr_entries()` and matched back to rows by `pub_number`. Falls back to `extract_old_uid_from_text()` on the entry's own text if the delimiter-based `ch_number` still comes back empty.
 - **On recovery:** updates `raw_json` with the new identifier(s) and immediately attempts local resolution via `_resolve_company_for_shab()` (free — no SOAP call); a register lookup for numbers still unmatched locally is left to `resolve_shab_old_uids`'s next run. On confirmed still-empty, stamps `old_uid_backfill_checked_at` so a re-run doesn't re-fetch the same dead PDF indefinitely.
 - **Job type:** `backfill_shab_old_uid_extraction` | **Endpoint:** `POST /api/v1/jobs/collection/backfill-shab-old-uid-extraction` (superadmin). Params: `batch_size`, `pdf_workers`, `request_delay` (Mode A day-to-day sleep). Not rate-limited by the UID SOAP API — safe to run alongside `uid_import`/`uid_detail`/`resolve_shab_old_uids`. **Frontend:** Collection page → "Backfill SHAB old-UID text extraction" section.
+- **No `resume_from`** — this function doesn't accept one, unlike most other jobs in this file. It's self-resuming by construction instead: Pass 1's filters (`old_uid_backfill_checked_at` stamp, already-has-an-identifier check) mean a full rescan from `id=0` naturally skips everything a prior run already resolved or gave up on, so re-running from scratch is cheap and idempotent, not wasteful in itself.
+- **Mode B chunk size bug (fixed):** was `max(pdf_workers * 5, batch_size)` — dominated by `batch_size` (500 by default) since that's always ≥ `pdf_workers*5`. Job cancellation/pause is cooperative: `abort_cb()` (→ `ctx.assert_not_cancelled`, which raises `JobPausedError` when a deploy calls `job_worker.request_shutdown()`, or the user cancels) is only checked once per chunk, and each Mode B item is a real network PDF fetch with up to a 60s timeout plus exponential-backoff retries (`shab_archive_client._get_with_retry`). A 500-item chunk (only 8 fetched concurrently by default) on a slow SHAB PDF server can run many minutes between `abort_cb()` checks — long enough that a graceful-shutdown request (issued on every deploy) goes unnoticed past K8s' termination grace period, and the pod gets SIGKILLed instead of pausing cleanly. (Note: the per-job heartbeat itself is a separate 30s daemon thread — see §18 — unaffected by chunk size; it's cancellation responsiveness that chunk size controls.) A hard-killed pod's job can only be recovered later via the 300s stale-heartbeat sweep (`requeue_interrupted_jobs`) — and since this function accepts no `resume_from`, that recovery restarts the whole scan from the top. This is what looked like "never finishes, just keeps restarting with a lower number" during a run of frequent redeploys (the total shrinks each restart as more of the backlog genuinely gets resolved, but each restart re-does Pass 1 and re-fetches whatever Mode B/A work hadn't committed yet). Fixed: chunk size is now `max(pdf_workers * 3, 10)` (24 by default, independent of `batch_size`) so `abort_cb()` is checked often enough to pause cleanly on the next deploy — this does not eliminate the "restart from scratch" behavior (still no `resume_from`), it just gets there via a clean pause instead of a crash+recovery.
 
 ### SHAB Archive Import — `app/services/registry/shab_archive_import.py`
 
@@ -2982,6 +3006,31 @@ stale/wrong NOGA code was skipped when `only_missing_noga=True` because it alrea
 Now branches always re-run `apply_noga_classification`, which inherits the parent's NOGA if
 available or clears it if the parent can't be resolved. The `branches_handled` counter tracks
 this separately from normal classifications.
+
+**Per-company commit failures used to kill the whole nightly run (2026-07-29):** `reclassify_noga`
+and `reclassify_low_confidence_noga` call `crud.update_company()` per company inside the batch
+loop, which commits immediately. When that commit failed (observed cause: a Postgres statement
+timeout on one row's `UPDATE companies ...`), the `except Exception` handler then logged
+`company.uid` — but the session was left in SQLAlchemy's "pending rollback" state by the failed
+flush, so even that attribute access raised `PendingRollbackError`, escaped the handler uncaught,
+and crashed the entire job (observed: died at company 32,000 of 2,865,376). Same root cause in
+`zefix_import.py`'s purpose re-extraction loop (`company.id` instead of `.uid`). Fixed in all three
+by calling `db.rollback()` as the first line of the `except` block, before touching `company` at
+all — a general pattern any per-row-commit batch loop must follow.
+
+**Third instance — `handle_recompute_website_status` had no per-row error handling at all
+(2026-07-29):** running the backfill described above (needed to null out pre-phase-3 stale
+verdicts) died at 174,000/302,329 on the same `QueryCanceled: statement timeout` class of error,
+this time on the row's own `UPDATE companies SET website_url=...` (likely lock contention with a
+concurrent crawler/extract job touching the same row) — with zero try/except around the per-row
+loop, any such failure killed the whole run immediately. Naively wrapping it in try/except plus a
+blanket `db.rollback()` would have silently discarded every already-`.update()`'d-but-not-yet-
+committed row earlier in that same 1000-row batch (this handler commits once per batch, not per
+row, for throughput). Fixed instead with a SAVEPOINT per row (`with ctx.db.begin_nested():` around
+just the verdict compute + `.update()` call): on failure only that row's change rolls back to the
+savepoint, the rest of the batch's pending updates and the outer transaction stay intact, and the
+loop continues to the next company. `stats["errors"]` now surfaces in both the progress message and
+final done-message.
 
 ### Domain blocklist auto-detection
 
