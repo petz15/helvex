@@ -1920,6 +1920,7 @@ class WebCrawlHttpBody(WebCrawlBody):
     rerun: bool = False          # reset previously crawled/failed HTTP rows (including js_required) before starting
     order_by: str = "company_id_asc"  # company_id_asc | last_crawled_asc | flex_score_desc | combined_score_desc
     limit: int | None = None     # stop after this many companies (None = all)
+    crawl_concurrency: int = 10  # companies crawled at once within this job (pure async I/O, bounded by semaphore)
 
 
 class WebCrawlPlaywrightBody(WebCrawlBody):
@@ -1927,6 +1928,7 @@ class WebCrawlPlaywrightBody(WebCrawlBody):
     rerun: bool = False          # reset previously crawled/failed playwright rows before starting
     order_by: str = "company_id_asc"  # company_id_asc | last_crawled_asc | flex_score_desc | combined_score_desc
     limit: int | None = None     # stop after this many companies (None = all)
+    crawl_concurrency: int = 2   # each slot launches a full Chromium instance — keep low to avoid OOM
 
 
 class WebExtractBody(BaseModel):

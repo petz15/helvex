@@ -438,7 +438,11 @@ class CrawlResult:
 
 # ── Per-domain rate limiter ────────────────────────────────────────────────────
 # Module-level dict persists across asyncio.run() calls within the same process.
-# The job worker calls asyncio.run() sequentially, so no concurrency issues.
+# Safe under the job worker's concurrent crawls too: asyncio.gather runs all
+# tasks on one thread's event loop, and the read-check-write below has no
+# `await` in between, so concurrent companies (crawled as separate tasks)
+# can't race each other here — only truly parallel (multi-process/thread)
+# callers would need a real lock.
 
 _domain_last_access: dict[str, float] = {}
 

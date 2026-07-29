@@ -57,6 +57,15 @@ spec:
                   # Backward compatibility: some older clusters still use DB_URL.
                   : "${DATABASE_URL:=${DB_URL:-}}"
                   : "${DATABASE_URL:?DATABASE_URL/DB_URL missing}"
+                  # Pod-local networking (kube-proxy/CNI) isn't always ready the instant
+                  # an init container starts; retry briefly instead of failing immediately.
+                  for i in $(seq 1 15); do
+                    if pg_isready --dbname="$DATABASE_URL" >/dev/null 2>&1; then
+                      break
+                    fi
+                    echo "waiting for database to become reachable (attempt $i/15)..." >&2
+                    sleep 2
+                  done
                   ts=$(date -u +%Y%m%dT%H%M%SZ)
                   out="/backup/helvex-${ts}.dump"
                   pg_dump \

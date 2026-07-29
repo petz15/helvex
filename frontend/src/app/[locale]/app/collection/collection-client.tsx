@@ -856,12 +856,15 @@ export function CollectionClient() {
             rerun: fd.get("rerun") === "on",
             order_by: fd.get("order_by") as string || "company_id_asc",
             limit: isNaN(limitRaw) || limitRaw <= 0 ? null : limitRaw,
+            crawl_concurrency: parseInt(fd.get("crawl_concurrency") as string) || 10,
           });
         }} className="space-y-4">
           <p className="text-xs text-slate-500">
             Fast httpx crawler — no browser, handles most Swiss SME sites.
             Sites needing JavaScript are automatically flagged and picked up by the Playwright job.
-            Runs on the <span className="font-medium">crawler-http</span> pods (2 parallel workers).
+            Runs on the <span className="font-medium">crawler-http</span> pods; each job crawls multiple
+            companies concurrently (see Concurrency below), and dedup is off for this job type so
+            triggering it again from another pod runs a second job in parallel over disjoint companies.
           </p>
           <div className="grid grid-cols-2 gap-4">
             <Field label="Pages per site" hint="Homepage counts as 1; finds impressum, privacy, contact, about, services">
@@ -871,6 +874,9 @@ export function CollectionClient() {
               <input name="rate_limit_delay" type="number" min="0" max="10" step="0.1" defaultValue="0.5" className={inputCls} />
             </Field>
           </div>
+          <Field label="Concurrency" hint="Companies crawled at once within this job — plain async I/O, so this is the main throughput lever">
+            <input name="crawl_concurrency" type="number" min="1" max="50" defaultValue="10" className={cn(inputCls, "w-32")} />
+          </Field>
           <SubSection title="Filters &amp; Advanced">
             <div className="grid grid-cols-2 gap-4">
               <Field label="Canton" hint="Leave blank for all">
@@ -915,6 +921,7 @@ export function CollectionClient() {
             rerun: fd.get("rerun") === "on",
             order_by: fd.get("order_by") as string || "company_id_asc",
             limit: isNaN(limitRaw) || limitRaw <= 0 ? null : limitRaw,
+            crawl_concurrency: parseInt(fd.get("crawl_concurrency") as string) || 2,
           });
         }} className="space-y-4">
           <p className="text-xs text-slate-500">
@@ -930,6 +937,9 @@ export function CollectionClient() {
               <input name="rate_limit_delay" type="number" min="0" max="10" step="0.1" defaultValue="0.5" className={inputCls} />
             </Field>
           </div>
+          <Field label="Concurrency" hint="Each slot launches a full Chromium instance — keep low to avoid OOM">
+            <input name="crawl_concurrency" type="number" min="1" max="6" defaultValue="2" className={cn(inputCls, "w-32")} />
+          </Field>
           <SubSection title="Filters &amp; Advanced">
             <div className="grid grid-cols-2 gap-4">
               <Field label="Canton">

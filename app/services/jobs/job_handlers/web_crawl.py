@@ -159,6 +159,47 @@ def handle_web_url_populate(ctx: JobContext) -> tuple[dict, str]:
 
 # ── web_crawl_http ────────────────────────────────────────────────────────────
 
+async def _crawl_one_target(crawl_fn, state, candidate, *, max_pages, rate_limit_delay, company_timeout, sem):
+    async with sem:
+        try:
+            result = await asyncio.wait_for(
+                crawl_fn(
+                    state.company_id,
+                    candidate.url,
+                    url_candidate_id=candidate.id,
+                    max_pages=max_pages,
+                    rate_limit_delay=rate_limit_delay,
+                ),
+                timeout=company_timeout,
+            )
+            return ("ok", result, None)
+        except asyncio.TimeoutError:
+            return ("timeout", None, None)
+        except Exception as exc:  # noqa: BLE001
+            return ("error", None, exc)
+
+
+async def _crawl_targets_concurrently(targets, *, crawl_fn, max_pages, rate_limit_delay, company_timeout, concurrency):
+    """Crawl a batch of (state, candidate) pairs concurrently, bounded by `concurrency`.
+
+    Each target's crawl is pure async I/O (httpx / Playwright) with a per-domain
+    rate limiter, so different companies' fetches never block each other — the
+    semaphore only caps how many run at once. Returns one (kind, result, exc)
+    tuple per target, in the same order, with per-target exceptions/timeouts
+    already caught so one bad site can't take down the whole gather.
+    """
+    sem = asyncio.Semaphore(max(1, concurrency))
+    tasks = [
+        _crawl_one_target(
+            crawl_fn, state, candidate,
+            max_pages=max_pages, rate_limit_delay=rate_limit_delay,
+            company_timeout=company_timeout, sem=sem,
+        )
+        for state, candidate in targets
+    ]
+    return await asyncio.gather(*tasks)
+
+
 def _run_crawl_batch(
     ctx: JobContext,
     *,
@@ -172,6 +213,7 @@ def _run_crawl_batch(
     order_by: str = "company_id_asc",
     limit: int | None = None,
     company_timeout: float = 120.0,
+    concurrency: int = 1,
 ) -> tuple[dict, str]:
     """Shared batch-crawl loop used by both HTTP and Playwright handlers.
 
@@ -240,27 +282,34 @@ def _run_crawl_batch(
             if not batch:
                 break
 
+            # Resolve candidates up front so a missing row doesn't consume a
+            # concurrency slot below; failures here are recorded immediately.
+            crawl_targets = []  # list of (state, candidate)
             for state in batch:
-                ctx.assert_not_cancelled()
                 candidate = ctx.db.get(CompanyUrlCandidate, state.selected_url_id)
                 if not candidate:
                     crawler_crud.mark_crawl_failed(ctx.db, state, "http_error", "No URL candidate found")
                     continue
+                crawl_targets.append((state, candidate))
 
-                try:
-                    result = asyncio.run(
-                        asyncio.wait_for(
-                            crawl_fn(
-                                state.company_id,
-                                candidate.url,
-                                url_candidate_id=candidate.id,
-                                max_pages=max_pages,
-                                rate_limit_delay=rate_limit_delay,
-                            ),
-                            timeout=company_timeout,
-                        )
+            # Crawl the whole batch concurrently (bounded by `concurrency`) in a
+            # single event loop. DB writes below stay strictly sequential in this
+            # thread — only the network I/O runs concurrently.
+            crawl_outcomes = (
+                asyncio.run(
+                    _crawl_targets_concurrently(
+                        crawl_targets, crawl_fn=crawl_fn, max_pages=max_pages,
+                        rate_limit_delay=rate_limit_delay, company_timeout=company_timeout,
+                        concurrency=concurrency,
                     )
-                except asyncio.TimeoutError:
+                )
+                if crawl_targets else []
+            )
+
+            for (state, candidate), (kind, result, exc) in zip(crawl_targets, crawl_outcomes):
+                ctx.assert_not_cancelled()
+
+                if kind == "timeout":
                     crawler_crud.mark_crawl_failed(
                         ctx.db, state, "timeout",
                         f"Total crawl timeout after {company_timeout:.0f}s",
@@ -271,7 +320,7 @@ def _run_crawl_batch(
                     )
                     record_crawl_result(tier, "timeout")
                     continue
-                except Exception as exc:  # noqa: BLE001
+                if kind == "error":
                     crawler_crud.mark_crawl_failed(ctx.db, state, "http_error", str(exc))
                     stats["errors"].append(f"company {state.company_id}: {exc}")
                     record_crawl_result(tier, "error")
@@ -444,6 +493,7 @@ def handle_web_crawl_http(ctx: JobContext) -> tuple[dict, str]:
         order_by=str(ctx.params.get("order_by", "company_id_asc")),
         limit=int(limit_raw) if limit_raw else None,
         company_timeout=float(ctx.params.get("company_timeout", 120.0)),
+        concurrency=int(ctx.params.get("crawl_concurrency", 10)),
     )
 
 
@@ -466,6 +516,9 @@ def handle_web_crawl_playwright(ctx: JobContext) -> tuple[dict, str]:
         order_by=str(ctx.params.get("order_by", "company_id_asc")),
         limit=int(limit_raw) if limit_raw else None,
         company_timeout=float(ctx.params.get("company_timeout", 180.0)),
+        # Each concurrent slot launches a full Chromium instance — keep this
+        # low by default to avoid OOM on the ML worker pod.
+        concurrency=int(ctx.params.get("crawl_concurrency", 2)),
     )
 
 
