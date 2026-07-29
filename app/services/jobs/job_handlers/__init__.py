@@ -122,6 +122,7 @@ JOB_HANDLERS: dict[str, Callable[[JobContext], tuple[dict, str]]] = {
     "enrich_web_purpose_sim":    noga.handle_enrich_web_purpose_sim,
     "embed_purpose_full":        noga.handle_embed_purpose_full,
     "embed_purpose_clean":       noga.handle_embed_purpose_clean,
+    "strip_purpose_semantic":    noga.handle_strip_purpose_semantic,
     # Clustering
     "tfidf_kmeans_cluster":      clustering.handle_tfidf_kmeans_cluster,
     "recompute_keywords":        clustering.handle_recompute_keywords,

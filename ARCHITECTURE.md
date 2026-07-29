@@ -91,7 +91,7 @@ zefix_analyzer/
 │       ├── ingestion/          # collection, zefix_import, uid_import, incremental_classify
 │       ├── registry/           # shab_import, shab_archive_import, simap_*, sogc_* (preprocessor/persons/entity_resolver)
 │       ├── enrichment/         # crawler_* (http/playwright/common/sitemap/extract), directory_extract, website_status, web_enrichment, geocoding_pipeline
-│       ├── ml/                 # noga, noga_pipeline, noga_lookup, language_detection, embeddings, company_embedding_pipeline, cluster_pipeline, stopword_discovery, boilerplate_analysis, _pipeline_utils
+│       ├── ml/                 # noga, noga_pipeline, noga_lookup, language_detection, embeddings, company_embedding_pipeline, cluster_pipeline, stopword_discovery, boilerplate_analysis, boilerplate_semantic, _pipeline_utils
 │       ├── scoring/            # scoring, claude, claude_classify
 │       ├── billing/            # credits, tiers, billing_addresses, billing_renewal, payment_transactions, payments/ (worldline provider — transaction + payment-page interfaces)
 │       ├── notifications/      # email, saved_view_alerts, activity
@@ -1426,13 +1426,72 @@ Classifies each company into the official Swiss NOGA 2025 taxonomy (~2000 level-
 
 ---
 
+### Semantic Boilerplate Stripping (`purpose_clean`, DE/FR)
+
+`purpose_clean` on `Company` (migration `0127_add_purpose_clean.py`) stores the
+cleaned purpose text consumed by NOGA classification, Claude classification, and
+the `purpose_clean` embedding. Two stripping methods feed it, chosen per
+`purpose_language`:
+
+- **DE/FR (`SEMANTIC_LANGS`)** — embedding-similarity method in
+  `app/services/ml/boilerplate_semantic.py`. Company purpose texts mix a
+  substantive first part with a generic "ancillary powers" tail (branch
+  offices, real estate, financing/guarantees), reliably introduced by a modal
+  verb (`kann` / `peut`/`peuvent`) starting at sentence 2+. The regex-based
+  method below only catches this tail when it recurs as a near-exact sentence
+  and is too coarse as a blanket structural rule (destroys real content when
+  the ancillary clause is worded differently — utilities, foundations, niche
+  trades). Instead: find the modal-verb trigger sentence + next 2, embed them
+  (same `paraphrase-multilingual-mpnet-base-v2` model as NOGA), score against a
+  handful of known-generic exemplar sentences per language, and cut at the
+  first sentence scoring ≥ `SIMILARITY_THRESHOLD` (0.72). Validated on the full
+  DE corpus (94.6% coverage on a 3000-company sample vs ~20% for hand-picked
+  regex anchors) and against known false positives (utility company service
+  descriptions, foundation-specific activities, niche trade descriptions) that
+  a bare structural rule would have destroyed.
+- **Other languages (IT, etc.)** — falls back to the existing regex-based
+  `_strip_purpose_boilerplate()` (see Boilerplate Pattern Analysis below),
+  unchanged.
+
+**Entry points:**
+- `get_purpose_clean(company, boilerplate_patterns)` — single-company. Returns
+  `company.purpose_clean` directly if already populated; otherwise computes it
+  live (used as a fallback for companies not yet processed by the backfill
+  job). Called from `classify_company_noga`, `classify_company_noga_v2`,
+  `claude_classify._build_user_text`, and both `purpose_clean` embedding paths
+  (`embed_purpose_clean_batch`, `embed_batch_for_noga`).
+- `compute_purpose_clean_batch(companies, boilerplate_patterns)` — batch-efficient
+  version: collects every DE/FR company's trigger window across the whole input
+  list into one `embed_texts()` call. Used by the backfill job below and
+  internally by `get_purpose_clean` (as a batch of one).
+- `strip_purpose_semantic_batch()` — keyset-paginated backfill job (`batch_size=500`,
+  same shape as `_run_embed_batch`), writes `purpose_clean` +
+  `purpose_clean_computed_at`. Job type `strip_purpose_semantic`, triggered via
+  `POST /scoring/strip-purpose-semantic` (Collection page → "Strip Purpose
+  (Semantic)"). **Run after `detect_language_bulk`, before `reclassify_noga` /
+  `embed_purpose_clean` / Claude classification** so those consume the
+  precomputed column instead of re-stripping (and re-embedding) on every call.
+
+**Not touched:** TF-IDF clustering (`cluster_pipeline.py::strip_boilerplate`)
+still uses the regex method directly — it operates on raw text lists rather
+than `Company` objects, so threading `purpose_clean` through would need a
+larger refactor. Out of scope for now.
+
+**Standalone validation tool:** `scripts/validate_boilerplate_similarity.py` —
+diagnostic script (not part of the app) used to validate the threshold/exemplars
+and spot-check specific company IDs before this was wired into production.
+Supports `--lang`, `--limit`/`--full` (keyset-paginated to avoid the 700k-row
+statement-timeout trap), and `--ids` for targeted re-checks.
+
+---
+
 ### Company Purpose Embeddings (Semantic Search)
 
 Stores 768-dim L2-normalized embeddings per company in `company_embeddings` for free-text semantic search.
 
 **Two embedding types:**
 - `purpose_full` — raw `company.purpose` text
-- `purpose_clean` — boilerplate-stripped purpose (same patterns as NOGA pipeline)
+- `purpose_clean` — boilerplate-stripped purpose; see "Semantic Boilerplate Stripping" above for how it's computed (semantic for DE/FR, regex fallback otherwise)
 
 **Batch jobs (standalone):**
 - `embed_purpose_full` — (re)computes `purpose_full` embeddings for all companies with a purpose
@@ -3527,6 +3586,13 @@ backfill_unclassified(db, *, batch_size=500, run_noga, run_clusters, limit)
 ```
 
 ### Boilerplate Pattern Analysis — `app/services/ml/boilerplate_analysis.py`
+
+Regex-based, corpus-frequency discovery — the mechanism `purpose_clean` falls
+back to for non-DE/FR languages, and the DE/FR pattern set this replaced as the
+*primary* stripping method (see "Semantic Boilerplate Stripping" above). Still
+useful for discovering new regex patterns for IT/other languages, or sentence-
+level (non-truncating) patterns that don't fit the semantic method's structural
+model.
 
 `run_boilerplate_analysis` is a corpus-frequency job triggered from the Collection page (`scoring/analyze-boilerplate`).
 

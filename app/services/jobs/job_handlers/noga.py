@@ -267,3 +267,29 @@ def handle_embed_purpose_full(ctx: JobContext) -> tuple[dict, str]:
 def handle_embed_purpose_clean(ctx: JobContext) -> tuple[dict, str]:
     from app.services.ingestion.collection import embed_purpose_clean_batch
     return _handle_embed_purpose(ctx, embed_purpose_clean_batch)
+
+
+def handle_strip_purpose_semantic(ctx: JobContext) -> tuple[dict, str]:
+    from app.services.ml.boilerplate_semantic import strip_purpose_semantic_batch
+
+    only_missing = bool(ctx.params.get("only_missing", True))
+
+    def _progress(done: int, total: int, stats: dict) -> None:
+        ctx.assert_not_cancelled()
+        msg = f"Processed {done}/{total} — {stats.get('updated', 0)} stripped"
+        ctx.progress(done, total, stats, msg)
+
+    stats = strip_purpose_semantic_batch(
+        ctx.db,
+        resume_from=ctx.resume_from,
+        only_missing=only_missing,
+        progress_cb=_progress,
+    )
+    done_msg = (
+        f"Done — {stats.get('updated', 0)} purposes stripped, "
+        f"{stats.get('skipped_no_purpose', 0)} skipped (no purpose), "
+        f"{len(stats.get('errors', []))} errors"
+    )
+    if ctx.resume_from:
+        done_msg += f" (resumed from {ctx.resume_from})"
+    return stats, done_msg

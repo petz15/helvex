@@ -619,7 +619,8 @@ def classify_company_noga(
     )
 
     boilerplate_patterns = crud.get_active_boilerplate_patterns(db)
-    stripped_purpose = _strip_purpose_boilerplate(company.purpose or "", boilerplate_patterns)
+    from app.services.ml.boilerplate_semantic import get_purpose_clean
+    stripped_purpose = get_purpose_clean(company, boilerplate_patterns)
 
     web_text = _web_content_text(db, company.id)
     classify_text = f"{stripped_purpose} {web_text}".strip() if web_text else stripped_purpose
@@ -659,7 +660,8 @@ def classify_company_noga_v2(db: Session, company: Company) -> dict:
     from app.services.ml.language_detection import detect_purpose_language
 
     boilerplate_patterns = crud.get_active_boilerplate_patterns(db)
-    stripped_purpose = _strip_purpose_boilerplate(company.purpose or "", boilerplate_patterns)
+    from app.services.ml.boilerplate_semantic import get_purpose_clean
+    stripped_purpose = get_purpose_clean(company, boilerplate_patterns)
     lang = company.purpose_language or detect_purpose_language(company.purpose) or _DEFAULT_LANG
 
     embed_text = stripped_purpose

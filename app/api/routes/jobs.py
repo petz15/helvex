@@ -461,6 +461,10 @@ class EmbedPurposeBody(BaseModel):
     only_missing: bool = True
 
 
+class StripPurposeSemanticBody(BaseModel):
+    only_missing: bool = True
+
+
 class ClaudeClassifyBody(BaseModel):
     canton: str | None = None
     min_zefix_score: int | None = None   # passed as-is to job params; worker maps to min_flex_score
@@ -786,6 +790,32 @@ def trigger_embed_purpose_clean(
     job = _enqueue_or_http_error(
         request,
         job_type="embed_purpose_clean",
+        label=label,
+        params=body.model_dump(),
+        db=db,
+    )
+    return JobOut.from_orm_obj(job)
+
+
+@router.post("/scoring/strip-purpose-semantic", response_model=JobOut, status_code=status.HTTP_202_ACCEPTED)
+def trigger_strip_purpose_semantic(
+    body: StripPurposeSemanticBody,
+    request: Request,
+    db: Session = Depends(get_db),
+    _: User = Depends(require_superadmin),
+):
+    """Precompute purpose_clean (semantic method for de/fr, regex fallback otherwise).
+
+    Run once after detect_language_bulk and before reclassify_noga / embed_purpose_clean
+    / claude classification so those consume the precomputed column instead of
+    recomputing (and re-embedding) on every call.
+    """
+    label = "Strip purpose (semantic)"
+    if body.only_missing:
+        label += " — missing only"
+    job = _enqueue_or_http_error(
+        request,
+        job_type="strip_purpose_semantic",
         label=label,
         params=body.model_dump(),
         db=db,

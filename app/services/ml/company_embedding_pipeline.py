@@ -52,15 +52,6 @@ def upsert_embeddings_bulk(
 
 
 # ---------------------------------------------------------------------------
-# Boilerplate stripping helper (reuses the NOGA pipeline logic)
-# ---------------------------------------------------------------------------
-
-def _strip(purpose: str, patterns) -> str:
-    from app.services.ml.noga import _strip_purpose_boilerplate
-    return _strip_purpose_boilerplate(purpose, patterns)
-
-
-# ---------------------------------------------------------------------------
 # Shared keyset-paginated batch loop
 # ---------------------------------------------------------------------------
 
@@ -196,8 +187,8 @@ def embed_purpose_clean_batch(
         raw = (company.purpose or "").strip()
         if not raw:
             return None
-        stripped = _strip(raw, patterns)
-        return stripped or raw
+        from app.services.ml.boilerplate_semantic import get_purpose_clean
+        return get_purpose_clean(company, patterns) or raw
 
     return _run_embed_batch(
         db,
@@ -236,6 +227,8 @@ def embed_batch_for_noga(
 
     from app.services.ml.embeddings import embed_texts
 
+    from app.services.ml.boilerplate_semantic import get_purpose_clean
+
     raw_texts: list[str] = []
     clean_texts: list[str] = []
     valid: list[Company] = []
@@ -243,9 +236,8 @@ def embed_batch_for_noga(
         raw = (company.purpose or "").strip()
         if not raw:
             continue
-        stripped = _strip(raw, boilerplate_patterns)
         raw_texts.append(raw)
-        clean_texts.append(stripped or raw)
+        clean_texts.append(get_purpose_clean(company, boilerplate_patterns) or raw)
         valid.append(company)
 
     if not valid:

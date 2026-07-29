@@ -32,6 +32,11 @@ class Company(Base):
     municipality: Mapped[str | None] = mapped_column(String(256), nullable=True)
     canton: Mapped[str | None] = mapped_column(String(8), nullable=True)
     purpose: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Boilerplate-stripped purpose (semantic method for de/fr, regex fallback
+    # otherwise) — precomputed by the strip_purpose_semantic job and consumed by
+    # NOGA/Claude classification via get_purpose_clean(). NULL until computed.
+    purpose_clean: Mapped[str | None] = mapped_column(Text, nullable=True)
+    purpose_clean_computed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     address: Mapped[str | None] = mapped_column(Text, nullable=True)
     # Website found via Google Search. Raw search-provider data (results/full
     # response/params/searched_at) lives in company_search_results — see

@@ -51,6 +51,14 @@ function Section({ title, children, defaultOpen = false }: { title: string; chil
 
 const ML_JOB_DOCS: { job_type: string; label: string; description: string; when: string; prereq?: string }[] = [
   {
+    job_type: "strip_purpose_semantic",
+    label: "Strip Purpose (Semantic)",
+    description:
+      "Precomputes purpose_clean: embedding-similarity boilerplate stripping for DE/FR (catches paraphrased ancillary-powers clauses that the regex patterns miss, without destroying company-specific content), falling back to the existing regex-based stripping for other languages. Consumed by reclassify_noga, claude classification, and embed_purpose_clean instead of re-stripping on every call.",
+    when: "Run after detect_language_bulk, before reclassify_noga / embed_purpose_clean / claude classification.",
+    prereq: "Companies must have purpose and purpose_language populated.",
+  },
+  {
     job_type: "embed_purpose_full",
     label: "Embed Purpose (Full)",
     description:
@@ -1706,6 +1714,33 @@ export function CollectionClient() {
 
       <Section title="Embed Purpose Text">
         <div className="space-y-6">
+
+          {/* strip_purpose_semantic */}
+          <div className="rounded-lg border border-slate-200 p-4 space-y-3">
+            <div>
+              <h3 className="text-sm font-semibold text-slate-800">Strip Purpose (Semantic)</h3>
+              <p className="mt-1 text-xs text-slate-500">
+                Precomputes <code className="text-xs bg-slate-100 px-1 rounded">purpose_clean</code> using embedding
+                similarity (DE/FR) against known generic ancillary-powers clauses (branch offices, real estate,
+                financing/guarantees), falling back to the existing regex patterns for other languages. Run this
+                before Reclassify NOGA / Embed Purpose (Clean) / Claude classification so they read the precomputed
+                column instead of stripping (and re-embedding) on every call.
+              </p>
+            </div>
+            <form onSubmit={async e => {
+              e.preventDefault();
+              const fd = new FormData(e.currentTarget);
+              await submit("scoring/strip-purpose-semantic", {
+                only_missing: fd.get("only_missing_strip_semantic") === "on",
+              });
+            }} className="space-y-3">
+              <label className="flex items-center gap-2 text-sm text-slate-700">
+                <input type="checkbox" name="only_missing_strip_semantic" defaultChecked className={checkCls} />
+                Only companies missing purpose_clean
+              </label>
+              <SubmitBtn loading={loading === "scoring/strip-purpose-semantic"} />
+            </form>
+          </div>
 
           {/* embed_purpose_full */}
           <div className="rounded-lg border border-slate-200 p-4 space-y-3">

@@ -20,7 +20,6 @@ from app.services.scoring.claude import (
     claude_call,
     strip_fences,
 )
-from app.services.ml.noga import _strip_purpose_boilerplate
 from app.services.scoring.scoring import distance_to_origin_km, get_default_scoring_config
 
 logger = logging.getLogger(__name__)
@@ -252,7 +251,8 @@ def claude_classify_batch(
                 _web_text_by_company[company_id] = " ".join(parts)
 
     def _build_user_text(company: Company) -> str:
-        purpose = _strip_purpose_boilerplate(company.purpose or "", _boilerplate_patterns)
+        from app.services.ml.boilerplate_semantic import get_purpose_clean
+        purpose = get_purpose_clean(company, _boilerplate_patterns)
         if max_purpose_chars > 0 and len(purpose) > max_purpose_chars:
             purpose = purpose[:max_purpose_chars] + "…"
         parts = [f"Company: {company.name}", f"Purpose: {purpose}"]

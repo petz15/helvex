@@ -40,3 +40,4 @@ terraform.tfvars
 
 evaluate/
 scored_de.csv
+scored_known.csv
