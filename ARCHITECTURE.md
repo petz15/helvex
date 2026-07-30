@@ -2638,6 +2638,8 @@ Safe to parallelize because `crawl_fn` (`crawl_company_http` / `crawl_company_pl
 
 Defaults: `crawl_concurrency=10` for HTTP (network-bound, cheap per slot), `crawl_concurrency=2` for Playwright (each slot launches a full Chromium instance — kept low to avoid OOM on the ML worker pod). Exposed as a "Concurrency" field on both crawl trigger forms in `frontend/.../collection/collection-client.tsx`.
 
+**Correctness note — cancellation granularity:** the first version of this change used `asyncio.gather` (wait for the whole batch), which meant `ctx.assert_not_cancelled()` was only checked once per batch, after the single slowest task in it finished (up to `company_timeout`). That's the same check `_run_job` relies on to detect a job has been evicted by the stale-job recovery sweep (`requeue_interrupted_jobs` — see "Job recovery" below): if a sibling pod requeues+reclaims this job_run (heartbeat looked stale) and this execution doesn't notice for up to `company_timeout` seconds, both executions run concurrently, each with independent local `stats`/`done` counters, both writing progress into the same job row (visible as two interleaved, conflicting progress series in the job log). Fixed by switching to `asyncio.as_completed` — results (and the cancellation check) are handled as each individual crawl finishes, restoring the original per-company checkpoint granularity.
+
 For maximum throughput, combine with triggering multiple concurrent `web_crawl_http` job instances (dedup is off for this type) so more than one pod/thread is active at once — `crawl_concurrency` and job-instance count are independent, multiplicative levers.
 
 ### URL selection

@@ -179,25 +179,44 @@ async def _crawl_one_target(crawl_fn, state, candidate, *, max_pages, rate_limit
             return ("error", None, exc)
 
 
-async def _crawl_targets_concurrently(targets, *, crawl_fn, max_pages, rate_limit_delay, company_timeout, concurrency):
+async def _crawl_targets_concurrently(targets, *, crawl_fn, max_pages, rate_limit_delay, company_timeout, concurrency, on_result):
     """Crawl a batch of (state, candidate) pairs concurrently, bounded by `concurrency`.
 
     Each target's crawl is pure async I/O (httpx / Playwright) with a per-domain
     rate limiter, so different companies' fetches never block each other — the
-    semaphore only caps how many run at once. Returns one (kind, result, exc)
-    tuple per target, in the same order, with per-target exceptions/timeouts
-    already caught so one bad site can't take down the whole gather.
+    semaphore only caps how many run at once.
+
+    Calls `on_result(state, candidate, kind, result, exc)` synchronously as soon
+    as EACH crawl finishes — not once for the whole batch — so the caller can
+    check for cancellation/pause at the same per-company granularity the old
+    strictly-sequential loop had. Waiting for the whole batch (asyncio.gather)
+    instead would gate that check behind the single slowest straggler (up to
+    company_timeout), which is exactly what let a stale-job recovery sweep
+    silently start a second execution of the same job underneath this one
+    before this one ever noticed it had been evicted.
+
+    If `on_result` raises (JobPausedError / JobCancelledError), remaining
+    in-flight tasks are cancelled and the exception propagates.
     """
     sem = asyncio.Semaphore(max(1, concurrency))
-    tasks = [
-        _crawl_one_target(
+
+    async def _wrapped(state, candidate):
+        kind, result, exc = await _crawl_one_target(
             crawl_fn, state, candidate,
             max_pages=max_pages, rate_limit_delay=rate_limit_delay,
             company_timeout=company_timeout, sem=sem,
         )
-        for state, candidate in targets
-    ]
-    return await asyncio.gather(*tasks)
+        return state, candidate, kind, result, exc
+
+    tasks = [asyncio.ensure_future(_wrapped(state, candidate)) for state, candidate in targets]
+    try:
+        for coro in asyncio.as_completed(tasks):
+            state, candidate, kind, result, exc = await coro
+            on_result(state, candidate, kind, result, exc)
+    except BaseException:
+        for t in tasks:
+            t.cancel()
+        raise
 
 
 def _run_crawl_batch(
@@ -292,21 +311,9 @@ def _run_crawl_batch(
                     continue
                 crawl_targets.append((state, candidate))
 
-            # Crawl the whole batch concurrently (bounded by `concurrency`) in a
-            # single event loop. DB writes below stay strictly sequential in this
-            # thread — only the network I/O runs concurrently.
-            crawl_outcomes = (
-                asyncio.run(
-                    _crawl_targets_concurrently(
-                        crawl_targets, crawl_fn=crawl_fn, max_pages=max_pages,
-                        rate_limit_delay=rate_limit_delay, company_timeout=company_timeout,
-                        concurrency=concurrency,
-                    )
-                )
-                if crawl_targets else []
-            )
-
-            for (state, candidate), (kind, result, exc) in zip(crawl_targets, crawl_outcomes):
+            def _handle_crawl_result(state, candidate, kind, result, exc):
+                # Checked as each concurrent crawl completes (not once per whole
+                # batch) — see _crawl_targets_concurrently for why that matters.
                 ctx.assert_not_cancelled()
 
                 if kind == "timeout":
@@ -319,12 +326,12 @@ def _run_crawl_batch(
                         f"company {state.company_id}: total timeout {company_timeout:.0f}s"
                     )
                     record_crawl_result(tier, "timeout")
-                    continue
+                    return
                 if kind == "error":
                     crawler_crud.mark_crawl_failed(ctx.db, state, "http_error", str(exc))
                     stats["errors"].append(f"company {state.company_id}: {exc}")
                     record_crawl_result(tier, "error")
-                    continue
+                    return
 
                 now = datetime.now(timezone.utc)
 
@@ -399,6 +406,19 @@ def _run_crawl_batch(
                     candidate.last_crawled_at = now
                     stats["crawled"] += 1
                     record_crawl_result(tier, "crawled")
+
+            # Crawl the whole batch concurrently (bounded by `concurrency`) in a
+            # single event loop, handling each result as it completes. DB writes
+            # stay strictly sequential in this thread — only the network I/O
+            # runs concurrently.
+            if crawl_targets:
+                asyncio.run(
+                    _crawl_targets_concurrently(
+                        crawl_targets, crawl_fn=crawl_fn, max_pages=max_pages,
+                        rate_limit_delay=rate_limit_delay, company_timeout=company_timeout,
+                        concurrency=concurrency, on_result=_handle_crawl_result,
+                    )
+                )
 
             ctx.db.commit()
             done += len(batch)
