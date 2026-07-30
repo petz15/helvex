@@ -67,6 +67,21 @@ spec:
                     exit 0
                   fi
 
+                  # A restoreSource written by a previous cluster incarnation can go
+                  # stale once pg-backup-prune deletes it — restoring from a path that
+                  # no longer exists would break the next disaster-recovery deploy.
+                  # Fall back to the current serverName, which by definition exists
+                  # (this cluster is actively backing up to it right now).
+                  if ! aws s3 ls "${DEST_PATH%/}/${RESTORE_SOURCE}/" --endpoint-url "$ENDPOINT_URL" >/dev/null 2>&1; then
+                    echo "WARNING: restoreSource '$RESTORE_SOURCE' no longer exists in S3; falling back to current serverName '$SERVER_NAME'"
+                    RESTORE_SOURCE="$SERVER_NAME"
+                  fi
+
+                  if [ -z "$RESTORE_SOURCE" ]; then
+                    echo "No valid restore source available; skipping sync"
+                    exit 0
+                  fi
+
                   # Keep this strict enough to prevent path injection, but flexible enough
                   # to support both the historic stable name (helvex-pg) and timestamped names.
                   if ! echo "$RESTORE_SOURCE" | grep -Eq '^[A-Za-z0-9][A-Za-z0-9-]*[A-Za-z0-9]$'; then

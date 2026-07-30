@@ -84,7 +84,14 @@ spec:
                     # Extract timestamp from auto-generated names like helvex-pg-20260331T150000Z
                     ts=$(echo "$dir" | grep -oP '\d{8}T\d{6}Z$' || echo "")
                     if [ -z "$ts" ]; then
-                      echo "SKIP (no timestamp): $dir"
+                      # No timestamp suffix (e.g. the legacy stable name "helvex-pg").
+                      # We already know this isn't the current serverName, so the
+                      # cluster has moved on from it — there's no retention window
+                      # to honor, it's simply orphaned and safe to delete.
+                      echo "DELETE (orphaned, no timestamp, not current): $dir"
+                      aws s3 rm "${DEST_PATH}${dir}/" \
+                        --endpoint-url "${ENDPOINT_URL}" \
+                        --recursive
                       continue
                     fi
 

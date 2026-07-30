@@ -2178,7 +2178,10 @@ cert-manager → cloudnative-pg → arc-controller → arc-rbac → arc-runner-s
 | `frontend-deployment.yaml` | Deployment | Next.js pod |
 | `worker-deployment.yaml` | Deployment | RQ worker (only if `worker.enabled`) |
 | `postgres-cluster.yaml` | `postgresql.cnpg.io/v1 Cluster` | CloudNativePG-managed PostgreSQL |
-| `postgres-backup-schedule.yaml` | ScheduledBackup | S3 backups, retention via Helm values |
+| `postgres-backup-schedule.yaml` | ScheduledBackup | S3 backups; CNPG's own `retentionPolicy` (`postgres.backupRetention`) only prunes *within the currently active* `backupServerName` prefix — it has no awareness of prior cluster incarnations |
+| `postgres-backup-prune.yaml` | CronJob | Deletes S3 `<serverName>/` directories other than the currently active one (from `pg-backup-meta` ConfigMap) once their embedded timestamp exceeds `retentionDays`. A directory with no timestamp suffix (the legacy stable name `helvex-pg`, pre-dating the timestamped-naming scheme) is *not* current by definition once superseded, so it's deleted outright rather than skipped — a prior bug here (`SKIP (no timestamp)`, never deleting it) let ~298GB of orphaned backups accumulate silently for months |
+| `postgres-restore-point-sync.yaml` | CronJob | Writes `restore-point.json` (S3) + `pg-backup-meta` ConfigMap so the next `restoreFromBackup: true` deploy knows which `serverName` to restore from. Validates the resolved `restoreSource` still exists in S3 before writing it — a value from a previous incarnation can go stale once `postgres-backup-prune` deletes it, and restoring from a since-deleted path would break the next disaster-recovery deploy; falls back to the current active `serverName` when stale |
+| `postgres-weekly-export.yaml` | CronJob | Weekly `pg_dump` (long-retention, separate failure domain, **not** tied to `backupServerName`/`restoreSource` — fixed `STORAGEBOX_PATH`) uploaded to Hetzner Storage Box via SFTP/rclone; init container retries readiness with `timeout`-wrapped `pg_isready` before dumping — the `postgres:16-alpine` image's musl DNS resolver can intermittently hang past its own connect timeout on a freshly-started pod, so every DB-reaching command in this job is wrapped in `timeout` rather than relying on the client tool's own timeout flags |
 | `redis.yaml` | Deployment + Service | Redis for job queue + rate limiting |
 | `service.yaml` | Service | ClusterIP for backend |
 | `ingress.yaml` | Ingress + Middleware | Traefik routing; TLS via cert-manager; rate-limit Middleware (`ingress.rateLimit`); `/docs` path gated by `ingress.exposeDocs` (off in prod) |
@@ -2617,7 +2620,7 @@ into `website_url` regardless of quality — and, since identity rework phase 3,
 
 ### Job params — web_crawl_http and web_crawl_playwright
 
-Both share: `batch_size`, `canton`, `max_pages`, `rate_limit_delay`, `order_by`, `limit`.
+Both share: `batch_size`, `canton`, `max_pages`, `rate_limit_delay`, `order_by`, `limit`, `crawl_concurrency`.
 
 `order_by` values (applied via `claim_crawl_batch`):
 - `company_id_asc` — default, stable ordering
@@ -2628,6 +2631,14 @@ Both share: `batch_size`, `canton`, `max_pages`, `rate_limit_delay`, `order_by`,
 `limit` — stop after this many companies total; batch size is clamped to `min(batch_size, limit - done)`.
 
 Playwright-only: `rerun: bool` — calls `crawler_crud.reset_playwright_crawled()` before starting, which resets `crawl_status IN (crawled, bot_blocked, http_error, timeout, no_content)` rows with `tier=playwright` back to `pending`.
+
+**`crawl_concurrency`** (2026-07-30, throughput fix): number of companies crawled concurrently *within one job*, via `asyncio.gather` bounded by a `Semaphore` in `_crawl_targets_concurrently` (`app/services/jobs/job_handlers/web_crawl.py`). Previously `_run_crawl_batch` called `asyncio.run()` once per company inside a plain `for` loop — one company crawled at a time, full stop, regardless of `JOB_WORKER_CONCURRENCY` or pod count. That serialization (not dedup, not pod scheduling) was the actual throughput ceiling: `web_crawl_http`/`web_crawl_playwright` are already in `NO_DEDUP` (SKIP LOCKED makes concurrent job instances safe — see "Job dedup" below), so multiple pods/threads were already able to run separate job instances, but each instance itself did one company at a time.
+
+Safe to parallelize because `crawl_fn` (`crawl_company_http` / `crawl_company_playwright`) is pure async I/O and `rate_limit()` (`crawler_common.py`) keys its delay per-domain, not globally — concurrent companies (different domains) never block each other. DB writes stay untouched: within a claimed batch, candidates are resolved and crawled concurrently first, then results are written to `ctx.db` strictly sequentially in the one worker thread (SQLAlchemy sessions aren't safe for concurrent use).
+
+Defaults: `crawl_concurrency=10` for HTTP (network-bound, cheap per slot), `crawl_concurrency=2` for Playwright (each slot launches a full Chromium instance — kept low to avoid OOM on the ML worker pod). Exposed as a "Concurrency" field on both crawl trigger forms in `frontend/.../collection/collection-client.tsx`.
+
+For maximum throughput, combine with triggering multiple concurrent `web_crawl_http` job instances (dedup is off for this type) so more than one pod/thread is active at once — `crawl_concurrency` and job-instance count are independent, multiplicative levers.
 
 ### URL selection
 

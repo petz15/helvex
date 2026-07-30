@@ -58,17 +58,25 @@ spec:
                   : "${DATABASE_URL:=${DB_URL:-}}"
                   : "${DATABASE_URL:?DATABASE_URL/DB_URL missing}"
                   # Pod-local networking (kube-proxy/CNI) isn't always ready the instant
-                  # an init container starts; retry briefly instead of failing immediately.
+                  # an init container starts, and this image's musl-based DNS resolver
+                  # can occasionally hang past pg_isready's own connect timeout. Wrap each
+                  # attempt in `timeout` so a stuck DNS/connect can't block the job forever.
+                  ready=""
                   for i in $(seq 1 15); do
-                    if pg_isready --dbname="$DATABASE_URL" >/dev/null 2>&1; then
+                    if timeout 5 pg_isready --dbname="$DATABASE_URL" >/dev/null 2>&1; then
+                      ready=1
                       break
                     fi
                     echo "waiting for database to become reachable (attempt $i/15)..." >&2
                     sleep 2
                   done
+                  if [ -z "$ready" ]; then
+                    echo "ERROR: database never became reachable after 15 attempts" >&2
+                    exit 1
+                  fi
                   ts=$(date -u +%Y%m%dT%H%M%SZ)
                   out="/backup/helvex-${ts}.dump"
-                  pg_dump \
+                  timeout 1800 pg_dump \
                     --dbname="$DATABASE_URL" \
                     --format=custom \
                     --compress={{ .Values.postgres.weeklyExport.pgDumpCompress }} \
