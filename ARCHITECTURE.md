@@ -1672,6 +1672,10 @@ Quality depends on:
 
 **Progress-count performance (`include_stale`):** [app/services/ml/noga_pipeline.py](app/services/ml/noga_pipeline.py) `reclassify_noga`'s `include_stale` mode ORs `noga_code IS NULL` with a cross-column comparison (`noga_classified_at < updated_at - interval`), which can't be served by a btree index and forces a full table scan — this timed out in production (job 692, 2026-06-16) even after bumping `statement_timeout` to 120s. The exact `COUNT(*)` for this path was replaced with a cheap planner estimate (`pg_class.reltuples`) since it's only used for progress display, not iteration logic. The plain `only_missing_noga` (non-stale) path keeps an exact, index-backed count via the `ix_companies_no_noga_code` partial index added in migration 0102.
 
+**Resume checkpoint bug (fixed):** `reclassify_noga` paginates by keyset (`Company.id > last_id`, correct at 700k rows), but reported its progress checkpoint to the job system as `processed` — a row *count* — not `last_id`. `job_runs.progress_done` (and therefore `ctx.resume_from` on restart) is that count, so any restart resumed with `WHERE Company.id > <row count>` instead of `WHERE Company.id > <real last id>`. Since `only_detailed_raw=True` (the default) filters out companies with no purpose text at the DB level, ids and row-count diverge by however many companies got filtered out along the way — every restart re-processed a growing chunk of already-classified companies instead of continuing past them, which read as "never gets anywhere" across frequent redeploys. Fixed by stashing the real cursor in `stats["_resume_last_id"]` (mirrors how the `bulk` job keeps its own checkpoint outside `progress_done` — see "Graceful shutdown" in §19); `handle_reclassify_noga` (`app/services/jobs/job_handlers/noga.py`) now reads that back from `job.stats_json` instead of trusting `ctx.resume_from`. Covered by `tests/test_noga_pipeline.py::test_reclassify_noga_resume_cursor_survives_a_pause`.
+
+**Related fix — `reclassify_low_confidence_noga` had no checkpoint at all and could skip rows even without a restart:** it used `OFFSET`/`LIMIT` over a query filter (`noga_confidence IS NULL OR < threshold`) that shrinks as it runs — every company the batch just reclassified above threshold drops out of the filter before the next page is fetched, so `OFFSET` (a position in a set that keeps shrinking ahead of it) can walk past not-yet-processed companies. It also had no `resume_from` parameter, so a restart always started at `offset=0`. Fixed by switching it to the same keyset pagination as `reclassify_noga` (`Company.id > last_id`, cursor stashed in `stats["_resume_last_id"]`) — keyset pagination has no such assumption, since "next id after the last one seen" stays correct regardless of what else leaves the filter. `handle_reclassify_low_conf_noga` reads the cursor back the same way `handle_reclassify_noga` does. Covered by `tests/test_noga_pipeline.py::test_reclassify_low_confidence_noga_shrinking_filter_does_not_skip`.
+
 **Outputs to DB per company:**
 - `noga_code` — best-matching code (e.g. `"263001"`)
 - `noga_label` — German description
@@ -2788,7 +2792,18 @@ contact/about. Still inventoried, just not fetched.
 ### URL selection
 
 - **Automatic (new):** `run_batch_collect` upserts candidates immediately after each Google enrich, via the shared `_sync_url_candidates` helper — unconditionally, regardless of the company-level verdict (identity rework phase 3 decoupled candidate creation from the verdict; see "Website verdict" below). `select_best_candidate` only fires if no candidate is selected, so re-enriching a company never demotes a manually-chosen or already-crawled URL.
-- **`web_url_populate`:** backfill job for companies enriched before the auto-populate was added; idempotent.
+- **`web_url_populate`:** backfill job for companies enriched before the auto-populate was added; idempotent and **incremental**.
+
+  **Not part of the steady-state pipeline.** The Serper path already seeds candidates + crawl state inline via `_sync_url_candidates`, so this only exists for the corpus enriched before that helper. Those companies already have their search results on disk, which is why re-running Serper over them is the wrong fix — it re-pays for JSON already stored. Once the backlog clears this job should find nothing; if it starts picking up new companies, something enriched them without going through `_sync_url_candidates`.
+
+  **Rewritten set-based 2026-07-31.** Was 5 statements per company (`upsert_url_candidates` → `select_best_candidate` → `get_or_create_crawl_state`) inside `LIMIT/OFFSET` pagination — ~2M round trips over a 392k-company run, and because `OFFSET n` makes Postgres discard n rows before every page, the job *decelerated* as it advanced (~154M discarded rows total). Now three statements per batch:
+  - `bulk_upsert_url_candidates` — one multi-row `ON CONFLICT DO UPDATE`. Rows come from `build_candidate_rows`, which de-duplicates on url per company because a single `ON CONFLICT DO UPDATE` cannot touch the same key twice and Serper does repeat URLs.
+  - `bulk_select_best_candidates` — demote, then `DISTINCT ON (company_id)` picks the top-scoring non-blocked candidate. Domain matching uses `_APEX_DOMAIN_SQL` (last two labels), which must agree with `_extract_apex_domain`: matching the bare host would let `ch.linkedin.com` past a blocklist entry for `linkedin.com`.
+  - `bulk_create_crawl_states` — `INSERT … ON CONFLICT DO NOTHING`, one row per company, `no_website` + NULL `selected_url_id` when nothing was selectable.
+
+  Pagination is keyset (`c.id > :last_id`), and the query carries `NOT EXISTS (SELECT 1 FROM company_crawl_state …)`. Those two together are what make it incremental: every processed company gains a crawl-state row and drops out of the filter, so a restart costs nothing for work already done — which is also why the `no_website` row matters, without it those companies would be re-examined forever and the backfill would never converge. Errors now fail a whole batch rather than one company; the keyset cursor still advances, so a bad batch cannot wedge the job.
+
+  All three statements are PostgreSQL-only (`DISTINCT ON`, `unnest`, array casts). Array params are `CAST(… AS bigint[]/text[])` because Postgres rejects an untyped empty `ARRAY[]`. `tests/test_url_populate_bulk.py` compiles each against the PostgreSQL dialect and asserts the bind-parameter set, since the SQLite test engine cannot execute them.
 - **`web_select_url`** (params: `company_id`, `url_candidate_id`): switch to a specific candidate, resets crawl state.
 - Failure statuses are terminal until manually re-queued, or use `rerun=True` on the playwright job.
 
@@ -3673,6 +3688,26 @@ Observed incident: a `web_crawl_playwright` job (dedup key = one active per org)
 - **Advantage:** Zero lost progress across rolling updates; users never see a job reset to 0.
 - **Disadvantage:** `terminationGracePeriodSeconds: 90` delays K8s rolling updates by up to 90 s per pod. Jobs with very coarse checkpoints (e.g., one checkpoint per canton in `bulk`) may not save progress if the canton takes >90 s to process.
 - **Note:** Auto-resume on startup re-queues all paused jobs, including those paused by user action before a restart. Users who want a job to stay paused across a restart should cancel it instead.
+
+> **Bug found post-overhaul (fixed):** the graceful-pause path above only checkpoints
+> `job_runs.progress_done` — fine for every handler that reads `ctx.resume_from`, but
+> `bulk` (Zefix import) doesn't; it tracks its checkpoint in a separate `CollectionRun`
+> row (`last_canton`/`last_offset`) and only continues it when called with
+> `resume=True` (`app/services/ingestion/zefix_import.py::bulk_import_zefix`).
+> That flag was set only by `requeue_interrupted_jobs()` (the hard-crash/stale-heartbeat
+> path). The new graceful pause introduced by the job-worker overhaul (`d02ad59`)
+> requeues via `resume_paused_job()` / `resume_all_paused_jobs()` instead — neither set
+> the flag, so a `bulk` job interrupted by a *clean* deploy (the common case, since 25 s
+> is normally enough to hit a checkpoint) silently restarted the entire Zefix sweep from
+> canton A, while a job that got hard-killed before it could pause still resumed
+> correctly via the crash path. Fixed by extracting the flag-setting into
+> `crud.job_run._force_bulk_resume()` and calling it from all three re-queue paths
+> (`requeue_interrupted_jobs`, `resume_paused_job`, `resume_all_paused_jobs`), not just
+> the crash one. Covered by `test_resume_paused_job_sets_bulk_resume_flag` and
+> `test_resume_all_paused_jobs_sets_bulk_resume_flag` in `tests/test_job_recovery.py`.
+> **If a future job handler adds its own out-of-band checkpoint** (something other
+> than `progress_done`), it must hook into all three re-queue paths the same way —
+> `ctx.resume_from` alone is not enough.
 
 ---
 

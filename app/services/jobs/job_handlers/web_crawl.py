@@ -62,12 +62,21 @@ def _self_preempt_if_ml_queued(ctx: JobContext) -> None:
 def handle_web_url_populate(ctx: JobContext) -> tuple[dict, str]:
     """Seed company_url_candidates from existing company_search_results.
 
-    For each company that has Serper.dev results stored, creates URL candidate
-    rows and a company_crawl_state record. The highest-scoring candidate is
-    automatically marked as 'selected'.
+    **Backfill only.** Companies enriched through the Serper path already get
+    their candidates and crawl state inline, via
+    `web_enrichment._sync_url_candidates`. This job exists for the corpus that
+    was enriched *before* that helper existed: their search results are already
+    on disk, so converting them costs no API calls. Re-running Serper over those
+    companies instead would re-pay for JSON already stored.
 
-    Companies without a company_search_results row are skipped (run the Serper
-    enrichment job first).
+    Once the backlog clears this should find nothing. If it starts picking up
+    new companies again, something enriched them without going through
+    `_sync_url_candidates` — chase that rather than re-running this.
+
+    Set-based: three statements per batch rather than five per company, and
+    keyset-paginated on company id. The previous LIMIT/OFFSET version made
+    Postgres discard `offset` rows before every page, so the job decelerated as
+    it advanced (~154M discarded rows over a 392k-company run).
     """
     batch_size = int(ctx.params.get("batch_size", 500))
     stats: dict = {
@@ -88,13 +97,25 @@ def handle_web_url_populate(ctx: JobContext) -> tuple[dict, str]:
         f"{_BRANCH_NAME_FILTER}"
     )
 
+    # Skip companies already seeded. This is what makes the job incremental:
+    # every company processed gains a company_crawl_state row (including the
+    # no-candidate ones), so it drops out of this filter and a restart costs
+    # nothing for work already done.
+    _NOT_SEEDED = (
+        "AND NOT EXISTS (SELECT 1 FROM company_crawl_state cs WHERE cs.company_id = c.id)"
+    )
+
     total_q = ctx.db.execute(
-        text(f"SELECT COUNT(*) FROM companies c JOIN company_search_results csr ON csr.company_id = c.id WHERE csr.results_raw IS NOT NULL {_BASE_WHERE}")  # noqa: S608
+        text(f"SELECT COUNT(*) FROM companies c JOIN company_search_results csr ON csr.company_id = c.id WHERE csr.results_raw IS NOT NULL {_BASE_WHERE} {_NOT_SEEDED}")  # noqa: S608
     ).scalar() or 0
     total = int(total_q)
 
-    offset = ctx.resume_from
-    done = offset
+    blocked = crawler_crud.get_effective_crawl_blocklist(ctx.db)
+
+    # Keyset cursor, not OFFSET. Guarantees forward progress even if a batch
+    # errors, without Postgres re-scanning everything before it each page.
+    last_id = 0
+    done = 0
 
     while True:
         ctx.assert_not_cancelled()
@@ -104,39 +125,51 @@ def handle_web_url_populate(ctx: JobContext) -> tuple[dict, str]:
             text(
                 "SELECT c.id, csr.results_raw FROM companies c "
                 "JOIN company_search_results csr ON csr.company_id = c.id "
-                f"WHERE csr.results_raw IS NOT NULL {_BASE_WHERE} "
+                f"WHERE csr.results_raw IS NOT NULL {_BASE_WHERE} {_NOT_SEEDED} "
+                "  AND c.id > :last_id "
                 "ORDER BY c.id "
-                "LIMIT :limit OFFSET :offset"
+                "LIMIT :limit"
             ),
-            {"limit": batch_size, "offset": offset},
+            {"limit": batch_size, "last_id": last_id},
         ).fetchall()
 
         if not rows:
             break
 
+        now = datetime.now(timezone.utc)
+        company_ids: list[int] = []
+        candidate_rows: list[dict] = []
         for company_id, raw_results in rows:
-            try:
-                candidates = crawler_crud.parse_google_results_raw(raw_results)
-                if not candidates:
-                    stats["skipped_no_results"] += 1
-                    continue
-                upserted = crawler_crud.upsert_url_candidates(ctx.db, company_id, candidates)
-                best = crawler_crud.select_best_candidate(ctx.db, company_id)
-                crawler_crud.get_or_create_crawl_state(
-                    ctx.db,
-                    company_id,
-                    selected_url_id=best.id if best else None,
-                )
-                stats["candidates_created"] += len(upserted)
-                stats["processed"] += 1
-            except Exception as exc:  # noqa: BLE001
-                stats["errors"].append(f"company {company_id}: {exc}")
-                logger.warning("web_url_populate error for company %d: %s", company_id, exc)
-                ctx.db.rollback()
+            company_ids.append(int(company_id))
+            candidates = crawler_crud.parse_google_results_raw(raw_results)
+            if not candidates:
+                stats["skipped_no_results"] += 1
+                continue
+            candidate_rows.extend(
+                crawler_crud.build_candidate_rows(int(company_id), candidates, now)
+            )
 
-        ctx.db.commit()
+        try:
+            stats["candidates_created"] += crawler_crud.bulk_upsert_url_candidates(
+                ctx.db, candidate_rows
+            )
+            crawler_crud.bulk_select_best_candidates(ctx.db, company_ids, blocked)
+            crawler_crud.bulk_create_crawl_states(ctx.db, company_ids)
+            ctx.db.commit()
+            stats["processed"] += len(company_ids)
+        except Exception as exc:  # noqa: BLE001
+            # A whole batch fails together now. The keyset cursor still advances,
+            # so one bad batch can't wedge the job — re-run to pick it back up
+            # (the NOT EXISTS filter makes that cheap).
+            ctx.db.rollback()
+            stats["errors"].append(f"batch {company_ids[0]}-{company_ids[-1]}: {exc}")
+            logger.warning(
+                "web_url_populate batch %d-%d failed: %s",
+                company_ids[0], company_ids[-1], exc,
+            )
+
+        last_id = int(rows[-1][0])
         done += len(rows)
-        offset += batch_size
 
         msg = (
             f"Processed {done}/{total} — "

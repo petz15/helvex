@@ -160,6 +160,14 @@ def reclassify_noga(
         last_id = batch[-1].id
         processed += len(batch)
 
+        # The checkpoint the caller must resume from is `last_id` (a company id,
+        # for the `Company.id > last_id` keyset filter above), not `processed`
+        # (a row count) — the two diverge whenever a filter (only_detailed_raw,
+        # only_missing_noga, ...) skips ids, which is always on a 700k-row sweep.
+        # Stashed in stats (mirrors `bulk`'s CollectionRun checkpoint pattern)
+        # since `progress_cb`'s `done` argument is the UI-facing row count.
+        stats["_resume_last_id"] = last_id
+
         if progress_cb:
             progress_cb(processed, total, stats)
 
@@ -171,11 +179,21 @@ def reclassify_low_confidence_noga(
     *,
     confidence_threshold: float = 0.80,
     batch_size: int = 500,
+    resume_from: int = 0,
     progress_cb: Any = None,
 ) -> dict[str, Any]:
     """Re-classify companies whose noga_confidence is below the threshold.
 
     Companies with NULL confidence are also included since they have never been classified.
+
+    Paginates by keyset (`Company.id > last_id`), not `OFFSET` — this query's
+    own filter shrinks as it runs (a company that crosses the confidence
+    threshold drops out of "low confidence" the moment it's committed), and
+    OFFSET pagination over a live-shrinking result set skips rows: page 2's
+    OFFSET assumes page 1's matches are still ahead of it, but some of them
+    just left the set. Keyset pagination has no such assumption — "next id
+    after the last one seen" stays correct regardless of what else drops out
+    of the filter — and it doubles as the resume checkpoint after a restart.
     """
     stats: dict[str, Any] = {
         "selected": 0,
@@ -197,10 +215,11 @@ def reclassify_low_confidence_noga(
     db.execute(text("SET LOCAL statement_timeout = '120000'"))
     total = query.with_entities(func.count(Company.id)).scalar() or 0
     stats["selected"] = total
-    offset = 0
+    last_id = resume_from
+    processed = 0
 
     while True:
-        batch = query.order_by(Company.id.asc()).offset(offset).limit(batch_size).all()
+        batch = query.filter(Company.id > last_id).order_by(Company.id.asc()).limit(batch_size).all()
         if not batch:
             break
 
@@ -243,9 +262,11 @@ def reclassify_low_confidence_noga(
             except Exception as exc:  # noqa: BLE001
                 logger.warning("Embedding upsert alongside NOGA failed: %s", exc)
 
-        offset += len(batch)
+        last_id = batch[-1].id
+        processed += len(batch)
+        stats["_resume_last_id"] = last_id
 
         if progress_cb:
-            progress_cb(min(offset, total), total, stats)
+            progress_cb(min(processed, total), total, stats)
 
     return stats

@@ -6,7 +6,16 @@ from app.services.jobs.job_handlers import JobContext
 
 
 def handle_reclassify_noga(ctx: JobContext) -> tuple[dict, str]:
+    import json
+
     from app.services.ingestion.collection import reclassify_noga
+
+    # `ctx.resume_from` (job_runs.progress_done) is a UI row count, not the
+    # keyset cursor `reclassify_noga` paginates by — see `_resume_last_id` in
+    # noga_pipeline.py. Read the real cursor back from the job's own last
+    # stats snapshot, which survives pause/resume/crash-recovery untouched.
+    prior_stats = json.loads(ctx.job.stats_json) if ctx.job.stats_json else {}
+    resume_last_id = int(prior_stats.get("_resume_last_id") or 0)
 
     def _progress(done: int, total: int, stats: dict) -> None:
         ctx.assert_not_cancelled()
@@ -19,7 +28,7 @@ def handle_reclassify_noga(ctx: JobContext) -> tuple[dict, str]:
 
     stats = reclassify_noga(
         ctx.db,
-        resume_from=ctx.resume_from,
+        resume_from=resume_last_id,
         only_missing_noga=bool(ctx.params.get("only_missing_noga", False)),
         include_stale=bool(ctx.params.get("include_stale", False)),
         only_detailed_raw=bool(ctx.params.get("only_detailed_raw", True)),
@@ -32,8 +41,8 @@ def handle_reclassify_noga(ctx: JobContext) -> tuple[dict, str]:
         f"{stats.get('skipped_no_match', 0)} skipped no-match, "
         f"{len(stats.get('errors', []))} errors"
     )
-    if ctx.resume_from:
-        done_msg += f" (resumed from {ctx.resume_from})"
+    if resume_last_id:
+        done_msg += f" (resumed after company id {resume_last_id})"
     return stats, done_msg
 
 
@@ -94,9 +103,17 @@ def handle_noga_v2_explain(ctx: JobContext) -> tuple[dict, str]:
 
 
 def handle_reclassify_low_conf_noga(ctx: JobContext) -> tuple[dict, str]:
+    import json
+
     from app.services.ingestion.collection import reclassify_low_confidence_noga
 
     threshold = float(ctx.params.get("confidence_threshold", 0.80))
+
+    # See handle_reclassify_noga: ctx.resume_from is a UI row count, not the
+    # keyset cursor this function paginates by — read the real one back from
+    # the job's own last stats snapshot.
+    prior_stats = json.loads(ctx.job.stats_json) if ctx.job.stats_json else {}
+    resume_last_id = int(prior_stats.get("_resume_last_id") or 0)
 
     def _progress(done: int, total: int, stats: dict) -> None:
         ctx.assert_not_cancelled()
@@ -109,14 +126,18 @@ def handle_reclassify_low_conf_noga(ctx: JobContext) -> tuple[dict, str]:
     stats = reclassify_low_confidence_noga(
         ctx.db,
         confidence_threshold=threshold,
+        resume_from=resume_last_id,
         progress_cb=_progress,
     )
-    return stats, (
+    done_msg = (
         f"Done — {stats.get('updated', 0)} reclassified, "
         f"{stats.get('improved', 0)} now above threshold, "
         f"{stats.get('still_low', 0)} still low, "
         f"{len(stats.get('errors', []))} errors"
     )
+    if resume_last_id:
+        done_msg += f" (resumed after company id {resume_last_id})"
+    return stats, done_msg
 
 
 def handle_enrich_web_purpose_sim(ctx: JobContext) -> tuple[dict, str]:

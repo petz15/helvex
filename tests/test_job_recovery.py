@@ -122,6 +122,31 @@ def test_resume_paused_job_clears_reason(db):
     assert refreshed.pause_reason is None
 
 
+def test_resume_paused_job_sets_bulk_resume_flag(db):
+    """A graceful pause (shutdown/preempt/manual) must continue the existing
+    CollectionRun checkpoint, not restart the Zefix sweep from canton A —
+    the regression this test guards was a deploy silently restarting bulk
+    imports from scratch because only the crash-recovery path set this flag.
+    """
+    job = crud.create_job(db, job_type="bulk", label="Bulk", params={"cantons": ["ZH"]})
+    crud.mark_paused(db, job, message="Paused at 10", reason="shutdown")
+
+    crud.resume_paused_job(db, job)
+
+    refreshed = crud.get_job(db, job.id)
+    assert json.loads(refreshed.params_json or "{}").get("resume") is True
+
+
+def test_resume_all_paused_jobs_sets_bulk_resume_flag(db):
+    job = crud.create_job(db, job_type="bulk", label="Bulk", params={"cantons": ["ZH"]})
+    crud.mark_paused(db, job, message="Paused at 10", reason="shutdown")
+
+    assert crud.resume_all_paused_jobs(db) == 1
+
+    refreshed = crud.get_job(db, job.id)
+    assert json.loads(refreshed.params_json or "{}").get("resume") is True
+
+
 def test_resume_all_paused_jobs_skips_recent_heartbeat(db):
     """Rolling-deploy guard: the dying pod may still be mid-batch."""
     job = crud.create_job(db, job_type="bulk", label="Bulk", params={})

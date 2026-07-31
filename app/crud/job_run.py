@@ -230,6 +230,24 @@ def get_job_flags(db: Session, job_id: int) -> tuple[str, bool, bool] | None:
 MAX_RESTART_COUNT = 5
 
 
+def _force_bulk_resume(job: JobRun) -> None:
+    """Mark a re-queued 'bulk' job to continue its CollectionRun checkpoint.
+
+    `bulk_import_zefix` tracks progress in a separate `CollectionRun` row
+    (last_canton/last_offset), not `job_runs.progress_done` — the generic
+    `resume_from` plumbing every other handler uses does nothing for it. Its
+    only switch is `params['resume']`: without this, every automatic
+    re-queue (crash recovery, graceful shutdown pause, preemption) restarts
+    the whole Zefix sweep from canton A instead of continuing.
+    """
+    try:
+        p = json.loads(job.params_json or "{}")
+    except Exception:
+        p = {}
+    p["resume"] = True
+    job.params_json = json.dumps(p)
+
+
 def requeue_interrupted_jobs(
     db: Session,
     *,
@@ -252,7 +270,6 @@ def requeue_interrupted_jobs(
     instead of re-queued to prevent infinite crash loops.
     """
     import logging as _logging
-    import json as _json
     from datetime import timedelta
     _logger = _logging.getLogger(__name__)
     stale_cutoff = datetime.now(tz=timezone.utc) - timedelta(seconds=stale_after_seconds)
@@ -301,15 +318,8 @@ def requeue_interrupted_jobs(
             "Job %s (type=%s) requeued after crash (restart %d/%d)",
             job.id, job.job_type, job.restart_count, MAX_RESTART_COUNT,
         )
-        # For bulk jobs mark resume=True so the worker knows to continue the
-        # existing CollectionRun checkpoint rather than starting a fresh sweep.
         if job.job_type == "bulk":
-            try:
-                p = _json.loads(job.params_json or "{}")
-            except Exception:
-                p = {}
-            p["resume"] = True
-            job.params_json = _json.dumps(p)
+            _force_bulk_resume(job)
     if jobs:
         db.commit()
     return len(jobs)
@@ -442,13 +452,21 @@ def mark_paused(
 
 
 def resume_paused_job(db: Session, job: JobRun) -> JobRun:
-    """Re-queue a paused job so the worker picks it up from progress_done."""
+    """Re-queue a paused job so the worker picks it up from progress_done.
+
+    Used both for the immediate preempt-requeue path and the manual
+    "Resume" API action — in both cases the intent is to continue, never to
+    restart, so bulk jobs get the same `params['resume']` patch as the
+    crash-recovery path (see `_force_bulk_resume`).
+    """
     job.status = "queued"
     job.pause_requested = False
     job.pause_reason = None
     job.started_at = None
     job.completed_at = None
     job.message = _job_message(f"Resuming from {job.progress_done or 0}…")
+    if job.job_type == "bulk":
+        _force_bulk_resume(job)
     db.commit()
     db.refresh(job)
     return job
@@ -499,6 +517,8 @@ def resume_all_paused_jobs(
         job.started_at = None
         job.completed_at = None
         job.message = _job_message(f"Auto-resumed from {job.progress_done or 0} after restart")
+        if job.job_type == "bulk":
+            _force_bulk_resume(job)
     if jobs:
         db.commit()
     return len(jobs)

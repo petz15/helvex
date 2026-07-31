@@ -76,6 +76,157 @@ def upsert_url_candidates(
     return sorted(upserted, key=lambda r: (r.score or 0), reverse=True)
 
 
+# Apex domain (last two labels) of a URL, in SQL. Must agree with
+# _extract_apex_domain: strip scheme, take the host up to the first '/', drop any
+# :port, then keep the final two dot-separated labels. Taking the bare host
+# instead would let "ch.linkedin.com" past a blocklist that contains
+# "linkedin.com" — the whole point of matching on the apex.
+_APEX_DOMAIN_SQL = r"""
+    substring(
+        regexp_replace(
+            split_part(regexp_replace(lower(url), '^https?://', ''), '/', 1),
+            ':[0-9]+$', ''
+        )
+        from '([^.]+\.[^.]+)$'
+    )
+"""
+
+
+def build_candidate_rows(company_id: int, candidates: list[dict[str, Any]], now: datetime) -> list[dict]:
+    """Flatten parsed search results into insertable candidate rows.
+
+    De-duplicates on url within the company: a single ON CONFLICT DO UPDATE
+    statement cannot touch the same (company_id, url) twice, and Serper results
+    do sometimes repeat a URL.
+    """
+    rows: list[dict] = []
+    seen: set[str] = set()
+    for cand in candidates:
+        url = cand.get("link") or cand.get("url")
+        if not url or url in seen:
+            continue
+        seen.add(url)
+        rows.append({
+            "company_id": company_id,
+            "url": url,
+            "title": cand.get("title"),
+            "snippet": cand.get("snippet"),
+            "score": cand.get("score"),
+            "position": cand.get("position"),
+            "status": "pending",
+            "source": "serper",
+            "first_seen_at": now,
+        })
+    return rows
+
+
+def bulk_upsert_url_candidates(db: Session, rows: list[dict]) -> int:
+    """Upsert candidate rows for MANY companies in one statement.
+
+    The per-company `upsert_url_candidates` costs a round trip each; at 700k
+    companies × ~9 candidates that is the difference between thousands of
+    statements and millions. Returns rows affected (inserted + updated).
+    """
+    if not rows:
+        return 0
+    stmt = pg_insert(CompanyUrlCandidate).values(rows)
+    stmt = stmt.on_conflict_do_update(
+        index_elements=["company_id", "url"],
+        set_={
+            "score": stmt.excluded.score,
+            "title": stmt.excluded.title,
+            "snippet": stmt.excluded.snippet,
+            "position": stmt.excluded.position,
+        },
+    )
+    result = db.execute(stmt)
+    db.flush()
+    return int(result.rowcount or 0)
+
+
+def bulk_select_best_candidates(
+    db: Session,
+    company_ids: list[int],
+    blocked: frozenset[str] | set[str],
+) -> int:
+    """Set-based equivalent of select_best_candidate over many companies.
+
+    Same rule: demote any current selection, then mark the highest-scoring
+    non-blocked pending candidate as 'selected'. Ties broken by id so the choice
+    is deterministic across re-runs. Returns the number of companies that got a
+    selection.
+    """
+    if not company_ids:
+        return 0
+
+    db.execute(
+        text(
+            "UPDATE company_url_candidates SET status = 'pending' "
+            "WHERE company_id = ANY(CAST(:ids AS bigint[])) AND status = 'selected'"
+        ),
+        {"ids": list(company_ids)},
+    )
+
+    result = db.execute(
+        text(
+            f"""
+            UPDATE company_url_candidates c
+            SET status = 'selected'
+            FROM (
+                SELECT DISTINCT ON (company_id) id
+                FROM company_url_candidates
+                WHERE company_id = ANY(CAST(:ids AS bigint[]))
+                  AND status = 'pending'
+                  -- CAST is load-bearing: an untyped empty ARRAY[] makes
+                  -- Postgres error with "cannot determine type of empty array".
+                  AND COALESCE({_APEX_DOMAIN_SQL}, '') <> ALL(CAST(:blocked AS text[]))
+                ORDER BY company_id, score DESC NULLS LAST, id
+            ) best
+            WHERE c.id = best.id
+            """  # noqa: S608
+        ),
+        {"ids": list(company_ids), "blocked": list(blocked)},
+    )
+    db.flush()
+    return int(result.rowcount or 0)
+
+
+def bulk_create_crawl_states(db: Session, company_ids: list[int]) -> int:
+    """Create a crawl state per company, pointing at its selected candidate.
+
+    Companies with no crawlable candidate (none found, or every one blocked)
+    still get a row — with `no_website` and a NULL selected_url_id. That matters
+    for more than tidiness: the populate job's "skip companies already seeded"
+    filter keys on the existence of this row, so without it those companies
+    would be re-examined on every run and the backfill would never converge.
+
+    ON CONFLICT DO NOTHING — never disturb a company already being crawled.
+    """
+    if not company_ids:
+        return 0
+    result = db.execute(
+        text(
+            """
+            INSERT INTO company_crawl_state
+                (company_id, selected_url_id, crawl_status, tier, crawl_phase)
+            SELECT ids.company_id,
+                   best.id,
+                   CASE WHEN best.id IS NULL THEN 'no_website' ELSE 'pending' END,
+                   'http',
+                   'identity'
+            FROM unnest(CAST(:ids AS bigint[])) AS ids(company_id)
+            LEFT JOIN company_url_candidates best
+                   ON best.company_id = ids.company_id
+                  AND best.status = 'selected'
+            ON CONFLICT (company_id) DO NOTHING
+            """
+        ),
+        {"ids": list(company_ids)},
+    )
+    db.flush()
+    return int(result.rowcount or 0)
+
+
 def select_best_candidate(db: Session, company_id: int) -> CompanyUrlCandidate | None:
     """Mark the highest-scoring non-blocked pending candidate as 'selected'.
 
