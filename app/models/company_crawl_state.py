@@ -36,12 +36,25 @@ class CompanyCrawlState(Base):
       no_website    — company has no URL candidate to crawl
 
     tier: 'http' | 'playwright'
+
+    crawl_phase values (two-phase crawling):
+      identity  — phase A: homepage + impressum/contact only, enough to settle
+                  the identity verdict. Every company starts here.
+      content   — phase B: full-site crawl. Only companies whose identity was
+                  confirmed are moved here (see advance_to_content_phase).
+      done      — both phases finished, or the company was exhausted in phase A
+                  with no crawlable candidates left.
+
+    crawl_status is per-phase: a row can be 'pending' in phase 'content' having
+    already been 'crawled' in phase 'identity'. The pair (crawl_phase,
+    crawl_status) is what a worker claims on.
     """
 
     __tablename__ = "company_crawl_state"
     __table_args__ = (
         Index("ix_company_crawl_state_status_tier", "crawl_status", "tier"),
         Index("ix_company_crawl_state_next_crawl", "next_crawl_at"),
+        Index("ix_company_crawl_state_phase_status_tier", "crawl_phase", "crawl_status", "tier"),
     )
 
     company_id: Mapped[int] = mapped_column(
@@ -53,6 +66,10 @@ class CompanyCrawlState(Base):
     crawl_status: Mapped[str] = mapped_column(String(32), nullable=False, default="pending", index=True)
     # http | playwright
     tier: Mapped[str] = mapped_column(String(16), nullable=False, default="http")
+    # identity | content | done — see class docstring
+    crawl_phase: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="identity", server_default="identity"
+    )
     bot_protected: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     # cloudflare | captcha | http_403 | js_challenge | unknown
     bot_protection_type: Mapped[str | None] = mapped_column(String(32), nullable=True)

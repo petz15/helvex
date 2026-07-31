@@ -28,6 +28,7 @@ from app.services.enrichment.crawler_common import (
     pick_user_agent,
     rate_limit,
     resolve_is_public,
+    run_in_page_executor,
 )
 
 logger = logging.getLogger(__name__)
@@ -359,7 +360,9 @@ async def crawl_company_playwright(
                 return result
 
             result.pages.append(
-                _make_page_result("homepage", url, final_url, status, body, company_id, url_candidate_id)
+                await run_in_page_executor(
+                    _make_page_result, "homepage", url, final_url, status, body, company_id, url_candidate_id
+                )
             )
 
             # ── Subpages ──────────────────────────────────────────────────
@@ -380,8 +383,9 @@ async def crawl_company_playwright(
                         )
                         if s_status < 400:
                             result.pages.append(
-                                _make_page_result(
-                                    page_type, sub_url, s_final, s_status, s_body, company_id, url_candidate_id
+                                await run_in_page_executor(
+                                    _make_page_result, page_type, sub_url, s_final, s_status, s_body,
+                                    company_id, url_candidate_id,
                                 )
                             )
                     except Exception:

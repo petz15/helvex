@@ -41,7 +41,7 @@ spec:
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           env:
             - name: JOB_TYPE_WHITELIST
-              value: "web_crawl_http,web_url_populate,web_select_url,web_crawl_single,directory_crawl"
+              value: "web_crawl_http,web_crawl_content,web_url_populate,web_select_url,web_crawl_single,directory_crawl"
             # NOTE: multiplies with the in-job `crawl_concurrency` param — see
             # crawlerHttpWorker.concurrency in values.yaml before raising this.
             - name: JOB_WORKER_CONCURRENCY

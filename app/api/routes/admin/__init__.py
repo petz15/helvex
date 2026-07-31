@@ -517,10 +517,14 @@ def approve_directory_crawl_domain_route(
     _: User = Depends(_require_superadmin),
 ) -> dict:
     from app import crud
+    from app.crud.crawler import invalidate_crawl_blocklist_cache
     row = crud.approve_directory_crawl_domain(db, domain_id)
     if not row:
         raise HTTPException(status_code=404, detail="Domain not found")
     db.commit()
+    # Approving a directory domain also excludes it from website-crawl selection.
+    # This clears only this pod's cache; workers pick the change up within the TTL.
+    invalidate_crawl_blocklist_cache()
     return {"id": row.id, "value": row.value, "status": row.status}
 
 
@@ -531,10 +535,12 @@ def reject_directory_crawl_domain_route(
     _: User = Depends(_require_superadmin),
 ) -> dict:
     from app import crud
+    from app.crud.crawler import invalidate_crawl_blocklist_cache
     row = crud.reject_directory_crawl_domain(db, domain_id)
     if not row:
         raise HTTPException(status_code=404, detail="Domain not found")
     db.commit()
+    invalidate_crawl_blocklist_cache()
     return {"id": row.id, "value": row.value, "status": row.status}
 
 
@@ -545,9 +551,11 @@ def delete_directory_crawl_domain_route(
     _: User = Depends(_require_superadmin),
 ) -> None:
     from app import crud
+    from app.crud.crawler import invalidate_crawl_blocklist_cache
     if not crud.delete_directory_crawl_domain(db, domain_id):
         raise HTTPException(status_code=404, detail="Domain not found")
     db.commit()
+    invalidate_crawl_blocklist_cache()
 
 
 @router.get("/crawler/candidate-domain-stats", summary="Frequent URL candidate domains for blocklist review (superadmin)")

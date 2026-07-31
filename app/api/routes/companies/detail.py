@@ -18,6 +18,7 @@ from app.auth import get_current_user, require_superadmin
 from app.services.jobs.rate_limit import check_rate_limit
 from app.database import get_db
 from app.models.organization import Organization
+from app.models.company_crawl_state import CompanyCrawlState
 from app.models.company_url_candidate import CompanyUrlCandidate
 from app.models.company_web_extract import CompanyWebExtract
 from app.models.simap_award_vendor import SimapAwardVendor
@@ -766,10 +767,18 @@ def get_company_web_extract(
         for p in pages
     ]
 
+    # Crawl phase drives the UI's "identity confirmed, content still coming"
+    # state: after phase A the URL is verified and worth showing, but the
+    # content fields (services, team, about) are genuinely not collected yet —
+    # which is different from "we crawled the site and found nothing".
+    crawl_state = db.get(CompanyCrawlState, company_id)
+
     return {
         "extract": extract_out,
         "pages": pages_out,
         "candidate_count": int(candidate_count),
+        "crawl_phase": crawl_state.crawl_phase if crawl_state else None,
+        "crawl_status": crawl_state.crawl_status if crawl_state else None,
     }
 
 

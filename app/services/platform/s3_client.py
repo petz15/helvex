@@ -4,6 +4,7 @@ For CSV exports and for storing trained model artifacts (TF-IDF vectorizers, K-M
 from __future__ import annotations
 
 import logging
+import threading
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -11,6 +12,19 @@ logger = logging.getLogger(__name__)
 # Process-scoped flag set by check_crawl_s3_connectivity() when the crawl
 # bucket is unreachable.  Prevents per-page upload hangs from blocking crawl jobs.
 _crawl_uploads_disabled: bool = False
+
+# Process-wide boto3 client. Constructing one loads the botocore JSON service
+# model from disk and builds an endpoint resolver — 50-300 ms before a single
+# byte moves. This used to happen on EVERY call, so a 5-page crawl paid it five
+# times, inline on the crawler's event loop. botocore clients are thread-safe
+# for API calls, so one shared instance serves every worker thread.
+_client_singleton = None
+_client_lock = threading.Lock()
+
+# Each concurrent crawl holds one pooled connection for the duration of its
+# upload; botocore's default of 10 would re-serialise what the thread pool just
+# parallelised.
+_MAX_POOL_CONNECTIONS = 64
 
 
 def check_crawl_s3_connectivity() -> bool:
@@ -34,16 +48,35 @@ def check_crawl_s3_connectivity() -> bool:
 
 
 def _client():
-    import boto3
-    from botocore.config import Config
-    from app.config import settings
-    return boto3.client(
-        "s3",
-        aws_access_key_id=settings.s3_access_key,
-        aws_secret_access_key=settings.s3_secret_key,
-        endpoint_url=settings.s3_endpoint_url or None,
-        config=Config(connect_timeout=10, read_timeout=30, retries={"max_attempts": 2}),
-    )
+    global _client_singleton
+    client = _client_singleton
+    if client is not None:
+        return client
+    with _client_lock:
+        if _client_singleton is None:
+            import boto3
+            from botocore.config import Config
+            from app.config import settings
+            _client_singleton = boto3.client(
+                "s3",
+                aws_access_key_id=settings.s3_access_key,
+                aws_secret_access_key=settings.s3_secret_key,
+                endpoint_url=settings.s3_endpoint_url or None,
+                config=Config(
+                    connect_timeout=10,
+                    read_timeout=30,
+                    retries={"max_attempts": 2},
+                    max_pool_connections=_MAX_POOL_CONNECTIONS,
+                ),
+            )
+    return _client_singleton
+
+
+def reset_client() -> None:
+    """Drop the cached client so the next call rebuilds it from current settings."""
+    global _client_singleton
+    with _client_lock:
+        _client_singleton = None
 
 
 def is_configured() -> bool:

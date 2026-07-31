@@ -107,13 +107,34 @@
       },
       "cta": "Créer votre compte gratuit →",
       "actions": {
-        "batchClassify": { "label": "Classification LLM par lot", "unit": "par entreprise" },
-        "immediateClassify": { "label": "Classification LLM immédiate", "unit": "par entreprise" },
-        "webSearch": { "label": "Recherche web", "unit": "par entreprise" },
-        "flexRescore": { "label": "Rescoring flexible", "unit": "par entreprise" },
-        "fullRecluster": { "label": "Reclassement complet", "unit": "forfait" },
-        "exportBasic": { "label": "Export en masse – basique (UID/Nom/Canton)", "unit": "par 10k lignes" },
-        "exportDetailed": { "label": "Export en masse – détaillé", "unit": "par 10k lignes" }
+        "batchClassify": {
+          "label": "Classification LLM par lot",
+          "unit": "par entreprise"
+        },
+        "immediateClassify": {
+          "label": "Classification LLM immédiate",
+          "unit": "par entreprise"
+        },
+        "webSearch": {
+          "label": "Recherche web",
+          "unit": "par entreprise"
+        },
+        "flexRescore": {
+          "label": "Rescoring flexible",
+          "unit": "par entreprise"
+        },
+        "fullRecluster": {
+          "label": "Reclassement complet",
+          "unit": "forfait"
+        },
+        "exportBasic": {
+          "label": "Export en masse – basique (UID/Nom/Canton)",
+          "unit": "par 10k lignes"
+        },
+        "exportDetailed": {
+          "label": "Export en masse – détaillé",
+          "unit": "par 10k lignes"
+        }
       }
     },
     "footer": {
@@ -125,7 +146,7 @@
       "signIn": "Connexion"
     }
   },
-"footer": {
+  "footer": {
     "copyright": "© {year} Helvex · Balogh Consulting",
     "impressum": "Mentions légales",
     "datenschutz": "Confidentialité",
@@ -731,7 +752,6 @@
       "people": "Personnes",
       "noPages": "Aucune page enregistrée.",
       "colPage": "Page",
-      "colStatus": "Statut",
       "statusCrawled": "Analysée",
       "statusInventory": "Découverte",
       "colHttp": "HTTP",
@@ -740,7 +760,12 @@
       "colImg": "Img",
       "colVid": "Vidéo",
       "colForm": "Form.",
-      "colHtml": "HTML"
+      "colHtml": "HTML",
+      "contentPendingTitle": "Site web confirmé — contenu pas encore collecté",
+      "contentPendingBody": "Cette URL a été vérifiée comme étant le site web de l'entreprise. L'exploration complète du site, qui collecte les services, l'équipe et le contenu des pages, n'est pas encore terminée : les champs ci-dessous sont donc incomplets et non vides.",
+      "contentPendingBadge": "Contenu en attente",
+      "notCollectedYet": "Pas encore collecté",
+      "visitWebsite": "Visiter le site web"
     },
     "simap": {
       "title": "Marchés publics (SIMAP)",
@@ -1008,7 +1033,11 @@
     "guidedSearch": {
       "orGuide": "ou laissez-nous vous guider",
       "whatTitle": "Que cherchez-vous ?",
-      "tiles": { "companies": "Entreprises", "people": "Personnes", "jobs": "Emplois" },
+      "tiles": {
+        "companies": "Entreprises",
+        "people": "Personnes",
+        "jobs": "Emplois"
+      },
       "tilesSub": {
         "companies": "700 000+ enregistrées",
         "people": "Fondateurs, directeurs, propriétaires",
@@ -1016,7 +1045,13 @@
       },
       "skipAdvanced": "Passer aux filtres avancés →",
       "wizard": {
-        "steps": { "what": "QUOI", "where": "OÙ", "industry": "SECTEUR", "refine": "AFFINER", "review": "RÉSUMÉ" },
+        "steps": {
+          "what": "QUOI",
+          "where": "OÙ",
+          "industry": "SECTEUR",
+          "refine": "AFFINER",
+          "review": "RÉSUMÉ"
+        },
         "questions": {
           "what": "Que cherchez-vous ?",
           "where": "Où en Suisse ?",
@@ -1071,7 +1106,45 @@
       "exportQueued": "Export en file — télécharger depuis la page Emplois quand prêt."
     },
     "filters": {
-      "chipLabels": {"q": "Nom", "uid": "IDE", "canton": "Canton", "review_status": "Révision", "contact_status": "Contact", "has_website": "Site web", "google_searched": "Recherche web", "tags": "Tags", "ai_category": "Classe IA", "tfidf_cluster": "Cluster", "purpose_keywords": "Mot-clé", "noga_code": "Code NOGA", "noga_label": "Libellé NOGA", "noga_level": "Niveau NOGA", "purpose_language": "Langue", "business_model": "Modèle d'affaires", "legal_form": "Forme juridique", "registered_after": "Première FOSC après", "registered_before": "Première FOSC avant", "min_web_score": "Web min.", "max_web_score": "Web max.", "min_flex_score": "Flex min.", "max_flex_score": "Flex max.", "min_ai_score": "IA min.", "max_ai_score": "IA max.", "min_combined_score": "Combiné min.", "max_combined_score": "Combiné max.", "exclude_review_status": "Excl. révision", "exclude_contact_status": "Excl. contact", "exclude_canton": "Excl. canton", "exclude_tags": "Excl. tags", "exclude_tfidf_cluster": "Excl. cluster", "exclude_purpose_keywords": "Excl. mot-clé", "exclude_ai_category": "Excl. classe IA", "exclude_noga_code": "Excl. code NOGA", "exclude_noga_label": "Excl. libellé NOGA", "exclude_noga_level": "Excl. niveau NOGA"},
+      "chipLabels": {
+        "q": "Nom",
+        "uid": "IDE",
+        "canton": "Canton",
+        "review_status": "Révision",
+        "contact_status": "Contact",
+        "has_website": "Site web",
+        "google_searched": "Recherche web",
+        "tags": "Tags",
+        "ai_category": "Classe IA",
+        "tfidf_cluster": "Cluster",
+        "purpose_keywords": "Mot-clé",
+        "noga_code": "Code NOGA",
+        "noga_label": "Libellé NOGA",
+        "noga_level": "Niveau NOGA",
+        "purpose_language": "Langue",
+        "business_model": "Modèle d'affaires",
+        "legal_form": "Forme juridique",
+        "registered_after": "Première FOSC après",
+        "registered_before": "Première FOSC avant",
+        "min_web_score": "Web min.",
+        "max_web_score": "Web max.",
+        "min_flex_score": "Flex min.",
+        "max_flex_score": "Flex max.",
+        "min_ai_score": "IA min.",
+        "max_ai_score": "IA max.",
+        "min_combined_score": "Combiné min.",
+        "max_combined_score": "Combiné max.",
+        "exclude_review_status": "Excl. révision",
+        "exclude_contact_status": "Excl. contact",
+        "exclude_canton": "Excl. canton",
+        "exclude_tags": "Excl. tags",
+        "exclude_tfidf_cluster": "Excl. cluster",
+        "exclude_purpose_keywords": "Excl. mot-clé",
+        "exclude_ai_category": "Excl. classe IA",
+        "exclude_noga_code": "Excl. code NOGA",
+        "exclude_noga_label": "Excl. libellé NOGA",
+        "exclude_noga_level": "Excl. niveau NOGA"
+      },
       "proTag": "Pro",
       "proTitle": "Fonctionnalité IA — consomme des crédits par entreprise",
       "filtersBtn": "Filtres",

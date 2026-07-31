@@ -71,13 +71,18 @@ imagePullSecrets: []
 #
 #   in-flight work = concurrency × <job's own crawl_concurrency param>
 #
-#   web_crawl_http       crawl_concurrency default 10 (async HTTP)
+#   web_crawl_http       crawl_concurrency default 40 (async HTTP)
 #   web_crawl_playwright crawl_concurrency default  2 (one Chromium EACH)
 #
 # So raising a worker's `concurrency` is not the lever for crawl throughput —
 # the in-job `crawl_concurrency` param is. Raise `concurrency` to stop long jobs
 # blocking short ones on the same pod, and re-check the pod's memory limit
 # against the product above whenever you change either number.
+#
+# Page processing (lxml parse + S3 upload) runs in a separate thread pool sized
+# by CRAWL_PAGE_WORKERS (default 32) rather than on the crawl event loop. That
+# pool is per-POD, not per-job, so it is the ceiling both crawl jobs share —
+# raise it alongside crawl_concurrency, and give the pod CPU to match.
 
 apiWorker:
   enabled: false
@@ -110,7 +115,7 @@ mlWorker:
 crawlerHttpWorker:
   enabled: false
   replicaCount: 2
-  # 2 jobs per pod × crawl_concurrency 10 = up to 20 in-flight site crawls.
+  # 2 jobs per pod × crawl_concurrency 40 = up to 80 in-flight site crawls.
   # The point is head-of-line blocking, not raw throughput: this pod's whitelist
   # also carries web_url_populate / web_select_url / web_crawl_single, and at
   # concurrency 1 a user's interactive single crawl queued behind a multi-hour

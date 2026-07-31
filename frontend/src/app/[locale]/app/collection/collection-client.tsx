@@ -851,31 +851,34 @@ export function CollectionClient() {
           await submit("crawler/crawl-http", {
             batch_size: parseInt(fd.get("batch_size") as string) || 20,
             canton: (fd.get("canton") as string)?.trim().toUpperCase() || null,
-            max_pages: parseInt(fd.get("max_pages") as string) || 5,
+            max_pages: parseInt(fd.get("max_pages") as string) || 3,
             rate_limit_delay: parseFloat(fd.get("rate_limit_delay") as string) || 0.5,
             rerun: fd.get("rerun") === "on",
             order_by: fd.get("order_by") as string || "company_id_asc",
             limit: isNaN(limitRaw) || limitRaw <= 0 ? null : limitRaw,
-            crawl_concurrency: parseInt(fd.get("crawl_concurrency") as string) || 10,
+            crawl_concurrency: parseInt(fd.get("crawl_concurrency") as string) || 40,
           });
         }} className="space-y-4">
           <p className="text-xs text-slate-500">
-            Fast httpx crawler — no browser, handles most Swiss SME sites.
-            Sites needing JavaScript are automatically flagged and picked up by the Playwright job.
+            <span className="font-medium">Phase A (identity).</span> Fast httpx crawler — no browser, handles most Swiss SME sites.
+            Fetches only homepage + impressum/contact: everything the identity verdict needs, and nothing more,
+            so budget is never spent on a site that turns out to belong to another company.
+            Confirmed companies are handed to the full-site crawler below automatically.
+            Sites needing JavaScript are flagged and picked up by the Playwright job.
             Runs on the <span className="font-medium">crawler-http</span> pods; each job crawls multiple
             companies concurrently (see Concurrency below), and dedup is off for this job type so
             triggering it again from another pod runs a second job in parallel over disjoint companies.
           </p>
           <div className="grid grid-cols-2 gap-4">
-            <Field label="Pages per site" hint="Homepage counts as 1; finds impressum, privacy, contact, about, services">
-              <input name="max_pages" type="number" min="1" max="10" defaultValue="5" className={inputCls} />
+            <Field label="Pages per site" hint="Homepage counts as 1; identity needs only impressum + contact">
+              <input name="max_pages" type="number" min="1" max="10" defaultValue="3" className={inputCls} />
             </Field>
             <Field label="Rate limit (s/domain)" hint="Min seconds between requests to the same domain — 0 to disable">
               <input name="rate_limit_delay" type="number" min="0" max="10" step="0.1" defaultValue="0.5" className={inputCls} />
             </Field>
           </div>
           <Field label="Concurrency" hint="Companies crawled at once within this job — plain async I/O, so this is the main throughput lever">
-            <input name="crawl_concurrency" type="number" min="1" max="50" defaultValue="10" className={cn(inputCls, "w-32")} />
+            <input name="crawl_concurrency" type="number" min="1" max="200" defaultValue="40" className={cn(inputCls, "w-32")} />
           </Field>
           <SubSection title="Filters &amp; Advanced">
             <div className="grid grid-cols-2 gap-4">
@@ -905,6 +908,75 @@ export function CollectionClient() {
             </label>
           </div>
           <SubmitBtn loading={loading === "crawler/crawl-http"} />
+        </form>
+      </Section>
+
+      <Section title="Web Crawl — Full Site (phase B, content)">
+        <form onSubmit={async e => {
+          e.preventDefault();
+          const fd = new FormData(e.currentTarget);
+          const limitRaw = parseInt(fd.get("limit") as string);
+          await submit("crawler/crawl-content", {
+            batch_size: parseInt(fd.get("batch_size") as string) || 10,
+            canton: (fd.get("canton") as string)?.trim().toUpperCase() || null,
+            max_pages: parseInt(fd.get("max_pages") as string) || 60,
+            max_depth: parseInt(fd.get("max_depth") as string) || 3,
+            rate_limit_delay: parseFloat(fd.get("rate_limit_delay") as string) || 0.5,
+            rerun: fd.get("rerun") === "on",
+            order_by: fd.get("order_by") as string || "combined_score_desc",
+            limit: isNaN(limitRaw) || limitRaw <= 0 ? null : limitRaw,
+            crawl_concurrency: parseInt(fd.get("crawl_concurrency") as string) || 20,
+          });
+        }} className="space-y-4">
+          <p className="text-xs text-slate-500">
+            Breadth-first crawl of the <span className="font-medium">entire website</span> — runs only for companies
+            whose identity phase A confirmed, so the budget is never spent on the wrong company.
+            Seeds its frontier from the sitemap inventory phase A already stored, so it usually needs
+            zero discovery requests: no robots.txt, no sitemap, no homepage re-fetch.
+            Enqueued automatically when extraction confirms a company; trigger here to backfill or re-crawl.
+          </p>
+          <div className="grid grid-cols-2 gap-4">
+            <Field label="Max pages per site" hint="Hard cap — a large WordPress site can otherwise expand without bound">
+              <input name="max_pages" type="number" min="1" max="500" defaultValue="60" className={inputCls} />
+            </Field>
+            <Field label="Max depth" hint="Link distance from the sitemap/nav seed set">
+              <input name="max_depth" type="number" min="1" max="6" defaultValue="3" className={inputCls} />
+            </Field>
+            <Field label="Rate limit (s/domain)" hint="Min seconds between requests to the same domain">
+              <input name="rate_limit_delay" type="number" min="0" max="10" step="0.1" defaultValue="0.5" className={inputCls} />
+            </Field>
+            <Field label="Concurrency" hint="Sites crawled at once — each may run for many pages">
+              <input name="crawl_concurrency" type="number" min="1" max="100" defaultValue="20" className={inputCls} />
+            </Field>
+          </div>
+          <SubSection title="Filters &amp; Advanced">
+            <div className="grid grid-cols-2 gap-4">
+              <Field label="Canton" hint="Leave blank for all">
+                <input name="canton" className={inputCls} placeholder="Any" />
+              </Field>
+              <Field label="Batch size" hint="Companies claimed per SKIP LOCKED batch">
+                <input name="batch_size" type="number" min="1" defaultValue="10" className={inputCls} />
+              </Field>
+              <Field label="Order by" hint="Full-site crawls are expensive — spend them on the best leads first">
+                <select name="order_by" defaultValue="combined_score_desc" className={inputCls}>
+                  <option value="combined_score_desc">Combined score ↓ (default)</option>
+                  <option value="flex_score_desc">Flex score ↓</option>
+                  <option value="company_id_asc">Company ID</option>
+                  <option value="last_crawled_asc">Oldest crawled first</option>
+                </select>
+              </Field>
+              <Field label="Limit" hint="Max companies to process — leave blank for all">
+                <input name="limit" type="number" min="1" className={inputCls} placeholder="All" />
+              </Field>
+            </div>
+            <div className="flex items-center gap-2 mt-2">
+              <input type="checkbox" name="rerun" id="content-rerun" className="rounded" />
+              <label htmlFor="content-rerun" className="text-sm text-slate-700">
+                Rerun — re-crawl companies that already completed the full-site phase
+              </label>
+            </div>
+          </SubSection>
+          <SubmitBtn loading={loading === "crawler/crawl-content"} />
         </form>
       </Section>
 

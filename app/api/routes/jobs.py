@@ -1924,7 +1924,18 @@ class WebCrawlHttpBody(WebCrawlBody):
     rerun: bool = False          # reset previously crawled/failed HTTP rows (including js_required) before starting
     order_by: str = "company_id_asc"  # company_id_asc | last_crawled_asc | flex_score_desc | combined_score_desc
     limit: int | None = None     # stop after this many companies (None = all)
-    crawl_concurrency: int = 10  # companies crawled at once within this job (pure async I/O, bounded by semaphore)
+    crawl_concurrency: int = 40  # companies crawled at once within this job (pure async I/O, bounded by semaphore)
+
+
+class WebCrawlContentBody(WebCrawlBody):
+    """Phase B — full-site crawl of identity-confirmed companies."""
+    batch_size: int = 10
+    max_pages: int = 60         # page budget per SITE, not a fixed page set
+    max_depth: int = 3          # link distance from the sitemap/nav seed set
+    rerun: bool = False         # re-crawl companies that already completed phase B
+    order_by: str = "combined_score_desc"  # spend the budget on the best leads first
+    limit: int | None = None
+    crawl_concurrency: int = 20
 
 
 class WebCrawlPlaywrightBody(WebCrawlBody):
@@ -1986,6 +1997,35 @@ def trigger_web_crawl_http(
     job = _enqueue_or_http_error(
         request,
         job_type="web_crawl_http",
+        label=label,
+        params=body.model_dump(),
+        db=db,
+    )
+    return JobOut.from_orm_obj(job)
+
+
+@router.post("/crawler/crawl-content", response_model=JobOut, status_code=status.HTTP_202_ACCEPTED)
+def trigger_web_crawl_content(
+    body: WebCrawlContentBody,
+    request: Request,
+    db: Session = Depends(get_db),
+    _: User = Depends(require_superadmin),
+):
+    """Trigger the phase-B full-site crawler for identity-confirmed companies."""
+    parts = []
+    if body.canton:
+        parts.append(body.canton)
+    if body.rerun:
+        parts.append("rerun")
+    if body.order_by != "combined_score_desc":
+        parts.append(body.order_by)
+    if body.limit:
+        parts.append(f"limit {body.limit}")
+    parts.append(f"max {body.max_pages} pages/site")
+    label = "Full-site crawler" + (f" — {', '.join(parts)}" if parts else "")
+    job = _enqueue_or_http_error(
+        request,
+        job_type="web_crawl_content",
         label=label,
         params=body.model_dump(),
         db=db,

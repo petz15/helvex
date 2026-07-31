@@ -20,6 +20,7 @@ from app.services.enrichment.crawler_common import (
     DecompressionBombError,
     PageResult,
     classify_all_urls,
+    classify_page_type,
     classify_urls_by_path,
     client_hint_headers,
     count_media,
@@ -27,13 +28,16 @@ from app.services.enrichment.crawler_common import (
     detect_bot_block,
     detect_js_required,
     detect_page_language,
+    extract_internal_links,
     find_subpage_links,
     has_contact_form,
+    is_crawlable_page_url,
     parse_soup,
     pick_browser_profile,
     rate_limit,
     read_bounded_body,
     resolve_is_public,
+    run_in_page_executor,
     ssrf_request_guard as _ssrf_request_guard,
 )
 
@@ -255,20 +259,129 @@ async def _fetch_with_ssl_fallback(
         return None
 
 
+async def crawl_site_full(
+    company_id: int,
+    url: str,
+    *,
+    url_candidate_id: int | None = None,
+    max_pages: int = 60,
+    rate_limit_delay: float = 0.5,
+    max_depth: int = 3,
+    seed_urls: list[tuple[str, str]] | None = None,
+    visited_urls: set[str] | None = None,
+) -> CrawlResult:
+    """Phase B — breadth-first crawl of an entire company website.
+
+    Only runs for companies whose identity phase A confirmed, so the budget is
+    never spent on a site that turns out to belong to someone else.
+
+    seed_urls:    (page_type, url) pairs from the phase-A sitemap inventory
+                  (crud.get_uncrawled_inventory_urls). When present the homepage
+                  is not re-fetched — phase A already stored it.
+    visited_urls: URLs phase A already fetched. Seeded into the visited set so
+                  the homepage and impressum are never fetched twice.
+
+    Bounded on three axes, all of which must hold or a single WordPress site can
+    swallow the whole crawler: max_pages (hard page cap), max_depth (link
+    distance from the seed set), and is_crawlable_page_url (drops assets,
+    off-host links, and pagination/filter/archive traps).
+
+    Failure semantics differ from phase A: partial success is success. A page
+    that 404s or times out is skipped, not fatal — the result only carries a
+    failure_status if the crawl produced no pages at all.
+    """
+    from collections import deque
+
+    result = CrawlResult()
+    visited: set[str] = set(visited_urls or ())
+    base_host = urlparse(url).netloc
+    headers = {**_make_headers(company_id), "Sec-Fetch-Site": "same-origin", "Referer": url}
+
+    frontier: deque[tuple[str, int]] = deque()
+    for _page_type, seed in (seed_urls or []):
+        if seed not in visited and is_crawlable_page_url(seed, base_host):
+            frontier.append((seed, 1))
+
+    async with _client(headers) as client:
+        # No inventory (site had no usable sitemap) — re-fetch the homepage purely
+        # to expand the frontier from its nav links. Not saved as a page: phase A
+        # already stored the homepage and its extract row depends on that copy.
+        if not frontier:
+            try:
+                status, final_url, _, body = await _fetch(client, url, rate_limit_delay)
+            except Exception:  # noqa: BLE001
+                result.failure_status = "http_error"
+                result.failure_detail = f"Phase B could not re-fetch homepage {url}"
+                return result
+            if status >= 400 or not body:
+                result.failure_status = "http_error"
+                result.failure_detail = f"Phase B homepage returned HTTP {status}"
+                return result
+            visited.add(url)
+            visited.add(final_url)
+            root_soup = await run_in_page_executor(parse_soup, body)
+            for link in extract_internal_links(root_soup, final_url):
+                if link not in visited:
+                    frontier.append((link, 1))
+
+        while frontier and len(result.pages) < max_pages:
+            page_url, depth = frontier.popleft()
+            if page_url in visited:
+                continue
+            visited.add(page_url)
+
+            try:
+                status, final_url, _, body = await _fetch(client, page_url, rate_limit_delay)
+            except Exception:  # noqa: BLE001
+                logger.debug("Phase B skipping %s for company %d", page_url, company_id, exc_info=True)
+                continue
+            if status >= 400 or not body:
+                continue
+            visited.add(final_url)
+
+            page_type = classify_page_type(final_url)
+            result.pages.append(
+                await run_in_page_executor(
+                    _make_page_result, page_type, page_url, final_url, status, body,
+                    company_id, url_candidate_id,
+                )
+            )
+
+            if depth < max_depth and len(result.pages) < max_pages:
+                soup = await run_in_page_executor(parse_soup, body)
+                for link in extract_internal_links(soup, final_url):
+                    if link not in visited:
+                        frontier.append((link, depth + 1))
+
+    if not result.pages:
+        result.failure_status = "no_content"
+        result.failure_detail = "Phase B found no crawlable pages beyond the identity set"
+    return result
+
+
 async def crawl_company_http(
     company_id: int,
     url: str,
     *,
     url_candidate_id: int | None = None,
-    max_pages: int = 5,
+    max_pages: int = 3,
     rate_limit_delay: float = 0.5,
     use_sitemap: bool = True,
 ) -> CrawlResult:
-    """Crawl a company website with plain httpx.
+    """Phase A — crawl the identity pages of a company website with plain httpx.
 
-    max_pages: total pages per domain (homepage counts as 1).
+    max_pages: total pages per domain (homepage counts as 1). Defaults to 3
+    (homepage + impressum + contact) because that is everything the confidence
+    ladder in resolve_company_extract reads: UID from impressum/contact, address
+    from JSON-LD/<address>/impressum text, name from domain+title. about/team/
+    services only lift the capped coverage residual, so fetching them before
+    identity is settled spends budget on a site that may not even be the right
+    company. Phase B (crawl_site_full) picks those up once identity is confirmed.
+
     rate_limit_delay: minimum seconds between requests to the same domain.
     use_sitemap: fetch robots.txt + sitemap.xml to find subpages and crawl-delay.
+      The sitemap pass also writes the full page inventory, which phase B reuses
+      as its frontier instead of re-discovering the site.
     """
     result = CrawlResult()
     max_subpages = max(0, max_pages - 1)
@@ -357,7 +470,9 @@ async def crawl_company_http(
             return result
 
         result.pages.append(
-            _make_page_result("homepage", url, final_url, status, body, company_id, url_candidate_id)
+            await run_in_page_executor(
+                _make_page_result, "homepage", url, final_url, status, body, company_id, url_candidate_id
+            )
         )
 
         if max_subpages == 0:
@@ -384,7 +499,10 @@ async def crawl_company_http(
                     s_status, s_final, _, s_body = await _fetch(sub_client, sub_url, effective_delay)
                     if s_status < 400:
                         result.pages.append(
-                            _make_page_result(page_type, sub_url, s_final, s_status, s_body, company_id, url_candidate_id)
+                            await run_in_page_executor(
+                                _make_page_result, page_type, sub_url, s_final, s_status, s_body,
+                                company_id, url_candidate_id,
+                            )
                         )
                 except Exception:
                     logger.debug("Skipping subpage %s for company %d", sub_url, company_id, exc_info=True)

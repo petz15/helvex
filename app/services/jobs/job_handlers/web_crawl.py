@@ -159,7 +159,9 @@ def handle_web_url_populate(ctx: JobContext) -> tuple[dict, str]:
 
 # ── web_crawl_http ────────────────────────────────────────────────────────────
 
-async def _crawl_one_target(crawl_fn, state, candidate, *, max_pages, rate_limit_delay, company_timeout, sem):
+async def _crawl_one_target(
+    crawl_fn, state, candidate, *, max_pages, rate_limit_delay, company_timeout, sem, extra_kwargs=None
+):
     async with sem:
         try:
             result = await asyncio.wait_for(
@@ -169,6 +171,7 @@ async def _crawl_one_target(crawl_fn, state, candidate, *, max_pages, rate_limit
                     url_candidate_id=candidate.id,
                     max_pages=max_pages,
                     rate_limit_delay=rate_limit_delay,
+                    **(extra_kwargs or {}),
                 ),
                 timeout=company_timeout,
             )
@@ -200,15 +203,22 @@ async def _crawl_targets_concurrently(targets, *, crawl_fn, max_pages, rate_limi
     """
     sem = asyncio.Semaphore(max(1, concurrency))
 
-    async def _wrapped(state, candidate):
+    async def _wrapped(state, candidate, extra_kwargs):
         kind, result, exc = await _crawl_one_target(
             crawl_fn, state, candidate,
             max_pages=max_pages, rate_limit_delay=rate_limit_delay,
-            company_timeout=company_timeout, sem=sem,
+            company_timeout=company_timeout, sem=sem, extra_kwargs=extra_kwargs,
         )
         return state, candidate, kind, result, exc
 
-    tasks = [asyncio.ensure_future(_wrapped(state, candidate)) for state, candidate in targets]
+    # Targets are (state, candidate) or (state, candidate, extra_kwargs) — the
+    # third element carries per-company data the caller resolved from the DB in
+    # its own thread (phase B's frontier seed), since the session cannot be
+    # touched from inside the event loop.
+    tasks = [
+        asyncio.ensure_future(_wrapped(t[0], t[1], t[2] if len(t) > 2 else None))
+        for t in targets
+    ]
     try:
         for coro in asyncio.as_completed(tasks):
             state, candidate, kind, result, exc = await coro
@@ -233,11 +243,18 @@ def _run_crawl_batch(
     limit: int | None = None,
     company_timeout: float = 120.0,
     concurrency: int = 1,
+    phase: str = "identity",
+    target_kwargs_fn=None,
 ) -> tuple[dict, str]:
-    """Shared batch-crawl loop used by both HTTP and Playwright handlers.
+    """Shared batch-crawl loop used by the HTTP, Playwright and content handlers.
 
     Releases stuck in_progress rows at start (crash recovery) and in a
     finally block (pause/fail recovery), so no company ever gets stranded.
+
+    `phase` scopes every claim and release to one crawl phase, so an identity
+    job and a content job can run side by side without stealing each other's
+    rows. `target_kwargs_fn(db, state, candidate) -> dict` runs in this thread
+    (DB-safe) to build per-company kwargs for the crawl function.
     """
     from app.services.platform import s3_client as _s3
     if _s3.is_crawl_bucket_configured():
@@ -251,12 +268,17 @@ def _run_crawl_batch(
     }
 
     # Release rows stuck in_progress from any previous crashed run
-    released = crawler_crud.release_in_progress_states(ctx.db, tier=tier)
+    released = crawler_crud.release_in_progress_states(ctx.db, tier=tier, phase=phase)
     ctx.db.commit()
     if released:
         ctx.event("info", f"Released {released} stuck in_progress rows from previous run")
 
-    if rerun and tier == "http":
+    if rerun and phase == "content":
+        reset_count = crawler_crud.reset_content_crawled(ctx.db, canton=canton)
+        ctx.db.commit()
+        if reset_count:
+            ctx.event("info", f"Rerun: reset {reset_count} completed content crawls to pending")
+    elif rerun and tier == "http":
         reset_count = crawler_crud.reset_http_crawled(ctx.db, canton=canton)
         ctx.db.commit()
         if reset_count:
@@ -270,16 +292,17 @@ def _run_crawl_batch(
     if tier == "playwright":
         count_sql = (
             "SELECT COUNT(*) FROM company_crawl_state "
-            "WHERE (crawl_status = 'pending' AND tier = 'playwright') "
-            "   OR crawl_status = 'js_required'"
+            "WHERE crawl_phase = :phase AND ("
+            "      (crawl_status = 'pending' AND tier = 'playwright') "
+            "   OR crawl_status = 'js_required')"
         )
-        total = int(ctx.db.execute(text(count_sql)).scalar() or 0)
+        total = int(ctx.db.execute(text(count_sql), {"phase": phase}).scalar() or 0)
     else:
         count_sql = (
             "SELECT COUNT(*) FROM company_crawl_state "
-            "WHERE crawl_status = 'pending' AND tier = :tier"
+            "WHERE crawl_status = 'pending' AND tier = :tier AND crawl_phase = :phase"
         )
-        total = int(ctx.db.execute(text(count_sql), {"tier": tier}).scalar() or 0)
+        total = int(ctx.db.execute(text(count_sql), {"tier": tier, "phase": phase}).scalar() or 0)
 
     if limit is not None:
         total = min(total, limit)
@@ -297,19 +320,25 @@ def _run_crawl_batch(
             claim_size = batch_size if limit is None else min(batch_size, limit - done)
             batch = crawler_crud.claim_crawl_batch(
                 ctx.db, tier=tier, batch_size=claim_size, canton=canton, order_by=order_by,
+                phase=phase,
             )
             if not batch:
                 break
 
             # Resolve candidates up front so a missing row doesn't consume a
             # concurrency slot below; failures here are recorded immediately.
-            crawl_targets = []  # list of (state, candidate)
+            # target_kwargs_fn also runs here, in this thread, because it reads
+            # the DB and the session must never be touched from the event loop.
+            crawl_targets = []  # list of (state, candidate[, extra_kwargs])
             for state in batch:
                 candidate = ctx.db.get(CompanyUrlCandidate, state.selected_url_id)
                 if not candidate:
                     crawler_crud.mark_crawl_failed(ctx.db, state, "http_error", "No URL candidate found")
                     continue
-                crawl_targets.append((state, candidate))
+                if target_kwargs_fn is not None:
+                    crawl_targets.append((state, candidate, target_kwargs_fn(ctx.db, state, candidate)))
+                else:
+                    crawl_targets.append((state, candidate))
 
             def _handle_crawl_result(state, candidate, kind, result, exc):
                 # Checked as each concurrent crawl completes (not once per whole
@@ -370,7 +399,13 @@ def _run_crawl_batch(
                     stats["js_required"] += 1
                     record_crawl_result(tier, "js_required")
                 else:
-                    crawler_crud.delete_web_pages_for_company(ctx.db, state.company_id)
+                    if phase == "content":
+                        # Never delete_web_pages_for_company here — that would wipe
+                        # the phase-A homepage/impressum rows the identity verdict
+                        # and its extract were computed from.
+                        crawler_crud.delete_content_pages_for_company(ctx.db, state.company_id)
+                    else:
+                        crawler_crud.delete_web_pages_for_company(ctx.db, state.company_id)
                     pages_crawled = []
                     fetched_urls: set[str] = set()
                     for i, p in enumerate(result.pages):
@@ -389,7 +424,10 @@ def _run_crawl_batch(
                             video_count=p.video_count,
                             has_contact_form=p.has_contact_form,
                             s3_key_html=p.s3_key_html,
-                            discovered_via="homepage" if i == 0 else "nav",
+                            discovered_via=(
+                                "crawl" if phase == "content"
+                                else ("homepage" if i == 0 else "nav")
+                            ),
                             priority=i,
                         )
                         pages_crawled.append(p.page_type)
@@ -402,6 +440,9 @@ def _run_crawl_batch(
                             already_saved_urls=fetched_urls,
                         )
                     crawler_crud.mark_crawl_done(ctx.db, state, pages_crawled)
+                    if phase == "content":
+                        # Both phases finished — nothing more to claim for this company.
+                        crawler_crud.mark_phase_done(ctx.db, state.company_id)
                     candidate.status = "crawled"
                     candidate.last_crawled_at = now
                     stats["crawled"] += 1
@@ -513,7 +554,61 @@ def handle_web_crawl_http(ctx: JobContext) -> tuple[dict, str]:
         order_by=str(ctx.params.get("order_by", "company_id_asc")),
         limit=int(limit_raw) if limit_raw else None,
         company_timeout=float(ctx.params.get("company_timeout", 120.0)),
-        concurrency=int(ctx.params.get("crawl_concurrency", 10)),
+        # Page processing now runs off the event loop (crawler_common.PAGE_WORKERS),
+        # so this semaphore genuinely bounds in-flight sites rather than queueing
+        # behind the loop's own blocking work.
+        concurrency=int(ctx.params.get("crawl_concurrency", 40)),
+    )
+
+
+# ── web_crawl_content (phase B) ───────────────────────────────────────────────
+
+def _make_content_target_kwargs(max_depth: int):
+    """Build the per-company frontier seeder for the phase-B full-site crawl.
+
+    The returned function runs in the job thread, never inside the event loop —
+    it touches the DB session, which SQLAlchemy does not allow concurrent use of.
+
+    The sitemap inventory phase A already persisted means phase B usually needs
+    zero discovery requests: no robots.txt, no sitemap.xml, no homepage re-fetch.
+    """
+    def _content_target_kwargs(db, state, candidate) -> dict:
+        return {
+            "seed_urls": crawler_crud.get_uncrawled_inventory_urls(db, state.company_id),
+            "visited_urls": crawler_crud.get_crawled_page_urls(db, state.company_id),
+            "max_depth": max_depth,
+        }
+    return _content_target_kwargs
+
+
+def handle_web_crawl_content(ctx: JobContext) -> tuple[dict, str]:
+    """Phase B — full-site crawl for companies whose identity phase A confirmed.
+
+    Claims only crawl_phase='content' rows, so it runs concurrently with the
+    identity crawler without contending for the same companies.
+    """
+    from app.services.enrichment.crawler_http import crawl_site_full
+
+    limit_raw = ctx.params.get("limit")
+    return _run_crawl_batch(
+        ctx,
+        tier="http",
+        phase="content",
+        batch_size=int(ctx.params.get("batch_size", 10)),
+        canton=ctx.params.get("canton") or None,
+        # Page budget per site. Much larger than phase A's 3 — the intent here is
+        # the whole website, not a fixed page set.
+        max_pages=int(ctx.params.get("max_pages", 60)),
+        rate_limit_delay=float(ctx.params.get("rate_limit_delay", 0.5)),
+        crawl_fn=crawl_site_full,
+        rerun=bool(ctx.params.get("rerun", False)),
+        order_by=str(ctx.params.get("order_by", "combined_score_desc")),
+        limit=int(limit_raw) if limit_raw else None,
+        # A 60-page site at ~0.5 s politeness delay needs a far longer budget
+        # than phase A's 3 pages.
+        company_timeout=float(ctx.params.get("company_timeout", 600.0)),
+        concurrency=int(ctx.params.get("crawl_concurrency", 20)),
+        target_kwargs_fn=_make_content_target_kwargs(int(ctx.params.get("max_depth", 3))),
     )
 
 
@@ -559,6 +654,7 @@ def handle_web_extract(ctx: JobContext) -> tuple[dict, str]:
 
     batch_size = int(ctx.params.get("batch_size", 200))
     stats: dict = {"extracted": 0, "empty": 0, "s3_errors": 0, "errors": [], "rescored": 0}
+    _content_enqueued = False  # kick the phase-B crawler at most once per run
     # Loaded once per run; drives the company-level website verdict below.
     _thr = ws.load_thresholds(ctx.db)
 
@@ -717,20 +813,40 @@ def handle_web_extract(ctx: JobContext) -> tuple[dict, str]:
                     if (verdict.website_count or 0) >= 2:
                         stats["multi_site"] = stats.get("multi_site", 0) + 1
 
+                    # Identity resolution (quarantine / fallback / advance to phase B)
+                    # applies only while the company is still in the identity phase.
+                    # After phase B the same extract re-runs over a much larger page
+                    # set; without this gate a confirmed company would re-enter the
+                    # fallback chain and re-queue crawls it has already passed.
+                    crawl_phase = ctx.db.execute(
+                        text("SELECT crawl_phase FROM company_crawl_state WHERE company_id = :cid"),
+                        {"cid": company_id},
+                    ).scalar()
+                    in_identity_phase = crawl_phase in (None, "identity")
+
+                    confirmed = best.uid_matches_zefix is True or (
+                        best.uid_matches_zefix is None and (best.confidence or 0) >= 0.65
+                    )
+
                     # UID-mismatch auto-quarantine: reject the wrong-site candidate
                     # so it's never re-selected. Always triggers a fallback crawl.
-                    if any_extracted and best.uid_matches_zefix is False:
+                    if in_identity_phase and any_extracted and best.uid_matches_zefix is False:
                         crawler_crud.reject_url_candidate(ctx.db, best.url_candidate_id)
                         stats["quarantined"] = stats.get("quarantined", 0) + 1
+
+                    # Identity confirmed — hand the company to the phase-B full-site
+                    # crawler. advance_to_content_phase is a no-op unless the row is
+                    # still in the identity phase, so this is safe to re-run.
+                    if in_identity_phase and any_extracted and confirmed:
+                        if crawler_crud.advance_to_content_phase(ctx.db, company_id):
+                            stats["advanced_to_content"] = stats.get("advanced_to_content", 0) + 1
 
                     # Fallback: if UID mismatch, or no UID found with low confidence,
                     # try the next untried, non-blocked URL candidate.
                     if (
-                        any_extracted
-                        and (
-                            best.uid_matches_zefix is False
-                            or (best.uid_matches_zefix is None and (best.confidence or 0) < 0.65)
-                        )
+                        in_identity_phase
+                        and any_extracted
+                        and not confirmed
                     ):
                         already_tried = set(pages_by_candidate.keys())
                         fallback = crawler_crud.get_next_crawlable_candidate(
@@ -752,6 +868,12 @@ def handle_web_extract(ctx: JobContext) -> tuple[dict, str]:
                                 stats["fallbacks"] = stats.get("fallbacks", 0) + 1
                             except Exception:  # noqa: BLE001
                                 pass  # Dedup hit or queue full — not fatal
+                        else:
+                            # Candidates exhausted and identity never confirmed —
+                            # retire the company rather than leaving it pending in
+                            # the identity phase forever.
+                            crawler_crud.mark_phase_done(ctx.db, company_id)
+                            stats["identity_exhausted"] = stats.get("identity_exhausted", 0) + 1
 
                 # Always mark processed so the queue drains even when nothing is found.
                 crawler_crud.mark_pages_extracted(ctx.db, company_id)
@@ -769,16 +891,36 @@ def handle_web_extract(ctx: JobContext) -> tuple[dict, str]:
 
         ctx.db.commit()
         done += len(company_ids)
+
+        # Companies confirmed this batch are now queued for phase B. Kick the
+        # content crawler so it runs in parallel on another pod, same pattern as
+        # the crawl job's auto-enqueue of extraction. Dedup is off for this type,
+        # so guard with _content_enqueued rather than relying on the queue.
+        if stats.get("advanced_to_content", 0) > 0 and not _content_enqueued:
+            try:
+                ctx.enqueue_job(
+                    job_type="web_crawl_content",
+                    label="Full-site content crawl (auto — identity confirmed)",
+                    params={},
+                    org_id=None,
+                    user_id=ctx.job.user_id,
+                )
+                ctx.db.commit()
+                _content_enqueued = True
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("Auto-enqueue web_crawl_content skipped: %s", exc)
+
         msg = (
             f"Extracted {done}/{total} — {stats['extracted']} with data, "
-            f"{stats['empty']} empty, {stats['s3_errors']} S3 errors, "
-            f"{len(stats['errors'])} errors"
+            f"{stats['empty']} empty, {stats.get('advanced_to_content', 0)} → phase B, "
+            f"{stats['s3_errors']} S3 errors, {len(stats['errors'])} errors"
         )
         crud.update_progress(ctx.db, ctx.job, message=msg, done=done, total=total, stats=dict(stats))
         crud.create_event(ctx.db, job_id=ctx.job.id, level="debug", message=msg)
 
     done_msg = (
         f"Extraction done — {stats['extracted']} companies with structured data, "
+        f"{stats.get('advanced_to_content', 0)} advanced to full-site crawl, "
         f"{stats['empty']} empty, {stats['s3_errors']} S3 errors, "
         f"{len(stats['errors'])} errors"
     )
@@ -959,7 +1101,9 @@ def handle_web_crawl_single(ctx: JobContext) -> tuple[dict, str]:
         selected = ctx.db.get(crawler_crud.CompanyUrlCandidate, target_candidate_id)
         if not selected or selected.company_id != company_id:
             return {"company_id": company_id}, f"Candidate {target_candidate_id} not found for company {company_id}"
-        if crawler_crud.is_crawl_blocked(selected.url):
+        if crawler_crud.is_crawl_blocked(
+            selected.url, crawler_crud.get_effective_crawl_blocklist(ctx.db)
+        ):
             return {"company_id": company_id}, f"Candidate {target_candidate_id} is on the crawl blocklist"
     else:
         # Select best candidate if none is selected yet

@@ -2,12 +2,15 @@
 from __future__ import annotations
 
 import asyncio
+import functools
 import ipaddress
 import logging
+import os
 import re
 import socket
 import time
 import zlib
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from typing import Any
 from urllib.parse import urljoin, urlparse
@@ -15,6 +18,27 @@ from urllib.parse import urljoin, urlparse
 from bs4 import BeautifulSoup
 
 logger = logging.getLogger(__name__)
+
+# ── Off-loop page processing ──────────────────────────────────────────────────
+#
+# Turning a fetched page into a PageResult is blocking work: an lxml parse plus
+# media/word counting and language detection (CPU-bound), followed by a blocking
+# boto3 S3 PUT. Doing that inline on the crawl coroutine stalls the event loop,
+# and with it EVERY other company being crawled concurrently on the same loop —
+# which is why raising `crawl_concurrency` on its own never moved throughput.
+#
+# Hand that work to a thread pool instead so the loop stays free to keep sockets
+# in flight. Sized independently of crawl_concurrency: it bounds how much CPU +
+# S3 work is in flight, while the semaphore bounds how many sites are open.
+PAGE_WORKERS: int = int(os.getenv("CRAWL_PAGE_WORKERS", "32"))
+
+_page_executor = ThreadPoolExecutor(max_workers=PAGE_WORKERS, thread_name_prefix="crawl-page")
+
+
+async def run_in_page_executor(fn, *args):
+    """Run a blocking page-processing function off the event loop."""
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(_page_executor, functools.partial(fn, *args))
 
 # ── Subpage keyword sets (DE / FR / IT / EN) ──────────────────────────────────
 
@@ -152,9 +176,24 @@ _SUBPAGE_PRIORITY: list[tuple[str, frozenset[str]]] = [
 # news/jobs/products/references are inventoried but not fetched by default —
 # low signal-per-byte for identity/NOGA/AI use, high volume risk (e.g. paginated
 # job boards or catalogs). Fetch them later on demand from the profile UI.
+#
+# `privacy` is deliberately NOT here despite sitting at priority 2: it is absent
+# from crawler_extract._TEXT_PAGES, so its main text was never extracted — it
+# only ever contributed the unconditional email/phone/social/UID regexes, all of
+# which impressum already supplies. It was consuming a budget slot ahead of
+# contact/about and returning almost nothing. Still inventoried, just not fetched.
 _FETCH_WORTHY_TYPES = frozenset({
-    "impressum", "privacy", "contact", "about", "team", "services",
+    "impressum", "contact", "about", "team", "services",
 })
+
+# Phase A (identity) budget: the confidence ladder in resolve_company_extract
+# reads UID from impressum/contact, address from JSON-LD/<address>/impressum
+# text, and name from domain+title. Nothing in it reads about/team/services, so
+# these are the only types worth fetching before identity is settled.
+IDENTITY_PAGE_TYPES = frozenset({"impressum", "contact"})
+
+# Phase B (content) — everything else is fair game; see crawl_site_full.
+CONTENT_PAGE_TYPES = frozenset(t for t, _ in _SUBPAGE_PRIORITY) - IDENTITY_PAGE_TYPES
 
 # Fetch-selection uses only the fetch-worthy subset (still priority-ordered) so
 # raising the crawl budget later never starts spending it on job/news/product
@@ -546,6 +585,92 @@ def find_subpage_links(
             break
 
     return dict(list(type_to_url.items())[:max_subpages])
+
+
+# Path fragments that explode a full-site crawl without adding signal:
+# pagination, filters, archives, and per-item listing pages.
+_CRAWL_TRAP_PATTERNS: tuple[str, ...] = (
+    "/page/", "/seite/", "/tag/", "/tags/", "/category/", "/kategorie/",
+    "/archiv", "/archive", "/feed", "/rss", "/wp-json", "/wp-admin",
+    "/cart", "/warenkorb", "/checkout", "/login", "/logout", "/signin",
+    "/search", "/suche", "/recherche", "/filter", "/sort",
+    "?s=", "?q=", "?search=", "?page=", "?paged=",
+    "/print/", "?print=", "/calendar", "/kalender", "/event/",
+)
+
+# Extensions we never want to spend a fetch on (binary/asset, not HTML text).
+_NON_HTML_SUFFIXES: tuple[str, ...] = (
+    ".pdf", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx", ".zip", ".rar",
+    ".jpg", ".jpeg", ".png", ".gif", ".svg", ".webp", ".ico", ".bmp", ".tiff",
+    ".mp4", ".mp3", ".avi", ".mov", ".wmv", ".webm", ".wav", ".ogg",
+    ".css", ".js", ".json", ".xml", ".txt", ".csv", ".exe", ".dmg", ".apk",
+)
+
+
+def is_crawlable_page_url(url: str, base_host: str) -> bool:
+    """Return True if `url` is worth spending a full-site crawl slot on.
+
+    Rejects: off-host links, non-HTTP schemes, binary/asset extensions, and
+    known crawl traps (pagination, faceted filters, archives, feeds, carts).
+    Without the trap filter a single WooCommerce or WordPress site can expand
+    into tens of thousands of near-duplicate URLs and consume the entire budget.
+    """
+    try:
+        parsed = urlparse(url)
+    except (ValueError, TypeError):
+        return False
+    if parsed.scheme not in ("http", "https"):
+        return False
+    if parsed.netloc != base_host:
+        return False
+
+    path_lower = parsed.path.lower()
+    if path_lower.endswith(_NON_HTML_SUFFIXES):
+        return False
+
+    full_lower = (parsed.path + ("?" + parsed.query if parsed.query else "")).lower()
+    return not any(trap in full_lower for trap in _CRAWL_TRAP_PATTERNS)
+
+
+def classify_page_type(url: str) -> str:
+    """Best-effort page type for an arbitrary URL, by path keyword.
+
+    Falls back to 'other' — phase B crawls whole sites, so most pages have no
+    recognised type and that is fine; page_type is a retrieval hint, not a gate.
+    """
+    path = urlparse(url).path.lower()
+    for page_type, keywords in _SUBPAGE_PRIORITY:
+        if any(kw in path for kw in keywords):
+            return page_type
+    return "other"
+
+
+def extract_internal_links(soup: BeautifulSoup, base_url: str) -> list[str]:
+    """All crawlable same-host links on a page, de-duplicated, fragments stripped.
+
+    The frontier expander for the phase-B full-site crawl.
+    """
+    base_host = urlparse(base_url).netloc
+    out: list[str] = []
+    seen: set[str] = set()
+
+    for tag in soup.find_all("a", href=True):
+        href = str(tag["href"]).strip()
+        if not href or href.startswith(("mailto:", "tel:", "javascript:", "#")):
+            continue
+        try:
+            abs_url = urljoin(base_url, href)
+        except (ValueError, TypeError):
+            continue
+        abs_url = urlparse(abs_url)._replace(fragment="").geturl()
+        if abs_url in seen:
+            continue
+        if not is_crawlable_page_url(abs_url, base_host):
+            continue
+        seen.add(abs_url)
+        out.append(abs_url)
+
+    return out
 
 
 def classify_urls_by_path(

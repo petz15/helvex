@@ -76,10 +76,10 @@
         "tagline": "Trova e monitora le aziende giuste con filtri, raccolte e digest.",
         "f1": "Combina stato, geografia, punteggio e filtri scopo",
         "f2": "Organizza i target in raccolte riutilizzabili con nome",
-          "f3": "E-mail di digest giornalieri per le nuove aziende corrispondenti",
-          "f4": "Arricchimento tramite ricerca web per segnali aggiuntivi",
-          "f5": "Vista mappa con lat/lon e ispezione dei cluster"
-        },
+        "f3": "E-mail di digest giornalieri per le nuove aziende corrispondenti",
+        "f4": "Arricchimento tramite ricerca web per segnali aggiuntivi",
+        "f5": "Vista mappa con lat/lon e ispezione dei cluster"
+      },
       "workspace": {
         "title": "Workspace & Scalabilità",
         "tagline": "Workspace di squadra, fatturazione trasparente e controlli di livello enterprise.",
@@ -107,14 +107,35 @@
       },
       "cta": "Crea il tuo account gratuito →",
       "actions": {
-        "batchClassify": { "label": "Classificazione LLM batch", "unit": "per azienda" },
-        "immediateClassify": { "label": "Classificazione LLM immediata", "unit": "per azienda" },
-        "webSearch": { "label": "Ricerca web", "unit": "per azienda" },
-        "flexRescore": { "label": "Rescoring flessibile", "unit": "per azienda" },
-        "fullRecluster": { "label": "Reclusterizzazione completa", "unit": "forfait" },
-        "exportBasic": { "label": "Esportazione massiva – base (UID/Nome/Cantone)", "unit": "per 10k righe" },
-        "exportDetailed": { "label": "Esportazione massiva – dettagliata", "unit": "per 10k righe" }
-      }  
+        "batchClassify": {
+          "label": "Classificazione LLM batch",
+          "unit": "per azienda"
+        },
+        "immediateClassify": {
+          "label": "Classificazione LLM immediata",
+          "unit": "per azienda"
+        },
+        "webSearch": {
+          "label": "Ricerca web",
+          "unit": "per azienda"
+        },
+        "flexRescore": {
+          "label": "Rescoring flessibile",
+          "unit": "per azienda"
+        },
+        "fullRecluster": {
+          "label": "Reclusterizzazione completa",
+          "unit": "forfait"
+        },
+        "exportBasic": {
+          "label": "Esportazione massiva – base (UID/Nome/Cantone)",
+          "unit": "per 10k righe"
+        },
+        "exportDetailed": {
+          "label": "Esportazione massiva – dettagliata",
+          "unit": "per 10k righe"
+        }
+      }
     },
     "footer": {
       "copyright": "© {year} Helvex · Balogh Consulting",
@@ -731,7 +752,6 @@
       "people": "Persone",
       "noPages": "Nessuna pagina registrata.",
       "colPage": "Pagina",
-      "colStatus": "Stato",
       "statusCrawled": "Analizzata",
       "statusInventory": "Scoperta",
       "colHttp": "HTTP",
@@ -740,7 +760,12 @@
       "colImg": "Img",
       "colVid": "Video",
       "colForm": "Modulo",
-      "colHtml": "HTML"
+      "colHtml": "HTML",
+      "contentPendingTitle": "Sito web confermato — contenuti non ancora raccolti",
+      "contentPendingBody": "Questo URL è stato verificato come sito web dell'azienda. La scansione completa del sito, che raccoglie servizi, team e contenuti delle pagine, non è ancora terminata: i campi sottostanti sono quindi incompleti, non vuoti.",
+      "contentPendingBadge": "Contenuti in attesa",
+      "notCollectedYet": "Non ancora raccolto",
+      "visitWebsite": "Visita il sito web"
     },
     "simap": {
       "title": "Appalti pubblici (SIMAP)",
@@ -1008,7 +1033,11 @@
     "guidedSearch": {
       "orGuide": "o lasciati guidare",
       "whatTitle": "Cosa stai cercando?",
-      "tiles": { "companies": "Aziende", "people": "Persone", "jobs": "Lavori" },
+      "tiles": {
+        "companies": "Aziende",
+        "people": "Persone",
+        "jobs": "Lavori"
+      },
       "tilesSub": {
         "companies": "700.000+ registrate",
         "people": "Fondatori, direttori, proprietari",
@@ -1016,7 +1045,13 @@
       },
       "skipAdvanced": "Vai ai filtri avanzati →",
       "wizard": {
-        "steps": { "what": "COSA", "where": "DOVE", "industry": "SETTORE", "refine": "AFFINA", "review": "RIEPILOGO" },
+        "steps": {
+          "what": "COSA",
+          "where": "DOVE",
+          "industry": "SETTORE",
+          "refine": "AFFINA",
+          "review": "RIEPILOGO"
+        },
         "questions": {
           "what": "Cosa stai cercando?",
           "where": "Dove in Svizzera?",
@@ -1071,7 +1106,45 @@
       "exportQueued": "Export in coda — scaricare dalla pagina Lavori quando pronto."
     },
     "filters": {
-      "chipLabels": {"q": "Nome", "uid": "IDI", "canton": "Cantone", "review_status": "Revisione", "contact_status": "Contatto", "has_website": "Sito web", "google_searched": "Ricerca web", "tags": "Tag", "ai_category": "Classe IA", "tfidf_cluster": "Cluster", "purpose_keywords": "Parola chiave", "noga_code": "Codice NOGA", "noga_label": "Etichetta NOGA", "noga_level": "Livello NOGA", "purpose_language": "Lingua", "business_model": "Modello di business", "legal_form": "Forma giuridica", "registered_after": "Prima FUSC dopo", "registered_before": "Prima FUSC prima", "min_web_score": "Min Web", "max_web_score": "Max Web", "min_flex_score": "Min Flex", "max_flex_score": "Max Flex", "min_ai_score": "Min IA", "max_ai_score": "Max IA", "min_combined_score": "Min Combinato", "max_combined_score": "Max Combinato", "exclude_review_status": "Escl. revisione", "exclude_contact_status": "Escl. contatto", "exclude_canton": "Escl. cantone", "exclude_tags": "Escl. tag", "exclude_tfidf_cluster": "Escl. cluster", "exclude_purpose_keywords": "Escl. parola chiave", "exclude_ai_category": "Escl. classe IA", "exclude_noga_code": "Escl. codice NOGA", "exclude_noga_label": "Escl. etichetta NOGA", "exclude_noga_level": "Escl. livello NOGA"},
+      "chipLabels": {
+        "q": "Nome",
+        "uid": "IDI",
+        "canton": "Cantone",
+        "review_status": "Revisione",
+        "contact_status": "Contatto",
+        "has_website": "Sito web",
+        "google_searched": "Ricerca web",
+        "tags": "Tag",
+        "ai_category": "Classe IA",
+        "tfidf_cluster": "Cluster",
+        "purpose_keywords": "Parola chiave",
+        "noga_code": "Codice NOGA",
+        "noga_label": "Etichetta NOGA",
+        "noga_level": "Livello NOGA",
+        "purpose_language": "Lingua",
+        "business_model": "Modello di business",
+        "legal_form": "Forma giuridica",
+        "registered_after": "Prima FUSC dopo",
+        "registered_before": "Prima FUSC prima",
+        "min_web_score": "Min Web",
+        "max_web_score": "Max Web",
+        "min_flex_score": "Min Flex",
+        "max_flex_score": "Max Flex",
+        "min_ai_score": "Min IA",
+        "max_ai_score": "Max IA",
+        "min_combined_score": "Min Combinato",
+        "max_combined_score": "Max Combinato",
+        "exclude_review_status": "Escl. revisione",
+        "exclude_contact_status": "Escl. contatto",
+        "exclude_canton": "Escl. cantone",
+        "exclude_tags": "Escl. tag",
+        "exclude_tfidf_cluster": "Escl. cluster",
+        "exclude_purpose_keywords": "Escl. parola chiave",
+        "exclude_ai_category": "Escl. classe IA",
+        "exclude_noga_code": "Escl. codice NOGA",
+        "exclude_noga_label": "Escl. etichetta NOGA",
+        "exclude_noga_level": "Escl. livello NOGA"
+      },
       "proTag": "Pro",
       "proTitle": "Funzione IA — consuma crediti per azienda",
       "filtersBtn": "Filtri",

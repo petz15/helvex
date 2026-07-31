@@ -5,7 +5,7 @@ import useSWR from "swr";
 import {
   Globe, Mail, MapPin, Link2, Languages, Tag, FileText,
   CheckCircle2, AlertTriangle, ExternalLink, Loader2, Hash, Users,
-  ChevronUp, Trash2, Flag, RefreshCw, Search, Briefcase,
+  ChevronUp, Trash2, Flag, RefreshCw, Search, Briefcase, Clock,
 } from "lucide-react";
 import {
   fetchAllWebExtracts, promoteWebExtract, discardWebExtract, runCompanyWebSearch,
@@ -61,6 +61,11 @@ interface WebPage {
 interface WebExtractResponse {
   extract: WebExtract | null;
   pages: WebPage[];
+  // 'identity' = phase A still resolving which URL is the company's own site
+  // 'content'  = identity confirmed, full-site crawl queued or running
+  // 'done'     = both phases finished
+  crawl_phase: "identity" | "content" | "done" | null;
+  crawl_status: string | null;
   candidate_count: number;
 }
 
@@ -81,12 +86,22 @@ function fmtDate(iso: string | null): string {
 }
 
 /** A labelled value row; renders "—" muted when empty so gaps are visible. */
-function Field({ label, children, empty }: { label: string; children?: React.ReactNode; empty?: boolean }) {
+function Field({ label, children, empty, pendingLabel }: {
+  label: string; children?: React.ReactNode; empty?: boolean;
+  // When the full-site crawl hasn't run yet, an empty content field means
+  // "not collected" — not "we looked and there is nothing". Showing a bare
+  // em-dash there reads as a negative finding, which is wrong.
+  pendingLabel?: string;
+}) {
   return (
     <div className="flex gap-3 py-1.5">
       <span className="text-[12px] text-slate-400 w-28 shrink-0 pt-0.5">{label}</span>
       <div className="text-[13px] text-slate-700 min-w-0 flex-1">
-        {empty ? <span className="text-slate-300">—</span> : children}
+        {empty
+          ? (pendingLabel
+              ? <span className="text-slate-400 italic">{pendingLabel}</span>
+              : <span className="text-slate-300">—</span>)
+          : children}
       </div>
     </div>
   );
@@ -485,6 +500,10 @@ export function WebsitePanel({ companyId, isSuperadmin = false, websiteStatus = 
   // normal pending state, not a failure, so it must not share noStructuredData's
   // "extraction ran and found nothing" warning styling.
   const pendingExtraction = pages.some(p => p.crawled && p.needs_extraction);
+  // Phase A confirmed the URL but phase B (the full-site content crawl) hasn't
+  // finished. The site is real and worth visiting — the content fields just
+  // aren't populated yet, which must read differently from "nothing found".
+  const contentPending = data?.crawl_phase === "content";
 
   // Nothing crawled at all
   if (!extract && pages.length === 0) {
@@ -529,6 +548,11 @@ export function WebsitePanel({ companyId, isSuperadmin = false, websiteStatus = 
       <div className="bg-white rounded-xl border border-[#e6e8ec] px-4 py-3 flex flex-wrap items-center gap-x-6 gap-y-2">
         <WebsiteStatusBadge status={websiteStatus} count={websiteCount} />
         <IdentityCategoryBadge category={extract?.identity_category} />
+        {contentPending && (
+          <span className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 border border-blue-200">
+            <Clock size={10} /> {t.contentPendingBadge}
+          </span>
+        )}
         <div className="flex items-center gap-2 min-w-0">
           <Globe size={15} className="text-[#2563eb] shrink-0" />
           {extract?.url ? (
@@ -573,7 +597,23 @@ export function WebsitePanel({ companyId, isSuperadmin = false, websiteStatus = 
         )}
       </div>
 
-      {!extract && (
+      {contentPending && (
+        <div className="bg-blue-50 border border-blue-200 rounded-xl px-4 py-3 flex gap-3">
+          <Clock size={16} className="text-blue-600 shrink-0 mt-0.5" />
+          <div className="min-w-0">
+            <p className="text-sm font-medium text-blue-900">{t.contentPendingTitle}</p>
+            <p className="text-[13px] text-blue-800 mt-0.5">{t.contentPendingBody}</p>
+            {extract?.url && (
+              <a href={extract.url} target="_blank" rel="noopener noreferrer"
+                 className="inline-flex items-center gap-1 mt-2 text-[13px] font-medium text-blue-700 hover:underline">
+                {t.visitWebsite} <ExternalLink size={11} className="shrink-0" />
+              </a>
+            )}
+          </div>
+        </div>
+      )}
+
+      {!extract && !contentPending && (
         pendingExtraction ? (
           <div className="bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm text-slate-600">
             {t.pendingExtraction}
@@ -661,7 +701,8 @@ export function WebsitePanel({ companyId, isSuperadmin = false, websiteStatus = 
         <Field label={t.description} empty={!extract?.description}>
           <p className="leading-relaxed">{extract?.description}</p>
         </Field>
-        <Field label={t.aboutText} empty={!extract?.about_text || extract.about_text === extract.description}>
+        <Field label={t.aboutText} empty={!extract?.about_text || extract.about_text === extract.description}
+               pendingLabel={contentPending ? t.notCollectedYet : undefined}>
           <p className="leading-relaxed text-slate-600">{extract?.about_text}</p>
         </Field>
         <Field label={t.languages} empty={!extract?.languages.length}>
@@ -670,7 +711,8 @@ export function WebsitePanel({ companyId, isSuperadmin = false, websiteStatus = 
             {extract?.languages.map(l => l.toUpperCase()).join(", ")}
           </span>
         </Field>
-        <Field label={t.keywords} empty={!extract?.service_keywords.length}>
+        <Field label={t.keywords} empty={!extract?.service_keywords.length}
+               pendingLabel={contentPending ? t.notCollectedYet : undefined}>
           <div className="flex flex-wrap gap-1.5">
             {extract?.service_keywords.map(k => (
               <span key={k} className="inline-flex items-center gap-1 text-[12px] px-2 py-0.5 rounded-full bg-slate-100 text-slate-600">
@@ -679,7 +721,8 @@ export function WebsitePanel({ companyId, isSuperadmin = false, websiteStatus = 
             ))}
           </div>
         </Field>
-        <Field label={t.servicesFound} empty={!extract?.services_struct.length}>
+        <Field label={t.servicesFound} empty={!extract?.services_struct.length}
+               pendingLabel={contentPending ? t.notCollectedYet : undefined}>
           <div className="space-y-2">
             {extract?.services_struct.map(s => (
               <div key={s.title} className="border-l-2 border-slate-200 pl-2.5">
@@ -691,7 +734,8 @@ export function WebsitePanel({ companyId, isSuperadmin = false, websiteStatus = 
             ))}
           </div>
         </Field>
-        <Field label={t.people} empty={!extract?.persons.length && !extract?.persons_struct.length}>
+        <Field label={t.people} empty={!extract?.persons.length && !extract?.persons_struct.length}
+               pendingLabel={contentPending ? t.notCollectedYet : undefined}>
           {extract && extract.persons_struct.length > 0 ? (
             <div className="flex flex-wrap gap-1.5">
               {extract.persons_struct.map(p => (

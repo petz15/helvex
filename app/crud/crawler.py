@@ -9,10 +9,12 @@ from __future__ import annotations
 
 import json
 import logging
+import threading
+import time
 from datetime import datetime, timezone
 from typing import Any
 
-from sqlalchemy import text
+from sqlalchemy import bindparam as sa_bindparam, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
@@ -78,11 +80,13 @@ def select_best_candidate(db: Session, company_id: int) -> CompanyUrlCandidate |
     """Mark the highest-scoring non-blocked pending candidate as 'selected'.
 
     Any existing 'selected' row for this company is demoted back to 'pending'.
-    Directory sites and social media (CRAWL_BLOCKED_DOMAINS) are skipped so the
-    crawler never tries to scrape moneyhouse.ch, LinkedIn, etc. as company websites.
+    Directory sites and social media are skipped so the crawler never tries to
+    scrape moneyhouse.ch, LinkedIn, etc. as company websites — including the
+    admin-approved directory domains, which the static set does not carry
+    (see get_effective_crawl_blocklist).
     Returns the newly selected candidate, or None if no crawlable candidates exist.
     """
-    from app.services.scoring.scoring import CRAWL_BLOCKED_DOMAINS
+    blocked = get_effective_crawl_blocklist(db)
 
     # Demote current selection
     db.query(CompanyUrlCandidate).filter_by(company_id=company_id, status="selected").update(
@@ -95,7 +99,7 @@ def select_best_candidate(db: Session, company_id: int) -> CompanyUrlCandidate |
         .all()
     )
     for best in candidates:
-        if not is_crawl_blocked(best.url, CRAWL_BLOCKED_DOMAINS):
+        if not is_crawl_blocked(best.url, blocked):
             best.status = "selected"
             db.flush()
             return best
@@ -234,12 +238,16 @@ def claim_crawl_batch(
     batch_size: int = 20,
     canton: str | None = None,
     order_by: str = "company_id_asc",
+    phase: str = "identity",
 ) -> list[CompanyCrawlState]:
     """Atomically claim a batch of crawl states via SELECT FOR UPDATE SKIP LOCKED.
 
     HTTP tier:       picks up crawl_status='pending' AND tier='http'
     Playwright tier: picks up crawl_status='pending' AND tier='playwright'
                      PLUS crawl_status='js_required' (escalated by HTTP workers)
+
+    `phase` scopes the claim to one crawl phase, so identity and content workers
+    claim disjoint rows and can run concurrently without coordinating.
     """
     now = datetime.now(timezone.utc)
 
@@ -273,11 +281,13 @@ def claim_crawl_batch(
 
     if canton:
         params["canton"] = canton
+    params["phase"] = phase
 
     sql = text(f"""
         SELECT cs.company_id FROM company_crawl_state cs
         {join_clause}
         WHERE {status_clause}
+          AND cs.crawl_phase = :phase
           AND (cs.next_crawl_at IS NULL OR cs.next_crawl_at <= :now)
           AND cs.selected_url_id IS NOT NULL
           {canton_clause}
@@ -395,13 +405,17 @@ def reset_crawl_for_recrawl(db: Session, state: CompanyCrawlState) -> None:
     db.flush()
 
 
-def release_in_progress_states(db: Session, tier: str) -> int:
+def release_in_progress_states(db: Session, tier: str, phase: str | None = None) -> int:
     """Reset company_crawl_state rows stuck in 'in_progress' back to 'pending'.
 
     Called at the start of each crawl job run (covers resume-after-crash) and on
     job failure/pause, so pods dying mid-batch don't permanently strand companies.
     For 'playwright' tier, also releases rows where tier='playwright' since those
     were escalated by the HTTP crawler before being claimed.
+
+    `phase` scopes the release to one crawl phase. Identity and content workers
+    run concurrently, so an unscoped release would let one job's startup sweep
+    yank rows out from under the other job's in-flight batch.
     Returns the number of rows released.
     """
     if tier == "playwright":
@@ -409,15 +423,97 @@ def release_in_progress_states(db: Session, tier: str) -> int:
     else:
         tier_clause = "tier = :tier"
 
+    params: dict[str, Any] = {"tier": tier}
+    phase_clause = ""
+    if phase is not None:
+        phase_clause = "AND crawl_phase = :phase"
+        params["phase"] = phase
+
     result = db.execute(
         text(
             f"UPDATE company_crawl_state SET crawl_status = 'pending' "  # noqa: S608
-            f"WHERE crawl_status = 'in_progress' AND {tier_clause}"
+            f"WHERE crawl_status = 'in_progress' AND {tier_clause} {phase_clause}"
         ),
-        {"tier": tier},
+        params,
     )
     db.flush()
     return result.rowcount
+
+
+# ── Phase transitions ──────────────────────────────────────────────────────────
+
+def advance_to_content_phase(db: Session, company_id: int) -> bool:
+    """Move a company from phase A (identity) to phase B (content).
+
+    Called from handle_web_extract once identity is confirmed. Idempotent and
+    safe under concurrency: the WHERE clause only matches a row still sitting in
+    the identity phase, so a re-run of extraction on an already-advanced company
+    (or two extract workers racing on it) cannot re-queue a finished content
+    crawl. Returns True if this call performed the transition.
+    """
+    result = db.execute(
+        text(
+            "UPDATE company_crawl_state "
+            "SET crawl_phase = 'content', crawl_status = 'pending', tier = 'http', "
+            "    next_crawl_at = NULL, consecutive_failures = 0, crawl_error_detail = NULL "
+            "WHERE company_id = :cid AND crawl_phase = 'identity'"
+        ),
+        {"cid": company_id},
+    )
+    db.flush()
+    return bool(result.rowcount)
+
+
+def mark_phase_done(db: Session, company_id: int) -> None:
+    """Mark a company as finished with both crawl phases."""
+    db.execute(
+        text("UPDATE company_crawl_state SET crawl_phase = 'done' WHERE company_id = :cid"),
+        {"cid": company_id},
+    )
+    db.flush()
+
+
+def get_uncrawled_inventory_urls(
+    db: Session,
+    company_id: int,
+    limit: int = 500,
+) -> list[tuple[str, str]]:
+    """Return (page_type, url) for pages discovered but never fetched.
+
+    Phase A's sitemap pass writes these rows (save_page_inventory, crawled=false),
+    so phase B can seed its frontier from the DB instead of re-fetching
+    robots.txt and sitemap.xml. Ordered by the same _SUBPAGE_PRIORITY rank the
+    inventory was classified with, so the highest-signal pages are crawled first
+    when the budget runs out.
+    """
+    rows = db.execute(
+        text(
+            "SELECT page_type, url FROM company_web_pages "
+            "WHERE company_id = :cid AND crawled IS FALSE "
+            "ORDER BY priority NULLS LAST, id "
+            "LIMIT :lim"
+        ),
+        {"cid": company_id, "lim": limit},
+    ).fetchall()
+    return [(str(r[0]), str(r[1])) for r in rows]
+
+
+def get_crawled_page_urls(db: Session, company_id: int) -> set[str]:
+    """URLs already fetched for a company — phase B's visited-set seed."""
+    rows = db.execute(
+        text(
+            "SELECT url, final_url FROM company_web_pages "
+            "WHERE company_id = :cid AND crawled IS TRUE"
+        ),
+        {"cid": company_id},
+    ).fetchall()
+    out: set[str] = set()
+    for url, final_url in rows:
+        if url:
+            out.add(str(url))
+        if final_url:
+            out.add(str(final_url))
+    return out
 
 
 # ── Web pages ──────────────────────────────────────────────────────────────────
@@ -432,6 +528,65 @@ def delete_web_pages_for_company(db: Session, company_id: int) -> int:
     result = db.execute(
         text("DELETE FROM company_web_pages WHERE company_id = :cid"),
         {"cid": company_id},
+    )
+    db.flush()
+    return result.rowcount
+
+
+def delete_content_pages_for_company(db: Session, company_id: int) -> int:
+    """Delete only phase-B (content) pages, preserving the phase-A identity crawl.
+
+    Phase B must never call delete_web_pages_for_company: that would destroy the
+    homepage and impressum rows the identity verdict was computed from, leaving
+    a confirmed company with no evidence behind its own website_status.
+
+    Identity pages are those whose page_type is in IDENTITY_PAGE_TYPES plus the
+    homepage; everything else belongs to phase B. Inventory-only rows
+    (crawled=false) are kept — they are phase B's frontier seed.
+    """
+    from app.services.enrichment.crawler_common import IDENTITY_PAGE_TYPES
+
+    keep = tuple(IDENTITY_PAGE_TYPES | {"homepage"})
+    result = db.execute(
+        text(
+            "DELETE FROM company_web_pages "
+            "WHERE company_id = :cid AND crawled IS TRUE "
+            "  AND page_type NOT IN :keep"
+        ).bindparams(sa_bindparam("keep", expanding=True)),
+        {"cid": company_id, "keep": list(keep)},
+    )
+    db.flush()
+    return result.rowcount
+
+
+def reset_content_crawled(db: Session, *, canton: str | None = None) -> int:
+    """Reset finished or failed phase-B rows back to a pending content crawl.
+
+    Covers both rows that completed the content phase (crawl_phase='done') and
+    rows whose content crawl ended terminally — a failed phase B leaves
+    crawl_phase='content' with a terminal status, which is claimable by nothing
+    until a rerun picks it back up.
+
+    Never touches phase 'identity' rows, so a rerun cannot drag a company back
+    through identity resolution it has already passed.
+    """
+    canton_clause = ""
+    params: dict[str, Any] = {}
+    if canton:
+        canton_clause = "AND company_id IN (SELECT id FROM companies WHERE canton = :canton)"
+        params["canton"] = canton
+
+    result = db.execute(
+        text(
+            f"UPDATE company_crawl_state "  # noqa: S608
+            f"SET crawl_phase = 'content', crawl_status = 'pending', tier = 'http', "
+            f"    crawl_error_detail = NULL, next_crawl_at = NULL, consecutive_failures = 0 "
+            f"WHERE (crawl_phase = 'done' "
+            f"       OR (crawl_phase = 'content' AND crawl_status IN "
+            f"           ('crawled', 'bot_blocked', 'http_error', 'timeout', 'no_content'))) "
+            f"{canton_clause}"
+        ),
+        params,
     )
     db.flush()
     return result.rowcount
@@ -736,13 +891,72 @@ def is_crawl_blocked(url: str, blocked: frozenset[str] | set[str] | None = None)
     """Return True if the URL's domain is on the crawl blocklist.
 
     Uses the module-level CRAWL_BLOCKED_DOMAINS set by default (directory sites +
-    social media). Pass a custom set to override (e.g. with DB-managed entries merged in).
+    social media). Prefer passing the set from get_effective_crawl_blocklist(),
+    which also covers admin-approved directory domains.
     """
     if blocked is None:
         from app.services.scoring.scoring import CRAWL_BLOCKED_DOMAINS
         blocked = CRAWL_BLOCKED_DOMAINS
     domain = _extract_apex_domain(url)
     return bool(domain and domain in blocked)
+
+
+# Cached union of the static blocklist and the DB-managed directory domains.
+# select_best_candidate runs once per company across ~700k rows, so this must
+# never become a per-company query.
+_BLOCKLIST_TTL = 300.0
+_blocklist_cache: frozenset[str] | None = None
+_blocklist_cached_at: float = 0.0
+_blocklist_lock = threading.Lock()
+
+
+def get_effective_crawl_blocklist(db: Session) -> frozenset[str]:
+    """CRAWL_BLOCKED_DOMAINS plus every admin-approved directory domain.
+
+    The static set only carries the seed directories. Domains found by the
+    discovery job are inserted precisely *because* they are not already blocked
+    (handle_discover_directory_domains skips ones that are), so without this
+    merge every domain that discovery ever adds stays eligible to be selected as
+    a company website: the crawler spends a full multi-page crawl plus S3
+    uploads on a directory listing, rejects it after the fact via
+    is_directory_page, and then burns a fallback crawl on the next candidate.
+
+    Only 'approved' domains are merged — 'pending_review' rows are unreviewed
+    guesses, and wrongly blocking one would silently cost a real company site.
+
+    Cached for _BLOCKLIST_TTL seconds; an approval takes effect within that.
+    """
+    global _blocklist_cache, _blocklist_cached_at
+    from app.services.scoring.scoring import CRAWL_BLOCKED_DOMAINS
+
+    now = time.monotonic()
+    cached = _blocklist_cache
+    if cached is not None and (now - _blocklist_cached_at) < _BLOCKLIST_TTL:
+        return cached
+
+    with _blocklist_lock:
+        # Re-check inside the lock: another thread may have just refreshed it.
+        if _blocklist_cache is not None and (time.monotonic() - _blocklist_cached_at) < _BLOCKLIST_TTL:
+            return _blocklist_cache
+        try:
+            from app.crud.directory_crawl_domain import get_approved_directory_crawl_domains
+            approved = get_approved_directory_crawl_domains(db)
+        except Exception:  # noqa: BLE001
+            # Never let a blocklist refresh failure stop a crawl — fall back to
+            # the static set (the pre-existing behaviour).
+            logger.warning("Directory blocklist refresh failed; using static set", exc_info=True)
+            approved = set()
+        _blocklist_cache = frozenset(CRAWL_BLOCKED_DOMAINS | {d.lower() for d in approved if d})
+        _blocklist_cached_at = time.monotonic()
+        return _blocklist_cache
+
+
+def invalidate_crawl_blocklist_cache() -> None:
+    """Force the next get_effective_crawl_blocklist() call to re-query the DB."""
+    global _blocklist_cache, _blocklist_cached_at
+    with _blocklist_lock:
+        _blocklist_cache = None
+        _blocklist_cached_at = 0.0
 
 
 def get_next_crawlable_candidate(
@@ -758,8 +972,7 @@ def get_next_crawlable_candidate(
     the crawl blocklist. Returns the highest-score remaining candidate, or None.
     """
     if blocked is None:
-        from app.services.scoring.scoring import CRAWL_BLOCKED_DOMAINS
-        blocked = CRAWL_BLOCKED_DOMAINS
+        blocked = get_effective_crawl_blocklist(db)
 
     # Candidates that already have at least one page saved (attempted before)
     attempted_subq = (

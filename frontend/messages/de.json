@@ -752,7 +752,6 @@
       "people": "Personen",
       "noPages": "Keine Seiten erfasst.",
       "colPage": "Seite",
-      "colStatus": "Status",
       "statusCrawled": "Gecrawlt",
       "statusInventory": "Entdeckt",
       "colHttp": "HTTP",
@@ -761,7 +760,12 @@
       "colImg": "Bild",
       "colVid": "Video",
       "colForm": "Formular",
-      "colHtml": "HTML"
+      "colHtml": "HTML",
+      "contentPendingTitle": "Website bestätigt — Inhalte noch nicht erfasst",
+      "contentPendingBody": "Diese URL wurde als eigene Website des Unternehmens bestätigt. Der vollständige Website-Crawl, der Dienstleistungen, Team und Seiteninhalte erfasst, ist noch nicht abgeschlossen — die Felder unten sind daher unvollständig, nicht leer.",
+      "contentPendingBadge": "Inhalte ausstehend",
+      "notCollectedYet": "Noch nicht erfasst",
+      "visitWebsite": "Website besuchen"
     },
     "simap": {
       "title": "Öffentliche Aufträge (SIMAP)",
@@ -1029,7 +1033,11 @@
     "guidedSearch": {
       "orGuide": "oder lass dich führen",
       "whatTitle": "Was suchst du?",
-      "tiles": { "companies": "Unternehmen", "people": "Personen", "jobs": "Jobs" },
+      "tiles": {
+        "companies": "Unternehmen",
+        "people": "Personen",
+        "jobs": "Jobs"
+      },
       "tilesSub": {
         "companies": "700.000+ eingetragen",
         "people": "Gründer, Direktoren, Eigentümer",
@@ -1037,7 +1045,13 @@
       },
       "skipAdvanced": "Zu erweiterten Filtern →",
       "wizard": {
-        "steps": { "what": "WAS", "where": "WO", "industry": "BRANCHE", "refine": "VERFEINERN", "review": "ÜBERSICHT" },
+        "steps": {
+          "what": "WAS",
+          "where": "WO",
+          "industry": "BRANCHE",
+          "refine": "VERFEINERN",
+          "review": "ÜBERSICHT"
+        },
         "questions": {
           "what": "Was suchst du?",
           "where": "Wo in der Schweiz?",
@@ -1092,7 +1106,45 @@
       "exportQueued": "Export in Warteschlange — auf Jobs-Seite herunterladen wenn bereit."
     },
     "filters": {
-      "chipLabels": {"q": "Name", "uid": "UID", "canton": "Kanton", "review_status": "Prüfung", "contact_status": "Kontakt", "has_website": "Webseite", "google_searched": "Websuche", "tags": "Tags", "ai_category": "KI-Klasse", "tfidf_cluster": "Cluster", "purpose_keywords": "Schlüsselwort", "noga_code": "NOGA-Code", "noga_label": "NOGA-Label", "noga_level": "NOGA-Ebene", "purpose_language": "Sprache", "business_model": "Geschäftsmodell", "legal_form": "Rechtsform", "registered_after": "Erste SOGC nach", "registered_before": "Erste SOGC vor", "min_web_score": "Min. Web", "max_web_score": "Max. Web", "min_flex_score": "Min. Flex", "max_flex_score": "Max. Flex", "min_ai_score": "Min. KI", "max_ai_score": "Max. KI", "min_combined_score": "Min. Kombiniert", "max_combined_score": "Max. Kombiniert", "exclude_review_status": "Ausschl. Prüfung", "exclude_contact_status": "Ausschl. Kontakt", "exclude_canton": "Ausschl. Kanton", "exclude_tags": "Ausschl. Tags", "exclude_tfidf_cluster": "Ausschl. Cluster", "exclude_purpose_keywords": "Ausschl. Schlüsselwort", "exclude_ai_category": "Ausschl. KI-Klasse", "exclude_noga_code": "Ausschl. NOGA-Code", "exclude_noga_label": "Ausschl. NOGA-Label", "exclude_noga_level": "Ausschl. NOGA-Ebene"},
+      "chipLabels": {
+        "q": "Name",
+        "uid": "UID",
+        "canton": "Kanton",
+        "review_status": "Prüfung",
+        "contact_status": "Kontakt",
+        "has_website": "Webseite",
+        "google_searched": "Websuche",
+        "tags": "Tags",
+        "ai_category": "KI-Klasse",
+        "tfidf_cluster": "Cluster",
+        "purpose_keywords": "Schlüsselwort",
+        "noga_code": "NOGA-Code",
+        "noga_label": "NOGA-Label",
+        "noga_level": "NOGA-Ebene",
+        "purpose_language": "Sprache",
+        "business_model": "Geschäftsmodell",
+        "legal_form": "Rechtsform",
+        "registered_after": "Erste SOGC nach",
+        "registered_before": "Erste SOGC vor",
+        "min_web_score": "Min. Web",
+        "max_web_score": "Max. Web",
+        "min_flex_score": "Min. Flex",
+        "max_flex_score": "Max. Flex",
+        "min_ai_score": "Min. KI",
+        "max_ai_score": "Max. KI",
+        "min_combined_score": "Min. Kombiniert",
+        "max_combined_score": "Max. Kombiniert",
+        "exclude_review_status": "Ausschl. Prüfung",
+        "exclude_contact_status": "Ausschl. Kontakt",
+        "exclude_canton": "Ausschl. Kanton",
+        "exclude_tags": "Ausschl. Tags",
+        "exclude_tfidf_cluster": "Ausschl. Cluster",
+        "exclude_purpose_keywords": "Ausschl. Schlüsselwort",
+        "exclude_ai_category": "Ausschl. KI-Klasse",
+        "exclude_noga_code": "Ausschl. NOGA-Code",
+        "exclude_noga_label": "Ausschl. NOGA-Label",
+        "exclude_noga_level": "Ausschl. NOGA-Ebene"
+      },
       "proTag": "Pro",
       "proTitle": "KI-Funktion — verbraucht Credits pro Firma",
       "filtersBtn": "Filter",

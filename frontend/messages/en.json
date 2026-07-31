@@ -107,13 +107,34 @@
       },
       "cta": "Create your free account →",
       "actions": {
-        "batchClassify": { "label": "Batch LLM classify", "unit": "per company" },
-        "immediateClassify": { "label": "Immediate LLM classify", "unit": "per company" },
-        "webSearch": { "label": "Web search", "unit": "per company" },
-        "flexRescore": { "label": "Flex rescore", "unit": "per company" },
-        "fullRecluster": { "label": "Full reclustering", "unit": "flat" },
-        "exportBasic": { "label": "Bulk export – basic (UID/Name/Canton)", "unit": "per 10k rows" },
-        "exportDetailed": { "label": "Bulk export – detailed", "unit": "per 10k rows" }
+        "batchClassify": {
+          "label": "Batch LLM classify",
+          "unit": "per company"
+        },
+        "immediateClassify": {
+          "label": "Immediate LLM classify",
+          "unit": "per company"
+        },
+        "webSearch": {
+          "label": "Web search",
+          "unit": "per company"
+        },
+        "flexRescore": {
+          "label": "Flex rescore",
+          "unit": "per company"
+        },
+        "fullRecluster": {
+          "label": "Full reclustering",
+          "unit": "flat"
+        },
+        "exportBasic": {
+          "label": "Bulk export – basic (UID/Name/Canton)",
+          "unit": "per 10k rows"
+        },
+        "exportDetailed": {
+          "label": "Bulk export – detailed",
+          "unit": "per 10k rows"
+        }
       }
     },
     "footer": {
@@ -731,7 +752,6 @@
       "people": "People",
       "noPages": "No pages recorded.",
       "colPage": "Page",
-      "colStatus": "Status",
       "statusCrawled": "Crawled",
       "statusInventory": "Discovered",
       "colHttp": "HTTP",
@@ -740,7 +760,12 @@
       "colImg": "Img",
       "colVid": "Vid",
       "colForm": "Form",
-      "colHtml": "HTML"
+      "colHtml": "HTML",
+      "contentPendingTitle": "Website confirmed — full content not collected yet",
+      "contentPendingBody": "This URL has been verified as the company's own website. The full-site crawl that collects services, team and page content has not finished yet, so the fields below are incomplete rather than empty.",
+      "contentPendingBadge": "Content pending",
+      "notCollectedYet": "Not collected yet",
+      "visitWebsite": "Visit website"
     },
     "simap": {
       "title": "Public Contracts (SIMAP)",
@@ -1008,7 +1033,11 @@
     "guidedSearch": {
       "orGuide": "or let us guide you",
       "whatTitle": "What are you looking for?",
-      "tiles": { "companies": "Companies", "people": "People", "jobs": "Jobs" },
+      "tiles": {
+        "companies": "Companies",
+        "people": "People",
+        "jobs": "Jobs"
+      },
       "tilesSub": {
         "companies": "700,000+ registered",
         "people": "Founders, directors, owners",
@@ -1016,7 +1045,13 @@
       },
       "skipAdvanced": "Skip to advanced filters →",
       "wizard": {
-        "steps": { "what": "WHAT", "where": "WHERE", "industry": "INDUSTRY", "refine": "REFINE", "review": "REVIEW" },
+        "steps": {
+          "what": "WHAT",
+          "where": "WHERE",
+          "industry": "INDUSTRY",
+          "refine": "REFINE",
+          "review": "REVIEW"
+        },
         "questions": {
           "what": "What are you looking for?",
           "where": "Where in Switzerland?",
@@ -1065,7 +1100,45 @@
       "dailyLimit": "Daily preview limit reached. Resets tomorrow."
     },
     "filters": {
-      "chipLabels": {"q": "Name", "uid": "UID", "canton": "Canton", "review_status": "Review", "contact_status": "Contact", "has_website": "Website", "google_searched": "Web search", "tags": "Tags", "ai_category": "AI Class.", "tfidf_cluster": "Cluster", "purpose_keywords": "Keyword", "noga_code": "NOGA code", "noga_label": "NOGA label", "noga_level": "NOGA level", "purpose_language": "Language", "business_model": "Business model", "legal_form": "Legal form", "registered_after": "First SOGC after", "registered_before": "First SOGC before", "min_web_score": "Min Web", "max_web_score": "Max Web", "min_flex_score": "Min Flex", "max_flex_score": "Max Flex", "min_ai_score": "Min AI", "max_ai_score": "Max AI", "min_combined_score": "Min Combined", "max_combined_score": "Max Combined", "exclude_review_status": "Excl. review", "exclude_contact_status": "Excl. contact", "exclude_canton": "Excl. canton", "exclude_tags": "Excl. tags", "exclude_tfidf_cluster": "Excl. cluster", "exclude_purpose_keywords": "Excl. keyword", "exclude_ai_category": "Excl. AI class.", "exclude_noga_code": "Excl. NOGA code", "exclude_noga_label": "Excl. NOGA label", "exclude_noga_level": "Excl. NOGA level"},
+      "chipLabels": {
+        "q": "Name",
+        "uid": "UID",
+        "canton": "Canton",
+        "review_status": "Review",
+        "contact_status": "Contact",
+        "has_website": "Website",
+        "google_searched": "Web search",
+        "tags": "Tags",
+        "ai_category": "AI Class.",
+        "tfidf_cluster": "Cluster",
+        "purpose_keywords": "Keyword",
+        "noga_code": "NOGA code",
+        "noga_label": "NOGA label",
+        "noga_level": "NOGA level",
+        "purpose_language": "Language",
+        "business_model": "Business model",
+        "legal_form": "Legal form",
+        "registered_after": "First SOGC after",
+        "registered_before": "First SOGC before",
+        "min_web_score": "Min Web",
+        "max_web_score": "Max Web",
+        "min_flex_score": "Min Flex",
+        "max_flex_score": "Max Flex",
+        "min_ai_score": "Min AI",
+        "max_ai_score": "Max AI",
+        "min_combined_score": "Min Combined",
+        "max_combined_score": "Max Combined",
+        "exclude_review_status": "Excl. review",
+        "exclude_contact_status": "Excl. contact",
+        "exclude_canton": "Excl. canton",
+        "exclude_tags": "Excl. tags",
+        "exclude_tfidf_cluster": "Excl. cluster",
+        "exclude_purpose_keywords": "Excl. keyword",
+        "exclude_ai_category": "Excl. AI class.",
+        "exclude_noga_code": "Excl. NOGA code",
+        "exclude_noga_label": "Excl. NOGA label",
+        "exclude_noga_level": "Excl. NOGA level"
+      },
       "proTag": "Pro",
       "proTitle": "AI feature — uses credits per company",
       "filtersBtn": "Filters",

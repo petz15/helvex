@@ -896,7 +896,7 @@ Strict-Transport-Security: max-age=31536000 (HTTPS only)
 - Worker deployments set `terminationGracePeriodSeconds: 60` to fit the drain (`JOB_SHUTDOWN_JOIN_TIMEOUT`, default 25 s) before SIGKILL.
 
 **Concurrency knobs multiply**
-- In-flight work per pod = `JOB_WORKER_CONCURRENCY × the job's own fan-out`. `web_crawl_http` defaults to `crawl_concurrency=10` (async httpx); `web_crawl_playwright` to `2`, each slot a full Chromium.
+- In-flight work per pod = `JOB_WORKER_CONCURRENCY × the job's own fan-out`. `web_crawl_http` defaults to `crawl_concurrency=40` (async httpx); `web_crawl_playwright` to `2`, each slot a full Chromium. Page processing is bounded separately and per-pod by `CRAWL_PAGE_WORKERS` (default 32) — see "Off-loop page processing".
 - Crawl throughput is therefore tuned via `crawl_concurrency`, **not** by raising the worker's concurrency. Raise `JOB_WORKER_CONCURRENCY` to stop long jobs blocking short ones on the same pod (crawler-http also carries the interactive `web_crawl_single`), and re-check the pod memory limit against the product. Current: `crawlerHttpWorker.concurrency: 2`, `mlWorker.concurrency: 1`, `apiWorker.concurrency: 2`.
 
 **Job handler registry pattern — single dispatch, no inline branches**
@@ -954,6 +954,7 @@ The worker checks `cancel_requested` / `pause_requested` **between companies** (
 | `repair_is_current` | `batch_size` | Recompute `is_current` flag for all existing `sogc_person_appearances` rows; fixes historical data before the temporal-ordering bug was corrected | — |
 | `shab_archive` | `start_page`, `end_page`, `page_size`, `request_delay`, `pdf_delay` | Fetch shab.ch archive, download PDFs, upsert `sogc_publications` + `sogc_changes`; resume via page cursor | ONE_PER_ORG |
 | `link_sogc_stubs` | `batch_size` | Back-fill `company_id` on existing `sogc_publications` + `sogc_person_appearances` rows; creates `shab_stub` Company rows for unknown UIDs — no API calls | — |
+| `web_crawl_content` | `max_pages`, `max_depth`, `batch_size`, `canton`, `order_by`, `limit`, `crawl_concurrency`, `rerun` | Phase B — breadth-first crawl of the whole website for identity-confirmed companies; claims `crawl_phase='content'`. Auto-enqueued by `web_extract`. See §Two-phase crawling | — |
 
 #### `web_search_batch` concurrency safety (`run_batch_collect`, `web_enrichment.py`)
 
@@ -1955,6 +1956,7 @@ All config is loaded from `.env` (or process env) by `pydantic-settings`. The `S
 | `S3_ENDPOINT_URL` | No* | e.g. `https://nbg1.your-objectstorage.com` |
 | `S3_BUCKET_EXPORTS` | No* | `helvex-exports` — async CSV export storage; *required for csv_export job type |
 | `JOB_WORKER_CONCURRENCY` | No | Jobs run in parallel per pod; `1` by default. Multiplies with a job's own `crawl_concurrency` — see values.yaml |
+| `CRAWL_PAGE_WORKERS` | No | Threads for off-loop page processing (lxml parse + S3 upload); `32` by default. Per-pod, shared by all crawl jobs — raise alongside `crawl_concurrency` and give the pod CPU to match |
 | `JOB_TYPE_WHITELIST` / `JOB_TYPE_BLACKLIST` | No | Comma-separated job types this pod may / may not claim |
 | `JOB_POLL_INTERVAL` | No | Seconds between queue polls when idle; `5` by default |
 | `JOB_SHUTDOWN_JOIN_TIMEOUT` | No | Seconds shutdown waits for jobs to checkpoint; `25` by default |
@@ -2377,9 +2379,9 @@ Three-phase pipeline: crawl ~210k Swiss company websites → store raw HTML in S
 
 | Pod | Image | Job types | Node |
 |---|---|---|---|
-| `crawler-http` × 2 | `helvex-app` | `web_crawl_http`, `web_url_populate`, `web_select_url`, `web_crawl_single`, `directory_crawl` | main node |
+| `crawler-http` × 2 | `helvex-app` | `web_crawl_http`, `web_crawl_content`, `web_url_populate`, `web_select_url`, `web_crawl_single`, `directory_crawl` | main node |
 | `api-worker` | `helvex-app` | (many others, no longer `web_extract`) | main node |
-| `ml-worker` | `helvex-ml` | `web_crawl_http`, `web_crawl_playwright` (idle-fill), **`web_extract`** + all ML job types | ml node (cax21) |
+| `ml-worker` | `helvex-ml` | `web_crawl_http`, `web_crawl_playwright`, `web_crawl_content` (idle-fill), **`web_extract`** + all ML job types | ml node (cax21) |
 
 `web_extract` runs **only on `ml-worker`** — it is the only image with the spaCy NER models (`fr/it/en_core_news_sm`, `de_core_news_md`) bundled (see `Dockerfile.ml-base`). This replaces the earlier "Pod A crawls, Pod B extracts" parallelism on `crawler-http`/`api-worker`: extraction no longer runs concurrently with crawling on the main node, it queues for ml-worker instead. Trade-off accepted to keep spaCy off the main-node app image.
 
@@ -2607,7 +2609,12 @@ into `website_url` regardless of quality — and, since identity rework phase 3,
 - **Domain buckets** (`scoring.classify_domain`): each result URL → `own` / `social` /
   `directory` / `news` / `none`, reusing the existing directory/social/news domain sets.
 - **Directory-domain blocking** (`scoring._is_directory_domain`): `_DIRECTORY_DOMAINS` (hardcoded frozenset) is always unioned with DB overrides from `crud.get_active_google_directory_domains` — never replaced. Ensures both sets are active simultaneously.
-- **Content-based directory detection** (`scoring.is_directory_page(html, url)`): runs at crawl-extraction time in `handle_web_extract`. Checks URL path patterns, "claim this listing" phrases, title suffix patterns (Branchenbuch/Verzeichnis/Vergleich), and "similar companies" phrasing — three tiers, any match rejects the candidate via `crawler_crud.reject_url_candidate`.
+- **Content-based directory detection** (`scoring.is_directory_page(html, url)`): runs at crawl-extraction time in `handle_web_extract`. Checks URL path patterns, "claim this listing" phrases, title suffix patterns (Branchenbuch/Verzeichnis/Vergleich), and "similar companies" phrasing — three tiers, any match rejects the candidate via `crawler_crud.reject_url_candidate`. This is the *post-crawl* net; the pre-crawl filter below is what keeps the crawl from happening at all.
+- **Pre-crawl directory filter** (`crawler_crud.get_effective_crawl_blocklist(db)`, 2026-07-31): returns `CRAWL_BLOCKED_DOMAINS ∪ {approved rows in directory_crawl_domains}`, cached 300 s behind a lock (`invalidate_crawl_blocklist_cache()` clears it; the admin approve/reject/delete routes call it for their own pod, others pick it up via the TTL). Used by `select_best_candidate`, `get_next_crawlable_candidate`, and the `web_crawl_single` fallback guard.
+
+  **Why the union is required:** the hardcoded `DIRECTORY_CRAWL_DOMAINS` seed list *is* a strict subset of `CRAWL_BLOCKED_DOMAINS`, so seeded directories were never selectable as company websites. But `handle_discover_directory_domains` inserts a domain only when it is **not** already in `CRAWL_BLOCKED_DOMAINS` — so every domain discovery has ever added is, by construction, absent from the blocklist. Before this change, approving one for directory crawling left it fully eligible as a company website: full multi-page crawl + S3 uploads on a directory listing, post-hoc `is_directory_page` rejection, then a wasted fallback crawl on the next candidate. The gap was the steady state for discovered domains, not an edge case.
+
+  Only `status='approved'` rows are merged. `pending_review` rows are unreviewed guesses, and wrongly blocking one would silently cost a real company site.
 - **SEO Visibility Score** (`scoring.compute_seo_visibility_score(organic_position, *, ads_count, has_local_pack, has_knowledge_graph) → int | None`): measures actual Google search findability, distinct from `web_score` (URL-selection confidence). Formula: `100 − (rank−1)×8 − ads×12 − 5×(local_pack) − 5×(knowledge_graph)`, clamped [0,100]; `None` when company site not in organic results.
   - Shared helpers: `find_organic_position(results, url) → int | None` (1-based rank of `url` domain in stored results); `extract_serp_features(google_search_full_raw) → (ads_count, has_local_pack, has_knowledge_graph)` (handles Serper `ads`/`places`/`knowledgeGraph` and ScrapingDog `paid_results`/`local_results`/`knowledge_graph` naming).
   - Stored as `companies.seo_visibility_score` + `seo_visibility_computed_at` (migration `0113`).
@@ -2667,11 +2674,116 @@ Playwright-only: `rerun: bool` — calls `crawler_crud.reset_playwright_crawled(
 
 Safe to parallelize because `crawl_fn` (`crawl_company_http` / `crawl_company_playwright`) is pure async I/O and `rate_limit()` (`crawler_common.py`) keys its delay per-domain, not globally — concurrent companies (different domains) never block each other. DB writes stay untouched: within a claimed batch, candidates are resolved and crawled concurrently first, then results are written to `ctx.db` strictly sequentially in the one worker thread (SQLAlchemy sessions aren't safe for concurrent use).
 
-Defaults: `crawl_concurrency=10` for HTTP (network-bound, cheap per slot), `crawl_concurrency=2` for Playwright (each slot launches a full Chromium instance — kept low to avoid OOM on the ML worker pod). Exposed as a "Concurrency" field on both crawl trigger forms in `frontend/.../collection/collection-client.tsx`.
+Defaults: `crawl_concurrency=40` for HTTP (network-bound, cheap per slot), `crawl_concurrency=2` for Playwright (each slot launches a full Chromium instance — kept low to avoid OOM on the ML worker pod). Exposed as a "Concurrency" field on both crawl trigger forms in `frontend/.../collection/collection-client.tsx`.
+
+**Off-loop page processing** (2026-07-31, throughput fix): `_make_page_result` (both `crawler_http.py` and `crawler_playwright.py`) is blocking work — an lxml parse plus media/word counting and language detection, then a blocking boto3 S3 PUT. It used to run inline on the crawl coroutine, which stalled the event loop and with it every other company being crawled concurrently on it. That is why raising `crawl_concurrency` past ~10 previously did nothing: the semaphore admitted more sites, but they queued behind the loop's own blocking work. Measured effect was ~35 companies/min at `crawl_concurrency=10`, i.e. roughly one company per slot per 17 s against a ~7-request page budget.
+
+Both crawlers now call it via `crawler_common.run_in_page_executor(fn, *args)`, backed by a module-level `ThreadPoolExecutor` sized by `CRAWL_PAGE_WORKERS` (default 32). Two ceilings, deliberately separate:
+- `crawl_concurrency` (per job) bounds how many **sites are open** at once.
+- `CRAWL_PAGE_WORKERS` (per **pod**, shared by every crawl job on it) bounds how much **CPU + S3 work** is in flight.
+
+Raise them together; a large `crawl_concurrency` against a small page pool just relocates the queue. Give the pod CPU to match `CRAWL_PAGE_WORKERS`.
+
+Paired with this, `s3_client._client()` now caches a single process-wide boto3 client behind a lock (`reset_client()` clears it). It previously constructed a fresh client on **every** call — each one loading the botocore JSON service model from disk, 50–300 ms before any byte moved — so a 5-page crawl paid that five times, on the event loop. `max_pool_connections=64` keeps the connection pool from re-serialising what the thread pool parallelised (botocore's default is 10).
 
 **Correctness note — cancellation granularity:** the first version of this change used `asyncio.gather` (wait for the whole batch), which meant `ctx.assert_not_cancelled()` was only checked once per batch, after the single slowest task in it finished (up to `company_timeout`). That's the same check `_run_job` relies on to detect a job has been evicted by the stale-job recovery sweep (`requeue_interrupted_jobs` — see "Job recovery" below): if a sibling pod requeues+reclaims this job_run (heartbeat looked stale) and this execution doesn't notice for up to `company_timeout` seconds, both executions run concurrently, each with independent local `stats`/`done` counters, both writing progress into the same job row (visible as two interleaved, conflicting progress series in the job log). Fixed by switching to `asyncio.as_completed` — results (and the cancellation check) are handled as each individual crawl finishes, restoring the original per-company checkpoint granularity.
 
 For maximum throughput, combine with triggering multiple concurrent `web_crawl_http` job instances (dedup is off for this type) so more than one pod/thread is active at once — `crawl_concurrency` and job-instance count are independent, multiplicative levers.
+
+### Two-phase crawling (2026-07-31)
+
+The crawl is split at the point identity is decided, because everything the
+confidence ladder in `resolve_company_extract` reads lives on two pages.
+
+| | Phase A — identity | Phase B — content |
+|---|---|---|
+| Job | `web_crawl_http` (+ `web_crawl_playwright` for js_required) | `web_crawl_content` |
+| Crawl fn | `crawl_company_http` (`max_pages=3`) | `crawl_site_full` (`max_pages=60`, BFS) |
+| Pages | homepage + impressum + contact | the entire website |
+| Feeds | `uid_matches_zefix`, address, zone-weighted name, `confidence`, verdict, `web_score` | `service_keywords`, `persons_struct`, `services_struct`, `about_text` |
+| Runs for | every company, every candidate | identity-confirmed companies only |
+| Ordering | `company_id_asc` | `combined_score_desc` — full-site crawls are expensive, spend them on the best leads first |
+
+`company_crawl_state.crawl_phase` (`identity | content | done`, migration `0129`)
+is claimed on alongside `crawl_status`, so the two jobs take disjoint rows and
+run concurrently. `crawl_status` is *per-phase*: a row can be `pending` in phase
+`content` having already been `crawled` in phase `identity`.
+
+**Why the split.** Phase A fetches 3 pages instead of 7 for every candidate,
+and with a ~40% fallback rate most companies are crawled more than once before
+identity settles — so the saving multiplies across the fallback chain rather
+than applying once. Content pages are never spent on a candidate that turns out
+to belong to a different company. Identity coverage across the whole corpus also
+lands far sooner, with content streaming in behind it.
+
+**Transitions** (`app/crud/crawler.py`):
+- `advance_to_content_phase(db, company_id)` — called from `handle_web_extract`
+  when identity is confirmed (UID match, or no UID with `confidence >= 0.65`).
+  Its `WHERE crawl_phase = 'identity'` makes it idempotent and race-safe: a
+  re-extract on an already-advanced company cannot re-queue a finished content
+  crawl. Returns whether it performed the transition.
+- `mark_phase_done(db, company_id)` — set when phase B finishes, and when phase A
+  exhausts every candidate without confirming (otherwise those rows sit pending
+  in the identity phase forever).
+
+**Phase-gating in `handle_web_extract`.** Quarantine, fallback and advancement
+all run only while `crawl_phase` is `identity`. After phase B the same extractor
+re-runs over a much larger page set; without the gate a confirmed company would
+re-enter the fallback chain and re-queue crawls it has already passed.
+
+**Phase B never calls `delete_web_pages_for_company`.** It uses
+`delete_content_pages_for_company`, which preserves `homepage` + `IDENTITY_PAGE_TYPES`
+rows and all inventory-only rows. Deleting them would destroy the evidence the
+company's own `website_status` was computed from, and the frontier seed with it.
+
+**Frontier, and why phase B needs no discovery requests.** Phase A's sitemap pass
+already wrote every classified-but-unfetched URL via `save_page_inventory`
+(`crawled=false`). `_make_content_target_kwargs` reads those in the job thread
+(never the event loop — the DB session is not concurrency-safe) and hands them to
+`crawl_site_full` as `seed_urls`, together with `visited_urls` so phase A's pages
+are never re-fetched. Only when the inventory is empty (no usable sitemap) does
+phase B re-fetch the homepage, purely to expand the frontier from nav links — it
+is not saved, since phase A's copy is what the extract row depends on.
+
+**Bounds.** A single WordPress or WooCommerce site can expand without limit, so
+`crawl_site_full` is bounded on three axes: `max_pages` (hard cap),
+`max_depth` (link distance from the seed set), and `is_crawlable_page_url`, which
+drops off-host links, binary/asset extensions, and crawl traps (pagination, tag
+and date archives, feeds, search/filter query params, carts, logins).
+
+**Failure semantics differ from phase A**: partial success is success. A page that
+404s or times out is skipped; `failure_status` is only set when the crawl produced
+no pages at all. `crawl_site_full` does no bot/JS detection, so phase B never
+escalates to Playwright — which is what keeps a `tier='playwright'` +
+`crawl_phase='content'` row from being stranded with no worker able to claim it.
+
+**Transition backfill** (migration `0129`) maps the existing corpus onto the new
+state machine:
+
+| Existing state | Becomes |
+|---|---|
+| Crawled **and** ingested (`company_web_extract` row), confirmed | phase A complete → `crawl_phase='content'`, `crawl_status='pending'` (queued for phase B) |
+| Crawled and ingested, not confirmed | `crawl_phase='identity'`, status untouched — the existing fallback machinery still governs them |
+| Crawled but **never** ingested | neither phase complete → reset to pending phase A and re-ingested by the new pipeline |
+| URL candidates only | already the default — `identity` / `pending` |
+
+**Frontend — the "confirmed URL, content pending" state.** `GET /{id}/web-extract`
+returns `crawl_phase` + `crawl_status` from `company_crawl_state`. `WebsitePanel`
+treats `crawl_phase === 'content'` as its own UI state: a blue banner plus a
+"Content pending" chip in the source strip, with a direct link out to the
+verified site. The phase-B-populated fields (`aboutText`, `keywords`,
+`servicesFound`, `people`) render "Not collected yet" instead of an em-dash —
+an empty field there means *not gathered*, not *looked and found nothing*, and
+a bare dash reads as a negative finding. `description` and `languages` keep the
+dash: they come from the homepage, which phase A already has. The existing
+`noStructuredData` warning is suppressed while content is pending so the two
+states can't both claim the panel.
+
+**`privacy` was dropped from `_FETCH_WORTHY_TYPES`.** It sat at priority 2 but is
+absent from `crawler_extract._TEXT_PAGES`, so its main text was never extracted —
+it only ever contributed the unconditional email/phone/social/UID regexes, all of
+which impressum already supplies. It was consuming a budget slot ahead of
+contact/about. Still inventoried, just not fetched.
 
 ### URL selection
 
@@ -3515,7 +3627,7 @@ In RQ mode with Redis, a **2 s periodic DB poll** runs alongside pub/sub to deli
 | **Default** — one active per org | All job types not listed below |
 | One active per org + param hash | `claude_classify` (distinct prompt configs may run concurrently) |
 | Per-company | `noga_v2_explain` |
-| No dedup (parallel-safe) | `csv_export`, `web_select_url`, `web_crawl_single`, `web_crawl_http`, `web_crawl_playwright` |
+| No dedup (parallel-safe) | `csv_export`, `web_select_url`, `web_crawl_single`, `web_crawl_http`, `web_crawl_playwright`, `web_crawl_content` |
 
 New job types are automatically deduplicated without any code change. Add to `NO_DEDUP` only if the type genuinely supports concurrent runs.
 

@@ -158,6 +158,7 @@ JOB_HANDLERS: dict[str, Callable[[JobContext], tuple[dict, str]]] = {
     "web_url_populate":          web_crawl.handle_web_url_populate,
     "web_crawl_http":            web_crawl.handle_web_crawl_http,
     "web_crawl_playwright":      web_crawl.handle_web_crawl_playwright,
+    "web_crawl_content":         web_crawl.handle_web_crawl_content,
     "web_extract":               web_crawl.handle_web_extract,
     "web_crawl_single":          web_crawl.handle_web_crawl_single,
     "web_select_url":            web_crawl.handle_web_select_url,

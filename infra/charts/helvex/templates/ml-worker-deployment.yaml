@@ -49,7 +49,7 @@ spec:
           imagePullPolicy: {{ .Values.mlImage.pullPolicy }}
           env:
             - name: JOB_TYPE_WHITELIST
-              value: "reclassify_noga,build_noga_embeddings,detect_language_bulk,reclassify_low_conf_noga,tfidf_kmeans_cluster,recompute_keywords,reextract_keywords,cluster_analysis,discover_stopwords,noga_v2_explain,embed_purpose_full,embed_purpose_clean,strip_purpose_semantic,enrich_web_purpose_sim,web_crawl_http,web_crawl_playwright,web_extract"
+              value: "reclassify_noga,build_noga_embeddings,detect_language_bulk,reclassify_low_conf_noga,tfidf_kmeans_cluster,recompute_keywords,reextract_keywords,cluster_analysis,discover_stopwords,noga_v2_explain,embed_purpose_full,embed_purpose_clean,strip_purpose_semantic,enrich_web_purpose_sim,web_crawl_http,web_crawl_playwright,web_crawl_content,web_extract"
             # Keep at 1: web_crawl_playwright already forks `crawl_concurrency`
             # (default 2) Chromium processes per job, and the ML models are
             # memory-hungry. See mlWorker.concurrency in values.yaml.

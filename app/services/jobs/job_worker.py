@@ -151,11 +151,13 @@ def _compute_dedup_key(job_type: str, org_id: int | None, params: dict) -> str |
     """
     # Types that genuinely support multiple concurrent runs per org.
     # Everything else is deduplicated by default — add here to opt out.
-    # web_crawl_http / web_crawl_playwright: claim_crawl_batch uses SELECT FOR UPDATE
-    # SKIP LOCKED, so concurrent jobs claim disjoint rows — safe to run in parallel
-    # and essential for utilising multiple HTTP pods.
+    # web_crawl_http / web_crawl_playwright / web_crawl_content: claim_crawl_batch
+    # uses SELECT FOR UPDATE SKIP LOCKED, so concurrent jobs claim disjoint rows —
+    # safe to run in parallel and essential for utilising multiple HTTP pods.
+    # web_crawl_content additionally scopes its claim to crawl_phase='content', so
+    # it never contends with the identity crawler over the same companies.
     NO_DEDUP = {"csv_export", "web_select_url", "web_crawl_single",
-                "web_crawl_http", "web_crawl_playwright"}
+                "web_crawl_http", "web_crawl_playwright", "web_crawl_content"}
 
     # Per-entity dedup (not per-org-type).
     if job_type == "noga_v2_explain":
