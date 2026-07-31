@@ -57,7 +57,6 @@ def handle_recompute_keywords(ctx: JobContext) -> tuple[dict, str]:
         ctx.assert_not_cancelled()
         msg = f"[{stats.get('step', 'keywords')}] {done}/{total} — {stats.get('updated', 0)} updated"
         ctx.progress_no_event(done, total, stats, msg)
-        ctx.sync(msg, dict(stats), False)
 
     cfg = PipelineConfig(
         top_keywords_per_company=int(ctx.params.get("top_keywords_per_company", 10)),

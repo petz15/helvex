@@ -17,6 +17,10 @@ class JobRun(Base):
     status: Mapped[str] = mapped_column(String(16), nullable=False, default="queued", index=True)
     cancel_requested: Mapped[bool] = mapped_column(default=False, nullable=False)
     pause_requested: Mapped[bool] = mapped_column(default=False, nullable=False)
+    # Who paused this job: 'user' | 'shutdown' | 'preempt' (NULL when not paused).
+    # resume_all_paused_jobs() auto-resumes only the infrastructure reasons, so a
+    # job a person paused in the UI stays paused instead of restarting itself.
+    pause_reason: Mapped[str | None] = mapped_column(String(16), nullable=True)
     message: Mapped[str | None] = mapped_column(String(512), nullable=True)
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
     params_json: Mapped[str | None] = mapped_column(Text, nullable=True)

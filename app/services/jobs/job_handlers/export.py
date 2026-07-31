@@ -15,10 +15,7 @@ def handle_csv_export(ctx: JobContext) -> tuple[dict, str]:
     def _progress(done: int, total: int, _stats: dict) -> None:
         ctx.assert_not_cancelled()
         msg = f"Exported {done:,}" + (f"/{total:,}" if total else "") + " rows…"
-        ctx._maybe_sync(ctx.app, job_type=ctx.job.job_type, label=ctx.job.label, message=msg, stats=dict(_stats), error=None, done=False)
-        from app import crud
-        crud.update_progress(ctx.db, ctx.job, message=msg, done=done, total=total, stats=_stats)
-        ctx._heartbeat()
+        ctx.progress_no_event(done, total, _stats, msg)
 
     stats = run_csv_export(
         ctx.db,

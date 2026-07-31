@@ -36,7 +36,6 @@ def handle_analyze_boilerplate(ctx: JobContext) -> tuple[dict, str]:
             f"{bstats.get('unique_sentences', 0)} unique sentences found"
         )
         crud.update_progress(ctx.db, ctx.job, message=msg, done=done, total=total, stats=bstats)
-        ctx._heartbeat()
 
     stats = run_boilerplate_analysis(
         ctx.db,

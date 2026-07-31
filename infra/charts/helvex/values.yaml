@@ -65,6 +65,19 @@ imagePullSecrets: []
 # Each worker runs the same Docker image with JOB_TYPE_WHITELIST set so it
 # only picks up its assigned job types. The web pod sets DISABLE_JOB_WORKER=true
 # when any worker is enabled, so jobs are never executed in the web process.
+#
+# IMPORTANT — `concurrency` is how many JOBS a pod runs at once. Some job types
+# ALSO fan out internally, and the two MULTIPLY:
+#
+#   in-flight work = concurrency × <job's own crawl_concurrency param>
+#
+#   web_crawl_http       crawl_concurrency default 10 (async HTTP)
+#   web_crawl_playwright crawl_concurrency default  2 (one Chromium EACH)
+#
+# So raising a worker's `concurrency` is not the lever for crawl throughput —
+# the in-job `crawl_concurrency` param is. Raise `concurrency` to stop long jobs
+# blocking short ones on the same pod, and re-check the pod's memory limit
+# against the product above whenever you change either number.
 
 apiWorker:
   enabled: false
@@ -80,6 +93,10 @@ apiWorker:
 
 mlWorker:
   enabled: false
+  # Keep at 1. ML jobs are CPU/memory-bound (this pod already requests 2 CPU
+  # against a 6Gi limit) and web_crawl_playwright forks 2 Chromium per job, so
+  # >1 here multiplies into OOM territory rather than throughput.
+  concurrency: 1
   nodeSelector: {}
   tolerations: []
   resources:
@@ -93,6 +110,12 @@ mlWorker:
 crawlerHttpWorker:
   enabled: false
   replicaCount: 2
+  # 2 jobs per pod × crawl_concurrency 10 = up to 20 in-flight site crawls.
+  # The point is head-of-line blocking, not raw throughput: this pod's whitelist
+  # also carries web_url_populate / web_select_url / web_crawl_single, and at
+  # concurrency 1 a user's interactive single crawl queued behind a multi-hour
+  # bulk crawl. Raising this further needs the memory limit raised with it.
+  concurrency: 2
   resources:
     requests:
       cpu: 250m

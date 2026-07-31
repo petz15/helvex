@@ -181,6 +181,9 @@ export interface Job {
   progress_total: number | null;
   error: string | null;
   restart_count: number;
+  /** Who paused the job. "user" stays paused until resumed; the others resume
+   *  automatically once the worker recovers. Null when not paused. */
+  pause_reason: "user" | "shutdown" | "preempt" | null;
   created_at: string;
   started_at: string | null;
   finished_at: string | null;

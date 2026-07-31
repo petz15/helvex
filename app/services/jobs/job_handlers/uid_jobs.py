@@ -82,7 +82,6 @@ def handle_uid_import(ctx: JobContext) -> tuple[dict, str]:
 
     def _ping() -> None:
         _live["calls"] += 1
-        ctx._heartbeat()
         ctx.assert_not_cancelled()
         crud.update_progress(
             ctx.db, ctx.job,

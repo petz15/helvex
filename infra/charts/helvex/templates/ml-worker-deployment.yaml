@@ -26,6 +26,11 @@ spec:
         runAsUser: 1000
         runAsGroup: 1000
       automountServiceAccountToken: false
+      # Job workers pause in-flight jobs at their next checkpoint on SIGTERM
+      # (job_worker.request_shutdown waits up to JOB_SHUTDOWN_JOIN_TIMEOUT,
+      # default 25s). The K8s default of 30s leaves no margin for that, so
+      # give the drain room before the SIGKILL.
+      terminationGracePeriodSeconds: 60
       {{- with .Values.imagePullSecrets }}
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
@@ -45,6 +50,11 @@ spec:
           env:
             - name: JOB_TYPE_WHITELIST
               value: "reclassify_noga,build_noga_embeddings,detect_language_bulk,reclassify_low_conf_noga,tfidf_kmeans_cluster,recompute_keywords,reextract_keywords,cluster_analysis,discover_stopwords,noga_v2_explain,embed_purpose_full,embed_purpose_clean,strip_purpose_semantic,enrich_web_purpose_sim,web_crawl_http,web_crawl_playwright,web_extract"
+            # Keep at 1: web_crawl_playwright already forks `crawl_concurrency`
+            # (default 2) Chromium processes per job, and the ML models are
+            # memory-hungry. See mlWorker.concurrency in values.yaml.
+            - name: JOB_WORKER_CONCURRENCY
+              value: "{{ .Values.mlWorker.concurrency }}"
           envFrom:
             - secretRef:
                 name: {{ .Values.envSecretName }}

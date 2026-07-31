@@ -391,7 +391,16 @@ kubectl describe pod <pod-name> -n helvex-prod | grep -A 5 "Last State"
 | Geocoding (swisstopo) | `helvex` (app) | SQLite DB is mmap'd; ~150 MB cold, stays resident |
 | Bulk import | `helvex` or `helvex-worker` | Minimal memory; safe anywhere |
 
-If the **app pod** is OOMKilled during a classification or clustering job, those jobs should only be triggered via the RQ worker (`USE_RQ=true`, `worker.enabled: true`), not run in-process.
+If the **app pod** is OOMKilled during a classification or clustering job, that job
+should not be running in the web process at all. Enable the dedicated workers
+(`apiWorker.enabled: true`, `mlWorker.enabled: true`) — the chart then sets
+`DISABLE_JOB_WORKER=true` on the web pod, and each worker claims only the types in
+its `JOB_TYPE_WHITELIST`. (There is no Redis/RQ worker; job routing is entirely
+`JOB_TYPE_WHITELIST` / `JOB_TYPE_BLACKLIST` over the shared `job_runs` table.)
+
+If a **worker pod** is OOMKilled, check `JOB_WORKER_CONCURRENCY` against the job's
+own fan-out before raising memory — for crawl jobs the in-flight work is
+`JOB_WORKER_CONCURRENCY × crawl_concurrency`, so the two multiply.
 
 **Increase memory limit** in `infra/environments/prod.yaml`:
 ```yaml

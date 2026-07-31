@@ -102,8 +102,6 @@ def handle_bulk(ctx: JobContext) -> tuple[dict, str]:
         stats_now = {"created": created, "updated": updated}
         crud.update_progress(ctx.db, ctx.job, message=msg, stats=stats_now)
         crud.create_event(ctx.db, job_id=ctx.job.id, level="info", message=msg)
-        ctx.sync(msg, stats_now, False)
-        ctx._heartbeat()
 
     stats = bulk_import_zefix(
         ctx.db,

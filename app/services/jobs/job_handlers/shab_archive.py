@@ -222,7 +222,6 @@ def handle_resolve_shab_old_uids(ctx: JobContext) -> tuple[dict, str]:
         ctx.progress(done, total or 0, _stats, msg)
 
     def _abort() -> None:
-        ctx._heartbeat()
         ctx.assert_not_cancelled()
 
     stats = resolve_shab_old_uids(

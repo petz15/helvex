@@ -132,50 +132,99 @@ def get_next_queued_job(
     db: Session,
     job_type_whitelist: set[str] | None = None,
     job_type_blacklist: set[str] | None = None,
-    *,
-    skip_locked: bool = False,
 ) -> JobRun | None:
+    """Peek at the next queued job WITHOUT claiming it.
+
+    For diagnostics and tests only. Workers must use `claim_next_job()` — a
+    peek-then-claim pair hands the same row to every polling worker and lets
+    all but one waste a round trip losing the claim.
+    """
     q = db.query(JobRun).filter(JobRun.status == "queued")
     if job_type_whitelist:
         q = q.filter(JobRun.job_type.in_(job_type_whitelist))
     if job_type_blacklist:
         q = q.filter(JobRun.job_type.notin_(job_type_blacklist))
-    q = q.order_by(JobRun.queued_at.asc())
-    if skip_locked:
-        q = q.with_for_update(skip_locked=True)
-    return q.first()
+    return q.order_by(JobRun.queued_at.asc()).first()
 
 
-def atomic_claim_job(db: Session, job_id: int, *, message: str = "Starting…") -> bool:
-    """Atomically transition a job from queued/paused → running.
+def claim_next_job(
+    db: Session,
+    *,
+    job_type_whitelist: set[str] | None = None,
+    job_type_blacklist: set[str] | None = None,
+    message: str = "Starting…",
+) -> int | None:
+    """Atomically select AND claim the oldest eligible queued job.
 
-    Returns True if this pod won the claim, False if another pod beat it to it.
-    Uses a single UPDATE WHERE so two pods racing for the same job_id can never
-    both succeed — only the first commit wins (rowcount=1), the other gets 0.
+    Returns the claimed job id, or None when nothing is available.
+
+    Select and claim happen in ONE statement, so a claimed row is never handed
+    to a second caller — within this pod or across pods. The previous design
+    selected in one session (`FOR UPDATE SKIP LOCKED`, whose lock was dropped
+    the moment that session closed, making SKIP LOCKED a no-op) and claimed in
+    another. That left two costs: every losing pod burned a poll+claim round
+    trip, and locally a job stayed `queued` between `pool.submit()` and its
+    thread actually starting, so the next poll re-drew the same row, tripped the
+    in-flight guard and aborted slot filling — one slot per poll interval.
+
+    `NOT cancel_requested` is in the WHERE clause rather than being cleared in
+    the SET: clearing it unconditionally could silently swallow a cancel that
+    arrived while the job was pausing for shutdown and was then re-queued by the
+    recovery sweep.
     """
     now = datetime.now(tz=timezone.utc)
+
+    inner = db.query(JobRun.id).filter(
+        JobRun.status == "queued",
+        or_(JobRun.cancel_requested.is_(False), JobRun.cancel_requested.is_(None)),
+    )
+    if job_type_whitelist:
+        inner = inner.filter(JobRun.job_type.in_(job_type_whitelist))
+    if job_type_blacklist:
+        inner = inner.filter(JobRun.job_type.notin_(job_type_blacklist))
+    inner = (
+        inner.order_by(JobRun.queued_at.asc())
+        .limit(1)
+        .with_for_update(skip_locked=True)
+        .scalar_subquery()
+    )
+
     result = db.execute(
         _sql_update(JobRun)
-        .where(JobRun.id == job_id, JobRun.status.in_(["queued", "paused"]))
+        .where(JobRun.id == inner)
         .values(
             status="running",
-            cancel_requested=False,
             started_at=now,
+            last_heartbeat_at=now,
+            pause_requested=False,
+            pause_reason=None,
             message=_job_message(message),
         )
+        .returning(JobRun.id)
         .execution_options(synchronize_session=False)
     )
+    row = result.first()
     db.commit()
-    return result.rowcount == 1
+    return int(row[0]) if row else None
 
 
-def list_queued_jobs(db: Session) -> list[JobRun]:
-    return (
-        db.query(JobRun)
-        .filter(JobRun.status == "queued")
-        .order_by(JobRun.queued_at.asc())
-        .all()
+def get_job_flags(db: Session, job_id: int) -> tuple[str, bool, bool] | None:
+    """Return (status, cancel_requested, pause_requested), or None if gone.
+
+    Reads three columns instead of loading the row, because a running job's
+    cancel checkpoint calls this per unit of work. Callers inside a job MUST
+    pass a short-lived session, not the handler's own — reading through the
+    handler's session would autoflush its pending work at an arbitrary point
+    mid-batch.
+    """
+    row = (
+        db.query(JobRun.status, JobRun.cancel_requested, JobRun.pause_requested)
+        .filter(JobRun.id == job_id)
+        .first()
     )
+    if row is None:
+        return None
+    return str(row[0]), bool(row[1]), bool(row[2])
 
 
 MAX_RESTART_COUNT = 5
@@ -264,91 +313,6 @@ def requeue_interrupted_jobs(
     if jobs:
         db.commit()
     return len(jobs)
-
-
-def requeue_recent_abandoned_jobs(
-    db: Session,
-    *,
-    message: str = "Recovered after worker restart",
-    lookback_seconds: int = 1800,
-) -> int:
-    """Re-queue jobs that failed due to a worker restart.
-
-    During a deploy restart, in-flight jobs may be forcibly killed before
-    our in-process runner can pause them gracefully. This helper converts
-    those recent, infrastructure-induced failures back to queued so they
-    can resume from their existing progress checkpoint.
-    """
-    import json as _json
-    from datetime import timedelta
-
-    cutoff = datetime.now(tz=timezone.utc) - timedelta(seconds=lookback_seconds)
-    jobs = (
-        db.query(JobRun)
-        .filter(
-            JobRun.status == "failed",
-            JobRun.completed_at.is_not(None),
-            JobRun.completed_at >= cutoff,
-            JobRun.error.is_not(None),
-            JobRun.error.ilike("%AbandonedJobError%"),
-        )
-        .all()
-    )
-    import logging as _logging
-    _logger = _logging.getLogger(__name__)
-    for job in jobs:
-        job.restart_count = (job.restart_count or 0) + 1
-        if job.restart_count > MAX_RESTART_COUNT:
-            error_msg = f"Max retries exceeded ({job.restart_count - 1}/{MAX_RESTART_COUNT} restarts)"
-            job.status = "failed"
-            job.error = error_msg
-            job.completed_at = datetime.now(tz=timezone.utc)
-            job.message = _job_message(error_msg)
-            _logger.error(
-                "Job %s (type=%s) killed after %d restarts — max retries exceeded",
-                job.id, job.job_type, job.restart_count - 1,
-            )
-            continue
-        if job.cancel_requested:
-            job.status = "cancelled"
-            job.completed_at = datetime.now(tz=timezone.utc)
-            job.message = _job_message("Cancelled (honoured during abandon recovery)")
-            _logger.info(
-                "Job %s (type=%s) cancelled during abandon recovery — cancel was pending",
-                job.id, job.job_type,
-            )
-            continue
-        job.status = "queued"
-        job.pause_requested = False
-        job.started_at = None
-        job.completed_at = None
-        job.message = _job_message(message)
-        job.error = None
-        _logger.warning(
-            "Job %s (type=%s) requeued after abandon (restart %d/%d)",
-            job.id, job.job_type, job.restart_count, MAX_RESTART_COUNT,
-        )
-        # For bulk jobs force checkpoint resume semantics on restart recovery.
-        if job.job_type == "bulk":
-            try:
-                p = _json.loads(job.params_json or "{}")
-            except Exception:
-                p = {}
-            p["resume"] = True
-            job.params_json = _json.dumps(p)
-    if jobs:
-        db.commit()
-    return len(jobs)
-
-
-def mark_running(db: Session, job: JobRun, *, message: str) -> JobRun:
-    job.status = "running"
-    job.cancel_requested = False
-    job.started_at = datetime.now(tz=timezone.utc)
-    job.message = _job_message(message)
-    db.commit()
-    db.refresh(job)
-    return job
 
 
 def mark_cancel_requested(db: Session, job: JobRun) -> JobRun:
@@ -447,10 +411,28 @@ def mark_pause_requested(db: Session, job: JobRun) -> JobRun:
     return job
 
 
-def mark_paused(db: Session, job: JobRun, *, message: str, stats: dict[str, Any] | None = None) -> JobRun:
-    """Set job status to 'paused', preserving progress_done as the resume point."""
+#: Pause reasons that the recovery sweep is allowed to auto-resume. A pause the
+#: user asked for is deliberately excluded — see `resume_all_paused_jobs`.
+AUTO_RESUMABLE_PAUSE_REASONS = ("shutdown", "preempt")
+
+
+def mark_paused(
+    db: Session,
+    job: JobRun,
+    *,
+    message: str,
+    stats: dict[str, Any] | None = None,
+    reason: str = "shutdown",
+) -> JobRun:
+    """Set job status to 'paused', preserving progress_done as the resume point.
+
+    ``reason`` records WHO paused the job ('user' | 'shutdown' | 'preempt') and
+    is what stops `resume_all_paused_jobs` from restarting a job a person
+    deliberately stopped.
+    """
     job.status = "paused"
     job.pause_requested = False
+    job.pause_reason = reason
     job.message = _job_message(message)
     if stats is not None:
         job.stats_json = json.dumps(stats)
@@ -463,6 +445,7 @@ def resume_paused_job(db: Session, job: JobRun) -> JobRun:
     """Re-queue a paused job so the worker picks it up from progress_done."""
     job.status = "queued"
     job.pause_requested = False
+    job.pause_reason = None
     job.started_at = None
     job.completed_at = None
     job.message = _job_message(f"Resuming from {job.progress_done or 0}…")
@@ -476,17 +459,30 @@ def resume_all_paused_jobs(
     *,
     min_heartbeat_age_seconds: int = 0,
 ) -> int:
-    """Re-queue paused jobs after a restart so they resume automatically.
+    """Re-queue jobs that were paused by infrastructure, so they self-heal.
+
+    Only pauses with ``pause_reason`` in ``AUTO_RESUMABLE_PAUSE_REASONS`` are
+    touched. A job paused from the UI (``pause_reason='user'``) is left alone:
+    this sweep runs at boot and every few minutes, so previously any job a user
+    paused restarted itself within ~3 minutes, and there was no way to keep a
+    job stopped. Rows predating the ``pause_reason`` column have NULL and are
+    treated as auto-resumable, preserving the old behaviour for them.
 
     ``min_heartbeat_age_seconds`` guards against the K8s rolling-deploy race:
     a dying pod pauses its job and Pod 2 starts almost simultaneously.  If the
     paused job still has a recent heartbeat (< ``min_heartbeat_age_seconds``
-    old) the dying pod is still mid-batch, so we skip it here and let
-    ``_periodic_recovery`` pick it up once the heartbeat goes stale.
-    Pass 0 (default) to re-queue all paused jobs immediately.
+    old) the dying pod is still mid-batch, so we skip it here and let the next
+    sweep pick it up once the heartbeat goes stale.
+    Pass 0 (default) to re-queue all eligible paused jobs immediately.
     """
     from datetime import timedelta
-    query = db.query(JobRun).filter(JobRun.status == "paused")
+    query = db.query(JobRun).filter(
+        JobRun.status == "paused",
+        or_(
+            JobRun.pause_reason.is_(None),
+            JobRun.pause_reason.in_(AUTO_RESUMABLE_PAUSE_REASONS),
+        ),
+    )
     if min_heartbeat_age_seconds > 0:
         stale_cutoff = datetime.now(tz=timezone.utc) - timedelta(seconds=min_heartbeat_age_seconds)
         query = query.filter(
@@ -499,6 +495,7 @@ def resume_all_paused_jobs(
     for job in jobs:
         job.status = "queued"
         job.pause_requested = False
+        job.pause_reason = None
         job.started_at = None
         job.completed_at = None
         job.message = _job_message(f"Auto-resumed from {job.progress_done or 0} after restart")

@@ -26,6 +26,11 @@ spec:
         runAsUser: 1000
         runAsGroup: 1000
       automountServiceAccountToken: false
+      # Job workers pause in-flight jobs at their next checkpoint on SIGTERM
+      # (job_worker.request_shutdown waits up to JOB_SHUTDOWN_JOIN_TIMEOUT,
+      # default 25s). The K8s default of 30s leaves no margin for that, so
+      # give the drain room before the SIGKILL.
+      terminationGracePeriodSeconds: 60
       {{- with .Values.imagePullSecrets }}
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}

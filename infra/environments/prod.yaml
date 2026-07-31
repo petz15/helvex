@@ -60,6 +60,8 @@ apiWorker:
 
 mlWorker:
   enabled: true
+  # 1 job at a time — playwright crawls already fork 2 Chromium per job.
+  concurrency: 1
   nodeSelector: {workload: ml}
   tolerations:
     - key: workload
@@ -77,6 +79,9 @@ mlWorker:
 crawlerHttpWorker:
   enabled: true
   replicaCount: 2
+  # 2 jobs/pod × crawl_concurrency 10 = up to 20 in-flight crawls per pod.
+  # Raise the memory limit below before raising this — see values.yaml.
+  concurrency: 2
   resources:
     requests:
       cpu: 250m

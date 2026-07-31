@@ -23,19 +23,82 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+# ── Tunables ───────────────────────────────────────────────────────────────────
+
+# Seconds a worker sleeps when the queue is empty.  An enqueue on this pod wakes
+# the poller early via `_wake_event`, so this is only the ceiling for work queued
+# by *another* pod.
+_JOB_POLL_INTERVAL = int(os.environ.get("JOB_POLL_INTERVAL", "5"))
+
+_JOB_WORKER_CONCURRENCY = int(os.environ.get("JOB_WORKER_CONCURRENCY", "1"))
+
+# How often a running job stamps last_heartbeat_at.  Must stay well below
+# `requeue_interrupted_jobs(stale_after_seconds=...)` (300 s) or live jobs get
+# re-queued onto a second pod — the two constants are a pair.
+_HEARTBEAT_INTERVAL = 30
+
+# Seconds between stale-job recovery sweeps.
+_STALE_JOB_RECOVERY_INTERVAL = 180
+
+# Minimum seconds between cancel/pause flag polls inside a running job.
+_FLAG_POLL_INTERVAL = 2.0
+
+# Upper bound on how long shutdown waits for running jobs to hit a checkpoint
+# and persist themselves as paused.  Kept under the K8s default 30 s
+# terminationGracePeriodSeconds so the pod is not SIGKILLed mid-write.
+_SHUTDOWN_JOIN_TIMEOUT = float(os.environ.get("JOB_SHUTDOWN_JOIN_TIMEOUT", "25"))
+
+
 # ── Graceful shutdown ──────────────────────────────────────────────────────────
 
-_shutdown_requested: bool = False
+# An Event rather than a bare bool so it can be cleared: as a module global that
+# was only ever set, one lifespan shutdown poisoned the whole process, and every
+# job started afterwards paused at its first checkpoint.
+_shutdown_event = threading.Event()
+
+# Set by the worker loop while it owns in-flight jobs; `request_shutdown` waits
+# on it so jobs get to their next checkpoint before the process dies.
+_jobs_drained = threading.Event()
+_jobs_drained.set()
 
 
-def request_shutdown() -> None:
-    """Signal all running jobs to pause at their next progress checkpoint.
+def is_shutting_down() -> bool:
+    return _shutdown_event.is_set()
 
-    Called from app/main.py lifespan shutdown.
+
+def reset_shutdown() -> None:
+    """Clear the shutdown flag. Called from lifespan startup."""
+    _shutdown_event.clear()
+    _jobs_drained.set()
+
+
+def request_shutdown(timeout: float | None = None) -> None:
+    """Signal running jobs to pause at their next checkpoint, then wait for them.
+
+    Called from app/main.py lifespan shutdown.  Previously this only set the
+    flag and returned, so uvicorn tore the process down mid-batch and the jobs
+    were killed rather than paused — they stayed `running` in the DB until the
+    5-minute recovery sweep noticed the dead heartbeat.  Waiting here lets each
+    job persist itself as `paused` with its progress intact.
     """
-    global _shutdown_requested
-    _shutdown_requested = True
+    _shutdown_event.set()
+    # Break an idle poller out of its park immediately rather than letting it
+    # burn the remaining poll interval before it notices the shutdown.
+    _wake_event.set()
     logger.info("Graceful shutdown requested — running jobs will pause at next checkpoint")
+
+    # Slightly longer than the loop's own join budget: the loop may take up to a
+    # poll interval to notice the flag, and warning before it has had its full
+    # window would report a clean drain as a timeout.
+    wait_for = (_SHUTDOWN_JOIN_TIMEOUT + _JOB_POLL_INTERVAL) if timeout is None else timeout
+    if not _jobs_drained.wait(wait_for):
+        logger.warning(
+            "Shutdown drain timed out after %.0fs — remaining jobs will be recovered "
+            "by the stale-job sweep on the next pod",
+            wait_for,
+        )
+    else:
+        logger.info("All in-flight jobs checkpointed — shutdown clean")
 
 
 class JobCancelledError(Exception):
@@ -45,21 +108,29 @@ class JobCancelledError(Exception):
 class JobPausedError(Exception):
     """Raised when a running job receives a pause request.
 
+    `reason` is persisted to `job_runs.pause_reason` and decides whether the
+    recovery sweep may auto-resume the job: only `'user'` pauses are left alone,
+    because a person deliberately stopped that job and expects it to stay
+    stopped.  `'shutdown'` and `'preempt'` pauses are infrastructure-driven and
+    resume on their own.
+
     Set requeue=True for preemption: the job is immediately re-queued instead
     of staying paused, so another worker pod can pick it up right away.
     """
-    def __init__(self, message: str = "", *, requeue: bool = False) -> None:
+    def __init__(
+        self,
+        message: str = "",
+        *,
+        requeue: bool = False,
+        reason: str = "shutdown",
+    ) -> None:
         super().__init__(message)
         self.requeue = requeue
+        self.reason = "preempt" if requeue else reason
 
 
 class JobEnqueueError(RuntimeError):
     """Raised when a job cannot be enqueued or processed due to configuration."""
-
-
-class _JobWaitingExternalSignal(Exception):
-    """Internal signal: job transitioned to waiting_external — skip mark_completed."""
-
 
 
 def _compute_dedup_key(job_type: str, org_id: int | None, params: dict) -> str | None:
@@ -120,14 +191,6 @@ def _compute_dedup_key(job_type: str, org_id: int | None, params: dict) -> str |
 
     # Default: one active job per type per org.
     return f"{job_type}:{org_id}"
-
-
-def _publish_job_update(org_id: int | None) -> None:
-    pass
-
-
-def _heartbeat() -> None:
-    pass
 
 
 def _preflight_job(db: Session, *, job_type: str, params: dict) -> tuple[dict, list[str]]:
@@ -325,64 +388,34 @@ def _refund_job_credits_if_needed(
         logger.warning("credit_refund_failed job_id=%d error=%s", job.id, _e)
 
 
-# ── Internal state helpers ─────────────────────────────────────────────────────
-
-def _sync_active_task(
-    app_state,
-    *,
-    job_type: str,
-    label: str,
-    message: str,
-    stats: dict,
-    error: str | None,
-    done: bool,
-) -> None:
-    app_state.collection_task = {
-        "type": job_type,
-        "label": label,
-        "started_at": time.time(),
-        "message": message,
-        "stats": stats,
-        "error": error,
-        "done": done,
-    }
-
-
-def _maybe_sync(app, **kwargs) -> None:
-    """Call _sync_active_task only when running inside the web process (app != None)."""
-    if app is not None:
-        _sync_active_task(app.state, **kwargs)
-
-
 # ── Job runner ─────────────────────────────────────────────────────────────────
 
 def _run_job(app, job_id: int) -> None:
-    """Execute one job."""
+    """Execute one already-claimed job.
+
+    The caller (`_job_worker_loop`) claims the row atomically via
+    `crud.claim_next_job()`, which flips it to `status='running'` in the same
+    statement that selects it.  This function therefore does no claiming of its
+    own — never call it with an id that was not claimed that way, or two pods
+    can execute the same job.
+    """
     from app.metrics import record_job_duration
-    from app.services.jobs.job_handlers import JOB_HANDLERS as _JOB_HANDLERS
-    
+    from app.services.jobs.job_handlers import (
+        JOB_HANDLERS as _JOB_HANDLERS,
+        JobContext,
+        JobWaitingExternalSignal,
+    )
+
     job_start_time = time.monotonic()
+    outcome = "failed"
 
     with SessionLocal() as db:
         job = crud.get_job(db, job_id)
         if not job:
             return
 
-        if job.status == "cancelled" or job.cancel_requested:
-            _refund_job_credits_if_needed(db, job=job, reason="cancelled_before_start")
-            crud.mark_cancelled(db, job, message="Cancelled before start")
-            crud.create_event(db, job_id=job.id, level="info", message="Job cancelled before execution started")
-            duration = time.monotonic() - job_start_time
-            record_job_duration(job.job_type, duration, "cancelled")
-            return
-
-        # Atomic claim: UPDATE WHERE status IN ('queued','paused') — only one pod wins
-        if not crud.atomic_claim_job(db, job_id, message="Starting…"):
-            return  # another pod already claimed this job
-
-        db.refresh(job)  # sync in-memory state after the atomic UPDATE
+        job_type = job.job_type
         crud.create_event(db, job_id=job.id, level="info", message="Job started")
-        _publish_job_update(job.org_id)
 
         # Heartbeat daemon: stamps last_heartbeat_at every 30 s so that
         # requeue_interrupted_jobs() can tell this job is still alive and
@@ -390,7 +423,7 @@ def _run_job(app, job_id: int) -> None:
         _hb_stop = threading.Event()
 
         def _hb_daemon() -> None:
-            while not _hb_stop.wait(30):
+            while not _hb_stop.wait(_HEARTBEAT_INTERVAL):
                 try:
                     with SessionLocal() as _hb_db:
                         crud.update_heartbeat(_hb_db, job_id)
@@ -400,56 +433,69 @@ def _run_job(app, job_id: int) -> None:
         _hb_thread = threading.Thread(target=_hb_daemon, daemon=True, name=f"hb-job-{job_id}")
         _hb_thread.start()
 
-        if app is not None:
-            _sync_active_task(
-                app.state,
-                job_type=job.job_type,
-                label=job.label,
-                message="Starting…",
-                stats={},
-                error=None,
-                done=False,
-            )
-
         params = json.loads(job.params_json or "{}")
         resume_from = max(0, int(job.progress_done or 0))
 
+        # Throttle state for the checkpoint below.
+        _last_flag_poll = 0.0
+
         def _assert_not_cancelled() -> None:
-            db.refresh(job)
-            if job.cancel_requested:
+            """Checkpoint called between units of work by every handler.
+
+            Shutdown is a local flag, so it is honoured immediately.  The DB
+            flags are polled at most every `_FLAG_POLL_INTERVAL` seconds: on a
+            700k-row job this checkpoint runs per company, and the previous
+            `db.refresh(job)` made that one full-row SELECT per row — on the
+            handler's own session, so it could also autoflush the handler's
+            pending state at an arbitrary point mid-batch.  The trade is that a
+            cancel or pause lands within a couple of seconds instead of
+            instantly.
+            """
+            nonlocal _last_flag_poll
+
+            if _shutdown_event.is_set():
+                raise JobPausedError("Worker shutdown — job paused for restart", reason="shutdown")
+
+            now = time.monotonic()
+            if now - _last_flag_poll < _FLAG_POLL_INTERVAL:
+                return
+            _last_flag_poll = now
+
+            # Short-lived session, never the handler's own — see get_job_flags.
+            with SessionLocal() as _flag_db:
+                flags = crud.get_job_flags(_flag_db, job_id)
+            if flags is None:
+                return
+            status, cancel_requested, pause_requested = flags
+            if cancel_requested:
                 raise JobCancelledError("Cancellation requested")
-            if job.pause_requested:
-                raise JobPausedError("Pause requested")
-            if _shutdown_requested:
-                raise JobPausedError("Worker shutdown — job paused for restart")
+            if pause_requested:
+                raise JobPausedError("Pause requested", reason="user")
             # If recovery on a sibling pod re-queued this job (due to a
             # heartbeat gap), our status is no longer 'running'.  Pause so
             # the re-queued instance can start cleanly instead of two threads
             # executing the same job in parallel.
-            if job.status != "running":
-                raise JobPausedError(f"Job evicted by recovery (status='{job.status}') — yielding to re-queued instance")
+            if status != "running":
+                raise JobPausedError(
+                    f"Job evicted by recovery (status='{status}') — yielding to re-queued instance",
+                    reason="shutdown",
+                )
 
         try:
-            if job.job_type in _JOB_HANDLERS:
-                from app.services.jobs.job_handlers import JobContext, JOB_HANDLERS as _JH, JobWaitingExternalSignal
-                _ctx = JobContext(
-                    db=db,
-                    job=job,
-                    params=params,
-                    resume_from=resume_from,
-                    app=app,
-                    _assert_not_cancelled=_assert_not_cancelled,
-                    _maybe_sync=lambda **kw: _maybe_sync(app, **kw),
-                    _heartbeat=_heartbeat,
-                    _enqueue_job=enqueue_job,
-                )
-                try:
-                    stats, done_msg = _JH[job.job_type](_ctx)
-                except JobWaitingExternalSignal:
-                    raise _JobWaitingExternalSignal()
+            handler = _JOB_HANDLERS.get(job_type)
+            if handler is None:
+                raise RuntimeError(f"Unsupported job type: {job_type}")
 
-            else:
-                raise RuntimeError(f"Unsupported job type: {job.job_type}")
+            _ctx = JobContext(
+                db=db,
+                job=job,
+                params=params,
+                resume_from=resume_from,
+                app=app,
+                _assert_not_cancelled=_assert_not_cancelled,
+                _enqueue_job=enqueue_job,
+            )
+            stats, done_msg = handler(_ctx)
 
             crud.mark_completed(db, job, message=done_msg, stats=stats)
             crud.create_event(db, job_id=job.id, level="info", message=done_msg)
@@ -457,14 +503,13 @@ def _run_job(app, job_id: int) -> None:
                 crud.create_event(db, job_id=job.id, level="warn", message=str(_w))
             for _err in (stats.get("errors") or [])[:50]:
                 crud.create_event(db, job_id=job.id, level="warn", message=str(_err))
-            _maybe_sync(app, job_type=job.job_type, label=job.label, message=done_msg, stats=dict(stats), error=None, done=True)
-            _publish_job_update(job.org_id)
             _maybe_send_job_notification(db, job=job, event="completed", stats=stats)
+            outcome = "success"
 
-        except _JobWaitingExternalSignal:
-            # Job transitioned to waiting_external — already committed above; nothing else needed.
-            _publish_job_update(job.org_id)
-            return
+        except JobWaitingExternalSignal:
+            # Job transitioned to waiting_external — already committed by the
+            # handler; nothing else to do.
+            outcome = "waiting_external"
 
         except JobPausedError as _pause_exc:
             current_stats = json.loads(job.stats_json) if job.stats_json else {}
@@ -472,22 +517,20 @@ def _run_job(app, job_id: int) -> None:
             total_n = job.progress_total
             if _pause_exc.requeue:
                 pause_msg = f"Preempted at {done_n}" + (f"/{total_n}" if total_n else "") + " — requeued"
-                crud.mark_paused(db, job, message=pause_msg, stats=current_stats)
+                crud.mark_paused(db, job, message=pause_msg, stats=current_stats, reason=_pause_exc.reason)
                 crud.resume_paused_job(db, job)
             else:
                 pause_msg = f"Paused at {done_n}" + (f"/{total_n}" if total_n else "")
-                crud.mark_paused(db, job, message=pause_msg, stats=current_stats)
+                crud.mark_paused(db, job, message=pause_msg, stats=current_stats, reason=_pause_exc.reason)
             crud.create_event(db, job_id=job.id, level="info", message=pause_msg)
-            _maybe_sync(app, job_type=job.job_type, label=job.label, message=pause_msg, stats=current_stats, error=None, done=True)
-            _publish_job_update(job.org_id)
+            outcome = "paused"
 
         except JobCancelledError:
             msg = "Cancelled by user"
             _refund_job_credits_if_needed(db, job=job, reason="cancelled")
             crud.mark_cancelled(db, job, message=msg)
             crud.create_event(db, job_id=job.id, level="warn", message=msg)
-            _maybe_sync(app, job_type=job.job_type, label=job.label, message=msg, stats={}, error=None, done=True)
-            _publish_job_update(job.org_id)
+            outcome = "cancelled"
 
         except Exception as exc:  # noqa: BLE001
             err = traceback.format_exc()
@@ -496,17 +539,19 @@ def _run_job(app, job_id: int) -> None:
                 db.rollback()
             except Exception:  # noqa: BLE001
                 pass
-            logger.error("Job %s (%s) failed:\n%s", job.id, job.job_type, err)
+            logger.error("Job %s (%s) failed:\n%s", job.id, job_type, err)
             _refund_job_credits_if_needed(db, job=job, reason="failed")
             crud.mark_failed(db, job, error=err, message=summary)
             crud.create_event(db, job_id=job.id, level="error", message=summary)
             crud.create_event(db, job_id=job.id, level="debug", message=err)
-            _maybe_sync(app, job_type=job.job_type, label=job.label, message="Failed", stats={}, error=summary, done=True)
-            _publish_job_update(job.org_id)
             _maybe_send_job_notification(db, job=job, event="failed", summary=summary)
+            outcome = "failed"
 
         finally:
             _hb_stop.set()
+            # Previously only the cancelled-before-start branch recorded this,
+            # so job_duration_seconds observed nothing for real runs.
+            record_job_duration(job_type, time.monotonic() - job_start_time, outcome)
 
 
 # ── Job notification emails ───────────────────────────────────────────────────
@@ -580,142 +625,175 @@ def _get_job_type_blacklist() -> set[str] | None:
     return {t.strip() for t in raw.split(",") if t.strip()}
 
 
-_JOB_POLL_INTERVAL = int(os.environ.get("JOB_POLL_INTERVAL", "5"))
+# Set by `kick_job_worker` to wake an idle poller immediately instead of making
+# a freshly enqueued job wait out `_JOB_POLL_INTERVAL`.
+_wake_event = threading.Event()
 
 
-_STALE_JOB_RECOVERY_INTERVAL = 180  # seconds between periodic stale-job sweeps
+def _run_recovery_sweep() -> None:
+    """Re-queue jobs orphaned by a dead pod.
 
-
-_JOB_WORKER_CONCURRENCY = int(os.environ.get("JOB_WORKER_CONCURRENCY", "1"))
+    Runs on a timer from the worker loop regardless of queue depth.  It used to
+    live inside the "queue is empty" branch, which meant it never ran at all on
+    a pod without a JOB_TYPE_WHITELIST, and on whitelist pods a sustained
+    backlog starved it indefinitely — exactly when orphan recovery matters most.
+    """
+    try:
+        with SessionLocal() as db:
+            recovered = crud.requeue_interrupted_jobs(db)
+            if recovered:
+                logger.info("Stale-job sweep: recovered %d interrupted job(s)", recovered)
+            resumed = crud.resume_all_paused_jobs(db, min_heartbeat_age_seconds=120)
+            if resumed:
+                logger.info("Stale-job sweep: resumed %d auto-paused job(s) with stale heartbeat", resumed)
+    except Exception:  # noqa: BLE001
+        logger.error("Stale-job sweep failed", exc_info=True)
 
 
 def _job_worker_loop(app) -> None:
+    """Long-lived daemon: claim queued jobs and run them, up to `concurrency`.
+
+    One loop shape for every concurrency level — at concurrency=1 the pool
+    simply holds a single slot.  The loop never exits on an empty queue; it
+    parks on `_wake_event` so a local enqueue starts work immediately and a
+    remote one is picked up within `_JOB_POLL_INTERVAL`.
+    """
     from concurrent.futures import ThreadPoolExecutor, wait as _fut_wait, FIRST_COMPLETED
 
     whitelist = _get_job_type_whitelist()
     blacklist = _get_job_type_blacklist()
-    continuous = bool(whitelist)
-    concurrency = _JOB_WORKER_CONCURRENCY
+    concurrency = max(1, _JOB_WORKER_CONCURRENCY)
 
     if whitelist:
         logger.info(
-            "Job worker started (continuous poll, concurrency=%d) — handling job types: %s",
+            "Job worker started (concurrency=%d) — handling job types: %s",
             concurrency, ", ".join(sorted(whitelist)),
         )
     elif blacklist:
-        logger.info("Job worker started (concurrency=%d) — handling all job types except: %s", concurrency, ", ".join(sorted(blacklist)))
+        logger.info(
+            "Job worker started (concurrency=%d) — handling all job types except: %s",
+            concurrency, ", ".join(sorted(blacklist)),
+        )
     else:
         logger.info("Job worker started (concurrency=%d) — handling all job types", concurrency)
 
-    app.state.job_worker_running = True
-    _last_recovery = time.monotonic()
-
-    def _poll_next():
-        with SessionLocal() as db:
-            return crud.get_next_queued_job(
-                db,
-                job_type_whitelist=whitelist,
-                job_type_blacklist=blacklist,
-                skip_locked=True,
-            )
-
-    def _periodic_recovery(db_session):
-        nonlocal _last_recovery
-        if time.monotonic() - _last_recovery >= _STALE_JOB_RECOVERY_INTERVAL:
-            recovered = crud.requeue_interrupted_jobs(db_session)
-            if recovered:
-                logger.info("Periodic stale-job sweep: recovered %d interrupted job(s)", recovered)
-            resumed = crud.resume_all_paused_jobs(db_session, min_heartbeat_age_seconds=120)
-            if resumed:
-                logger.info("Periodic stale-job sweep: resumed %d paused job(s) with stale heartbeat", resumed)
-            _last_recovery = time.monotonic()
+    last_recovery = 0.0  # sweep once on the first iteration
 
     try:
-        if concurrency == 1:
-            # Single-threaded fast path — zero overhead, original behaviour.
-            while True:
-                next_job = _poll_next()
-                if next_job is None:
-                    if not continuous:
+        with ThreadPoolExecutor(max_workers=concurrency, thread_name_prefix="job-worker") as pool:
+            in_flight: set = set()
+            while not _shutdown_event.is_set():
+                # Drain finished slots.
+                for fut in [f for f in in_flight if f.done()]:
+                    in_flight.discard(fut)
+                    try:
+                        fut.result()
+                    except Exception as exc:  # noqa: BLE001
+                        logger.error("Unexpected error from job thread: %s", exc, exc_info=True)
+
+                if in_flight:
+                    _jobs_drained.clear()
+                else:
+                    _jobs_drained.set()
+
+                now = time.monotonic()
+                if now - last_recovery >= _STALE_JOB_RECOVERY_INTERVAL:
+                    last_recovery = now
+                    _run_recovery_sweep()
+
+                # Fill free slots.  claim_next_job() flips the row to 'running'
+                # in the same statement that selects it, so a claimed job can
+                # never be handed out twice — no in-flight id bookkeeping, and
+                # slots fill in one pass instead of one per poll interval.
+                claimed_any = False
+                while len(in_flight) < concurrency and not _shutdown_event.is_set():
+                    try:
+                        with SessionLocal() as db:
+                            job_id = crud.claim_next_job(
+                                db,
+                                job_type_whitelist=whitelist,
+                                job_type_blacklist=blacklist,
+                            )
+                    except Exception:  # noqa: BLE001
+                        logger.error("Job claim failed", exc_info=True)
                         break
-                    with SessionLocal() as db:
-                        _periodic_recovery(db)
-                    time.sleep(_JOB_POLL_INTERVAL)
-                    continue
-                _run_job(app, next_job.id)
-        else:
-            # Multi-threaded path: fill up to `concurrency` slots, wait for any
-            # to finish, then refill.
-            # in_flight maps job_id → Future so we never submit the same job_id
-            # twice within one pod (which would happen because _poll_next() can
-            # return the same row twice before atomic_claim_job flips it to
-            # 'running').
-            from concurrent.futures import Future as _Future
-            with ThreadPoolExecutor(max_workers=concurrency, thread_name_prefix="job-worker") as pool:
-                in_flight: dict[int, _Future] = {}
-                while True:
-                    # Drain completed futures.
-                    for job_id, f in list(in_flight.items()):
-                        if f.done():
-                            del in_flight[job_id]
-                            try:
-                                f.result()
-                            except Exception as exc:
-                                logger.error("Unexpected error from job thread: %s", exc, exc_info=True)
+                    if job_id is None:
+                        break
+                    claimed_any = True
+                    _jobs_drained.clear()
+                    in_flight.add(pool.submit(_run_job, app, job_id))
 
-                    with SessionLocal() as db:
-                        _periodic_recovery(db)
+                if in_flight:
+                    # Wake as soon as a slot frees up so the queue keeps moving.
+                    _fut_wait(list(in_flight), timeout=_JOB_POLL_INTERVAL, return_when=FIRST_COMPLETED)
+                elif not claimed_any:
+                    # Idle: park until something is enqueued locally or the poll
+                    # interval elapses (work queued by another pod).
+                    _wake_event.wait(_JOB_POLL_INTERVAL)
+                    _wake_event.clear()
 
-                    # Fill empty slots — skip IDs already in-flight.
-                    while len(in_flight) < concurrency:
-                        nj = _poll_next()
-                        if nj is None or nj.id in in_flight:
-                            break
-                        in_flight[nj.id] = pool.submit(_run_job, app, nj.id)
-
-                    if not in_flight:
-                        if not continuous:
-                            break
-                        time.sleep(_JOB_POLL_INTERVAL)
-                        continue
-
-                    # Block until a slot opens or the poll interval elapses,
-                    # then loop to refill.
-                    _fut_wait(list(in_flight.values()), timeout=_JOB_POLL_INTERVAL, return_when=FIRST_COMPLETED)
+            # Shutdown: stop claiming, let in-flight jobs reach a checkpoint and
+            # persist themselves as paused.  `request_shutdown` is waiting on
+            # `_jobs_drained`, and the pool's __exit__ joins the threads.
+            if in_flight:
+                logger.info("Shutdown — waiting for %d in-flight job(s) to checkpoint", len(in_flight))
+                _fut_wait(list(in_flight), timeout=_SHUTDOWN_JOIN_TIMEOUT)
     finally:
-        app.state.job_worker_running = False
-        with SessionLocal() as db:
-            if crud.get_next_queued_job(db, job_type_whitelist=whitelist, job_type_blacklist=blacklist) is not None:
-                _ensure_job_worker(app)
+        _jobs_drained.set()
+        with _worker_lock:
+            _worker_threads.pop("job", None)
+        logger.info("Job worker loop exited")
 
 
 _LLM_POLL_INTERVAL = 300  # 5 minutes
 
 
 def _llm_poll_loop() -> None:
-    """Daemon thread: poll Anthropic Batch API jobs every 5 minutes."""
-    while True:
-        time.sleep(_LLM_POLL_INTERVAL)
+    """Daemon thread: poll Anthropic Batch API jobs every 5 minutes.
+
+    Polls first, then sleeps — sleeping first left `waiting_external` batches
+    unchecked for 5 minutes after every restart.
+    """
+    while not _shutdown_event.is_set():
         try:
             poll_llm_batches()
         except Exception:  # noqa: BLE001
             logger.error("LLM poll loop error", exc_info=True)
+        time.sleep(_LLM_POLL_INTERVAL)
+
+
+# Guards worker-thread startup.  Without it two concurrent kick_job_worker()
+# calls — routes, schedulers and enqueue_job all call it — could both observe
+# "not running" and start a second loop, after which the first to exit cleared
+# the shared flag while the other was still polling.
+_worker_lock = threading.Lock()
+_worker_threads: dict[str, threading.Thread] = {}
+
+
+def _ensure_thread(name: str, target, thread_name: str, args: tuple = ()) -> None:
+    """Start `target` in a daemon thread unless one is already alive for `name`."""
+    with _worker_lock:
+        existing = _worker_threads.get(name)
+        if existing is not None and existing.is_alive():
+            return
+        t = threading.Thread(target=target, args=args, daemon=True, name=thread_name)
+        _worker_threads[name] = t
+        t.start()
 
 
 def _ensure_job_worker(app) -> None:
     if getattr(app.state, "disable_job_worker", False):
         return
-    if not getattr(app.state, "llm_poll_running", False):
-        app.state.llm_poll_running = True
-        threading.Thread(target=_llm_poll_loop, daemon=True, name="llm-batch-poller").start()
-    if getattr(app.state, "job_worker_running", False):
+    if _shutdown_event.is_set():
         return
-    threading.Thread(target=_job_worker_loop, args=(app,), daemon=True).start()
+    _ensure_thread("llm", _llm_poll_loop, "llm-batch-poller")
+    _ensure_thread("job", _job_worker_loop, "job-worker-loop", args=(app,))
 
 
 def kick_job_worker(app) -> None:
-    """Ensure all DB-queued jobs are being processed by the in-process daemon thread."""
+    """Ensure queued jobs are being processed, and wake an idle poller now."""
     _ensure_job_worker(app)
+    _wake_event.set()
 
 
 # ── Enqueue helpers (used by REST routes) ─────────────────────────────────────
@@ -917,12 +995,10 @@ def poll_llm_batches() -> None:
                     for err in (stats.get("errors") or [])[:50]:
                         _crud.create_event(db, job_id=job.id, level="warn", message=str(err))
                     logger.info("poll_llm_batches: job %s completed (%s)", job.id, done_msg)
-                    _publish_job_update(job.org_id)
                 elif status == "error":
                     err_msg = stats.get("error", "Unknown Anthropic API error")
                     _crud.mark_failed(db, job, error=err_msg, message=err_msg)
                     _crud.create_event(db, job_id=job.id, level="error", message=err_msg)
-                    _publish_job_update(job.org_id)
                 # else: still processing — do nothing, retry next poll cycle
 
     except Exception as exc:  # noqa: BLE001

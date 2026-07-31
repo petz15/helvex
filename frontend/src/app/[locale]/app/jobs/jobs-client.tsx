@@ -152,6 +152,19 @@ function JobRow({ job, onAction }: { job: Job; onAction: (updated?: Job[]) => vo
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
             {statusBadge(job.status, t)}
+            {job.status === "paused" && (
+              <span
+                className={cn(
+                  "text-xs px-1.5 py-0.5 rounded",
+                  job.pause_reason === "user"
+                    ? "text-amber-700 bg-amber-50"
+                    : "text-slate-500 bg-slate-100"
+                )}
+                title={job.pause_reason === "user" ? t.pausedByYouTitle : t.pausedAutoTitle}
+              >
+                {job.pause_reason === "user" ? t.pausedByYou : t.pausedAuto}
+              </span>
+            )}
             <span className="text-xs text-slate-400 font-mono">#{job.id}</span>
             <span className="text-xs text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded">{job.job_type}</span>
             {job.restart_count > 0 && (

@@ -424,7 +424,6 @@ def _recover_jobs_and_start_worker(app, app_state) -> None:
         delete_old_finished_jobs,
         list_active_jobs,
         requeue_interrupted_jobs,
-        requeue_recent_abandoned_jobs,
         resume_all_paused_jobs,
     )
     from app.database import SessionLocal
@@ -433,15 +432,15 @@ def _recover_jobs_and_start_worker(app, app_state) -> None:
     try:
         with SessionLocal() as db:
             recovered = requeue_interrupted_jobs(db)
-            recovered_abandoned = requeue_recent_abandoned_jobs(db)
+            # Only 'shutdown'/'preempt' pauses resume here — a job paused from
+            # the UI stays paused across restarts.
             resumed = resume_all_paused_jobs(db, min_heartbeat_age_seconds=120)
             active_count = len(list_active_jobs(db))
             pruned = delete_old_finished_jobs(db, keep_days=30)
         kick_job_worker(app)
         app_state.startup_message = (
             f"Background jobs ready — recovered {recovered} interrupted, "
-            f"{recovered_abandoned} abandoned, resumed {resumed}, "
-            f"active {active_count}, pruned {pruned} old"
+            f"resumed {resumed}, active {active_count}, pruned {pruned} old"
         )
     except Exception as exc:
         raise RuntimeError(f"Failed to recover background jobs: {exc}") from exc
@@ -455,9 +454,12 @@ async def lifespan(app: FastAPI):
     app.state.startup_message = "Initialising…"
     app.state.startup_error = None
     app.state.startup_started_at = time.time()
-    app.state.collection_task = None
-    app.state.job_worker_running = False
     app.state.disable_job_worker = bool(getattr(settings, "disable_job_worker", False))
+
+    # The shutdown flag is module-level; clear it so a second lifespan in the
+    # same process (tests, reload) does not start out already shutting down.
+    from app.services.jobs.job_worker import reset_shutdown
+    reset_shutdown()
 
     async def _startup() -> None:
         try:
@@ -485,10 +487,12 @@ async def lifespan(app: FastAPI):
     asyncio.create_task(_startup())
     yield
 
-    # Graceful shutdown: ask any in-process jobs to pause at their next
-    # progress checkpoint so they are not left stuck as "running".
+    # Graceful shutdown: ask any in-process jobs to pause at their next progress
+    # checkpoint, then WAIT for them. Without the wait, uvicorn tore the process
+    # down mid-batch and the jobs stayed "running" in the DB until the stale-job
+    # sweep noticed the dead heartbeat minutes later.
     from app.services.jobs.job_worker import request_shutdown
-    request_shutdown()
+    await asyncio.to_thread(request_shutdown)
 
 
 # ── Application ───────────────────────────────────────────────────────────────

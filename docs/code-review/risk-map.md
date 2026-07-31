@@ -116,12 +116,13 @@ isn't a defect, but it's where reviewers most often miss things on a skim:
   backend (no route, no `JOB_HANDLERS` entry, no inline `elif`) — harmless,
   since that panel is purely descriptive with no trigger button, but it's a
   stale entry (planned-and-never-built, or removed-and-not-cleaned-up).
-- **`CLAUDE.md`'s job-system description is stale**: it describes a `USE_RQ`
-  env var and separate RQ worker mode. Neither exists in the current
-  codebase (`grep` for `USE_RQ`/`worker_entrypoint` returns nothing) —
-  `ARCHITECTURE.md` already correctly says thread-only. Worth a one-line fix
-  in `CLAUDE.md` next time it's touched (not changed here, since it's your
-  instructions file rather than generated documentation).
+- ~~**`CLAUDE.md`'s job-system description is stale**: it describes a `USE_RQ`
+  env var and separate RQ worker mode.~~ **Fixed.** The `USE_RQ` / RQ-worker
+  references in `CLAUDE.md`, `architecture.md` and `RUNBOOK.md` have been
+  replaced with the actual model (DB-polling workers partitioned by
+  `JOB_TYPE_WHITELIST`). See
+  [job-system-deep-dive.md](job-system-deep-dive.md), also rewritten — its
+  description of a duplicated inline dispatch chain no longer applied either.
 - **`docker-compose.yml` no longer exists in the repo**, but both
   `CLAUDE.md` ("Docker Compose (full stack)" section:
   `docker compose up --build`) and `ARCHITECTURE.md`'s directory layout

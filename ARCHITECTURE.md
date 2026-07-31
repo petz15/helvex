@@ -880,22 +880,49 @@ Strict-Transport-Security: max-age=31536000 (HTTPS only)
 ### Implementation
 
 **Thread mode (only mode — Redis/RQ removed)**
-- Daemon thread pool (`app/services/jobs/job_worker.py`), polls `job_runs` table for `status=queued`
-- Executes jobs concurrently via `ThreadPoolExecutor` (configurable `max_workers`)
-- No external dependencies; uses in-memory progress tracking
+- One long-lived daemon loop (`_job_worker_loop`, `app/services/jobs/job_worker.py`) claims `job_runs` rows and runs them in a `ThreadPoolExecutor` sized by `JOB_WORKER_CONCURRENCY`. Same loop shape at every concurrency level.
+- The loop never exits when idle; it parks on `_wake_event`, which `kick_job_worker()` sets so a local enqueue starts work immediately instead of waiting out `JOB_POLL_INTERVAL` (5 s).
+- Thread startup is guarded by `_worker_lock` + an `is_alive()` check, so concurrent `kick_job_worker()` calls (routes, schedulers, `enqueue_job`) cannot start two competing loops.
+- Progress is persisted to the `job_runs` row only — there is no in-process mirror (the old `app.state.collection_task`) and no pub/sub fan-out. The UI reads progress from the SSE poller in `app/api/routes/jobs.py`.
 - Set `DISABLE_JOB_WORKER=true` to suppress the thread (e.g., API-only pod)
+
+**Stale-job recovery**
+- `_run_recovery_sweep()` runs on a timer (`_STALE_JOB_RECOVERY_INTERVAL`, 180 s) at the top of every loop iteration — independent of queue depth. It previously sat inside the "queue is empty" branch, so it never ran on pods without a `JOB_TYPE_WHITELIST`, and a sustained backlog starved it on the others.
+- `requeue_interrupted_jobs()` re-queues `running` jobs whose heartbeat is older than 300 s. `_HEARTBEAT_INTERVAL` (30 s) and that threshold are a **pair** — change them together.
+
+**Graceful shutdown**
+- `request_shutdown()` sets `_shutdown_event`, wakes the parked poller, then **blocks on `_jobs_drained`** until in-flight jobs hit a checkpoint and persist themselves as `paused` (`pause_reason='shutdown'`). It formerly set a flag and returned, so uvicorn killed jobs mid-batch and they stayed `running` until the recovery sweep noticed.
+- `_shutdown_event` is an `Event` so `reset_shutdown()` (lifespan startup) can clear it; as a write-once bool, one shutdown poisoned the process and every later job paused immediately.
+- Worker deployments set `terminationGracePeriodSeconds: 60` to fit the drain (`JOB_SHUTDOWN_JOIN_TIMEOUT`, default 25 s) before SIGKILL.
+
+**Concurrency knobs multiply**
+- In-flight work per pod = `JOB_WORKER_CONCURRENCY × the job's own fan-out`. `web_crawl_http` defaults to `crawl_concurrency=10` (async httpx); `web_crawl_playwright` to `2`, each slot a full Chromium.
+- Crawl throughput is therefore tuned via `crawl_concurrency`, **not** by raising the worker's concurrency. Raise `JOB_WORKER_CONCURRENCY` to stop long jobs blocking short ones on the same pod (crawler-http also carries the interactive `web_crawl_single`), and re-check the pod memory limit against the product. Current: `crawlerHttpWorker.concurrency: 2`, `mlWorker.concurrency: 1`, `apiWorker.concurrency: 2`.
 
 **Job handler registry pattern — single dispatch, no inline branches**
 - Every job type is a dedicated handler in `app/services/jobs/job_handlers/{type}.py`, registered in `JOB_HANDLERS` (`app/services/jobs/job_handlers/__init__.py`)
-- `_run_job()` (`app/services/jobs/job_worker.py`) dispatches solely via `JOB_HANDLERS[job_type](ctx)`, passing a `JobContext` (DB, `job`, `params`, `resume_from`, `app`, and helper methods `assert_not_cancelled`, `progress`/`progress_no_event`, `event`, `status`/`status_with_stats`, `sync`, `enqueue_job`). Unknown job types raise `RuntimeError`.
+- `_run_job()` (`app/services/jobs/job_worker.py`) dispatches solely via `JOB_HANDLERS[job_type](ctx)`, passing a `JobContext` (DB, `job`, `params`, `resume_from`, `app`, and helper methods `assert_not_cancelled`, `progress`/`progress_no_event`, `event`, `status`/`status_with_stats`, `enqueue_job`). Unknown job types raise `RuntimeError`. (`sync()` and `_heartbeat()` were removed — both fed the deleted in-process state mirror and had no-op bodies.)
 - Handlers return `(stats_dict, done_message)` or raise typed exceptions (`JobPausedError`, `JobCancelledError`, `JobWaitingExternalSignal`)
 - The legacy inline `elif job.job_type == "...":` chain (~29 branches, ~900 lines) was **removed** — its logic already lived, near-verbatim, in the registry handlers. Two gaps closed during removal: (1) the `shab_daily` auto-chain that enqueues `sogc_preprocess`+`extract_sogc_persons` after a productive import was ported into `job_handlers/shab.py::handle_shab` (uses `ctx.enqueue_job`, which routes through the same `_enqueue_job_in_session` so the dedup key still guards against duplicate chained jobs); (2) `embed_purpose_full`/`embed_purpose_clean` gained handlers in `job_handlers/noga.py` and registry entries.
 - Shared post-completion logic stays in `_run_job` and is dispatch-agnostic: `mark_completed`, warning/error event fan-out, and `_maybe_send_job_notification`. (There is no longer any taxonomy/category cache to invalidate — those stats are computed live per request; see `get_taxonomy_stats`/`get_category_stats` in `app/crud/company.py`.)
 
 **Atomic job claiming (multi-pod safety)**
-- `crud.atomic_claim_job(db, job_id)` issues a single `UPDATE job_runs SET status='running' WHERE id=? AND status IN ('queued','paused')` and checks `rowcount == 1`
-- Only one pod wins the race even if both call `_run_job` simultaneously — the second UPDATE finds the row already `status='running'` and returns `rowcount=0`, causing an immediate return
-- `get_next_queued_job(..., skip_locked=True)` uses `SELECT ... FOR UPDATE SKIP LOCKED` so that when both idle pods poll simultaneously, each naturally claims a different queued job rather than both racing for the same one
+- `crud.claim_next_job(db, job_type_whitelist=…, job_type_blacklist=…)` selects **and** claims in one statement:
+  ```sql
+  UPDATE job_runs SET status='running', started_at=now(), last_heartbeat_at=now(), …
+  WHERE id = (SELECT id FROM job_runs
+              WHERE status='queued' AND NOT cancel_requested AND <type filter>
+              ORDER BY queued_at LIMIT 1 FOR UPDATE SKIP LOCKED)
+  RETURNING id
+  ```
+  A claimed row can never be handed to a second caller, in this pod or another. `_run_job()` receives an already-claimed id and does no claiming of its own.
+- **Do not split this back into a peek and a claim.** The former `get_next_queued_job(skip_locked=True)` + `atomic_claim_job()` pair released its row lock when the select's session closed — so `SKIP LOCKED` protected nothing and every losing pod burned a round trip. Locally it was worse: a job submitted to the pool stayed `queued` until its thread started, so the next poll re-drew it, tripped the in-flight guard and aborted slot filling — one slot per 5 s poll, meaning concurrency N took ~5·N seconds to reach.
+- `NOT cancel_requested` sits in the `WHERE` rather than being cleared in the `SET`: clearing it unconditionally could swallow a cancel that arrived while a job was pausing for shutdown and was then re-queued by recovery.
+- `get_next_queued_job()` remains as a non-claiming peek for diagnostics and tests only.
+
+**Cheap cancel/pause checkpoints**
+- `_assert_not_cancelled()` checks the local shutdown flag instantly, and polls `status`/`cancel_requested`/`pause_requested` at most every `_FLAG_POLL_INTERVAL` (2 s) via `crud.get_job_flags()` on a **short-lived session**.
+- It previously did `db.refresh(job)` on the handler's own session — one full-row SELECT per company on a 700k-row job, and an autoflush of the handler's pending state at an arbitrary point mid-batch.
 
 ### Job lifecycle
 
@@ -1681,10 +1708,12 @@ Quality depends on:
 
 ```python
 ML_JOB_TYPES = {"tfidf_kmeans_cluster", "discover_stopwords", "reclassify_noga", ...}
-# → routed to helvex-ml pod when USE_RQ=true
+# → the helvex-ml pod's JOB_TYPE_WHITELIST (infra/charts/helvex/templates/ml-worker-deployment.yaml)
 ```
 
-When `USE_RQ=false` (local dev / thread mode), all jobs run in the same process.
+Routing is by `JOB_TYPE_WHITELIST` / `JOB_TYPE_BLACKLIST` env var, not by queue —
+every pod polls the same `job_runs` table and simply filters which types it claims.
+With no whitelist and no blacklist set (local dev), one process handles all types.
 
 **Model artifacts on S3 (`helvex-exports` bucket, `models/` prefix):**
 
@@ -1921,12 +1950,14 @@ All config is loaded from `.env` (or process env) by `pydantic-settings`. The `S
 | `APP_BASE_URL` | Yes | Used in email links |
 | `SERPER_API_KEY` | No | Google Search (jobs fail gracefully without it) |
 | `ANTHROPIC_API_KEY` | No | Claude classification |
-| `REDIS_URL` | No | Required if `USE_RQ=true` |
 | `S3_ACCESS_KEY` | No* | Hetzner Object Storage key (shared by backup + export buckets) |
 | `S3_SECRET_KEY` | No* | Hetzner Object Storage secret |
 | `S3_ENDPOINT_URL` | No* | e.g. `https://nbg1.your-objectstorage.com` |
 | `S3_BUCKET_EXPORTS` | No* | `helvex-exports` — async CSV export storage; *required for csv_export job type |
-| `USE_RQ` | No | `false` by default |
+| `JOB_WORKER_CONCURRENCY` | No | Jobs run in parallel per pod; `1` by default. Multiplies with a job's own `crawl_concurrency` — see values.yaml |
+| `JOB_TYPE_WHITELIST` / `JOB_TYPE_BLACKLIST` | No | Comma-separated job types this pod may / may not claim |
+| `JOB_POLL_INTERVAL` | No | Seconds between queue polls when idle; `5` by default |
+| `JOB_SHUTDOWN_JOIN_TIMEOUT` | No | Seconds shutdown waits for jobs to checkpoint; `25` by default |
 | `DISABLE_JOB_WORKER` | No | `false` by default |
 | `ZEFIX_API_USERNAME/PASSWORD` | No | Optional HTTP Basic for Zefix |
 
@@ -3408,16 +3439,32 @@ Or via the CloudNativePG pooler if enabled.
 
 ### Job stuck in `paused` state after restart
 
-Paused jobs are now **auto-resumed on startup** via `crud.resume_all_paused_jobs()`.
-If a job remains paused, it was either cancelled mid-run or there is a preflight
-failure (missing API key, insufficient credits) — check the job event log.
+Check `job_runs.pause_reason` first:
+
+| `pause_reason` | Meaning |
+|---|---|
+| `user` | Someone paused it in the UI. **Stays paused by design** — press Resume. |
+| `shutdown` | Paused by a pod restart. Auto-resumes on startup and on the 180 s sweep. |
+| `preempt` | Crawler yielded to a queued ML job; re-queued immediately. |
+| `NULL` | Pre-migration-0128 row; treated as auto-resumable. |
+
+`crud.resume_all_paused_jobs()` auto-resumes only `shutdown`/`preempt`. If a
+`shutdown`-paused job is not resuming, check `min_heartbeat_age_seconds` (the
+rolling-deploy guard skips jobs whose heartbeat is younger than 120 s), then the
+job event log for a preflight failure (missing API key, insufficient credits).
 
 ---
 
 ## 19. Background Job System — Design Evolution
 
 This section records the architectural changes made to the job system and the
-rationale behind each decision. Most of these decisions apply to **RQ mode** (optional separate worker process, production-intended). **Thread mode** (default, `USE_RQ=false`) is simpler: it polls the DB in-process and does not use Redis.
+rationale behind each decision.
+
+> **Historical note:** parts of this section were written when the job system had
+> an optional Redis/RQ worker mode. That mode has been removed entirely — there is
+> no `USE_RQ`, no `REDIS_URL` for jobs, and no `app/worker_entrypoint.py`. Every
+> pod now runs the same DB-polling `_job_worker_loop` and is specialised by
+> `JOB_TYPE_WHITELIST` / `JOB_TYPE_BLACKLIST`.
 
 ### Overview of changes (migration 0048)
 

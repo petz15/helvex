@@ -68,6 +68,9 @@ class JobOut(BaseModel):
     progress_total: int | None
     error: str | None
     restart_count: int
+    # 'user' | 'shutdown' | 'preempt' | None. Lets the UI say whether a paused
+    # job will resume on its own or is waiting for the user.
+    pause_reason: str | None
     created_at: str
     started_at: str | None
     finished_at: str | None
@@ -86,6 +89,7 @@ class JobOut(BaseModel):
             progress_total=j.progress_total,
             error=j.error,
             restart_count=j.restart_count or 0,
+            pause_reason=j.pause_reason,
             created_at=j.queued_at.isoformat() if j.queued_at else "",
             started_at=j.started_at.isoformat() if j.started_at else None,
             finished_at=j.completed_at.isoformat() if j.completed_at else None,

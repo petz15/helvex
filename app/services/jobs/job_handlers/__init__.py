@@ -24,14 +24,21 @@ class JobWaitingExternalSignal(Exception):
 
 @dataclass
 class JobContext:
+    """What a handler is handed: its DB session, its job row, and the callbacks
+    it needs to report progress and to yield on cancel/pause.
+
+    Progress is persisted to `job_runs` and nowhere else — the UI reads it from
+    there via the SSE poller in `app/api/routes/jobs.py`. There is deliberately
+    no in-process state mirror and no pub/sub fan-out; both existed once and
+    both have been removed.
+    """
+
     db: Session
     job: Any  # JobRun ORM object
     params: dict
     resume_from: int
     app: Any  # FastAPI app or None
     _assert_not_cancelled: Callable
-    _maybe_sync: Callable
-    _heartbeat: Callable
     _enqueue_job: Callable
 
     def assert_not_cancelled(self) -> None:
@@ -40,12 +47,9 @@ class JobContext:
     def progress(self, done: int, total: int, stats: dict, msg: str) -> None:
         crud.update_progress(self.db, self.job, message=msg, done=done, total=total, stats=stats)
         crud.create_event(self.db, job_id=self.job.id, level="debug", message=msg)
-        self._maybe_sync(job_type=self.job.job_type, label=self.job.label, message=msg, stats=dict(stats), error=None, done=False)
-        self._heartbeat()
 
     def progress_no_event(self, done: int, total: int, stats: dict, msg: str) -> None:
         crud.update_progress(self.db, self.job, message=msg, done=done, total=total, stats=stats)
-        self._heartbeat()
 
     def event(self, level: str, message: str) -> None:
         crud.create_event(self.db, job_id=self.job.id, level=level, message=message)
@@ -54,22 +58,16 @@ class JobContext:
         self._assert_not_cancelled()
         crud.update_progress(self.db, self.job, message=str(msg))
         crud.create_event(self.db, job_id=self.job.id, level="info", message=str(msg))
-        self._maybe_sync(job_type=self.job.job_type, label=self.job.label, message=str(msg),
-                         stats={}, error=None, done=False)
 
     def status_with_stats(self, msg: str) -> None:
-        """Status callback that carries existing stats from job.stats_json."""
-        import json
-        self._assert_not_cancelled()
-        crud.update_progress(self.db, self.job, message=str(msg))
-        crud.create_event(self.db, job_id=self.job.id, level="info", message=str(msg))
-        self._maybe_sync(job_type=self.job.job_type, label=self.job.label, message=str(msg),
-                         stats=json.loads(self.job.stats_json) if self.job.stats_json else {},
-                         error=None, done=False)
+        """Alias of `status()`.
 
-    def sync(self, msg: str, stats: dict, done: bool) -> None:
-        self._maybe_sync(job_type=self.job.job_type, label=self.job.label,
-                         message=msg, stats=stats, error=None, done=done)
+        It only ever differed by forwarding `job.stats_json` to the in-process
+        state mirror. That mirror is gone and stats already live on the job row,
+        so the two are now identical. Kept because several handlers pass it as a
+        status callback.
+        """
+        self.status(msg)
 
     def enqueue_job(self, **kwargs) -> Any:
         return self._enqueue_job(self.app, db=self.db, **kwargs)

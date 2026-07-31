@@ -120,13 +120,25 @@ Zefix REST API → bulk_import → companies table
 
 ### Background job system
 
-Two modes (controlled by `USE_RQ` env var):
-- **Thread mode** (default): daemon thread polls `job_runs` DB table; runs jobs in-process
-- **RQ mode**: separate `rq worker` process connects to Redis queue; entry point is `app/worker_entrypoint.py`
+**One mode: DB polling.** There is no Redis and no RQ. Every pod runs the same
+`_job_worker_loop` daemon thread (`app/services/jobs/job_worker.py`), which claims
+rows from the `job_runs` table and runs them in a `ThreadPoolExecutor` sized by
+`JOB_WORKER_CONCURRENCY`.
 
-Both modes share the same DB-persisted `job_runs` table. This means jobs survive Redis/pod restarts. The dedup key (`"bulk:org_id"`, etc.) prevents >1 active job of the same type per org. A heartbeat timestamp (`last_heartbeat_at`) guards against double-execution on pod restart.
+Pods are specialised by job type, not by queue:
+- `JOB_TYPE_WHITELIST` — worker pods (api-worker, ml-worker, crawler-http) handle only these
+- `JOB_TYPE_BLACKLIST` — the web pod handles everything *except* these
+- `DISABLE_JOB_WORKER=true` — the web pod runs no jobs at all (set when both workers are enabled)
+
+Key invariants:
+- **Claiming is one statement.** `crud.claim_next_job()` does `UPDATE … WHERE id = (SELECT … FOR UPDATE SKIP LOCKED LIMIT 1) RETURNING id`, so a job is never handed to two workers. Never reintroduce a peek-then-claim pair.
+- **Dedup** via `dedup_key` (`"bulk:org_id"`, etc.) plus a partial unique index — at most one active job of a type per org. Opt out in `_compute_dedup_key`'s `NO_DEDUP`.
+- **Heartbeat** (`last_heartbeat_at`, stamped every 30 s) distinguishes a live job from one orphaned by a dead pod. `_HEARTBEAT_INTERVAL` and `requeue_interrupted_jobs(stale_after_seconds=300)` are a pair — change them together.
+- **`pause_reason`** (`'user' | 'shutdown' | 'preempt'`) decides whether the recovery sweep may auto-resume a paused job. A `'user'` pause stays paused.
+- **Handlers are registry-only** — add to `JOB_HANDLERS` in `app/services/jobs/job_handlers/__init__.py`. Progress goes to the `job_runs` row and nowhere else; the UI reads it from the SSE poller.
 
 Job lifecycle: `queued → running → [paused ↔ running] → completed/failed/cancelled`
+(plus `waiting_external` for Anthropic Batch API jobs).
 
 ### Multi-tenancy model
 
