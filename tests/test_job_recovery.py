@@ -137,6 +137,23 @@ def test_resume_paused_job_sets_bulk_resume_flag(db):
     assert json.loads(refreshed.params_json or "{}").get("resume") is True
 
 
+def test_resume_paused_job_bump_queued_at_yields_priority(db):
+    """Regression for the self-preemption livelock (job #12741, 2026-08-01):
+    a crawler job that pauses to yield to a higher-priority queued ML job
+    must not keep re-winning claim_next_job's oldest-queued_at-first race
+    against that very job — otherwise it re-claims itself, re-observes the
+    ML job still queued, and re-preempts forever, starving the ML job.
+    """
+    old_job = crud.create_job(db, job_type="web_crawl_http", label="Crawler", params={})
+    crud.mark_paused(db, old_job, message="Preempted", reason="preempt")
+
+    new_job = crud.create_job(db, job_type="reclassify_noga", label="ML", params={})
+
+    crud.resume_paused_job(db, old_job, bump_queued_at=True)
+
+    assert _claim(db) == new_job.id
+
+
 def test_resume_all_paused_jobs_sets_bulk_resume_flag(db):
     job = crud.create_job(db, job_type="bulk", label="Bulk", params={"cantons": ["ZH"]})
     crud.mark_paused(db, job, message="Paused at 10", reason="shutdown")
@@ -236,3 +253,57 @@ def test_mark_failed_truncates_oversized_message(db):
     assert refreshed.message is not None
     assert len(refreshed.message) <= 512
     assert refreshed.message.endswith("...")
+
+
+# ── Zombie queued jobs (queued + cancel_requested) ────────────────────────────
+#
+# Regression suite for the preempt hot-loop of 2026-08-01. Job #12744
+# (web_crawl_playwright) sat `queued` with `cancel_requested = true`:
+# claim_next_job refused it, nothing else moved it out of `queued`, and
+# has_queued_ml_job counted it as work worth yielding to — so #12746
+# (web_extract) preempted, requeued, was re-claimed and preempted again,
+# several times a second, indefinitely. Queue *ordering* could not fix it:
+# no position makes an unclaimable job claimable.
+
+def test_has_queued_ml_job_ignores_cancel_requested_jobs(db):
+    """A crawler must never yield to work that can't take the slot."""
+    from app.crud.crawler import has_queued_ml_job
+
+    job = crud.create_job(db, job_type="reclassify_noga", label="ML", params={})
+    assert has_queued_ml_job(db, {"reclassify_noga"}) is True
+
+    crud.mark_cancel_requested(db, job)
+    assert has_queued_ml_job(db, {"reclassify_noga"}) is False
+
+
+def test_resume_paused_job_honours_a_pending_cancel(db):
+    """Requeueing a cancel-requested job is what mints the zombie."""
+    job = crud.create_job(db, job_type="web_crawl_playwright", label="PW", params={})
+    crud.mark_cancel_requested(db, job)
+    crud.mark_paused(db, job, message="Preempted", reason="preempt")
+
+    crud.resume_paused_job(db, job, bump_queued_at=True)
+
+    refreshed = crud.get_job(db, job.id)
+    assert refreshed.status == "cancelled"
+    assert refreshed.completed_at is not None
+    assert _claim(db) is None
+
+
+def test_cancel_zombie_queued_jobs_clears_existing_rows(db):
+    """Self-heals queues that already contain a zombie (prod had one)."""
+    zombie = crud.create_job(db, job_type="web_crawl_playwright", label="PW", params={})
+    crud.mark_cancel_requested(db, zombie)
+    healthy = crud.create_job(db, job_type="reclassify_noga", label="ML", params={})
+
+    assert crud.cancel_zombie_queued_jobs(db) == 1
+
+    assert crud.get_job(db, zombie.id).status == "cancelled"
+    assert crud.get_job(db, healthy.id).status == "queued"
+    # The queue is usable again.
+    assert _claim(db) == healthy.id
+
+
+def test_cancel_zombie_queued_jobs_is_a_noop_on_a_clean_queue(db):
+    crud.create_job(db, job_type="reclassify_noga", label="ML", params={})
+    assert crud.cancel_zombie_queued_jobs(db) == 0

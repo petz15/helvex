@@ -10,6 +10,7 @@ import re
 import socket
 import time
 import zlib
+from collections import OrderedDict
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from typing import Any
@@ -30,7 +31,14 @@ logger = logging.getLogger(__name__)
 # Hand that work to a thread pool instead so the loop stays free to keep sockets
 # in flight. Sized independently of crawl_concurrency: it bounds how much CPU +
 # S3 work is in flight, while the semaphore bounds how many sites are open.
-PAGE_WORKERS: int = int(os.getenv("CRAWL_PAGE_WORKERS", "32"))
+#
+# It is also the hard bound on PEAK page-processing memory: each worker holds one
+# document's bytes plus its lxml/BeautifulSoup tree (a tree runs ~5-10x the source
+# size), so peak ~= PAGE_WORKERS * MAX_PAGE_BYTES * 10. At the old 32 x 5 MB that
+# is >1.5 GB against a 1 Gi pod limit. The crawler pods are also capped at 1 CPU,
+# so 32 parse threads never ran in parallel anyway — they just queued, each
+# pinning a tree. Raise via CRAWL_PAGE_WORKERS only alongside the pod memory limit.
+PAGE_WORKERS: int = int(os.getenv("CRAWL_PAGE_WORKERS", "12"))
 
 _page_executor = ThreadPoolExecutor(max_workers=PAGE_WORKERS, thread_name_prefix="crawl-page")
 
@@ -274,6 +282,14 @@ _CONTACT_FORM_PATTERNS = re.compile(
     r'<(form|input)[^>]*(contact|kontakt|message|nachricht|name|email)',
     re.IGNORECASE,
 )
+# Byte-level twin of the above, so has_contact_form can run straight off the
+# response body without first materialising a full str copy of the document
+# (that copy is up to 4x the byte size for non-ASCII pages, and every
+# CRAWL_PAGE_WORKERS thread was holding one at once).
+_CONTACT_FORM_PATTERNS_BYTES = re.compile(
+    rb'<(form|input)[^>]*(contact|kontakt|message|nachricht|name|email)',
+    re.IGNORECASE,
+)
 
 _CF_MARKERS = frozenset(["cf-ray", "cf-cache-status", "__cf_bm", "cf_clearance"])
 _CF_BODY_PATTERNS = re.compile(
@@ -287,7 +303,10 @@ _JS_APP_ROOT = re.compile(
 )
 
 # Pages larger than this are truncated before parsing/storing (prevents OOM).
-MAX_PAGE_BYTES: int = 5 * 1024 * 1024  # 5 MB
+# 2 MB of markup is already far beyond any real Swiss SME page (typical: <300 KB)
+# and nothing downstream reads past the identity/contact blocks. Kept low because
+# this multiplies by PAGE_WORKERS and by the soup tree's ~10x expansion factor.
+MAX_PAGE_BYTES: int = 2 * 1024 * 1024  # 2 MB
 
 # Hard cap on RAW (as-received-on-the-wire, possibly compressed) bytes read for
 # a single response — independent of MAX_PAGE_BYTES, which bounds the DECODED
@@ -448,11 +467,18 @@ async def ssrf_request_guard(request: Any) -> None:
 
 @dataclass
 class PageResult:
+    """Metadata about one crawled page. Deliberately does NOT carry the HTML.
+
+    The HTML lives in S3 (`s3_key_html`) and is re-downloaded by web_extract.
+    Keeping the bytes here as well used to pin every page of every concurrently
+    crawled site in RAM for the whole batch — phase B (10 sites x 60 pages) held
+    600 full documents at once, which is what OOM-killed the 1Gi crawler pod.
+    Nothing ever read the field.
+    """
     page_type: str
     url: str
     final_url: str
     http_status: int
-    html: bytes
     lang: str | None
     word_count: int
     image_count: int
@@ -483,7 +509,12 @@ class CrawlResult:
 # can't race each other here — only truly parallel (multi-process/thread)
 # callers would need a real lock.
 
-_domain_last_access: dict[str, float] = {}
+_domain_last_access: "OrderedDict[str, float]" = OrderedDict()
+
+# The dict is process-lifetime, and the crawler walks ~700k distinct domains, so
+# an unbounded dict grows forever inside a long-lived pod. Only the most recent
+# domains can still be inside their delay window, so an LRU cap loses nothing.
+_MAX_TRACKED_DOMAINS = 20_000
 
 
 async def rate_limit(url: str, delay: float) -> None:
@@ -498,6 +529,9 @@ async def rate_limit(url: str, delay: float) -> None:
     if since < delay:
         await asyncio.sleep(delay - since)
     _domain_last_access[domain] = time.monotonic()
+    _domain_last_access.move_to_end(domain)
+    while len(_domain_last_access) > _MAX_TRACKED_DOMAINS:
+        _domain_last_access.popitem(last=False)
 
 
 # ── HTML utilities ─────────────────────────────────────────────────────────────
@@ -535,8 +569,11 @@ def count_words(soup: BeautifulSoup) -> int:
     return len(soup.get_text(separator=" ", strip=True).split())
 
 
-def has_contact_form(html_str: str) -> bool:
-    return bool(_CONTACT_FORM_PATTERNS.search(html_str))
+def has_contact_form(html: str | bytes) -> bool:
+    """Detect a contact form. Accepts raw bytes to avoid a full str copy."""
+    if isinstance(html, (bytes, bytearray)):
+        return bool(_CONTACT_FORM_PATTERNS_BYTES.search(html))
+    return bool(_CONTACT_FORM_PATTERNS.search(html))
 
 
 def find_subpage_links(

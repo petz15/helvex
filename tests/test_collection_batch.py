@@ -1,4 +1,3 @@
-from datetime import datetime, timezone
 
 from app.config import settings
 from app.models.company import Company

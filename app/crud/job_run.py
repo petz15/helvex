@@ -325,6 +325,39 @@ def requeue_interrupted_jobs(
     return len(jobs)
 
 
+def cancel_zombie_queued_jobs(db: Session) -> int:
+    """Cancel rows stuck `queued` with a pending cancel request.
+
+    `claim_next_job` refuses these (`NOT cancel_requested`) and nothing else
+    moves them out of `queued`, so they sit in the queue forever. They are not
+    merely inert: any "is there queued work of type X?" check that does not
+    replicate the cancel filter will see them and act on them — which is how a
+    single such row starved `web_extract` into a several-per-second
+    preempt/requeue loop (jobs #12744/#12746, 2026-08-01).
+
+    Run at startup alongside the other recovery sweeps. Returns rows cancelled.
+    """
+    import logging as _logging
+    _logger = _logging.getLogger(__name__)
+    now = datetime.now(tz=timezone.utc)
+    jobs = (
+        db.query(JobRun)
+        .filter(JobRun.status == "queued", JobRun.cancel_requested.is_(True))
+        .all()
+    )
+    for job in jobs:
+        job.status = "cancelled"
+        job.completed_at = now
+        job.message = _job_message("Cancelled (was queued with a pending cancel)")
+        _logger.info(
+            "Job %s (type=%s) cancelled at startup — queued with cancel_requested",
+            job.id, job.job_type,
+        )
+    if jobs:
+        db.commit()
+    return len(jobs)
+
+
 def mark_cancel_requested(db: Session, job: JobRun) -> JobRun:
     job.cancel_requested = True
     db.commit()
@@ -451,19 +484,46 @@ def mark_paused(
     return job
 
 
-def resume_paused_job(db: Session, job: JobRun) -> JobRun:
+def resume_paused_job(db: Session, job: JobRun, *, bump_queued_at: bool = False) -> JobRun:
     """Re-queue a paused job so the worker picks it up from progress_done.
 
     Used both for the immediate preempt-requeue path and the manual
     "Resume" API action — in both cases the intent is to continue, never to
     restart, so bulk jobs get the same `params['resume']` patch as the
     crash-recovery path (see `_force_bulk_resume`).
+
+    ``bump_queued_at`` sends the job to the back of the FIFO queue instead of
+    keeping its original (much older) `queued_at`. `claim_next_job()` claims
+    strictly oldest-`queued_at`-first, so without this a self-preempting job
+    (see `web_crawl._self_preempt_if_ml_queued`) always re-wins the claim race
+    against the very job it's trying to yield to — it re-claims itself,
+    re-observes the other job still queued, and re-preempts, forever, without
+    the other job ever getting a turn. Only set for that preemption path;
+    manual resume keeps the job's original place in line.
+
+    A pending cancel wins over the resume, matching `requeue_interrupted_jobs`.
+    Re-queueing a job whose cancel is already requested produces a row that
+    `claim_next_job` will never claim (it filters on `NOT cancel_requested`) and
+    that nothing else ever transitions out of `queued` — an immortal zombie that
+    still counts as "queued work" everywhere else in the system.
     """
+    if job.cancel_requested:
+        job.status = "cancelled"
+        job.pause_requested = False
+        job.pause_reason = None
+        job.completed_at = datetime.now(tz=timezone.utc)
+        job.message = _job_message("Cancelled (honoured instead of resuming)")
+        db.commit()
+        db.refresh(job)
+        return job
+
     job.status = "queued"
     job.pause_requested = False
     job.pause_reason = None
     job.started_at = None
     job.completed_at = None
+    if bump_queued_at:
+        job.queued_at = datetime.now(tz=timezone.utc)
     job.message = _job_message(f"Resuming from {job.progress_done or 0}…")
     if job.job_type == "bulk":
         _force_bulk_resume(job)

@@ -51,16 +51,3 @@ def setup_structured_logging(log_level_name: str = "INFO") -> logging.Logger:
     return app_logger
 
 
-def get_logger(name: str) -> logging.Logger:
-    """Get a logger for a specific module.
-
-    Args:
-        name: Module name (typically __name__)
-
-    Returns:
-        A logger instance.
-    """
-    logger = logging.getLogger(name)
-    if not logger.handlers:
-        logger.addHandler(logging.StreamHandler(sys.stdout))
-    return logger

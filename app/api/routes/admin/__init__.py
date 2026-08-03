@@ -754,6 +754,8 @@ def delete_org_admin(
     db: Session = Depends(get_db),
     _: User = Depends(_require_superadmin),
 ):
+    from app.auth import clear_user_cache
+
     org = db.get(Organization, org_id)
     if not org:
         raise HTTPException(status_code=404, detail="Org not found")
@@ -762,6 +764,12 @@ def delete_org_admin(
     )
     db.delete(org)
     db.commit()
+    # A bulk Query.update() is emitted as raw SQL and does NOT fire the ORM
+    # mapper events that normally evict app.auth's user cache, so every member
+    # kicked here would keep their old org_id — and their access to this org's
+    # data — for the remainder of the cache TTL. Clear wholesale: the affected
+    # ids are no longer recoverable after the UPDATE, and org deletion is rare.
+    clear_user_cache()
 
 
 # ── Payment Transactions ────────────────────────────────────────────────────────

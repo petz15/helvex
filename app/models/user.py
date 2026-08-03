@@ -41,6 +41,15 @@ class User(Base):
         DateTime(timezone=True), nullable=True
     )
 
+    # Invite revocation — set when this user is removed from an org, so any
+    # invite token issued before it is refused. Invites are stateless signed
+    # payloads with a 7-day life and no DB record, so without this a removed
+    # member could re-open their original invite link and rejoin at the original
+    # role. Same mechanism as logged_out_at, applied to invites.
+    org_membership_revoked_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
     # Organisation (for team-seat tiers)
     org_id: Mapped[int | None] = mapped_column(ForeignKey("organizations.id", ondelete="SET NULL"), nullable=True)
     # Role within the org: owner | admin | member | viewer

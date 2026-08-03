@@ -51,17 +51,6 @@ def detect_purpose_language(text: str | None) -> str | None:
         return None
 
 
-def detect_and_update_language(company) -> str | None:
-    """Detect language from company purpose and return the code.
-
-    Does not persist — callers are responsible for writing to DB.
-    Falls back to company.purpose_language if already set.
-    """
-    if company.purpose_language:
-        return company.purpose_language
-    return detect_purpose_language(company.purpose)
-
-
 def detect_language_bulk(
     db,
     *,

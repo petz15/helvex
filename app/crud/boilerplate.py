@@ -175,24 +175,6 @@ def upsert_boilerplate_candidates(
     return result.rowcount
 
 
-def list_boilerplate_candidates(
-    db: Session,
-    *,
-    promoted: bool | None = None,
-    min_confidence: float | None = None,
-    source_type: str | None = None,
-    limit: int = 200,
-) -> list[BoilerplateCandidate]:
-    q = db.query(BoilerplateCandidate)
-    if promoted is not None:
-        q = q.filter(BoilerplateCandidate.promoted == promoted)
-    if min_confidence is not None:
-        q = q.filter(BoilerplateCandidate.confidence >= min_confidence)
-    if source_type:
-        q = q.filter(BoilerplateCandidate.source_type == source_type)
-    return q.order_by(BoilerplateCandidate.confidence.desc()).limit(limit).all()
-
-
 def promote_boilerplate_candidate(
     db: Session,
     candidate: BoilerplateCandidate,

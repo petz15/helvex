@@ -421,6 +421,7 @@ def _maybe_enqueue_noga_nightly(app) -> None:
 
 def _recover_jobs_and_start_worker(app, app_state) -> None:
     from app.crud import (
+        cancel_zombie_queued_jobs,
         delete_old_finished_jobs,
         list_active_jobs,
         requeue_interrupted_jobs,
@@ -432,6 +433,11 @@ def _recover_jobs_and_start_worker(app, app_state) -> None:
     try:
         with SessionLocal() as db:
             recovered = requeue_interrupted_jobs(db)
+            # Before anything else reads the queue: clear rows stuck 'queued'
+            # with a pending cancel. claim_next_job will never take them, but
+            # "is work queued?" checks elsewhere still see them and can starve
+            # real jobs into a preempt loop.
+            zombies = cancel_zombie_queued_jobs(db)
             # Only 'shutdown'/'preempt' pauses resume here — a job paused from
             # the UI stays paused across restarts.
             resumed = resume_all_paused_jobs(db, min_heartbeat_age_seconds=120)
@@ -440,6 +446,7 @@ def _recover_jobs_and_start_worker(app, app_state) -> None:
         kick_job_worker(app)
         app_state.startup_message = (
             f"Background jobs ready — recovered {recovered} interrupted, "
+            f"cancelled {zombies} zombie-queued, "
             f"resumed {resumed}, active {active_count}, pruned {pruned} old"
         )
     except Exception as exc:

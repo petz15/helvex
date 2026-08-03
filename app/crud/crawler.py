@@ -545,17 +545,6 @@ def schedule_crawl_retry(
     db.flush()
 
 
-def reset_crawl_for_recrawl(db: Session, state: CompanyCrawlState) -> None:
-    """Reset a terminal crawl state back to pending for a re-crawl attempt."""
-    state.crawl_status = "pending"
-    state.tier = "http"
-    state.bot_protected = False
-    state.bot_protection_type = None
-    state.crawl_error_detail = None
-    state.next_crawl_at = None
-    db.flush()
-
-
 def release_in_progress_states(db: Session, tier: str, phase: str | None = None) -> int:
     """Reset company_crawl_state rows stuck in 'in_progress' back to 'pending'.
 
@@ -977,26 +966,31 @@ def mark_pages_extracted(db: Session, company_id: int) -> int:
 # ── Job queue helpers ──────────────────────────────────────────────────────────
 
 def has_queued_ml_job(db: Session, ml_types: set[str]) -> bool:
-    """Return True if any ML job type is currently queued.
+    """Return True if any ML job type is currently queued AND claimable.
 
     Used by crawler progress callbacks to self-preempt and yield to ML jobs.
     Single SELECT 1 — negligible overhead.
+
+    The `cancel_requested` filter must mirror `job_run.claim_next_job` exactly.
+    When it didn't, the two disagreed about what "queued" means: a job left
+    `queued` with `cancel_requested = true` was visible here but refused by the
+    claimer, so a crawler yielded to a job that could never start, was re-claimed,
+    yielded again — a hot loop at several requeues per second that no amount of
+    queue reordering could break (job #12744 starving #12746, 2026-08-01).
+    Only yield to work that can actually take the slot.
     """
     if not ml_types:
         return False
     result = db.execute(
         text(
             "SELECT 1 FROM job_runs "
-            "WHERE status = 'queued' AND job_type = ANY(:types) "
+            "WHERE status = 'queued' AND job_type IN :types "
+            "  AND (cancel_requested IS FALSE OR cancel_requested IS NULL) "
             "LIMIT 1"
-        ),
+        ).bindparams(sa_bindparam("types", expanding=True)),
         {"types": list(ml_types)},
     ).fetchone()
     return result is not None
-
-
-def get_crawl_state(db: Session, company_id: int) -> CompanyCrawlState | None:
-    return db.get(CompanyCrawlState, company_id)
 
 
 def get_selected_candidate(db: Session, company_id: int) -> CompanyUrlCandidate | None:

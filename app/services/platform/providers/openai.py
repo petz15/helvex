@@ -20,31 +20,6 @@ _DEFAULT_MODEL = "gpt-4o"
 
 # ── Key resolution ────────────────────────────────────────────────────────────
 
-def resolve_openai_api_key(db: Any, org_id: int | None) -> str | None:
-    """Return effective OpenAI API key for this context.
-
-    Org with byo_llm_keys: org-level openai_api_key setting
-    Org without byo_llm_keys: platform key (never exposed)
-    """
-    from app.config import settings as _settings
-    from app import crud
-
-    if org_id is None:
-        return _settings.openai_api_key or None
-
-    try:
-        from app.models.organization import Organization
-        from app.services.billing.tiers import has_feature
-        org = db.get(Organization, org_id)
-        if org and has_feature(org, "byo_llm_keys"):
-            key = crud.get_effective_setting(db, "openai_api_key", org_id=org_id, default="") or ""
-            return key or None
-    except Exception:
-        pass
-
-    return _settings.openai_api_key or None
-
-
 def get_openai_default_model(db: Any, api_key: str | None) -> str:
     """Get the default model for an API key.
 
@@ -187,15 +162,6 @@ def openai_batch_create(
     finally:
         import os
         os.unlink(temp_path)
-
-
-def openai_batch_poll(batch_id: str, *, api_key: str) -> str:
-    """Return current status of a batch without blocking."""
-    from openai import OpenAI
-
-    client = OpenAI(api_key=api_key)
-    batch = client.beta.batches.retrieve(batch_id)
-    return batch.status
 
 
 def openai_batch_iter_results(

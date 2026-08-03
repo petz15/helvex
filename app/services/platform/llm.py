@@ -222,21 +222,6 @@ def llm_batch_create(
         raise ValueError(f"Unknown provider: {provider}")
 
 
-def llm_batch_poll(batch_id: str, *, provider: Provider, api_key: str) -> str:
-    """Check batch status. Returns processing_status or similar."""
-    if provider == "claude":
-        from app.services.platform.providers.claude import claude_batch_poll
-        return claude_batch_poll(batch_id, api_key=api_key)
-    elif provider == "openai":
-        from app.services.platform.providers.openai import openai_batch_poll
-        return openai_batch_poll(batch_id, api_key=api_key)
-    elif provider == "gemini":
-        from app.services.platform.providers.gemini import gemini_batch_poll
-        return gemini_batch_poll(batch_id, api_key=api_key)
-    else:
-        raise ValueError(f"Provider {provider} does not support batch API")
-
-
 def llm_batch_iter_results(
     batch_id: str,
     *,

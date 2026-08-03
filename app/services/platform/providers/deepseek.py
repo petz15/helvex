@@ -18,31 +18,6 @@ _DEFAULT_MODEL = "deepseek-chat"
 
 # ── Key resolution ────────────────────────────────────────────────────────────
 
-def resolve_deepseek_api_key(db: Any, org_id: int | None) -> str | None:
-    """Return effective DeepSeek API key for this context.
-
-    Org with byo_llm_keys: org-level deepseek_api_key setting
-    Org without byo_llm_keys: platform key (never exposed)
-    """
-    from app.config import settings as _settings
-    from app import crud
-
-    if org_id is None:
-        return _settings.deepseek_api_key or None
-
-    try:
-        from app.models.organization import Organization
-        from app.services.billing.tiers import has_feature
-        org = db.get(Organization, org_id)
-        if org and has_feature(org, "byo_llm_keys"):
-            key = crud.get_effective_setting(db, "deepseek_api_key", org_id=org_id, default="") or ""
-            return key or None
-    except Exception:
-        pass
-
-    return _settings.deepseek_api_key or None
-
-
 def get_deepseek_default_model(db: Any, api_key: str | None) -> str:
     """Get the default model for an API key."""
     from app import crud

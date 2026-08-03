@@ -11,6 +11,8 @@ from app.auth import (
     COOKIE_NAME,
     create_session_cookie,
     decode_invite_token,
+    decode_invite_token_with_timestamp,
+    invite_predates_revocation,
     get_current_user,
 )
 from app.database import get_db
@@ -165,13 +167,23 @@ def accept_invite(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> None:
-    result = decode_invite_token(body.token)
-    if result is None:
+    decoded = decode_invite_token_with_timestamp(body.token)
+    if decoded is None:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Invalid or expired invite link.",
         )
-    org_id, invited_email, invite_role = result
+    (org_id, invited_email, invite_role), issued_at = decoded
+
+    # An invite minted before this user was removed from an org is dead. Without
+    # this a removed member could re-open their original link and rejoin at the
+    # original role for the remainder of the token's 7-day life — the membership
+    # row was deleted, so nothing else here would stop them.
+    if invite_predates_revocation(current_user, issued_at):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="This invite is no longer valid. Please ask for a new one.",
+        )
 
     if current_user.email.lower() != invited_email.lower():
         raise HTTPException(

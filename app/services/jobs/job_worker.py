@@ -62,10 +62,6 @@ _jobs_drained = threading.Event()
 _jobs_drained.set()
 
 
-def is_shutting_down() -> bool:
-    return _shutdown_event.is_set()
-
-
 def reset_shutdown() -> None:
     """Clear the shutdown flag. Called from lifespan startup."""
     _shutdown_event.clear()
@@ -520,7 +516,7 @@ def _run_job(app, job_id: int) -> None:
             if _pause_exc.requeue:
                 pause_msg = f"Preempted at {done_n}" + (f"/{total_n}" if total_n else "") + " — requeued"
                 crud.mark_paused(db, job, message=pause_msg, stats=current_stats, reason=_pause_exc.reason)
-                crud.resume_paused_job(db, job)
+                crud.resume_paused_job(db, job, bump_queued_at=True)
             else:
                 pause_msg = f"Paused at {done_n}" + (f"/{total_n}" if total_n else "")
                 crud.mark_paused(db, job, message=pause_msg, stats=current_stats, reason=_pause_exc.reason)

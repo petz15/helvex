@@ -112,6 +112,7 @@ from app.crud.job_run import (
     has_shab_daily_run_today,  # noqa: F401
     has_simap_daily_run_today,  # noqa: F401
     list_waiting_llm_batches,  # noqa: F401
+    cancel_zombie_queued_jobs,
     mark_cancel_requested,
     mark_cancelled,
     mark_completed,
@@ -200,6 +201,7 @@ __all__ = [
     "MAX_RESTART_COUNT",
     "list_events",
     "delete_old_finished_jobs",
+    "cancel_zombie_queued_jobs",
     "requeue_interrupted_jobs",
     "resume_all_paused_jobs",
     "mark_cancel_requested",

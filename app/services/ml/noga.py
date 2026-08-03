@@ -77,10 +77,6 @@ def noga_lookup_path() -> Path:
     return Path(__file__).resolve().parents[2] / "data" / "noga_lookup.json"
 
 
-def _normalize_text(value: str) -> str:
-    return value.strip().lower()
-
-
 def _collect_multilang_text(v: Any) -> list[str]:
     if isinstance(v, str):
         txt = v.strip()

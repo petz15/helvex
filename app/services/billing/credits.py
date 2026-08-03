@@ -421,8 +421,3 @@ def refund_action(
     return True
 
 
-def grant_monthly_entitlements(db: Session, org_id: int) -> None:
-    """Reset monthly entitlement flags at billing cycle rollover."""
-    # Simple tier monthly free rescore has been removed from the product.
-    # This function is kept as a hook for future monthly entitlements.
-    pass

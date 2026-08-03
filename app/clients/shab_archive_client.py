@@ -159,11 +159,6 @@ def get_entries(page_data: dict[str, Any]) -> list[dict[str, Any]]:
     return content if isinstance(content, list) else []
 
 
-def get_total_elements(page_data: dict[str, Any]) -> int:
-    """Return the claimed total element count."""
-    return int(page_data.get("total") or 0)
-
-
 def get_page_size(page_data: dict[str, Any]) -> int:
     """Return the page size used in this response."""
     pr = page_data.get("pageRequest") or {}
@@ -301,11 +296,6 @@ def is_hr_heading(heading: str | None, rubric: str | None) -> bool:
     """
     if (heading or "").lower() == "hr":
         return True
-    return (rubric or "").upper() in HR_SUBRUBRICS
-
-
-def is_hr_rubric(rubric: str | None) -> bool:
-    """Return True if *rubric* is a Handelsregister entry type."""
     return (rubric or "").upper() in HR_SUBRUBRICS
 
 

@@ -149,13 +149,6 @@ def _str_or_none(val: Any) -> str | None:
     return s if s else None
 
 
-def _first(*values: Any) -> Any:
-    for v in values:
-        if v is not None:
-            return v
-    return None
-
-
 def _format_address(addr: dict | None) -> str | None:
     if not addr:
         return None

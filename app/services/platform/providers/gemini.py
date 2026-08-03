@@ -20,31 +20,6 @@ _DEFAULT_MODEL = "gemini-2.0-flash"
 
 # ── Key resolution ────────────────────────────────────────────────────────────
 
-def resolve_gemini_api_key(db: Any, org_id: int | None) -> str | None:
-    """Return effective Gemini API key for this context.
-
-    Org with byo_llm_keys: org-level gemini_api_key setting
-    Org without byo_llm_keys: platform key (never exposed)
-    """
-    from app.config import settings as _settings
-    from app import crud
-
-    if org_id is None:
-        return _settings.gemini_api_key or None
-
-    try:
-        from app.models.organization import Organization
-        from app.services.billing.tiers import has_feature
-        org = db.get(Organization, org_id)
-        if org and has_feature(org, "byo_llm_keys"):
-            key = crud.get_effective_setting(db, "gemini_api_key", org_id=org_id, default="") or ""
-            return key or None
-    except Exception:
-        pass
-
-    return _settings.gemini_api_key or None
-
-
 def get_gemini_default_model(db: Any, api_key: str | None) -> str:
     """Get the default model for an API key."""
     from app import crud
@@ -174,22 +149,6 @@ def gemini_batch_create(
         db.close()
 
     return batch_id
-
-
-def gemini_batch_poll(batch_id: str, *, api_key: str) -> str:
-    """Check status of a Gemini pseudo-batch."""
-    from app.database import SessionLocal
-    from app import crud
-
-    db = SessionLocal()
-    try:
-        batch_data_str = crud.get_effective_setting(db, f"batch_{batch_id}", default="")
-        if not batch_data_str:
-            return "unknown"
-        batch_data = json.loads(batch_data_str)
-        return batch_data.get("status", "unknown")
-    finally:
-        db.close()
 
 
 def gemini_batch_iter_results(

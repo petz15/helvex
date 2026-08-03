@@ -7,7 +7,7 @@ import pytest
 
 from app import crud
 from app.config import settings as app_settings
-from app.schemas.company import GoogleSearchResult, ZefixSearchResult
+from app.schemas.company import ZefixSearchResult
 
 
 # ---------------------------------------------------------------------------

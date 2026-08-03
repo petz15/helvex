@@ -147,10 +147,6 @@ _SOCIAL_DOMAINS = {
 CRAWL_BLOCKED_DOMAINS: frozenset[str] = frozenset(_DIRECTORY_DOMAINS | _SOCIAL_DOMAINS)
 
 
-def get_default_directory_domains() -> set[str]:
-    """Return a copy of built-in directory domains excluded in Google scoring."""
-    return set(_DIRECTORY_DOMAINS)
-
 _NEWS_DOMAINS = {
     "news.google.com",
     "20min.ch",
@@ -238,11 +234,6 @@ _STOPWORDS = {
     "the", "and", "of", "in", "for", "to", "a", "an", "with", "its",
     "gesellschaft", "unternehmen", "betrieb", "zweck", "aktien", "gmbh",
 }
-
-
-def get_default_google_stopwords() -> set[str]:
-    """Return a copy of built-in stopwords used for purpose keyword extraction."""
-    return set(_STOPWORDS)
 
 
 _URL_EXCLUDE_KEYWORDS: tuple[str, ...] = ()

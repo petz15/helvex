@@ -20,12 +20,6 @@ router = APIRouter(prefix="/api-keys", tags=["admin"])
 
 # ── Schemas ────────────────────────────────────────────────────────────────
 
-class ApiKeyFingerprint(BaseModel):
-    """Redacted API key fingerprint (first 8 + last 4 chars)."""
-    fingerprint: str = Field(..., description="First 8 and last 4 chars of key")
-    lastUpdated: str | None = Field(None, description="ISO timestamp")
-
-
 class PlatformApiKeyResponse(BaseModel):
     """Platform-wide Claude API key status."""
     provider: str = "claude"

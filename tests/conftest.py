@@ -11,7 +11,6 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from app.auth import COOKIE_NAME, create_session_cookie, get_current_user
-from app.config import settings as app_settings
 from app.database import Base, get_db
 from app.main import app
 from app.models.user import User as UserModel

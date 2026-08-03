@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
@@ -142,6 +144,14 @@ def remove_member(
         if owner_count <= 1:
             raise HTTPException(status_code=400, detail="Cannot remove the last owner")
     db.delete(target_member)
+    # Invites are stateless signed tokens with a 7-day life and no DB record, so
+    # deleting the membership alone does not stop the removed member re-opening
+    # their original invite link and rejoining at the same role. Stamping the
+    # user makes every invite minted before now invalid for them (mirrors
+    # logged_out_at for sessions). Deliberately per-user rather than per-org:
+    # it can also invalidate a still-pending invite to a *different* org, which
+    # fails closed and is cheap to remedy by re-inviting.
+    target.org_membership_revoked_at = datetime.now(timezone.utc)
     if target.org_id == org.id:
         fallback = db.query(OrgMember).filter(
             OrgMember.user_id == target.id, OrgMember.org_id != org.id

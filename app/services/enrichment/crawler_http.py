@@ -6,6 +6,7 @@ rendering, sets CrawlResult.needs_playwright=True and returns without pages.
 from __future__ import annotations
 
 import logging
+from collections import deque
 from urllib.parse import urljoin, urlparse
 
 import httpx
@@ -200,13 +201,20 @@ def _make_page_result(
     html_bytes: bytes,
     company_id: int,
     url_candidate_id: int | None = None,
+    soup=None,
 ) -> PageResult:
-    html_str = html_bytes.decode("utf-8", errors="replace")
-    soup = parse_soup(html_bytes)
+    # `soup` lets a caller that already parsed this document (phase B, which also
+    # needs the links) reuse the tree instead of paying for a second lxml parse
+    # and a second ~10x-of-source tree at the same time.
+    owns_soup = soup is None
+    if owns_soup:
+        soup = parse_soup(html_bytes)
     images, videos = count_media(soup)
     words = count_words(soup)
     lang = detect_page_language(soup)
-    contact_form = has_contact_form(html_str)
+    contact_form = has_contact_form(html_bytes)
+    if owns_soup:
+        del soup  # drop the tree before the blocking S3 PUT
 
     s3_key: str | None = None
     if s3_client.is_crawl_bucket_configured():
@@ -217,12 +225,13 @@ def _make_page_result(
             logger.warning("S3 upload failed for company %d / %s", company_id, page_type, exc_info=True)
             s3_key = None
 
+    # No `html=` — the bytes live in S3 and web_extract re-downloads them. See
+    # PageResult's docstring: retaining them here was the crawler-pod OOM.
     return PageResult(
         page_type=page_type,
         url=url,
         final_url=final_url,
         http_status=http_status,
-        html=html_bytes,
         lang=lang,
         word_count=words,
         image_count=images,
@@ -259,6 +268,91 @@ async def _fetch_with_ssl_fallback(
         return None
 
 
+class BoundedFrontier:
+    """FIFO crawl queue with a hard size cap.
+
+    A link-dense site (shop, news archive, paginated blog) yields hundreds of
+    links per page, so an unbounded frontier grew far faster than max_pages
+    drained it — and every concurrently crawled site held its own copy. Anything
+    past `cap` is unreachable within the page budget anyway, so dropping it costs
+    no coverage.
+
+    Note the cap is enforced on push (dropping the NEWEST link), not with
+    `deque(maxlen=…)`, which evicts from the FRONT — i.e. exactly the pages the
+    crawl is about to visit, which would silently gut BFS coverage.
+    """
+
+    __slots__ = ("_q", "cap", "dropped")
+
+    def __init__(self, max_pages: int, *, per_page_factor: int = 20, floor: int = 64):
+        self.cap = max(floor, max_pages * per_page_factor)
+        self._q: deque[tuple[str, int]] = deque()
+        self.dropped = 0
+
+    def push(self, link: str, depth: int) -> bool:
+        if len(self._q) >= self.cap:
+            self.dropped += 1
+            return False
+        self._q.append((link, depth))
+        return True
+
+    def pop(self) -> tuple[str, int]:
+        return self._q.popleft()
+
+    def __len__(self) -> int:
+        return len(self._q)
+
+    def __bool__(self) -> bool:
+        return bool(self._q)
+
+
+def _links_only(html_bytes: bytes, base_url: str) -> list[str]:
+    """Parse off the event loop and return only the links, never the soup.
+
+    Returning the BeautifulSoup tree to the caller would keep it (~10x the source
+    size) alive for the rest of the crawl.
+    """
+    soup = parse_soup(html_bytes)
+    try:
+        return extract_internal_links(soup, base_url)
+    finally:
+        del soup
+
+
+def _page_result_and_links(
+    page_type: str,
+    url: str,
+    final_url: str,
+    http_status: int,
+    html_bytes: bytes,
+    company_id: int,
+    url_candidate_id: int | None,
+    want_links: bool,
+) -> tuple[PageResult, list[str]]:
+    """Phase-B page processing: one lxml parse for both the PageResult and the
+    frontier links.
+
+    Phase B used to parse each page twice — once inside _make_page_result and
+    again to expand the frontier — doubling both CPU and the peak soup memory
+    (a tree is ~10x its source) for every page of every concurrently crawled site.
+    The soup never escapes this function, so it is freed as soon as it returns
+    rather than living as long as the CrawlResult.
+    """
+    if not want_links:
+        return _make_page_result(
+            page_type, url, final_url, http_status, html_bytes, company_id, url_candidate_id
+        ), []
+    soup = parse_soup(html_bytes)
+    try:
+        page = _make_page_result(
+            page_type, url, final_url, http_status, html_bytes, company_id,
+            url_candidate_id, soup=soup,
+        )
+        return page, extract_internal_links(soup, final_url)
+    finally:
+        del soup
+
+
 async def crawl_site_full(
     company_id: int,
     url: str,
@@ -281,26 +375,27 @@ async def crawl_site_full(
     visited_urls: URLs phase A already fetched. Seeded into the visited set so
                   the homepage and impressum are never fetched twice.
 
-    Bounded on three axes, all of which must hold or a single WordPress site can
+    Bounded on four axes, all of which must hold or a single WordPress site can
     swallow the whole crawler: max_pages (hard page cap), max_depth (link
-    distance from the seed set), and is_crawlable_page_url (drops assets,
-    off-host links, and pagination/filter/archive traps).
+    distance from the seed set), is_crawlable_page_url (drops assets, off-host
+    links, and pagination/filter/archive traps), and BoundedFrontier (caps the
+    pending-link queue, which on a link-dense site outgrows the page budget by
+    orders of magnitude — once per concurrently crawled site).
 
     Failure semantics differ from phase A: partial success is success. A page
     that 404s or times out is skipped, not fatal — the result only carries a
     failure_status if the crawl produced no pages at all.
     """
-    from collections import deque
-
     result = CrawlResult()
     visited: set[str] = set(visited_urls or ())
     base_host = urlparse(url).netloc
     headers = {**_make_headers(company_id), "Sec-Fetch-Site": "same-origin", "Referer": url}
 
-    frontier: deque[tuple[str, int]] = deque()
+    frontier = BoundedFrontier(max_pages)
+
     for _page_type, seed in (seed_urls or []):
         if seed not in visited and is_crawlable_page_url(seed, base_host):
-            frontier.append((seed, 1))
+            frontier.push(seed, 1)
 
     async with _client(headers) as client:
         # No inventory (site had no usable sitemap) — re-fetch the homepage purely
@@ -319,13 +414,14 @@ async def crawl_site_full(
                 return result
             visited.add(url)
             visited.add(final_url)
-            root_soup = await run_in_page_executor(parse_soup, body)
-            for link in extract_internal_links(root_soup, final_url):
+            root_links = await run_in_page_executor(_links_only, body, final_url)
+            del body
+            for link in root_links:
                 if link not in visited:
-                    frontier.append((link, 1))
+                    frontier.push(link, 1)
 
         while frontier and len(result.pages) < max_pages:
-            page_url, depth = frontier.popleft()
+            page_url, depth = frontier.pop()
             if page_url in visited:
                 continue
             visited.add(page_url)
@@ -340,18 +436,18 @@ async def crawl_site_full(
             visited.add(final_url)
 
             page_type = classify_page_type(final_url)
-            result.pages.append(
-                await run_in_page_executor(
-                    _make_page_result, page_type, page_url, final_url, status, body,
-                    company_id, url_candidate_id,
-                )
+            # One parse serves both the PageResult and the frontier expansion.
+            want_links = depth < max_depth and len(result.pages) + 1 < max_pages
+            page, links = await run_in_page_executor(
+                _page_result_and_links, page_type, page_url, final_url, status, body,
+                company_id, url_candidate_id, want_links,
             )
+            del body  # the bytes are in S3 now; don't hold them across the next fetch
+            result.pages.append(page)
 
-            if depth < max_depth and len(result.pages) < max_pages:
-                soup = await run_in_page_executor(parse_soup, body)
-                for link in extract_internal_links(soup, final_url):
-                    if link not in visited:
-                        frontier.append((link, depth + 1))
+            for link in links:
+                if link not in visited:
+                    frontier.push(link, depth + 1)
 
     if not result.pages:
         result.failure_status = "no_content"
@@ -452,7 +548,10 @@ async def crawl_company_http(
             result.failure_detail = f"HTTP {status}"
             return result
 
-        soup = parse_soup(body)
+        # Parsed off the event loop: an inline parse here stalled every other
+        # site being crawled on the same loop. The tree is reused for the
+        # PageResult and the nav-link scan below instead of being rebuilt twice.
+        soup = await run_in_page_executor(parse_soup, body)
         words = count_words(soup)
 
         # Check JS-shell detection BEFORE the near-empty check: a minimal SPA
@@ -471,9 +570,11 @@ async def crawl_company_http(
 
         result.pages.append(
             await run_in_page_executor(
-                _make_page_result, "homepage", url, final_url, status, body, company_id, url_candidate_id
+                _make_page_result, "homepage", url, final_url, status, body,
+                company_id, url_candidate_id, soup,
             )
         )
+        del body_str  # a full str copy of the homepage; only the bot/JS checks needed it
 
         if max_subpages == 0:
             return result

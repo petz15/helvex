@@ -36,18 +36,6 @@ _CSV_MAX = 10_000
 
 # ── helpers ──────────────────────────────────────────────────────────────────
 
-def _best_title(a: SimapAward) -> str:
-    return a.title_de or a.title_fr or a.title_it or ""
-
-
-def _best_authority(a: SimapAward) -> str:
-    return a.proc_office_name_de or a.proc_office_name_fr or a.proc_office_name_it or ""
-
-
-def _source(a: SimapAward) -> str:
-    return "archive" if (a.simap_project_id or "").startswith("arch-") else "api"
-
-
 def _build_query(
     db: Session,
     q: str | None,

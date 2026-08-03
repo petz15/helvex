@@ -1,4 +1,3 @@
-import pytest
 
 
 def test_geocode_uses_postal_code_segment_not_postfach(monkeypatch):

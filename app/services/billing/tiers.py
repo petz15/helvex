@@ -151,17 +151,6 @@ def get_billing_tier_names(db: Session, *, include_custom: bool = True) -> list[
     return names
 
 
-def get_user_tier_names(db: Session) -> list[str]:
-    return get_billing_tier_names(db) + ["superadmin"]
-
-
-def get_tier_display_name(db: Session, slug: str) -> str:
-    tier = get_billing_tier_by_slug(db, slug)
-    if tier:
-        return tier.display_name
-    return _default_billing_tier_map().get(slug, {}).get("display_name", slug.title())  # type: ignore[return-value]
-
-
 def get_tier_price_chf(db: Session, slug: str) -> float:
     tier = get_billing_tier_by_slug(db, slug)
     if tier:
@@ -171,25 +160,6 @@ def get_tier_price_chf(db: Session, slug: str) -> float:
         return float(default.get("monthly_price_chf", 0.0))
     return 0.0
 
-
-def get_tier_bonus_rate(db: Session, slug: str) -> float:
-    tier = get_billing_tier_by_slug(db, slug)
-    if tier:
-        return float(tier.topup_bonus_rate)
-    default = _default_billing_tier_map().get(slug)
-    if default:
-        return float(default.get("topup_bonus_rate", 0.0))
-    return 0.0
-
-
-def get_tier_yearly_price_chf(db: Session, slug: str) -> float:
-    tier = get_billing_tier_by_slug(db, slug)
-    if tier:
-        return round(float(tier.monthly_price_chf) * float(tier.yearly_multiplier), 2)
-    default = _default_billing_tier_map().get(slug)
-    if default:
-        return round(float(default.get("monthly_price_chf", 0.0)) * float(default.get("yearly_multiplier", 10.0)), 2)
-    return 0.0
 
 #: Legacy DB values → new names (for rows not yet data-migrated).
 _LEGACY_TIER_MAP: dict[str, str] = {

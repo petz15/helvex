@@ -57,10 +57,6 @@ def _worldline_raw_api_logging_enabled() -> bool:
     return bool(getattr(settings, "worldline_raw_api_logging_enabled", False))
 
 
-def _worldline_payment_page_enabled() -> bool:
-    return bool(getattr(settings, "worldline_payment_page_enabled", False))
-
-
 def _worldline_payment_methods() -> list[str]:
     raw = (getattr(settings, "worldline_payment_methods", "") or "").strip()
     return [m.strip().upper() for m in raw.split(",") if m.strip()]

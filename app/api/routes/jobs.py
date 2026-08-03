@@ -424,14 +424,6 @@ class DetailCollectBody(BaseModel):
     score_if_missing: bool = False
 
 
-class RecalcZefixBody(BaseModel):
-    pass
-
-
-class RecalcGoogleBody(BaseModel):
-    pass
-
-
 class ReextractPurposeBody(BaseModel):
     only_missing_purpose: bool = True
 

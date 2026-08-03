@@ -72,13 +72,6 @@ def _client():
     return _client_singleton
 
 
-def reset_client() -> None:
-    """Drop the cached client so the next call rebuilds it from current settings."""
-    global _client_singleton
-    with _client_lock:
-        _client_singleton = None
-
-
 def is_configured() -> bool:
     from app.config import settings
     return bool(settings.s3_access_key and settings.s3_secret_key and settings.s3_bucket_exports)

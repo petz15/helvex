@@ -12,24 +12,6 @@ from sqlalchemy.orm import Session
 from app.models.company_score import CompanyScore
 
 
-def get_scores_bulk(
-    db: Session, *, org_id: int, user_id: int | None, company_ids: list[int]
-) -> dict[int, CompanyScore]:
-    """Return {company_id: CompanyScore} for the resolved scope — one query."""
-    if not company_ids:
-        return {}
-    rows = (
-        db.query(CompanyScore)
-        .filter(
-            CompanyScore.org_id == org_id,
-            CompanyScore.user_id == user_id,
-            CompanyScore.company_id.in_(company_ids),
-        )
-        .all()
-    )
-    return {r.company_id: r for r in rows}
-
-
 def get_score(db: Session, *, org_id: int, user_id: int | None, company_id: int) -> CompanyScore | None:
     return (
         db.query(CompanyScore)

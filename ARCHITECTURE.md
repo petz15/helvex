@@ -896,7 +896,7 @@ Strict-Transport-Security: max-age=31536000 (HTTPS only)
 - Worker deployments set `terminationGracePeriodSeconds: 60` to fit the drain (`JOB_SHUTDOWN_JOIN_TIMEOUT`, default 25 s) before SIGKILL.
 
 **Concurrency knobs multiply**
-- In-flight work per pod = `JOB_WORKER_CONCURRENCY × the job's own fan-out`. `web_crawl_http` defaults to `crawl_concurrency=40` (async httpx); `web_crawl_playwright` to `2`, each slot a full Chromium. Page processing is bounded separately and per-pod by `CRAWL_PAGE_WORKERS` (default 32) — see "Off-loop page processing".
+- In-flight work per pod = `JOB_WORKER_CONCURRENCY × the job's own fan-out`. `web_crawl_http` defaults to `crawl_concurrency=40` (async httpx); `web_crawl_playwright` to `2`, each slot a full Chromium. Page processing is bounded separately and per-pod by `CRAWL_PAGE_WORKERS` (default 12) — see "Off-loop page processing" and "Crawler memory budget".
 - Crawl throughput is therefore tuned via `crawl_concurrency`, **not** by raising the worker's concurrency. Raise `JOB_WORKER_CONCURRENCY` to stop long jobs blocking short ones on the same pod (crawler-http also carries the interactive `web_crawl_single`), and re-check the pod memory limit against the product. Current: `crawlerHttpWorker.concurrency: 2`, `mlWorker.concurrency: 1`, `apiWorker.concurrency: 2`.
 
 **Job handler registry pattern — single dispatch, no inline branches**
@@ -1960,7 +1960,7 @@ All config is loaded from `.env` (or process env) by `pydantic-settings`. The `S
 | `S3_ENDPOINT_URL` | No* | e.g. `https://nbg1.your-objectstorage.com` |
 | `S3_BUCKET_EXPORTS` | No* | `helvex-exports` — async CSV export storage; *required for csv_export job type |
 | `JOB_WORKER_CONCURRENCY` | No | Jobs run in parallel per pod; `1` by default. Multiplies with a job's own `crawl_concurrency` — see values.yaml |
-| `CRAWL_PAGE_WORKERS` | No | Threads for off-loop page processing (lxml parse + S3 upload); `32` by default. Per-pod, shared by all crawl jobs — raise alongside `crawl_concurrency` and give the pod CPU to match |
+| `CRAWL_PAGE_WORKERS` | No | Threads for off-loop page processing (lxml parse + S3 upload); `12` by default. Per-pod, shared by all crawl jobs. Also the hard bound on peak page memory (`workers × MAX_PAGE_BYTES × ~10`) — raise only alongside the pod's CPU **and** memory limit |
 | `JOB_TYPE_WHITELIST` / `JOB_TYPE_BLACKLIST` | No | Comma-separated job types this pod may / may not claim |
 | `JOB_POLL_INTERVAL` | No | Seconds between queue polls when idle; `5` by default |
 | `JOB_SHUTDOWN_JOIN_TIMEOUT` | No | Seconds shutdown waits for jobs to checkpoint; `25` by default |
@@ -2682,17 +2682,55 @@ Defaults: `crawl_concurrency=40` for HTTP (network-bound, cheap per slot), `craw
 
 **Off-loop page processing** (2026-07-31, throughput fix): `_make_page_result` (both `crawler_http.py` and `crawler_playwright.py`) is blocking work — an lxml parse plus media/word counting and language detection, then a blocking boto3 S3 PUT. It used to run inline on the crawl coroutine, which stalled the event loop and with it every other company being crawled concurrently on it. That is why raising `crawl_concurrency` past ~10 previously did nothing: the semaphore admitted more sites, but they queued behind the loop's own blocking work. Measured effect was ~35 companies/min at `crawl_concurrency=10`, i.e. roughly one company per slot per 17 s against a ~7-request page budget.
 
-Both crawlers now call it via `crawler_common.run_in_page_executor(fn, *args)`, backed by a module-level `ThreadPoolExecutor` sized by `CRAWL_PAGE_WORKERS` (default 32). Two ceilings, deliberately separate:
+Both crawlers now call it via `crawler_common.run_in_page_executor(fn, *args)`, backed by a module-level `ThreadPoolExecutor` sized by `CRAWL_PAGE_WORKERS` (default 12 — lowered from 32, see "Crawler memory budget"). Two ceilings, deliberately separate:
 - `crawl_concurrency` (per job) bounds how many **sites are open** at once.
 - `CRAWL_PAGE_WORKERS` (per **pod**, shared by every crawl job on it) bounds how much **CPU + S3 work** is in flight.
 
-Raise them together; a large `crawl_concurrency` against a small page pool just relocates the queue. Give the pod CPU to match `CRAWL_PAGE_WORKERS`.
+Raise them together; a large `crawl_concurrency` against a small page pool just relocates the queue. Give the pod CPU **and memory** to match `CRAWL_PAGE_WORKERS` — it is also the hard bound on peak page-processing memory (see "Crawler memory budget").
 
-Paired with this, `s3_client._client()` now caches a single process-wide boto3 client behind a lock (`reset_client()` clears it). It previously constructed a fresh client on **every** call — each one loading the botocore JSON service model from disk, 50–300 ms before any byte moved — so a 5-page crawl paid that five times, on the event loop. `max_pool_connections=64` keeps the connection pool from re-serialising what the thread pool parallelised (botocore's default is 10).
+Paired with this, `s3_client._client()` now caches a single process-wide boto3 client behind a lock. It previously constructed a fresh client on **every** call — each one loading the botocore JSON service model from disk, 50–300 ms before any byte moved — so a 5-page crawl paid that five times, on the event loop. `max_pool_connections=64` keeps the connection pool from re-serialising what the thread pool parallelised (botocore's default is 10).
 
 **Correctness note — cancellation granularity:** the first version of this change used `asyncio.gather` (wait for the whole batch), which meant `ctx.assert_not_cancelled()` was only checked once per batch, after the single slowest task in it finished (up to `company_timeout`). That's the same check `_run_job` relies on to detect a job has been evicted by the stale-job recovery sweep (`requeue_interrupted_jobs` — see "Job recovery" below): if a sibling pod requeues+reclaims this job_run (heartbeat looked stale) and this execution doesn't notice for up to `company_timeout` seconds, both executions run concurrently, each with independent local `stats`/`done` counters, both writing progress into the same job row (visible as two interleaved, conflicting progress series in the job log). Fixed by switching to `asyncio.as_completed` — results (and the cancellation check) are handled as each individual crawl finishes, restoring the original per-company checkpoint granularity.
 
 For maximum throughput, combine with triggering multiple concurrent `web_crawl_http` job instances (dedup is off for this type) so more than one pod/thread is active at once — `crawl_concurrency` and job-instance count are independent, multiplicative levers.
+
+### Crawler memory budget (2026-08-03, OOMKill fix)
+
+`helvex-crawler-http` (limit `1Gi`, `1` CPU) was being OOMKilled every ~70 min. Five
+independent unbounded allocations, fixed together. **Anything added to the crawl path
+must stay bounded on all five axes** — the pod has no headroom.
+
+1. **`PageResult` no longer carries the HTML.** It had an unread `html: bytes` field
+   holding each page's full body. `_run_crawl_batch` keeps every finished task (and so
+   every `CrawlResult`) alive until the batch drains, so phase B held
+   `batch_size × max_pages` = **10 × 60 = 600 whole documents** at once. The bytes live
+   in S3 (`s3_key_html`); `web_extract` re-downloads them. Guarded by
+   `tests/test_crawler_memory_bounds.py::test_page_result_has_no_html_field`.
+   `_crawl_targets_concurrently` additionally clears `result.pages`/`result.inventory`
+   once `on_result` has persisted them.
+2. **One lxml parse per page, and the tree never escapes.** Both phases used to parse
+   each page twice — once in `_make_page_result`, once for links/word-count — holding
+   two trees (~10× the source each). `_make_page_result` now takes an optional `soup=`;
+   phase B goes through `_page_result_and_links`, phase A passes its homepage soup in.
+   Phase A's homepage parse also moved onto `run_in_page_executor` (it was blocking the
+   event loop for every other in-flight site).
+3. **`CRAWL_PAGE_WORKERS` 32 → 12, `MAX_PAGE_BYTES` 5 MB → 2 MB.** Peak page-processing
+   memory is `PAGE_WORKERS × MAX_PAGE_BYTES × ~10` (tree expansion) — the old pair
+   budgeted >1.5 GB against a 1 Gi limit. With a `1` CPU limit, 32 parse threads never
+   ran in parallel anyway; they queued, each pinning a tree. Raise either only alongside
+   the pod's memory limit.
+4. **`crawler_http.BoundedFrontier`** caps phase B's pending-link queue at
+   `max(64, max_pages × 20)`. A shop/news-archive site yields hundreds of links per
+   page, so the frontier outgrew the page budget by orders of magnitude — once per
+   concurrently crawled site. It drops the **newest** push; `deque(maxlen=…)` would
+   evict from the front, i.e. exactly the pages about to be crawled.
+5. **`_domain_last_access` is LRU-capped** at `_MAX_TRACKED_DOMAINS` (20k). It is a
+   process-lifetime dict and the corpus walks ~700k distinct domains; only recent ones
+   can still be inside their delay window. **`stats["errors"]`** is capped at
+   `_MAX_TRACKED_ERRORS` (50) samples plus an `error_count` total, via
+   `web_crawl._track_error` — `stats` is `json.dumps`'d into `job_runs.stats_json` on
+   *every* batch, so an uncapped list made each write proportional to all errors so far
+   (O(n²) over a 700k run).
 
 ### Two-phase crawling (2026-07-31)
 
@@ -2817,7 +2855,7 @@ Each crawl session (URL candidate) gets its own prefix, so switching a company t
 
 ### Large-response / zip-bomb protection
 
-- **httpx:** `_fetch` uses `client.stream()` — decompression is streamed and halted at `MAX_PAGE_BYTES` (5 MB). A gzip bomb never fully expands in memory.
+- **httpx:** `_fetch` uses `client.stream()` — decompression is streamed and halted at `MAX_PAGE_BYTES` (2 MB, lowered from 5 MB — see "Crawler memory budget"). A gzip bomb never fully expands in memory.
 - **Content-Length check:** if `Content-Length` header already exceeds the cap, the body is skipped entirely before downloading.
 - **Playwright:** body is captured via `page.content()` (browser-level) and then sliced to `MAX_PAGE_BYTES` in Python. The `company_timeout` (120s) prevents hangs.
 - **curl_cffi fallback:** `resp.content[:MAX_PAGE_BYTES]` — curl decompresses internally before the slice; risk is low given it's a rarely-used fallback path.
@@ -2840,7 +2878,25 @@ Grafana query: `rate(crawl_result_total[5m])` grouped by `tier` and `status`. Pe
 
 ### Self-preemption (ML worker)
 
-`web_crawl_http` and `web_crawl_playwright` check for queued ML jobs in every progress callback. If an ML job is waiting, `pause_requested` is set and `JobPausedError` is raised — the crawl saves its progress and the ML job runs next.
+`web_crawl_http` and `web_crawl_playwright` check for queued ML jobs in every progress callback (`web_crawl._self_preempt_if_ml_queued`). If an ML job is waiting, `JobPausedError(requeue=True, reason="preempt")` is raised — the crawl saves its progress and is immediately re-queued (`crud.resume_paused_job`) so the ML job runs next.
+
+**Livelock bug (fixed, job #12741, 2026-08-01):** "next" never arrived. `resume_paused_job` didn't touch `queued_at`, and `claim_next_job()` claims strictly oldest-`queued_at`-first — so the crawler job (created long before the ML job) kept re-winning the claim race against the very job it was trying to yield to. Observed live: `Job started` → `Preempted at 40/366328 — requeued` repeating dozens of times per second, progress frozen at 40 the whole time (the preempt check is the first thing the loop does, before claiming any crawl work), while the ML job it was deferring to sat `queued` forever because it could never win a claim. Pure DB-round-trip spin, no network I/O, so no per-item slowness masked it — the tightness of the loop was the tell. Fixed by giving `resume_paused_job` a `bump_queued_at: bool = False` param that sets `queued_at = now()`, and passing `bump_queued_at=True` only from the preempt call site in `job_worker.py` (manual "Resume" keeps its original queue position). Regression test: `tests/test_job_recovery.py::test_resume_paused_job_bump_queued_at_yields_priority`.
+
+**Second livelock — zombie queued jobs (fixed, jobs #12744/#12746, 2026-08-01):** the same symptom recurred with a different cause, and `bump_queued_at` could not touch it — no queue position makes an *unclaimable* job claimable. `has_queued_ml_job` and `claim_next_job` disagreed about what "queued" means:
+
+| | predicate |
+|---|---|
+| `claim_next_job` | `status='queued' AND NOT cancel_requested` |
+| `has_queued_ml_job` (before) | `status='queued'` |
+
+So a row left `queued` with `cancel_requested = true` was **visible to the preemption check but refused by the claimer**. `web_extract` (#12746) yielded to `web_crawl_playwright` (#12744) — cancelled while queued, `started_at` NULL — which could never start; it was re-claimed, re-observed the zombie, and re-preempted, several times a second, "Preempted at 0" every time because the check precedes any work.
+
+Three-part fix, because each alone leaves a hole:
+- `has_queued_ml_job` now mirrors the claimer's `cancel_requested` filter — **only yield to work that can actually take the slot.** Any future "is work queued?" reader must replicate this predicate or reintroduce the bug. (Also switched from `ANY(:types)` to an expanding `IN` bindparam so it runs on SQLite and is therefore testable.)
+- `resume_paused_job` honours a pending cancel instead of re-queueing, matching `requeue_interrupted_jobs`. Re-queueing a cancel-requested job is what *mints* the zombie: nothing else ever transitions it out of `queued`.
+- `cancel_zombie_queued_jobs()` runs in the startup recovery sweep (`main._recover_jobs_and_start_worker`), so a queue that already contains such a row self-heals on deploy rather than needing manual SQL.
+
+Regression tests: `tests/test_job_recovery.py` — `test_has_queued_ml_job_ignores_cancel_requested_jobs`, `test_resume_paused_job_honours_a_pending_cancel`, `test_cancel_zombie_queued_jobs_clears_existing_rows`, `test_claim_next_job_skips_cancel_requested`.
 
 ### Crawler security hardening (2026-07-24)
 

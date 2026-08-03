@@ -230,12 +230,12 @@ def _make_page_result(
     company_id: int,
     url_candidate_id: int | None = None,
 ) -> PageResult:
-    html_str = html_bytes.decode("utf-8", errors="replace")
     soup = parse_soup(html_bytes)
     images, videos = count_media(soup)
     words = count_words(soup)
     lang = detect_page_language(soup)
-    contact_form = has_contact_form(html_str)
+    contact_form = has_contact_form(html_bytes)
+    del soup  # drop the tree (~10x the source size) before the blocking S3 PUT
 
     s3_key: str | None = None
     if s3_client.is_crawl_bucket_configured():
@@ -251,7 +251,6 @@ def _make_page_result(
         url=url,
         final_url=final_url,
         http_status=http_status,
-        html=html_bytes,
         lang=lang,
         word_count=words,
         image_count=images,

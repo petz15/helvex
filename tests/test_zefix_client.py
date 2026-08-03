@@ -3,7 +3,6 @@
 import json
 from unittest.mock import MagicMock, patch
 
-import pytest
 
 from app.api.zefix_client import _normalise_uid, _parse_company, search_companies, get_company
 

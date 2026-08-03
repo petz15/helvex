@@ -75,10 +75,6 @@ class CardRegistrationRequest(BaseModel):
     scope: Literal["org", "personal"] = "personal"
 
 
-class DefaultPaymentMethodRequest(BaseModel):
-    user_id: int
-
-
 class CheckoutResponse(BaseModel):
     provider: str
     checkout_url: str

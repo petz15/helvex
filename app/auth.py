@@ -10,6 +10,7 @@ is for routes that need to *act as* the user (audit logging, quota, etc.).
 
 import ipaddress
 import logging
+import os
 import time
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
@@ -20,12 +21,13 @@ from urllib.parse import quote
 from fastapi import Cookie, Depends, HTTPException, Request, status
 from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
 import jwt
-from sqlalchemy import inspect as sa_inspect
+from sqlalchemy import event as sa_event, inspect as sa_inspect
 from sqlalchemy.orm import Session
 
 from app import crud
 from app.config import settings
 from app.database import get_db
+from app.models.org_member import OrgMember
 from app.models.user import User
 
 logger = logging.getLogger(__name__)
@@ -175,7 +177,16 @@ def _user_id_from_request(request: Request) -> int | None:
 
 _user_cache: dict[int, tuple[User, float]] = {}
 _user_cache_lock = Lock()
-_USER_CACHE_TTL = 30.0  # seconds
+
+# Every authorization decision downstream of get_current_user — is_active,
+# is_superadmin, org_id — reads off this cache, so its TTL is the window during
+# which a revoked privilege still works. The mapper events below evict on any
+# identity change, but that is process-local: other pods keep serving their own
+# copy until it expires. This TTL is therefore the *cross-pod* revocation lag —
+# how long a deactivated or demoted account keeps working on a pod that did not
+# handle the revoking request. Set USER_CACHE_TTL_SECONDS=0 to disable caching
+# entirely (one indexed PK lookup per request).
+_USER_CACHE_TTL = float(os.environ.get("USER_CACHE_TTL_SECONDS", "5"))
 
 
 def _get_cached_user(db: Session, user_id: int) -> User | None:
@@ -189,19 +200,61 @@ def _get_cached_user(db: Session, user_id: int) -> User | None:
             if not sa_inspect(entry[0]).modified:
                 return db.merge(entry[0], load=False)
     user = crud.get_user(db, user_id)
-    if user:
-        # Expunge before caching: merge() returns a new in-session instance,
-        # so handler modifications won't dirty the cached detached copy.
-        db.expunge(user)
-        with _user_cache_lock:
-            _user_cache[user_id] = (user, now)
-        return db.merge(user, load=False)
-    return None
+    if not user:
+        return None
+    if sa_inspect(user).modified:
+        # Already dirty in this session. Caching it would store unflushed state,
+        # and merge(load=False) rejects a dirty instance outright with
+        # InvalidRequestError — a 500 on an auth-path request. Serve it directly;
+        # it is already attached to this session and correct for this request.
+        return user
+    # Expunge before caching: merge() returns a new in-session instance,
+    # so handler modifications won't dirty the cached detached copy.
+    db.expunge(user)
+    with _user_cache_lock:
+        _user_cache[user_id] = (user, now)
+    return db.merge(user, load=False)
 
 
 def invalidate_user_cache(user_id: int) -> None:
     with _user_cache_lock:
         _user_cache.pop(user_id, None)
+
+
+def clear_user_cache() -> None:
+    """Drop every cached user. Used by tests and by anything that rewrites
+    identity in bulk (e.g. an org deletion that kicks all members at once)."""
+    with _user_cache_lock:
+        _user_cache.clear()
+
+
+# ── Automatic cache eviction on identity change ───────────────────────────────
+#
+# Deactivating a user, revoking superadmin, moving them between orgs and
+# changing an OrgMember role all happen at a dozen call sites across
+# admin/, orgs.py, invites.py and workspace/members.py. Relying on each of
+# those to remember an invalidate_user_cache() call is the same allow-list-drift
+# failure mode that bites elsewhere in this codebase: the one site that forgets
+# leaves a revoked privilege live for the whole TTL, and nothing fails loudly.
+#
+# Hooking the mapper instead makes it structural — any write to a User or
+# OrgMember row evicts that user, including from code that does not know this
+# cache exists. Over-invalidation (e.g. on a last_login touch) is deliberate:
+# a wasted PK lookup is the cheap failure, a stale authorization is not.
+
+def _evict_user_on_change(_mapper, _connection, target) -> None:
+    invalidate_user_cache(target.id)
+
+
+def _evict_member_on_change(_mapper, _connection, target) -> None:
+    invalidate_user_cache(target.user_id)
+
+
+sa_event.listen(User, "after_update", _evict_user_on_change)
+sa_event.listen(User, "after_delete", _evict_user_on_change)
+sa_event.listen(OrgMember, "after_insert", _evict_member_on_change)
+sa_event.listen(OrgMember, "after_update", _evict_member_on_change)
+sa_event.listen(OrgMember, "after_delete", _evict_member_on_change)
 
 
 def get_current_user(
@@ -278,6 +331,40 @@ def create_invite_token(org_id: int, email: str, role: str = "viewer") -> str:
     return URLSafeTimedSerializer(settings.secret_key, salt=_INVITE_SALT).dumps(
         (org_id, email, role)
     )
+
+
+def decode_invite_token_with_timestamp(token: str) -> tuple[tuple[int, str, str], datetime] | None:
+    """Return ((org_id, email, role), issued_at) or None if invalid/expired.
+
+    The issue timestamp is what makes an invite revocable: it is compared
+    against `users.org_membership_revoked_at` so a token minted before a
+    removal is refused. Without it, invites are replayable for their full
+    7-day life regardless of whether the invitee was since removed.
+    """
+    try:
+        data, issued_at = URLSafeTimedSerializer(
+            settings.secret_key, salt=_INVITE_SALT
+        ).loads(token, max_age=_INVITE_MAX_AGE, return_timestamp=True)
+        if len(data) == 2:
+            org_id, email = data
+            role = "viewer"
+        else:
+            org_id, email, role = data
+        if issued_at.tzinfo is None:
+            issued_at = issued_at.replace(tzinfo=timezone.utc)
+        return (int(org_id), str(email), str(role)), issued_at
+    except (SignatureExpired, BadSignature, ValueError, TypeError):
+        return None
+
+
+def invite_predates_revocation(user: User, issued_at: datetime) -> bool:
+    """True if this invite was issued before the user was removed from an org."""
+    revoked = user.org_membership_revoked_at
+    if revoked is None:
+        return False
+    if revoked.tzinfo is None:
+        revoked = revoked.replace(tzinfo=timezone.utc)
+    return issued_at <= revoked
 
 
 def decode_invite_token(token: str) -> tuple[int, str, str] | None:
@@ -417,14 +504,6 @@ def record_email_login_failure(email: str) -> None:
     attempts = [t for t in _email_attempts[key] if now - t < _RATE_WINDOW]
     attempts.append(now)
     _email_attempts[key] = attempts
-
-
-def check_login_rate_limit(ip: str) -> bool:
-    """Backward-compatible helper used by older code paths."""
-    if not is_login_allowed(ip):
-        return False
-    record_login_failure(ip)
-    return True
 
 
 def check_public_rate_limit(ip: str, action: str, *, window: float = 900, max_requests: int = 5) -> bool:

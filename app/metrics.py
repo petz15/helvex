@@ -99,16 +99,6 @@ def record_job_duration(job_type: str, duration_seconds: float, status: str) -> 
     JOB_DURATION_SECONDS.labels(job_type=job_type, status=status).observe(duration_seconds)
 
 
-def record_job_error(job_type: str, error_type: str) -> None:
-    """Record a job error.
-
-    Args:
-        job_type: Type of job
-        error_type: "timeout", "rate_limit", "db", "api", or "unknown"
-    """
-    JOB_ERRORS_TOTAL.labels(job_type=job_type, error_type=error_type).inc()
-
-
 def record_api_call(api_name: str, duration_seconds: float, status_code: int) -> None:
     """Record an external API call.
 

@@ -154,12 +154,12 @@ def test_content_delete_preserves_identity_pages(db):
 
 # ── Full-site crawl bounds ────────────────────────────────────────────────────
 
-def _stub_page_result(page_type, url, final_url, status, body, company_id, cand_id=None):
+def _stub_page_result(page_type, url, final_url, status, body, company_id, cand_id=None, soup=None):
     """Stand-in for _make_page_result — skips lxml parsing and the S3 upload."""
     from app.services.enrichment.crawler_common import PageResult
     return PageResult(
         page_type=page_type, url=url, final_url=final_url, http_status=status,
-        html=body, lang=None, word_count=0, image_count=0, video_count=0,
+        lang=None, word_count=0, image_count=0, video_count=0,
         has_contact_form=False,
     )
 

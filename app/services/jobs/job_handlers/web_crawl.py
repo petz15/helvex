@@ -40,6 +40,23 @@ _ML_JOB_TYPES: frozenset[str] = frozenset({
 # separately (escalation to Playwright), not retried in place.
 _MAX_CRAWL_RETRIES = 3
 
+# Cap on the per-job sample of error strings. `stats` is json.dumps'd into
+# job_runs.stats_json on EVERY batch, so an uncapped list made each write
+# proportional to all errors so far — O(n^2) serialisation over a 700k-company
+# run, on top of the list itself growing without bound in the worker's heap.
+# A sample is all the UI shows; the full detail is in company_crawl_state.
+_MAX_TRACKED_ERRORS = 50
+
+
+def _track_error(stats: dict, msg: str) -> None:
+    """Record an error, keeping at most _MAX_TRACKED_ERRORS samples."""
+    stats["error_count"] = stats.get("error_count", 0) + 1
+    errors = stats["errors"]
+    if len(errors) < _MAX_TRACKED_ERRORS:
+        errors.append(msg)
+    elif len(errors) == _MAX_TRACKED_ERRORS:
+        errors.append("… further errors omitted (see error_count)")
+
 
 def _self_preempt_if_ml_queued(ctx: JobContext) -> None:
     """Pause the current crawl job if an ML job is waiting in the queue.
@@ -256,6 +273,13 @@ async def _crawl_targets_concurrently(targets, *, crawl_fn, max_pages, rate_limi
         for coro in asyncio.as_completed(tasks):
             state, candidate, kind, result, exc = await coro
             on_result(state, candidate, kind, result, exc)
+            # `tasks` keeps every finished Task — and therefore its CrawlResult —
+            # alive until the whole batch drains. on_result has already persisted
+            # everything, so empty the payload now rather than holding all N
+            # sites' page lists and inventories at once.
+            if result is not None:
+                result.pages.clear()
+                result.inventory.clear()
     except BaseException:
         for t in tasks:
             t.cancel()
@@ -384,14 +408,15 @@ def _run_crawl_batch(
                         f"Total crawl timeout after {company_timeout:.0f}s",
                     )
                     stats["timeout"] = stats.get("timeout", 0) + 1
-                    stats["errors"].append(
-                        f"company {state.company_id}: total timeout {company_timeout:.0f}s"
+                    _track_error(
+                        stats,
+                        f"company {state.company_id}: total timeout {company_timeout:.0f}s",
                     )
                     record_crawl_result(tier, "timeout")
                     return
                 if kind == "error":
                     crawler_crud.mark_crawl_failed(ctx.db, state, "http_error", str(exc))
-                    stats["errors"].append(f"company {state.company_id}: {exc}")
+                    _track_error(stats, f"company {state.company_id}: {exc}")
                     record_crawl_result(tier, "error")
                     return
 
@@ -565,7 +590,7 @@ def _run_crawl_batch(
         f"{stats.get('http_error', 0)} HTTP errors, "
         f"{stats.get('timeout', 0)} timeouts, "
         f"{stats.get('no_content', 0)} empty, "
-        f"{len(stats['errors'])} unexpected errors"
+        f"{stats.get('error_count', 0)} unexpected errors"
     )
     return stats, done_msg
 
@@ -911,7 +936,7 @@ def handle_web_extract(ctx: JobContext) -> tuple[dict, str]:
                 # Always mark processed so the queue drains even when nothing is found.
                 crawler_crud.mark_pages_extracted(ctx.db, company_id)
             except Exception as exc:  # noqa: BLE001
-                stats["errors"].append(f"company {company_id}: {exc}")
+                _track_error(stats, f"company {company_id}: {exc}")
                 logger.warning("web_extract error for company %d: %s", company_id, exc)
                 ctx.db.rollback()
                 # Mark processed in a fresh transaction so a poison row can't loop forever.
@@ -946,7 +971,7 @@ def handle_web_extract(ctx: JobContext) -> tuple[dict, str]:
         msg = (
             f"Extracted {done}/{total} — {stats['extracted']} with data, "
             f"{stats['empty']} empty, {stats.get('advanced_to_content', 0)} → phase B, "
-            f"{stats['s3_errors']} S3 errors, {len(stats['errors'])} errors"
+            f"{stats['s3_errors']} S3 errors, {stats.get('error_count', 0)} errors"
         )
         crud.update_progress(ctx.db, ctx.job, message=msg, done=done, total=total, stats=dict(stats))
         crud.create_event(ctx.db, job_id=ctx.job.id, level="debug", message=msg)
@@ -955,7 +980,7 @@ def handle_web_extract(ctx: JobContext) -> tuple[dict, str]:
         f"Extraction done — {stats['extracted']} companies with structured data, "
         f"{stats.get('advanced_to_content', 0)} advanced to full-site crawl, "
         f"{stats['empty']} empty, {stats['s3_errors']} S3 errors, "
-        f"{len(stats['errors'])} errors"
+        f"{stats.get('error_count', 0)} errors"
     )
     return stats, done_msg
 

@@ -6,10 +6,6 @@ from sqlalchemy.orm import Session
 from app.models.org_company_ai import OrgCompanyAi
 
 
-def get_org_ai(db: Session, *, org_id: int, company_id: int) -> OrgCompanyAi | None:
-    return db.get(OrgCompanyAi, (org_id, company_id))
-
-
 def bulk_get_org_ai(db: Session, *, org_id: int, company_ids: list[int]) -> dict[int, OrgCompanyAi]:
     if not company_ids:
         return {}

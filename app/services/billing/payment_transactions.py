@@ -235,33 +235,6 @@ def log_payment_transaction(
     return tx
 
 
-def mark_payment_authorized(
-    db: Session,
-    payment_tx_id: int,
-) -> PaymentTransaction:
-    """Mark a payment as authorized after successful provider response.
-
-    This should only be called after verifying the authorization succeeded
-    and we've extracted the provider transaction ID.
-    """
-    tx = db.query(PaymentTransaction).filter(PaymentTransaction.id == payment_tx_id).first()
-    if not tx:
-        raise PaymentValidationError(f"Payment transaction {payment_tx_id} not found")
-
-    # SECURITY: Only mark pending transactions as authorized
-    if tx.status != "pending":
-        raise PaymentValidationError(
-            f"Cannot mark transaction {payment_tx_id} as authorized: "
-            f"status is {tx.status}, not pending"
-        )
-
-    tx.status = "captured"  # Saferpay's CAPTURED means fully authorized
-    tx.authorized_at = datetime.now(tz=timezone.utc)
-    db.commit()
-    db.refresh(tx)
-    return tx
-
-
 def get_payment_transaction_by_external_id(
     db: Session,
     external_id: str,
@@ -271,21 +244,6 @@ def get_payment_transaction_by_external_id(
     Used to detect duplicate processing and retrieve transaction details.
     """
     return db.query(PaymentTransaction).filter(PaymentTransaction.external_id == external_id).first()
-
-
-def get_payment_transaction_by_provider_tx_id(
-    db: Session,
-    provider_transaction_id: str,
-) -> PaymentTransaction | None:
-    """Retrieve a payment transaction by provider transaction ID.
-
-    Used for lookups after provider sends webhook with transaction ID.
-    """
-    return (
-        db.query(PaymentTransaction)
-        .filter(PaymentTransaction.provider_transaction_id == provider_transaction_id)
-        .first()
-    )
 
 
 def get_payment_transaction_by_order_reference(

@@ -543,6 +543,34 @@ def _set_session(response: _Redirect, user_id: int, *, is_https: bool) -> None:
     set_session_cookie(response, user_id, is_https=is_https, samesite="lax")
 
 
+def _require_verified_provider_email(userinfo: dict, provider: str) -> None:
+    """Refuse an OAuth login whose email the provider has not verified.
+
+    `crud.get_or_create_oauth_user` auto-links by email: an OAuth identity whose
+    email matches an existing account is attached to that account and logs in as
+    it. Without this check, anyone able to mint a provider account asserting
+    someone else's address — e.g. a Google Workspace admin creating users on a
+    domain they control, where `email_verified` comes back false — takes over the
+    matching local account outright, and the link persists.
+
+    OIDC requires `email_verified` alongside the `email` claim. Treat its absence
+    as unverified: failing closed on a missing claim costs a login, trusting it
+    costs an account.
+    """
+    if userinfo.get("email_verified") is not True:
+        logger.warning(
+            "auth.oauth_unverified_email_rejected provider=%s email=%r",
+            provider, userinfo.get("email"),
+        )
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                "Your email address is not verified with this provider. "
+                "Verify it there and try again, or sign in with a password."
+            ),
+        )
+
+
 @router.get("/google/authorize", include_in_schema=False)
 async def google_authorize(request: Request, next: str | None = None) -> _Redirect:
     from app.config import settings as _s
@@ -615,6 +643,7 @@ async def google_callback(
     provider_user_id = userinfo.get("sub")
     if not email or not provider_user_id:
         raise HTTPException(status_code=400, detail="Google account did not provide an email address")
+    _require_verified_provider_email(userinfo, "google")
 
     user = _crud.get_or_create_oauth_user(db, provider="google", provider_user_id=provider_user_id, email=email)
     logger.info("auth.google_oauth_ok user_id=%s email=%r", user.id, user.email)
@@ -708,6 +737,7 @@ async def linkedin_callback(
     provider_user_id = userinfo.get("sub")
     if not email or not provider_user_id:
         raise HTTPException(status_code=400, detail="LinkedIn account did not provide an email address. Ensure your LinkedIn primary email is set to public.")
+    _require_verified_provider_email(userinfo, "linkedin")
 
     user = _crud.get_or_create_oauth_user(db, provider="linkedin", provider_user_id=provider_user_id, email=email)
     logger.info("auth.linkedin_oauth_ok user_id=%s email=%r", user.id, user.email)
