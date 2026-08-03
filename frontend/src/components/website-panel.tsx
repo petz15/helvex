@@ -420,6 +420,7 @@ const WEBSITE_STATUS_META: Record<string, { labelKey: string; cls: string; hintK
   social_only:    { labelKey: "statusSocialOnly",    cls: "bg-sky-50 text-sky-700 border-sky-200",             hintKey: "hintSocialOnly" },
   directory_only: { labelKey: "statusDirectoryOnly", cls: "bg-slate-100 text-slate-500 border-slate-200",      hintKey: "hintDirectoryOnly" },
   none:           { labelKey: "statusNone",          cls: "bg-red-50 text-red-600 border-red-200",             hintKey: "hintNone" },
+  unreachable:    { labelKey: "statusUnreachable",   cls: "bg-orange-50 text-orange-600 border-orange-200",    hintKey: "hintUnreachable" },
 };
 
 function WebsiteStatusBadge({ status, count }: { status: string | null | undefined; count: number | null | undefined }) {

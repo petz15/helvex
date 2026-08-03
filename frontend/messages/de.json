@@ -620,7 +620,8 @@
       "noCompaniesFound": "Keine Firmen gefunden",
       "markInteresting": "Als interessant markieren",
       "skipClearReview": "Überspringen (Prüfung löschen)",
-      "reject": "Ablehnen"
+      "reject": "Ablehnen",
+      "statusUnreachable": "Nicht erreichbar"
     },
     "personDetail": {
       "roleDirector": "Direktor",
@@ -765,7 +766,9 @@
       "contentPendingBody": "Diese URL wurde als eigene Website des Unternehmens bestätigt. Der vollständige Website-Crawl, der Dienstleistungen, Team und Seiteninhalte erfasst, ist noch nicht abgeschlossen — die Felder unten sind daher unvollständig, nicht leer.",
       "contentPendingBadge": "Inhalte ausstehend",
       "notCollectedYet": "Noch nicht erfasst",
-      "visitWebsite": "Website besuchen"
+      "visitWebsite": "Website besuchen",
+      "statusUnreachable": "Nicht erreichbar",
+      "hintUnreachable": "Alle Kandidaten blockiert oder fehlerhaft — Identität ungeklärt"
     },
     "simap": {
       "title": "Öffentliche Aufträge (SIMAP)",

@@ -25,7 +25,7 @@ from app.services.enrichment.crawler_common import (
     classify_urls_by_path,
     client_hint_headers,
     count_media,
-    count_words,
+    page_text,
     detect_bot_block,
     detect_js_required,
     detect_page_language,
@@ -202,19 +202,48 @@ def _make_page_result(
     company_id: int,
     url_candidate_id: int | None = None,
     soup=None,
+    text: str | None = None,
+    *,
+    metrics: bool = True,
 ) -> PageResult:
-    # `soup` lets a caller that already parsed this document (phase B, which also
-    # needs the links) reuse the tree instead of paying for a second lxml parse
-    # and a second ~10x-of-source tree at the same time.
-    owns_soup = soup is None
-    if owns_soup:
-        soup = parse_soup(html_bytes)
-    images, videos = count_media(soup)
-    words = count_words(soup)
-    lang = detect_page_language(soup)
-    contact_form = has_contact_form(html_bytes)
-    if owns_soup:
-        del soup  # drop the tree before the blocking S3 PUT
+    """Turn a fetched page into a PageResult and push its HTML to S3.
+
+    `metrics=False` skips the descriptive page stats (media counts, language,
+    contact form) — and with them the lxml parse, if the caller has not already
+    handed over a `soup`. Phase A passes False: the identity verdict is decided
+    later by `crawler_extract.resolve_company_extract`, which re-downloads the
+    HTML from S3 and does its own parse, so nothing in the identity path ever
+    reads these fields. Computing them for all ~700k companies x 3 pages meant
+    building a full BeautifulSoup tree (and walking it three more times) purely
+    to populate columns shown in a detail-page table. Phase B, which is the
+    phase those stats actually describe, still passes True.
+
+    `soup` lets a caller that already parsed this document (phase B, which also
+    needs the links) reuse the tree instead of paying for a second lxml parse
+    and a second ~10x-of-source tree at the same time. `text` likewise reuses a
+    get_text() traversal the caller already paid for.
+    """
+    images = videos = None
+    lang = None
+    contact_form = None
+    # A word count is free when the caller already extracted the text (phase A
+    # needs it for the JS-shell / near-empty checks); never worth a traversal of
+    # its own when metrics are off.
+    words = len(text.split()) if text is not None else None
+
+    if metrics:
+        owns_soup = soup is None
+        if owns_soup:
+            soup = parse_soup(html_bytes)
+        images, videos = count_media(soup)
+        # One traversal feeds both the word count and the language fallback.
+        if text is None:
+            text = page_text(soup)
+            words = len(text.split())
+        lang = detect_page_language(soup, text=text)
+        contact_form = has_contact_form(html_bytes)
+        if owns_soup:
+            del soup  # drop the tree before the blocking S3 PUT
 
     s3_key: str | None = None
     if s3_client.is_crawl_bucket_configured():
@@ -304,6 +333,15 @@ class BoundedFrontier:
 
     def __bool__(self) -> bool:
         return bool(self._q)
+
+
+def _word_count(html_bytes: bytes) -> int:
+    """Visible-word count for the JS-shell heuristic. Parses and discards."""
+    soup = parse_soup(html_bytes)
+    try:
+        return len(page_text(soup).split())
+    finally:
+        del soup
 
 
 def _links_only(html_bytes: bytes, base_url: str) -> list[str]:
@@ -427,13 +465,37 @@ async def crawl_site_full(
             visited.add(page_url)
 
             try:
-                status, final_url, _, body = await _fetch(client, page_url, rate_limit_delay)
+                status, final_url, resp_headers, body = await _fetch(
+                    client, page_url, rate_limit_delay
+                )
             except Exception:  # noqa: BLE001
                 logger.debug("Phase B skipping %s for company %d", page_url, company_id, exc_info=True)
                 continue
             if status >= 400 or not body:
                 continue
             visited.add(final_url)
+
+            # Escalation check, first successful fetch only. Phase B used to
+            # swallow bot walls and JS shells silently — it just `continue`d, so
+            # a site that renders its content via JS produced an empty or thin
+            # crawl that looked like a legitimately small website. Decided once,
+            # on the first page we actually get back, because a whole-site verdict
+            # is what the tier escalation acts on.
+            if not result.pages:
+                probe = body.decode("utf-8", errors="replace")
+                blocked, ptype = detect_bot_block(status, resp_headers, probe)
+                if blocked:
+                    result.bot_blocked = True
+                    result.bot_protection_type = ptype
+                    result.failure_status = "bot_blocked"
+                    return result
+                # Word count off the event loop — parsing inline here would stall
+                # every other site being crawled concurrently on this loop.
+                probe_words = await run_in_page_executor(_word_count, body)
+                if detect_js_required(probe, probe_words):
+                    result.needs_playwright = True
+                    return result
+                del probe
 
             page_type = classify_page_type(final_url)
             # One parse serves both the PageResult and the frontier expansion.
@@ -552,7 +614,12 @@ async def crawl_company_http(
         # site being crawled on the same loop. The tree is reused for the
         # PageResult and the nav-link scan below instead of being rebuilt twice.
         soup = await run_in_page_executor(parse_soup, body)
-        words = count_words(soup)
+        # get_text() once, reused for the near-empty check below AND handed to
+        # _make_page_result. Previously the homepage was traversed three times:
+        # count_words here, count_words again inside _make_page_result, and a
+        # third time inside detect_page_language.
+        homepage_text = await run_in_page_executor(page_text, soup)
+        words = len(homepage_text.split())
 
         # Check JS-shell detection BEFORE the near-empty check: a minimal SPA
         # shell (e.g. a bare <div id="root"> plus a script tag) can easily be
@@ -571,7 +638,8 @@ async def crawl_company_http(
         result.pages.append(
             await run_in_page_executor(
                 _make_page_result, "homepage", url, final_url, status, body,
-                company_id, url_candidate_id, soup,
+                company_id, url_candidate_id, soup, homepage_text,
+                metrics=False,
             )
         )
         del body_str  # a full str copy of the homepage; only the bot/JS checks needed it
@@ -600,9 +668,15 @@ async def crawl_company_http(
                     s_status, s_final, _, s_body = await _fetch(sub_client, sub_url, effective_delay)
                     if s_status < 400:
                         result.pages.append(
+                            # metrics=False with no soup/text: this page is never
+                            # parsed here at all — it is uploaded to S3 and read
+                            # back by web_extract, which does the only parse that
+                            # matters for identity. Two of phase A's three pages
+                            # take this path.
                             await run_in_page_executor(
                                 _make_page_result, page_type, sub_url, s_final, s_status, s_body,
                                 company_id, url_candidate_id,
+                                metrics=False,
                             )
                         )
                 except Exception:

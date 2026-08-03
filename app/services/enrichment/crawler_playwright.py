@@ -8,6 +8,7 @@ from __future__ import annotations
 import logging
 
 import os
+from contextlib import asynccontextmanager
 from urllib.parse import urlparse
 
 from app.services.platform import s3_client
@@ -17,13 +18,16 @@ from app.services.enrichment.crawler_common import (
     CrawlResult,
     PageResult,
     classify_all_urls,
+    classify_page_type,
     classify_urls_by_path,
     count_media,
-    count_words,
+    page_text,
     detect_bot_block,
     detect_page_language,
+    extract_internal_links,
     find_subpage_links,
     has_contact_form,
+    is_crawlable_page_url,
     parse_soup,
     pick_user_agent,
     rate_limit,
@@ -229,13 +233,31 @@ def _make_page_result(
     html_bytes: bytes,
     company_id: int,
     url_candidate_id: int | None = None,
+    text: str | None = None,
+    soup=None,
+    *,
+    metrics: bool = True,
 ) -> PageResult:
-    soup = parse_soup(html_bytes)
-    images, videos = count_media(soup)
-    words = count_words(soup)
-    lang = detect_page_language(soup)
-    contact_form = has_contact_form(html_bytes)
-    del soup  # drop the tree (~10x the source size) before the blocking S3 PUT
+    """See crawler_http._make_page_result — same `metrics`/`soup` contract.
+
+    The Playwright tier is an identity-phase escalation (js_required), so it
+    passes metrics=False for the same reason phase A does: the extract that
+    decides identity re-parses the HTML from S3.
+    """
+    images = videos = lang = contact_form = None
+    words = len(text.split()) if text is not None else None
+
+    if metrics:
+        if soup is None:
+            soup = parse_soup(html_bytes)
+        images, videos = count_media(soup)
+        # One get_text() traversal feeds both — see crawler_common.page_text.
+        if text is None:
+            text = page_text(soup)
+            words = len(text.split())
+        lang = detect_page_language(soup, text=text)
+        contact_form = has_contact_form(html_bytes)
+        del soup  # drop the tree (~10x the source size) before the blocking S3 PUT
 
     s3_key: str | None = None
     if s3_client.is_crawl_bucket_configured():
@@ -258,6 +280,177 @@ def _make_page_result(
         has_contact_form=contact_form,
         s3_key_html=s3_key,
     )
+
+
+def _links_only(html_bytes: bytes, base_url: str) -> list[str]:
+    """Parse and return only the links — the soup never escapes to the caller."""
+    soup = parse_soup(html_bytes)
+    try:
+        return extract_internal_links(soup, base_url)
+    finally:
+        del soup
+
+
+def _page_result_and_links(
+    page_type: str,
+    url: str,
+    final_url: str,
+    http_status: int,
+    html_bytes: bytes,
+    company_id: int,
+    url_candidate_id: int | None,
+    want_links: bool,
+) -> tuple[PageResult, list[str]]:
+    """One parse for both the PageResult and the frontier links — mirrors
+    crawler_http._page_result_and_links. Runs in the page executor."""
+    if not want_links:
+        return _make_page_result(
+            page_type, url, final_url, http_status, html_bytes, company_id,
+            url_candidate_id,
+        ), []
+    soup = parse_soup(html_bytes)
+    try:
+        page = _make_page_result(
+            page_type, url, final_url, http_status, html_bytes, company_id,
+            url_candidate_id, soup=soup,
+        )
+        return page, extract_internal_links(soup, final_url)
+    finally:
+        del soup
+
+
+@asynccontextmanager
+async def _browser_page(company_id: int):
+    """Yield a stealth-patched, SSRF-guarded Playwright page; always closes.
+
+    Same launch/context configuration crawl_company_playwright builds inline —
+    factored out so the phase-B content crawler cannot drift from the phase-A
+    one on stealth patches, the resource route guard, or the CH locale headers.
+    """
+    try:
+        from playwright.async_api import async_playwright
+        from playwright_stealth import Stealth
+    except ImportError as exc:
+        raise RuntimeError(
+            "Playwright is not installed in this image. "
+            "Add playwright/playwright-stealth to requirements.ml.txt."
+        ) from exc
+
+    async with Stealth().use_async(async_playwright()) as pw:
+        launch_kwargs: dict = {"headless": True, "args": _LAUNCH_ARGS}
+        if _CHANNEL:
+            launch_kwargs["channel"] = _CHANNEL
+        try:
+            browser = await pw.chromium.launch(**launch_kwargs)
+        except Exception:
+            browser = await pw.chromium.launch(headless=True, args=_LAUNCH_ARGS)
+        try:
+            context = await browser.new_context(
+                viewport=_VIEWPORT,
+                user_agent=pick_user_agent(company_id),
+                locale="de-CH",
+                extra_http_headers={"Accept-Language": ACCEPT_LANGUAGE},
+                ignore_https_errors=True,
+            )
+            await context.route("**/*", _guard_and_filter_resources)
+            yield await context.new_page()
+        finally:
+            await browser.close()
+
+
+async def crawl_site_full_playwright(
+    company_id: int,
+    url: str,
+    *,
+    url_candidate_id: int | None = None,
+    max_pages: int = 60,
+    rate_limit_delay: float = 0.5,
+    max_depth: int = 3,
+    seed_urls: list[tuple[str, str]] | None = None,
+    visited_urls: set[str] | None = None,
+) -> CrawlResult:
+    """Phase B for sites that need a real browser — the Playwright twin of
+    `crawler_http.crawl_site_full`.
+
+    Reached when the HTTP content crawl comes back bot-blocked or JS-shelled.
+    Same bounds and same partial-success semantics as the HTTP version: a page
+    that fails is skipped, and only a completely empty result is a failure.
+    One browser is launched per company and reused for every page, so the
+    per-page cost is a navigation, not a process start.
+    """
+    from app.services.enrichment.crawler_http import BoundedFrontier
+
+    result = CrawlResult()
+    visited: set[str] = set(visited_urls or ())
+    base_host = urlparse(url).netloc
+
+    frontier = BoundedFrontier(max_pages)
+    for _page_type, seed in (seed_urls or []):
+        if seed not in visited and is_crawlable_page_url(seed, base_host):
+            frontier.push(seed, 1)
+
+    async with _browser_page(company_id) as page:
+        # No inventory — re-render the homepage purely to expand the frontier.
+        # Not saved: phase A already stored the homepage its extract depends on.
+        if not frontier:
+            try:
+                status, final_url, _, body = await _fetch_page(
+                    page, url, rate_limit_delay=rate_limit_delay
+                )
+            except Exception:  # noqa: BLE001
+                result.failure_status = "http_error"
+                result.failure_detail = f"Phase B (playwright) could not render {url}"
+                return result
+            if status >= 400 or not body:
+                result.failure_status = "http_error"
+                result.failure_detail = f"Phase B (playwright) homepage returned HTTP {status}"
+                return result
+            visited.add(url)
+            visited.add(final_url)
+            # Off the event loop: a blocking parse here stalls every other
+            # company's browser navigation sharing this loop.
+            for link in await run_in_page_executor(_links_only, body, final_url):
+                if link not in visited:
+                    frontier.push(link, 1)
+            del body
+
+        while frontier and len(result.pages) < max_pages:
+            page_url, depth = frontier.pop()
+            if page_url in visited:
+                continue
+            visited.add(page_url)
+
+            try:
+                status, final_url, _, body = await _fetch_page(
+                    page, page_url, rate_limit_delay=rate_limit_delay
+                )
+            except Exception:  # noqa: BLE001
+                logger.debug(
+                    "Phase B (playwright) skipping %s for company %d",
+                    page_url, company_id, exc_info=True,
+                )
+                continue
+            if status >= 400 or not body:
+                continue
+            visited.add(final_url)
+
+            want_links = depth < max_depth and len(result.pages) + 1 < max_pages
+            page_result, links = await run_in_page_executor(
+                _page_result_and_links,
+                classify_page_type(final_url), page_url, final_url, status, body,
+                company_id, url_candidate_id, want_links,
+            )
+            del body  # in S3 now; don't hold it across the next navigation
+            result.pages.append(page_result)
+
+            for link in links:
+                if link not in visited:
+                    frontier.push(link, depth + 1)
+
+    if not result.pages:
+        result.failure_status = "no_content"
+        result.failure_detail = "Phase B (playwright) found no crawlable pages"
+    return result
 
 
 async def crawl_company_playwright(
@@ -352,7 +545,9 @@ async def crawl_company_playwright(
                 return result
 
             soup = parse_soup(body)
-            words = count_words(soup)
+            # One traversal, reused for the near-empty check and the PageResult.
+            homepage_text = page_text(soup)
+            words = len(homepage_text.split())
             if words < 5 and len(body) < 500:
                 result.failure_status = "no_content"
                 result.failure_detail = f"Near-empty body after render ({len(body)} bytes)"
@@ -360,7 +555,9 @@ async def crawl_company_playwright(
 
             result.pages.append(
                 await run_in_page_executor(
-                    _make_page_result, "homepage", url, final_url, status, body, company_id, url_candidate_id
+                    _make_page_result, "homepage", url, final_url, status, body,
+                    company_id, url_candidate_id, homepage_text,
+                    metrics=False,
                 )
             )
 
@@ -385,6 +582,7 @@ async def crawl_company_playwright(
                                 await run_in_page_executor(
                                     _make_page_result, page_type, sub_url, s_final, s_status, s_body,
                                     company_id, url_candidate_id,
+                                    metrics=False,  # identity phase — never parsed here
                                 )
                             )
                     except Exception:

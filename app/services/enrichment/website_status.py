@@ -19,8 +19,15 @@ Verdicts (most → least certain):
     likely          own-domain candidate exists, mid confidence
     social_only     crawled, no own-domain cleared the bar, but a social profile was found
     directory_only  crawled, only directory/registry listings (moneyhouse, local.ch, …)
-    none            crawled, nothing credible confirmed
-    (NULL)          unknown — not yet crawled (regardless of search state)
+    none            searched and/or crawled to a conclusion — this company has no website
+    unreachable     every candidate was bot-blocked / errored, so identity is undecided
+                    (distinct from `none`: nothing was disproved, it is worth retrying)
+    (NULL)          unknown — identity phase still in flight
+
+`none` covers three concluded paths, all of which used to leave a NULL that was
+indistinguishable from "not looked at yet": no crawlable candidate existed at
+all, every candidate was tried and rejected, or the crawl produced extracts that
+cleared no tier. See crawler_crud.get_identity_outcome.
 """
 from __future__ import annotations
 
@@ -37,6 +44,7 @@ LIKELY = "likely"
 SOCIAL_ONLY = "social_only"
 DIRECTORY_ONLY = "directory_only"
 NONE = "none"
+UNREACHABLE = "unreachable"
 
 # Verdicts for which website_url should hold a real own-domain link.
 POSITIVE = frozenset({VERIFIED, CONFIRMED, LIKELY})
@@ -301,7 +309,21 @@ def compute_verdict(
         # would let a weak search-result guess overrule an actual crawl finding.
         return Verdict(NONE, None, 0, 0)
 
-    # Never crawled — unknown. A raw search snippet is not trusted as a
+    # No extract rows. That is only "unknown" while the identity phase is still
+    # in flight — once it concludes without producing one, the company has a real
+    # answer that must be shown rather than left as an empty cell:
+    #   no_candidates → search turned up nothing crawlable at all
+    #   exhausted     → every candidate was tried, none was them
+    #   unreachable   → the site(s) blocked or errored, so we still don't know
+    # The first two are genuine "no website" findings; the third deliberately is
+    # NOT, and gets its own status so it can be retried rather than written off.
+    outcome = crawler_crud.get_identity_outcome(db, company_id)
+    if outcome == "unreachable":
+        return Verdict(UNREACHABLE, None, 0, None)
+    if outcome in ("no_candidates", "exhausted"):
+        return Verdict(NONE, None, 0, 0)
+
+    # Still in flight — unknown. A raw search snippet is not trusted as a
     # company-facing verdict (identity rework phase 3, "cut pre-crawl scoring");
     # classify_search_results still exists as a crawl-queue-ordering helper, but
     # its output is not surfaced here.

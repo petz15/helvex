@@ -43,10 +43,10 @@ PAGE_WORKERS: int = int(os.getenv("CRAWL_PAGE_WORKERS", "12"))
 _page_executor = ThreadPoolExecutor(max_workers=PAGE_WORKERS, thread_name_prefix="crawl-page")
 
 
-async def run_in_page_executor(fn, *args):
+async def run_in_page_executor(fn, *args, **kwargs):
     """Run a blocking page-processing function off the event loop."""
     loop = asyncio.get_running_loop()
-    return await loop.run_in_executor(_page_executor, functools.partial(fn, *args))
+    return await loop.run_in_executor(_page_executor, functools.partial(fn, *args, **kwargs))
 
 # ── Subpage keyword sets (DE / FR / IT / EN) ──────────────────────────────────
 
@@ -474,16 +474,22 @@ class PageResult:
     crawled site in RAM for the whole batch — phase B (10 sites x 60 pages) held
     600 full documents at once, which is what OOM-killed the 1Gi crawler pod.
     Nothing ever read the field.
+
+    lang/word_count/image_count/video_count/has_contact_form are **descriptive
+    only** — they land in company_web_pages and are surfaced in the company
+    detail Website panel, and nothing scores, filters or decides on them. They
+    are therefore None on phase-A (identity) pages, which skip computing them
+    entirely; see _make_page_result's `metrics` flag.
     """
     page_type: str
     url: str
     final_url: str
     http_status: int
     lang: str | None
-    word_count: int
-    image_count: int
-    video_count: int
-    has_contact_form: bool
+    word_count: int | None
+    image_count: int | None
+    video_count: int | None
+    has_contact_form: bool | None
     s3_key_html: str | None = None
     bot_blocked: bool = False
 
@@ -540,7 +546,24 @@ def parse_soup(html: bytes | str) -> BeautifulSoup:
     return BeautifulSoup(html, "lxml")
 
 
-def detect_page_language(soup: BeautifulSoup) -> str | None:
+def page_text(soup: BeautifulSoup) -> str:
+    """The page's visible text — ONE full tree traversal.
+
+    `soup.get_text()` is pure-Python tree walking and is the single most
+    expensive thing done per page after the parse itself. Callers that need both
+    a word count and the text (i.e. everyone) must traverse once and share the
+    result rather than calling count_words + detect_page_language back to back.
+    """
+    return soup.get_text(separator=" ", strip=True)
+
+
+def detect_page_language(soup: BeautifulSoup, text: str | None = None) -> str | None:
+    """Language of the page. Pass `text` (from page_text) to avoid re-traversing.
+
+    Without it this walks the whole tree a second time purely to take the first
+    2000 characters — the metadata paths below usually return first, but on the
+    many Swiss SME sites with no lang= attribute the fallback always fires.
+    """
     html_tag = soup.find("html")
     if html_tag and html_tag.get("lang"):
         return str(html_tag["lang"])[:16]
@@ -551,7 +574,7 @@ def detect_page_language(soup: BeautifulSoup) -> str | None:
     # Delegates to the shared lingua detector already used by the NOGA pipeline.
     try:
         from app.services.ml.language_detection import detect_purpose_language
-        body = soup.get_text(separator=" ", strip=True)[:2000]
+        body = (text if text is not None else page_text(soup))[:2000]
         return detect_purpose_language(body)
     except Exception:
         return None

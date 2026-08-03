@@ -144,6 +144,9 @@ const WEBSITE_STATUS_META: Record<string, { labelKey: string; cls: string }> = {
   social_only:    { labelKey: "statusSocialOnly", cls: "bg-sky-50 text-sky-700 border-sky-200" },
   directory_only: { labelKey: "statusDirectory",  cls: "bg-slate-100 text-slate-500 border-slate-200" },
   none:           { labelKey: "statusNoWebsite",  cls: "bg-red-50 text-red-600 border-red-200" },
+  // Not a negative finding — nothing was disproved, the site just couldn't be
+  // read. Kept visually distinct from `none` so it reads as "retry me".
+  unreachable:    { labelKey: "statusUnreachable", cls: "bg-orange-50 text-orange-600 border-orange-200" },
 };
 
 function WebsiteStatusBadge({ status, count }: { status: string | null; count: number | null }) {

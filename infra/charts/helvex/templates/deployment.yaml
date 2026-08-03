@@ -46,6 +46,15 @@ spec:
             - name: ML_WORKER_INTERNAL_URL
               value: "http://{{ include "helvex.fullname" . }}-ml-worker:8000"
             {{- end }}
+            {{- if .Values.crawlerHttpWorker.enabled }}
+            # Crawl worker slots across the crawler-http fleet. The web pod runs
+            # no crawl jobs, but it serves the trigger route and one job row is
+            # claimed by exactly one slot — so it must fan out the enqueue to
+            # this many rows or the extra pods idle. Keep in step with
+            # crawlerHttpWorker.replicaCount / .concurrency.
+            - name: CRAWLER_HTTP_SLOTS
+              value: "{{ mul .Values.crawlerHttpWorker.replicaCount .Values.crawlerHttpWorker.concurrency }}"
+            {{- end }}
             {{- if and .Values.apiWorker.enabled .Values.mlWorker.enabled }}
             - name: DISABLE_JOB_WORKER
               value: "true"

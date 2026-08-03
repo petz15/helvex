@@ -32,6 +32,30 @@ _JOB_POLL_INTERVAL = int(os.environ.get("JOB_POLL_INTERVAL", "5"))
 
 _JOB_WORKER_CONCURRENCY = int(os.environ.get("JOB_WORKER_CONCURRENCY", "1"))
 
+# Worker slots available for the HTTP crawler across the crawler-http pods,
+# i.e. replicaCount x JOB_WORKER_CONCURRENCY. Injected by Helm into the *web*
+# pod (which serves the trigger route but runs no crawl jobs itself), because
+# nothing else lets the API size a crawl fan-out to the fleet actually running it.
+#
+# One job row is claimed by exactly ONE worker slot — `claim_next_job` is a
+# single-row UPDATE. So a single enqueue leaves every other slot idle no matter
+# how many pods are up; the fan-out has to happen at enqueue time. This is what
+# makes `web_crawl_http` being in NO_DEDUP actually pay off.
+_CRAWLER_HTTP_SLOTS = int(os.environ.get("CRAWLER_HTTP_SLOTS", "0"))
+
+# Guard rail: each instance costs real memory on a crawler pod, so an operator
+# typo (or a bad env value) must not enqueue hundreds of concurrent crawls.
+MAX_CRAWL_INSTANCES = 16
+
+
+def crawler_http_slots() -> int:
+    """How many parallel web_crawl_http jobs the crawler fleet can actually run.
+
+    Falls back to 1 when unset (single-pod / local dev), which reproduces the
+    previous one-job-per-trigger behaviour exactly.
+    """
+    return max(1, min(_CRAWLER_HTTP_SLOTS or 1, MAX_CRAWL_INSTANCES))
+
 # How often a running job stamps last_heartbeat_at.  Must stay well below
 # `requeue_interrupted_jobs(stale_after_seconds=...)` (300 s) or live jobs get
 # re-queued onto a second pod — the two constants are a pair.
@@ -153,7 +177,8 @@ def _compute_dedup_key(job_type: str, org_id: int | None, params: dict) -> str |
     # web_crawl_content additionally scopes its claim to crawl_phase='content', so
     # it never contends with the identity crawler over the same companies.
     NO_DEDUP = {"csv_export", "web_select_url", "web_crawl_single",
-                "web_crawl_http", "web_crawl_playwright", "web_crawl_content"}
+                "web_crawl_http", "web_crawl_playwright", "web_crawl_content",
+                "web_crawl_content_playwright", "web_crawl_external"}
 
     # Per-entity dedup (not per-org-type).
     if job_type == "noga_v2_explain":

@@ -955,6 +955,7 @@ The worker checks `cancel_requested` / `pause_requested` **between companies** (
 | `shab_archive` | `start_page`, `end_page`, `page_size`, `request_delay`, `pdf_delay` | Fetch shab.ch archive, download PDFs, upsert `sogc_publications` + `sogc_changes`; resume via page cursor | ONE_PER_ORG |
 | `link_sogc_stubs` | `batch_size` | Back-fill `company_id` on existing `sogc_publications` + `sogc_person_appearances` rows; creates `shab_stub` Company rows for unknown UIDs — no API calls | — |
 | `web_crawl_content` | `max_pages`, `max_depth`, `batch_size`, `canton`, `order_by`, `limit`, `crawl_concurrency`, `rerun` | Phase B — breadth-first crawl of the whole website for identity-confirmed companies; claims `crawl_phase='content'`. Auto-enqueued by `web_extract`. See §Two-phase crawling | — |
+| `web_crawl_http` | …plus `instances` | `instances` is an **enqueue-time** param, not a handler param: the route turns it into N job rows. `None` ⇒ one per `CRAWLER_HTTP_SLOTS`. See §Multi-pod crawl fan-out | — |
 
 #### `web_search_batch` concurrency safety (`run_batch_collect`, `web_enrichment.py`)
 
@@ -1961,6 +1962,7 @@ All config is loaded from `.env` (or process env) by `pydantic-settings`. The `S
 | `S3_BUCKET_EXPORTS` | No* | `helvex-exports` — async CSV export storage; *required for csv_export job type |
 | `JOB_WORKER_CONCURRENCY` | No | Jobs run in parallel per pod; `1` by default. Multiplies with a job's own `crawl_concurrency` — see values.yaml |
 | `CRAWL_PAGE_WORKERS` | No | Threads for off-loop page processing (lxml parse + S3 upload); `12` by default. Per-pod, shared by all crawl jobs. Also the hard bound on peak page memory (`workers × MAX_PAGE_BYTES × ~10`) — raise only alongside the pod's CPU **and** memory limit |
+| `CRAWLER_HTTP_SLOTS` | No | Crawl worker slots across the crawler-http fleet (`replicaCount × concurrency`), injected by Helm into the **web** pod. Sizes the auto fan-out of `POST /crawler/crawl-http`. Unset ⇒ 1 job per trigger — see "Multi-pod crawl fan-out" |
 | `JOB_TYPE_WHITELIST` / `JOB_TYPE_BLACKLIST` | No | Comma-separated job types this pod may / may not claim |
 | `JOB_POLL_INTERVAL` | No | Seconds between queue polls when idle; `5` by default |
 | `JOB_SHUTDOWN_JOIN_TIMEOUT` | No | Seconds shutdown waits for jobs to checkpoint; `25` by default |
@@ -2692,7 +2694,66 @@ Paired with this, `s3_client._client()` now caches a single process-wide boto3 c
 
 **Correctness note — cancellation granularity:** the first version of this change used `asyncio.gather` (wait for the whole batch), which meant `ctx.assert_not_cancelled()` was only checked once per batch, after the single slowest task in it finished (up to `company_timeout`). That's the same check `_run_job` relies on to detect a job has been evicted by the stale-job recovery sweep (`requeue_interrupted_jobs` — see "Job recovery" below): if a sibling pod requeues+reclaims this job_run (heartbeat looked stale) and this execution doesn't notice for up to `company_timeout` seconds, both executions run concurrently, each with independent local `stats`/`done` counters, both writing progress into the same job row (visible as two interleaved, conflicting progress series in the job log). Fixed by switching to `asyncio.as_completed` — results (and the cancellation check) are handled as each individual crawl finishes, restoring the original per-company checkpoint granularity.
 
-For maximum throughput, combine with triggering multiple concurrent `web_crawl_http` job instances (dedup is off for this type) so more than one pod/thread is active at once — `crawl_concurrency` and job-instance count are independent, multiplicative levers.
+For maximum throughput, combine with multiple concurrent `web_crawl_http` job instances (dedup is off for this type) so more than one pod/thread is active at once — `crawl_concurrency` and job-instance count are independent, multiplicative levers. Since 2026-08-03 this is automatic; see "Multi-pod crawl fan-out".
+
+### Multi-pod crawl fan-out (2026-08-03)
+
+**A job row is claimed by exactly one worker slot.** `claim_next_job` is a single-row
+`UPDATE … RETURNING`, so one `web_crawl_http` row = one pod doing crawl work, no matter
+how many replicas are up. `NO_DEDUP` *permits* concurrent instances; it never creates
+them. `POST /crawler/crawl-http` enqueued exactly one row, so the second crawler pod had
+nothing to claim and idled — the pod count looked wrong when the enqueue was.
+
+Two changes make the fleet actually get used:
+
+**1. The trigger fans out.** `WebCrawlHttpBody.instances` (default `None` = auto) enqueues
+one row per worker slot. Helm injects `CRAWLER_HTTP_SLOTS` = `crawlerHttpWorker.replicaCount
+× .concurrency` into the **web** pod — it runs no crawl jobs but serves the trigger route,
+and nothing else lets the API size a fan-out to the fleet running it. Unset ⇒ 1 (local dev
+behaves exactly as before); capped at `MAX_CRAWL_INSTANCES` (16). Only instance 1 carries
+`rerun`, or instance 2 would reset the rows instance 1 is already crawling.
+
+*Note:* `ml-worker` also whitelists `web_crawl_http`/`_content`/`_playwright` as idle-fill,
+so real capacity is slightly higher than `CRAWLER_HTTP_SLOTS`. The count deliberately
+covers the dedicated pods only — the ML worker self-preempts (`_self_preempt_if_ml_queued`)
+the moment an ML job queues, so sizing the fan-out to include it would enqueue rows that
+immediately pause.
+
+**2. Concurrent jobs no longer steal each other's rows.** `claim_crawl_batch` was already
+safe (`FOR UPDATE SKIP LOCKED` ⇒ disjoint companies). The *recovery* paths around it were
+not — both called `release_in_progress_states(tier, phase)`, which resets **every**
+`in_progress` row of that tier+phase, including a sibling job's batch claimed seconds ago.
+Two pods then crawled the same companies.
+
+- **Startup sweep** now passes `stale_after_seconds = max(company_timeout × 3, 900)`.
+  Rows are claimed through the ORM, so `updated_at` is stamped at claim time and serves as
+  the claim clock; only rows idle far longer than any legitimate crawl can be orphaned.
+- **Exit path** now calls `release_crawl_states_by_id(in_flight)` — the job tracks the
+  company ids it claimed and hands back exactly those, no threshold needed. `in_flight` is
+  cleared after each batch commit, since those rows already carry a terminal status.
+  (This path had also been dropping the `phase` argument entirely, so a finishing identity
+  job reset a concurrent phase-B content job's rows.)
+
+Guarded by `tests/test_crawl_claim_isolation.py`. **Any new crawl-recovery path must be
+scoped by claimed id or by staleness — never a blanket tier+phase reset.**
+
+**3. The claim no longer locks `companies`.** `claim_crawl_batch` ended in a bare
+`FOR UPDATE SKIP LOCKED`, which in Postgres locks a row in **every** table of the FROM
+list — and that statement joins `companies` whenever `canton` is set or `order_by` is
+score-based (`web_crawl_content`'s default). So every claim took `companies` row locks
+held until the batch committed, across all of that batch's network I/O. Both directions
+hurt, and both were already visible in prod:
+
+- `UPDATE companies` from NOGA reclassify, the Zefix nightly (`bulk`/`detail`), or
+  `recompute_website_status` queued behind the crawl batch and could trip the engine-wide
+  30 s `statement_timeout` set in `app/database.py` — which is exactly what the
+  savepoint-per-row workaround in `handle_recompute_website_status` was built to survive.
+- `SKIP LOCKED` cuts both ways: a company row locked by one of those jobs made the crawler
+  silently skip its crawl-state row, under-claiming for reasons nothing logged.
+
+Now `FOR UPDATE OF cs SKIP LOCKED`. The join is only for ordering/filtering; the statement
+writes nothing but `company_crawl_state`. **Any future claim query that joins `companies`
+must keep the `OF cs`** — dropping it silently reintroduces fleet-wide lock contention.
 
 ### Crawler memory budget (2026-08-03, OOMKill fix)
 
@@ -2714,6 +2775,26 @@ must stay bounded on all five axes** — the pod has no headroom.
    phase B goes through `_page_result_and_links`, phase A passes its homepage soup in.
    Phase A's homepage parse also moved onto `run_in_page_executor` (it was blocking the
    event loop for every other in-flight site).
+
+2b. **Phase A computes no page metrics at all** (`_make_page_result(metrics=False)`).
+   `lang` / `word_count` / `image_count` / `video_count` / `has_contact_form` are
+   **descriptive only** — `save_web_page` → `company_web_pages` → `detail.py` → the
+   company-detail Website panel. Nothing scores, filters or decides on them, and the
+   identity verdict comes from `crawler_extract.resolve_company_extract`, which
+   re-downloads the HTML from S3 and does its own parse. Phase A was therefore building
+   a full BeautifulSoup tree, walking it with two `find_all`s and up to three
+   `get_text()`s, and running lingua — per page, for ~700k companies × 3 pages — purely
+   to fill a table a human rarely opens. Now:
+   - phase-A **subpages** (2 of the 3 pages) are **never parsed here at all** — fetch,
+     S3 upload, done;
+   - the phase-A **homepage** still parses once (unavoidable: the JS-shell check and
+     nav-link discovery need the tree) but skips the metrics, and its word count comes
+     free from the `get_text()` those checks already needed;
+   - the **Playwright** tier is also identity-phase, so it does the same;
+   - **phase B keeps `metrics=True`** — it is the phase those stats actually describe.
+
+   These columns are nullable and the frontend already renders `—` for null, so no
+   schema or UI change was needed. Pinned by `test_phase_a_does_not_parse_pages_for_display_metrics`.
 3. **`CRAWL_PAGE_WORKERS` 32 → 12, `MAX_PAGE_BYTES` 5 MB → 2 MB.** Peak page-processing
    memory is `PAGE_WORKERS × MAX_PAGE_BYTES × ~10` (tree expansion) — the old pair
    budgeted >1.5 GB against a 1 Gi limit. With a `1` CPU limit, 32 parse threads never
@@ -2731,6 +2812,73 @@ must stay bounded on all five axes** — the pod has no headroom.
    `web_crawl._track_error` — `stats` is `json.dumps`'d into `job_runs.stats_json` on
    *every* batch, so an uncapped list made each write proportional to all errors so far
    (O(n²) over a 700k run).
+
+### Identity resolution: batched fallback + terminal outcomes (2026-08-03)
+
+**The fallback chain is batched, not per-company.** When `web_extract` cannot confirm
+identity it used to enqueue a **`web_crawl_single` job per company** for the next
+candidate. Each such job claimed a whole worker slot for ONE company (against
+`batch_size=20` on the normal path) and waited out the job poll interval — so the
+common case, the real site being candidate #2 or #3, crawled far slower than a
+first-guess hit, and a full corpus pass left ~100k terminal job rows behind.
+`handle_web_extract` now calls `crawler_crud.retarget_crawl_state_to_candidate()`,
+which repoints `selected_url_id` and sets the row back to `pending` for the normal
+batch crawler — the same mechanism `advance_to_content_phase` already used for phase B.
+It then kicks one `web_crawl_http` (once per run) in case the crawl job that fed it has
+already drained. `web_crawl_single` remains for the interactive single-company path.
+
+**Consequence — identity-phase page deletion is candidate-scoped.**
+`delete_web_pages_for_candidate()` replaces the company-wide delete on the identity
+path. `get_next_crawlable_candidate` tests "already attempted" by whether a candidate
+has pages; a company-wide wipe would make the chain re-pick the same candidate forever.
+
+**Every terminal outcome is now visible.** `compute_verdict` consulted only
+`company_web_extract`, so a company that concluded without producing one got a NULL
+`website_status` — indistinguishable from "not started". It now falls through to
+`crawler_crud.get_identity_outcome()`:
+
+| outcome | meaning | `website_status` |
+|---|---|---|
+| `no_candidates` | search found nothing crawlable (`crawl_status='no_website'`) | `none` |
+| `exhausted` | every candidate tried, none was them (`crawl_phase='done'`) | `none` |
+| `unreachable` | all candidates bot-blocked/errored — **nothing disproved** | `unreachable` (new) |
+| _(in flight)_ | still pending/in_progress | NULL |
+
+`unreachable` is deliberately not `none`: reporting a bot wall as "no website" is a
+false negative that also stops anyone retrying. Both the companies table and the
+Website panel render it in orange, with labels in all four locales.
+
+### Crawl escalation ladder (2026-08-03)
+
+```
+httpx ──bot──▶ curl_cffi (real Chrome TLS) ──bot──▶ Playwright ──bot──▶ ScrapingDog (paid)
+```
+
+- **Phase B could not escalate at all.** `crawl_site_full` just `continue`d past every
+  failure — no `detect_bot_block`, no `detect_js_required` — so a JS-rendered site that
+  cleared identity on a static impressum produced a silently thin phase B. It now probes
+  the first successfully fetched page and returns `bot_blocked` / `needs_playwright`
+  for the whole site.
+- **`handle_web_crawl_playwright` never passed `phase`,** so it defaulted to `identity`
+  and could never claim an escalated content row. New `web_crawl_content_playwright`
+  (`crawler_playwright.crawl_site_full_playwright`) handles phase B in a browser, reusing
+  `BoundedFrontier` and the new `_browser_page()` context manager. `_run_crawl_batch`'s
+  auto-escalation is now phase-aware and routes to the right job type.
+- **`web_crawl_external`** is the paid rung: `crawler_external.crawl_company_external`
+  via `clients/scrapingdog_scrape_client.py` (distinct from `scrapingdog_search_client`,
+  which finds candidate URLs). Reached **only** from a Playwright bot-block
+  (`escalate_to_external` → `tier='external'`), identity phase only, and never
+  auto-enqueued — starting it is an explicit operator action. Bounded by `limit`
+  (default 100), `_EXTERNAL_MAX_PER_RUN` (500), and 2 billed pages per company. No-ops
+  with a clear message when no API key is set.
+
+### Job history retention (2026-08-03)
+
+`cleanup_job_runs` (`job_handlers/maintenance.py`) prunes terminal `job_runs` older than
+`retention_days` (30), keeping the `keep_per_type` (20) most recent per job type so a
+rarely-run job never loses its whole history. `job_run_events` has `ON DELETE CASCADE`
+on `job_id`, so streams go with their parent. Chunked at 1000/statement — the cascade
+fans out and the engine-wide 30 s `statement_timeout` applies. Supports `dry_run`.
 
 ### Two-phase crawling (2026-07-31)
 

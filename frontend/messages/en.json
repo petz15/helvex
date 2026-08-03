@@ -620,7 +620,8 @@
       "noCompaniesFound": "No companies found",
       "markInteresting": "Mark interesting",
       "skipClearReview": "Skip (clear review)",
-      "reject": "Reject"
+      "reject": "Reject",
+      "statusUnreachable": "Unreachable"
     },
     "personDetail": {
       "roleDirector": "Director",
@@ -765,7 +766,9 @@
       "contentPendingBody": "This URL has been verified as the company's own website. The full-site crawl that collects services, team and page content has not finished yet, so the fields below are incomplete rather than empty.",
       "contentPendingBadge": "Content pending",
       "notCollectedYet": "Not collected yet",
-      "visitWebsite": "Visit website"
+      "visitWebsite": "Visit website",
+      "statusUnreachable": "Unreachable",
+      "hintUnreachable": "Every candidate was blocked or errored — identity undecided"
     },
     "simap": {
       "title": "Public Contracts (SIMAP)",

@@ -2363,6 +2363,44 @@ export async function crawlerReextract(): Promise<{ flagged: number; job_id: num
   return res.json();
 }
 
+/** Phase B in a real browser — drains companies the HTTP content crawl escalated. */
+export async function crawlerCrawlContentPlaywright(): Promise<{ job_id: number; status: string }> {
+  const res = await fetch("/api/v1/admin/jobs/crawler/crawl-content-playwright", {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({}),
+  });
+  if (!res.ok) throw new Error("Failed to enqueue Playwright content crawl");
+  return res.json();
+}
+
+/** Paid ScrapingDog tier — only for companies that already defeated Playwright. */
+export async function crawlerCrawlExternal(limit = 100): Promise<{ job_id: number; status: string }> {
+  const res = await fetch("/api/v1/admin/jobs/crawler/crawl-external", {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ limit }),
+  });
+  if (!res.ok) throw new Error("Failed to enqueue external scrape crawl");
+  return res.json();
+}
+
+/** Prune terminal job history; job_run_events cascade with the parent row. */
+export async function cleanupJobRuns(
+  opts?: { retention_days?: number; keep_per_type?: number; dry_run?: boolean },
+): Promise<{ job_id: number; status: string }> {
+  const res = await fetch("/api/v1/admin/jobs/maintenance/cleanup-job-runs", {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(opts ?? {}),
+  });
+  if (!res.ok) throw new Error("Failed to enqueue job-history cleanup");
+  return res.json();
+}
+
 export async function crawlerRecomputeWebsiteStatus(): Promise<{ job_id: number; status: string }> {
   const res = await fetch("/api/v1/admin/jobs/crawler/recompute-website-status", {
     method: "POST",

@@ -399,6 +399,21 @@ def claim_crawl_batch(
 
     `phase` scopes the claim to one crawl phase, so identity and content workers
     claim disjoint rows and can run concurrently without coordinating.
+
+    **`FOR UPDATE OF cs` — the `OF cs` is load-bearing.** A bare `FOR UPDATE`
+    locks a row in EVERY table of the FROM list, and this statement joins
+    `companies` whenever `canton` is set or `order_by` is score-based (which
+    `web_crawl_content` does by default). That meant each claim took row locks on
+    `companies` too, held until the whole batch committed — minutes, for phase B.
+    Two ways that hurt, both observed:
+      - `UPDATE companies` from any other job (NOGA reclassify, Zefix nightly
+        bulk/detail, recompute_website_status) blocked behind the crawl batch and
+        could hit the engine-wide 30 s statement_timeout in database.py.
+      - `SKIP LOCKED` cuts the other way too: a company row locked by one of
+        those jobs made the crawler silently skip its crawl-state row.
+    The join is purely for ordering/filtering; this statement only ever writes
+    `company_crawl_state`, so restricting the lock to `cs` is both correct and
+    what removes the cross-job contention.
     """
     now = datetime.now(timezone.utc)
 
@@ -444,7 +459,7 @@ def claim_crawl_batch(
           {canton_clause}
         ORDER BY {order_clause}
         LIMIT :limit
-        FOR UPDATE SKIP LOCKED
+        FOR UPDATE OF cs SKIP LOCKED
     """)  # noqa: S608
 
     rows = db.execute(sql, params).fetchall()
@@ -545,17 +560,32 @@ def schedule_crawl_retry(
     db.flush()
 
 
-def release_in_progress_states(db: Session, tier: str, phase: str | None = None) -> int:
+def release_in_progress_states(
+    db: Session,
+    tier: str,
+    phase: str | None = None,
+    *,
+    stale_after_seconds: float | None = None,
+) -> int:
     """Reset company_crawl_state rows stuck in 'in_progress' back to 'pending'.
 
-    Called at the start of each crawl job run (covers resume-after-crash) and on
-    job failure/pause, so pods dying mid-batch don't permanently strand companies.
-    For 'playwright' tier, also releases rows where tier='playwright' since those
-    were escalated by the HTTP crawler before being claimed.
+    Crash recovery only: it exists so a pod dying mid-batch doesn't permanently
+    strand companies. For 'playwright' tier, also releases rows where
+    tier='playwright' since those were escalated by the HTTP crawler.
 
     `phase` scopes the release to one crawl phase. Identity and content workers
-    run concurrently, so an unscoped release would let one job's startup sweep
-    yank rows out from under the other job's in-flight batch.
+    run concurrently, so an unscoped release lets one job's sweep yank rows out
+    from under the other job's in-flight batch.
+
+    `stale_after_seconds` is what makes this safe to run while OTHER jobs of the
+    same tier+phase are mid-batch — which is the whole point of `web_crawl_http`
+    being in NO_DEDUP. Without it this sweep resets *every* in_progress row,
+    including the batch a sibling pod claimed seconds ago, so both pods then
+    crawl the same companies. Rows are claimed through the ORM, so `updated_at`
+    is stamped at claim time and doubles as the claim clock; pass a threshold
+    comfortably above the job's `company_timeout`. Callers releasing their OWN
+    rows should use release_crawl_states_by_id instead — it needs no threshold.
+
     Returns the number of rows released.
     """
     if tier == "playwright":
@@ -569,15 +599,46 @@ def release_in_progress_states(db: Session, tier: str, phase: str | None = None)
         phase_clause = "AND crawl_phase = :phase"
         params["phase"] = phase
 
+    stale_clause = ""
+    if stale_after_seconds is not None:
+        from datetime import timedelta
+        params["cutoff"] = datetime.now(timezone.utc) - timedelta(seconds=stale_after_seconds)
+        stale_clause = "AND updated_at < :cutoff"
+
     result = db.execute(
         text(
             f"UPDATE company_crawl_state SET crawl_status = 'pending' "  # noqa: S608
-            f"WHERE crawl_status = 'in_progress' AND {tier_clause} {phase_clause}"
+            f"WHERE crawl_status = 'in_progress' AND {tier_clause} "
+            f"{phase_clause} {stale_clause}"
         ),
         params,
     )
     db.flush()
     return result.rowcount
+
+
+def release_crawl_states_by_id(db: Session, company_ids: list[int] | set[int]) -> int:
+    """Release specific rows this job claimed but did not finish.
+
+    The precise counterpart to release_in_progress_states: a job knows exactly
+    which companies it claimed, so on pause/cancel/crash-out it can hand back its
+    own in-flight batch immediately without a staleness threshold and without
+    touching any sibling job's rows. Only rows still sitting in 'in_progress' are
+    reset — companies the batch already finished keep their terminal status.
+    """
+    ids = sorted(company_ids)  # deterministic lock order — see claim_crawl_batch
+    if not ids:
+        return 0
+    released = (
+        db.query(CompanyCrawlState)
+        .filter(
+            CompanyCrawlState.company_id.in_(ids),
+            CompanyCrawlState.crawl_status == "in_progress",
+        )
+        .update({"crawl_status": "pending"}, synchronize_session=False)
+    )
+    db.flush()
+    return int(released)
 
 
 # ── Phase transitions ──────────────────────────────────────────────────────────
@@ -671,6 +732,180 @@ def delete_web_pages_for_company(db: Session, company_id: int) -> int:
     )
     db.flush()
     return result.rowcount
+
+
+def delete_web_pages_for_candidate(db: Session, company_id: int, url_candidate_id: int | None) -> int:
+    """Delete a company's pages for ONE url candidate before re-crawling it.
+
+    The identity phase uses this rather than delete_web_pages_for_company: with
+    the batched fallback chain a company is crawled once per candidate, and
+    wiping every page each time would destroy two things that the chain depends
+    on — the per-candidate comparison shown in the Website panel, and
+    get_next_crawlable_candidate's "already attempted" test, which keys on the
+    existence of pages for a candidate. Without those pages the chain would
+    re-pick the same candidate forever.
+
+    Still prevents the duplicate rows the company-wide version existed to avoid:
+    S3 keys are (company_id, url_candidate_id, page_type), so re-crawling the
+    SAME candidate overwrites its objects and its old rows must go.
+    """
+    if url_candidate_id is None:
+        return delete_web_pages_for_company(db, company_id)
+    result = db.execute(
+        text(
+            "DELETE FROM company_web_pages "
+            "WHERE company_id = :cid AND url_candidate_id = :uid"
+        ),
+        {"cid": company_id, "uid": url_candidate_id},
+    )
+    db.flush()
+    return result.rowcount
+
+
+def retarget_crawl_state_to_candidate(db: Session, company_id: int, candidate_id: int) -> bool:
+    """Point a company's identity crawl at its next candidate and re-queue it.
+
+    This is the batched replacement for enqueuing a per-company
+    `web_crawl_single` job on every fallback. That approach turned the pipeline
+    inside out: each retry became its own job row claiming a whole worker slot
+    for ONE company (against batch_size=20 on the normal path) and waiting on
+    the job poll interval, so companies whose site is the 2nd or 3rd candidate —
+    the common case — crawled orders of magnitude slower than the first-guess
+    ones. Re-queuing the existing state row instead lets the normal batch
+    crawler pick the retry up with everything else.
+
+    Only touches a row still in the identity phase, so it can never drag a
+    company back out of phase B. Returns True if the retarget happened.
+    """
+    result = db.execute(
+        text(
+            "UPDATE company_crawl_state "
+            "SET selected_url_id = :cand, crawl_status = 'pending', tier = 'http', "
+            "    next_crawl_at = NULL, consecutive_failures = 0, "
+            "    crawl_error_detail = NULL, bot_protected = FALSE, "
+            "    bot_protection_type = NULL "
+            "WHERE company_id = :cid AND crawl_phase = 'identity'"
+        ),
+        {"cid": company_id, "cand": candidate_id},
+    )
+    db.flush()
+    return bool(result.rowcount)
+
+
+# Crawl statuses that mean "we tried and could not read the site", as opposed to
+# "we read it and it wasn't them".
+_UNREACHABLE_CRAWL_STATUSES = ("bot_blocked", "http_error", "timeout", "no_content")
+
+
+def escalate_to_external(db: Session, state: CompanyCrawlState) -> None:
+    """Hand a company to the paid external scrape tier.
+
+    Reached only after Playwright — a real browser — was itself bot-blocked.
+    Re-queues as `pending` with tier='external' so the normal claim query picks
+    it up; `web_crawl_external` is the only job whitelisted for that tier, which
+    is what keeps billed fetches off the free crawlers' path.
+    """
+    state.crawl_status = "pending"
+    state.tier = "external"
+    state.next_crawl_at = None
+    state.crawl_error_detail = "escalated to external scrape tier"
+    db.flush()
+
+
+def count_pending_external(db: Session, phase: str = "identity") -> int:
+    """How many companies are waiting on the paid tier — the spend forecast."""
+    return int(
+        db.execute(
+            text(
+                "SELECT COUNT(*) FROM company_crawl_state "
+                "WHERE crawl_status = 'pending' AND tier = 'external' "
+                "  AND crawl_phase = :phase"
+            ),
+            {"phase": phase},
+        ).scalar()
+        or 0
+    )
+
+
+def sync_terminal_website_status(db: Session, company_ids: list[int] | set[int]) -> int:
+    """Write `website_status` for companies whose identity phase concluded
+    WITHOUT producing an extract row.
+
+    Needed because `handle_web_extract` only writes a verdict when an extract
+    exists — and it only ever claims companies that have pages. A company with no
+    crawlable candidate has no pages, so it is never claimed at all, and one whose
+    every candidate was bot-blocked produces no extract either. Both would keep a
+    NULL website_status (visually identical to "not started") until somebody ran
+    `recompute_website_status` by hand.
+
+    Set-based and idempotent: the WHERE clauses skip rows already carrying the
+    right value, so calling it after every crawl batch costs nothing once settled.
+    Mirrors compute_verdict's taxonomy — see get_identity_outcome.
+    """
+    ids = sorted(company_ids)
+    if not ids:
+        return 0
+
+    no_extract = (
+        "NOT EXISTS (SELECT 1 FROM company_web_extract e "
+        "            WHERE e.company_id = companies.id)"
+    )
+    failures = ", ".join(f"'{s}'" for s in _UNREACHABLE_CRAWL_STATUSES)
+    updated = 0
+
+    # `unreachable` first, and `none` explicitly excludes those statuses, so the
+    # two conditions are mutually exclusive and order cannot matter.
+    for status, state_clause in (
+        (
+            "unreachable",
+            f"cs.crawl_status IN ({failures})",
+        ),
+        (
+            "none",
+            f"cs.crawl_status NOT IN ({failures}) "
+            f"AND (cs.crawl_status = 'no_website' OR cs.crawl_phase = 'done')",
+        ),
+    ):
+        stmt = text(
+            f"UPDATE companies SET website_status = :status, "  # noqa: S608
+            f"    website_count = NULL, website_url = NULL "
+            f"WHERE id IN :ids "
+            f"  AND (website_status IS NULL OR website_status <> :status) "
+            f"  AND {no_extract} "
+            f"  AND EXISTS (SELECT 1 FROM company_crawl_state cs "
+            f"              WHERE cs.company_id = companies.id AND {state_clause})"
+        ).bindparams(sa_bindparam("ids", value=ids, expanding=True))
+        updated += db.execute(stmt, {"status": status}).rowcount or 0
+
+    db.flush()
+    return int(updated)
+
+
+def get_identity_outcome(db: Session, company_id: int) -> str | None:
+    """Why the identity phase produced no usable extract, if it has concluded.
+
+    Returns 'no_candidates' | 'unreachable' | 'exhausted', or None while the
+    company is still in flight. Lets compute_verdict tell "we looked and found
+    nothing" apart from "we haven't looked yet" — both of which previously
+    surfaced as a NULL website_status, i.e. an empty cell.
+    """
+    row = db.execute(
+        text(
+            "SELECT crawl_status, crawl_phase FROM company_crawl_state "
+            "WHERE company_id = :cid"
+        ),
+        {"cid": company_id},
+    ).first()
+    if row is None:
+        return None
+    status, phase = row[0], row[1]
+    if status == "no_website":
+        return "no_candidates"
+    if status in _UNREACHABLE_CRAWL_STATUSES:
+        return "unreachable"
+    if phase == "done":
+        return "exhausted"
+    return None
 
 
 def delete_content_pages_for_company(db: Session, company_id: int) -> int:

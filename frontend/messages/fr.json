@@ -620,7 +620,8 @@
       "noCompaniesFound": "Aucune entreprise trouvée",
       "markInteresting": "Marquer comme intéressant",
       "skipClearReview": "Ignorer (effacer la révision)",
-      "reject": "Rejeter"
+      "reject": "Rejeter",
+      "statusUnreachable": "Inaccessible"
     },
     "personDetail": {
       "roleDirector": "Directeur",
@@ -765,7 +766,9 @@
       "contentPendingBody": "Cette URL a été vérifiée comme étant le site web de l'entreprise. L'exploration complète du site, qui collecte les services, l'équipe et le contenu des pages, n'est pas encore terminée : les champs ci-dessous sont donc incomplets et non vides.",
       "contentPendingBadge": "Contenu en attente",
       "notCollectedYet": "Pas encore collecté",
-      "visitWebsite": "Visiter le site web"
+      "visitWebsite": "Visiter le site web",
+      "statusUnreachable": "Inaccessible",
+      "hintUnreachable": "Tous les candidats bloqués ou en erreur — identité indéterminée"
     },
     "simap": {
       "title": "Marchés publics (SIMAP)",

@@ -620,7 +620,8 @@
       "noCompaniesFound": "Nessuna azienda trovata",
       "markInteresting": "Contrassegna come interessante",
       "skipClearReview": "Salta (cancella revisione)",
-      "reject": "Rifiuta"
+      "reject": "Rifiuta",
+      "statusUnreachable": "Non raggiungibile"
     },
     "personDetail": {
       "roleDirector": "Direttore",
@@ -765,7 +766,9 @@
       "contentPendingBody": "Questo URL è stato verificato come sito web dell'azienda. La scansione completa del sito, che raccoglie servizi, team e contenuti delle pagine, non è ancora terminata: i campi sottostanti sono quindi incompleti, non vuoti.",
       "contentPendingBadge": "Contenuti in attesa",
       "notCollectedYet": "Non ancora raccolto",
-      "visitWebsite": "Visita il sito web"
+      "visitWebsite": "Visita il sito web",
+      "statusUnreachable": "Non raggiungibile",
+      "hintUnreachable": "Tutti i candidati bloccati o in errore — identità indeterminata"
     },
     "simap": {
       "title": "Appalti pubblici (SIMAP)",

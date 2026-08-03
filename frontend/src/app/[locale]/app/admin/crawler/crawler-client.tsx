@@ -12,6 +12,9 @@ import {
   crawlerResetPlaywright,
   crawlerPopulateUrls,
   crawlerRecomputeWebsiteStatus,
+  crawlerCrawlContentPlaywright,
+  crawlerCrawlExternal,
+  cleanupJobRuns,
   crawlerEnrichPurposeSim,
   crawlerDirectoryCrawl,
   crawlerDiscoverDirectoryDomains,
@@ -390,6 +393,33 @@ export function CrawlerAdminClient() {
               >
                 {acting === "purpose-sim" ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
                 Enrich purpose similarity (ML)
+              </button>
+              <button
+                onClick={() => doAction("content-playwright", crawlerCrawlContentPlaywright)}
+                disabled={acting !== null}
+                title="Phase B for sites the HTTP content crawl could not read (JS / bot wall). Normally auto-enqueued."
+                className="flex items-center gap-2 px-3 py-2 text-sm rounded-lg border border-sky-200 bg-sky-50 hover:bg-sky-100 text-sky-800 disabled:opacity-50 transition-colors"
+              >
+                {acting === "content-playwright" ? <Loader2 size={14} className="animate-spin" /> : <Globe size={14} />}
+                Content crawl (Playwright)
+              </button>
+              <button
+                onClick={() => doAction("external", () => crawlerCrawlExternal(100))}
+                disabled={acting !== null}
+                title="PAID: ScrapingDog residential proxy. Only companies that already defeated httpx and Playwright. Capped at 100 companies × 2 pages per run."
+                className="flex items-center gap-2 px-3 py-2 text-sm rounded-lg border border-rose-300 bg-rose-50 hover:bg-rose-100 text-rose-800 disabled:opacity-50 transition-colors"
+              >
+                {acting === "external" ? <Loader2 size={14} className="animate-spin" /> : <AlertTriangle size={14} />}
+                External scrape (paid, max 100)
+              </button>
+              <button
+                onClick={() => doAction("cleanup-jobs", () => cleanupJobRuns())}
+                disabled={acting !== null}
+                title="Delete terminal job runs older than 30 days, keeping the 20 most recent per type. Job events cascade."
+                className="flex items-center gap-2 px-3 py-2 text-sm rounded-lg border border-slate-200 hover:bg-slate-50 disabled:opacity-50 transition-colors"
+              >
+                {acting === "cleanup-jobs" ? <Loader2 size={14} className="animate-spin" /> : <RotateCcw size={14} />}
+                Prune job history
               </button>
               <button
                 onClick={() => doAction("directory-crawl", crawlerDirectoryCrawl)}

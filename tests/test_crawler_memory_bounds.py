@@ -13,7 +13,7 @@ from app.services.enrichment.crawler_common import PageResult, has_contact_form
 from app.services.enrichment.crawler_http import BoundedFrontier
 
 
-def _stub_page(pt, u, fu, s, b, cid, cand=None, soup=None) -> PageResult:
+def _stub_page(pt, u, fu, s, b, cid, cand=None, soup=None, text=None) -> PageResult:
     """Stand-in for _make_page_result — no lxml parse, no S3 upload."""
     return PageResult(
         page_type=pt, url=u, final_url=fu, http_status=s, lang=None,
@@ -154,6 +154,69 @@ def test_phase_b_bounded_frontier_still_reaches_max_pages(monkeypatch):
         seed_urls=[("other", "https://x.ch/s01")],
     ))
     assert len(result.pages) == 12
+
+
+# ── Phase A skips the descriptive page metrics (and the parse with them) ──────
+
+def test_phase_a_does_not_parse_pages_for_display_metrics(monkeypatch):
+    """Identity pages must not pay for an lxml parse per page.
+
+    The identity verdict comes from crawler_extract, which re-downloads the HTML
+    from S3 and does its own parse. lang/word_count/media/contact_form only feed
+    the detail-page Website panel, so computing them here builds a full soup tree
+    (~10x the source) for every one of ~700k companies x 3 pages for nothing.
+    """
+    parses: list[int] = []
+    real_parse = crawler_http.parse_soup
+    monkeypatch.setattr(
+        crawler_http, "parse_soup",
+        lambda b: (parses.append(1), real_parse(b))[1],
+    )
+
+    html = b"<html lang='de'><body><p>hello world from a company</p></body></html>"
+
+    # A subpage: no soup, no text, metrics off -> not parsed at all.
+    page = crawler_http._make_page_result(
+        "impressum", "https://x.ch/i", "https://x.ch/i", 200, html, 1, None,
+        metrics=False,
+    )
+    assert parses == []
+    assert page.image_count is None
+    assert page.video_count is None
+    assert page.has_contact_form is None
+    assert page.lang is None
+    assert page.word_count is None
+    # The part that actually matters downstream still gets set.
+    assert page.page_type == "impressum"
+    assert page.final_url == "https://x.ch/i"
+
+
+def test_metrics_false_still_counts_words_when_text_is_free(monkeypatch):
+    """Phase A's homepage already extracted the text for its JS-shell check, so
+    the word count costs nothing extra and stays populated."""
+    html = b"<html><body><p>one two three</p></body></html>"
+    page = crawler_http._make_page_result(
+        "homepage", "https://x.ch/", "https://x.ch/", 200, html, 1, None,
+        None, "one two three", metrics=False,
+    )
+    assert page.word_count == 3
+    assert page.image_count is None  # still skipped
+
+
+def test_phase_b_still_records_the_metrics():
+    """Phase B is the phase those stats describe — it must keep computing them."""
+    html = (
+        b"<html lang='de'><body><p>hello world</p>"
+        b"<img src='a.png'><img src='b.png'>"
+        b"<form><input name='email'></form></body></html>"
+    )
+    page = crawler_http._make_page_result(
+        "about", "https://x.ch/a", "https://x.ch/a", 200, html, 1, None,
+    )
+    assert page.image_count == 2
+    assert page.word_count == 2
+    assert page.has_contact_form is True
+    assert page.lang == "de"
 
 
 # ── The job's error sample is capped ──────────────────────────────────────────

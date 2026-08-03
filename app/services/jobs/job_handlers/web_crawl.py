@@ -32,7 +32,7 @@ _ML_JOB_TYPES: frozenset[str] = frozenset({
     "reclassify_low_conf_noga", "tfidf_kmeans_cluster", "recompute_keywords",
     "reextract_keywords", "cluster_analysis", "discover_stopwords",
     "noga_v2_explain", "embed_purpose_full", "embed_purpose_clean",
-    "web_crawl_playwright",
+    "web_crawl_playwright", "web_crawl_content_playwright",
 })
 
 # Transient failures (timeout / connection error) get this many backoff retries
@@ -172,6 +172,10 @@ def handle_web_url_populate(ctx: JobContext) -> tuple[dict, str]:
             )
             crawler_crud.bulk_select_best_candidates(ctx.db, company_ids, blocked)
             crawler_crud.bulk_create_crawl_states(ctx.db, company_ids)
+            # Companies that got a 'no_website' state (no crawlable candidate)
+            # will never be crawled or extracted, so this is the only place their
+            # verdict can be written.
+            crawler_crud.sync_terminal_website_status(ctx.db, company_ids)
             ctx.db.commit()
             stats["processed"] += len(company_ids)
         except Exception as exc:  # noqa: BLE001
@@ -324,11 +328,30 @@ def _run_crawl_batch(
         "http_error": 0, "timeout": 0, "no_content": 0, "errors": [],
     }
 
-    # Release rows stuck in_progress from any previous crashed run
-    released = crawler_crud.release_in_progress_states(ctx.db, tier=tier, phase=phase)
+    # Resolved once per run: whether a Playwright bot-block may escalate to the
+    # paid tier. Without a key configured the ladder simply ends at Playwright.
+    from app.services.enrichment import crawler_external as _ext
+    _external_enabled = tier == "playwright" and _ext.is_external_tier_enabled(ctx.db)
+
+    # Release rows stranded in_progress by a previously CRASHED run.
+    #
+    # The staleness gate is load-bearing, not defensive: web_crawl_http /
+    # _content are in NO_DEDUP precisely so several can run at once across the
+    # crawler pods. An ungated sweep here resets every in_progress row of this
+    # tier+phase — including the batch a sibling job claimed seconds ago — so
+    # both jobs would then crawl the same companies. Only rows untouched for
+    # well over one company_timeout can be genuinely orphaned.
+    stale_after = max(company_timeout * 3, 900.0)
+    released = crawler_crud.release_in_progress_states(
+        ctx.db, tier=tier, phase=phase, stale_after_seconds=stale_after,
+    )
     ctx.db.commit()
     if released:
-        ctx.event("info", f"Released {released} stuck in_progress rows from previous run")
+        ctx.event(
+            "info",
+            f"Released {released} in_progress rows stranded by a crashed run "
+            f"(idle > {stale_after / 60:.0f} min)",
+        )
 
     if rerun and phase == "content":
         reset_count = crawler_crud.reset_content_crawled(ctx.db, canton=canton)
@@ -365,6 +388,10 @@ def _run_crawl_batch(
         total = min(total, limit)
     done = 0
     _playwright_enqueued = False  # trigger at most once per run
+    # Companies claimed by THIS job and not yet finished. Lets the exit path hand
+    # back exactly our own in-flight batch without a staleness threshold and
+    # without disturbing a sibling crawl job's rows.
+    in_flight: set[int] = set()
 
     try:
         while True:
@@ -381,6 +408,7 @@ def _run_crawl_batch(
             )
             if not batch:
                 break
+            in_flight.update(int(s.company_id) for s in batch)
 
             # Resolve candidates up front so a missing row doesn't consume a
             # concurrency slot below; failures here are recorded immediately.
@@ -435,6 +463,21 @@ def _run_crawl_batch(
                         stats["js_required"] = stats.get("js_required", 0) + 1
                         record_crawl_result(tier, "js_required")
                     elif (
+                        tier == "playwright"
+                        and fs == "bot_blocked"
+                        and _external_enabled
+                        and phase == "identity"
+                    ):
+                        # A real browser was blocked too. The paid residential-proxy
+                        # tier is the only rung left — and it costs credits, so it
+                        # is reached ONLY from here, never straight off the HTTP
+                        # tier. Identity phase only: proving which site is the
+                        # company is worth money; re-fetching its content pages
+                        # generally is not.
+                        crawler_crud.escalate_to_external(ctx.db, state)
+                        stats["escalated_external"] = stats.get("escalated_external", 0) + 1
+                        record_crawl_result(tier, "escalated_external")
+                    elif (
                         fs in ("timeout", "http_error")
                         and (state.consecutive_failures or 0) < _MAX_CRAWL_RETRIES
                     ):
@@ -463,7 +506,14 @@ def _run_crawl_batch(
                         # and its extract were computed from.
                         crawler_crud.delete_content_pages_for_company(ctx.db, state.company_id)
                     else:
-                        crawler_crud.delete_web_pages_for_company(ctx.db, state.company_id)
+                        # Candidate-scoped, NOT company-wide: the batched
+                        # fallback chain crawls one candidate per pass, and the
+                        # chain's "already attempted" test keys on a candidate
+                        # having pages. Wiping them all would make it re-pick
+                        # the same candidate forever.
+                        crawler_crud.delete_web_pages_for_candidate(
+                            ctx.db, state.company_id, state.selected_url_id
+                        )
                     pages_crawled = []
                     fetched_urls: set[str] = set()
                     for i, p in enumerate(result.pages):
@@ -519,16 +569,34 @@ def _run_crawl_batch(
                     )
                 )
 
+            # Companies that just failed terminally produce no extract, so
+            # web_extract will never give them a verdict — write it here instead
+            # of leaving a NULL that reads as "not looked at yet".
+            crawler_crud.sync_terminal_website_status(
+                ctx.db, [s.company_id for s in batch]
+            )
             ctx.db.commit()
             done += len(batch)
+            # Committed — every row in this batch now carries a terminal status,
+            # so none of them still need handing back if we exit from here on.
+            in_flight.clear()
 
             # When the HTTP tier finds js_required companies, kick off playwright
             # automatically. One job drains all js_required rows via SKIP LOCKED.
             if tier == "http" and stats.get("js_required", 0) > 0 and not _playwright_enqueued:
+                # Phase-aware: an escalated *content* row sits at
+                # crawl_phase='content', which the identity Playwright job can
+                # never claim (it defaults to phase='identity'). Sending both to
+                # web_crawl_playwright would leave every phase-B escalation
+                # stranded as js_required forever.
+                escalation_type = (
+                    "web_crawl_content_playwright" if phase == "content"
+                    else "web_crawl_playwright"
+                )
                 try:
                     ctx.enqueue_job(
-                        job_type="web_crawl_playwright",
-                        label="Playwright crawl (auto — js_required)",
+                        job_type=escalation_type,
+                        label=f"Playwright crawl (auto — js_required, {phase})",
                         params={},
                         org_id=None,
                         user_id=ctx.job.user_id,
@@ -573,14 +641,19 @@ def _run_crawl_batch(
             ctx.db.rollback()
         except Exception:
             pass
-        # Release any in_progress rows we claimed but didn't finish
-        # (covers pause, cancel, unexpected exception, deadlock rollback)
+        # Hand back only the rows THIS job still holds (pause, cancel, unexpected
+        # exception, deadlock rollback). Scoped by company id rather than by
+        # tier+phase: a blanket release here would reset the in-flight batch of
+        # every sibling crawl job on the other pods too, since they share the
+        # tier and phase — the exact double-crawl NO_DEDUP concurrency is meant
+        # to avoid. Rows the last batch already finished are skipped by the
+        # crawl_status='in_progress' filter inside the helper.
         try:
-            still_stuck = crawler_crud.release_in_progress_states(ctx.db, tier=tier)
+            still_stuck = crawler_crud.release_crawl_states_by_id(ctx.db, in_flight)
             if still_stuck:
                 ctx.db.commit()
         except Exception as exc:
-            logger.warning("release_in_progress_states failed during cleanup: %s", exc)
+            logger.warning("release_crawl_states_by_id failed during cleanup: %s", exc)
 
     tier_label = "Playwright" if tier == "playwright" else "HTTP"
     done_msg = (
@@ -695,6 +768,98 @@ def handle_web_crawl_playwright(ctx: JobContext) -> tuple[dict, str]:
     )
 
 
+def handle_web_crawl_content_playwright(ctx: JobContext) -> tuple[dict, str]:
+    """Phase B in a real browser — for sites the HTTP content crawl can't read.
+
+    Claims `crawl_phase='content'` rows that the HTTP phase-B crawler escalated
+    (crawl_status='js_required', or tier flipped to playwright). Without this,
+    `handle_web_crawl_playwright` only ever claimed identity rows — it never
+    passes `phase`, so it defaults to 'identity' — and a JS-heavy site that
+    happened to clear identity on a static impressum silently produced an empty
+    phase B.
+    """
+    from app.services.enrichment.crawler_playwright import crawl_site_full_playwright
+
+    limit_raw = ctx.params.get("limit")
+    return _run_crawl_batch(
+        ctx,
+        tier="playwright",
+        phase="content",
+        batch_size=int(ctx.params.get("batch_size", 5)),
+        canton=ctx.params.get("canton") or None,
+        max_pages=int(ctx.params.get("max_pages", 40)),
+        rate_limit_delay=float(ctx.params.get("rate_limit_delay", 0.5)),
+        crawl_fn=crawl_site_full_playwright,
+        rerun=bool(ctx.params.get("rerun", False)),
+        order_by=str(ctx.params.get("order_by", "combined_score_desc")),
+        limit=int(limit_raw) if limit_raw else None,
+        # A rendered 40-page site needs far longer than phase A's budget.
+        company_timeout=float(ctx.params.get("company_timeout", 900.0)),
+        # Each slot is a full Chromium — the binding constraint is pod memory,
+        # not network, so this stays far below the HTTP crawler's concurrency.
+        concurrency=int(ctx.params.get("crawl_concurrency", 2)),
+        target_kwargs_fn=_make_content_target_kwargs(int(ctx.params.get("max_depth", 3))),
+    )
+
+
+# ── web_crawl_external (paid tier) ────────────────────────────────────────────
+
+# Hard ceiling on companies fetched per external run, independent of what the
+# caller asks for. Every page here is billed, so an accidental `limit=null` must
+# not be able to spend the whole ScrapingDog balance in one job.
+_EXTERNAL_MAX_PER_RUN = 500
+
+
+def handle_web_crawl_external(ctx: JobContext) -> tuple[dict, str]:
+    """Paid last-resort crawl for companies that defeated httpx AND Playwright.
+
+    Claims `tier='external'` rows, which only `escalate_to_external` creates —
+    so this job can never pull in a company that hasn't already burned the free
+    tiers. Bounded twice: by `limit` (default 100) and by the absolute
+    `_EXTERNAL_MAX_PER_RUN`, because each page is a billed request.
+
+    No-ops with a clear message when no API key is configured, rather than
+    failing a job the operator can't act on.
+    """
+    from app.services.enrichment import crawler_external as ext
+
+    api_key = ext.get_external_api_key(ctx.db)
+    if not api_key:
+        waiting = crawler_crud.count_pending_external(ctx.db)
+        return (
+            {"skipped": True, "pending": waiting},
+            f"External scrape tier not configured (no ScrapingDog API key) — "
+            f"{waiting} companies waiting. Set it in Ops settings to enable.",
+        )
+
+    requested = ctx.params.get("limit")
+    limit = min(int(requested) if requested else 100, _EXTERNAL_MAX_PER_RUN)
+
+    def _crawl_fn(company_id, url, **kwargs):
+        return ext.crawl_company_external(company_id, url, api_key=api_key, **kwargs)
+
+    stats, msg = _run_crawl_batch(
+        ctx,
+        tier="external",
+        phase="identity",
+        batch_size=int(ctx.params.get("batch_size", 10)),
+        canton=ctx.params.get("canton") or None,
+        # 2 billed pages per company: homepage + the impressum/contact that
+        # carries the UID. See crawl_company_external.
+        max_pages=int(ctx.params.get("max_pages", 2)),
+        rate_limit_delay=0.0,
+        crawl_fn=_crawl_fn,
+        order_by=str(ctx.params.get("order_by", "combined_score_desc")),
+        limit=limit,
+        company_timeout=float(ctx.params.get("company_timeout", 180.0)),
+        # The provider pools proxies for us; this only bounds our own in-flight
+        # billed requests.
+        concurrency=int(ctx.params.get("crawl_concurrency", 5)),
+    )
+    stats["billed_pages"] = stats.get("crawled", 0) * int(ctx.params.get("max_pages", 2))
+    return stats, f"{msg} (external tier, capped at {limit} companies)"
+
+
 # ── web_extract ───────────────────────────────────────────────────────────────
 
 def handle_web_extract(ctx: JobContext) -> tuple[dict, str]:
@@ -713,6 +878,8 @@ def handle_web_extract(ctx: JobContext) -> tuple[dict, str]:
     batch_size = int(ctx.params.get("batch_size", 200))
     stats: dict = {"extracted": 0, "empty": 0, "s3_errors": 0, "errors": [], "rescored": 0}
     _content_enqueued = False  # kick the phase-B crawler at most once per run
+    _identity_enqueued = False  # ditto for the identity crawler after a fallback
+    _crawl_requeued = False  # a company was retargeted onto its next candidate
     # Loaded once per run; drives the company-level website verdict below.
     _thr = ws.load_thresholds(ctx.db)
 
@@ -911,27 +1078,30 @@ def handle_web_extract(ctx: JobContext) -> tuple[dict, str]:
                             ctx.db, company_id, exclude_candidate_ids=already_tried
                         )
                         if fallback is not None:
-                            try:
-                                ctx.enqueue_job(
-                                    job_type="web_crawl_single",
-                                    label=f"Fallback crawl candidate {fallback.id} for company {company_id}",
-                                    params={
-                                        "company_id": company_id,
-                                        "url_candidate_id": fallback.id,
-                                        "max_pages": 3,
-                                    },
-                                    org_id=ctx.job.org_id,
-                                    user_id=ctx.job.user_id,
-                                )
+                            # Re-queue the company's own crawl state onto the next
+                            # candidate instead of spawning a per-company
+                            # web_crawl_single job. Each such job claimed a whole
+                            # worker slot for ONE company and waited on the job
+                            # poll interval, so the (common) case of the right site
+                            # being candidate #2 or #3 ran far slower than a
+                            # first-guess hit. The batch crawler now picks the
+                            # retry up alongside everything else.
+                            if crawler_crud.retarget_crawl_state_to_candidate(
+                                ctx.db, company_id, fallback.id
+                            ):
                                 stats["fallbacks"] = stats.get("fallbacks", 0) + 1
-                            except Exception:  # noqa: BLE001
-                                pass  # Dedup hit or queue full — not fatal
+                                _crawl_requeued = True
                         else:
                             # Candidates exhausted and identity never confirmed —
                             # retire the company rather than leaving it pending in
                             # the identity phase forever.
                             crawler_crud.mark_phase_done(ctx.db, company_id)
                             stats["identity_exhausted"] = stats.get("identity_exhausted", 0) + 1
+                            # Every candidate tried and none was them. This company
+                            # DOES have extracts, so compute_verdict above already
+                            # returned `none` — but only when `best` was non-NULL.
+                            # Sync covers the case where none of them were usable.
+                            crawler_crud.sync_terminal_website_status(ctx.db, [company_id])
 
                 # Always mark processed so the queue drains even when nothing is found.
                 crawler_crud.mark_pages_extracted(ctx.db, company_id)
@@ -967,6 +1137,25 @@ def handle_web_extract(ctx: JobContext) -> tuple[dict, str]:
                 _content_enqueued = True
             except Exception as exc:  # noqa: BLE001
                 logger.debug("Auto-enqueue web_crawl_content skipped: %s", exc)
+
+        # Companies retargeted onto their next candidate are sitting at
+        # crawl_status='pending' again. The identity crawl job that produced this
+        # extraction batch may already have drained and exited, so kick one —
+        # otherwise the fallback chain stalls until someone triggers a crawl by
+        # hand. Dedup is off for this type, hence the once-per-run guard.
+        if _crawl_requeued and not _identity_enqueued:
+            try:
+                ctx.enqueue_job(
+                    job_type="web_crawl_http",
+                    label="Identity crawl (auto — fallback candidates queued)",
+                    params={},
+                    org_id=None,
+                    user_id=ctx.job.user_id,
+                )
+                ctx.db.commit()
+                _identity_enqueued = True
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("Auto-enqueue web_crawl_http skipped: %s", exc)
 
         msg = (
             f"Extracted {done}/{total} — {stats['extracted']} with data, "

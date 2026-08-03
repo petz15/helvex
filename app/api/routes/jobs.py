@@ -1917,6 +1917,10 @@ class WebCrawlHttpBody(WebCrawlBody):
     order_by: str = "company_id_asc"  # company_id_asc | last_crawled_asc | flex_score_desc | combined_score_desc
     limit: int | None = None     # stop after this many companies (None = all)
     crawl_concurrency: int = 40  # companies crawled at once within this job (pure async I/O, bounded by semaphore)
+    # Parallel job rows to enqueue. None = auto-scale to the crawler fleet's slot
+    # count (replicas x JOB_WORKER_CONCURRENCY, via CRAWLER_HTTP_SLOTS). One row
+    # is claimed by exactly one slot, so without this the extra pods sit idle.
+    instances: int | None = None
 
 
 class WebCrawlContentBody(WebCrawlBody):
@@ -1975,7 +1979,16 @@ def trigger_web_crawl_http(
     db: Session = Depends(get_db),
     _: User = Depends(require_superadmin),
 ):
-    """Trigger HTTP crawler — fast path using httpx, no browser."""
+    """Trigger HTTP crawler — fast path using httpx, no browser.
+
+    Enqueues `instances` job rows (default: one per crawler worker slot). A row is
+    claimed by exactly one slot via `claim_next_job`, so a single row would leave
+    the rest of the fleet idle. The rows are safe to run concurrently:
+    `claim_crawl_batch` uses SELECT FOR UPDATE SKIP LOCKED, so they take disjoint
+    companies, and each job only ever releases the batch it claimed itself.
+    """
+    from app.services.jobs.job_worker import MAX_CRAWL_INSTANCES, crawler_http_slots
+
     parts = []
     if body.canton:
         parts.append(body.canton)
@@ -1986,14 +1999,28 @@ def trigger_web_crawl_http(
     if body.limit:
         parts.append(f"limit {body.limit}")
     label = "HTTP crawler" + (f" — {', '.join(parts)}" if parts else "")
-    job = _enqueue_or_http_error(
-        request,
-        job_type="web_crawl_http",
-        label=label,
-        params=body.model_dump(),
-        db=db,
-    )
-    return JobOut.from_orm_obj(job)
+
+    instances = body.instances if body.instances is not None else crawler_http_slots()
+    instances = max(1, min(instances, MAX_CRAWL_INSTANCES))
+
+    # `rerun` resets rows fleet-wide, so only the first instance may carry it —
+    # otherwise instance 2 would reset the rows instance 1 is already crawling.
+    params = body.model_dump()
+    jobs = []
+    for i in range(instances):
+        p = dict(params)
+        if i > 0:
+            p["rerun"] = False
+        jobs.append(
+            _enqueue_or_http_error(
+                request,
+                job_type="web_crawl_http",
+                label=label if instances == 1 else f"{label} ({i + 1}/{instances})",
+                params=p,
+                db=db,
+            )
+        )
+    return JobOut.from_orm_obj(jobs[0])
 
 
 @router.post("/crawler/crawl-content", response_model=JobOut, status_code=status.HTTP_202_ACCEPTED)
@@ -2019,6 +2046,86 @@ def trigger_web_crawl_content(
         request,
         job_type="web_crawl_content",
         label=label,
+        params=body.model_dump(),
+        db=db,
+    )
+    return JobOut.from_orm_obj(job)
+
+
+@router.post("/crawler/crawl-content-playwright", response_model=JobOut, status_code=status.HTTP_202_ACCEPTED)
+def trigger_web_crawl_content_playwright(
+    body: WebCrawlContentBody,
+    request: Request,
+    db: Session = Depends(get_db),
+    _: User = Depends(require_superadmin),
+):
+    """Phase B in a real browser, for sites the HTTP content crawl can't read.
+
+    Normally auto-enqueued when the HTTP phase-B crawler escalates a company to
+    js_required; exposed here so a stalled escalation queue can be drained by hand.
+    """
+    job = _enqueue_or_http_error(
+        request,
+        job_type="web_crawl_content_playwright",
+        label="Full-site crawler (Playwright)",
+        params=body.model_dump(),
+        db=db,
+    )
+    return JobOut.from_orm_obj(job)
+
+
+class WebCrawlExternalBody(BaseModel):
+    """Paid tier — every page is a billed ScrapingDog request."""
+    batch_size: int = 10
+    canton: str | None = None
+    max_pages: int = 2          # homepage + the impressum/contact carrying the UID
+    limit: int | None = 100     # hard-capped again server-side by _EXTERNAL_MAX_PER_RUN
+    crawl_concurrency: int = 5
+    order_by: str = "combined_score_desc"
+
+
+@router.post("/crawler/crawl-external", response_model=JobOut, status_code=status.HTTP_202_ACCEPTED)
+def trigger_web_crawl_external(
+    body: WebCrawlExternalBody,
+    request: Request,
+    db: Session = Depends(get_db),
+    _: User = Depends(require_superadmin),
+):
+    """Drain the paid external-scrape queue (companies that defeated Playwright).
+
+    Never auto-enqueued: reaching this tier costs credits, so starting it is an
+    explicit operator decision. The job itself no-ops with a clear message if no
+    ScrapingDog key is configured.
+    """
+    job = _enqueue_or_http_error(
+        request,
+        job_type="web_crawl_external",
+        label=f"External scrape crawl (paid — up to {body.limit or 100} companies)",
+        params=body.model_dump(),
+        db=db,
+    )
+    return JobOut.from_orm_obj(job)
+
+
+class CleanupJobRunsBody(BaseModel):
+    retention_days: int = 30
+    keep_per_type: int = 20
+    dry_run: bool = False
+
+
+@router.post("/maintenance/cleanup-job-runs", response_model=JobOut, status_code=status.HTTP_202_ACCEPTED)
+def trigger_cleanup_job_runs(
+    body: CleanupJobRunsBody,
+    request: Request,
+    db: Session = Depends(get_db),
+    _: User = Depends(require_superadmin),
+):
+    """Prune terminal job history. `job_run_events` cascades with the parent row."""
+    suffix = " (dry run)" if body.dry_run else ""
+    job = _enqueue_or_http_error(
+        request,
+        job_type="cleanup_job_runs",
+        label=f"Prune job history older than {body.retention_days}d{suffix}",
         params=body.model_dump(),
         db=db,
     )

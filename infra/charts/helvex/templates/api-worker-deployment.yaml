@@ -41,7 +41,7 @@ spec:
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           env:
             - name: JOB_TYPE_WHITELIST
-              value: "bulk,detail,initial,uid_import,uid_detail,simap_daily,simap_backfill,simap_archive,shab_daily,shab_backfill,shab_archive,link_sogc_stubs,resolve_shab_old_uids,backfill_shab_old_uid_extraction,sogc_preprocess,extract_sogc_persons,resolve_bisher_links,repair_is_current,web_search_batch,re_geocode,recalculate_scores,recalculate_google_scores,recompute_website_status,reextract_purpose,reextract_zefix_raw,claude_classify,csv_export,analyze_boilerplate,billing_renewal,saved_view_alerts,discover_directory_domains,rescore_scope"
+              value: "bulk,detail,initial,uid_import,uid_detail,simap_daily,simap_backfill,simap_archive,shab_daily,shab_backfill,shab_archive,link_sogc_stubs,resolve_shab_old_uids,backfill_shab_old_uid_extraction,sogc_preprocess,extract_sogc_persons,resolve_bisher_links,repair_is_current,web_search_batch,re_geocode,recalculate_scores,recalculate_google_scores,recompute_website_status,reextract_purpose,reextract_zefix_raw,claude_classify,csv_export,analyze_boilerplate,billing_renewal,saved_view_alerts,discover_directory_domains,rescore_scope,cleanup_job_runs"
             - name: JOB_WORKER_CONCURRENCY
               value: "{{ .Values.apiWorker.concurrency }}"
             {{- if .Values.mlWorker.enabled }}
