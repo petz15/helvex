@@ -80,7 +80,7 @@ jobs:
           provenance: false
           platforms: ${{ env.BUILD_PLATFORMS }}
           build-args: |
-            INSTALL_SPACY_MODEL=false
+            INSTALL_SPACY_MODEL=true
             BUILD_GEOCODING_DB=false
           tags: |
             ghcr.io/${{ github.repository }}:dev

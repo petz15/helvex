@@ -38,7 +38,16 @@ if os.getenv("INSTALL_SPACY_MODEL", "false").lower() == "true":
 
         ForwardRef._evaluate = _p
     import spacy.cli
-    spacy.cli.download("de_core_news_md")
+    # All four models crawler_extract._SPACY_NER_MODELS references. Downloading
+    # only `de` left fr/it/en pages silently falling back to the regex-only
+    # person extractor (`_get_spacy_ner` swallows the load error and caches
+    # None), so NER coverage depended on the page's language. Keep this list in
+    # step with Dockerfile.ml-base, which already installs all four.
+    for _model in (
+        "de_core_news_md", "fr_core_news_sm",
+        "it_core_news_sm", "en_core_web_sm",
+    ):
+        spacy.cli.download(_model)
 else:
     print("Skipping spaCy model download (INSTALL_SPACY_MODEL=false)")
 EOF

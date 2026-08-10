@@ -224,3 +224,46 @@ def job_worker_handlers():
     from app.services.jobs import job_handlers
 
     return job_handlers.JOB_HANDLERS
+
+
+def test_enqueue_resumes_a_paused_job_instead_of_returning_it_idle(worker_db):
+    """Pressing "start" on a type blocked by a user-paused job must actually start it.
+
+    A paused job counts as active for dedup, so it blocks every new enqueue of
+    its type — and `resume_all_paused_jobs` deliberately skips `pause_reason=
+    'user'`. Together that was a permanent silent dead end: the trigger returned
+    202 with the paused job's id, the UI read it as "started", and nothing ran.
+    Observed as NOGA reclassification that could not be started at all.
+    """
+    job = crud.create_job(
+        worker_db, job_type="reclassify_noga", label="NOGA", params={},
+        dedup_key="reclassify_noga:None",
+    )
+    crud.mark_paused(worker_db, job, message="Paused", reason="user")
+    assert _reload(worker_db, job.id).status == "paused"
+    # The sweep will not touch it — that is the trap.
+    assert crud.resume_all_paused_jobs(worker_db) == 0
+
+    returned = job_worker._enqueue_job_in_session(
+        worker_db, job_type="reclassify_noga", label="NOGA (retry)", params={},
+    )
+
+    assert returned.id == job.id, "must reuse the row, not create a duplicate"
+    assert _reload(worker_db, job.id).status == "queued", "must be claimable now"
+
+
+def test_enqueue_does_not_resurrect_a_paused_job_pending_cancel(worker_db):
+    """resume_paused_job turns a cancel-pending row terminal — the resume path
+    must not hand back an immortal zombie that claim_next_job refuses forever."""
+    job = crud.create_job(
+        worker_db, job_type="reclassify_noga", label="NOGA", params={},
+        dedup_key="reclassify_noga:None",
+    )
+    crud.mark_paused(worker_db, job, message="Paused", reason="user")
+    crud.mark_cancel_requested(worker_db, _reload(worker_db, job.id))
+
+    job_worker._enqueue_job_in_session(
+        worker_db, job_type="reclassify_noga", label="NOGA (retry)", params={},
+    )
+
+    assert _reload(worker_db, job.id).status == "cancelled"

@@ -40,8 +40,15 @@ spec:
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           env:
+            # web_extract belongs here, not only on the ML worker: it is pure
+            # lxml/trafilatura/S3/DB work (all in requirements.backend.txt, and
+            # spaCy NER degrades gracefully when the model is absent). Leaving it
+            # ML-only put the identity-critical step — the one that turns crawled
+            # HTML into a website verdict — behind NOGA and Chromium on that pod's
+            # single slot, so a stuck browser crawl stalled the whole pipeline.
+            # It is still dedup'd, so this relocates it rather than parallelising it.
             - name: JOB_TYPE_WHITELIST
-              value: "web_crawl_http,web_crawl_content,web_crawl_external,web_url_populate,web_select_url,web_crawl_single,directory_crawl"
+              value: "web_crawl_http,web_crawl_content,web_crawl_external,web_extract,web_url_populate,web_select_url,web_crawl_single,directory_crawl"
             # NOTE: multiplies with the in-job `crawl_concurrency` param — see
             # crawlerHttpWorker.concurrency in values.yaml before raising this.
             - name: JOB_WORKER_CONCURRENCY

@@ -82,13 +82,19 @@ crawlerHttpWorker:
   # 2 jobs/pod × crawl_concurrency 10 = up to 20 in-flight crawls per pod.
   # Raise the memory limit below before raising this — see values.yaml.
   concurrency: 2
+  # 1Gi -> 2Gi: this pod now also runs web_extract, which was ML-worker-only.
+  # Peak here is roughly Python+SQLAlchemy (~250M) + lingua (~150M) + the four
+  # spaCy NER models the extractor loads lazily per language (~400M) +
+  # CRAWL_PAGE_WORKERS soup churn (~240M) + one capped extract blob set
+  # (_MAX_EXTRACT_BLOB_BYTES 16M, ~100M with parse transients) ≈ 1.1–1.2Gi.
+  # 1Gi had no headroom for that; the ML worker only absorbed it because it has 6Gi.
   resources:
     requests:
       cpu: 250m
-      memory: 512Mi
+      memory: 1Gi
     limits:
       cpu: "1"
-      memory: 1Gi
+      memory: 2Gi
 
 postgres:
   enabled: true

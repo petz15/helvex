@@ -24,16 +24,46 @@ from app.services.jobs.job_worker import JobPausedError
 
 logger = logging.getLogger(__name__)
 
-# High-priority job types that web_crawl_http should yield to when queued on
-# the ML worker.  Includes all ML/NOGA types plus web_crawl_playwright so that
-# HTTP idle-fill on the ML worker doesn't block playwright jobs from starting.
-_ML_JOB_TYPES: frozenset[str] = frozenset({
+# The genuine ML/NOGA work the ML worker exists for. EVERY crawl job yields to
+# these — that is the whole point of crawl work being idle-fill on that pod.
+_ML_ONLY_JOB_TYPES: frozenset[str] = frozenset({
     "reclassify_noga", "build_noga_embeddings", "detect_language_bulk",
     "reclassify_low_conf_noga", "tfidf_kmeans_cluster", "recompute_keywords",
     "reextract_keywords", "cluster_analysis", "discover_stopwords",
     "noga_v2_explain", "embed_purpose_full", "embed_purpose_clean",
+})
+
+# Browser-tier crawls. Ranked above HTTP idle-fill (a Chromium slot is scarcer
+# than an httpx one) but NOT above each other — see _preempt_watch_for.
+_PLAYWRIGHT_JOB_TYPES: frozenset[str] = frozenset({
     "web_crawl_playwright", "web_crawl_content_playwright",
 })
+
+# Union kept under the old name: it is what detects "am I on the ML worker?"
+# by intersecting with the pod's JOB_TYPE_WHITELIST.
+_ML_JOB_TYPES: frozenset[str] = _ML_ONLY_JOB_TYPES | _PLAYWRIGHT_JOB_TYPES
+
+
+def _preempt_watch_for(job_type: str) -> frozenset[str]:
+    """Job types whose presence in the queue should make `job_type` yield.
+
+    **A job must never watch for its own tier.** `web_crawl_playwright` and
+    `web_crawl_content_playwright` are NO_DEDUP *and* auto-enqueued by every HTTP
+    crawl batch that finds a js_required company — so several are normally
+    queued at once. With the browser types in their own watch set, a running
+    playwright job saw a queued sibling, preempted itself, was auto-resumed by
+    the recovery sweep (pause_reason='preempt'), preempted itself again… a hot
+    loop that never reached the first `update_progress`, so the job sat at
+    "Starting…" forever while occupying the ML worker's only slot and starving
+    the NOGA jobs it was supposed to be yielding to.
+
+    This is the same class of bug as the cancel_requested mismatch documented in
+    `crawler_crud.has_queued_ml_job` — yielding to work that can never actually
+    take the slot ahead of you.
+    """
+    if job_type in _PLAYWRIGHT_JOB_TYPES:
+        return _ML_ONLY_JOB_TYPES          # yield to ML, never to a peer browser job
+    return frozenset(_ML_JOB_TYPES - {job_type})
 
 # Transient failures (timeout / connection error) get this many backoff retries
 # before being marked terminally failed. Bot blocks and js_required are handled
@@ -46,6 +76,37 @@ _MAX_CRAWL_RETRIES = 3
 # run, on top of the list itself growing without bound in the worker's heap.
 # A sample is all the UI shows; the full detail is in company_crawl_state.
 _MAX_TRACKED_ERRORS = 50
+
+
+# Ceiling on how much page HTML one extract holds in memory at once.
+#
+# handle_web_extract downloads EVERY page of a candidate into `page_blobs`
+# before extracting. In the identity phase that is ~3 pages, but after phase B a
+# candidate can carry `max_pages` (60) documents — at MAX_PAGE_BYTES that is
+# ~120 MB resident, plus roughly a 10x transient during parsing. Survivable on
+# the 6Gi ML worker, fatal on the 1Gi crawler pods. 16 MB is far more than the
+# identity ladder in resolve_company_extract ever reads, and _order_pages_for_extract
+# guarantees the pages that carry the UID/address come first.
+_MAX_EXTRACT_BLOB_BYTES = 16 * 1024 * 1024
+
+# Page types that actually decide identity, best first. Everything else is
+# coverage-residual only, so it is what gets dropped when the cap bites.
+_EXTRACT_PAGE_PRIORITY: tuple[str, ...] = (
+    "homepage", "impressum", "contact", "about", "team",
+)
+
+
+def _order_pages_for_extract(pages: list) -> list:
+    """Identity-bearing pages first, so the byte cap never drops the UID page.
+
+    resolve_company_extract's confidence ladder reads the UID from impressum or
+    contact, the address from JSON-LD/<address>/impressum, and the name from
+    domain+title — all of which live in the first few types below. DB order is
+    by (crawled desc, priority, id), which after a 60-page phase-B crawl can put
+    arbitrary content pages ahead of the impressum.
+    """
+    rank = {t: i for i, t in enumerate(_EXTRACT_PAGE_PRIORITY)}
+    return sorted(pages, key=lambda p: rank.get(p.page_type, len(rank)))
 
 
 def _track_error(stats: dict, msg: str) -> None:
@@ -70,7 +131,8 @@ def _self_preempt_if_ml_queued(ctx: JobContext) -> None:
     if not whitelist.intersection(_ML_JOB_TYPES):
         # Not running on ML worker — skip preemption check
         return
-    if crawler_crud.has_queued_ml_job(ctx.db, _ML_JOB_TYPES):
+    watch = _preempt_watch_for(ctx.job.job_type)
+    if watch and crawler_crud.has_queued_ml_job(ctx.db, watch):
         raise JobPausedError("High-priority job queued — crawler yielding", requeue=True)
 
 
@@ -593,18 +655,27 @@ def _run_crawl_batch(
                     "web_crawl_content_playwright" if phase == "content"
                     else "web_crawl_playwright"
                 )
-                try:
-                    ctx.enqueue_job(
-                        job_type=escalation_type,
-                        label=f"Playwright crawl (auto — js_required, {phase})",
-                        params={},
-                        org_id=None,
-                        user_id=ctx.job.user_id,
-                    )
-                    ctx.db.commit()
+                # One is enough: the playwright job drains ALL js_required rows
+                # via SKIP LOCKED. These types are NO_DEDUP (for multi-pod
+                # parallelism), and _playwright_enqueued only guards THIS job —
+                # so N concurrent HTTP crawl jobs would each add one, piling up
+                # identical jobs against the ML worker's single Chromium slot.
+                if crawler_crud.has_queued_ml_job(ctx.db, {escalation_type}):
+                    # One is already waiting — adding another buys nothing.
                     _playwright_enqueued = True
-                except Exception as exc:  # noqa: BLE001
-                    logger.debug("Auto-enqueue web_crawl_playwright skipped: %s", exc)
+                else:
+                    try:
+                        ctx.enqueue_job(
+                            job_type=escalation_type,
+                            label=f"Playwright crawl (auto — js_required, {phase})",
+                            params={},
+                            org_id=None,
+                            user_id=ctx.job.user_id,
+                        )
+                        ctx.db.commit()
+                        _playwright_enqueued = True
+                    except Exception as exc:  # noqa: BLE001
+                        logger.debug("Auto-enqueue %s skipped: %s", escalation_type, exc)
 
             # Trigger extraction after each batch so it runs in parallel on a
             # separate pod. Dedup returns the existing job if one is already
@@ -932,10 +1003,15 @@ def handle_web_extract(ctx: JobContext) -> tuple[dict, str]:
                         cand_pages[0].url if cand_pages else None,
                     )
                     page_blobs: list[tuple[str, bytes]] = []
-                    for p in cand_pages:
+                    blob_bytes = 0
+                    for p in _order_pages_for_extract(cand_pages):
+                        if blob_bytes >= _MAX_EXTRACT_BLOB_BYTES:
+                            stats["blob_capped"] = stats.get("blob_capped", 0) + 1
+                            break
                         try:
                             html = _s3.download_crawl_html(p.s3_key_html)
                             page_blobs.append((p.page_type, html))
+                            blob_bytes += len(html)
                         except Exception as exc:  # noqa: BLE001
                             stats["s3_errors"] += 1
                             logger.debug("S3 download failed for %s: %s", p.s3_key_html, exc)

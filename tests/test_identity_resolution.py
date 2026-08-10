@@ -273,3 +273,37 @@ def test_external_tier_is_off_without_an_api_key(db, monkeypatch):
 
     monkeypatch.setattr(settings, "scrapingdog_api_key", "")
     assert ext.is_external_tier_enabled(db) is False
+
+
+# ── Extract memory bound ──────────────────────────────────────────────────────
+
+def test_extract_page_order_puts_identity_pages_first():
+    """The byte cap drops the tail, so the UID/address pages must lead.
+
+    DB order is (crawled desc, priority, id); after a 60-page phase-B crawl that
+    can put arbitrary content pages ahead of the impressum, which is exactly
+    where resolve_company_extract reads the UID from.
+    """
+    from app.services.jobs.job_handlers.web_crawl import _order_pages_for_extract
+
+    class _P:
+        def __init__(self, t):
+            self.page_type = t
+
+    ordered = [
+        p.page_type
+        for p in _order_pages_for_extract(
+            [_P("news"), _P("impressum"), _P("shop"), _P("homepage"), _P("contact")]
+        )
+    ]
+    assert ordered[:3] == ["homepage", "impressum", "contact"]
+
+
+def test_extract_blob_cap_is_far_above_the_identity_page_set():
+    """The cap must never bite on a normal identity extract (~3 pages)."""
+    from app.services.enrichment.crawler_common import MAX_PAGE_BYTES
+    from app.services.jobs.job_handlers.web_crawl import _MAX_EXTRACT_BLOB_BYTES
+
+    assert _MAX_EXTRACT_BLOB_BYTES >= 3 * MAX_PAGE_BYTES
+    # ...but well under what an unbounded 60-page phase-B candidate would hold.
+    assert _MAX_EXTRACT_BLOB_BYTES < 60 * MAX_PAGE_BYTES

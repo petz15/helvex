@@ -857,6 +857,31 @@ def _enqueue_job_in_session(
                     db, job_id=existing.id, level="warn",
                     message="Force-failed by dedup self-heal — restart cap exceeded",
                 )
+            elif existing.status == "paused":
+                # A paused job is "active" for dedup, so it blocks every new
+                # enqueue of its type — and a `pause_reason='user'` pause is
+                # deliberately skipped by resume_all_paused_jobs. Together those
+                # made a permanent silent dead end: the trigger returns 202 with
+                # this job's id, the UI reads that as "started", and nothing ever
+                # runs. Someone pressing the button IS the instruction to run it,
+                # so honour that and re-queue rather than hand back a corpse.
+                logger.info(
+                    "Dedup hit on PAUSED job %s (type=%s key=%s reason=%s) — "
+                    "resuming it instead of returning it idle",
+                    existing.id, job_type, dedup_key, existing.pause_reason,
+                )
+                crud.resume_paused_job(db, existing, bump_queued_at=False)
+                crud.create_event(
+                    db, job_id=existing.id, level="info",
+                    message="Resumed by a new trigger for the same job type",
+                )
+                # resume_paused_job commits, which EXPIRES every attribute.
+                # Expunging an expired instance detaches it mid-flight, and the
+                # caller's JobOut.from_orm_obj() then raises DetachedInstanceError
+                # trying to reload — a 500 on the trigger route. Reload first.
+                db.refresh(existing)
+                db.expunge(existing)
+                return existing
             else:
                 logger.info(
                     "Dedup hit: returning existing job %s (type=%s key=%s status=%s)",

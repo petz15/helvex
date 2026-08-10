@@ -2872,6 +2872,79 @@ httpx ──bot──▶ curl_cffi (real Chrome TLS) ──bot──▶ Playwrig
   (default 100), `_EXTERNAL_MAX_PER_RUN` (500), and 2 billed pages per company. No-ops
   with a clear message when no API key is set.
 
+### Crawler self-preemption — never watch your own tier (2026-08-04)
+
+`_self_preempt_if_ml_queued` makes a crawl job yield the ML worker's slot when
+higher-priority work is queued. Its watch set used to be one flat `_ML_JOB_TYPES`
+that **included the browser crawl types** — so a running `web_crawl_playwright`
+watched for `web_crawl_playwright`. Those types are `NO_DEDUP` *and* auto-enqueued
+by every HTTP crawl batch that finds a js_required company, so a sibling is
+normally queued: the job preempted itself, the recovery sweep auto-resumed it
+(`pause_reason='preempt'`), and it preempted again — a hot loop that never reached
+its first `update_progress`. Symptom: a job pinned at **"Starting…"**, unstoppable
+(each incarnation was too short-lived to poll the cancel flag, which is throttled
+to `_FLAG_POLL_INTERVAL`), holding the ML worker's only slot and starving the NOGA
+jobs it was supposedly yielding to.
+
+Now `_preempt_watch_for(job_type)` splits the set: `_ML_ONLY_JOB_TYPES` (real
+ML/NOGA work) and `_PLAYWRIGHT_JOB_TYPES`. Browser jobs watch ML only; HTTP
+idle-fill watches both; **no type ever watches for itself**. This is the same bug
+class as the `cancel_requested` mismatch documented in
+`crawler_crud.has_queued_ml_job` — yielding to work that can never take the slot
+ahead of you. Guarded by `tests/test_crawl_preemption.py`.
+
+Paired fix: the auto-escalation enqueue now skips when one of that type is already
+queued. `_playwright_enqueued` only guards a single job, so N concurrent HTTP crawl
+jobs each added one — piling identical jobs against a single Chromium slot.
+
+### web_extract placement + extract memory bound (2026-08-04)
+
+`web_extract` was whitelisted on the **ML worker only** — not crawler-http, not
+api-worker, and the web pod runs no jobs (`DISABLE_JOB_WORKER=true` when both
+workers are enabled). So the identity-critical step (crawled HTML → website
+verdict) sat behind NOGA *and* Chromium on that pod's single slot: one stuck
+browser crawl stalled the whole pipeline. It now runs on crawler-http as well.
+Still dedup'd, so this relocates it rather than parallelising it.
+
+Two things had to change for that move to be safe:
+
+**1. spaCy NER actually works off the ML image now.** `Dockerfile.ml-base`
+installs all four models (`de_core_news_md`, `fr/it/en_core_news_sm`), but the
+base image built with `INSTALL_SPACY_MODEL=false` had none — and
+`_get_spacy_ner` swallows the load failure and caches `None`, so
+`_extract_persons_ner` silently returns `[]` and only the regex pass runs.
+Moving `web_extract` to a base-image pod would have quietly degraded person
+extraction. Fixed by setting `INSTALL_SPACY_MODEL=true` in both deploy workflows
+**and** extending the base `Dockerfile` to download all four models — it fetched
+only `de`, so fr/it/en pages fell back to regex even when enabled.
+
+**2. `page_blobs` is byte-bounded.** `handle_web_extract` downloads EVERY page of
+a candidate before extracting: ~3 in the identity phase, but up to `max_pages`
+(60) after phase B — ~120 MB resident at `MAX_PAGE_BYTES`, plus ~10x transient
+during parse. Survivable at 6Gi, fatal at 1Gi. Now capped at
+`_MAX_EXTRACT_BLOB_BYTES` (16 MB), with `_order_pages_for_extract` putting
+homepage/impressum/contact/about/team first so the cap can only ever drop
+coverage-residual pages, never the UID/address ones the confidence ladder reads.
+
+`crawlerHttpWorker` memory raised 1Gi → 2Gi (requests 512Mi → 1Gi) to cover
+lingua + the four lazily-loaded spaCy models + page-worker churn + one capped
+blob set (≈1.1–1.2Gi peak).
+
+### Dedup + paused = silent dead end (2026-08-04)
+
+`find_active_by_dedup_key` counts `paused` as active, so a paused job blocks every
+new enqueue of its type. Combined with `resume_all_paused_jobs` deliberately
+skipping `pause_reason='user'`, that produced a **permanent, invisible** block: the
+trigger route returned `202` with the paused job's id, the UI read that as
+"started", and nothing ever ran. There was no self-heal — only the restart-cap
+branch could clear a dedup blocker.
+
+`_enqueue_job_in_session` now re-queues a paused dedup blocker instead of handing
+it back idle: pressing the button IS the instruction to run it. `resume_paused_job`
+already turns a cancel-pending row terminal, so this cannot resurrect a zombie.
+Note it commits (expiring attributes), so the row is `refresh`ed before `expunge` —
+otherwise the caller's `JobOut.from_orm_obj()` raises `DetachedInstanceError`.
+
 ### Job history retention (2026-08-03)
 
 `cleanup_job_runs` (`job_handlers/maintenance.py`) prunes terminal `job_runs` older than

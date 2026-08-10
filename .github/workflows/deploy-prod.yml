@@ -104,7 +104,7 @@ jobs:
           build-args: |
             BUILD_DATE=${{ github.event.head_commit.timestamp }}
             BUILD_GIT_SHA=${{ github.sha }}
-            INSTALL_SPACY_MODEL=false
+            INSTALL_SPACY_MODEL=true
             BUILD_GEOCODING_DB=false
           cache-from: type=gha,scope=backend
           cache-to: type=gha,mode=max,scope=backend

@@ -146,7 +146,13 @@ def test_web_pipeline_jobs_land_on_the_intended_pods():
         "web_crawl_playwright":        {"ml"},
         "web_crawl_single":            {"crawler-http"},
         "web_select_url":              {"crawler-http"},
-        "web_extract":                 {"ml"},
+        # Deliberately on BOTH. web_extract is the identity-critical step
+        # (crawled HTML -> website verdict) and needs nothing from the ML image:
+        # lxml/trafilatura/extruct/lingua are all in requirements.backend.txt and
+        # spaCy NER degrades to the regex pass when the model is absent. ML-only
+        # placement put it behind NOGA and Chromium on that pod's single slot, so
+        # one stuck browser crawl stalled the entire crawl pipeline.
+        "web_extract":                 {"ml", "crawler-http"},
         "directory_crawl":             {"crawler-http"},
         "discover_directory_domains":  {"api"},
         "recompute_website_status":    {"api"},
