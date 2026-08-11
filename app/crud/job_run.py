@@ -208,23 +208,38 @@ def claim_next_job(
     return int(row[0]) if row else None
 
 
-def get_job_flags(db: Session, job_id: int) -> tuple[str, bool, bool] | None:
-    """Return (status, cancel_requested, pause_requested), or None if gone.
+def get_job_flags(
+    db: Session, job_id: int
+) -> tuple[str, bool, bool, datetime | None] | None:
+    """Return (status, cancel_requested, pause_requested, started_at), or None.
 
-    Reads three columns instead of loading the row, because a running job's
+    Reads four columns instead of loading the row, because a running job's
     cancel checkpoint calls this per unit of work. Callers inside a job MUST
     pass a short-lived session, not the handler's own — reading through the
     handler's session would autoflush its pending work at an arbitrary point
     mid-batch.
+
+    `started_at` is the execution token. `claim_next_job` stamps it on EVERY
+    claim, so it uniquely identifies one execution of a job row without needing
+    a dedicated owner column. The eviction check needs it because comparing
+    `status != 'running'` is blind to the case that actually matters: once the
+    recovery sweep re-queues a job and another pod claims it, the status is
+    `running` again — just not *yours* — and both executions then run to
+    completion, interleaving progress writes into the same row.
     """
     row = (
-        db.query(JobRun.status, JobRun.cancel_requested, JobRun.pause_requested)
+        db.query(
+            JobRun.status,
+            JobRun.cancel_requested,
+            JobRun.pause_requested,
+            JobRun.started_at,
+        )
         .filter(JobRun.id == job_id)
         .first()
     )
     if row is None:
         return None
-    return str(row[0]), bool(row[1]), bool(row[2])
+    return str(row[0]), bool(row[1]), bool(row[2]), row[3]
 
 
 MAX_RESTART_COUNT = 5

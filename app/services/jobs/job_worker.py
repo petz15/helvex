@@ -438,6 +438,10 @@ def _run_job(app, job_id: int) -> None:
             return
 
         job_type = job.job_type
+        # This execution's identity. claim_next_job re-stamps started_at on every
+        # claim, so if the row's value ever differs from this one, the row has
+        # been re-claimed and we are the stale execution — see _assert_not_cancelled.
+        _own_started_at = job.started_at
         crud.create_event(db, job_id=job.id, level="info", message="Job started")
 
         # Heartbeat daemon: stamps last_heartbeat_at every 30 s so that
@@ -489,7 +493,7 @@ def _run_job(app, job_id: int) -> None:
                 flags = crud.get_job_flags(_flag_db, job_id)
             if flags is None:
                 return
-            status, cancel_requested, pause_requested = flags
+            status, cancel_requested, pause_requested, started_at = flags
             if cancel_requested:
                 raise JobCancelledError("Cancellation requested")
             if pause_requested:
@@ -501,6 +505,21 @@ def _run_job(app, job_id: int) -> None:
             if status != "running":
                 raise JobPausedError(
                     f"Job evicted by recovery (status='{status}') — yielding to re-queued instance",
+                    reason="shutdown",
+                )
+            # …but the status check alone only catches the brief `queued` window.
+            # If a sibling pod re-claims before our next 2 s poll, status is
+            # `running` again and we would happily carry on — two executions of
+            # ONE row, interleaving progress writes and redoing the same work.
+            # started_at is re-stamped by every claim, so a change means the row
+            # is no longer ours.
+            if (
+                _own_started_at is not None
+                and started_at is not None
+                and started_at != _own_started_at
+            ):
+                raise JobPausedError(
+                    "Job re-claimed by another execution — yielding to it",
                     reason="shutdown",
                 )
 

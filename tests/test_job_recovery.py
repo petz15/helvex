@@ -68,7 +68,7 @@ def test_get_job_flags_reports_current_state(db):
     job = crud.create_job(db, job_type="detail", label="Flags", params={})
     crud.mark_cancel_requested(db, job)
 
-    status, cancel_requested, pause_requested = crud.get_job_flags(db, job.id)
+    status, cancel_requested, pause_requested, _started = crud.get_job_flags(db, job.id)
     assert status == "queued"
     assert cancel_requested is True
     assert pause_requested is False

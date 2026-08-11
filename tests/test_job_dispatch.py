@@ -5,6 +5,7 @@ the csv_export handler (a positional arg passed to a keyword-only lambda) went
 unnoticed even though it failed every export on its first batch.
 """
 import json
+from datetime import datetime, timezone
 from unittest.mock import patch
 
 import pytest
@@ -267,3 +268,41 @@ def test_enqueue_does_not_resurrect_a_paused_job_pending_cancel(worker_db):
     )
 
     assert _reload(worker_db, job.id).status == "cancelled"
+
+
+def test_reclaimed_job_yields_instead_of_running_twice(worker_db):
+    """The double-execution guard.
+
+    `status != 'running'` only catches the brief `queued` window. If the recovery
+    sweep re-queues a job and a sibling pod re-claims it before this execution's
+    next 2s flag poll, the status reads `running` again — just not ours — and
+    both executions run to completion, interleaving progress writes into one row
+    (observed as two conflicting progress series with different totals).
+    `started_at` is re-stamped by every claim, so it identifies the execution.
+    """
+    seen: list[str] = []
+
+    def _handler(ctx: JobContext):
+        # Simulate a sibling pod re-claiming: bump started_at, keep status running.
+        from datetime import timedelta
+        row = _reload(worker_db, ctx.job.id)
+        row.started_at = (row.started_at or datetime.now(timezone.utc)) + timedelta(seconds=5)
+        worker_db.commit()
+
+        job_worker._FLAG_POLL_INTERVAL = 0.0  # force the next poll to actually read
+        ctx.assert_not_cancelled()            # must raise — we are the stale one
+        seen.append("kept running")           # never reached
+        return {}, "done"
+
+    job = crud.create_job(worker_db, job_type="web_extract", label="Extract", params={})
+    crud.claim_next_job(worker_db)
+
+    original_interval = job_worker._FLAG_POLL_INTERVAL
+    try:
+        with patch.dict(job_worker_handlers(), {"web_extract": _handler}):
+            _run(job.id)
+    finally:
+        job_worker._FLAG_POLL_INTERVAL = original_interval
+
+    assert seen == [], "stale execution carried on after the row was re-claimed"
+    assert _reload(worker_db, job.id).status in ("paused", "queued")
