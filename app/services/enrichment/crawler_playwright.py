@@ -201,10 +201,19 @@ async def _get_bounded_html(page, cap: int = MAX_PAGE_BYTES) -> str:
     return await page.content()
 
 
+# Per-page navigation budgets. Deliberately tight: a bot wall answers fast or
+# not at all, so a long nav timeout buys nothing on this tier and burns the
+# company's whole budget. 1 homepage + 4 subpages sits just inside the 60s
+# identity company_timeout, which means SUBPAGES are what gets dropped when a
+# site is slow — never the homepage, which is where identity is decided.
+_HOMEPAGE_TIMEOUT_MS = 10_000
+_SUBPAGE_TIMEOUT_MS = 12_000
+
+
 async def _fetch_page(
     page,
     url: str,
-    timeout_ms: int = 20_000,
+    timeout_ms: int = _HOMEPAGE_TIMEOUT_MS,
     rate_limit_delay: float = 0.5,
 ) -> tuple[int, str, dict, bytes]:
     """Navigate to url and return (status, final_url, headers, body)."""
@@ -319,13 +328,97 @@ def _page_result_and_links(
         del soup
 
 
-@asynccontextmanager
-async def _browser_page(company_id: int):
-    """Yield a stealth-patched, SSRF-guarded Playwright page; always closes.
+# How many times one session may relaunch a dead browser. A Chromium that OOMs
+# or has its target closed would otherwise take every remaining company in the
+# batch down with it — the whole point of sharing the browser is that one crash
+# is now a batch-wide event rather than a per-company one.
+_MAX_BROWSER_RELAUNCHES = 2
 
-    Same launch/context configuration crawl_company_playwright builds inline —
-    factored out so the phase-B content crawler cannot drift from the phase-A
-    one on stealth patches, the resource route guard, or the CH locale headers.
+
+class BrowserSession:
+    """One Chromium, reused across every company in a crawl batch.
+
+    Launching a browser costs 1–3 s and ~150 MB; opening a context costs tens of
+    milliseconds. The crawler used to launch one browser PER COMPANY, which is
+    the dominant reason the Playwright tier managed ~20 companies/hour.
+
+    Per-company isolation is preserved exactly: `page()` opens a fresh
+    `new_context()` with that company's own user agent and its own cookie jar,
+    and closes it on exit. Only the process is shared.
+
+    Lifetime note: `_run_crawl_batch` calls `asyncio.run()` once per batch, so
+    every batch gets a fresh event loop that is then closed. Playwright objects
+    are bound to their creating loop, which is why this is batch-scoped and not
+    a process-wide singleton.
+    """
+
+    __slots__ = ("_pw", "_browser", "relaunches")
+
+    def __init__(self, pw, browser):
+        self._pw = pw
+        self._browser = browser
+        self.relaunches = 0
+
+    async def _launch(self):
+        launch_kwargs: dict = {"headless": True, "args": _LAUNCH_ARGS}
+        if _CHANNEL:
+            launch_kwargs["channel"] = _CHANNEL
+        try:
+            return await self._pw.chromium.launch(**launch_kwargs)
+        except Exception:
+            # Configured channel (e.g. "chrome") not installed in this image —
+            # fall back to bundled Chromium.
+            return await self._pw.chromium.launch(headless=True, args=_LAUNCH_ARGS)
+
+    async def _ensure_alive(self):
+        if self._browser is not None and self._browser.is_connected():
+            return self._browser
+        if self.relaunches >= _MAX_BROWSER_RELAUNCHES:
+            raise RuntimeError(
+                f"Chromium died and the relaunch budget ({_MAX_BROWSER_RELAUNCHES}) is spent"
+            )
+        self.relaunches += 1
+        logger.warning(
+            "Playwright browser was disconnected — relaunching (%d/%d)",
+            self.relaunches, _MAX_BROWSER_RELAUNCHES,
+        )
+        self._browser = await self._launch()
+        return self._browser
+
+    @asynccontextmanager
+    async def page(self, company_id: int):
+        """Yield a stealth-patched, SSRF-guarded page in its own fresh context."""
+        browser = await self._ensure_alive()
+        context = await browser.new_context(
+            viewport=_VIEWPORT,
+            user_agent=pick_user_agent(company_id),
+            locale="de-CH",
+            # Match HTTP crawler's full CH language negotiation.
+            extra_http_headers={"Accept-Language": ACCEPT_LANGUAGE},
+            # Ignore SSL cert errors (expired/self-signed certs are common on
+            # small Swiss company sites). Equivalent to httpx verify=False.
+            ignore_https_errors=True,
+        )
+        # Drop images/fonts/media, and SSRF-guard every request the page's own
+        # JS might make (see _guard_and_filter_resources).
+        await context.route("**/*", _guard_and_filter_resources)
+        try:
+            yield await context.new_page()
+        finally:
+            # Close the CONTEXT, not the browser — the next company reuses it.
+            try:
+                await context.close()
+            except Exception:  # noqa: BLE001 — browser may already be gone
+                pass
+
+
+@asynccontextmanager
+async def browser_session():
+    """Launch one Chromium for a whole batch; always closes it.
+
+    Pass this (the factory itself, uncalled) as `_run_crawl_batch`'s
+    `session_factory` — the driver enters it once and hands the resulting
+    BrowserSession to every company's crawl.
     """
     try:
         from playwright.async_api import async_playwright
@@ -336,26 +429,48 @@ async def _browser_page(company_id: int):
             "Add playwright/playwright-stealth to requirements.ml.txt."
         ) from exc
 
+    # Stealth().use_async() wraps async_playwright and auto-applies stealth
+    # patches to every new page/context before any navigation.
     async with Stealth().use_async(async_playwright()) as pw:
-        launch_kwargs: dict = {"headless": True, "args": _LAUNCH_ARGS}
-        if _CHANNEL:
-            launch_kwargs["channel"] = _CHANNEL
+        session = BrowserSession(pw, None)
+        session._browser = await session._launch()
         try:
-            browser = await pw.chromium.launch(**launch_kwargs)
-        except Exception:
-            browser = await pw.chromium.launch(headless=True, args=_LAUNCH_ARGS)
-        try:
-            context = await browser.new_context(
-                viewport=_VIEWPORT,
-                user_agent=pick_user_agent(company_id),
-                locale="de-CH",
-                extra_http_headers={"Accept-Language": ACCEPT_LANGUAGE},
-                ignore_https_errors=True,
-            )
-            await context.route("**/*", _guard_and_filter_resources)
-            yield await context.new_page()
+            yield session
         finally:
-            await browser.close()
+            if session._browser is not None:
+                try:
+                    await session._browser.close()
+                except Exception:  # noqa: BLE001
+                    pass
+
+
+@asynccontextmanager
+async def _browser_page(company_id: int):
+    """One-off page for a single company — opens and closes its own browser.
+
+    Thin wrapper over browser_session() so the single-company path cannot drift
+    from the batch path on stealth patches, the resource route guard, or the CH
+    locale headers. Batch callers must use browser_session() directly.
+    """
+    async with browser_session() as session:
+        async with session.page(company_id) as page:
+            yield page
+
+
+@asynccontextmanager
+async def _page_for(session: "BrowserSession | None", company_id: int):
+    """A page from the batch's shared browser, or a throwaway one if solo.
+
+    Lets both crawl functions accept `session=None` without branching: batch
+    callers amortise one launch across the whole batch, single-company callers
+    (web_crawl_single, the fallback chain) behave exactly as before.
+    """
+    if session is not None:
+        async with session.page(company_id) as page:
+            yield page
+    else:
+        async with _browser_page(company_id) as page:
+            yield page
 
 
 async def crawl_site_full_playwright(
@@ -368,9 +483,13 @@ async def crawl_site_full_playwright(
     max_depth: int = 3,
     seed_urls: list[tuple[str, str]] | None = None,
     visited_urls: set[str] | None = None,
+    session: "BrowserSession | None" = None,
 ) -> CrawlResult:
     """Phase B for sites that need a real browser — the Playwright twin of
     `crawler_http.crawl_site_full`.
+
+    `session`: a batch-scoped BrowserSession. When None the function opens its
+    own browser, which keeps single-company callers working unchanged.
 
     Reached when the HTTP content crawl comes back bot-blocked or JS-shelled.
     Same bounds and same partial-success semantics as the HTTP version: a page
@@ -389,7 +508,7 @@ async def crawl_site_full_playwright(
         if seed not in visited and is_crawlable_page_url(seed, base_host):
             frontier.push(seed, 1)
 
-    async with _browser_page(company_id) as page:
+    async with _page_for(session, company_id) as page:
         # No inventory — re-render the homepage purely to expand the frontier.
         # Not saved: phase A already stored the homepage its extract depends on.
         if not frontier:
@@ -460,24 +579,21 @@ async def crawl_company_playwright(
     url_candidate_id: int | None = None,
     max_pages: int = 5,
     rate_limit_delay: float = 0.5,
-    use_sitemap: bool = True,
+    use_sitemap: bool = False,
+    session: "BrowserSession | None" = None,
 ) -> CrawlResult:
     """Crawl a company website using Playwright + playwright-stealth.
 
     max_pages: total pages per domain (homepage counts as 1).
     rate_limit_delay: minimum seconds between requests to the same domain.
     use_sitemap: fetch robots.txt + sitemap.xml to find subpages and crawl-delay.
-    Imports Playwright lazily so the module can be imported on pods without it.
+      Defaults to False on this tier: discover_site_overview is an *httpx* fetch
+      of robots.txt and sitemap.xml, and every company that reaches Playwright is
+      here precisely because httpx was bot-blocked — so it is two near-certain
+      failures burned inside each company's timeout budget.
+    session: batch-scoped BrowserSession. When None the function launches its own
+      browser, so single-company callers keep working unchanged.
     """
-    try:
-        from playwright.async_api import async_playwright
-        from playwright_stealth import Stealth
-    except ImportError as exc:
-        raise RuntimeError(
-            "Playwright is not installed in this image. "
-            "Add playwright/playwright-stealth to requirements.ml.txt."
-        ) from exc
-
     result = CrawlResult()
     max_subpages = max(0, max_pages - 1)
 
@@ -492,34 +608,9 @@ async def crawl_company_playwright(
         if overview.urls:
             result.inventory = classify_all_urls(overview.urls, url)
 
-    # Stealth().use_async() wraps async_playwright and auto-applies stealth
-    # patches to every new page/context before any navigation — replaces the
-    # old stealth_async(page) call that was removed in playwright-stealth 2.x.
-    async with Stealth().use_async(async_playwright()) as pw:
-        launch_kwargs: dict = {"headless": True, "args": _LAUNCH_ARGS}
-        if _CHANNEL:
-            launch_kwargs["channel"] = _CHANNEL
-        try:
-            browser = await pw.chromium.launch(**launch_kwargs)
-        except Exception:
-            # Configured channel (e.g. "chrome") not installed in this image —
-            # fall back to bundled Chromium.
-            browser = await pw.chromium.launch(headless=True, args=_LAUNCH_ARGS)
-        context = await browser.new_context(
-            viewport=_VIEWPORT,
-            user_agent=pick_user_agent(company_id),
-            locale="de-CH",
-            # Match HTTP crawler's full CH language negotiation.
-            extra_http_headers={"Accept-Language": ACCEPT_LANGUAGE},
-            # Ignore SSL cert errors (expired/self-signed certs are common on
-            # small Swiss company sites). Equivalent to httpx verify=False.
-            ignore_https_errors=True,
-        )
-        # Drop images/fonts/media, and SSRF-guard every request the page's own
-        # JS might make (see _guard_and_filter_resources).
-        await context.route("**/*", _guard_and_filter_resources)
-        page = await context.new_page()
-
+    # One shared browser per batch, a fresh context per company — see
+    # BrowserSession. Launching per company was the dominant cost on this tier.
+    async with _page_for(session, company_id) as page:
         try:
             # ── Homepage ──────────────────────────────────────────────────
             try:
@@ -575,7 +666,8 @@ async def crawl_company_playwright(
                 for page_type, sub_url in subpage_urls.items():
                     try:
                         s_status, s_final, _, s_body = await _fetch_page(
-                            page, sub_url, rate_limit_delay=effective_delay
+                            page, sub_url, timeout_ms=_SUBPAGE_TIMEOUT_MS,
+                            rate_limit_delay=effective_delay,
                         )
                         if s_status < 400:
                             result.pages.append(
@@ -591,6 +683,8 @@ async def crawl_company_playwright(
                         )
 
         finally:
-            await browser.close()
+            # The context is closed by _page_for; the browser outlives this
+            # company and is reused for the rest of the batch.
+            pass
 
     return result

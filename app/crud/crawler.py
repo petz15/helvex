@@ -517,6 +517,17 @@ def mark_crawl_failed(
         state.bot_protection_type = bot_protection_type or "unknown"
     if status == "js_required":
         state.tier = "playwright"
+        # Record WHY this was escalated. Previously js_required rows carried no
+        # evidence at all, so a backlog of them was indistinguishable between
+        # "Cloudflare wall" (a local browser cannot beat a datacenter ASN) and
+        # "SPA shell" (a local browser solves it for free) — which makes the
+        # rows unroutable without re-crawling them.
+        #
+        # bot_protected is deliberately NOT set here: it stays the marker for a
+        # confirmed hard block, which sync_terminal_website_status and the
+        # `unreachable` verdict key on.
+        if bot_protection_type:
+            state.bot_protection_type = bot_protection_type
     db.flush()
 
     if status in _TERMINAL_CRAWL_STATUSES:

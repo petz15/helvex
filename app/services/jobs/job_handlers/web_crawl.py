@@ -109,6 +109,19 @@ def _order_pages_for_extract(pages: list) -> list:
     return sorted(pages, key=lambda p: rank.get(p.page_type, len(rank)))
 
 
+def _bump_protection(stats: dict, protection_type: str | None) -> None:
+    """Count escalations by protection type in the job's stats.
+
+    This is the operator-facing half of the evidence fix: the DB column tells you
+    what a single company hit, this tells you the shape of a whole run — i.e.
+    whether the Playwright queue is mostly SPA shells (cheap, keep local) or
+    mostly Cloudflare (a datacenter browser cannot win those).
+    """
+    by = stats.setdefault("by_protection", {})
+    key = protection_type or "unknown"
+    by[key] = by.get(key, 0) + 1
+
+
 def _track_error(stats: dict, msg: str) -> None:
     """Record an error, keeping at most _MAX_TRACKED_ERRORS samples."""
     stats["error_count"] = stats.get("error_count", 0) + 1
@@ -298,7 +311,10 @@ async def _crawl_one_target(
             return ("error", None, exc)
 
 
-async def _crawl_targets_concurrently(targets, *, crawl_fn, max_pages, rate_limit_delay, company_timeout, concurrency, on_result):
+async def _crawl_targets_concurrently(
+    targets, *, crawl_fn, max_pages, rate_limit_delay, company_timeout,
+    concurrency, on_result, session_factory=None,
+):
     """Crawl a batch of (state, candidate) pairs concurrently, bounded by `concurrency`.
 
     Each target's crawl is pure async I/O (httpx / Playwright) with a per-domain
@@ -316,40 +332,57 @@ async def _crawl_targets_concurrently(targets, *, crawl_fn, max_pages, rate_limi
 
     If `on_result` raises (JobPausedError / JobCancelledError), remaining
     in-flight tasks are cancelled and the exception propagates.
+
+    `session_factory` is an async context manager (crawler_playwright.browser_session)
+    entered ONCE for the whole batch and passed into every crawl as `session=`.
+    That is what turns the Playwright tier's per-company Chromium launch into a
+    per-batch one. It is entered outside the task loop and exited in a `finally`
+    that wraps it, so a JobPausedError raised from `on_result` still closes the
+    browser rather than leaking a Chromium process per paused batch.
     """
     sem = asyncio.Semaphore(max(1, concurrency))
 
-    async def _wrapped(state, candidate, extra_kwargs):
-        kind, result, exc = await _crawl_one_target(
-            crawl_fn, state, candidate,
-            max_pages=max_pages, rate_limit_delay=rate_limit_delay,
-            company_timeout=company_timeout, sem=sem, extra_kwargs=extra_kwargs,
-        )
-        return state, candidate, kind, result, exc
+    async def _run(session):
+        extra_common = {"session": session} if session is not None else {}
 
-    # Targets are (state, candidate) or (state, candidate, extra_kwargs) — the
-    # third element carries per-company data the caller resolved from the DB in
-    # its own thread (phase B's frontier seed), since the session cannot be
-    # touched from inside the event loop.
-    tasks = [
-        asyncio.ensure_future(_wrapped(t[0], t[1], t[2] if len(t) > 2 else None))
-        for t in targets
-    ]
-    try:
-        for coro in asyncio.as_completed(tasks):
-            state, candidate, kind, result, exc = await coro
-            on_result(state, candidate, kind, result, exc)
-            # `tasks` keeps every finished Task — and therefore its CrawlResult —
-            # alive until the whole batch drains. on_result has already persisted
-            # everything, so empty the payload now rather than holding all N
-            # sites' page lists and inventories at once.
-            if result is not None:
-                result.pages.clear()
-                result.inventory.clear()
-    except BaseException:
-        for t in tasks:
-            t.cancel()
-        raise
+        async def _wrapped(state, candidate, extra_kwargs):
+            merged = {**(extra_kwargs or {}), **extra_common}
+            kind, result, exc = await _crawl_one_target(
+                crawl_fn, state, candidate,
+                max_pages=max_pages, rate_limit_delay=rate_limit_delay,
+                company_timeout=company_timeout, sem=sem, extra_kwargs=merged,
+            )
+            return state, candidate, kind, result, exc
+
+        # Targets are (state, candidate) or (state, candidate, extra_kwargs) — the
+        # third element carries per-company data the caller resolved from the DB in
+        # its own thread (phase B's frontier seed), since the session cannot be
+        # touched from inside the event loop.
+        tasks = [
+            asyncio.ensure_future(_wrapped(t[0], t[1], t[2] if len(t) > 2 else None))
+            for t in targets
+        ]
+        try:
+            for coro in asyncio.as_completed(tasks):
+                state, candidate, kind, result, exc = await coro
+                on_result(state, candidate, kind, result, exc)
+                # `tasks` keeps every finished Task — and therefore its CrawlResult —
+                # alive until the whole batch drains. on_result has already persisted
+                # everything, so empty the payload now rather than holding all N
+                # sites' page lists and inventories at once.
+                if result is not None:
+                    result.pages.clear()
+                    result.inventory.clear()
+        except BaseException:
+            for t in tasks:
+                t.cancel()
+            raise
+
+    if session_factory is None:
+        await _run(None)
+        return
+    async with session_factory() as session:
+        await _run(session)
 
 
 def _run_crawl_batch(
@@ -368,6 +401,7 @@ def _run_crawl_batch(
     concurrency: int = 1,
     phase: str = "identity",
     target_kwargs_fn=None,
+    session_factory=None,
 ) -> tuple[dict, str]:
     """Shared batch-crawl loop used by the HTTP, Playwright and content handlers.
 
@@ -521,8 +555,12 @@ def _run_crawl_batch(
                     ):
                         # Hard bot block on the HTTP tier — hand off to Playwright
                         # (real browser) instead of failing terminally.
-                        crawler_crud.mark_crawl_failed(ctx.db, state, "js_required")
+                        crawler_crud.mark_crawl_failed(
+                            ctx.db, state, "js_required",
+                            bot_protection_type=result.bot_protection_type,
+                        )
                         stats["js_required"] = stats.get("js_required", 0) + 1
+                        _bump_protection(stats, result.bot_protection_type)
                         record_crawl_result(tier, "js_required")
                     elif (
                         tier == "playwright"
@@ -558,8 +596,14 @@ def _run_crawl_batch(
                         record_crawl_result(tier, fs)
                     candidate.last_crawled_at = now
                 elif result.needs_playwright:
-                    crawler_crud.mark_crawl_failed(ctx.db, state, "js_required")
+                    # No bot wall — detect_js_required fired on a bare SPA shell.
+                    # Tagged distinctly from a Cloudflare escalation because this
+                    # is the one class a local browser genuinely solves.
+                    crawler_crud.mark_crawl_failed(
+                        ctx.db, state, "js_required", bot_protection_type="js_shell",
+                    )
                     stats["js_required"] += 1
+                    _bump_protection(stats, "js_shell")
                     record_crawl_result(tier, "js_required")
                 else:
                     if phase == "content":
@@ -628,6 +672,7 @@ def _run_crawl_batch(
                         crawl_targets, crawl_fn=crawl_fn, max_pages=max_pages,
                         rate_limit_delay=rate_limit_delay, company_timeout=company_timeout,
                         concurrency=concurrency, on_result=_handle_crawl_result,
+                        session_factory=session_factory,
                     )
                 )
 
@@ -818,24 +863,32 @@ def handle_web_crawl_content(ctx: JobContext) -> tuple[dict, str]:
 
 def handle_web_crawl_playwright(ctx: JobContext) -> tuple[dict, str]:
     """Playwright crawler. Claims companies where tier='playwright' or crawl_status='js_required'."""
-    from app.services.enrichment.crawler_playwright import crawl_company_playwright
+    from app.services.enrichment import crawler_playwright as _pw
 
     limit_raw = ctx.params.get("limit")
     return _run_crawl_batch(
         ctx,
         tier="playwright",
-        batch_size=int(ctx.params.get("batch_size", 10)),
+        # 25, not 10: one Chromium is now launched per BATCH, so a bigger batch
+        # amortises that launch over more companies.
+        batch_size=int(ctx.params.get("batch_size", 25)),
         canton=ctx.params.get("canton") or None,
         max_pages=int(ctx.params.get("max_pages", 5)),
         rate_limit_delay=float(ctx.params.get("rate_limit_delay", 0.5)),
-        crawl_fn=crawl_company_playwright,
+        crawl_fn=_pw.crawl_company_playwright,
         rerun=bool(ctx.params.get("rerun", False)),
         order_by=str(ctx.params.get("order_by", "company_id_asc")),
         limit=int(limit_raw) if limit_raw else None,
-        company_timeout=float(ctx.params.get("company_timeout", 180.0)),
-        # Each concurrent slot launches a full Chromium instance — keep this
-        # low by default to avoid OOM on the ML worker pod.
-        concurrency=int(ctx.params.get("crawl_concurrency", 2)),
+        # 180s -> 60s. This tier's population is bot-walled or JS-shelled; a page
+        # that has not rendered inside 60s never will, and the old budget meant
+        # each hopeless company cost three minutes. 1 homepage + 4 subpages at
+        # the per-page timeouts in _fetch_page fits inside this.
+        company_timeout=float(ctx.params.get("company_timeout", 60.0)),
+        # 2 -> 4: the per-company memory unit is now a browser CONTEXT, not a
+        # whole Chromium process, so four in flight is cheaper than the two full
+        # browsers this ran with before.
+        concurrency=int(ctx.params.get("crawl_concurrency", 4)),
+        session_factory=_pw.browser_session,
     )
 
 
@@ -849,7 +902,7 @@ def handle_web_crawl_content_playwright(ctx: JobContext) -> tuple[dict, str]:
     happened to clear identity on a static impressum silently produced an empty
     phase B.
     """
-    from app.services.enrichment.crawler_playwright import crawl_site_full_playwright
+    from app.services.enrichment import crawler_playwright as _pw
 
     limit_raw = ctx.params.get("limit")
     return _run_crawl_batch(
@@ -860,16 +913,19 @@ def handle_web_crawl_content_playwright(ctx: JobContext) -> tuple[dict, str]:
         canton=ctx.params.get("canton") or None,
         max_pages=int(ctx.params.get("max_pages", 40)),
         rate_limit_delay=float(ctx.params.get("rate_limit_delay", 0.5)),
-        crawl_fn=crawl_site_full_playwright,
+        crawl_fn=_pw.crawl_site_full_playwright,
         rerun=bool(ctx.params.get("rerun", False)),
         order_by=str(ctx.params.get("order_by", "combined_score_desc")),
         limit=int(limit_raw) if limit_raw else None,
-        # A rendered 40-page site needs far longer than phase A's budget.
+        # Unchanged at 900s: a genuine 40-page render needs it. Only the identity
+        # tier gets the fast-fail budget.
         company_timeout=float(ctx.params.get("company_timeout", 900.0)),
-        # Each slot is a full Chromium — the binding constraint is pod memory,
-        # not network, so this stays far below the HTTP crawler's concurrency.
+        # Each slot is now a browser CONTEXT on the batch's shared Chromium, not
+        # its own process — but a 40-page render holds far more per slot than an
+        # identity crawl, so this stays conservative.
         concurrency=int(ctx.params.get("crawl_concurrency", 2)),
         target_kwargs_fn=_make_content_target_kwargs(int(ctx.params.get("max_depth", 3))),
+        session_factory=_pw.browser_session,
     )
 
 
