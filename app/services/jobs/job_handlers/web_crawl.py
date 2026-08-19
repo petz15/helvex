@@ -484,6 +484,7 @@ def _run_crawl_batch(
         total = min(total, limit)
     done = 0
     _playwright_enqueued = False  # trigger at most once per run
+    _extract_enqueued = False     # ditto for web_extract (now NO_DEDUP)
     # Companies claimed by THIS job and not yet finished. Lets the exit path hand
     # back exactly our own in-flight batch without a staleness threshold and
     # without disturbing a sibling crawl job's rows.
@@ -577,6 +578,26 @@ def _run_crawl_batch(
                         crawler_crud.escalate_to_external(ctx.db, state)
                         stats["escalated_external"] = stats.get("escalated_external", 0) + 1
                         record_crawl_result(tier, "escalated_external")
+                    elif fs == "directory" and phase == "identity":
+                        # Directory/listing page detected on the homepage, before
+                        # the subpage budget was spent. Mirror the extract-time
+                        # path: reject this candidate and move to the next one,
+                        # rather than leaving a crawl_status nothing can claim.
+                        crawler_crud.reject_url_candidate(ctx.db, candidate.id)
+                        stats["directory_blocked"] = stats.get("directory_blocked", 0) + 1
+                        record_crawl_result(tier, "directory")
+                        nxt = crawler_crud.get_next_crawlable_candidate(
+                            ctx.db, state.company_id, exclude_candidate_ids={candidate.id},
+                        )
+                        if nxt is not None and crawler_crud.retarget_crawl_state_to_candidate(
+                            ctx.db, state.company_id, nxt.id
+                        ):
+                            stats["fallbacks"] = stats.get("fallbacks", 0) + 1
+                        else:
+                            # No candidate left — retire rather than strand.
+                            crawler_crud.mark_phase_done(ctx.db, state.company_id)
+                            crawler_crud.sync_terminal_website_status(ctx.db, [state.company_id])
+                            stats["identity_exhausted"] = stats.get("identity_exhausted", 0) + 1
                     elif (
                         fs in ("timeout", "http_error")
                         and (state.consecutive_failures or 0) < _MAX_CRAWL_RETRIES
@@ -723,21 +744,28 @@ def _run_crawl_batch(
                         logger.debug("Auto-enqueue %s skipped: %s", escalation_type, exc)
 
             # Trigger extraction after each batch so it runs in parallel on a
-            # separate pod. Dedup returns the existing job if one is already
-            # running (no-op). When extraction finishes mid-crawl, the next
-            # batch creates a fresh job — keeping extraction continuously fed.
-            if stats["crawled"] > 0:
-                try:
-                    ctx.enqueue_job(
-                        job_type="web_extract",
-                        label="HTML extraction (auto)",
-                        params={},
-                        org_id=None,
-                        user_id=ctx.job.user_id,
-                    )
-                    ctx.db.commit()
-                except Exception as exc:  # noqa: BLE001
-                    logger.debug("Auto-enqueue web_extract skipped: %s", exc)
+            # separate pod. web_extract is no longer dedup'd (it shards, so it
+            # can run N-wide), which means dedup no longer swallows a repeat
+            # enqueue — without the queued-check below this would add one job per
+            # batch and pile up exactly as the playwright escalation once did.
+            # When extraction finishes mid-crawl, the next batch queues a fresh
+            # one, keeping extraction continuously fed.
+            if stats["crawled"] > 0 and not _extract_enqueued:
+                if crawler_crud.has_queued_ml_job(ctx.db, {"web_extract"}):
+                    _extract_enqueued = True
+                else:
+                    try:
+                        ctx.enqueue_job(
+                            job_type="web_extract",
+                            label="HTML extraction (auto)",
+                            params={},
+                            org_id=None,
+                            user_id=ctx.job.user_id,
+                        )
+                        ctx.db.commit()
+                        _extract_enqueued = True
+                    except Exception as exc:  # noqa: BLE001
+                        logger.debug("Auto-enqueue web_extract skipped: %s", exc)
 
             tier_label = "Playwright" if tier == "playwright" else "HTTP"
             msg = (
@@ -929,6 +957,90 @@ def handle_web_crawl_content_playwright(ctx: JobContext) -> tuple[dict, str]:
     )
 
 
+# ── reopen_identity (remediation) ─────────────────────────────────────────────
+
+def handle_reopen_identity(ctx: JobContext) -> tuple[dict, str]:
+    """Re-open identity resolution for companies retired with candidates left.
+
+    Every identity write path is gated on `crawl_phase = 'identity'`, and
+    `mark_phase_done` retires a company once its candidates are exhausted — so a
+    retired company can never benefit from a later extractor fix. Around 56.6k
+    companies were retired while still holding an untried candidate, most of them
+    casualties of bugs since fixed (Unicode-hyphen UIDs, single-address matching,
+    PDF candidates selected as websites, impressum links lost to the footer).
+
+    Two phases, both chunked and idempotent:
+      1. reject candidates that can never be a website (PDFs, assets), so the
+         reopened companies do not simply re-select the same garbage;
+      2. reopen companies that still have an untried, non-rejected candidate.
+
+    Params: purge (default True), batch_size (500), limit (None = all).
+    """
+    purge = bool(ctx.params.get("purge", True))
+    batch_size = int(ctx.params.get("batch_size", 500))
+    limit_raw = ctx.params.get("limit")
+    limit = int(limit_raw) if limit_raw else None
+
+    stats: dict = {"candidates_purged": 0, "companies_reopened": 0}
+
+    if purge:
+        ctx.status("Rejecting non-page URL candidates…")
+        after_id = 0
+        while True:
+            ctx.assert_not_cancelled()
+            n, after_id = crawler_crud.purge_non_page_candidates(
+                ctx.db, after_id=after_id, batch_size=5000
+            )
+            ctx.db.commit()
+            stats["candidates_purged"] += n
+            if after_id is None:
+                break
+            crud.update_progress(
+                ctx.db, ctx.job,
+                message=f"Purged {stats['candidates_purged']} non-page candidates…",
+                stats=dict(stats),
+            )
+
+    ctx.status("Reopening exhausted companies with an untried candidate…")
+    while True:
+        ctx.assert_not_cancelled()
+        _self_preempt_if_ml_queued(ctx)
+        if limit is not None and stats["companies_reopened"] >= limit:
+            break
+
+        take = batch_size if limit is None else min(batch_size, limit - stats["companies_reopened"])
+        n = crawler_crud.reopen_exhausted_identity(ctx.db, batch_size=take)
+        ctx.db.commit()
+        if not n:
+            break
+        stats["companies_reopened"] += n
+        msg = (
+            f"Reopened {stats['companies_reopened']} companies "
+            f"({stats['candidates_purged']} bad candidates purged)"
+        )
+        crud.update_progress(ctx.db, ctx.job, message=msg, done=stats["companies_reopened"], stats=dict(stats))
+        crud.create_event(ctx.db, job_id=ctx.job.id, level="debug", message=msg)
+
+    # Reopened companies sit at crawl_status='pending' in the identity phase, so
+    # the normal batch crawler picks them up — but only if one is running.
+    if stats["companies_reopened"]:
+        try:
+            if not crawler_crud.has_queued_ml_job(ctx.db, {"web_crawl_http"}):
+                ctx.enqueue_job(
+                    job_type="web_crawl_http",
+                    label="Identity crawl (auto — reopened companies)",
+                    params={}, org_id=None, user_id=ctx.job.user_id,
+                )
+                ctx.db.commit()
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("Auto-enqueue web_crawl_http after reopen skipped: %s", exc)
+
+    return stats, (
+        f"Reopened {stats['companies_reopened']} companies for identity resolution; "
+        f"rejected {stats['candidates_purged']} non-page candidates"
+    )
+
+
 # ── web_crawl_external (paid tier) ────────────────────────────────────────────
 
 # Hard ceiling on companies fetched per external run, independent of what the
@@ -1003,6 +1115,12 @@ def handle_web_extract(ctx: JobContext) -> tuple[dict, str]:
     from app.services.enrichment import website_status as ws
 
     batch_size = int(ctx.params.get("batch_size", 200))
+    # Disjoint slice of the corpus for this worker. See
+    # claim_companies_for_extraction: sharding rather than row locks, because
+    # FOR UPDATE is illegal with DISTINCT and locks would be held across this
+    # batch's S3 downloads. shard_count=1 is the single-worker default.
+    shard = int(ctx.params.get("shard", 0))
+    shard_count = max(1, int(ctx.params.get("shard_count", 1)))
     stats: dict = {"extracted": 0, "empty": 0, "s3_errors": 0, "errors": [], "rescored": 0}
     _content_enqueued = False  # kick the phase-B crawler at most once per run
     _identity_enqueued = False  # ditto for the identity crawler after a fallback
@@ -1017,7 +1135,9 @@ def handle_web_extract(ctx: JobContext) -> tuple[dict, str]:
         ctx.assert_not_cancelled()
         _self_preempt_if_ml_queued(ctx)
 
-        company_ids = crawler_crud.claim_companies_for_extraction(ctx.db, batch_size=batch_size)
+        company_ids = crawler_crud.claim_companies_for_extraction(
+            ctx.db, batch_size=batch_size, shard=shard, shard_count=shard_count,
+        )
         if not company_ids:
             break
 
@@ -1187,9 +1307,24 @@ def handle_web_extract(ctx: JobContext) -> tuple[dict, str]:
 
                     # UID-mismatch auto-quarantine: reject the wrong-site candidate
                     # so it's never re-selected. Always triggers a fallback crawl.
+                    #
+                    # ...EXCEPT when the domain itself carries the company's name.
+                    # This rejection is permanent, and it fired on the bare binary
+                    # uid_matches flag while ignoring the domain evidence computed
+                    # in the same extract. A subsidiary printing its parent's UID
+                    # (taxware.ch / "TaxWare AG"), a franchise, or a brand site all
+                    # lost their correct URL that way. The confidence penalty and
+                    # the MISMATCH category still stand — we genuinely could not
+                    # verify — only the destructive half is skipped.
                     if in_identity_phase and any_extracted and best.uid_matches_zefix is False:
-                        crawler_crud.reject_url_candidate(ctx.db, best.url_candidate_id)
-                        stats["quarantined"] = stats.get("quarantined", 0) + 1
+                        _cand = ctx.db.get(CompanyUrlCandidate, best.url_candidate_id)
+                        if crawler_extract.domain_matches_company_name(
+                            _cand.url if _cand else None, cname
+                        ):
+                            stats["mismatch_kept"] = stats.get("mismatch_kept", 0) + 1
+                        else:
+                            crawler_crud.reject_url_candidate(ctx.db, best.url_candidate_id)
+                            stats["quarantined"] = stats.get("quarantined", 0) + 1
 
                     # Identity confirmed — hand the company to the phase-B full-site
                     # crawler. advance_to_content_phase is a no-op unless the row is
@@ -1627,8 +1762,10 @@ DIRECTORY_CRAWL_DOMAINS: frozenset[str] = frozenset({
     "kununu.com",
     "yelp.com",
     # Industry databases — free tiers have useful text
-    "kompass.ch",
-    "kompass.com",
+    #   kompass.ch / kompass.com REMOVED: blocked from candidate selection (they
+    #   are never a company's own site) but never worth a directory crawl. That
+    #   distinction only became expressible with the `harvest` flag (migration
+    #   0131); before it, approving a domain implied harvesting it.
     # Excluded (paywall / JS-heavy / low value for Swiss SMEs):
     #   moneyhouse.ch      — useful data behind login; ToS restrictions
     #   business-monitor.ch — aggregated metrics, not descriptive text
@@ -1669,10 +1806,18 @@ def handle_directory_crawl(ctx: JobContext) -> tuple[dict, str]:
     request_timeout = float(ctx.params.get("timeout", 15.0))
     rate_delay = float(ctx.params.get("rate_limit_delay", 0.3))
 
-    # Prefer DB-managed approved list; fall back to hardcoded set if table is empty
-    # (e.g. before the migration has run on a dev environment).
-    db_domains = crud.get_approved_directory_crawl_domains(ctx.db)
-    domain_list = list(db_domains) if db_domains else list(DIRECTORY_CRAWL_DOMAINS)
+    # UNION of the hardcoded floor and the DB-approved harvestable domains.
+    #
+    # This was `db_domains if db_domains else DIRECTORY_CRAWL_DOMAINS` — an
+    # either/or, so approving a single domain in the review UI silently discarded
+    # the entire hardcoded harvest list. The blocklist has always unioned; this
+    # now matches it.
+    #
+    # Filtered on `harvest`, not merely `approved`: approved means "never a
+    # company's own website", which is true of kompass.ch and moneyland.ch too —
+    # and those carry nothing worth fetching.
+    db_domains = crud.get_harvestable_directory_domains(ctx.db)
+    domain_list = sorted(DIRECTORY_CRAWL_DOMAINS | db_domains)
 
     already_done_clause = (
         ""

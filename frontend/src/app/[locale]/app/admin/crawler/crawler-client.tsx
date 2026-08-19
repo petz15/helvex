@@ -13,6 +13,7 @@ import {
   crawlerPopulateUrls,
   crawlerRecomputeWebsiteStatus,
   crawlerCrawlContentPlaywright,
+  crawlerReopenIdentity,
   crawlerCrawlExternal,
   cleanupJobRuns,
   crawlerEnrichPurposeSim,
@@ -393,6 +394,15 @@ export function CrawlerAdminClient() {
               >
                 {acting === "purpose-sim" ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
                 Enrich purpose similarity (ML)
+              </button>
+              <button
+                onClick={() => doAction("reopen-identity", crawlerReopenIdentity)}
+                disabled={acting !== null}
+                title="Re-open identity resolution for companies retired while an untried URL candidate remained. Rejects PDF/asset candidates first, then re-queues them for the identity crawler."
+                className="flex items-center gap-2 px-3 py-2 text-sm rounded-lg border border-emerald-200 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 disabled:opacity-50 transition-colors"
+              >
+                {acting === "reopen-identity" ? <Loader2 size={14} className="animate-spin" /> : <RotateCcw size={14} />}
+                Reopen exhausted identities
               </button>
               <button
                 onClick={() => doAction("content-playwright", crawlerCrawlContentPlaywright)}

@@ -228,3 +228,158 @@ def test_crawl_site_full_reports_no_content_when_nothing_fetched(monkeypatch):
     ))
     assert result.pages == []
     assert result.failure_status == "no_content"
+
+
+# ── Real-site regressions (remarkt.ch, 2026-08-18) ────────────────────────────
+
+def test_non_html_responses_are_never_stored():
+    """is_crawlable_page_url filters by URL SUFFIX only, so an extensionless
+    download endpoint (/download_file/view/51/187) reaches the fetch. Without a
+    Content-Type check the crawler stored whole PDFs — 50k "words" of foreign
+    language that also pollute the identity extract's name matching."""
+    from app.services.enrichment.crawler_http import _is_html_response
+
+    assert _is_html_response({"content-type": "text/html; charset=utf-8"}) is True
+    assert _is_html_response({"content-type": "application/xhtml+xml"}) is True
+    # A server that states nothing stays crawlable — plenty of small CH sites omit it.
+    assert _is_html_response({}) is True
+
+    for ctype in ("application/pdf", "image/png", "application/octet-stream",
+                  "application/zip", "video/mp4"):
+        assert _is_html_response({"content-type": ctype}) is False, ctype
+
+
+def test_trailing_slash_urls_collapse_to_one_page():
+    """/Unterstuetzung/spenden and /Unterstuetzung/spenden/ are one page, but
+    were two frontier entries and two `visited` keys — so both were fetched,
+    stored and extracted."""
+    from app.services.enrichment.crawler_common import normalize_page_url
+
+    a = normalize_page_url("https://x.ch/support/donate")
+    b = normalize_page_url("https://x.ch/support/donate/")
+    assert a == b
+    # Fragments go too, and the bare root keeps its slash.
+    assert normalize_page_url("https://x.ch/a#top") == "https://x.ch/a"
+    assert normalize_page_url("https://x.ch/") == "https://x.ch/"
+
+
+def test_recrawl_does_not_accumulate_duplicate_inventory_rows(db):
+    """Inventory rows carry url_candidate_id IS NULL, so a candidate-scoped
+    delete never matched them and save_page_inventory only de-dupes within one
+    run — every re-crawl appended another full copy of the sitemap."""
+    from datetime import datetime, timezone
+    cand = CompanyUrlCandidate(company_id=77, url="https://x.ch", status="selected")
+    db.add(cand)
+    db.flush()
+
+    now = datetime.now(timezone.utc)
+    # One fetched page for the candidate, plus two sitemap-only inventory rows.
+    db.add(CompanyWebPage(
+        company_id=77, url_candidate_id=cand.id, page_type="homepage",
+        url="https://x.ch/", crawled=True, crawled_at=now,
+    ))
+    for u in ("https://x.ch/shop", "https://x.ch/team"):
+        db.add(CompanyWebPage(
+            company_id=77, url_candidate_id=None, page_type="other", url=u,
+            crawled=False, crawled_at=now, discovered_via="sitemap",
+        ))
+    db.flush()
+
+    crawler_crud.delete_web_pages_for_candidate(db, 77, cand.id)
+    db.commit()
+
+    assert db.query(CompanyWebPage).filter_by(company_id=77).count() == 0, (
+        "stale inventory survived the re-crawl and would be duplicated"
+    )
+
+
+def test_non_page_urls_are_rejected_as_website_candidates():
+    """Whatever Google returned became a candidate "website" and was then fetched
+    as a company homepage. Crawling a SHAB-notices PDF harvests OTHER companies'
+    UIDs, which is how one PDF produced MISMATCH for several unrelated companies.
+    """
+    from datetime import datetime, timezone
+    from app.services.enrichment.crawler_common import is_page_like_url
+
+    for bad in (
+        "https://www.sshv.ch/fileadmin/SHAB_Meldungen_Februar_2025.pdf",
+        "https://x.ch/prospekt.docx",
+        "https://x.ch/logo.svg",
+        "ftp://x.ch/a",
+        "not-a-url",
+    ):
+        assert is_page_like_url(bad) is False, bad
+
+    for good in ("https://www.remarkt.ch/", "https://x.ch/impressum",
+                 "http://x.ch/ueber-uns?lang=de"):
+        assert is_page_like_url(good) is True, good
+
+    rows = crawler_crud.build_candidate_rows(
+        1,
+        [{"link": "https://x.ch/notice.pdf"}, {"link": "https://x.ch/"}],
+        datetime.now(timezone.utc),
+    )
+    assert [r["url"] for r in rows] == ["https://x.ch/"]
+
+
+def test_extensionless_binary_urls_are_caught_at_fetch_not_by_the_url_filter():
+    """The two filters are complementary, and neither alone is sufficient.
+
+    A URL heuristic cannot classify
+    `eur-lex.europa.eu/legal-content/DE/TXT/PDF/?uri=...` — its path ends in
+    `/PDF/`, not `.pdf` — and guessing harder would start rejecting real pages.
+    Content-Type settles it at fetch time, before a byte of body is read.
+    """
+    from app.services.enrichment.crawler_common import is_page_like_url
+    from app.services.enrichment.crawler_http import _is_html_response
+
+    url = "https://eur-lex.europa.eu/legal-content/DE/TXT/PDF/?uri=OJ:C:2019:399:FULL"
+    assert is_page_like_url(url) is True, "URL filter cannot and need not catch this"
+    assert _is_html_response({"content-type": "application/pdf"}) is False
+
+
+def test_impressum_wins_the_budget_over_nav_links_found_earlier():
+    """The impressum lives in the FOOTER; nav links come first in the DOM.
+
+    find_subpage_links used to break out of the link scan as soon as
+    max_subpages types were collected, then slice the DOM-ordered dict — so on a
+    site with a rich nav the budget was spent before the crawler ever reached the
+    one page the identity ladder reads. Observed on taxware.ch: services + team
+    were fetched, /de/site/impressum (plain HTML, footer) was not.
+    """
+    from app.services.enrichment.crawler_common import find_subpage_links, parse_soup
+
+    html = b"""
+    <html><body>
+      <nav>
+        <a href="/de/site/loesungen">Loesungen</a>
+        <a href="/de/site/ueber-taxware/team">Team</a>
+        <a href="/de/site/ueber-taxware">Ueber uns</a>
+      </nav>
+      <footer>
+        <a href="/de/site/impressum">Impressum</a>
+        <a href="/de/site/kontakt-support">Kontakt &amp; Support</a>
+      </footer>
+    </body></html>
+    """
+    picked = find_subpage_links(parse_soup(html), "https://www.taxware.ch/de", max_subpages=2)
+
+    assert "impressum" in picked, "impressum lost its slot to earlier nav links"
+    assert picked["impressum"] == "https://www.taxware.ch/de/site/impressum"
+    # _FETCH_PRIORITY order is impressum > contact > about > team > services.
+    assert list(picked) == ["impressum", "contact"]
+
+
+def test_subpage_selection_respects_the_budget():
+    from app.services.enrichment.crawler_common import find_subpage_links, parse_soup
+
+    html = b"""
+    <html><body>
+      <a href="/impressum">Impressum</a><a href="/kontakt">Kontakt</a>
+      <a href="/ueber-uns">Ueber uns</a><a href="/team">Team</a>
+      <a href="/leistungen">Leistungen</a>
+    </body></html>
+    """
+    picked = find_subpage_links(parse_soup(html), "https://x.ch/", max_subpages=2)
+    assert list(picked) == ["impressum", "contact"]
+    assert len(picked) == 2

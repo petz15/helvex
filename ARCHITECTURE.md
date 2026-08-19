@@ -2872,6 +2872,132 @@ httpx ──bot──▶ curl_cffi (real Chrome TLS) ──bot──▶ Playwrig
   (default 100), `_EXTERNAL_MAX_PER_RUN` (500), and 2 billed pages per company. No-ops
   with a clear message when no API key is set.
 
+### Phase-B crawl hygiene (2026-08-18)
+
+Three bugs found from one company's Crawl-Coverage table (remarkt.ch). Phase A itself was
+correct — it fetched exactly homepage + impressum; the other 16 rows were phase B. (Handy
+diagnostic: phase-A rows have NULL `lang`/`image_count` because of `metrics=False`, phase-B
+rows are populated. That difference tells you which phase produced a row.)
+
+**1. Binaries were crawled, stored and extracted.** `is_crawlable_page_url` filters by URL
+**suffix**, so an extensionless download endpoint like `/download_file/view/51/187` passed
+straight through — and the crawler fetched, S3-stored and text-extracted whole PDFs
+(50,987 "words", `lang=EN`, 0 images). Beyond the wasted bandwidth/storage/CPU, that text
+enters `resolve_company_extract` and dilutes name matching, actively harming identity
+confidence. Fixed with `_is_html_response()` in `_fetch`, checked **before** the body is
+read. Only an explicit, clearly-non-HTML Content-Type is rejected — a missing one stays
+crawlable, since many small CH servers omit it. Suffix filtering cannot solve this class;
+the response header can.
+
+**2. Every re-crawl duplicated the whole sitemap inventory.** Inventory rows carry
+`url_candidate_id IS NULL`, so the candidate-scoped `delete_web_pages_for_candidate`
+(introduced with the batched fallback chain) never matched them, and
+`save_page_inventory` only de-dupes against URLs fetched in the *same* run. Each re-crawl
+appended another full copy, up to `_MAX_INVENTORY_URLS` rows, unbounded. The delete now
+also clears `url_candidate_id IS NULL AND crawled = FALSE` rows — they are re-derived from
+the fresh sitemap on that very crawl.
+
+**3. Trailing-slash variants were crawled twice.** `/Unterstuetzung/spenden` and
+`/Unterstuetzung/spenden/` were two frontier entries and two `visited` keys, so both were
+fetched, stored and extracted. `normalize_page_url()` now strips the fragment and a
+trailing slash (the bare root keeps its slash) and is applied both in
+`extract_internal_links` and at every `visited` boundary in the HTTP and Playwright
+frontier crawlers.
+
+### Identity extraction: two false-negative classes (2026-08-18)
+
+Both found from one reported company (ReMarkt, CHE-130.637.800) whose impressum carried
+the correct UID *and* the correct address yet scored low confidence. Both are
+false negatives on **correct** sites, so they depress the confirmed-identity rate
+silently — nothing errors, the company just looks unverified.
+
+**1. `_UID_RE` only matched the ASCII hyphen.** `CHE[-\s]?` matches none of the Unicode
+dashes (U+2010/2011/2012/2013/2014/2212) that editors and CMSes substitute routinely and
+which are visually identical to a hyphen. remarkt.ch writes `CHE‑130.637.800` with a
+non-breaking hyphen (U+2011), so **no UID was extracted at all** — losing
+`uid_matches_zefix`, the single *decisive* signal in the confidence ladder. Compounding
+it, `_extract_uids` runs on the **raw HTML string**, where entities are never decoded, so
+`CHE&nbsp;130.637.800` and `CHE&#8209;130.637.800` also failed.
+
+Fixed by `_normalize_uid_text()`, applied inside `_extract_uids`: `html.unescape` when the
+text contains `&`, then a translation table folding Unicode dashes and exotic spaces to
+ASCII. The digit-group separator class also now accepts `-` (sites write
+`CHE-130-637-800`); that is only safe because every hit is checksum-validated via
+`stdnum.ch.uid`, which is what rejects phone numbers and dates.
+
+**2. Address verification checked only ONE address.** A company may legitimately publish
+several — postal box plus visiting address, workshop plus registered seat, a group
+impressum listing sister entities. `address` keeps only the first (or the impressum's), so
+when Zefix holds the *second* one the site scored as having no address match. ReMarkt
+lists Grienweg 16, 4226 Breitenbach first and the Zefix seat Kastelstrasse 444, 4204
+Himmelried second.
+
+`addr_full_match` / `addr_partial_match` are now evaluated against every address-bearing
+string (the stored `address` **and** the impressum/contact text). This mirrors the rule
+the UID path already had — *"if the target's UID is among ANY found, that's the match"* —
+which the two verification paths should not disagree on.
+
+**Remediation is free.** Both are extractor bugs, not crawl bugs, and the HTML is already
+in S3: `POST /api/v1/admin/jobs/crawler/reextract` (`reset_extraction_flags` +
+`web_extract`) re-runs against stored pages with no re-crawl and no network cost.
+
+### Playwright tier: batch-scoped browser + fail-fast (2026-08-16)
+
+The Playwright tier managed **~20 companies/hour** in production and was the pipeline
+bottleneck. Two independent causes:
+
+1. **A full Chromium was launched per company** — `crawl_company_playwright` opened
+   `async_playwright()` → `chromium.launch()` → `new_context()` inside each call. The
+   browser was reused across a company's *pages*, never across the batch's *companies*.
+2. **The pods have datacenter IPs.** Companies reach this tier *because* they were
+   bot-blocked, and Cloudflare scores on IP reputation/ASN before fingerprinting;
+   `playwright-stealth` cannot change an ASN. Decisively, `crawler_http` already retried
+   them through **curl_cffi with a real Chrome TLS/JA3 fingerprint** — so anything still
+   blocked here is IP-scored and a local browser cannot win it. It burned the full 180 s
+   `company_timeout` to reach that conclusion.
+
+**`BrowserSession` / `browser_session()`** (`crawler_playwright.py`) launch one Chromium
+per *batch*; `session.page(company_id)` opens a fresh `new_context()` per company, so
+cookie-jar and per-company user-agent isolation are unchanged — only the process is
+shared. `_crawl_targets_concurrently` takes a `session_factory`, enters it **once**
+outside the task loop, and passes `session=` into every crawl. The CM wraps the loop so a
+`JobPausedError` from `on_result` still closes the browser instead of leaking a Chromium
+per preempted batch.
+
+*Why batch-scoped and not a process singleton:* `_run_crawl_batch` calls `asyncio.run()`
+**inside** its `while` loop, so each batch gets a fresh event loop that is then closed.
+Playwright objects bind to their creating loop, so a process-wide browser is not
+implementable here. `crawl_*_playwright(session=None)` still opens its own browser, which
+keeps the single-company callers (`web_crawl_single`, the fallback chain) working.
+
+A dead browser is relaunched up to `_MAX_BROWSER_RELAUNCHES` (2) — sharing a process means
+one Chromium OOM would otherwise take every remaining company in the batch with it.
+
+**Fail-fast tuning (identity tier only):** `company_timeout` 180 s → **60 s**,
+`crawl_concurrency` 2 → **4** (the per-company unit is now a context, not a process),
+`batch_size` 10 → **25** (amortises the one launch), and `use_sitemap` now defaults to
+**False** — `discover_site_overview` is an *httpx* fetch of robots.txt/sitemap.xml at a
+site that reached this tier precisely because httpx was bot-blocked, i.e. two near-certain
+failures inside every company's budget. `web_crawl_content_playwright` keeps
+`company_timeout=900` (a real 40-page render needs it) but gains the shared browser.
+
+**The page budgets are load-bearing, not cosmetic.** `_HOMEPAGE_TIMEOUT_MS` (10 s) and
+`_SUBPAGE_TIMEOUT_MS` (9 s) must sum — with the 0.5 s rate-limit delay and 0.8 s settle,
+across the full `max_pages=5` shape — to less than `company_timeout`. `_crawl_one_target`
+wraps the crawl in `asyncio.wait_for`, so exceeding the budget does not merely drop the
+remaining subpages: it discards the whole `CrawlResult`, **losing the homepage that
+identity is decided from**. Worst case is 52 s against 60 s. Pinned by
+`tests/test_playwright_browser_reuse.py::test_worst_case_page_budget_fits_inside_the_identity_company_timeout`.
+
+**Escalations now record why.** `mark_crawl_failed(..., "js_required")` previously wrote
+no `bot_protection_type` (the column was only set for `bot_blocked`), so a backlog of
+`js_required` rows was indistinguishable between "Cloudflare wall" (unwinnable locally)
+and "SPA shell" (free to solve locally) — making them unroutable without re-crawling.
+It now persists the type, with the synthetic value `js_shell` for a bare
+`detect_js_required` hit. `bot_protected` is deliberately **not** set, since
+`sync_terminal_website_status` and the `unreachable` verdict key on that flag. Per-run
+shape is counted into `stats["by_protection"]` via `_bump_protection`.
+
 ### Crawler self-preemption — never watch your own tier (2026-08-04)
 
 `_self_preempt_if_ml_queued` makes a crawl job yield the ML worker's slot when

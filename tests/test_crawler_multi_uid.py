@@ -52,3 +52,70 @@ def test_resolve_company_extract_still_reports_mismatch_when_target_uid_absent()
     result = resolve_company_extract(pages, zefix_uid="CHE-111.111.116")
 
     assert result["uid_matches_zefix"] is False
+
+
+# ── Real-world formatting regressions (remarkt.ch, 2026-08-18) ────────────────
+
+def test_uid_with_typographic_hyphen_is_found():
+    r"""CMSes substitute U+2011 for the ASCII hyphen; it is visually identical.
+
+    `_UID_RE`'s `[-\s]?` matched none of the Unicode dashes, so an impressum
+    printing `CHE‑130.637.800` yielded NO UID — losing the single decisive piece
+    of identity evidence and collapsing a correct site to low confidence.
+    """
+    from app.services.enrichment.crawler_extract import _extract_uids
+
+    for sep in ("\u2010", "\u2011", "\u2012", "\u2013", "\u2014", "\u2212"):
+        assert _extract_uids(f"CHE{sep}130.637.800") == ["CHE-130.637.800"], (
+            f"UID with U+{ord(sep):04X} separator was not extracted"
+        )
+
+
+def test_uid_written_with_html_entities_is_found():
+    """_extract_uids runs on RAW HTML, where entities are never decoded."""
+    from app.services.enrichment.crawler_extract import _extract_uids
+
+    assert _extract_uids("CHE&nbsp;130.637.800") == ["CHE-130.637.800"]
+    assert _extract_uids("CHE&#8209;130.637.800") == ["CHE-130.637.800"]
+
+
+def test_uid_checksum_still_rejects_lookalikes():
+    """The looser separator class is only safe because of checksum validation."""
+    from app.services.enrichment.crawler_extract import _extract_uids
+
+    assert _extract_uids("CHE-123.456.789") == []
+    assert _extract_uids("call 044-123-456-789 now") == []
+
+
+def test_address_matches_when_zefix_seat_is_the_second_address_listed():
+    """A company may publish several addresses; Zefix may hold the later one.
+
+    remarkt.ch's impressum lists Grienweg 16, 4226 Breitenbach first and the
+    registered seat Kastelstrasse 444, 4204 Himmelried second. Matching only the
+    single stored `address` scored a correct site as having no address match.
+    """
+    from app.services.enrichment.crawler_extract import resolve_company_extract
+
+    impressum = (
+        "<html><body><h1>Impressum</h1>"
+        "<p>ReMarkt<br>Grienweg 16<br>4226 Breitenbach</p>"
+        "<p>Werkstatt: Kastelstrasse 444<br>4204 Himmelried</p>"
+        "<p>CHE\u2011130.637.800</p>"
+        "</body></html>"
+    ).encode()
+
+    data = resolve_company_extract(
+        [("impressum", impressum)],
+        company_name="ReMarkt",
+        zefix_uid="CHE-130.637.800",
+        site_url="https://www.remarkt.ch/impressum",
+        company_zip="4204",
+        company_city="Himmelried",
+        page_types=["impressum"],
+    )
+
+    assert data["uid"] == "CHE-130.637.800"
+    assert data["uid_matches_zefix"] is True
+    assert data["confidence"] >= 0.80, (
+        f"a UID-verified site should not be low confidence (got {data['confidence']})"
+    )

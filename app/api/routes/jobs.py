@@ -2113,6 +2113,35 @@ class CleanupJobRunsBody(BaseModel):
     dry_run: bool = False
 
 
+class ReopenIdentityBody(BaseModel):
+    purge: bool = True          # reject non-page (PDF/asset) candidates first
+    batch_size: int = 500
+    limit: int | None = None    # None = every eligible company
+
+
+@router.post("/crawler/reopen-identity", response_model=JobOut, status_code=status.HTTP_202_ACCEPTED)
+def trigger_reopen_identity(
+    body: ReopenIdentityBody,
+    request: Request,
+    db: Session = Depends(get_db),
+    _: User = Depends(require_superadmin),
+):
+    """Re-open identity resolution for companies retired with candidates left.
+
+    Every identity write path is gated on `crawl_phase='identity'`, so a company
+    retired by `mark_phase_done` can never benefit from a later extractor fix.
+    This is the remediation path after fixing one.
+    """
+    job = _enqueue_or_http_error(
+        request,
+        job_type="reopen_identity",
+        label="Reopen identity resolution" + ("" if body.purge else " (no candidate purge)"),
+        params=body.model_dump(),
+        db=db,
+    )
+    return JobOut.from_orm_obj(job)
+
+
 @router.post("/maintenance/cleanup-job-runs", response_model=JobOut, status_code=status.HTTP_202_ACCEPTED)
 def trigger_cleanup_job_runs(
     body: CleanupJobRunsBody,

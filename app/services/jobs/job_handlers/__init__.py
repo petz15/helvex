@@ -162,6 +162,7 @@ JOB_HANDLERS: dict[str, Callable[[JobContext], tuple[dict, str]]] = {
     "web_crawl_content":         web_crawl.handle_web_crawl_content,
     "web_crawl_content_playwright": web_crawl.handle_web_crawl_content_playwright,
     "web_crawl_external":        web_crawl.handle_web_crawl_external,
+    "reopen_identity":           web_crawl.handle_reopen_identity,
     "cleanup_job_runs":          maintenance.handle_cleanup_job_runs,
     "web_extract":               web_crawl.handle_web_extract,
     "web_crawl_single":          web_crawl.handle_web_crawl_single,

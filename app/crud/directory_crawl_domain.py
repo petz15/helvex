@@ -9,10 +9,34 @@ from app.models.directory_crawl_domain import DirectoryCrawlDomain
 
 
 def get_approved_directory_crawl_domains(db: Session) -> set[str]:
-    """Return the set of approved domain values for use by the directory_crawl job."""
+    """Approved domains — i.e. "never a company's own website".
+
+    Feeds `get_effective_crawl_blocklist`. Says nothing about whether the domain
+    is worth harvesting; see get_harvestable_directory_domains.
+    """
     rows = (
         db.query(DirectoryCrawlDomain.value)
         .filter(DirectoryCrawlDomain.status == "approved")
+        .all()
+    )
+    return {r[0] for r in rows}
+
+
+def get_harvestable_directory_domains(db: Session) -> set[str]:
+    """Approved domains whose profile pages are worth crawling for data.
+
+    The strict subset of the blocklist that carries value: local.ch and
+    treuhandvergleich.ch (reviews, profiles) yes; kompass.ch, moneyland.ch and
+    business-monitor.ch no. Before the `harvest` flag existed these two questions
+    shared one column, so approving a domain to keep it out of candidate
+    selection also silently signed it up for directory crawling.
+    """
+    rows = (
+        db.query(DirectoryCrawlDomain.value)
+        .filter(
+            DirectoryCrawlDomain.status == "approved",
+            DirectoryCrawlDomain.harvest.is_(True),
+        )
         .all()
     )
     return {r[0] for r in rows}

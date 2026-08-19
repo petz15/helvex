@@ -153,6 +153,8 @@ def test_web_pipeline_jobs_land_on_the_intended_pods():
         # placement put it behind NOGA and Chromium on that pod's single slot, so
         # one stuck browser crawl stalled the entire crawl pipeline.
         "web_extract":                 {"ml", "crawler-http"},
+        # Pure DB remediation — no ML deps, no network. Lives with the crawl pipeline.
+        "reopen_identity":             {"crawler-http"},
         "directory_crawl":             {"crawler-http"},
         "discover_directory_domains":  {"api"},
         "recompute_website_status":    {"api"},
@@ -194,6 +196,10 @@ _SCENARIOS = {
     # web_extract fallback chain that identity resolution depends on.
     "api + ml, crawler-http off":     (True,  True,  False, {
         "directory_crawl", "web_crawl_single", "web_select_url", "web_url_populate",
+        # reopen_identity is a one-off remediation run by hand; stranding it when
+        # the crawl pod is scaled to zero is acceptable (there is nothing to crawl
+        # the reopened companies with anyway).
+        "reopen_identity",
     }),
 }
 

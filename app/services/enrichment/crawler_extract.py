@@ -30,7 +30,12 @@ logger = logging.getLogger(__name__)
 
 _EMAIL_RE = re.compile(r"[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}")
 # Swiss company identifier, e.g. CHE-123.456.789
-_UID_RE = re.compile(r"CHE[-\s]?(\d{3})[.\s]?(\d{3})[.\s]?(\d{3})", re.IGNORECASE)
+# Digit groups accept `-` as well as `.`/space: sites write CHE-130-637-800 too.
+# Safe to be this permissive because every hit is checksum-validated below, which
+# is what rejects the phone numbers and dates a looser pattern would otherwise
+# pick up. Feed this `_normalize_uid_text` output — it does not match Unicode
+# dashes or HTML entities on its own.
+_UID_RE = re.compile(r"CHE[-\s]?(\d{3})[-.\s]?(\d{3})[-.\s]?(\d{3})", re.IGNORECASE)
 
 # Swiss street line: name + suffix + house number (DE/FR/IT variants).
 _STREET_RE = re.compile(
@@ -260,6 +265,75 @@ def _extract_socials(soup) -> dict[str, str]:
     return socials
 
 
+# Typographic separators a CMS or word processor silently substitutes for the
+# ASCII hyphen, plus the exotic spaces that come with them. `_UID_RE`'s `[-\s]?`
+# matches none of these, so `CHE‑130.637.800` written with a non-breaking hyphen
+# (U+2011) yielded NO UID at all — losing the single decisive piece of identity
+# evidence and collapsing an otherwise-correct site to low confidence.
+# Observed live on remarkt.ch/impressum.
+_UID_TEXT_NORMALIZE = str.maketrans({
+    "‐": "-",  # hyphen
+    "‑": "-",  # non-breaking hyphen
+    "‒": "-",  # figure dash
+    "–": "-",  # en dash
+    "—": "-",  # em dash
+    "―": "-",  # horizontal bar
+    "−": "-",  # minus sign
+    " ": " ",  # nbsp
+    " ": " ",  # figure space
+    " ": " ",  # thin space
+    " ": " ",  # narrow nbsp
+})
+
+
+def _normalize_uid_text(text: str) -> str:
+    """Make UID-bearing text matchable by `_UID_RE`.
+
+    Two transforms, both load-bearing:
+
+    * HTML entities are decoded. `_extract_uids` runs on the RAW HTML string,
+      not on parsed text, so a hand-written impressum containing
+      `CHE&nbsp;130.637.800` or `CHE&#8209;130.637.800` never matched — the
+      regex saw the literal `&nbsp;`.
+    * Unicode dashes and exotic spaces are folded to ASCII. Editors and CMSes
+      substitute these routinely and they are visually identical to a hyphen.
+    """
+    if "&" in text:
+        import html as _html
+        text = _html.unescape(text)
+    return text.translate(_UID_TEXT_NORMALIZE)
+
+
+# Page types whose UID we trust enough to DISPROVE a company's identity.
+# The impressum is the legally mandated operator statement and the contact page
+# is its usual companion; a UID anywhere else is far more likely to belong to a
+# partner, an agency credit, or another company entirely on a listing page.
+_UID_AUTHORITATIVE_PAGES: frozenset[str] = frozenset({"impressum", "contact"})
+
+# A page carrying at least this many distinct valid UIDs is a listing, not a
+# company's own page. Catches directory/aggregator pages and SHAB-notice PDFs
+# without needing to classify the whole SITE as a directory first — which today
+# only happens later, at extract time, after the crawl is already paid for.
+_UID_LISTING_PAGE_THRESHOLD = 3
+
+
+def _uid_may_disprove(uid_by_page: dict[str, list[str]], uid: str | None) -> bool:
+    """True if `uid` came from a page trustworthy enough to set uid_matches=False.
+
+    Requires the UID to appear on an impressum/contact page AND that page not to
+    look like a listing (see _UID_LISTING_PAGE_THRESHOLD). Returning False leaves
+    the verdict at None — unproven rather than contradicted — which keeps the URL
+    candidate alive instead of permanently rejecting it.
+    """
+    if not uid:
+        return False
+    for page_type in _UID_AUTHORITATIVE_PAGES:
+        page_uids = uid_by_page.get(page_type) or []
+        if uid in page_uids and len(page_uids) < _UID_LISTING_PAGE_THRESHOLD:
+            return True
+    return False
+
+
 def _extract_uids(html_str: str) -> list[str]:
     """Return every distinct, checksum-valid Swiss UID found on the page, in
     the order first seen.
@@ -279,6 +353,7 @@ def _extract_uids(html_str: str) -> list[str]:
     except ImportError:  # pragma: no cover
         stdnum_uid = None
 
+    html_str = _normalize_uid_text(html_str)
     out: list[str] = []
     seen: set[str] = set()
     for m in _UID_RE.finditer(html_str):
@@ -650,6 +725,11 @@ def _extract_services_struct(soup) -> list[dict]:
 # ── Public API ───────────────────────────────────────────────────────────────
 
 # Pages whose main text we mine for keywords / address / persons.
+# Pages worth running the (expensive) microdata/RDFa parser on. Organization and
+# LocalBusiness markup lives on the homepage and the legal/contact pages; content
+# pages carry article or product markup the identity ladder never reads.
+_MICRODATA_PAGES = frozenset({"", "homepage", "impressum", "contact"})
+
 _TEXT_PAGES = frozenset({"", "homepage", "about", "services", "team", "impressum", "contact"})
 # Page types that additionally get structured (not just plain-text) extraction.
 _TEAM_STRUCT_PAGES = frozenset({"team"})
@@ -672,7 +752,15 @@ def extract_page(html: bytes, page_type: str = "") -> PageSignals:
     out.description = _extract_meta_description(soup)
     out.title = _extract_title(soup)
     _extract_jsonld(soup, out)
-    _extract_microdata_rdfa(html_str, out)
+    # extruct is by far the heaviest step here — its RDFa parser re-parses the
+    # whole document a THIRD time (after BeautifulSoup and trafilatura) and is a
+    # dominant cost of web_extract, which manages ~800 companies/hour and OOMs.
+    # What it contributes is Organization/LocalBusiness markup: name, address,
+    # contact. That is identity data, and identity is decided from the homepage
+    # and impressum/contact — so paying for it on every content page of every
+    # phase-B site buys nothing the confidence ladder reads.
+    if page_type in _MICRODATA_PAGES:
+        _extract_microdata_rdfa(html_str, out)
     # Semantic <address> tag — more targeted than free-text regex, less than JSON-LD.
     if not out.address:
         out.address = _extract_from_address_tag(soup)
@@ -760,6 +848,38 @@ def _name_match_ratio(company_name: str | None, haystack: str) -> float:
     hl = haystack.lower()
     hits = sum(1 for t in toks if t in hl)
     return hits / len(toks)
+
+
+def domain_matches_company_name(site_url: str | None, company_name: str | None) -> bool:
+    """True when the domain SLD carries EVERY distinctive token of the company name.
+
+    Used to veto the destructive half of a UID mismatch. `_zone_weighted_name_ratio`
+    already treats the domain zone as near-proof (0.65 of the composite) because a
+    registered domain is expensive to fake — this exposes that single zone as a
+    hard yes/no.
+
+    Deliberately strict: *all* distinctive tokens, not a ratio. The same guard must
+    not rescue the directory/PDF cohort, which is ~91% of mismatches — a SHAB-notice
+    PDF on sshv.ch shares no name token with the company it wrongly matched, while
+    taxware.ch contains the whole of "TaxWare". Generic tokens ("swiss", "solutions")
+    and legal forms are excluded via _GENERIC_NAME_TOKENS / cleanco, so a company
+    named only from generic words can never qualify.
+    """
+    if not site_url or not company_name:
+        return False
+    toks = _name_tokens(company_name) - _GENERIC_NAME_TOKENS
+    if not toks:
+        return False
+    try:
+        host = urlparse(site_url).netloc.lower()
+    except (ValueError, TypeError):
+        return False
+    if not host:
+        return False
+    sld = host.removeprefix("www.").split(".")[0]
+    if not sld:
+        return False
+    return all(t in sld for t in toks)
 
 
 def _zone_weighted_name_ratio(
@@ -994,9 +1114,29 @@ def resolve_company_extract(
         or next(iter(all_found_uids), None)
     )
     site_uid_n = _norm_uid(uid)
+
+    # ── Asymmetric UID evidence ──────────────────────────────────────────────
+    #
+    # A UID may PROVE identity from anywhere, but may only DISPROVE it from a
+    # page we trust. The two directions are not symmetric:
+    #
+    #   positive — an exact match to the Zefix UID cannot be a false positive,
+    #     so the page it appeared on is irrelevant. Restricting this to
+    #     impressum/contact would lose the very common site-wide footer UID.
+    #
+    #   negative — a *foreign* UID is weak grounds for MISMATCH, and MISMATCH is
+    #     destructive: handle_web_extract permanently rejects the candidate on
+    #     it. Directory listings, aggregator profiles and SHAB-notice PDFs are
+    #     full of other companies' UIDs, and measurement showed ~91% of
+    #     mismatches were a wrong site rather than a real contradiction. So only
+    #     impressum/contact may set uid_matches=False; elsewhere we stay at
+    #     None (MATCH_WEAK), which keeps the candidate alive.
     uid_matches: bool | None = None
     if site_uid_n and zefix_uid_n:
-        uid_matches = site_uid_n == zefix_uid_n
+        if matching_uid is not None:
+            uid_matches = True
+        elif _uid_may_disprove(uid_by_page, uid):
+            uid_matches = False
 
     # Name match against title + site URL + leading body text.
     # Used only for the name_address_verified threshold check (needs full haystack).
@@ -1011,13 +1151,28 @@ def resolve_company_extract(
     zone_name_conf = _zone_weighted_name_ratio(company_name, site_url, titles, all_text_parts)
 
     # Graded address verification: full (zip+city) > partial (one of the two) > none.
-    addr_full_match = _address_matches_company(address, company_zip, company_city)
+    #
+    # Checked against EVERY address-bearing string on the site, not just the one
+    # stored in `address`. A company can legitimately publish several: a postal
+    # box plus a visiting address, a workshop plus a registered seat, a group
+    # impressum listing sister entities. `address` keeps only the first (or the
+    # impressum's), so when Zefix holds the *second* one the site was scored as
+    # having no address match at all — a false negative on a correct site.
+    # This mirrors the "match if the target's UID is among ANY found" rule above;
+    # the two verification paths should not disagree on that principle.
+    # Observed live on remarkt.ch, whose impressum lists Grienweg 16, 4226
+    # Breitenbach first and the Zefix seat Kastelstrasse 444, 4204 Himmelried second.
+    addr_candidates = [a for a in (address, impressum_text) if a]
+    addr_full_match = any(
+        _address_matches_company(a, company_zip, company_city) for a in addr_candidates
+    )
     addr_partial_match = (
         not addr_full_match
-        and bool(address)
-        and (
-            (company_zip and company_zip.strip() in address)
-            or (company_city and company_city.strip().lower() in address.lower())
+        and bool(addr_candidates)
+        and any(
+            (company_zip and company_zip.strip() in a)
+            or (company_city and company_city.strip().lower() in a.lower())
+            for a in addr_candidates
         )
     )
     addr_score = 1.0 if addr_full_match else (0.35 if addr_partial_match else 0.0)

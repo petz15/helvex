@@ -176,9 +176,14 @@ def _compute_dedup_key(job_type: str, org_id: int | None, params: dict) -> str |
     # safe to run in parallel and essential for utilising multiple HTTP pods.
     # web_crawl_content additionally scopes its claim to crawl_phase='content', so
     # it never contends with the identity crawler over the same companies.
+    # web_extract joins these: it is sharded by company_id % shard_count
+    # (claim_companies_for_extraction), so concurrent instances take provably
+    # disjoint slices. Dedup would cap the whole corpus sweep at one worker —
+    # ~800 companies/hour, i.e. weeks for a 300k backlog.
     NO_DEDUP = {"csv_export", "web_select_url", "web_crawl_single",
                 "web_crawl_http", "web_crawl_playwright", "web_crawl_content",
-                "web_crawl_content_playwright", "web_crawl_external"}
+                "web_crawl_content_playwright", "web_crawl_external",
+                "web_extract"}
 
     # Per-entity dedup (not per-org-type).
     if job_type == "noga_v2_explain":

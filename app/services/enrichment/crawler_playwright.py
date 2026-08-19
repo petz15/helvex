@@ -28,6 +28,7 @@ from app.services.enrichment.crawler_common import (
     find_subpage_links,
     has_contact_form,
     is_crawlable_page_url,
+    normalize_page_url,
     parse_soup,
     pick_user_agent,
     rate_limit,
@@ -202,12 +203,16 @@ async def _get_bounded_html(page, cap: int = MAX_PAGE_BYTES) -> str:
 
 
 # Per-page navigation budgets. Deliberately tight: a bot wall answers fast or
-# not at all, so a long nav timeout buys nothing on this tier and burns the
-# company's whole budget. 1 homepage + 4 subpages sits just inside the 60s
-# identity company_timeout, which means SUBPAGES are what gets dropped when a
-# site is slow — never the homepage, which is where identity is decided.
+# not at all, so a long nav timeout buys nothing on this tier.
+#
+# These MUST sum to less than the identity company_timeout (60 s) for the whole
+# max_pages=5 shape, including the per-page rate-limit delay and the 800 ms
+# settle. `_crawl_one_target` wraps the crawl in `asyncio.wait_for`, so blowing
+# the company budget does not merely drop the remaining subpages — it discards
+# the CrawlResult entirely, losing the homepage that identity is decided from.
+# Worst case here: 10.8 + 4 x (0.5 + 9 + 0.8) = 52 s, leaving ~8 s of headroom.
 _HOMEPAGE_TIMEOUT_MS = 10_000
-_SUBPAGE_TIMEOUT_MS = 12_000
+_SUBPAGE_TIMEOUT_MS = 9_000
 
 
 async def _fetch_page(
@@ -500,11 +505,14 @@ async def crawl_site_full_playwright(
     from app.services.enrichment.crawler_http import BoundedFrontier
 
     result = CrawlResult()
-    visited: set[str] = set(visited_urls or ())
+    # Normalised on the way in so a seed differing only by a trailing slash
+    # from an already-fetched page is not re-crawled. See normalize_page_url.
+    visited: set[str] = {normalize_page_url(u) for u in (visited_urls or ())}
     base_host = urlparse(url).netloc
 
     frontier = BoundedFrontier(max_pages)
     for _page_type, seed in (seed_urls or []):
+        seed = normalize_page_url(seed)
         if seed not in visited and is_crawlable_page_url(seed, base_host):
             frontier.push(seed, 1)
 
@@ -524,8 +532,8 @@ async def crawl_site_full_playwright(
                 result.failure_status = "http_error"
                 result.failure_detail = f"Phase B (playwright) homepage returned HTTP {status}"
                 return result
-            visited.add(url)
-            visited.add(final_url)
+            visited.add(normalize_page_url(url))
+            visited.add(normalize_page_url(final_url))
             # Off the event loop: a blocking parse here stalls every other
             # company's browser navigation sharing this loop.
             for link in await run_in_page_executor(_links_only, body, final_url):
@@ -551,7 +559,7 @@ async def crawl_site_full_playwright(
                 continue
             if status >= 400 or not body:
                 continue
-            visited.add(final_url)
+            visited.add(normalize_page_url(final_url))
 
             want_links = depth < max_depth and len(result.pages) + 1 < max_pages
             page_result, links = await run_in_page_executor(

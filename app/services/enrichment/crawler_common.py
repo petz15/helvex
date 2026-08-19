@@ -641,10 +641,24 @@ def find_subpage_links(
                     seen_urls.add(abs_no_fragment)
                     break
 
-        if len(type_to_url) >= max_subpages:
-            break
-
-    return dict(list(type_to_url.items())[:max_subpages])
+    # Select by _FETCH_PRIORITY, NOT by the order links happen to appear in the
+    # DOM — and only after scanning every link.
+    #
+    # This used to `break` out of the link loop as soon as max_subpages types had
+    # been collected, then slice `type_to_url` (which is insertion-ordered, i.e.
+    # DOM-ordered). Both halves were wrong in the same direction, and the loser
+    # was always the impressum: nav links (services/about/team) come first in the
+    # DOM, the impressum sits in the FOOTER, i.e. last. On a site with a rich nav
+    # the budget was spent before the crawler ever reached the one page the
+    # identity ladder actually reads — UID and address both live there.
+    # Observed on taxware.ch, which links /de/site/impressum in plain HTML in its
+    # footer and still had it skipped in favour of services + team.
+    by_priority = [
+        (page_type, type_to_url[page_type])
+        for page_type, _ in _FETCH_PRIORITY
+        if page_type in type_to_url
+    ]
+    return dict(by_priority[:max_subpages])
 
 
 # Path fragments that explode a full-site crawl without adding signal:
@@ -665,6 +679,28 @@ _NON_HTML_SUFFIXES: tuple[str, ...] = (
     ".mp4", ".mp3", ".avi", ".mov", ".wmv", ".webm", ".wav", ".ogg",
     ".css", ".js", ".json", ".xml", ".txt", ".csv", ".exe", ".dmg", ".apk",
 )
+
+
+def is_page_like_url(url: str) -> bool:
+    """True if `url` could plausibly BE a company's website page.
+
+    Host-independent half of `is_crawlable_page_url`, for validating a URL that
+    has no base host to compare against — i.e. a search-result candidate.
+
+    A candidate is whatever Google returned, and nothing filtered it: PDFs,
+    dataset diffs and EU-law pages were all stored as candidate "websites" and
+    then fetched as a company homepage. A .pdf can never be a company's site, and
+    when one is crawled its text yields OTHER companies' UIDs — which is how a
+    SHAB-notices PDF ends up producing a MISMATCH verdict for three unrelated
+    companies at once.
+    """
+    try:
+        parsed = urlparse(url)
+    except (ValueError, TypeError):
+        return False
+    if parsed.scheme not in ("http", "https") or not parsed.netloc:
+        return False
+    return not parsed.path.lower().endswith(_NON_HTML_SUFFIXES)
 
 
 def is_crawlable_page_url(url: str, base_host: str) -> bool:
@@ -722,7 +758,7 @@ def extract_internal_links(soup: BeautifulSoup, base_url: str) -> list[str]:
             abs_url = urljoin(base_url, href)
         except (ValueError, TypeError):
             continue
-        abs_url = urlparse(abs_url)._replace(fragment="").geturl()
+        abs_url = normalize_page_url(abs_url)
         if abs_url in seen:
             continue
         if not is_crawlable_page_url(abs_url, base_host):
@@ -731,6 +767,21 @@ def extract_internal_links(soup: BeautifulSoup, base_url: str) -> list[str]:
         out.append(abs_url)
 
     return out
+
+
+def normalize_page_url(url: str) -> str:
+    """Canonical form for frontier de-duplication: no fragment, no trailing slash.
+
+    `/support/donate` and `/support/donate/` are the same page but were two
+    distinct frontier entries and two distinct `visited` keys, so both got
+    fetched, stored to S3 and extracted. Sites link to both forms routinely.
+    The root path keeps its slash — "https://x.ch" and "https://x.ch/" are the
+    same, and stripping it there would produce a schemeless-looking bare host.
+    """
+    parsed = urlparse(url)._replace(fragment="")
+    if len(parsed.path) > 1 and parsed.path.endswith("/"):
+        parsed = parsed._replace(path=parsed.path.rstrip("/"))
+    return parsed.geturl()
 
 
 def classify_urls_by_path(

@@ -39,11 +39,15 @@ def upsert_url_candidates(
     Returns the upserted rows sorted by score descending.
     Uses ON CONFLICT DO UPDATE so re-runs and concurrent jobs never raise UniqueViolation.
     """
+    from app.services.enrichment.crawler_common import is_page_like_url
+
     now = datetime.now(timezone.utc)
     rows = []
     for cand in candidates:
         url = cand.get("link") or cand.get("url")
-        if not url:
+        # Same non-page filter as build_candidate_rows — this is the
+        # single-company path (web_crawl_single / the fallback chain).
+        if not url or not is_page_like_url(url):
             continue
         rows.append({
             "company_id": company_id,
@@ -99,6 +103,8 @@ def build_candidate_rows(company_id: int, candidates: list[dict[str, Any]], now:
     statement cannot touch the same (company_id, url) twice, and Serper results
     do sometimes repeat a URL.
     """
+    from app.services.enrichment.crawler_common import is_page_like_url
+
     rows: list[dict] = []
     seen: set[str] = set()
     for cand in candidates:
@@ -106,6 +112,14 @@ def build_candidate_rows(company_id: int, candidates: list[dict[str, Any]], now:
         if not url or url in seen:
             continue
         seen.add(url)
+        # Nothing used to filter these: whatever Google returned became a
+        # candidate "website" and was then fetched as a company homepage —
+        # eur-lex PDFs, SHAB-notice PDFs, dataset diffs. A PDF can never be a
+        # company's site, and crawling one harvests OTHER companies' UIDs, which
+        # is how a single SHAB-notices PDF produced a MISMATCH verdict for
+        # several unrelated companies at once.
+        if not is_page_like_url(url):
+            continue
         rows.append({
             "company_id": company_id,
             "url": url,
@@ -762,10 +776,18 @@ def delete_web_pages_for_candidate(db: Session, company_id: int, url_candidate_i
     """
     if url_candidate_id is None:
         return delete_web_pages_for_company(db, company_id)
+    # Inventory rows (sitemap-discovered, never fetched) carry url_candidate_id
+    # IS NULL, so a purely candidate-scoped delete never matched them — and
+    # save_page_inventory only de-dupes against URLs fetched in the SAME run.
+    # Every re-crawl therefore appended another full copy of the sitemap (up to
+    # _MAX_INVENTORY_URLS rows), unbounded. They are re-derived from the fresh
+    # sitemap on this very crawl, so clearing them here is both safe and required.
     result = db.execute(
         text(
             "DELETE FROM company_web_pages "
-            "WHERE company_id = :cid AND url_candidate_id = :uid"
+            "WHERE company_id = :cid "
+            "  AND (url_candidate_id = :uid "
+            "       OR (url_candidate_id IS NULL AND crawled = FALSE))"
         ),
         {"cid": company_id, "uid": url_candidate_id},
     )
@@ -890,6 +912,111 @@ def sync_terminal_website_status(db: Session, company_ids: list[int] | set[int])
 
     db.flush()
     return int(updated)
+
+
+def purge_non_page_candidates(
+    db: Session, *, after_id: int = 0, batch_size: int = 5000
+) -> tuple[int, int | None]:
+    """Reject URL candidates that can never be a company website.
+
+    Nothing filtered search results before `is_page_like_url` existed, so PDFs,
+    dataset diffs and EU-law pages were stored as candidate "websites" and then
+    fetched as company homepages. Crawling a SHAB-notice PDF harvests OTHER
+    companies' UIDs — which is how one PDF produced a MISMATCH verdict for
+    several unrelated companies at once.
+
+    Reuses `is_page_like_url` rather than re-encoding the suffix list as SQL, so
+    the purge and the intake filter cannot drift apart (and so the statement is
+    not Postgres-only). Marks rows 'rejected' rather than deleting: the row is
+    evidence of what search returned, and `get_next_crawlable_candidate` already
+    skips rejected rows.
+
+    Keyset-paged because most rows do NOT match — a plain LIMIT would rescan the
+    same non-matching prefix forever. Returns (rejected_in_batch, last_id_seen);
+    last_id is None when the scan is complete.
+    """
+    from app.services.enrichment.crawler_common import is_page_like_url
+
+    rows = db.execute(
+        text(
+            "SELECT id, url FROM company_url_candidates "
+            "WHERE status <> 'rejected' AND id > :after "
+            "ORDER BY id LIMIT :lim"
+        ),
+        {"after": after_id, "lim": batch_size},
+    ).fetchall()
+    if not rows:
+        return 0, None
+
+    bad = [int(r[0]) for r in rows if not is_page_like_url(r[1] or "")]
+    if bad:
+        db.query(CompanyUrlCandidate).filter(
+            CompanyUrlCandidate.id.in_(bad)
+        ).update({"status": "rejected"}, synchronize_session=False)
+        db.flush()
+    return len(bad), int(rows[-1][0])
+
+
+def reopen_exhausted_identity(db: Session, batch_size: int = 500) -> int:
+    """Re-open identity resolution for companies retired with candidates left.
+
+    `mark_phase_done` retires a company once every candidate has been tried, and
+    every identity write path is gated on `crawl_phase = 'identity'` — so a
+    retired company can never re-enter resolution, not even after the extractor
+    that failed it has been fixed. Roughly 56.6k companies were retired while
+    still holding an untried candidate, most of them casualties of bugs since
+    fixed (Unicode-hyphen UIDs, single-address matching, PDF candidates,
+    impressum links lost to the footer).
+
+    Only touches rows where an untried, non-rejected candidate actually remains —
+    'untried' meaning no `company_web_pages` row references it — so it is
+    idempotent and cannot resurrect a genuinely exhausted company.
+
+    Written as select-then-update rather than Postgres `UPDATE ... FROM` +
+    `DISTINCT ON` so the same statements run on the SQLite test database; a
+    remediation job that rewrites 56k rows should not be the one thing with no
+    test coverage.
+
+    Returns companies reopened; call until it returns 0.
+    """
+    picked = db.execute(
+        text(
+            "SELECT company_id, cand_id FROM ("
+            "  SELECT c.company_id AS company_id, c.id AS cand_id,"
+            "         ROW_NUMBER() OVER ("
+            "           PARTITION BY c.company_id"
+            "           ORDER BY COALESCE(c.score, -1) DESC, c.id"
+            "         ) AS rn"
+            "    FROM company_url_candidates c"
+            "    JOIN company_crawl_state s ON s.company_id = c.company_id"
+            "   WHERE s.crawl_phase = 'done'"
+            "     AND c.status <> 'rejected'"
+            "     AND NOT EXISTS ("
+            "       SELECT 1 FROM company_web_pages p WHERE p.url_candidate_id = c.id"
+            "     )"
+            ") ranked WHERE rn = 1 LIMIT :lim"
+        ),
+        {"lim": batch_size},
+    ).fetchall()
+    if not picked:
+        return 0
+
+    db.execute(
+        text(
+            "UPDATE company_crawl_state "
+            "SET crawl_phase = 'identity', crawl_status = 'pending', tier = 'http', "
+            "    selected_url_id = :cand, next_crawl_at = NULL, "
+            "    consecutive_failures = 0, crawl_error_detail = NULL, "
+            "    bot_protected = :not_protected, bot_protection_type = NULL "
+            "WHERE company_id = :cid AND crawl_phase = 'done'"
+        ),
+        [
+            {"cid": int(r[0]), "cand": int(r[1]), "not_protected": False}
+            for r in picked
+        ],
+    )
+    db.flush()
+    return len(picked)
 
 
 def get_identity_outcome(db: Session, company_id: int) -> str | None:
@@ -1086,21 +1213,44 @@ def count_companies_pending_extraction(db: Session) -> int:
     ).scalar() or 0)
 
 
-def claim_companies_for_extraction(db: Session, batch_size: int = 200) -> list[int]:
+def claim_companies_for_extraction(
+    db: Session,
+    batch_size: int = 200,
+    *,
+    shard: int = 0,
+    shard_count: int = 1,
+) -> list[int]:
     """Return distinct company_ids that have unextracted pages with stored HTML.
 
-    web_extract is deduplicated (one active job per org), so no row-level locking
-    is needed — a single worker drains the queue. Ordered by company_id for
-    deterministic, resumable progress.
+    **Sharded, not locked.** `SELECT ... FOR UPDATE` is illegal alongside
+    `DISTINCT` in Postgres, and row locks would in any case be held across this
+    batch's S3 downloads and parsing — minutes at a time, for hundreds of rows.
+    Because this is a full-corpus sweep, `company_id % shard_count` partitions it
+    instead: N workers take provably disjoint slices with zero contention and no
+    held transactions. Two workers cannot collide because the modulus cannot
+    overlap.
+
+    shard_count=1 (the default) reproduces the original single-worker behaviour
+    exactly, so every existing caller is unaffected.
+
+    Ordered by company_id for deterministic, resumable progress.
     """
+    if shard_count <= 1:
+        where_shard = ""
+        params: dict[str, Any] = {"limit": batch_size}
+    else:
+        where_shard = "AND company_id % :shard_count = :shard "
+        params = {"limit": batch_size, "shard_count": shard_count, "shard": shard}
+
     rows = db.execute(
         text(
-            "SELECT DISTINCT company_id FROM company_web_pages "
+            "SELECT DISTINCT company_id FROM company_web_pages "  # noqa: S608
             "WHERE needs_extraction = TRUE AND s3_key_html IS NOT NULL "
+            f"{where_shard}"
             "ORDER BY company_id "
             "LIMIT :limit"
         ),
-        {"limit": batch_size},
+        params,
     ).fetchall()
     return [r[0] for r in rows]
 

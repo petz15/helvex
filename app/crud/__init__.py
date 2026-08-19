@@ -72,6 +72,7 @@ from app.crud.directory_crawl_domain import (
     count_pending_directory_crawl_domains,  # noqa: F401
     delete_directory_crawl_domain,
     get_approved_directory_crawl_domains,
+    get_harvestable_directory_domains,
     get_directory_crawl_domain,  # noqa: F401
     get_directory_crawl_domain_by_value,  # noqa: F401
     list_directory_crawl_domains,
@@ -281,6 +282,7 @@ __all__ = [
     "approve_directory_crawl_domain",
     "delete_directory_crawl_domain",
     "get_approved_directory_crawl_domains",
+    "get_harvestable_directory_domains",
     "list_directory_crawl_domains",
     "reject_directory_crawl_domain",
     "upsert_directory_crawl_domain",

@@ -90,6 +90,11 @@ _DIRECTORY_DOMAINS = {
     "consultingvergleich.ch",
     "fiduciairesuisse-vd.ch",
     "business-monitor.ch",
+    # Comparison/aggregator portals: never a company's own site, and nothing
+    # worth harvesting. moneyland.ch was in NEITHER list, so it was selectable
+    # as a company website.
+    "moneyland.ch",
+    "comparis.ch",
     "graph.swiss",
     "swiss-arc.ch",
     "northdata.com",

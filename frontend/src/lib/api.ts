@@ -2401,6 +2401,18 @@ export async function cleanupJobRuns(
   return res.json();
 }
 
+/** Re-open identity resolution for companies retired while candidates remained. */
+export async function crawlerReopenIdentity(): Promise<{ job_id: number; status: string }> {
+  const res = await fetch("/api/v1/admin/jobs/crawler/reopen-identity", {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({}),
+  });
+  if (!res.ok) throw new Error("Failed to enqueue reopen-identity job");
+  return res.json();
+}
+
 export async function crawlerRecomputeWebsiteStatus(): Promise<{ job_id: number; status: string }> {
   const res = await fetch("/api/v1/admin/jobs/crawler/recompute-website-status", {
     method: "POST",

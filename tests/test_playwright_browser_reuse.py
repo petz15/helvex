@@ -226,23 +226,30 @@ def test_relaunch_gives_up_once_the_budget_is_spent():
 
 # ── Timeout arithmetic, asserted as intent ────────────────────────────────────
 
-def test_page_budget_fits_inside_the_identity_company_timeout():
-    """Subpages are what gets dropped on a slow site — never the homepage.
+def test_worst_case_page_budget_fits_inside_the_identity_company_timeout():
+    """Blowing company_timeout loses the HOMEPAGE, not just the subpages.
 
-    The homepage is where identity is decided, so the per-page budgets must leave
-    room for it plus at least one subpage inside the 60s company_timeout, while
-    NOT allowing a full 5-page crawl to exceed it.
+    `_crawl_one_target` wraps the crawl in `asyncio.wait_for`, so a company that
+    exceeds its budget returns kind="timeout" with no CrawlResult at all — the
+    successfully fetched homepage, which is where identity is decided, is thrown
+    away with it. So the full max_pages=5 shape must fit, worst case, including
+    the rate-limit delay and the post-load settle.
     """
     identity_timeout_s = 60.0
-    settle_s = 0.8  # _fetch_page's post-load wait
+    settle_s = 0.8       # _fetch_page's page.wait_for_timeout(800)
+    rate_limit_s = 0.5   # default rate_limit_delay, applied per page
 
     homepage_s = pw._HOMEPAGE_TIMEOUT_MS / 1000 + settle_s
-    subpage_s = pw._SUBPAGE_TIMEOUT_MS / 1000 + settle_s
+    subpage_s = rate_limit_s + pw._SUBPAGE_TIMEOUT_MS / 1000 + settle_s
 
-    assert homepage_s + subpage_s < identity_timeout_s, "no room for a single subpage"
-    # 1 homepage + 4 subpages is the max_pages=5 shape; it should fit, but only
-    # just — that is what makes the timeout the effective bound, not a rubber stamp.
-    assert homepage_s + 4 * subpage_s <= identity_timeout_s
+    worst_case = homepage_s + 4 * subpage_s
+    assert worst_case <= identity_timeout_s, (
+        f"a max_pages=5 crawl can reach {worst_case:.1f}s against a "
+        f"{identity_timeout_s:.0f}s company_timeout — the homepage would be lost"
+    )
+    # Keep real headroom for consent-banner dismissal and HTML capture, which are
+    # unbudgeted. Without this the bound is nominal rather than safe.
+    assert identity_timeout_s - worst_case >= 5.0
 
 
 def test_identity_tier_no_longer_fetches_sitemaps():

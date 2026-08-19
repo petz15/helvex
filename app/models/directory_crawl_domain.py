@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import DateTime, Integer, String, Text, func
+from sqlalchemy import Boolean, DateTime, Integer, String, Text, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database import Base
@@ -26,6 +26,11 @@ class DirectoryCrawlDomain(Base):
     value: Mapped[str] = mapped_column(String(255), nullable=False, unique=True, index=True)
     # 'pending_review' | 'approved' | 'rejected'
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="pending_review")
+    # Independent of `status`. status=approved means "never a company's own
+    # website" (feeds the crawl blocklist); harvest means "worth crawling for
+    # directory profile data". kompass.ch is approved+harvest=False; local.ch is
+    # approved+harvest=True. See migration 0131.
+    harvest: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
     # 'manual' | 'auto_discovered'
     source: Mapped[str] = mapped_column(String(32), nullable=False, default="manual")
     # Company count from discovery query (null for manually added)

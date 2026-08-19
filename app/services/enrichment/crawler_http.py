@@ -33,6 +33,7 @@ from app.services.enrichment.crawler_common import (
     find_subpage_links,
     has_contact_form,
     is_crawlable_page_url,
+    normalize_page_url,
     parse_soup,
     pick_browser_profile,
     rate_limit,
@@ -185,6 +186,19 @@ async def _fetch(
         if cl > MAX_RAW_BYTES:
             logger.debug("Skipping oversized response (%d bytes declared) for %s", cl, url)
             return resp.status_code, str(resp.url), dict(resp.headers), b""
+        # Reject non-HTML before reading a byte. is_crawlable_page_url can only
+        # filter by URL *suffix*, so an extensionless download endpoint such as
+        # /download_file/view/51/187 sails through it and the crawler then
+        # fetched, S3-stored and text-extracted whole PDFs — 50k "words" of
+        # foreign-language document that also pollute the identity extract's
+        # name matching. Only reject when the server states a type and it is
+        # clearly not HTML; a missing Content-Type stays crawlable.
+        if not _is_html_response(resp.headers):
+            logger.debug(
+                "Skipping non-HTML response (%s) for %s",
+                resp.headers.get("content-type"), url,
+            )
+            return resp.status_code, str(resp.url), dict(resp.headers), b""
         try:
             body = await read_bounded_body(resp)
         except DecompressionBombError as exc:
@@ -335,6 +349,27 @@ class BoundedFrontier:
         return bool(self._q)
 
 
+# Content types worth parsing as a web page. Anything else the server explicitly
+# declares (application/pdf, image/*, application/octet-stream, …) is discarded
+# before its body is read.
+_HTML_CONTENT_TYPES: tuple[str, ...] = (
+    "text/html", "application/xhtml", "text/plain", "application/xml", "text/xml",
+)
+
+
+def _is_html_response(headers) -> bool:
+    """True when the response is (or plausibly is) a web page.
+
+    Absent Content-Type ⇒ True: plenty of small Swiss SME servers omit it, and
+    refusing those would lose real pages. Only an explicit, clearly-non-HTML
+    type is rejected.
+    """
+    ctype = (headers.get("content-type") or "").split(";", 1)[0].strip().lower()
+    if not ctype:
+        return True
+    return ctype.startswith(_HTML_CONTENT_TYPES)
+
+
 def _word_count(html_bytes: bytes) -> int:
     """Visible-word count for the JS-shell heuristic. Parses and discards."""
     soup = parse_soup(html_bytes)
@@ -425,13 +460,16 @@ async def crawl_site_full(
     failure_status if the crawl produced no pages at all.
     """
     result = CrawlResult()
-    visited: set[str] = set(visited_urls or ())
+    # Normalised on the way in so a seed differing only by a trailing slash
+    # from an already-fetched page is not re-crawled. See normalize_page_url.
+    visited: set[str] = {normalize_page_url(u) for u in (visited_urls or ())}
     base_host = urlparse(url).netloc
     headers = {**_make_headers(company_id), "Sec-Fetch-Site": "same-origin", "Referer": url}
 
     frontier = BoundedFrontier(max_pages)
 
     for _page_type, seed in (seed_urls or []):
+        seed = normalize_page_url(seed)
         if seed not in visited and is_crawlable_page_url(seed, base_host):
             frontier.push(seed, 1)
 
@@ -450,8 +488,8 @@ async def crawl_site_full(
                 result.failure_status = "http_error"
                 result.failure_detail = f"Phase B homepage returned HTTP {status}"
                 return result
-            visited.add(url)
-            visited.add(final_url)
+            visited.add(normalize_page_url(url))
+            visited.add(normalize_page_url(final_url))
             root_links = await run_in_page_executor(_links_only, body, final_url)
             del body
             for link in root_links:
@@ -473,7 +511,7 @@ async def crawl_site_full(
                 continue
             if status >= 400 or not body:
                 continue
-            visited.add(final_url)
+            visited.add(normalize_page_url(final_url))
 
             # Escalation check, first successful fetch only. Phase B used to
             # swallow bot walls and JS shells silently — it just `continue`d, so
@@ -628,6 +666,16 @@ async def crawl_company_http(
         # of correctly escalating to the Playwright tier that can render it.
         if detect_js_required(body_str, words):
             result.needs_playwright = True
+            return result
+
+        # Directory check BEFORE spending the subpage budget. This also runs at
+        # extract time (handle_web_extract), which stays authoritative because it
+        # sees every page — but by then phase A has already fetched and
+        # S3-uploaded ~5 pages of a listing site. Deciding here costs 1 fetch.
+        from app.services.scoring.scoring import is_directory_page
+        if is_directory_page(body, final_url or url):
+            result.failure_status = "directory"
+            result.failure_detail = f"Directory/listing page: {final_url or url}"
             return result
 
         if words < 5 and len(body) < 500:

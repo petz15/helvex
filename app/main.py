@@ -290,6 +290,10 @@ def _start_nightly_shab_scheduler(app) -> None:
                 _maybe_enqueue_simap_daily(app)
             except Exception:
                 _app_logger.warning("SIMAP daily scheduler iteration failed", exc_info=True)
+            try:
+                _maybe_enqueue_directory_discovery(app)
+            except Exception:
+                _app_logger.warning("Directory discovery scheduler iteration failed", exc_info=True)
 
     t = threading.Thread(target=_scheduler_loop, daemon=True, name="shab-nightly-scheduler")
     t.start()
@@ -417,6 +421,56 @@ def _maybe_enqueue_noga_nightly(app) -> None:
 
     kick_job_worker(app)
     logger.info("shab_nightly_scheduler: enqueued noga_nightly reclassify_noga")
+
+
+def _maybe_enqueue_directory_discovery(app) -> None:
+    """Enqueue discover_directory_domains at 04:00-04:59 Zurich, once per day.
+
+    The job scans company_url_candidates for domains appearing across many
+    distinct companies and queues the new ones as `pending_review`. It existed
+    but nothing ever ran it, so the blocklist only grew when someone clicked the
+    button — while every Serper batch kept adding fresh aggregator domains that
+    were then eligible to be selected as a company's own website.
+
+    Deliberately does NOT auto-approve: a false positive permanently hides a real
+    company website, so the review queue keeps a human in the loop.
+    """
+    from datetime import datetime, timedelta, timezone
+
+    try:
+        from zoneinfo import ZoneInfo
+        tz_zurich = ZoneInfo("Europe/Zurich")
+    except Exception:  # noqa: BLE001
+        tz_zurich = timezone(timedelta(hours=1))
+
+    if datetime.now(tz=tz_zurich).hour != 4:
+        return
+
+    from app.crud import create_event, list_jobs
+    from app.database import SessionLocal
+    from app.services.jobs.job_worker import _enqueue_job_in_session, kick_job_worker
+
+    with SessionLocal() as db:
+        today_start = datetime.now(tz=timezone.utc).replace(
+            hour=0, minute=0, second=0, microsecond=0
+        )
+        if any(
+            j.job_type == "discover_directory_domains"
+            and j.queued_at and j.queued_at >= today_start
+            for j in list_jobs(db, limit=50)
+        ):
+            return
+
+        job = _enqueue_job_in_session(
+            db,
+            job_type="discover_directory_domains",
+            label="Directory-domain discovery (auto, nightly)",
+            params={"min_companies": 30, "limit": 200},
+        )
+        create_event(db, job_id=job.id, level="info", message="Auto-queued by nightly scheduler")
+
+    kick_job_worker(app)
+    logger.info("shab_nightly_scheduler: enqueued discover_directory_domains")
 
 
 def _recover_jobs_and_start_worker(app, app_state) -> None:
