@@ -109,6 +109,36 @@ def _order_pages_for_extract(pages: list) -> list:
     return sorted(pages, key=lambda p: rank.get(p.page_type, len(rank)))
 
 
+def _enqueue_once(ctx: JobContext, *, job_type: str, label: str) -> bool:
+    """Enqueue `job_type` unless one is already queued. Returns True if handled.
+
+    Every auto-enqueue in this module targets a NO_DEDUP job type, so nothing
+    downstream collapses duplicates — the queue check here IS the dedup. A local
+    "once per run" flag is not sufficient on its own for two reasons:
+
+      * several instances of the enqueuing job can run at once (they are NO_DEDUP
+        too, and web_extract is sharded), each with its own flag; and
+      * a job that restarts — e.g. web_extract being OOM-killed — resets its
+        flags and enqueues again on every attempt.
+
+    Both were true simultaneously on 2026-08-20 and produced ~30 queued crawl
+    jobs in 7 seconds. Callers should keep their local flag as the cheap
+    fast-path and use this for the authoritative check.
+    """
+    try:
+        if crawler_crud.has_queued_ml_job(ctx.db, {job_type}):
+            return True
+        ctx.enqueue_job(
+            job_type=job_type, label=label, params={},
+            org_id=None, user_id=ctx.job.user_id,
+        )
+        ctx.db.commit()
+        return True
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("Auto-enqueue %s skipped: %s", job_type, exc)
+        return False
+
+
 def _bump_protection(stats: dict, protection_type: str | None) -> None:
     """Count escalations by protection type in the job's stats.
 
@@ -1388,41 +1418,24 @@ def handle_web_extract(ctx: JobContext) -> tuple[dict, str]:
         done += len(company_ids)
 
         # Companies confirmed this batch are now queued for phase B. Kick the
-        # content crawler so it runs in parallel on another pod, same pattern as
-        # the crawl job's auto-enqueue of extraction. Dedup is off for this type,
-        # so guard with _content_enqueued rather than relying on the queue.
+        # content crawler so it runs in parallel on another pod.
         if stats.get("advanced_to_content", 0) > 0 and not _content_enqueued:
-            try:
-                ctx.enqueue_job(
-                    job_type="web_crawl_content",
-                    label="Full-site content crawl (auto — identity confirmed)",
-                    params={},
-                    org_id=None,
-                    user_id=ctx.job.user_id,
-                )
-                ctx.db.commit()
-                _content_enqueued = True
-            except Exception as exc:  # noqa: BLE001
-                logger.debug("Auto-enqueue web_crawl_content skipped: %s", exc)
+            _content_enqueued = _enqueue_once(
+                ctx,
+                job_type="web_crawl_content",
+                label="Full-site content crawl (auto — identity confirmed)",
+            )
 
         # Companies retargeted onto their next candidate are sitting at
         # crawl_status='pending' again. The identity crawl job that produced this
         # extraction batch may already have drained and exited, so kick one —
-        # otherwise the fallback chain stalls until someone triggers a crawl by
-        # hand. Dedup is off for this type, hence the once-per-run guard.
+        # otherwise the fallback chain stalls until someone triggers a crawl.
         if _crawl_requeued and not _identity_enqueued:
-            try:
-                ctx.enqueue_job(
-                    job_type="web_crawl_http",
-                    label="Identity crawl (auto — fallback candidates queued)",
-                    params={},
-                    org_id=None,
-                    user_id=ctx.job.user_id,
-                )
-                ctx.db.commit()
-                _identity_enqueued = True
-            except Exception as exc:  # noqa: BLE001
-                logger.debug("Auto-enqueue web_crawl_http skipped: %s", exc)
+            _identity_enqueued = _enqueue_once(
+                ctx,
+                job_type="web_crawl_http",
+                label="Identity crawl (auto — fallback candidates queued)",
+            )
 
         msg = (
             f"Extracted {done}/{total} — {stats['extracted']} with data, "

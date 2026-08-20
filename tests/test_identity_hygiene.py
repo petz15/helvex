@@ -303,3 +303,38 @@ def test_purge_rejects_non_page_candidates(db):
     # Idempotent — a second full pass finds nothing left to reject.
     n2, _ = crawler_crud.purge_non_page_candidates(db, batch_size=100)
     assert n2 == 0
+
+
+# ── Extraction concurrency safety ─────────────────────────────────────────────
+
+def test_web_extract_dedup_is_per_shard():
+    """Two workers on the SAME shard must never coexist; different shards may.
+
+    web_extract parallelises by `company_id % shard_count`, which only separates
+    workers holding *different* shard indices. Marking the type NO_DEDUP instead
+    let every auto-enqueue (params={} => shard 0 of 1) spawn another worker
+    claiming identical rows; the loser of each race saw mark_pages_extracted
+    already done and logged a spurious "empty" — 14,277 of 15,000 on 2026-08-20.
+    """
+    from app.services.jobs.job_worker import _compute_dedup_key
+
+    a = _compute_dedup_key("web_extract", None, {})
+    b = _compute_dedup_key("web_extract", None, {"shard": 0, "shard_count": 1})
+    assert a == b, "the auto-enqueue default must collide with itself"
+
+    keys = {
+        _compute_dedup_key("web_extract", None, {"shard": i, "shard_count": 4})
+        for i in range(4)
+    }
+    assert len(keys) == 4, "distinct shards must be able to run concurrently"
+    assert a not in keys, "an unsharded run must not block a sharded fan-out"
+
+
+def test_web_extract_is_not_in_no_dedup():
+    """Regression guard: NO_DEDUP would reinstate the identical-claim race."""
+    import inspect
+    from app.services.jobs import job_worker
+
+    src = inspect.getsource(job_worker._compute_dedup_key)
+    no_dedup = src.split("NO_DEDUP = {", 1)[1].split("}", 1)[0]
+    assert "web_extract" not in no_dedup

@@ -176,19 +176,32 @@ def _compute_dedup_key(job_type: str, org_id: int | None, params: dict) -> str |
     # safe to run in parallel and essential for utilising multiple HTTP pods.
     # web_crawl_content additionally scopes its claim to crawl_phase='content', so
     # it never contends with the identity crawler over the same companies.
-    # web_extract joins these: it is sharded by company_id % shard_count
-    # (claim_companies_for_extraction), so concurrent instances take provably
-    # disjoint slices. Dedup would cap the whole corpus sweep at one worker —
-    # ~800 companies/hour, i.e. weeks for a 300k backlog.
     NO_DEDUP = {"csv_export", "web_select_url", "web_crawl_single",
                 "web_crawl_http", "web_crawl_playwright", "web_crawl_content",
-                "web_crawl_content_playwright", "web_crawl_external",
-                "web_extract"}
+                "web_crawl_content_playwright", "web_crawl_external"}
 
     # Per-entity dedup (not per-org-type).
     if job_type == "noga_v2_explain":
         company_id = params.get("company_id")
         return f"{job_type}:{company_id}" if company_id is not None else None
+
+    # web_extract: dedup PER SHARD, not per type.
+    #
+    # It is parallelised by `company_id % shard_count` (see
+    # claim_companies_for_extraction) — but that only separates workers if they
+    # hold *different* shard indices. Putting it in NO_DEDUP instead let every
+    # auto-enqueue (which passes params={}, i.e. shard 0 of 1) create another
+    # worker claiming the IDENTICAL rows: they raced on the same companies, and
+    # whichever lost saw mark_pages_extracted having already run and recorded a
+    # spurious "empty". Observed 2026-08-20 as 14,277 empty out of 15,000.
+    #
+    # Keying on the shard gives both properties at once: N differently-sharded
+    # jobs coexist and cover disjoint slices, while two jobs with the SAME shard
+    # can never exist.
+    if job_type == "web_extract":
+        shard = int(params.get("shard", 0) or 0)
+        shard_count = max(1, int(params.get("shard_count", 1) or 1))
+        return f"web_extract:{org_id}:{shard}/{shard_count}"
 
     # rescore_scope: per (org, user) scope, not per-org — otherwise two different
     # users in the same org rescoring their own materialized scope would
