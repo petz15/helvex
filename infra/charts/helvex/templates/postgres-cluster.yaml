@@ -47,10 +47,13 @@ spec:
     name: {{ .Values.envSecretName }}
 
   {{- if and .Values.postgres.backupEnabled .Values.postgres.restoreFromBackup }}
+  {{- if not .Values.postgres.restoreSourceServerName }}
+  {{- fail "postgres.restoreSourceServerName is empty while postgres.restoreFromBackup is true. It used to silently default to the cluster name, which on a disaster-recovery rebuild would restore from whichever lineage happened to carry that name instead of the one you intended. Pin it in infra/environments/<env>.yaml, or pass --set postgres.restoreSourceServerName=<name>." }}
+  {{- end }}
   externalClusters:
     - name: helvex-backup
       barmanObjectStore:
-        serverName: {{ .Values.postgres.restoreSourceServerName | default (printf "%s-pg" (include "helvex.fullname" .)) }}
+        serverName: {{ .Values.postgres.restoreSourceServerName }}
         destinationPath: {{ .Values.postgres.s3BucketPath }}
         endpointURL: {{ .Values.postgres.s3EndpointUrl }}
         s3Credentials:
@@ -63,12 +66,13 @@ spec:
   {{- end }}
 
   {{- if .Values.postgres.backupEnabled }}
+  {{- if not .Values.postgres.backupServerName }}
+  {{- fail "postgres.backupServerName is empty while postgres.backupEnabled is true. An empty value omits serverName entirely, and CNPG then falls back to the cluster name — silently starting a NEW backup lineage in S3 and orphaning the old one. That is exactly what the [deploy-all] path did on 2026-08-20, and it went unnoticed for seven weeks. Pin it in infra/environments/<env>.yaml, or pass --set postgres.backupServerName=<name>." }}
+  {{- end }}
   backup:
     retentionPolicy: {{ .Values.postgres.backupRetention }}
     barmanObjectStore:
-      {{- if .Values.postgres.backupServerName }}
       serverName: {{ .Values.postgres.backupServerName }}
-      {{- end }}
       destinationPath: {{ .Values.postgres.s3BucketPath }}
       endpointURL: {{ .Values.postgres.s3EndpointUrl }}
       {{- if .Values.postgres.backupDataCompression }}

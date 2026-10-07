@@ -74,16 +74,34 @@ spec:
                     echo "ERROR: database never became reachable after 15 attempts" >&2
                     exit 1
                   fi
+                  # The dump stages on an emptyDir, i.e. the node's own disk. Fail here
+                  # rather than filling the node partway through a multi-hour dump.
+                  # -k is required, not cosmetic: POSIX leaves `df -P` free to report 512-byte
+                  # blocks, which would double the apparent free space and make this check pass
+                  # on a volume half the needed size.
+                  free_gb=$(df -Pk /backup | awk 'NR==2{print int($4/1048576)}')
+                  min_gb={{ .Values.postgres.weeklyExport.minFreeStagingGb }}
+                  echo "staging free space: ${free_gb} GiB (minimum ${min_gb} GiB)"
+                  if [ "$free_gb" -lt "$min_gb" ]; then
+                    echo "ERROR: ${free_gb} GiB free on staging volume, need ${min_gb} GiB" >&2
+                    exit 1
+                  fi
+
                   ts=$(date -u +%Y%m%dT%H%M%SZ)
                   out="/backup/helvex-${ts}.dump"
-                  timeout 1800 pg_dump \
+                  # A hard 1800 s cap killed every scheduled run from 2026-08-02 onward with
+                  # "pg_dump: terminated by user" once the DB passed ~100 GB. Keep a timeout
+                  # (a wedged dump must not run forever) but size it to the real database.
+                  timeout {{ .Values.postgres.weeklyExport.dumpTimeoutSeconds }} pg_dump \
                     --dbname="$DATABASE_URL" \
                     --format=custom \
                     --compress={{ .Values.postgres.weeklyExport.pgDumpCompress }} \
                     --no-owner \
                     --no-acl \
+                    {{ range .Values.postgres.weeklyExport.excludeTableData }}--exclude-table-data={{ . | quote }} {{ end }}\
                     --file="$out"
                   echo "$out" > /backup/LATEST
+                  ls -lh "$out"
               volumeMounts:
                 - name: backup
                   mountPath: /backup

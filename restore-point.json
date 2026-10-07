@@ -1,4 +1,4 @@
 {
-  "restoreSource": "helvex-pg-20260405T113918Z",
-  "description": "Stable server name where original backups live in S3. CNPG will perform point-in-time recovery from this server's backups."
+  "restoreSource": "helvex-pg",
+  "description": "Server name in S3 holding the backups CNPG restores from on a rebuild. Updated 2026-10-07: was helvex-pg-20260405T113918Z, whose newest COMPLETED base backup is 2026-08-20 — restoring from it would have silently discarded seven weeks. 'helvex-pg' is the live lineage: WAL archiving has run into it continuously since the 2026-08-20 [deploy-all] incident, and it holds the newest completed base backups. This file is only fallback #3; s3://helvex-backups/pg-prod/restore-point.json (written every 30 min by the restore-point-sync CronJob from the pg-backup-meta ConfigMap) takes precedence, so keep the ConfigMap authoritative."
 }

@@ -1202,7 +1202,7 @@ Two separate buckets in region **nbg1** (`https://nbg1.your-objectstorage.com`):
 
 | Bucket | Purpose | Owner |
 |---|---|---|
-| `helvex-backups` | CloudNativePG PostgreSQL WAL + base backups, 7-day PITR | Helm chart / CNPG operator |
+| `helvex-backups` | CloudNativePG PostgreSQL WAL + base backups, 14-day PITR (`postgres.backupRetention`), plus the weekly `pg_dump` offsite copy | Helm chart / CNPG operator |
 | `helvex-exports` | Async CSV export files (`{user_id}/export.csv`), 7-day presigned URL TTL | Application (`s3_client.py`) |
 
 Both buckets share the same `S3_ACCESS_KEY` / `S3_SECRET_KEY` credentials.
@@ -2216,11 +2216,11 @@ cert-manager → cloudnative-pg → arc-controller → arc-rbac → arc-runner-s
 | `deployment.yaml` | Deployment | FastAPI app pod |
 | `frontend-deployment.yaml` | Deployment | Next.js pod |
 | `worker-deployment.yaml` | Deployment | RQ worker (only if `worker.enabled`) |
-| `postgres-cluster.yaml` | `postgresql.cnpg.io/v1 Cluster` | CloudNativePG-managed PostgreSQL |
+| `postgres-cluster.yaml` | `postgresql.cnpg.io/v1 Cluster` | CloudNativePG-managed PostgreSQL. `backupServerName` and `restoreSourceServerName` are **required** when `backupEnabled`/`restoreFromBackup` are on — the template calls `fail` on an empty value instead of omitting the key. Omitting `serverName` makes CNPG fall back to the cluster name, which starts a brand-new backup lineage in S3 and orphans the old one; that is exactly what happened on 2026-08-20 (see "Backup lineage" below) |
 | `postgres-backup-schedule.yaml` | ScheduledBackup | S3 backups; CNPG's own `retentionPolicy` (`postgres.backupRetention`) only prunes *within the currently active* `backupServerName` prefix — it has no awareness of prior cluster incarnations |
-| `postgres-backup-prune.yaml` | CronJob | Deletes S3 `<serverName>/` directories other than the currently active one (from `pg-backup-meta` ConfigMap) once their embedded timestamp exceeds `retentionDays`. A directory with no timestamp suffix (the legacy stable name `helvex-pg`, pre-dating the timestamped-naming scheme) is *not* current by definition once superseded, so it's deleted outright rather than skipped — a prior bug here (`SKIP (no timestamp)`, never deleting it) let ~298GB of orphaned backups accumulate silently for months |
+| `postgres-backup-prune.yaml` | CronJob | **Disabled in prod since 2026-10-07 — do not re-enable without rewriting it** (see ROADMAP "Backup & disaster recovery"). It resolves the active lineage from the `pg-backup-meta` ConfigMap, which only the `[deploy-prod]` path writes; once `[deploy-all]` repointed the cluster without updating that ConfigMap, the "no timestamp ⇒ orphaned ⇒ delete outright" branch below was aimed squarely at the *live* backup directory. Deletes S3 `<serverName>/` directories other than the currently active one (from `pg-backup-meta` ConfigMap) once their embedded timestamp exceeds `retentionDays`. A directory with no timestamp suffix (the legacy stable name `helvex-pg`, pre-dating the timestamped-naming scheme) is *not* current by definition once superseded, so it's deleted outright rather than skipped — a prior bug here (`SKIP (no timestamp)`, never deleting it) let ~298GB of orphaned backups accumulate silently for months |
 | `postgres-restore-point-sync.yaml` | CronJob | Writes `restore-point.json` (S3) + `pg-backup-meta` ConfigMap so the next `restoreFromBackup: true` deploy knows which `serverName` to restore from. Validates the resolved `restoreSource` still exists in S3 before writing it — a value from a previous incarnation can go stale once `postgres-backup-prune` deletes it, and restoring from a since-deleted path would break the next disaster-recovery deploy; falls back to the current active `serverName` when stale |
-| `postgres-weekly-export.yaml` | CronJob | Weekly `pg_dump` (long-retention, separate failure domain, **not** tied to `backupServerName`/`restoreSource` — fixed `STORAGEBOX_PATH`) uploaded to Hetzner Storage Box via SFTP/rclone; init container retries readiness with `timeout`-wrapped `pg_isready` before dumping — the `postgres:16-alpine` image's musl DNS resolver can intermittently hang past its own connect timeout on a freshly-started pod, so every DB-reaching command in this job is wrapped in `timeout` rather than relying on the client tool's own timeout flags |
+| `postgres-weekly-export.yaml` | CronJob | Weekly `pg_dump` (long-retention, separate failure domain, **not** tied to `backupServerName`/`restoreSource` — fixed `STORAGEBOX_PATH`) uploaded to Hetzner Storage Box via SFTP/rclone. The dump timeout is `weeklyExport.dumpTimeoutSeconds` (6 h in prod) and **must exceed the real dump duration**: a hard-coded `timeout 1800` silently killed every scheduled run from 2026-08-02 to 2026-10-07 with `pg_dump: terminated by user` once the DB passed ~100 GB. `pgDumpCompress` is 1, not 9 (gzip -9 costs ~5x the CPU for ~10% less size), and `excludeTableData` skips rows of regenerable tables (`company_embeddings` in prod — schema still dumped). The dump stages on an `emptyDir`, i.e. node disk, so a `minFreeStagingGb` preflight fails the job early rather than filling the node mid-dump; init container retries readiness with `timeout`-wrapped `pg_isready` before dumping — the `postgres:16-alpine` image's musl DNS resolver can intermittently hang past its own connect timeout on a freshly-started pod, so every DB-reaching command in this job is wrapped in `timeout` rather than relying on the client tool's own timeout flags |
 | `redis.yaml` | Deployment + Service | Redis for job queue + rate limiting |
 | `service.yaml` | Service | ClusterIP for backend |
 | `ingress.yaml` | Ingress + Middleware | Traefik routing; TLS via cert-manager; rate-limit Middleware (`ingress.rateLimit`); `/docs` path gated by `ingress.exposeDocs` (off in prod) |
@@ -2228,6 +2228,50 @@ cert-manager → cloudnative-pg → arc-controller → arc-rbac → arc-runner-s
 | `networkpolicy.yaml` | NetworkPolicy | Isolates helvex namespace |
 | `postgres-networkpolicy.yaml` | NetworkPolicy | Postgres-only ingress allowlist: app-tier pods, `cnpg-system` operator, same-cluster replicas, node-subnet `ipBlock` (kubelet probes bypass pod selectors) — see [roadmap.md](roadmap.md) for scoping caveats |
 | `servicemonitor.yaml` | ServiceMonitor | Prometheus scrapes `/metrics` |
+
+**Backup lineage (`backupServerName`) — read before touching any postgres value or deploy tag**
+
+Every base backup and archived WAL lands under `s3://helvex-backups/pg-prod/<serverName>/`. That
+`serverName` is the *lineage*: change it and the cluster starts writing to an empty prefix, while
+everything already written keeps sitting in the old one. CNPG cannot span two prefixes in a single
+recovery, so a silent change splits the recovery window in half.
+
+The value reaches the chart in exactly one way — `--set postgres.backupServerName=…` from the
+"Resolve backup server names" step in `deploy-prod.yml`, which reads it from the `pg-backup-meta`
+ConfigMap. Three invariants follow:
+
+1. **Every deploy tag that applies the `helvex` release must run the resolve step.** `[deploy-all]` and
+   `[deploy-prod]` both do `helmfile apply` on the release and therefore both re-render the CNPG
+   `Cluster`. The other tags (`[deploy-app]`, `[deploy-backend]`, `[deploy-frontend]`, `[deploy-ml]`) use
+   `kubectl set image` and never touch postgres. On 2026-08-20 `[deploy-all]` applied the release without
+   the resolve step, `backupServerName` fell back to `""`, CNPG defaulted it to the cluster name
+   `helvex-pg`, and backups silently moved to a new lineage for seven weeks.
+2. **An empty value is now a hard deploy failure**, not a silent default — `postgres-cluster.yaml` calls
+   `fail`. Prod also pins both names in `infra/environments/prod.yaml` as a floor (`--set` still wins).
+3. **The live `Cluster` spec is authoritative for `backupServerName`**, with `pg-backup-meta` only as a
+   fallback — the ConfigMap is written by the resolve step alone and so drifts whenever a deploy path
+   skips it, which is precisely how the prune job ended up aimed at the live lineage. For the *restore
+   source*, `pg-backup-meta.restoreSource` still matters: `postgres-restore-point-sync` copies it into
+   `s3://…/restore-point.json`, which outranks the repo's `restore-point.json`.
+
+**A recovering cluster must not archive into the prefix it restores from.** `barman-cloud-check-wal-archive`
+requires an empty destination; pointed at a prefix that already holds WALs and base backups, the new
+cluster wedges in "Setting up primary". This is the entire reason `backupServerName` is generated
+per-incarnation instead of held constant. Hence:
+
+- **Running cluster:** `backupServerName == restoreSourceServerName` is fine and is the current prod
+  state (`helvex-pg` for both). Nothing bootstraps, `externalClusters` is inert.
+- **Bootstrapping cluster:** the two must differ. The resolve step generates a fresh
+  `helvex-pg-<timestamp>` whenever no live `Cluster` exists, and hard-fails the deploy if the names
+  would still collide.
+- **Manual `helmfile apply` for DR bypasses that guard** — the pinned prod values would collide. Pass
+  `--set postgres.backupServerName=helvex-pg-$(date -u +%Y%m%dT%H%M%SZ)` and leave
+  `restoreSourceServerName` on the lineage you are recovering from.
+
+Current lineage: **`helvex-pg`** (WALs continuous since 2026-08-20, newest completed base backups).
+Cold archive: `helvex-pg-20260407T152113Z` (newest *completed* base backup 2026-08-20; many of its
+directories are partial uploads from failed attempts — trust the CNPG `Backup` object phases, never the
+bucket listing).
 
 **Pod security (all pods):**
 ```yaml

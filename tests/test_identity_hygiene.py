@@ -338,3 +338,86 @@ def test_web_extract_is_not_in_no_dedup():
     src = inspect.getsource(job_worker._compute_dedup_key)
     no_dedup = src.split("NO_DEDUP = {", 1)[1].split("}", 1)[0]
     assert "web_extract" not in no_dedup
+
+
+# ── Extraction must see the whole page set ────────────────────────────────────
+
+def test_extraction_sees_identity_pages_already_marked_extracted(db):
+    """Phase B must not be able to erase the evidence phase A established.
+
+    `needs_extraction` decides which COMPANIES are claimed; it must not decide
+    which PAGES the extractor sees. When it did, a phase-B re-extract received
+    only the new content pages — phase A's impressum/contact were already
+    flagged extracted — so the UID that proved identity was excluded and
+    upsert_web_extract overwrote a UID-verified extract with a name match.
+    ENTRADIS GMBH (CHE-115.230.839): UID in plain HTML on a crawled /kontakt/
+    page, scored 0.33 `deterministic+name_match`.
+    """
+    now = datetime.now(timezone.utc)
+    _company(db, 90)
+    cand = _cand(db, 90, "https://entradis.gmbh/")
+
+    # Phase A: contact page, already extracted in an earlier run.
+    db.add(CompanyWebPage(
+        company_id=90, url_candidate_id=cand.id, page_type="contact",
+        url="https://entradis.gmbh/kontakt/", crawled=True, crawled_at=now,
+        needs_extraction=False, s3_key_html="crawl/90/contact.html",
+    ))
+    # Phase B: fresh content page, awaiting extraction.
+    db.add(CompanyWebPage(
+        company_id=90, url_candidate_id=cand.id, page_type="other",
+        url="https://entradis.gmbh/2025/09", crawled=True, crawled_at=now,
+        needs_extraction=True, s3_key_html="crawl/90/other.html",
+    ))
+    # Inventory-only row: discovered, never fetched, no HTML to extract.
+    db.add(CompanyWebPage(
+        company_id=90, url_candidate_id=None, page_type="news",
+        url="https://entradis.gmbh/news", crawled=False, crawled_at=now,
+        needs_extraction=False, s3_key_html=None,
+    ))
+    db.commit()
+
+    types = {p.page_type for p in crawler_crud.get_extractable_pages(db, 90)}
+    assert "contact" in types, "identity page was excluded from the re-extract"
+    assert "other" in types
+    assert "news" not in types, "inventory rows have no HTML to extract"
+
+
+# ── Domain-frequency scan must not be a single unbounded query ───────────────
+
+def test_domain_frequency_scan_is_keyset_paged(db):
+    """discover_directory_domains hit the prod statement timeout (30s) on a
+    single GROUP BY over a per-row regex with no supporting index — the table
+    has multi-million rows. Now walked in id-ordered chunks with the hostname
+    extracted and counted in Python, so no individual statement can time out
+    regardless of table size. batch_size=2 forces >1 chunk here to prove the
+    boundary between pages doesn't drop or double-count a company.
+    """
+    _company(db, 60)
+    _company(db, 61)
+    _company(db, 62)
+    _cand(db, 60, "https://WWW.Directory.ch/profile/60")
+    _cand(db, 61, "http://directory.ch/profile/61")
+    _cand(db, 62, "https://directory.ch:8443/profile/62")
+    _cand(db, 60, "https://onlyone.ch/")
+    db.commit()
+
+    result = crawler_crud.get_high_frequency_candidate_domains(
+        db, min_companies=2, limit=10, batch_size=2,
+    )
+    assert result == [{"domain": "directory.ch", "company_count": 3}]
+
+    # Below threshold => filtered out, not just low-ranked.
+    none_ = crawler_crud.get_high_frequency_candidate_domains(
+        db, min_companies=4, limit=10, batch_size=2,
+    )
+    assert none_ == []
+
+
+def test_bare_hostname_matches_prior_sql_semantics():
+    """Pins the Python extraction against the exact regex it replaced:
+    strip scheme, take the first path segment, drop a trailing port, drop a
+    leading 'www.' — case-insensitive throughout."""
+    assert crawler_crud._bare_hostname("HTTPS://WWW.Example.CH/a/b") == "example.ch"
+    assert crawler_crud._bare_hostname("http://example.ch:8080/x") == "example.ch"
+    assert crawler_crud._bare_hostname("example.ch") == "example.ch"

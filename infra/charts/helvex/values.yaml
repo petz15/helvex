@@ -159,10 +159,16 @@ postgres:
   backupWalCompression: ""     # optional: "gzip" to compress archived WAL
   weeklyExport:
     enabled: false
-    schedule: "30 3 * * 0"      # weekly (UTC)
+    schedule: "0 10 * * 0"      # weekly (UTC); deliberately well clear of backupSchedule's
+                                # 02:00 base backup — a multi-hour dump running alongside one
+                                # puts both under avoidable contention
     retentionDays: 60
     pgDumpImage: "postgres:16-alpine"
-    pgDumpCompress: 9
+    pgDumpCompress: 1           # 1, not 9 — gzip -9 costs ~5x the CPU time for ~10% less size
+    dumpTimeoutSeconds: 21600   # 6 h. Must exceed the real dump duration: a 1800 s cap silently
+                                # killed every scheduled run once the DB passed ~100 GB
+    minFreeStagingGb: 40        # preflight on the emptyDir (node disk) before dumping
+    excludeTableData: []        # tables whose DATA is regenerable; schema is still dumped
     uploadImage: "rclone/rclone:1.66.0"
     resources:
       requests:

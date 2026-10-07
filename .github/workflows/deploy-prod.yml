@@ -579,13 +579,20 @@ jobs:
           kubectl wait --for condition=established --timeout=60s crd/clusters.postgresql.cnpg.io
           kubectl wait --for condition=established --timeout=60s crd/clusterissuers.cert-manager.io
 
+      # Must run for EVERY tag that applies the helvex Helm release, not just
+      # [deploy-prod]. [deploy-all] also re-renders the CNPG Cluster, and without these
+      # outputs it applied an empty backupServerName — silently repointing the backup
+      # destination to a new lineage on 2026-08-20. The chart now fails loudly on an
+      # empty value, so a missing resolve step breaks the deploy instead of the backups.
       - name: Resolve backup server names
         if: |
           (github.event_name != 'workflow_dispatch' && (
-            contains(github.event.head_commit.message, '[deploy-prod]')
+            contains(github.event.head_commit.message, '[deploy-prod]') ||
+            contains(github.event.head_commit.message, '[deploy-all]')
           )) ||
           (github.event_name == 'workflow_dispatch' && (
-            github.event.inputs.deploy_mode == 'prod'
+            github.event.inputs.deploy_mode == 'prod' ||
+            github.event.inputs.deploy_mode == 'all'
           ))
         id: pg-meta
         env:
@@ -598,25 +605,41 @@ jobs:
         run: |
           set -euo pipefail
 
-          # --- backupServerName (where the NEW cluster writes backups) ---
-          # Reuse from ConfigMap if it exists, otherwise generate a unique name.
-          EXISTING=$(kubectl get configmap pg-backup-meta -n helvex-prod \
-            -o jsonpath='{.data.serverName}' 2>/dev/null || echo "")
+          # --- backupServerName (where THIS cluster writes backups) ---
+          # The LIVE Cluster spec is authoritative, not the ConfigMap. A running cluster must
+          # keep archiving exactly where it already archives — repointing it mid-life splits the
+          # recovery window across two S3 prefixes, which CNPG cannot span in one recovery
+          # (that is the 2026-08-20 incident). pg-backup-meta is deliberately NOT consulted for
+          # this value: it is written by this step alone, so it drifts whenever a deploy path
+          # skips the step, and a drifted value would repoint a healthy cluster. It stays
+          # authoritative only for restoreSource below.
+          LIVE=$(kubectl get cluster helvex-pg -n helvex-prod \
+            -o jsonpath='{.spec.backup.barmanObjectStore.serverName}' 2>/dev/null || echo "")
+          CLUSTER_EXISTS=$(kubectl get cluster helvex-pg -n helvex-prod \
+            -o name 2>/dev/null || echo "")
 
-          if [ -n "$EXISTING" ]; then
-            echo "Reusing existing backupServerName: $EXISTING"
-            SERVER_NAME="$EXISTING"
-            echo "server_name=$EXISTING" >> "$GITHUB_OUTPUT"
+          if [ -n "$LIVE" ]; then
+            echo "Reusing live cluster backupServerName: $LIVE"
+            SERVER_NAME="$LIVE"
+          elif [ -n "$CLUSTER_EXISTS" ]; then
+            # Live cluster whose spec carries no serverName — the 2026-08-20 incident state.
+            # CNPG defaults the barman serverName to the cluster name, so that is where this
+            # cluster is archiving *right now*. Adopt it instead of trusting pg-backup-meta,
+            # which may still name a lineage the cluster has already abandoned.
+            SERVER_NAME="helvex-pg"
+            echo "Live cluster has no explicit serverName; adopting CNPG's default: $SERVER_NAME"
           else
-            NEW_NAME="helvex-pg-$(date -u +%Y%m%dT%H%M%SZ)"
-            echo "Generated new backupServerName: $NEW_NAME"
-            SERVER_NAME="$NEW_NAME"
-            kubectl create configmap pg-backup-meta \
-              -n helvex-prod \
-              --from-literal=serverName="$NEW_NAME" \
-              --dry-run=client -o yaml | kubectl apply -f -
-            echo "server_name=$NEW_NAME" >> "$GITHUB_OUTPUT"
+            # No live cluster ⇒ this deploy BOOTSTRAPS one. When it bootstraps via recovery it
+            # must not archive into the prefix it restores from: barman-cloud-check-wal-archive
+            # requires an empty destination, and a non-empty one leaves the cluster wedged in
+            # "Setting up primary". So a fresh cluster always starts a fresh lineage.
+            SERVER_NAME="helvex-pg-$(date -u +%Y%m%dT%H%M%SZ)"
+            echo "No live cluster; generated fresh backupServerName: $SERVER_NAME"
           fi
+
+          echo "server_name=$SERVER_NAME" >> "$GITHUB_OUTPUT"
+          # The ConfigMap is written once, further down, with serverName AND restoreSource
+          # together — writing it here too would transiently drop restoreSource.
 
           # --- restoreSourceServerName (where to restore FROM) ---
           # IMPORTANT: This is the server name where the *existing* backups live in S3.
@@ -752,6 +775,21 @@ jobs:
             exit 1
           fi
 
+          # A cluster that bootstraps via recovery must not archive WAL into the same prefix it
+          # restores from — barman-cloud-check-wal-archive requires an empty destination, and a
+          # non-empty one leaves the cluster wedged in "Setting up primary" (this is the whole
+          # reason backupServerName is generated per-incarnation rather than held constant).
+          # For an already-running cluster the names may legitimately match: no bootstrap happens,
+          # externalClusters is inert, and the live prefix is simply where it keeps archiving.
+          if [ "$SERVER_NAME" = "$RESTORE_SOURCE" ] && [ -z "$CLUSTER_EXISTS" ]; then
+            echo "ERROR: no live cluster, so this deploy will bootstrap one, but backupServerName" >&2
+            echo "       and restoreSourceServerName are both '$SERVER_NAME'. The new cluster would" >&2
+            echo "       try to archive into the prefix it recovers from and wedge on startup." >&2
+            echo "       Re-run with a distinct restore_source, or clear pg-backup-meta.serverName" >&2
+            echo "       so a fresh timestamped lineage is generated." >&2
+            exit 1
+          fi
+
           kubectl create configmap pg-backup-meta \
             -n helvex-prod \
             --from-literal=serverName="$SERVER_NAME" \
@@ -833,10 +871,14 @@ jobs:
           (github.event_name == 'workflow_dispatch' && github.event.inputs.deploy_mode == 'all')
         working-directory: infra
         run: |
+          # This applies the whole helvex release, CNPG Cluster included, so it must pass
+          # the resolved backup names exactly like the full-deploy step does.
           helmfile -e prod apply --selector name=helvex \
             --set "image.tag=${{ github.sha }}" \
             --set "mlImage.tag=${{ github.sha }}" \
             --set "frontend.image.tag=${{ github.sha }}" \
+            --set "postgres.backupServerName=${{ steps.pg-meta.outputs.server_name }}" \
+            --set "postgres.restoreSourceServerName=${{ steps.pg-meta.outputs.restore_source }}" \
             --suppress-diff
 
       - name: Deploy frontend only

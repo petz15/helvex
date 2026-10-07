@@ -105,10 +105,33 @@ postgres:
   restoreFromBackup: true
   s3EndpointUrl: "https://nbg1.your-objectstorage.com"
   s3BucketPath: "s3://helvex-backups/pg-prod/"
+  # Pinned explicitly so no deploy path can leave them empty. An empty value makes CNPG
+  # fall back to the cluster name and start a fresh lineage — see the 2026-08-20 incident.
+  # `helvex-pg` IS the live lineage: WAL archiving has run into it continuously since
+  # 2026-08-20 and it holds the newest completed base backups.
+  #
+  # These two being EQUAL is correct only for the currently running cluster: no bootstrap
+  # happens, externalClusters is inert, and the cluster simply keeps archiving where it
+  # already archives.
+  #
+  # !! DISASTER RECOVERY — do NOT apply these values as-is to a cluster that has to bootstrap
+  # from backup. A recovering cluster cannot archive WAL into the prefix it restores from
+  # (barman-cloud-check-wal-archive requires an empty destination; a non-empty one wedges the
+  # cluster in "Setting up primary"). The deploy workflow handles this: with no live Cluster
+  # present it generates a fresh timestamped backupServerName and refuses to proceed if the two
+  # names would collide. A MANUAL `helmfile -e prod apply` bypasses that guard, so for DR always
+  # pass --set postgres.backupServerName=helvex-pg-$(date -u +%Y%m%dT%H%M%SZ) and leave
+  # restoreSourceServerName pointing at the lineage you are recovering from.
+  backupServerName: "helvex-pg"
+  restoreSourceServerName: "helvex-pg"
   backupSchedule: "0 0 2 * * *"
   backupRetention: "14d"  # 14-day PITR window
   backupPrune:
-    enabled: true
+    # SUSPENDED 2026-10-07. The prune script resolves "current" from the pg-backup-meta
+    # ConfigMap, which only the [deploy-prod] path writes, so it had drifted to the old
+    # lineage and was one Sunday away from deleting the live one. Re-enable only after
+    # it reads serverName from the live Cluster spec. See roadmap.
+    enabled: false
     schedule: "0 4 * * 0"     # weekly Sunday 04:00 UTC
     retentionDays: 14
   restorePointSync:
@@ -118,8 +141,22 @@ postgres:
   backupWalCompression: "gzip"
   weeklyExport:
     enabled: true
-    schedule: "30 3 * * 0"   # weekly export to Storage Box (UTC)
+    # Sunday 10:00 UTC, moved off 03:30 on 2026-10-07. Now that the dump may run up to 6 h
+    # (dumpTimeoutSeconds below) instead of being killed at 30 min, 03:30 would have overlapped
+    # the daily 02:00 base backup for hours. Base backups are daily, so this is the widest gap
+    # available: 8 h of clear air after 02:00. If base backups start failing again, check whether
+    # one was still running when the dump began — contention is the leading unproven hypothesis
+    # for the 2026-04→10 failures.
+    schedule: "0 10 * * 0"   # weekly export to Storage Box (UTC)
     retentionDays: 60
+    pgDumpCompress: 1
+    dumpTimeoutSeconds: 21600   # 6 h; the DB is ~111 GB as of 2026-10-07
+    minFreeStagingGb: 40
+    excludeTableData:
+      # ~13 GB of pgvector embeddings, fully regenerable from company purpose text by
+      # the embedding job. Schema is still dumped, only the rows are skipped. Physical
+      # CNPG backups are block-level and keep them regardless.
+      - public.company_embeddings
   pooler:
     enabled: false
 

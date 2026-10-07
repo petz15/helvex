@@ -74,6 +74,50 @@
 
 
 ## Bug Fixes & Known Issues
+
+### PRIO! Backup & disaster recovery — open items from the 2026-10-07 incident
+
+Context: between 2026-04-25 and 2026-10-04 only **12 of ~40 CNPG base backups completed**, and the
+weekly offsite `pg_dump` failed every scheduled run from 2026-08-02 onward. Two independent faults:
+(a) the `[deploy-all]` path applied the helvex release without `postgres.backupServerName`, so CNPG
+fell back to the cluster name and silently started a new backup lineage on 2026-08-20; (b) the export's
+hard `timeout 1800` killed `pg_dump` once the DB passed ~100 GB. Both are **fixed**; the items below are not.
+
+- **Rewrite `postgres-backup-prune.yaml` before re-enabling it.** Currently **suspended in prod**
+  (`postgres.backupPrune.enabled: false` + CronJob patched `suspend: true`). It resolves "current
+  lineage" from the `pg-backup-meta` ConfigMap, which only the `[deploy-prod]` path writes, so it had
+  drifted to the old lineage and its "orphaned, no timestamp, not current" branch was one Sunday away
+  from `aws s3 rm --recursive` on the *live* backup directory. Fix: read `serverName` from the live
+  `Cluster` spec (`.spec.backup.barmanObjectStore.serverName`), refuse to delete anything when that
+  lookup fails or returns empty, and add a dry-run mode that is the default.
+- **No alerting on backup age — this is the actual root failure.** 24 consecutive failed backups over
+  four months produced zero signal. Add a Prometheus rule on CNPG's
+  `cnpg_collector_last_available_backup_timestamp` (alert when older than ~36 h) plus a
+  `kube_job_failed` rule covering `db-export`/`db-backup-prune`, wired into the existing
+  kube-prometheus-stack in `infra/charts/monitoring`.
+- **Unrecoverable-by-automation window: 2026-08-20 → 2026-10-04.** Base backups for that span live in
+  `helvex-pg-20260407T152113Z` while the WALs live in `helvex-pg`; CNPG cannot span two prefixes in one
+  recovery. PITR into that window needs manual WAL copying between prefixes. Decide whether to stitch
+  the prefixes once or accept the gap, then document the outcome in RUNBOOK.md.
+- **Many S3 base-backup directories are partial/unrestorable.** Failed attempts still leave directories,
+  so the old lineage looks far healthier than it is. Verify against the CNPG `Backup` object phases
+  (`kubectl get backups.postgresql.cnpg.io -n helvex-prod`), not the bucket listing.
+- **Export still stages the dump to an `emptyDir` (node disk).** Mitigated with a free-space preflight
+  (`minFreeStagingGb`), not solved. Proper fix is to stream `pg_dump` straight into `rclone rcat`, which
+  needs a single image carrying both binaries (build a small one, or add rclone to the pg image).
+- **Never tested a restore.** The monthly infra-maintenance reminder only checks that
+  `restore-point.json` is recent. Add a real drill: restore the newest dump into a throwaway namespace
+  and run a row-count/sanity check. Nothing above is trustworthy until this passes once.
+- **`postgres.instances: 1` in prod — no HA.** A node loss is a restore, not a failover. Chart default
+  is 2; revisit now that the DB is ~111 GB (also raises the disk question below).
+- **Disk pressure.** `/var/lib/postgresql/data` is at 81% (116 G of 150 G) and `storageSize: 40Gi` in
+  `infra/environments/prod.yaml` has drifted from the real volume. Reconcile the declared size, and plan
+  growth: `companies` 29 GB, `sogc_corporate_roles` 18 GB, `company_embeddings` 13 GB (+6.5 GB ivfflat
+  index), `sogc_publications` 12 GB.
+- **Root-cause class.** Same shape as the `JOB_TYPE_WHITELIST` / NetworkPolicy drift: a new code path
+  must opt into a critical list, and failing to do so breaks things silently. When adding a deploy tag,
+  audit every step gated on the existing tags.
+
 ### General fixes:
 - billing/payment/pricing
     - existing subscription then upgrading is not working

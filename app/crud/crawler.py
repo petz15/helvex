@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import threading
 import time
 from datetime import datetime, timezone
@@ -1256,13 +1257,32 @@ def claim_companies_for_extraction(
 
 
 def get_extractable_pages(db: Session, company_id: int) -> list[CompanyWebPage]:
-    """All pages for a company that have stored HTML and still need extraction."""
+    """EVERY stored page for a company — not only the ones awaiting extraction.
+
+    `needs_extraction` decides which *companies* are claimed
+    (claim_companies_for_extraction); it must not decide which *pages* the
+    extractor sees. resolve_company_extract recomputes the whole identity verdict
+    from the pages it is handed, so a partial set silently rewrites that verdict
+    from partial evidence.
+
+    Filtering on needs_extraction here meant that after phase B only the NEW
+    content pages were passed: phase A's impressum/contact had already been
+    flagged extracted, so the UID that established identity was excluded, the
+    verdict fell back to a name match, and upsert_web_extract overwrote the
+    UID-verified extract with the weaker one. Observed on ENTRADIS GMBH
+    (CHE-115.230.839), whose UID sits in plain HTML on a crawled /kontakt/ page
+    yet scored 0.33 `deterministic+name_match`.
+
+    Cost is re-downloading already-extracted pages from S3; that is bounded by
+    _MAX_EXTRACT_BLOB_BYTES and _order_pages_for_extract, which take the
+    identity-bearing pages first.
+    """
     return (
         db.query(CompanyWebPage)
         .filter(
             CompanyWebPage.company_id == company_id,
-            CompanyWebPage.needs_extraction.is_(True),
             CompanyWebPage.s3_key_html.isnot(None),
+            CompanyWebPage.crawled.is_(True),
         )
         .all()
     )
@@ -1550,39 +1570,59 @@ def reject_url_candidate(db: Session, url_candidate_id: int) -> None:
 
 # ── Domain frequency analysis ──────────────────────────────────────────────────
 
+def _bare_hostname(url: str) -> str:
+    """Return the host of a URL, lowercased, without scheme/port/leading www."""
+    u = re.sub(r"^https?://", "", url.strip().lower())
+    host = re.sub(r":\d+$", "", u.split("/", 1)[0])
+    return host[4:] if host.startswith("www.") else host
+
+
 def get_high_frequency_candidate_domains(
     db: Session,
     min_companies: int = 50,
     limit: int = 100,
+    batch_size: int = 20000,
 ) -> list[dict]:
     """Return hostnames that appear as URL candidates for many distinct companies.
 
     Useful for surfacing new directory/aggregator domains that should be added
     to the crawl blocklist. Hostname is the bare domain (www. stripped).
+
+    company_url_candidates is a multi-million-row table with no index that can
+    support a GROUP BY on a per-row regex — a single such query previously hit
+    the DB statement timeout in prod (30s). Walked keyset-paged on id instead,
+    with the hostname extracted and counted in Python; each chunk is a plain
+    indexed range scan, so no individual statement is at risk of the timeout
+    regardless of total table size.
     """
-    rows = db.execute(
-        text(
-            """
-            SELECT
-                regexp_replace(
-                    split_part(
-                        regexp_replace(lower(url), '^https?://', ''),
-                        '/', 1
-                    ),
-                    '^www\\.', ''
-                ) AS hostname,
-                count(distinct company_id) AS company_count
-            FROM company_url_candidates
-            WHERE url IS NOT NULL AND url <> ''
-            GROUP BY 1
-            HAVING count(distinct company_id) >= :min_companies
-            ORDER BY company_count DESC
-            LIMIT :limit
-            """
-        ),
-        {"min_companies": min_companies, "limit": limit},
-    ).fetchall()
-    return [{"domain": str(r[0]), "company_count": int(r[1])} for r in rows]
+    counts: dict[str, set[int]] = {}
+    after_id = 0
+    while True:
+        rows = db.execute(
+            text(
+                "SELECT id, company_id, url FROM company_url_candidates "
+                "WHERE id > :after AND url IS NOT NULL AND url <> '' "
+                "ORDER BY id LIMIT :lim"
+            ),
+            {"after": after_id, "lim": batch_size},
+        ).fetchall()
+        if not rows:
+            break
+        for row_id, company_id, url in rows:
+            host = _bare_hostname(url)
+            if host:
+                counts.setdefault(host, set()).add(company_id)
+        after_id = int(rows[-1][0])
+        if len(rows) < batch_size:
+            break
+
+    result = [
+        {"domain": host, "company_count": len(companies)}
+        for host, companies in counts.items()
+        if len(companies) >= min_companies
+    ]
+    result.sort(key=lambda r: r["company_count"], reverse=True)
+    return result[:limit]
 
 
 # ── Cross-company UID attribution ──────────────────────────────────────────────

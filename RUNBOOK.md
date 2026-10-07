@@ -45,6 +45,14 @@ Use this after destroying and recreating the Hetzner infra from scratch (Terrafo
 
 **How it works:** CloudNativePG restores the most recent base backup from S3, then replays every WAL segment produced after it — recovering to the last archived segment (typically within seconds of the crash).
 
+> **Two caveats learned the hard way on 2026-10-07 — check both before trusting the above.**
+>
+> 1. **"Most recent base backup" means most recent *in the lineage you restore from*** (`restoreSourceServerName`, i.e. the `s3://helvex-backups/pg-prod/<serverName>/` prefix), **and only ones that actually completed.** Failed attempts still leave directories in the bucket, so a listing can look healthy while the newest *usable* backup is weeks old. Judge from the CNPG objects, never the bucket:
+>    ```bash
+>    kubectl get backups.postgresql.cnpg.io -n helvex-prod --sort-by=.metadata.creationTimestamp | tail -20
+>    ```
+> 2. **WAL replay cannot cross lineages.** The base backup and the WALs must live under the same `<serverName>` prefix. If the lineage was ever repointed (see ARCHITECTURE.md "Backup lineage"), the window spanning the switch needs WALs manually copied between prefixes first — CNPG will not do it for you. For prod this affects **2026-08-20 → 2026-10-04**.
+
 ### Steps
 
 **1. Rebuild infra (if needed)**
@@ -195,6 +203,23 @@ SELECT pg_current_wal_lsn(), now();
 
 Backups silently do nothing if S3 credentials are wrong. Check regularly.
 
+> **`kubectl get backup` without reading the PHASE column is how four months of failures went
+> unnoticed.** Between 2026-04-25 and 2026-10-04 only 12 of ~40 base backups completed; the rest
+> show `failed`, and each left a directory in S3 that looks like a backup. Two checks that actually
+> answer "am I covered?":
+> ```bash
+> # 1. How many of the recent attempts actually completed?
+> kubectl get backups.postgresql.cnpg.io -n helvex-prod \
+>   -o custom-columns=NAME:.metadata.name,PHASE:.status.phase,SERVER:.status.serverName \
+>   --sort-by=.metadata.creationTimestamp | tail -20
+>
+> # 2. Is WAL archiving healthy right now? (independent of base backups)
+> kubectl exec -n helvex-prod helvex-pg-1 -- psql -U postgres -c "select * from pg_stat_archiver;"
+> ```
+> A daily `ScheduledBackup` will not start a new attempt while one is still active, so a backup that
+> hangs for days suppresses every run behind it — the symptom is backups appearing every ~6 days
+> instead of daily. Until the backup-age alert on the roadmap exists, nothing reports any of this.
+
 ```bash
 # List completed backups
 kubectl get backup -n helvex-prod
@@ -237,6 +262,18 @@ If you see `AccessDenied` or `NoSuchBucket` — the S3 credentials or bucket nam
 Prod also runs a weekly logical export (`pg_dump`) to a Storage Box as a second backup target (separate failure domain) with ~2 months retention.
 
 The job also prunes old exports automatically (deletes `helvex-*.dump` older than `retentionDays`).
+
+> **Restoring from one of these dumps: `company_embeddings` will be empty.** Prod sets
+> `weeklyExport.excludeTableData: [public.company_embeddings]` — the table and its index are created,
+> but ~13 GB of vectors are skipped because they are fully regenerable. After a `pg_restore` from this
+> dump you must re-run the embedding job, or NOGA classification and semantic clustering will silently
+> return nothing. The CNPG physical backups are block-level and include the vectors, so this caveat
+> applies **only** to the Storage Box dumps.
+>
+> **The dump timeout must exceed the real dump duration.** `weeklyExport.dumpTimeoutSeconds` is 6 h for
+> a ~111 GB database. A hard-coded `timeout 1800` silently killed every run from 2026-08-02 to
+> 2026-10-07 — the tell in the log is `pg_dump: terminated by user`, which means SIGTERM, not a user.
+> Re-check this value whenever the database grows substantially.
 
 **Helm values (prod):** `postgres.weeklyExport.enabled: true`
 
